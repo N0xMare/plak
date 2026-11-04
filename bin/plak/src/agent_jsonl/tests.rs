@@ -80,6 +80,38 @@ fn removed_binding_kinds_are_unknown_commands() {
     }
 }
 
+/// `resume` is the operator's Resume of a child a lost host interrupted:
+/// one agent, or every held one without `agent_id`.
+#[test]
+fn resume_names_one_held_agent_or_every_one() {
+    let action = |line: &str| {
+        let ParseOutcome::Command(command) = parse_command_line(line) else {
+            panic!("{line} is a command");
+        };
+        assert_eq!(command.kind_name(), "resume");
+        command.into_user_action(false)
+    };
+    assert_eq!(
+        action(r#"{"v":1,"kind":"resume","id":"r"}"#),
+        Some(UserAction::ResumeLossContinuation { agent_id: None })
+    );
+    assert_eq!(
+        action(r#"{"v":1,"kind":"resume","id":"r","agent_id":"c1"}"#),
+        Some(UserAction::ResumeLossContinuation {
+            agent_id: Some("c1".into())
+        })
+    );
+    for refused in [
+        r#"{"v":1,"kind":"resume","id":"r","agent_id":""}"#,
+        r#"{"v":1,"kind":"resume","id":"r","agent_id":3}"#,
+    ] {
+        assert!(
+            matches!(parse_command_line(refused), ParseOutcome::Diagnostic { .. }),
+            "{refused}"
+        );
+    }
+}
+
 #[test]
 fn removed_resume_tree_is_an_unknown_command() {
     let ParseOutcome::Diagnostic { message, .. } =
@@ -744,6 +776,8 @@ fn tool_error_tree_are_required_stdout() {
                 waiting_on: None,
                 recovery_abandoned: false,
                 dormancy: plakous_host_protocol::views::NodeDormancy::default(),
+                interrupt_cause: None,
+                continuation: None,
             }],
         }),
         JsonlCorrelation::default(),
@@ -796,6 +830,8 @@ fn tree_rows_carry_the_tier_attempt_and_candidate_or_omit_them() {
         waiting_on: None,
         recovery_abandoned: false,
         dormancy: plakous_host_protocol::views::NodeDormancy::default(),
+        interrupt_cause: None,
+        continuation: None,
     };
     let snapshot = |node: NodeView| {
         let line = project_host_event(
@@ -826,6 +862,14 @@ fn tree_rows_carry_the_tier_attempt_and_candidate_or_omit_them() {
     assert_eq!(row["blocked"]["quota"], "weekly");
     assert_eq!(row["blocked"]["account"], "codex");
     assert_eq!(row["blocked"]["resets_at"], 1_700_000_000_u64);
+    let mut held = child.clone();
+    held.status = NodeStatus::Interrupted;
+    held.interrupt_cause = Some(plakous_host_protocol::views::InterruptCauseView::OwnerLost);
+    held.continuation = Some(plakous_host_protocol::views::LossContinuationView::Held);
+    let object = snapshot(held);
+    assert_eq!(object["nodes"][0]["status"], "interrupted");
+    assert_eq!(object["nodes"][0]["cause"], "owner_lost");
+    assert_eq!(object["nodes"][0]["continuation"], "held");
 
     child.model_account.clear();
     child.tier = None;
@@ -846,6 +890,8 @@ fn tree_rows_carry_the_tier_attempt_and_candidate_or_omit_them() {
         "blocked",
         "workspace_status",
         "template",
+        "cause",
+        "continuation",
     ] {
         assert!(
             !row.contains_key(key),

@@ -3590,6 +3590,63 @@ not running, and marks nothing. Deleted views prove nothing until the feed
 rebuilds them: such a child is neither marked nor owed at reopen, and its
 `recover_node` judges the rebuilt rows by the same law.
 
+**Continuation after a loss.** Recovery spends no model call; paid work after
+a loss runs only through the host's continuation service. A child's
+continuation is **held** while all of these hold: the node is `interrupted`,
+the latest interrupt intent of its current attempt has cause `owner_lost` (or
+`handoff`), the attempt is open, unsubmitted and has turns left under
+`max_turns` (a spent attempt is never held, so a continuation never runs past
+it, after any number of losses; a spent attempt a loss stopped stays
+`interrupted`, as an interrupted spent attempt does, until its parent closes
+it), the node is not closed, no
+continuation decision names what the loss stopped, and no turn ran on the node
+since. The held state is derived from those rows; nothing records it. What the
+loss stopped (the decision's anchor) is the turn of the attempt's latest
+accepted command, which is the lost turn for a bound mark and the last turn for
+a parked one; with no accepted command on record it is the loss's interrupt
+intent. A held continuation ends through actions that already exist, with no
+record of its own: a close, another interrupt (whose cause then reads; a root
+stop records one on each held child, so stops stay stopped), or any later turn
+on the node (mail, a follow-up, a Resume).
+
+Consent is the one durable continuation decision intent of kind
+`continuation` for the attempt, cause, host generation, round 1 and anchor,
+deciding a new turn under its own command id (`plak:resume-loss:`). It is
+written and published before anything is dispatched; a refused publication
+rolls it back and nothing runs. With consent recorded and the turn not yet
+admitted the continuation is **pending**: every recovery run resubmits it
+under the same command id, and an owner-lost mark keeps that command rather
+than withdrawing it. Only a still-pending continuation's command is kept: once
+the continuation ended, its prepared command is withdrawn like any other (the
+reopen law owes the child for it, and a Start refused because the hold ended
+withdraws it at once), so its batch returns to unread and the child takes
+commands again. *Durable before and after:* before consent the rows hold
+the held node and no decision; after it, the decision and nothing else; the
+Start then writes the command intent before it submits. A crash between the
+decision and the submission leaves it pending, and the next run submits it. A
+crash after the runtime admitted the command leaves either a turn the child's
+exact open restores, which rejoins, or an accepted command the next projection
+names, which is no longer pending; so a continuation is never dispatched
+twice.
+Its Start re-checks that it is still pending when it reserves the child and
+when it binds the turn, so a close, an interrupt or another turn that ended it
+refuses the Start. Once its command is accepted and its turn runs, the
+continuation is **running**. The turn is a new host instruction to continue
+the assignment from the last completed step without repeating completed
+actions; it never replays the lost turn, carries the child's unread mail, and
+counts against `max_turns` like any turn.
+
+Under `[host] resume_after_loss = "hold"` (the default) a held continuation
+waits for the operator's Resume: the TUI's `r` on the held child in the Agents
+tab, or JSONL `resume` (chapter 02). Resume with no agent resumes every held
+child. Under `"continue"` the `recover_node` run the root's open starts
+resumes each held child once by itself; the attached root sets the policy on
+the tree's hub when it opens. Each run ends with that continuation pass, after
+every recovery it made, and reports the children still held in one live tree
+notice that is never stored. The root's own continuation and the restored
+queue's Resume are not part of this yet: the root still holds and its queue
+stays paused until the operator resumes it.
+
 A child whose own turn a live owner fenced is recovered at once, without
 waiting for the parent: its turn waiter releases and reopens the session as
 soon as the turn settles and records the outcome itself (section 14.2). The

@@ -11,6 +11,8 @@ static BEFORE_FAILED_WAKE_END: Mutex<Option<HashMap<String, Hook>>> = Mutex::new
 static AFTER_FOLLOW_UP_ADMISSION: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
 static AFTER_RECOVERED_OCCUPY: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
 static AROUND_REOPEN_SPAWNED_CHILD: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
+static BEFORE_LOSS_CONTINUATION_RESERVE: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
+static AFTER_LOSS_CONTINUATION_ADMISSION: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
 
 fn set(slot: &Mutex<Option<HashMap<String, Hook>>>, agent_id: &str, hook: Hook) {
     slot.lock()
@@ -87,4 +89,24 @@ pub(in crate::agent) fn clear_around_reopen_spawned_child(agent_id: &str) {
 
 pub(in crate::agent) async fn around_reopen_spawned_child(agent_id: &str) {
     run(&AROUND_REOPEN_SPAWNED_CHILD, agent_id).await;
+}
+
+/// Runs `hook` after a continuation after a loss recorded consent and
+/// reopened the child, before its Start reserves the child.
+pub(in crate::agent) fn set_before_loss_continuation_reserve(agent_id: &str, hook: Hook) {
+    set(&BEFORE_LOSS_CONTINUATION_RESERVE, agent_id, hook);
+}
+
+pub(in crate::agent) async fn before_loss_continuation_reserve(agent_id: &str) {
+    run(&BEFORE_LOSS_CONTINUATION_RESERVE, agent_id).await;
+}
+
+/// Runs `hook` after the runtime admitted a continuation's command, before
+/// its turn binds.
+pub(in crate::agent) fn set_after_loss_continuation_admission(agent_id: &str, hook: Hook) {
+    set(&AFTER_LOSS_CONTINUATION_ADMISSION, agent_id, hook);
+}
+
+pub(in crate::agent) async fn after_loss_continuation_admission(agent_id: &str) {
+    run(&AFTER_LOSS_CONTINUATION_ADMISSION, agent_id).await;
 }

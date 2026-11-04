@@ -88,6 +88,42 @@ pub struct NodeView {
     pub waiting_on: Option<Vec<String>>,
     /// Observational dormancy. Empty on the root and when no fact is true.
     pub dormancy: NodeDormancy,
+    /// Why an interrupted node was interrupted, when its interrupt recorded
+    /// a cause; `None` on any other node.
+    pub interrupt_cause: Option<InterruptCauseView>,
+    /// The node's continuation after its host was lost: held for the
+    /// operator's Resume, pending dispatch, or running; `None` otherwise.
+    pub continuation: Option<LossContinuationView>,
+}
+
+/// Why a node's turn was interrupted.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum InterruptCauseView {
+    /// The operator interrupted it.
+    Operator,
+    /// Its managing parent interrupted it.
+    Parent,
+    /// The root's interrupt cascaded to it.
+    Cascade,
+    /// The host running its turn was lost.
+    OwnerLost,
+    /// A planned handoff released it to another host.
+    Handoff,
+    /// An explicit stop.
+    Stopped,
+}
+
+/// Where a node's continuation after a lost host stands.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum LossContinuationView {
+    /// Waiting for the operator's Resume.
+    Held,
+    /// Consent is recorded; its turn has not started yet.
+    Pending,
+    /// Its continuation turn is running.
+    Running,
 }
 
 /// Independent dormancy facts. Several may be true at once. This is not a

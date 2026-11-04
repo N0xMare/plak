@@ -108,6 +108,7 @@ impl ProductAgentTree {
                     command.recipient == node.agent_id
                         && command.kind != super::AgentCommandKind::RootBatch
                         && command.unresolved()
+                        && !self.is_loss_continuation_command(&node.agent_id, &command.command_id)
                 })
             })
             .map(|node| node.agent_id.clone())

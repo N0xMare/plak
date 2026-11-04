@@ -814,6 +814,8 @@ fn take_projected_abandonments(
 pub(in crate::runtime) const FINAL_PROJECTION_BOUND: Duration = Duration::from_millis(400);
 
 #[cfg(test)]
+pub(in crate::runtime) mod loss_policy_tests;
+#[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests;
 #[cfg(test)]

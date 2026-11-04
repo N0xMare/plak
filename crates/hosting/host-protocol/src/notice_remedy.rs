@@ -80,6 +80,9 @@ impl std::fmt::Display for ProductSessionId {
 pub enum NoticeRemedy {
     /// Recover unresolved child sessions only.
     RecoverChildren {},
+    /// Resume the agents a lost host interrupted, one from the Agents tab
+    /// or every held one at once; carried only by live notices.
+    ResumeAfterLoss {},
     /// Rebind or start over after the frozen binding changed.
     Rebind {},
     /// Restore a usable login for the account, then retry.

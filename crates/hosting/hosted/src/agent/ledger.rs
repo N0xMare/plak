@@ -222,6 +222,10 @@ fn prepare_in(
     let current_attempt = tree
         .attempt(recipient)
         .map(|attempt| attempt.attempt_id.clone());
+    // A follow-up reaches a live turn, whose own Start withdrew these.
+    if kind != CommandKind::Followup {
+        withdraw_ended_continuations(tree, recipient);
+    }
     for prior in tree.commands().values().filter(|prior| {
         prior.recipient == recipient
             && prior.kind != AgentCommandKind::RootBatch
@@ -276,6 +280,40 @@ fn prepare_in(
     ))
     .map_err(|error| error.message)?;
     Ok(prepared)
+}
+
+/// Withdraws each continuation command of `recipient` an ended hold left
+/// prepared and unsubmitted, so its batch returns to unread and the next
+/// command is not blocked behind it.
+pub(super) async fn withdraw_ended_continuation(driver: &TreeDriver, recipient: &str) {
+    let recipient = recipient.to_owned();
+    let _ = persist_context(&driver.for_agent(&recipient), move |tree| {
+        withdraw_ended_continuations(tree, &recipient);
+        Ok(())
+    })
+    .await;
+}
+
+/// The ended continuations' withdrawal, inside a mutation. A Start or a
+/// wake prepares under the child's startup slot, so no continuation Start
+/// is in flight then.
+fn withdraw_ended_continuations(tree: &mut crate::agent_tree::ProductAgentTree, recipient: &str) {
+    let ended = tree
+        .commands()
+        .values()
+        .filter(|command| {
+            command.recipient == recipient
+                && command.unresolved()
+                && command
+                    .command_id
+                    .starts_with(crate::agent_tree::ProductAgentTree::LOSS_RESUME_COMMAND_PREFIX)
+                && !tree.loss_continuation_admissible(recipient, &command.command_id)
+        })
+        .map(|command| command.command_id.clone())
+        .collect::<Vec<_>>();
+    for command_id in ended {
+        tree.withdraw_command(&command_id);
+    }
 }
 
 /// Adds the mail a command carries to its prompt and batch.

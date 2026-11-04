@@ -700,6 +700,8 @@ pub(super) fn start_child_recovery<P: plakous_host_protocol::ProtocolExtension>(
 ) -> crate::agent::TreeRecoveryStart {
     // The run reports after the host may have switched sessions.
     let finished = events.pinned_to(session_id);
+    let held_notice = events.pinned_to(session_id);
+    let held_tree = tree_id.clone();
     // The automatic run starts on every custody take and reports the children it still
     // could not settle each time, so its report is live only; the operator's
     // own `/recover` answer is a one-time event and is stored.
@@ -733,6 +735,16 @@ pub(super) fn start_child_recovery<P: plakous_host_protocol::ProtocolExtension>(
                 }
             }
         }
+        // One live notice names the children a lost host left held for the
+        // operator's Resume (spec 02 §5.5). It is never stored: the held
+        // state is derived from the tree and shown again on the next run.
+        if let Some(note) = held_after_loss_note(&held_tree) {
+            let _ = held_notice.send(ContentEvent::Row(
+                TranscriptRow::warning(NoticeScope::Tree, note).with_remedy(
+                    plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeAfterLoss {},
+                ),
+            ));
+        }
     });
     if explicit {
         let note = match started {
@@ -751,6 +763,26 @@ pub(super) fn start_child_recovery<P: plakous_host_protocol::ProtocolExtension>(
         }
     }
     started
+}
+
+/// The held-continuation notice for `tree_id`'s children, when any is held.
+fn held_after_loss_note(tree_id: &str) -> Option<String> {
+    let runtime = crate::topology_runtime::lookup(tree_id)?;
+    let held = runtime
+        .read(|tree| {
+            tree.loss_continuations()
+                .into_iter()
+                .filter(|(_, continuation)| {
+                    continuation.state == crate::agent_tree::LossContinuationState::Held
+                })
+                .count()
+        })
+        .ok()?;
+    match held {
+        0 => None,
+        1 => Some("1 agent interrupted by a lost host is held".to_owned()),
+        held => Some(format!("{held} agents interrupted by a lost host are held")),
+    }
 }
 
 fn take_nothing(nothing: &std::sync::Mutex<Option<String>>) -> Option<String> {

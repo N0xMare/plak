@@ -623,6 +623,14 @@ impl ProductConfig {
             api_full_window: self.api_full_window,
             topology_enabled: self.subagents,
             auto_continue: self.auto_continue,
+            resume_after_loss: match self.resume_after_loss {
+                Some(ResumeAfterLoss::Continue) => {
+                    plakous_hosted::runtime::ResumeAfterLoss::Continue
+                }
+                Some(ResumeAfterLoss::Hold) | None => {
+                    plakous_hosted::runtime::ResumeAfterLoss::Hold
+                }
+            },
             requests_per_account: self.requests_per_account,
             root_template: self.root_template_fact(),
         }

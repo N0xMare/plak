@@ -100,6 +100,7 @@ impl IntentClass {
             | UserAction::ReadTopologyNodeUsage { .. }
             | UserAction::StopAllTopology
             | UserAction::RecoverTopologyNode { .. }
+            | UserAction::ResumeLossContinuation { .. }
             | UserAction::RefreshTemplates
             | UserAction::RequestCallDetail { .. }
             | UserAction::Extension(_) => Self::Ordinary,

@@ -167,7 +167,7 @@ pub const CONFIG_SECTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "host",
-        "The per-user host. Accepted and inert until node recovery lands.",
+        "The per-user host: how it treats work a lost host left.",
     ),
 ];
 
@@ -649,7 +649,7 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         field: ConfigField::ResumeAfterLoss,
         kind: "enum",
         constraint: "hold|continue; unset holds; home-scoped",
-        doc: "Whether a root whose owner was lost (a crash, a lease loss) continues by itself or holds for the operator's Resume. Accepted and inert until node recovery lands; a 0.0.3 build refuses a config.toml that sets it.",
+        doc: "Whether a sub-agent whose host was lost (a crash, a lease loss) holds for the operator's Resume or continues once by itself with a new instruction turn (chapter 03 §14.1). The root still holds either way; its continuation is not implemented yet. Read when the root opens; a released 0.0.3 build (or older) refuses a config.toml that sets it.",
         example: "\"continue\"",
         scope: ConfigScope::Immediate,
     },

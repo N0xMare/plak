@@ -177,9 +177,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     /// their own.
     pub(super) fn finish_attach_scan(&self) {
         let tree_id = durable_tree_id(&self.role.config.topology_rows(), &self.role.config.session);
-        if crate::topology_runtime::lookup(&tree_id)
-            .is_none_or(|runtime| runtime.finish_attach_scan())
-        {
+        let hub = crate::topology_runtime::lookup(&tree_id);
+        // The run the open starts reads the attached root's loss policy.
+        if let Some(runtime) = &hub {
+            runtime.set_continue_after_loss(
+                self.role.config.resume_after_loss == crate::runtime::ResumeAfterLoss::Continue,
+            );
+        }
+        if hub.is_none_or(|runtime| runtime.finish_attach_scan()) {
             self.spawn_tree_recovery();
         }
     }

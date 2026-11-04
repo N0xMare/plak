@@ -51,6 +51,8 @@ fn view() -> TreeView {
                 waiting_on: None,
                 recovery_abandoned: false,
                 dormancy: super::NodeDormancy::default(),
+                interrupt_cause: None,
+                continuation: None,
             },
             NodeView {
                 agent_id: "c1".to_owned(),
@@ -96,6 +98,8 @@ fn view() -> TreeView {
                 waiting_on: None,
                 recovery_abandoned: false,
                 dormancy: super::NodeDormancy::default(),
+                interrupt_cause: None,
+                continuation: None,
             },
         ],
     }

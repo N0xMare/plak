@@ -50,7 +50,7 @@ an export.
 - Configuration compatibility: `config.toml` accepts `[host]
   resume_after_loss` (`hold` or `continue`, default `hold`), `[mcp_servers.<id>]
   placement` (`host` or `runner`, default `host`) and `[runners.<name>]`;
-  `resume_after_loss` is validated and inert until node recovery lands. `plak`
+  `resume_after_loss` applies to sub-agents a lost host interrupted. `plak`
   writes them only when you set them, and `plak doctor` warns `config uses
   0.0.4-only keys` while one is set.
 - Plakous embedder break (agent lines): a head-advancing rebind's source
@@ -185,6 +185,13 @@ an export.
   interrupted tool is named once in the transcript (also after a crash during
   the reopen), and no `/recover` or prompt is needed first. A quit sent during
   the reopen is answered after it.
+- A sub-agent a lost host interrupted is held for your Resume: `r` on it in
+  the Agents tab, or JSONL `resume` (optionally with `agent_id`), records your
+  consent and continues it once with a new instruction turn that never
+  replays the lost one. `[host] resume_after_loss = "continue"` now takes
+  effect for sub-agents: each held one continues once by itself. Tree rows
+  carry the interrupt `cause` and the `continuation` state (`held`, `pending`,
+  `running`), and a live tree notice names the held agents after recovery.
 - Reopening a session no longer pauses the agent tree. A sub-agent whose turn
   lost its owner is interrupted (owner lost) on reopen, keeps its attempt and
   waits for mail or a followup; a parked sub-agent whose wake was still

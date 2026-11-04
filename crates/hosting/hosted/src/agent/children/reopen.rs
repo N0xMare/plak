@@ -36,6 +36,28 @@ pub(in crate::agent) async fn rejoin_recovered_start(
     result: TurnResultHandle,
 ) -> Result<crate::agent_tree_tools::MailDeliveryAck, crate::agent_tree_tools::MailDeliveryFailure>
 {
+    let (admitted, occupied) =
+        rejoin_recovered_turn(runtime, agent_id, attached, turn, control, result).await?;
+    if admitted == mail_command_id(message_id, "start")?.as_str() && occupied == turn {
+        return Ok(crate::agent_tree_tools::MailDeliveryAck {
+            turn_id: Some(turn.to_string()),
+        });
+    }
+    Err(crate::agent_tree_tools::MailDeliveryFailure::TurnEnded)
+}
+
+/// Rejoins a Start the lost process journaled and the runtime admitted
+/// before the tree bound its turn: the command settles from its record, the
+/// turn binds to the attempt and occupies the live slot under a new waiter.
+/// Returns the command that admitted it and the turn that occupies the slot.
+pub(in crate::agent) async fn rejoin_recovered_turn(
+    runtime: &crate::topology_runtime::ProductTopologyRuntime,
+    agent_id: &str,
+    attached: AttachedCodingSession,
+    turn: TurnId,
+    control: plakous::agent::TurnControl,
+    result: TurnResultHandle,
+) -> Result<(String, TurnId), crate::agent_tree_tools::MailDeliveryFailure> {
     use crate::topology_runtime::LiveChildHandle as _;
     let admitted = match crate::agent::park::settle_recovered_start(
         runtime, agent_id, &attached, turn,
@@ -109,12 +131,7 @@ pub(in crate::agent) async fn rejoin_recovered_start(
     let occupied = occupied?;
     #[cfg(test)]
     crate::agent::park::hooks::after_recovered_occupy(agent_id).await;
-    if admitted == mail_command_id(message_id, "start")?.as_str() && occupied == turn {
-        return Ok(crate::agent_tree_tools::MailDeliveryAck {
-            turn_id: Some(turn.to_string()),
-        });
-    }
-    Err(crate::agent_tree_tools::MailDeliveryFailure::TurnEnded)
+    Ok((admitted, occupied))
 }
 
 pub(super) async fn occupy_recovered_child(
@@ -484,7 +501,23 @@ async fn mark_and_project(
     let withdrawn = match crate::agent::ledger::prepared_commands(&driver, agent_id) {
         Ok(commands) => {
             let mut withdrawn = Ok(());
-            for command in commands {
+            // A continuation consent already recorded is resubmitted under
+            // its own command id, never withdrawn.
+            let kept = driver
+                .read(|tree| {
+                    commands
+                        .iter()
+                        .filter(|command| {
+                            tree.is_loss_continuation_command(agent_id, &command.command_id)
+                        })
+                        .map(|command| command.command_id.clone())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            for command in commands
+                .into_iter()
+                .filter(|command| !kept.contains(&command.command_id))
+            {
                 if let Err(error) = command.settle(&driver, false).await {
                     withdrawn = Err(error);
                 }

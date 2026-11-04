@@ -3261,7 +3261,13 @@ otherwise, including while a wake is being admitted. A non-root row also
 carries optional `dormancy`, an object of only the true facts among `parked`,
 `conversation_retired`, `workspace_reclaimed` and `closed`
 (`{"conversation_retired":true,"workspace_reclaimed":true}`). It is omitted
-when none apply, including on the root. The facts are the tree's own park,
+when none apply, including on the root. An `interrupted` row carries optional
+`cause` when its interrupt recorded one: today only `owner_lost` (and
+`handoff`, once a planned handoff records it) appear, since operator, parent,
+cascade and stop interrupts record no cause yet (`operator`, `parent`,
+`cascade` and `stopped` are reserved spellings), and a row carries optional `continuation`
+(`held`, `pending` or `running`) while its continuation after a lost host
+stands (chapter 03 §14.1). The facts are the tree's own park,
 retirement, reclamation and closed status; a missing session locator is not
 retirement and a missing directory is not reclamation. The closed JSONL
 event-kind vocabulary is unchanged.
@@ -3432,10 +3438,13 @@ after a gap; a fresh attachment starts with clean prompt provenance.
 | `fork` | optional `account`; optional `compact` (`true` compacts the new session). `account` together with `compact` is refused |
 | `tree`, `stop_all` | — |
 | `interrupt_node`, `close_node` | `agent_id` |
+| `resume` | optional `agent_id` (a non-empty string); without it every held child |
 | `invoke_tool` | `name`, `arguments` (an object), optional `agent_id` |
 
-`tree`, `interrupt_node`, `close_node`, `stop_all`, and `invoke_tool` are the
-topology commands; chapter 03 §15 owns their semantics
+`tree`, `interrupt_node`, `close_node`, `stop_all`, `resume` and `invoke_tool`
+are the topology commands; `resume` is the operator's Resume of a child a lost
+host interrupted (chapter 03 §14.1) and answers with one tree note naming what
+it resumed, what was not held and what did not start; chapter 03 §15 owns their semantics
 and their refusals.
 
 `resolve_approval` uses the same single-use `ResolveApproval` intent as the
@@ -6311,11 +6320,18 @@ a non-root `failed` or `recovery_required` child that still has an attempt,
 on a live, interrupted, or terminal-cleanup tree. A moved revision does not
 close it; the revision stays only in the intent the host fences. The
 child need not be active. `u` through the pop-up is the only place it is
-sent. A key the
+sent. `r` resumes the selected child when a lost host left its continuation
+held (or recorded and not started; chapter 03 §14.1): it sends
+`ResumeLossContinuation` for that agent at once, with no pop-up, the footer
+names `r resume` only then, and the inspector's status reads `held after the
+lost host · r resumes` (`continuation pending`, or `continuing after the lost
+host` while it runs). After a recovery run that leaves children held, one live
+tree warning names how many, with the `ResumeAfterLoss` remedy; it is never
+stored. A key the
 list does not map does nothing. `y` copies the agent id, `R` requests a fresh
 snapshot and re-reads acknowledgements, and `Esc` dismisses the list (`q` does
 nothing). A footer that would need more rows than it has reads every key in
-short form (`↑/↓ · Enter · x · i · c · s · y · u · R · t · f all · Esc`), each still
+short form (`↑/↓ · Enter · x · i · c · s · y · u · r · R · t · f all · Esc`, `u` and `r` only when offered), each still
 clickable. `t history`
 is clickable on the long footer.
 

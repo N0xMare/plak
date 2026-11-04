@@ -566,6 +566,7 @@ fn deferred_startup_never_claims_attachment_before_failed_open_falls_back() {
     let config = HostConfig {
         surface: test_kit::recording_surface(),
         auto_continue: true,
+        resume_after_loss: ResumeAfterLoss::Hold,
         topology_admission: None,
         state_roots: crate::agent::ProductStateRoots::with_doubles(
             home.clone(),

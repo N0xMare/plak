@@ -300,6 +300,18 @@ impl ProductAgentTree {
                     },
                 )?;
                 interrupted.push(id);
+            } else if id != root && self.loss_continuation(&id).is_some() {
+                // A child held after a loss is not running, but the stop
+                // still ends its hold: stops stay stopped.
+                let attempt = self.nodes.get(&id).and_then(|node| node.attempt_id.clone());
+                self.record_operator_intent(
+                    &id,
+                    attempt,
+                    super::operator_intents::Decision::Interrupt {
+                        effective: false,
+                        cause: None,
+                    },
+                )?;
             }
         }
         if !interrupted.is_empty() {

@@ -635,7 +635,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                     | UserAction::StopTopologyNodeProcesses { .. }
                     | UserAction::ReadTopologyNodeUsage { .. }
                     | UserAction::StopAllTopology
-                    | UserAction::RecoverTopologyNode { .. }),
+                    | UserAction::RecoverTopologyNode { .. }
+                    | UserAction::ResumeLossContinuation { .. }),
                 ) => {
                     crate::topology_navigator::dispatch_topology_navigator_action(
                         self.host.rows,

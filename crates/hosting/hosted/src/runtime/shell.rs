@@ -303,7 +303,8 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
         | UserAction::StopTopologyNodeProcesses { .. }
         | UserAction::ReadTopologyNodeUsage { .. }
         | UserAction::StopAllTopology
-        | UserAction::RecoverTopologyNode { .. } => {
+        | UserAction::RecoverTopologyNode { .. }
+        | UserAction::ResumeLossContinuation { .. } => {
             // The intent's own answer, which a node's face waits for.
             let answers = events.answering();
             crate::topology_navigator::emit_navigator_unavailable(

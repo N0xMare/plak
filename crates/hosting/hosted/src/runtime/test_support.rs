@@ -140,6 +140,7 @@ pub(super) fn fresh_injected_attached_host_for<P: plakous_host_protocol::Protoco
         super::HostConfig {
             surface: test_kit::recording_surface(),
             auto_continue: true,
+            resume_after_loss: ResumeAfterLoss::Hold,
             topology_admission: Some(Arc::new(|| Ok(true))),
             state_roots: ProductStateRoots::with_doubles(home.clone(), home.join("state")),
             home: SessionHome::new(home.join("sessions")),
@@ -250,6 +251,7 @@ pub(super) fn overflow_injected_attached_host(
         HostConfig {
             surface: test_kit::recording_surface(),
             auto_continue: true,
+            resume_after_loss: ResumeAfterLoss::Hold,
             topology_admission: Some(Arc::new(|| Ok(true))),
             state_roots: ProductStateRoots::with_doubles(home.clone(), home.join("state")),
             home: SessionHome::new(home.join("sessions")),

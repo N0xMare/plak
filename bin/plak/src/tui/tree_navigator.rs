@@ -36,6 +36,9 @@ pub struct FooterView<'a> {
     pub query: &'a str,
     /// `u recover` is named only when the selection is eligible.
     pub offer_recover: bool,
+    /// `r resume` is named only while the selection holds a continuation
+    /// after a lost host.
+    pub offer_resume: bool,
 }
 
 /// Footer for the Agents tab: why agents are missing, then the keys.
@@ -74,8 +77,13 @@ pub fn agents_footer_hint(view: FooterView<'_>) -> String {
     } else {
         ""
     };
+    let resume = if view.offer_resume {
+        " · r resume"
+    } else {
+        ""
+    };
     format!(
-        "{shown} · ↑/↓ select · Enter transcript · x acknowledge · i interrupt · c close · s stop all · y copy{recover} · R refresh · t history · Esc back"
+        "{shown} · ↑/↓ select · Enter transcript · x acknowledge · i interrupt · c close · s stop all · y copy{recover}{resume} · R refresh · t history · Esc back"
     )
 }
 
@@ -103,7 +111,8 @@ pub fn fitted_agents_footer(view: FooterView<'_>, width: u16, max_rows: usize) -
         AgentScope::All => "f live",
     };
     let recover = if view.offer_recover { " · u" } else { "" };
-    format!("↑/↓ · Enter · x · i · c · s · y{recover} · R · t · {shown} · Esc")
+    let resume = if view.offer_resume { " · r" } else { "" };
+    format!("↑/↓ · Enter · x · i · c · s · y{recover}{resume} · R · t · {shown} · Esc")
 }
 
 /// Rows the list footer may take before it gives up and clips.
@@ -134,6 +143,9 @@ pub(crate) fn humanize_state(state: &str) -> String {
 
 /// What a recovery-required agent needs from this list.
 pub const RECOVERY_REMEDY: &str = "u recovers";
+
+/// The inspector's remedy for a child held after a lost host.
+pub const LOSS_HELD_REMEDY: &str = "held after the lost host · r resumes";
 
 /// Result of one overlay key.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -397,6 +409,7 @@ impl TreeNavigator {
             failures_only: self.failures_only,
             query: &self.search,
             offer_recover: self.offer_recover(),
+            offer_resume: !self.history && self.resume_action().is_some(),
         }
     }
 
@@ -873,6 +886,10 @@ impl TreeNavigator {
                 TopologyNavigatorOutcome::Consumed,
                 TopologyNavigatorOutcome::Confirm,
             ),
+            TopologyNavigatorKey::Resume => self.resume_action().map_or(
+                TopologyNavigatorOutcome::Consumed,
+                TopologyNavigatorOutcome::Action,
+            ),
             TopologyNavigatorKey::Copy => TopologyNavigatorOutcome::Consumed,
         }
     }
@@ -1201,6 +1218,18 @@ impl TreeNavigator {
             (Some(_), false, true) => " · acknowledged".to_owned(),
             _ => String::new(),
         };
+        let remedy = match node.continuation {
+            Some(plakous_host_protocol::views::LossContinuationView::Held) => {
+                format!("{remedy} · {LOSS_HELD_REMEDY}")
+            }
+            Some(plakous_host_protocol::views::LossContinuationView::Pending) => {
+                format!("{remedy} · continuation pending")
+            }
+            Some(plakous_host_protocol::views::LossContinuationView::Running) => {
+                format!("{remedy} · continuing after the lost host")
+            }
+            None => remedy,
+        };
         let name = agent_name(node);
         let description = node.description.trim();
         let described = if description.is_empty() || description == name {
@@ -1293,6 +1322,24 @@ impl TreeNavigator {
             self.actionable_node()?.agent_id.as_str(),
         )
     }
+
+    /// `r` on a child a lost host interrupted whose continuation is held
+    /// (or recorded and not started): the host's Resume of that one node.
+    fn resume_action(&self) -> Option<crate::tui::UserAction> {
+        let node = self.actionable_node()?;
+        let held = matches!(
+            node.continuation,
+            Some(
+                plakous_host_protocol::views::LossContinuationView::Held
+                    | plakous_host_protocol::views::LossContinuationView::Pending
+            )
+        );
+        (held && node.parent_agent_id.is_some()).then(|| {
+            crate::tui::UserAction::ResumeLossContinuation {
+                agent_id: Some(node.agent_id.clone()),
+            }
+        })
+    }
 }
 
 /// Overlay keys after Crossterm translation in `ui.rs`.
@@ -1336,6 +1383,8 @@ pub enum TopologyNavigatorKey {
     Failures,
     /// u — recover the selected child's recorded session.
     Recover,
+    /// r — resume the selected child a lost host interrupted.
+    Resume,
     /// f — toggle the live/all scope.
     Filter,
     /// x — acknowledge the selected agent's attention.

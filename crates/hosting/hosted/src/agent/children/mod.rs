@@ -31,6 +31,7 @@ use crate::prompt_inputs::{prompt_agent_tier, prompt_composition};
 use crate::topology_runtime::{ChildStartup, ChildStartupStage, LiveRelease};
 
 mod bind;
+mod continuation;
 mod controller;
 mod deliver;
 mod failed_worktree;
@@ -59,6 +60,8 @@ pub(super) use bind::{
     frozen_child_tool_selection, frozen_openrouter_child_pin, openrouter_child_runtime_binding,
     openrouter_frozen_pin,
 };
+pub(super) use continuation::continue_after_loss;
+pub(crate) use continuation::{LossResume, operator_resume_after_loss};
 pub(super) use controller::ProductChildController;
 #[cfg(test)]
 pub(super) use deliver::turn_ended_or;

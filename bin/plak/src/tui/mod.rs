@@ -390,6 +390,7 @@ pub mod control {
             | UserAction::ReadTopologyNodeUsage { .. }
             | UserAction::StopAllTopology
             | UserAction::RecoverTopologyNode { .. }
+            | UserAction::ResumeLossContinuation { .. }
             | UserAction::RefreshTemplates
             | UserAction::InvokeTool { .. }
             | UserAction::RequestCallDetail { .. }

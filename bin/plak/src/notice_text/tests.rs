@@ -20,6 +20,7 @@ pub(crate) fn all_remedies() -> Vec<NoticeRemedy> {
         R::RetryCompaction {},
         R::AttachOnlyWhenDetached {},
         R::ResumeTree {},
+        R::ResumeAfterLoss {},
         R::StartFresh {},
         R::RetryOrChooseProfile {},
         R::RecoverSession {},
@@ -59,7 +60,7 @@ pub(crate) fn all_remedies() -> Vec<NoticeRemedy> {
 
 #[test]
 fn every_remedy_has_each_existing_frontend_route_and_strict_encoding() {
-    assert_eq!(all_remedies().len(), 36);
+    assert_eq!(all_remedies().len(), 37);
     for remedy in all_remedies() {
         let value = serde_json::to_value(&remedy).unwrap();
         assert_eq!(
@@ -214,6 +215,7 @@ fn remedies_are_exhaustive(remedy: &NoticeRemedy) {
         | R::RetryCompaction {}
         | R::AttachOnlyWhenDetached {}
         | R::ResumeTree {}
+        | R::ResumeAfterLoss {}
         | R::StartFresh {}
         | R::RetryOrChooseProfile {}
         | R::RecoverSession {}

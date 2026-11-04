@@ -5,7 +5,9 @@
 //! label reads like, which glyph it takes, and how a transcript pages are the
 //! host's; none of that is here.
 
-use plakous_host_protocol::views::{AttemptUsage, BlockedObservation, NodeView, TreeView};
+use plakous_host_protocol::views::{
+    AttemptUsage, BlockedObservation, InterruptCauseView, LossContinuationView, NodeView, TreeView,
+};
 
 use super::{AttemptId, MailDurableState, ProductAgentTree, WorkspaceMode};
 
@@ -115,6 +117,34 @@ fn project_node(tree: &ProductAgentTree, id: &str) -> Option<NodeView> {
                 .collect()
         }),
         dormancy: project_dormancy(tree, node),
+        interrupt_cause: project_interrupt_cause(tree, node),
+        continuation: tree
+            .loss_continuation(id)
+            .map(|continuation| match continuation.state {
+                super::LossContinuationState::Held => LossContinuationView::Held,
+                super::LossContinuationState::Pending => LossContinuationView::Pending,
+                super::LossContinuationState::Running => LossContinuationView::Running,
+            }),
+    })
+}
+
+/// The cause the current attempt's latest interrupt recorded, on an
+/// interrupted node.
+fn project_interrupt_cause(
+    tree: &ProductAgentTree,
+    node: &super::NodeRecord,
+) -> Option<InterruptCauseView> {
+    if node.status != super::NodeStatus::Interrupted {
+        return None;
+    }
+    let attempt = node.attempt_id.as_ref()?;
+    Some(match tree.latest_interrupt(&node.agent_id, attempt)?.1? {
+        super::InterruptCause::Operator => InterruptCauseView::Operator,
+        super::InterruptCause::Parent => InterruptCauseView::Parent,
+        super::InterruptCause::Cascade => InterruptCauseView::Cascade,
+        super::InterruptCause::OwnerLost => InterruptCauseView::OwnerLost,
+        super::InterruptCause::Handoff => InterruptCauseView::Handoff,
+        super::InterruptCause::Stopped => InterruptCauseView::Stopped,
     })
 }
 

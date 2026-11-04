@@ -38,6 +38,8 @@ fn node(id: &str, parent: Option<&str>, depth: u8) -> CanvasNode {
         fault: None,
         waiting_on: None,
         dormancy: plakous_host_protocol::views::NodeDormancy::default(),
+        interrupt_cause: None,
+        continuation: None,
     }
 }
 
@@ -1238,6 +1240,50 @@ fn u_recovers_only_a_child_that_still_needs_recovery() {
     );
 }
 
+/// `r` resumes a child a lost host left held, at once, and is offered only
+/// there: the footer names `r resume` and the inspector says it is held.
+#[test]
+fn r_resumes_only_a_child_held_after_a_lost_host() {
+    let mut held = node("c-held", Some("root"), 1);
+    held.status = "interrupted".into();
+    held.interrupt_cause = Some(plakous_host_protocol::views::InterruptCauseView::OwnerLost);
+    held.continuation = Some(plakous_host_protocol::views::LossContinuationView::Held);
+    let mut nav = TreeNavigator::from_snapshot(snapshot(vec![
+        node("root", None, 0),
+        held,
+        node("c-live", Some("root"), 1),
+    ]));
+    assert_eq!(
+        nav.handle_key(TopologyNavigatorKey::Resume),
+        TopologyNavigatorOutcome::Consumed,
+        "the root has no continuation to resume"
+    );
+    let _ = nav.handle_key(TopologyNavigatorKey::Down);
+    let frame = nav.frame(120, 30, None, &BTreeMap::new(), None);
+    assert!(frame.footer.contains("r resume"), "{}", frame.footer);
+    assert!(
+        frame
+            .inspector
+            .iter()
+            .any(|line| line.contains(LOSS_HELD_REMEDY)),
+        "{:?}",
+        frame.inspector
+    );
+    assert_eq!(
+        nav.handle_key(TopologyNavigatorKey::Resume),
+        TopologyNavigatorOutcome::Action(crate::tui::UserAction::ResumeLossContinuation {
+            agent_id: Some("c-held".into()),
+        })
+    );
+    let _ = nav.handle_key(TopologyNavigatorKey::Down);
+    let frame = nav.frame(120, 30, None, &BTreeMap::new(), None);
+    assert!(!frame.footer.contains("r resume"), "{}", frame.footer);
+    assert_eq!(
+        nav.handle_key(TopologyNavigatorKey::Resume),
+        TopologyNavigatorOutcome::Consumed
+    );
+}
+
 #[test]
 fn history_esc_clears_a_filter_that_hides_the_selection() {
     let (mut nav, now) = opened_history();
@@ -1290,6 +1336,7 @@ fn an_eighty_column_footer_keeps_t_history_on_one_row() {
         failures_only: false,
         query: "",
         offer_recover: false,
+        offer_resume: false,
     });
     let rows = wrap_footer_hint(&footer, 80, 3);
     assert!(rows.iter().any(|row| row.contains("t history")), "{rows:?}");

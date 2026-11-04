@@ -99,7 +99,8 @@ const fn row<P: ProtocolExtension>(intent: &SessionIntent<P>) -> &'static str {
         | SessionIntent::CloseTopologyNode { .. }
         | SessionIntent::MailTopologyNode { .. }
         | SessionIntent::StopAllTopology
-        | SessionIntent::RecoverTopologyNode { .. } => "navigator",
+        | SessionIntent::RecoverTopologyNode { .. }
+        | SessionIntent::ResumeLossContinuation { .. } => "navigator",
         SessionIntent::OpenAgentTranscript { .. }
         | SessionIntent::CloseAgentTranscript
         | SessionIntent::ResyncTranscript { .. } => "transcript",

@@ -79,7 +79,7 @@ pub(crate) fn with_remedy(
 
 #[allow(
     clippy::too_many_lines,
-    reason = "One exhaustive projection keeps all 36 closed semantic remedies and their three frontend alternatives together for review."
+    reason = "One exhaustive projection keeps all 37 closed semantic remedies and their three frontend alternatives together for review."
 )]
 pub(crate) fn remedy_text(remedy: &NoticeRemedy, context: RemedyContext<'_>) -> String {
     use Frontend::{Jsonl, Run, Tui};
@@ -88,6 +88,11 @@ pub(crate) fn remedy_text(remedy: &NoticeRemedy, context: RemedyContext<'_>) -> 
     let session = context.session_id.unwrap_or("<session>");
     let open_tui = format!("open `plak --resume {session}`");
     match remedy {
+        R::ResumeAfterLoss {} => match face {
+            Tui => "press r on a held agent in the Agents tab to resume it".into(),
+            Run => format!("{open_tui} and resume the held agents from the Agents tab"),
+            Jsonl => "send resume (with agent_id for one agent) to resume the held agents".into(),
+        },
         R::RecoverChildren {} => match face {
             Tui => "\
                 /recover selects unresolved child sessions only; recover_agent retries a \

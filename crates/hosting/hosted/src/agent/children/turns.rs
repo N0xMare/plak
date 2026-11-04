@@ -83,7 +83,7 @@ impl From<ChildStartFailure> for String {
 
 /// What a child Start must find before it reserves the child and binds its
 /// turn.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::agent) enum StartAdmission {
     /// Any Start the tree already admitted (a spawn, a mail Start).
     Ordinary,
@@ -91,11 +91,26 @@ pub(in crate::agent) enum StartAdmission {
     /// re-check the hold, so an interrupt or close that ended it refuses the
     /// Start instead of the reservation writing `running` over it.
     ReopenWake,
+    /// A continuation after a loss under its recorded command id: its
+    /// reservation and its bind each re-check that the continuation is still
+    /// pending, so a close, an interrupt or another turn that ended it
+    /// refuses the Start.
+    LossContinuation(String),
+}
+
+/// The refusal a continuation's admission checks return once something
+/// ended it.
+pub(in crate::agent) const LOSS_CONTINUATION_ENDED: &str = "the continuation after the loss ended before it started; a close, an interrupt or another turn won the race";
+
+/// Whether `error` is an admission check's refusal for a hold that ended:
+/// nothing started or bound, and nothing is at fault.
+pub(in crate::agent) fn hold_ended(error: &str) -> bool {
+    error == crate::agent::park::REOPEN_HOLD_ENDED || error == LOSS_CONTINUATION_ENDED
 }
 
 impl StartAdmission {
     pub(super) fn check(
-        self,
+        &self,
         tree: &crate::agent_tree::ProductAgentTree,
         agent_id: &str,
     ) -> Result<(), String> {
@@ -103,6 +118,12 @@ impl StartAdmission {
             Self::Ordinary => Ok(()),
             Self::ReopenWake if tree.reopen_wake_admissible(agent_id) => Ok(()),
             Self::ReopenWake => Err(crate::agent::park::REOPEN_HOLD_ENDED.to_owned()),
+            Self::LossContinuation(command_id)
+                if tree.loss_continuation_admissible(agent_id, command_id) =>
+            {
+                Ok(())
+            }
+            Self::LossContinuation(_) => Err(LOSS_CONTINUATION_ENDED.to_owned()),
         }
     }
 }
@@ -149,7 +170,7 @@ pub(in crate::agent) async fn start_child_turn_as(
     let reserved = tokio::time::timeout_at(
         deadline,
         runtime.reserve_startup_admitted(agent_id, {
-            let id = agent_id.to_owned();
+            let (id, admission) = (agent_id.to_owned(), admission.clone());
             move |tree| admission.check(tree, &id)
         }),
     )
@@ -158,7 +179,7 @@ pub(in crate::agent) async fn start_child_turn_as(
     let startup = match reserved {
         Ok(startup) => startup,
         // The hold ended: nothing was reserved and nothing is at fault.
-        Err(error) if error == crate::agent::park::REOPEN_HOLD_ENDED => {
+        Err(error) if hold_ended(&error) => {
             let _ = attached.release_opened().await;
             return Err(ChildStartFailure::Refused(error));
         }
@@ -197,6 +218,20 @@ pub(in crate::agent) async fn start_child_turn_as(
     let owner = runtime.clone();
     let id = agent_id.to_owned();
     let task = runtime.driver().spawn_release_owner(async move {
+        #[cfg(test)]
+        let acknowledged = {
+            let (id, continuation) = (
+                id.clone(),
+                matches!(admission, StartAdmission::LossContinuation(_)),
+            );
+            async move {
+                if continuation {
+                    crate::agent::park::hooks::after_loss_continuation_admission(&id).await;
+                }
+            }
+        };
+        #[cfg(not(test))]
+        let acknowledged = std::future::ready(());
         start_child_turn_owned_with_ack(
             &owner,
             &id,
@@ -206,7 +241,7 @@ pub(in crate::agent) async fn start_child_turn_as(
             &startup,
             false,
             admission,
-            std::future::ready(()),
+            acknowledged,
         )
         .await
     });
@@ -497,7 +532,7 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
         let projection =
             crate::agent::ledger::project_child_feed(runtime, agent_id, &attached).await;
         release_startup(runtime, agent_id, startup, attached).await;
-        if error == crate::agent::park::REOPEN_HOLD_ENDED {
+        if hold_ended(&error) {
             projection.map_err(ChildStartFailure::from)?;
             crate::agent::ledger::ChildLedger::settlement_only(runtime.driver())
                 .settle(&command_text, crate::driver::ledger::Settlement::Recorded)

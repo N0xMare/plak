@@ -250,7 +250,8 @@ pub(crate) fn row_of(action: &UserAction) -> Row {
         | UserAction::CloseTopologyNode { .. }
         | UserAction::MailTopologyNode { .. }
         | UserAction::StopAllTopology
-        | UserAction::RecoverTopologyNode { .. } => Row::Navigator,
+        | UserAction::RecoverTopologyNode { .. }
+        | UserAction::ResumeLossContinuation { .. } => Row::Navigator,
         UserAction::OpenAgentTranscript { .. }
         | UserAction::CloseAgentTranscript
         | UserAction::ResyncTranscript { .. } => Row::Transcript,
@@ -275,7 +276,8 @@ pub(crate) fn child_address(action: &UserAction) -> Option<&str> {
         | UserAction::StopTopologyNodeProcesses { agent_id, .. }
         | UserAction::ReadTopologyNodeUsage { agent_id }
         | UserAction::RecoverTopologyNode { agent_id, .. } => Some(agent_id),
-        UserAction::InvokeTool { agent_id, .. }
+        UserAction::ResumeLossContinuation { agent_id }
+        | UserAction::InvokeTool { agent_id, .. }
         | UserAction::RequestCallDetail { agent_id, .. } => agent_id.as_deref(),
         UserAction::ResyncTranscript {
             scope: TranscriptScope::Agent(agent_id),
@@ -285,7 +287,7 @@ pub(crate) fn child_address(action: &UserAction) -> Option<&str> {
 }
 
 /// The number of intent variants [`row_of`] places.
-const INTENT_VARIANTS: usize = 39;
+const INTENT_VARIANTS: usize = 40;
 
 /// One intent of every variant, child-addressed wherever the intent can be.
 pub(crate) fn every_intent() -> Vec<UserAction> {
@@ -362,6 +364,9 @@ pub(crate) fn every_intent() -> Vec<UserAction> {
             revision: 1,
             agent_id: id(),
             expected_attempt_id: id(),
+        },
+        UserAction::ResumeLossContinuation {
+            agent_id: Some(id()),
         },
         UserAction::RefreshTemplates,
         UserAction::InvokeTool {

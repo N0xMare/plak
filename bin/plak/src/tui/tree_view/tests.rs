@@ -40,6 +40,8 @@ fn node(status: NodeStatus, attempt: Option<AttemptStatus>) -> NodeView {
         waiting_on: None,
         recovery_abandoned: false,
         dormancy: plakous_host_protocol::views::NodeDormancy::default(),
+        interrupt_cause: None,
+        continuation: None,
     }
 }
 

@@ -1212,3 +1212,40 @@ async fn an_explicit_recovery_with_nothing_pending_answers_before_it_returns() {
     seen.extend(received.try_iter());
     assert_eq!(answers(&seen), 1, "the run did not answer again: {seen:#?}");
 }
+
+/// The held-after-loss notice is live only: a recovery run that leaves a
+/// child held sends it as a row carrying the `ResumeAfterLoss` remedy and
+/// authors no notice intent, so no stored transcript carries it.
+#[tokio::test]
+async fn the_held_after_loss_notice_is_live_and_never_stored() {
+    let root = tempfile::tempdir().unwrap();
+    let session = SessionRecord::new(root.path().to_path_buf());
+    let (tree, _child) =
+        host_loop::loss_policy_tests::held_child_tree(&session.id, root.path().to_path_buf());
+    let _runtime = crate::topology_runtime::insert_root(session.id.clone(), tree, None)
+        .await
+        .unwrap();
+    let (wire, received) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let events = Sender::over(wire);
+    let held = |event: &HostEvent| {
+        matches!(event, HostEvent::Row(TranscriptRow::Notice(row))
+            if row.remedy == Some(plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeAfterLoss {}))
+    };
+    let _ = start_child_recovery(&events, &session.id, session.id.clone(), false, None);
+    let found = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            if received.try_iter().any(|event| held(&event)) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    assert!(found.is_ok(), "the held notice reached the face");
+    assert!(
+        events.take_notice_intents().iter().all(|intent| !matches!(&intent.row,
+            TranscriptRow::Notice(row) if row.remedy == Some(plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeAfterLoss {}))),
+        "the held notice is never a notice intent"
+    );
+    crate::topology_runtime::force_release(&session.id).await;
+}

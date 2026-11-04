@@ -266,6 +266,14 @@ pub enum SessionIntent<P: ProtocolExtension = Core> {
         /// That child's attempt when the confirmation opened.
         expected_attempt_id: String,
     },
+    /// Resume a node a lost host interrupted, under the host's continuation
+    /// service: consent is recorded, then one new instruction turn runs.
+    /// `None` resumes every held node. A node with no held continuation is
+    /// answered with a note and nothing runs.
+    ResumeLossContinuation {
+        /// Exact child agent id; `None` for every held node.
+        agent_id: Option<String>,
+    },
     /// Ask the host for the current agent-template readiness projection
     /// (spec 02 §5.5). Answered with [`SessionObservation::TemplateReadiness`](crate::observation::SessionObservation::TemplateReadiness).
     RefreshTemplates,
@@ -344,6 +352,7 @@ impl<P: ProtocolExtension> fmt::Debug for SessionIntent<P> {
             Self::ReadTopologyNodeUsage { .. } => "ReadTopologyNodeUsage(..)",
             Self::StopAllTopology => "StopAllTopology",
             Self::RecoverTopologyNode { .. } => "RecoverTopologyNode(..)",
+            Self::ResumeLossContinuation { .. } => "ResumeLossContinuation(..)",
             Self::RefreshTemplates => "RefreshTemplates",
             Self::InvokeTool { .. } => "InvokeTool(..)",
             Self::RequestCallDetail { .. } => "RequestCallDetail(..)",

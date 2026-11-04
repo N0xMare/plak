@@ -857,6 +857,7 @@ not the row: when it leaves the list its parent is selected instead.
 | `c` | Close the selected agent (in the confirmation pop-up; not the root) |
 | `s` | Stop every non-root agent (in the confirmation pop-up) |
 | `u` | Recover the selected child that is a failed or recovery-required child (in the confirmation pop-up) |
+| `r` | Resume the selected child a lost host left held: it continues with a new turn (no pop-up) |
 | `Esc` | Leave the list |
 
 The footer's `i interrupt`, `c close`, `s stop all` and `t history` are

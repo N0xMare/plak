@@ -55,6 +55,11 @@ pub enum AgentCommand {
         id: String,
         agent_id: String,
     },
+    /// Resume one node a lost host interrupted, or every held one.
+    Resume {
+        id: String,
+        agent_id: Option<String>,
+    },
     StopAll {
         id: String,
     },
@@ -92,6 +97,7 @@ impl AgentCommand {
             Self::Tree { .. } => "tree",
             Self::InterruptNode { .. } => "interrupt_node",
             Self::CloseNode { .. } => "close_node",
+            Self::Resume { .. } => "resume",
             Self::StopAll { .. } => "stop_all",
             Self::Clear { .. } => "clear",
             Self::Quit { .. } => "quit",
@@ -120,6 +126,7 @@ impl AgentCommand {
             | Self::Tree { id }
             | Self::InterruptNode { id, .. }
             | Self::CloseNode { id, .. }
+            | Self::Resume { id, .. }
             | Self::StopAll { id }
             | Self::Clear { id }
             | Self::Quit { id }
@@ -171,6 +178,7 @@ impl AgentCommand {
                 Some(UserAction::InterruptTopologyNode { agent_id })
             }
             Self::CloseNode { agent_id, .. } => Some(UserAction::CloseTopologyNode { agent_id }),
+            Self::Resume { agent_id, .. } => Some(UserAction::ResumeLossContinuation { agent_id }),
             Self::StopAll { .. } => Some(UserAction::StopAllTopology),
             Self::Clear { .. } => Some(UserAction::NewSession),
             Self::Quit { .. } => Some(UserAction::Quit),
@@ -274,6 +282,7 @@ pub fn parse_command_line(line: &str) -> ParseOutcome {
         "tree" => ParseOutcome::Command(AgentCommand::Tree { id }),
         "interrupt_node" => parse_node_action(id, &value, true),
         "close_node" => parse_node_action(id, &value, false),
+        "resume" => parse_resume(id, &value),
         "stop_all" => ParseOutcome::Command(AgentCommand::StopAll { id }),
         "clear" => ParseOutcome::Command(AgentCommand::Clear { id }),
         "quit" => ParseOutcome::Command(AgentCommand::Quit { id }),
@@ -458,6 +467,25 @@ fn parse_node_action(id: String, value: &Map<String, Value>, interrupt: bool) ->
         ParseOutcome::Command(AgentCommand::InterruptNode { id, agent_id })
     } else {
         ParseOutcome::Command(AgentCommand::CloseNode { id, agent_id })
+    }
+}
+
+/// `resume`: one node by `agent_id`, or every held node without one.
+fn parse_resume(id: String, value: &Map<String, Value>) -> ParseOutcome {
+    match value.get("agent_id") {
+        None | Some(Value::Null) => {
+            ParseOutcome::Command(AgentCommand::Resume { id, agent_id: None })
+        }
+        Some(Value::String(agent_id)) if !agent_id.is_empty() => {
+            ParseOutcome::Command(AgentCommand::Resume {
+                id,
+                agent_id: Some(agent_id.clone()),
+            })
+        }
+        Some(_) => ParseOutcome::Diagnostic {
+            id: Some(id),
+            message: "resume agent_id must be a non-empty string when present".to_owned(),
+        },
     }
 }
 

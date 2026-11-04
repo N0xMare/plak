@@ -229,6 +229,8 @@ mod tests {
             fault: None,
             waiting_on: None,
             dormancy: NodeDormancy::default(),
+            interrupt_cause: None,
+            continuation: None,
         }
     }
 

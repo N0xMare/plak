@@ -52,6 +52,7 @@ fn expected_class(action: &UserAction) -> IntentClass {
         | UserAction::ReadTopologyNodeUsage { .. }
         | UserAction::StopAllTopology
         | UserAction::RecoverTopologyNode { .. }
+        | UserAction::ResumeLossContinuation { .. }
         | UserAction::RefreshTemplates
         | UserAction::RequestCallDetail { .. }
         | UserAction::Extension(_) => IntentClass::Ordinary,
@@ -134,6 +135,7 @@ fn every_intent() -> Vec<UserAction> {
             agent_id: id(),
             expected_attempt_id: id(),
         },
+        UserAction::ResumeLossContinuation { agent_id: None },
         UserAction::RefreshTemplates,
         UserAction::InvokeTool {
             correlation_id: None,
@@ -151,7 +153,7 @@ fn every_intent() -> Vec<UserAction> {
 }
 
 /// The number of `SessionIntent` variants `expected_class` matches.
-const INTENT_VARIANTS: usize = 39;
+const INTENT_VARIANTS: usize = 40;
 
 #[test]
 fn every_intent_has_its_class_and_disposition() {

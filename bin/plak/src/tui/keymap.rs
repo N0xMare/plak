@@ -742,6 +742,12 @@ pub const BINDINGS: &[Binding] = &[
         double_tap: None,
     },
     Binding {
+        chord: "r",
+        when: When::Tree,
+        effect: "resume the selected child a lost host left held",
+        double_tap: None,
+    },
+    Binding {
         chord: "s",
         when: When::Tree,
         effect: "ask to stop every non-root agent, in the confirmation pop-up",

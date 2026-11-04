@@ -108,9 +108,11 @@ attempt held for recovery, not running without a Start. The send's wait budget
 never cuts a submission in flight: a Start that is admitted late is delivered
 late, and the child keeps running.
 After a
-restart, a parked child is interrupted (owner lost), keeps its attempt and waits
-for mail or a followup; one whose wake was still pending rejoins that wake
-instead. JSONL roots and roots with
+restart, a parked child is interrupted (owner lost), keeps its attempt and is
+held: it waits for your Resume (`r` on it in the Agents tab, or JSONL
+`resume`), which continues it once with a new turn, or for mail or a followup.
+With `[host] resume_after_loss = "continue"` such children continue once by
+themselves. One whose wake was still pending rejoins that wake instead. JSONL roots and roots with
 auto-continue disabled must use `wait_agent` to learn child results before
 ending a turn. An idle wake
 failure pauses auto-continue, emits an error note and leaves the host attached;

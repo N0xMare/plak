@@ -140,6 +140,9 @@ pub(crate) async fn dispatch_topology_navigator_action<
                 send,
             );
         }
+        UserAction::ResumeLossContinuation { agent_id } => {
+            spawn_loss_resume(runtime, session, events, agent_id.clone(), send);
+        }
         _ => {}
     }
 }
@@ -295,6 +298,87 @@ pub(crate) fn spawn_operator_mail<P: plakous_host_protocol::ProtocolExtension>(
         };
         let _ = events.send(answer);
     }));
+}
+
+/// Starts the operator's Resume of a held continuation on the host
+/// executor and returns. The hub tracks the task, and shutdown aborts it.
+fn spawn_loss_resume<P: plakous_host_protocol::ProtocolExtension>(
+    runtime: std::sync::Arc<ProductTopologyRuntime>,
+    session: &SessionRecord,
+    events: &crate::runtime::Sender<P>,
+    agent_id: Option<String>,
+    send: impl Fn(ContentEvent<P>) + Copy,
+) {
+    if runtime.is_closed() {
+        send(ContentEvent::Row(TranscriptRow::error(
+            NoticeScope::Tree,
+            "agent tree navigator unavailable: hub is shutting down",
+        )));
+        return;
+    }
+    let task_runtime = std::sync::Arc::clone(&runtime);
+    let task_session = session.clone();
+    let task_events = events.clone();
+    let task = runtime.driver().tasks().spawn(async move {
+        let send = |event| {
+            let _ = task_events.send(event);
+        };
+        let row = match crate::agent::children::operator_resume_after_loss(
+            &task_runtime,
+            agent_id.as_deref(),
+        )
+        .await
+        {
+            Ok(resumed) => loss_resume_note(agent_id.as_deref(), &resumed),
+            Err(error) => TranscriptRow::error(NoticeScope::Tree, error),
+        };
+        send(ContentEvent::Row(row));
+        emit_snapshot(&task_runtime, &task_session, send, true);
+    });
+    if !runtime.track_recovery(task) {
+        send(ContentEvent::Row(TranscriptRow::error(
+            NoticeScope::Tree,
+            "agent tree navigator unavailable: hub is shutting down",
+        )));
+    }
+}
+
+/// One note for a Resume: what started, what was not held, what waits.
+fn loss_resume_note(
+    requested: Option<&str>,
+    resumed: &[(String, crate::agent::children::LossResume)],
+) -> TranscriptRow {
+    use crate::agent::children::LossResume;
+    if resumed.is_empty() {
+        return TranscriptRow::info(NoticeScope::Tree, "no agent is held after a lost host");
+    }
+    let mut started = Vec::new();
+    let mut parts = Vec::new();
+    for (agent_id, outcome) in resumed {
+        match outcome {
+            LossResume::Started => started.push(short_agent(agent_id)),
+            LossResume::NotHeld if requested.is_some() => parts.push(format!(
+                "{} is not held after a lost host",
+                short_agent(agent_id)
+            )),
+            LossResume::NotHeld => {}
+            LossResume::Busy => parts.push(format!(
+                "{} is busy; resume it again once it settles",
+                short_agent(agent_id)
+            )),
+            LossResume::Deferred(reason) => parts.push(format!(
+                "{} did not start ({reason}); its continuation is kept",
+                short_agent(agent_id)
+            )),
+        }
+    }
+    if !started.is_empty() {
+        parts.insert(0, format!("resumed {}", started.join(", ")));
+    }
+    if parts.is_empty() {
+        return TranscriptRow::info(NoticeScope::Tree, "no agent is held after a lost host");
+    }
+    TranscriptRow::info(NoticeScope::Tree, parts.join("; "))
 }
 
 /// Starts one child recover on the host executor and returns. The hub keeps

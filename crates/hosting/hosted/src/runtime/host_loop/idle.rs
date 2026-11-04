@@ -980,7 +980,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     | UserAction::StopTopologyNodeProcesses { .. }
                     | UserAction::ReadTopologyNodeUsage { .. }
                     | UserAction::StopAllTopology
-                    | UserAction::RecoverTopologyNode { .. }),
+                    | UserAction::RecoverTopologyNode { .. }
+                    | UserAction::ResumeLossContinuation { .. }),
                 ) => {
                     dispatch_topology_navigator(
                         &self.role.config.topology_rows(),

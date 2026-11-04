@@ -8,6 +8,7 @@ fn footer(hidden: usize) -> String {
         failures_only: false,
         query: "",
         offer_recover: false,
+        offer_resume: false,
     })
 }
 

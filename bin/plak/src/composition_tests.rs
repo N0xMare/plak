@@ -89,6 +89,7 @@ pub(crate) fn product_injected_attached_host(
             ProductSurface::new(paths.clone()).with_test_state_home(root.join("account-state")),
         )),
         auto_continue: true,
+        resume_after_loss: plakous_hosted::runtime::ResumeAfterLoss::Hold,
         topology_admission: Some(crate::product_config::topology_admission_probe(&paths)),
         state_roots: crate::shell::host::product_state_roots(&paths),
         home: paths.session_home(),
@@ -878,6 +879,7 @@ fn clear_publishes_fresh_product_and_runtime_authority_before_dispatch() {
     let mut config = HostConfig {
         surface: Some(ProductSurface::boxed(&paths)),
         auto_continue: true,
+        resume_after_loss: plakous_hosted::runtime::ResumeAfterLoss::Hold,
         topology_admission: None,
         state_roots,
         product_home: paths.home().to_path_buf(),

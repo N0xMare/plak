@@ -306,6 +306,7 @@ const TREE_KEYS: &[(&str, KeyCode, TopologyNavigatorKey)] = &[
     ("c", KeyCode::Char('c'), TopologyNavigatorKey::Close),
     ("s", KeyCode::Char('s'), TopologyNavigatorKey::StopAll),
     ("u", KeyCode::Char('u'), TopologyNavigatorKey::Recover),
+    ("r", KeyCode::Char('r'), TopologyNavigatorKey::Resume),
     ("Esc", KeyCode::Esc, TopologyNavigatorKey::Escape),
 ];
 

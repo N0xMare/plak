@@ -80,6 +80,10 @@ pub struct CanvasNode {
     pub waiting_on: Option<Vec<String>>,
     /// Typed dormancy from the tree. Not inferred from labels or the locator.
     pub dormancy: plakous_host_protocol::views::NodeDormancy,
+    /// Why an interrupted node was interrupted, when recorded.
+    pub interrupt_cause: Option<plakous_host_protocol::views::InterruptCauseView>,
+    /// Its continuation after a lost host: held, pending or running.
+    pub continuation: Option<plakous_host_protocol::views::LossContinuationView>,
 }
 
 /// A revisioned complete canvas tree. Replace, never patch locally.
@@ -137,6 +141,8 @@ impl From<&NodeView> for CanvasNode {
             fault: crate::refusal_text::node_fault(node),
             waiting_on: node.waiting_on.clone(),
             dormancy: node.dormancy,
+            interrupt_cause: node.interrupt_cause,
+            continuation: node.continuation,
         }
     }
 }

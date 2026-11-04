@@ -4304,3 +4304,482 @@ async fn mail_before_recover_node_waits_and_the_marked_child_then_takes_it() {
     let delivery: serde_json::Value = serde_json::from_str(&receipt.detail).unwrap();
     assert_eq!(delivery["disposition"], "started", "{delivery}");
 }
+
+/// A child a lost host interrupted: its bound turn was closed by the exact
+/// open, and its `recover_node` marked it owner-lost.
+async fn owner_lost_child(fixture: &Fixture) -> String {
+    // A native account, so the product composes the child's Starts.
+    fixture
+        .runtime
+        .mutate_then_emit(false, |tree| {
+            tree.pin_bind_hints_for_test(crate::orchestration::BindHints::from_names(
+                &["claude"],
+                &[],
+            ));
+            tree.pin_template(
+                "review",
+                crate::orchestration::RosterBinding::leaf("claude", "test-model"),
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let id = fixture.spawn();
+    let holder = fixture.sessions();
+    let (held, handle, _) = fixture.start_failing_turn(&holder, &id).await;
+    Fixture::await_unknown_outcome(&handle).await;
+    fixture.bind_turn(&id, &held.locator(), handle.turn_id());
+    held.release().await.unwrap();
+    fixture
+        .runtime
+        .mutate_then_emit(false, |tree| {
+            tree.apply_reopen_law();
+            Ok(())
+        })
+        .await
+        .unwrap();
+    crate::agent::recover_owed_children(&fixture.parent, &fixture.runtime).await;
+    let held = fixture
+        .runtime
+        .read(|tree| tree.loss_continuation(&id))
+        .unwrap()
+        .expect("the owner-lost child holds its continuation");
+    assert_eq!(held.state, crate::agent_tree::LossContinuationState::Held);
+    id
+}
+
+fn continuation_decisions(fixture: &Fixture) -> usize {
+    fixture
+        .runtime
+        .read(|tree| {
+            tree.operations()
+                .values()
+                .filter(|row| row.tool_name == crate::agent_tree::ContinuationIntent::KIND)
+                .count()
+        })
+        .unwrap()
+}
+
+/// The commands submitted under a continuation identity, with their facts.
+fn continuation_commands(
+    fixture: &Fixture,
+) -> Vec<(String, Option<crate::agent_tree::CommandFact>)> {
+    fixture
+        .runtime
+        .read(|tree| {
+            tree.commands()
+                .values()
+                .filter(|command| {
+                    command
+                        .command_id
+                        .starts_with(ProductAgentTree::LOSS_RESUME_COMMAND_PREFIX)
+                })
+                .map(|command| (command.command_id.clone(), command.fact))
+                .collect()
+        })
+        .unwrap()
+}
+
+/// Waits until the one continuation command the runtime admitted carries
+/// its fact.
+async fn continuation_admitted(fixture: &Fixture) -> String {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            if let [(command, Some(_))] = continuation_commands(fixture).as_slice() {
+                return command.clone();
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the continuation turn is admitted")
+}
+
+/// Under the default hold the operator's Resume records the one durable
+/// decision before it starts one new instruction turn; a second Resume
+/// records nothing and submits nothing again.
+#[tokio::test]
+async fn a_held_continuation_resumes_once_with_consent_recorded_first() {
+    let fixture = Fixture::new("held-resume");
+    let id = owner_lost_child(&fixture).await;
+    assert_eq!(continuation_decisions(&fixture), 0);
+    assert_eq!(continuation_commands(&fixture), []);
+    let resumed = crate::agent::children::operator_resume_after_loss(&fixture.runtime, Some(&id))
+        .await
+        .unwrap();
+    assert_eq!(
+        resumed,
+        vec![(id.clone(), crate::agent::children::LossResume::Started)]
+    );
+    assert_eq!(continuation_decisions(&fixture), 1);
+    let stored = ProductAgentTree::reopen(
+        fixture
+            .store
+            .load(&fixture.tree_id)
+            .unwrap()
+            .expect("the tree is stored"),
+    );
+    assert_eq!(
+        stored
+            .operations()
+            .values()
+            .filter(|row| row.tool_name == crate::agent_tree::ContinuationIntent::KIND)
+            .count(),
+        1,
+        "consent is durable"
+    );
+    let command = continuation_admitted(&fixture).await;
+    let again = crate::agent::children::operator_resume_after_loss(&fixture.runtime, Some(&id))
+        .await
+        .unwrap();
+    assert_ne!(
+        again[0].1,
+        crate::agent::children::LossResume::Started,
+        "{again:?}"
+    );
+    assert_eq!(continuation_decisions(&fixture), 1);
+    assert_eq!(
+        continuation_commands(&fixture)
+            .into_iter()
+            .map(|(command, _)| command)
+            .collect::<Vec<_>>(),
+        [command]
+    );
+    crate::topology_runtime::force_release(&fixture.tree_id).await;
+}
+
+/// The crash window between consent and dispatch: a recorded decision whose
+/// turn was never submitted is pending, and the next recovery run submits
+/// it once under its own command id, even under hold.
+#[tokio::test]
+async fn a_recorded_continuation_is_submitted_once_by_the_next_run() {
+    let fixture = Fixture::new("pending-resume");
+    let id = owner_lost_child(&fixture).await;
+    let recorded = fixture
+        .runtime
+        .mutate_then_emit(false, {
+            let id = id.clone();
+            move |tree| {
+                tree.record_loss_continuation(&id, 1)
+                    .map_err(|error| error.message)
+            }
+        })
+        .await
+        .unwrap();
+    assert!(!fixture.runtime.continues_after_loss());
+    recover_tree(&fixture.tree_id).await;
+    assert_eq!(continuation_admitted(&fixture).await, recorded);
+    recover_tree(&fixture.tree_id).await;
+    assert_eq!(continuation_decisions(&fixture), 1);
+    assert_eq!(continuation_commands(&fixture).len(), 1);
+    crate::topology_runtime::force_release(&fixture.tree_id).await;
+}
+
+/// Under `resume_after_loss = "continue"` the recovery run resumes a held
+/// child once by itself; under hold it leaves it held.
+#[tokio::test]
+async fn a_continue_policy_resumes_a_held_child_once() {
+    let fixture = Fixture::new("continue-resume");
+    let id = owner_lost_child(&fixture).await;
+    recover_tree(&fixture.tree_id).await;
+    assert_eq!(continuation_decisions(&fixture), 0, "hold leaves it held");
+    assert_eq!(
+        fixture
+            .runtime
+            .read(|tree| tree.loss_continuation(&id).map(|held| held.state))
+            .unwrap(),
+        Some(crate::agent_tree::LossContinuationState::Held)
+    );
+    fixture.runtime.set_continue_after_loss(true);
+    recover_tree(&fixture.tree_id).await;
+    assert_eq!(continuation_decisions(&fixture), 1);
+    continuation_admitted(&fixture).await;
+    recover_tree(&fixture.tree_id).await;
+    assert_eq!(continuation_decisions(&fixture), 1);
+    assert_eq!(continuation_commands(&fixture).len(), 1);
+    crate::topology_runtime::force_release(&fixture.tree_id).await;
+}
+
+fn interrupt_hook(fixture: &Fixture, id: &str) -> crate::agent::park::hooks::Hook {
+    let (runtime, target) = (fixture.runtime.clone(), id.to_owned());
+    Arc::new(move || {
+        let (runtime, target) = (runtime.clone(), target.clone());
+        Box::pin(async move {
+            runtime
+                .mutate_then_emit(false, move |tree| {
+                    tree.interrupt_agent(
+                        "root",
+                        &crate::agent_tree_protocol::AttemptScopedRequest {
+                            agent_id: target,
+                            expected_attempt_id: None,
+                        },
+                        None,
+                    )
+                    .map(|_| ())
+                    .map_err(|error| error.message)
+                })
+                .await
+                .unwrap();
+        })
+    })
+}
+
+/// Prepares the continuation's command the way a Start does before it
+/// submits, as a crash between preparation and submission leaves it.
+async fn prepare_continuation(fixture: &Fixture, id: &str) -> String {
+    let id = id.to_owned();
+    fixture
+        .runtime
+        .mutate_then_emit(false, move |tree| {
+            let command = tree
+                .record_loss_continuation(&id, 1)
+                .map_err(|error| error.message)?;
+            let attempt = tree
+                .node(&id)
+                .map_err(|error| error.message)?
+                .attempt_id
+                .clone();
+            tree.record_command(crate::agent_tree::AgentCommand::intent(
+                command.clone(),
+                &id,
+                attempt,
+                crate::agent_tree::AgentCommandKind::Resume,
+                crate::child_prompts::PLAK_CHILD_LOSS_RESUME_TEMPLATE,
+                Vec::new(),
+            ))
+            .map_err(|error| error.message)?;
+            Ok(command)
+        })
+        .await
+        .unwrap()
+}
+
+/// An interrupt that lands after consent and before the Start reserves the
+/// child ends the continuation there: nothing is submitted and the child
+/// stays interrupted.
+#[tokio::test]
+async fn an_interrupt_after_consent_and_before_reserve_starts_nothing() {
+    let fixture = Fixture::new("resume-before-reserve");
+    let id = owner_lost_child(&fixture).await;
+    let dispatched = fixture.dispatches();
+    crate::agent::park::hooks::set_before_loss_continuation_reserve(
+        &id,
+        interrupt_hook(&fixture, &id),
+    );
+    let resumed = crate::agent::children::operator_resume_after_loss(&fixture.runtime, Some(&id))
+        .await
+        .unwrap();
+    assert_eq!(
+        resumed,
+        vec![(id.clone(), crate::agent::children::LossResume::NotHeld)]
+    );
+    assert_eq!(continuation_decisions(&fixture), 1, "consent came first");
+    assert!(
+        continuation_commands(&fixture)
+            .iter()
+            .all(|(_, fact)| fact.is_some()),
+        "no continuation command is left unresolved"
+    );
+    assert_eq!(fixture.dispatches(), dispatched);
+    fixture
+        .runtime
+        .read(|tree| {
+            assert_eq!(tree.node(&id).unwrap().status, NodeStatus::Interrupted);
+            assert_eq!(tree.attempt(&id).unwrap().turn_id, None);
+            assert_eq!(tree.loss_continuation(&id), None);
+        })
+        .unwrap();
+    crate::topology_runtime::force_release(&fixture.tree_id).await;
+}
+
+/// An interrupt that lands after the runtime admitted the continuation and
+/// before its turn binds refuses the bind: no turn is bound and the
+/// command is settled from its record.
+#[tokio::test]
+async fn an_interrupt_after_admission_and_before_bind_binds_nothing() {
+    let fixture = Fixture::new("resume-before-bind");
+    let id = owner_lost_child(&fixture).await;
+    crate::agent::park::hooks::set_after_loss_continuation_admission(
+        &id,
+        interrupt_hook(&fixture, &id),
+    );
+    let resumed = crate::agent::children::operator_resume_after_loss(&fixture.runtime, Some(&id))
+        .await
+        .unwrap();
+    assert!(
+        matches!(
+            resumed.as_slice(),
+            [(agent, crate::agent::children::LossResume::Deferred(_))] if agent == &id
+        ),
+        "{resumed:?}"
+    );
+    fixture
+        .runtime
+        .read(|tree| {
+            assert_eq!(tree.node(&id).unwrap().status, NodeStatus::Interrupted);
+            assert_eq!(tree.attempt(&id).unwrap().turn_id, None, "no turn bound");
+            assert_eq!(tree.loss_continuation(&id), None);
+        })
+        .unwrap();
+    let commands = continuation_commands(&fixture);
+    assert_eq!(commands.len(), 1);
+    assert!(
+        commands[0].1.is_some(),
+        "the command is settled: {commands:?}"
+    );
+    crate::topology_runtime::force_release(&fixture.tree_id).await;
+}
+
+/// An owed child's owner-lost mark withdraws what never ran but keeps a
+/// still-pending continuation's command for the continuation to resubmit.
+#[tokio::test]
+async fn an_owed_childs_mark_keeps_its_pending_continuation() {
+    let fixture = Fixture::new("mark-keeps-pending");
+    let id = owner_lost_child(&fixture).await;
+    let command = prepare_continuation(&fixture, &id).await;
+    // Another command the lost process prepared makes the child owed.
+    let other = "plak:test:followup".to_owned();
+    fixture
+        .runtime
+        .mutate_then_emit(false, {
+            let (id, other) = (id.clone(), other.clone());
+            move |tree| {
+                let attempt = tree
+                    .node(&id)
+                    .map_err(|error| error.message)?
+                    .attempt_id
+                    .clone();
+                tree.record_command(crate::agent_tree::AgentCommand::intent(
+                    other,
+                    &id,
+                    attempt,
+                    crate::agent_tree::AgentCommandKind::Followup,
+                    "again",
+                    Vec::new(),
+                ))
+                .map_err(|error| error.message)?;
+                tree.apply_reopen_law();
+                Ok(())
+            }
+        })
+        .await
+        .unwrap();
+    assert!(
+        fixture
+            .runtime
+            .read(|tree| tree.recovery_owed(&id))
+            .unwrap()
+    );
+    crate::agent::recover_owed_children(&fixture.parent, &fixture.runtime).await;
+    fixture
+        .runtime
+        .read(|tree| {
+            assert!(
+                tree.commands()[&other].withdrawn,
+                "what never ran is withdrawn"
+            );
+            assert!(
+                tree.commands()[&command].unresolved(),
+                "the pending continuation's command is kept"
+            );
+            assert_eq!(
+                tree.loss_continuation(&id).map(|held| held.state),
+                Some(crate::agent_tree::LossContinuationState::Pending)
+            );
+        })
+        .unwrap();
+    crate::topology_runtime::force_release(&fixture.tree_id).await;
+}
+
+/// A continuation prepared and then ended by an interrupt strands nothing:
+/// the reopen law owes the child, its recovery withdraws the command, and
+/// the child takes mail again.
+#[tokio::test]
+async fn an_interrupted_prepared_continuation_leaves_the_child_taking_mail() {
+    let fixture = Fixture::new("interrupted-prepared");
+    let id = owner_lost_child(&fixture).await;
+    let command = prepare_continuation(&fixture, &id).await;
+    (interrupt_hook(&fixture, &id))().await;
+    fixture
+        .runtime
+        .mutate_then_emit(false, |tree| {
+            tree.apply_reopen_law();
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(
+        fixture
+            .runtime
+            .read(|tree| tree.recovery_owed(&id))
+            .unwrap()
+    );
+    recover_tree(&fixture.tree_id).await;
+    fixture
+        .runtime
+        .read(|tree| {
+            assert!(!tree.commands()[&command].unresolved(), "withdrawn");
+            assert!(!tree.recovery_owed(&id));
+            assert_eq!(tree.loss_continuation(&id), None);
+        })
+        .unwrap();
+    let receipt = crate::agent::invoke_topology_tool_on_hub(
+        &fixture.tree_id,
+        None,
+        "send_agent_message",
+        &json!({ "agent_id": id, "message": "after the interrupt" }),
+        "after-interrupt-mail",
+    )
+    .await
+    .unwrap();
+    assert!(receipt.succeeded, "{}", receipt.detail);
+    crate::topology_runtime::force_release(&fixture.tree_id).await;
+}
+
+/// A Resume of a continuation an interrupt ended after its command was
+/// prepared withdraws that command at once, with no reopen.
+#[tokio::test]
+async fn a_resume_of_an_ended_prepared_continuation_withdraws_its_command() {
+    let fixture = Fixture::new("resume-ended-prepared");
+    let id = owner_lost_child(&fixture).await;
+    let command = prepare_continuation(&fixture, &id).await;
+    (interrupt_hook(&fixture, &id))().await;
+    let resumed = crate::agent::children::operator_resume_after_loss(&fixture.runtime, Some(&id))
+        .await
+        .unwrap();
+    assert_eq!(
+        resumed,
+        vec![(id.clone(), crate::agent::children::LossResume::NotHeld)]
+    );
+    fixture
+        .runtime
+        .read(|tree| assert!(tree.commands()[&command].withdrawn, "withdrawn"))
+        .unwrap();
+    crate::topology_runtime::force_release(&fixture.tree_id).await;
+}
+
+/// Mail to a child whose prepared continuation an interrupt ended is
+/// delivered in the same session: its Start withdraws the ended command
+/// instead of waiting behind it for a reopen.
+#[tokio::test]
+async fn mail_after_an_ended_prepared_continuation_needs_no_reopen() {
+    let fixture = Fixture::new("mail-ended-prepared");
+    let id = owner_lost_child(&fixture).await;
+    let command = prepare_continuation(&fixture, &id).await;
+    (interrupt_hook(&fixture, &id))().await;
+    let receipt = crate::agent::invoke_topology_tool_on_hub(
+        &fixture.tree_id,
+        None,
+        "send_agent_message",
+        &json!({ "agent_id": id, "message": "after the interrupt" }),
+        "after-ended-mail",
+    )
+    .await
+    .unwrap();
+    assert!(receipt.succeeded, "{}", receipt.detail);
+    fixture
+        .runtime
+        .read(|tree| assert!(tree.commands()[&command].withdrawn, "withdrawn"))
+        .unwrap();
+    crate::topology_runtime::force_release(&fixture.tree_id).await;
+}

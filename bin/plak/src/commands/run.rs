@@ -556,6 +556,7 @@ impl PlakousApplication {
             max_model_rounds: policy.max_model_rounds,
             topology_enabled: policy.topology_enabled,
             auto_continue: policy.auto_continue,
+            resume_after_loss: policy.resume_after_loss,
             topology_admission: Some(product_config::topology_admission_probe(paths)),
             root_template: policy.root_template,
             attached_one_shot: true,

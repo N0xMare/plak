@@ -978,6 +978,8 @@ pub(super) fn tree_node(id: &str, parent: Option<&str>, depth: u8) -> NodeView {
         waiting_on: None,
         recovery_abandoned: false,
         dormancy: plakous_host_protocol::views::NodeDormancy::default(),
+        interrupt_cause: None,
+        continuation: None,
     }
 }
 

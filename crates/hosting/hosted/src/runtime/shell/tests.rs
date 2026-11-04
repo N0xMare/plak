@@ -471,6 +471,7 @@ fn attached_oauth_ready_refresh_never_rebinds_canonical_agent() {
     let mut config = HostConfig {
         surface: test_kit::recording_surface(),
         auto_continue: true,
+        resume_after_loss: ResumeAfterLoss::Hold,
         topology_admission: None,
         state_roots: crate::agent::ProductStateRoots::with_doubles(
             home_dir.clone(),

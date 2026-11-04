@@ -109,6 +109,9 @@ fn intents() -> Vec<Intent> {
             agent_id: "c1".into(),
             expected_attempt_id: "c1#1".into(),
         },
+        Intent::ResumeLossContinuation {
+            agent_id: Some("c1".into()),
+        },
         Intent::RefreshTemplates,
         Intent::InvokeTool {
             correlation_id: None,
@@ -128,7 +131,7 @@ fn intents() -> Vec<Intent> {
 #[test]
 fn every_intent_round_trips_tagged_by_kind() {
     let intents = intents();
-    assert_eq!(intents.len(), 38, "every core intent but Extension");
+    assert_eq!(intents.len(), 39, "every core intent but Extension");
     for intent in &intents {
         let encoded = round_trips(intent);
         assert!(encoded["kind"].is_string(), "{encoded}");

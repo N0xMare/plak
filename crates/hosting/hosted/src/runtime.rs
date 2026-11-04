@@ -735,6 +735,9 @@ pub struct HostConfig<P: plakous_host_protocol::ProtocolExtension = plakous_host
     pub topology_enabled: bool,
     /// Home idle-continuation policy, re-read by interactive attached hosts.
     pub auto_continue: bool,
+    /// Home `[host] resume_after_loss`: whether a node interrupted by a
+    /// lost host holds for the operator's Resume or continues by itself.
+    pub resume_after_loss: ResumeAfterLoss,
     /// Whether this face is interactive; JSONL must not enable idle continuation.
     pub interactive: bool,
     /// Re-asks the product whether a topology is admitted *now*, for the
@@ -777,6 +780,16 @@ pub struct HostConfig<P: plakous_host_protocol::ProtocolExtension = plakous_host
     /// boundary, through the same durable host-wake submission as an idle
     /// wake (a reload the session requested posts one). Taken once.
     pub continuation: Option<String>,
+}
+
+/// How a node whose host was lost continues (`[host] resume_after_loss`).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ResumeAfterLoss {
+    /// Hold for the operator's Resume; the default.
+    #[default]
+    Hold,
+    /// Continue each such node once by itself.
+    Continue,
 }
 
 /// What an exact reopen of a session's head would do on this build.

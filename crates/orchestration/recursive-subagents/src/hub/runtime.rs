@@ -41,6 +41,7 @@ impl ProductTopologyRuntime {
             quiet,
             attach_scan: std::sync::atomic::AtomicU8::new(super::ATTACH_SCAN_DUE),
             executor: Mutex::new(tokio::runtime::Handle::try_current().ok()),
+            continue_after_loss: AtomicBool::new(false),
         }
     }
 
@@ -62,6 +63,18 @@ impl ProductTopologyRuntime {
             .executor
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(executor);
+    }
+
+    /// Sets whether a child held after a loss continues by itself.
+    pub fn set_continue_after_loss(&self, continues: bool) {
+        self.continue_after_loss.store(continues, Ordering::Release);
+    }
+
+    /// Whether a child held after a loss continues by itself; false (hold)
+    /// until an attached root says otherwise.
+    #[must_use]
+    pub fn continues_after_loss(&self) -> bool {
+        self.continue_after_loss.load(Ordering::Acquire)
     }
 
     /// Begins this custody take's custody-attach scan: whether this root

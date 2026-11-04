@@ -87,6 +87,37 @@ pub fn interrupt_cause(
     }
 }
 
+impl ProductAgentTree {
+    /// The latest interrupt intent of `attempt_id` on `agent_id`, by fold
+    /// position: its operation id and the cause it recorded (`None` for one
+    /// that recorded no cause).
+    pub(super) fn latest_interrupt(
+        &self,
+        agent_id: &str,
+        attempt_id: &AttemptId,
+    ) -> Option<(&str, Option<InterruptCause>)> {
+        self.operations
+            .values()
+            .filter(|operation| {
+                operation.tool_name == INTERRUPT_KIND && operation.caller_agent_id == agent_id
+            })
+            .filter_map(|operation| {
+                let intent: OperatorIntent =
+                    serde_json::from_str(&operation.canonical_request).ok()?;
+                let Decision::Interrupt { cause, .. } = intent.decision else {
+                    return None;
+                };
+                (intent.attempt_id.as_ref() == Some(attempt_id)).then_some((
+                    operation.fold,
+                    operation.operation_id.as_str(),
+                    cause,
+                ))
+            })
+            .max_by_key(|(fold, ..)| *fold)
+            .map(|(_, id, cause)| (id, cause))
+    }
+}
+
 /// The attempt and exact output carried by a submitted intent, without folding views.
 ///
 /// # Errors

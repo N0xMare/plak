@@ -535,6 +535,9 @@ pub struct ProductTopologyRuntime {
     /// use (the host's own, which outlives a short-lived build that leases
     /// the tree beside it), or the one the tree was opened on before any.
     executor: Mutex<Option<tokio::runtime::Handle>>,
+    /// Whether a child held after a loss continues by itself (the root's
+    /// `resume_after_loss = "continue"`), set by the attached root.
+    continue_after_loss: AtomicBool,
 }
 
 /// The custody-attach scan (design section 6.6) is owed: no root has

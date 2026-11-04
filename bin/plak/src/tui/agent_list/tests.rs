@@ -44,6 +44,8 @@ fn node(id: &str, parent: Option<&str>, status: &str) -> CanvasNode {
         fault: None,
         waiting_on: None,
         dormancy: plakous_host_protocol::views::NodeDormancy::default(),
+        interrupt_cause: None,
+        continuation: None,
     }
 }
 

@@ -1222,7 +1222,11 @@ pub(crate) async fn recover_tree(tree_id: &str) -> Option<ChildRecoveryReport> {
     let parent = super::build::rejoin_parent(&runtime)?;
     super::children::recover_owed_children(&parent, &runtime).await;
     let port = ParentSessionPort { parent };
-    Some(recover_unresolved_children(&runtime, &port).await)
+    let report = recover_unresolved_children(&runtime, &port).await;
+    // The continuation pass runs after every recovery the run made, so a
+    // node resumed here is one its recover_node already settled.
+    super::children::continue_after_loss(&port.parent, &runtime).await;
+    Some(report)
 }
 
 /// What [`start_tree_recovery`] did.

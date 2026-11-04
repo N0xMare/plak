@@ -197,6 +197,7 @@ impl TuiAttacher for OfflineAttacher {
         let attached = crate::product_host::spawn_host_worker(HostConfig {
             surface: Some(crate::shell::settings::ProductSurface::boxed(paths)),
             auto_continue: true,
+            resume_after_loss: plakous_hosted::runtime::ResumeAfterLoss::Hold,
             topology_admission: None,
             state_roots: state_roots.clone(),
             product_home: paths.home().to_path_buf(),
@@ -1675,6 +1676,7 @@ fn host_config(
     HostConfig {
         surface: Some(crate::shell::settings::ProductSurface::boxed(paths)),
         auto_continue: true,
+        resume_after_loss: plakous_hosted::runtime::ResumeAfterLoss::Hold,
         topology_admission: None,
         state_roots: crate::shell::host::product_state_roots(paths),
         product_home: paths.home().to_path_buf(),
