@@ -1796,8 +1796,8 @@ the external `monty-proto` / `monty-types` / `monty-alloc` at
 
 `PORTABLE_CRATES` in `tools/gate/check_workspace.py` is the only portable-crate
 list: `plakous-model` and `plakous-runner-protocol`, whose closure is `serde`
-and `serde_json`, and `plakous-tools`. All three have portable defaults. A
-crate joins that tuple only in the change that makes its normal dependency
+and `serde_json`, then `plakous-tools` and `plakous-agent`. All four have
+portable defaults. A crate joins that tuple only in the change that makes its normal dependency
 closure pass the fence below and its library
 check clean for `wasm32-unknown-unknown`. Joining is not a supported-platform
 claim: `wasm32-unknown-unknown` stays an unsupported product target (section 2).
@@ -1877,10 +1877,10 @@ are known and accepted for now; their APIs do not change with this check:
   wasm host injects its own `Clock` and `SubscriptionGateClock`.
 - `ReachabilityProbe` takes a `std::time::Instant` deadline in its signature,
   so a wasm caller cannot construct one without a substitute clock.
-- `plakous-tools` reads `std::time::Instant` and `SystemTime` for operation
-  deadlines, job timestamps and supervision, and runs its blocking lane on
-  `tokio::task::spawn_blocking`; neither works on `wasm32-unknown-unknown`
-  without a host-supplied substitute.
+- `plakous-tools` and `plakous-agent` read `std::time::Instant` and
+  `SystemTime` for deadlines, timestamps and supervision, and start tasks with
+  `tokio::spawn` and `tokio::task::spawn_blocking`; none of these works on
+  `wasm32-unknown-unknown` without a host-supplied substitute.
 - `uuid`'s `js` feature calls `globalThis.crypto.getRandomValues` through
   `wasm-bindgen`. A v7 identifier generated in a host without the generated
   JavaScript glue or without `globalThis.crypto` fails at run time.
@@ -1893,6 +1893,15 @@ is uuid's WebCrypto backend and does not use `getrandom` there, so the tree
 sets no `getrandom_backend` cfg. Native resolutions do not enable `js` and do
 not link `wasm-bindgen`. The target-dependency table is part of the reviewed
 manifest security-surface digest.
+
+`plakous-agent` calls `getrandom` 0.4 directly for spawn salts, bootstrap
+nonces and checkpoint entropy. That version has no default backend on
+`cfg(all(target_arch = "wasm32", target_os = "unknown"))` and refuses to
+compile there, so `plakous-agent` enables `getrandom`'s `wasm_js` feature as a
+target dependency for that cfg only. In 0.4 the feature alone selects the
+WebCrypto backend; no `getrandom_backend` cfg is set. Native resolutions do not
+enable it. A call fails at run time in a host without `globalThis.crypto`, and
+each caller already handles that failure.
 
 The target is not listed in `rust-toolchain.toml`. Listing it would make rustup
 try to download it whenever the toolchain is selected, including inside the

@@ -706,7 +706,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-py-worker": "12692a8c10a6033ffd8c99be9fd192fb9d76cbd41de571b36aabdc8720bebce5",
     "plakous-js-runtime": "fd22d2bf42bb470f5ed7ec3a852aa0472c1fdafa2ced4641a4a4f42c0a4bdd2a",
     "plakous": "8baeebd5773fddcff9261c44e05b6d919498f991714c22abcc3edd9751f90041",
-    "plakous-agent": "da735f6245070e0109928b93c49b8ed1353df48ed5e887b19472bc31d2b32671",
+    "plakous-agent": "a3575595b6e3a90a1479335d3c0f6ec0f618354dc5831bc48fe31b28d9bb3e90",
     "plakous-anthropic": "1b02db17b7b8447f9f0abd665616ffbf380c1a6c1e41c192cdc0f075e3cf1c5f",
     "plakous-attempt": "87a0bece47ad17a768ac1eb58a4e6ff9712e6f53008fd524fae3fd4055282f6b",
     "plakous-auth": "b69237dd11b3b34ed0c5d47ced22fb6a1d22cfad9833a9175bd28c9efc8a6042",

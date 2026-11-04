@@ -4275,7 +4275,12 @@ def package_sources(package: Package, repository: Path = ROOT) -> tuple[dict[str
 # The only portable-crate list. Grow it one crate at a time, in the same change
 # that makes that crate's normal closure portable and its library check clean
 # for wasm32-unknown-unknown (spec 06 section 7.5). `--portable-crates` prints it.
-PORTABLE_CRATES = ("plakous-model", "plakous-runner-protocol", "plakous-tools")
+PORTABLE_CRATES = (
+    "plakous-model",
+    "plakous-runner-protocol",
+    "plakous-tools",
+    "plakous-agent",
+)
 # The fence resolves this target, not the host: cfg(target_arch = "wasm32")
 # dependencies are in the closure and cfg(not(...)) ones are not.
 PORTABLE_TARGET = "wasm32-unknown-unknown"

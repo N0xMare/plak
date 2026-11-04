@@ -41,6 +41,11 @@ time = { version = "0.3", default-features = false, features = ["formatting"] }
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 uuid.workspace = true
 
+# getrandom 0.4 has no default backend on this target and refuses to compile
+# without one. wasm_js is its WebCrypto backend; native builds do not enable it.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { workspace = true, features = ["wasm_js"] }
+
 [dev-dependencies]
 # Test-only: the composition presentations the agent hosts are compiled above
 # it, so only its tests name them.

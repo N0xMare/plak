@@ -329,6 +329,8 @@ an export.
   dependencies are `cfg(unix)` target dependencies; on `wasm32-unknown-unknown`
   (not a supported target) the library compiles without a host, so host
   environments, workspace files and job output files refuse there.
+- `plakous-agent` joins the portable set; on `wasm32-unknown-unknown` only it
+  enables `getrandom`'s `wasm_js` (WebCrypto) backend.
 - One test-environment helper and one build entry point serve every recipe;
   `just nextest` runs cargo-nextest under the gate's environment.
 
