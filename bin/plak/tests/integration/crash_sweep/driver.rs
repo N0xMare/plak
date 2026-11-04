@@ -297,7 +297,31 @@ pub(super) fn pilot(seed: &Fixture, session: &str, shape: &str) -> Vec<trace::Co
             outcome.stderr
         );
         let state = summary::read_converged(&fixture);
-        (shapes::get(shape).assert_live)(&fixture, &outcome, &state);
+        let live = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            (shapes::get(shape).assert_live)(&fixture, &outcome, &state);
+        }));
+        if let Err(error) = live {
+            // A pilot that ran but proved the wrong shape keeps everything a
+            // diagnosis needs: the fixture, the face's records and stderr.
+            fixture.preserve();
+            std::fs::write(fixture.root.join("pilot.jsonl"), outcome.lines.join("\n")).unwrap();
+            std::fs::write(fixture.root.join("pilot.stderr"), &outcome.stderr).unwrap();
+            let records = outcome.records();
+            let kinds = records
+                .iter()
+                .filter_map(|row| row["kind"].as_str())
+                .collect::<Vec<_>>();
+            let waits = records
+                .iter()
+                .filter(|row| row["kind"] == "credential_wait")
+                .collect::<Vec<_>>();
+            panic!(
+                "pilot {shape} proved the wrong live shape: {}; fixture={}; kinds={kinds:?}; credential_wait={waits:?}; stderr={}",
+                super::panic_text(&error),
+                fixture.root.display(),
+                outcome.stderr
+            );
+        }
         pilots.push(trace::read(&fixture.root.join("commit-trace.jsonl")));
         fixtures.push((fixture, outcome));
     }

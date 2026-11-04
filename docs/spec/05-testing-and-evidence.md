@@ -1891,6 +1891,10 @@ panicking; the command-id validity assertion remains in force.
 `crash_sweep::durability_twin_pilots` runs the twin pilots of every other
 registered shape without cutting, so a change that makes any strict shape's
 per-store commit sequence differ between twins fails in the durability lane.
+A pilot whose shape's live assertion fails preserves its fixture with the
+face's records (`pilot.jsonl`) and stderr (`pilot.stderr`) beside it, and its
+panic names the fixture, the record kinds, the `credential_wait` rows and
+stderr.
 Without `--shapes`, `--strict` selects every registered shape; a non-strict run
 uses the quick `final_only,direct_tool_then_final` selection. An explicit
 `--shapes` selection applies in either mode. The wrapper overrides any inherited
