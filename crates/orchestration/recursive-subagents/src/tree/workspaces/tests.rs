@@ -4,7 +4,7 @@ use crate::tree::vcs_fixtures::*;
 use crate::tree::*;
 
 #[test]
-fn restored_pause_is_presented_without_rewriting_folded_node_statuses() {
+fn a_reopen_keeps_a_spawned_child_running_without_rewriting_folded_statuses() {
     let (_tmp, mut tree) = tree();
     let child = tree
         .spawn_agent("root", &spawn_req(), None)
@@ -15,8 +15,8 @@ fn restored_pause_is_presented_without_rewriting_folded_node_statuses() {
         .iter()
         .map(|(id, node)| (id.clone(), node.status))
         .collect();
-    tree.restore_paused();
-    assert_eq!(tree.state, TreeAdmissionState::RestoredPaused);
+    tree.apply_reopen_law();
+    assert_eq!(tree.state, TreeAdmissionState::Live);
     for (id, status) in &statuses {
         assert_eq!(tree.node(id).unwrap().status, *status);
     }
@@ -27,12 +27,8 @@ fn restored_pause_is_presented_without_rewriting_folded_node_statuses() {
             .find(|node| node.agent_id == child)
             .unwrap()
             .status,
-        NodeStatus::Paused
+        NodeStatus::Running
     );
-    tree.resume_tree().unwrap();
-    for (id, status) in statuses {
-        assert_eq!(tree.node(&id).unwrap().status, status);
-    }
 }
 
 #[test]
@@ -119,14 +115,14 @@ fn mint_without_a_vcs_identity_is_typed_mint_unavailable() {
 }
 
 #[test]
-fn resume_after_pause_does_not_restart_a_bound_turn() {
+fn a_reopen_owes_a_bound_turn_a_recovery_and_does_not_restart_it() {
     let (_tmp, mut tree) = tree();
     let spawned = tree.spawn_agent("root", &spawn_req(), None).unwrap();
     tree.bind_session_locator(&spawned.agent_id, "session:c1")
         .unwrap();
     tree.bind_attempt_turn(&spawned.agent_id, "turn-1").unwrap();
     tree.set_active_turn(&spawned.agent_id, true).unwrap();
-    tree.restore_paused();
+    tree.apply_reopen_law();
     assert!(tree.node(&spawned.agent_id).unwrap().active_turn);
     assert_eq!(
         tree.inflight_join_targets(),
@@ -145,7 +141,7 @@ fn resume_after_pause_does_not_restart_a_bound_turn() {
         tree.attempt(&spawned.agent_id).unwrap().turn_id.as_deref(),
         Some("turn-1")
     );
-    tree.resume_tree().unwrap();
+    assert!(tree.recovery_owed(&spawned.agent_id));
     let mut deferred = mail(&spawned.agent_id, "again");
     deferred.priority = Some(MessagePriority::Deferred);
     let queued = tree.send_agent_message("root", &deferred, None).unwrap();
@@ -374,7 +370,7 @@ fn sealing_and_adopting_reopen_recovery_required() {
         .get_mut(&adopting.workspace.id)
         .unwrap()
         .status = WorkspaceStatus::Adopting;
-    tree.restore_paused();
+    tree.apply_reopen_law();
     assert_eq!(
         tree.node(&sealing.agent_id).unwrap().status,
         NodeStatus::RecoveryRequired
@@ -392,7 +388,6 @@ fn sealing_and_adopting_reopen_recovery_required() {
         tree.fault_reason("root")
             .is_some_and(|reason| reason.contains("adopt into this checkout"))
     );
-    tree.resume_tree().unwrap();
     assert_eq!(
         tree.node(&sealing.agent_id).unwrap().status,
         NodeStatus::RecoveryRequired
@@ -417,7 +412,7 @@ fn an_interrupted_adopt_faults_its_owner_even_after_the_producer_closed() {
     let row = tree.workspaces.get_mut(&producer.workspace.id).unwrap();
     row.status = WorkspaceStatus::Adopting;
     row.owner_agent_id.clone_from(&hub.agent_id);
-    tree.restore_paused();
+    tree.apply_reopen_law();
     assert_eq!(
         tree.node(&hub.agent_id).unwrap().status,
         NodeStatus::RecoveryRequired
@@ -438,8 +433,7 @@ fn an_interrupted_adopt_faults_its_owner_even_after_the_producer_closed() {
         .get_mut(&producer.workspace.id)
         .unwrap()
         .status = WorkspaceStatus::Adopting;
-    tree.restore_paused();
-    tree.resume_tree().unwrap();
+    tree.apply_reopen_law();
     assert_eq!(tree.node(&hub.agent_id).unwrap().status, NodeStatus::Closed);
 }
 
@@ -782,7 +776,7 @@ fn a_failed_discard_of_a_copy_with_a_candidate_is_retried_on_close() {
 fn a_stale_removal_never_faults_the_root_or_a_closed_occupant_on_reopen() {
     let (_root, vcs, mut tree) = fake_tree();
     let (child, workspace, _path) = failed_discard_of_a_finished_copy(&mut tree, &vcs);
-    tree.restore_paused();
+    tree.apply_reopen_law();
     assert_eq!(
         tree.node(&child).unwrap().status,
         NodeStatus::RecoveryRequired
@@ -800,9 +794,6 @@ fn a_stale_removal_never_faults_the_root_or_a_closed_occupant_on_reopen() {
         WorkspaceStatus::Discarding
     );
     assert!(reopened.take_effects().is_empty());
-    reopened.resume_tree().unwrap();
-    assert_eq!(reopened.node("root").unwrap().status, NodeStatus::Running);
-    assert_eq!(reopened.node(&child).unwrap().status, NodeStatus::Closed);
     assert!(reopened.poll_wait("root", &wait_for(&child)).is_ok());
 
     reopened

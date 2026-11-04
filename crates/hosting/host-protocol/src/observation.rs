@@ -433,8 +433,6 @@ define_observations! {
         process_exits: u32,
         /// Auto-continue is paused (Esc suppression) until the next user prompt.
         auto_continue_paused: bool,
-        /// The attached tree is restored-paused.
-        tree_paused: bool,
     },
     /// When the operator last sent the attached root a prompt or steer, as
     /// Unix milliseconds read from its committed canonical history at attach
@@ -461,8 +459,6 @@ pub struct PendingContinuation {
     pub process_exits: u32,
     /// Auto-continue is paused (Esc suppression) until the next user prompt.
     pub auto_continue_paused: bool,
-    /// The attached tree is restored-paused.
-    pub tree_paused: bool,
 }
 
 /// Immutable queue row supplied by the authoritative product host.

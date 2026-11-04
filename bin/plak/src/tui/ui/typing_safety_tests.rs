@@ -21,7 +21,6 @@ fn destructive(action: &UserAction) -> bool {
         UserAction::InterruptTopologyNode { .. }
             | UserAction::CloseTopologyNode { .. }
             | UserAction::StopAllTopology
-            | UserAction::ResumeTopologyTree
             | UserAction::RecoverTopologyNode { .. }
             | UserAction::StopProcesses { .. }
     )
@@ -573,28 +572,6 @@ fn a_draft_starting_with_q_in_activity_sends_no_prompt() {
             "{surface}: a typed draft was sent as {sent:?}"
         );
     }
-}
-
-/// On a restored-paused tree `r` opens the resume pop-up at once, and
-/// `Enter` resumes. A letter in between does not.
-#[test]
-fn r_then_enter_resumes_a_restored_paused_tree_at_once() {
-    let mut app = App::new(launch_basic(), true);
-    app.render_prefs.reduced_motion = true;
-    app.agents_clock = Some(FIXED_NOW);
-    let mut snapshot = tree_snapshot(vec![
-        tree_node("root", None, 0),
-        tree_node("child-a", Some("root"), 1),
-    ]);
-    snapshot.state = plakous_host_protocol::topology::TreeAdmissionState::RestoredPaused;
-    open_tree(&mut app, snapshot);
-    assert!(app.handle_key(key(KeyCode::Char('r'))).is_none());
-    assert!(app.destructive_confirm.is_some());
-    assert!(app.handle_key(key(KeyCode::Char('u'))).is_none());
-    assert_eq!(
-        app.handle_key(key(KeyCode::Enter)),
-        Some(UserAction::ResumeTopologyTree)
-    );
 }
 
 /// Paste routing (spec 02 §4): paste never reaches the composer while a

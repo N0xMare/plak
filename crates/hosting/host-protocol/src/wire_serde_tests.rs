@@ -81,7 +81,6 @@ fn intents() -> Vec<Intent> {
             scope: TranscriptScope::Agent("c1".into()),
         },
         Intent::RefreshTopologyTree,
-        Intent::ResumeTopologyTree,
         Intent::InterruptTopologyNode {
             agent_id: "c1".into(),
         },
@@ -114,7 +113,7 @@ fn intents() -> Vec<Intent> {
 #[test]
 fn every_intent_round_trips_tagged_by_kind() {
     let intents = intents();
-    assert_eq!(intents.len(), 35, "every core intent but Extension");
+    assert_eq!(intents.len(), 34, "every core intent but Extension");
     for intent in &intents {
         let encoded = round_trips(intent);
         assert!(encoded["kind"].is_string(), "{encoded}");

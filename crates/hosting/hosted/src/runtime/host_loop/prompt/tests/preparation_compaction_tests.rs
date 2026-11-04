@@ -267,7 +267,6 @@ fn compaction_error_wins_over_a_deferred_quit_and_keeps_its_pause_cause() {
         .unwrap();
     let mut invocation = crate::runtime::oneshot::OneShotState {
         attempted: true,
-        resume_tree: false,
         result: None,
         run: None,
     };

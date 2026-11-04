@@ -616,8 +616,6 @@ pub struct Settled {
 /// Why a rebind or roster apply is refused for this epoch.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EpochRebindRefusal {
-    /// The tree reopened paused and has not been resumed.
-    RestoredPaused,
     /// A spawn is mid-mint, so the tree is not quiescent.
     PendingSpawns,
     /// Descendants are still live; a successor epoch needs a quiet tree.

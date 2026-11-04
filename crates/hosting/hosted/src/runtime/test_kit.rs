@@ -337,14 +337,14 @@ impl super::TopologyRows for MemoryRows {
     }
 }
 
-/// Seed a tree that reopens `RestoredPaused`: a root with a descendant in
-/// flight, saved through whichever rows the caller is testing over.
+/// Seed a reopened tree with a descendant in flight, saved through whichever
+/// rows the caller is testing over.
 ///
 /// # Errors
 ///
 /// Returns the tree crate's own message when the tree cannot be built or
 /// saved.
-pub fn seed_restored_paused_tree(
+pub fn seed_reopened_tree_with_live_descendant(
     rows: &dyn super::TopologyRows,
     tree_id: &str,
     workspace: &std::path::Path,
@@ -361,10 +361,9 @@ pub fn seed_restored_paused_tree(
         WriterMode::SingleLease,
     )
     .map_err(|error| error.message)?;
-    // Only a tree with a descendant in flight reopens paused.
     tree.spawn_agent("root", &SpawnAgentRequest::test_review(), None)
         .map_err(|error| error.message)?;
-    tree.restore_paused();
+    tree.apply_reopen_law();
     rows.save_tree(&mut tree).map_err(|error| error.message())
 }
 
@@ -743,7 +742,6 @@ pub fn run_scripted_host<P: plakous_host_protocol::ProtocolExtension>(
         .attached_one_shot
         .then_some(super::oneshot::OneShotState {
             attempted: false,
-            resume_tree: false,
             result: None,
             run: None,
         });

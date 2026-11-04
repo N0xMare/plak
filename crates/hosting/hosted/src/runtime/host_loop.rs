@@ -20,10 +20,10 @@ use crate::sessions::{
 use crate::{CliFailure, CliResult};
 
 use super::admission::{
-    admit_idle_immediate_prompt, commit_session_update, emit_prompt_history, emit_queue_snapshot,
-    emit_restored_paused_note, emit_unavailable_context, queue_edit_applied, queue_edit_refused,
-    queue_persist_failed, queue_refusal, recovery_blocked_action, refuse_recovery_blocked_action,
-    reject_draft, reject_stale_queue_action, restored_paused_status_suffix,
+    admit_idle_immediate_prompt, commit_session_update, emit_prompt_history, emit_queue_pause_note,
+    emit_queue_snapshot, emit_unavailable_context, queue_edit_applied, queue_edit_refused,
+    queue_pause, queue_persist_failed, queue_refusal, recovery_blocked_action,
+    refuse_recovery_blocked_action, reject_draft, reject_stale_queue_action,
 };
 use super::clear::{clear_session_rebuild, delete_unpublished_runtime, resume_session_switch};
 use super::compact::{
@@ -597,13 +597,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 .borrow_mut()
                 .restore_front(delivery);
         }
-        if let Some(state) = one_shot.as_deref_mut()
-            && let Err(error) = self.resume_one_shot_tree(state.resume_tree).await
-        {
-            state.result = Some(Err(error));
-            state.attempted = true;
-        }
-
         self.main_loop(&mut RootLoop {
             one_shot: one_shot.as_deref_mut(),
             passive_checkpoint_scheduled: false,
@@ -611,25 +604,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         .await?;
         self.commit_notice_intents();
         self.finish_projection(one_shot.is_some()).await
-    }
-
-    /// A one-shot resumes a paused tree only when asked (`--resume-tree`);
-    /// otherwise a paused tree refuses the run.
-    async fn resume_one_shot_tree(&self, resume_tree: bool) -> CliResult<()> {
-        let tree_id = durable_tree_id(&self.role.config.topology_rows(), &self.role.config.session);
-        if resume_tree {
-            topology_state::resume_tree(&tree_id)
-                .await
-                .map_err(CliFailure::new)?;
-            crate::agent::rejoin_inflight_after_resume(&tree_id).await;
-            self.spawn_tree_recovery();
-            Ok(())
-        } else if crate::agent::topology_tree_is_restored_paused(&tree_id) {
-            Err(CliFailure::new(crate::agent::RESTORED_PAUSED_REFUSAL)
-                .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeTree {}))
-        } else {
-            Ok(())
-        }
     }
 
     fn retain_interrupted_storage(&mut self, error: &CliFailure) -> bool {

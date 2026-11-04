@@ -538,22 +538,9 @@ async fn acknowledge(
 /// One child command written and not yet settled.
 pub(super) struct JournaledCommand {
     pub(super) command_id: String,
-    kind: AgentCommandKind,
-    attempt_id: Option<AttemptId>,
-    pub(super) context: Prepared,
 }
 
 impl JournaledCommand {
-    /// Whether the command is a corrective round.
-    pub(super) fn is_corrective(&self) -> bool {
-        self.kind == AgentCommandKind::Corrective
-    }
-
-    /// Whether the command was written for an attempt other than `current`.
-    pub(super) fn for_other_attempt(&self, current: Option<&AttemptId>) -> bool {
-        self.attempt_id.as_ref() != current
-    }
-
     /// Settles the command without submitting it.
     pub(super) async fn settle(&self, driver: &TreeDriver, accepted: bool) -> Result<(), String> {
         let submission = if accepted {
@@ -584,9 +571,6 @@ pub(super) fn prepared_commands(
                 })
                 .map(|command| JournaledCommand {
                     command_id: command.command_id.clone(),
-                    kind: command.kind,
-                    attempt_id: command.attempt_id.clone(),
-                    context: Prepared::of(command),
                 })
                 .collect()
         })

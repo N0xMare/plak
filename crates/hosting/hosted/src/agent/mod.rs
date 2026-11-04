@@ -88,14 +88,14 @@ pub use build::{
     NATIVE_RUN_MAX_MODEL_ROUNDS, NATIVE_RUN_MAX_MODEL_ROUNDS_CEILING, NATIVE_RUN_MAX_OUTPUT_TOKENS,
     NATIVE_RUN_MODEL_CLEANUP_TIMEOUT, NATIVE_RUN_MODEL_OPERATION_TIMEOUT,
     NATIVE_RUN_TURN_INFERENCE_ALLOWANCE, NATIVE_RUN_TURN_INPUT_LIABILITY_BUDGET,
-    NATIVE_RUN_TURN_RETRY_RESERVE, ProductAgentSpec, RESTORED_PAUSED_REFUSAL, SpawnParent,
-    api_topology_parent, build_api_root_coding_session, build_coding_session,
-    build_runtime_session, coding_session_runtime_binding,
-    coding_session_runtime_binding_attaching_root, coding_session_target_binding,
-    compaction_session_runtime_binding, effective_presentation_label, open_api_root_coding_session,
-    open_coding_session, product_effect_policy, product_subscription_request_limits,
-    rejoin_inflight_after_resume, selected_coding_provider_configuration,
-    selected_coding_provider_configuration_with_processing_tier, topology_tree_is_restored_paused,
+    NATIVE_RUN_TURN_RETRY_RESERVE, ProductAgentSpec, SpawnParent, api_topology_parent,
+    build_api_root_coding_session, build_coding_session, build_runtime_session,
+    coding_session_runtime_binding, coding_session_runtime_binding_attaching_root,
+    coding_session_target_binding, compaction_session_runtime_binding,
+    effective_presentation_label, open_api_root_coding_session, open_coding_session,
+    product_effect_policy, product_subscription_request_limits,
+    selected_coding_provider_configuration,
+    selected_coding_provider_configuration_with_processing_tier,
 };
 pub(crate) use build::{
     SessionToolFence, api_session_runtime_binding, build_api_coding_session_seed,
@@ -120,15 +120,15 @@ pub(crate) use build::{
 };
 use children::{
     ProductChildSessionBinder, ProductLiveCanceller, ProductMailDeliverer,
-    format_session_reopen_error, incompatible_session_message, reattach_inflight_children,
+    format_session_reopen_error, incompatible_session_message, recover_owed_children,
 };
 #[cfg(test)]
 pub(crate) use recovery::TREE_FEED_READ_FAILED;
 #[cfg(test)]
 pub(crate) use recovery::tests::Fixture as RecoveryFixture;
 pub(crate) use recovery::{
-    RecoveryPassStart, TerminalExchange, operator_child_recover, read_tree_feed,
-    start_tree_recovery_pass, wait_evidence_in,
+    TerminalExchange, TreeRecoveryStart, operator_child_recover, read_tree_feed,
+    start_tree_recovery, wait_evidence_in,
 };
 pub use roots::ProductStateRoots;
 pub use roots::TelemetryHealth;

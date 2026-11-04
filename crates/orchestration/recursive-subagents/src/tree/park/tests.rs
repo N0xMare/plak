@@ -243,131 +243,205 @@ fn a_reopen_derives_the_parked_shape_from_durable_rows() {
     tree.send_agent_message("root", &followup, None).unwrap();
     assert_eq!(tree.node(&retasked).unwrap().status, NodeStatus::Running);
 
-    let mut reopened = ProductAgentTree::reopen(tree.to_persisted());
+    let reopened = ProductAgentTree::reopen(tree.to_persisted());
     assert!(
         !reopened.is_parked(&parked),
         "the parked map is process-local"
     );
-    // A restored tree wakes nothing until the operator resumes it.
+    // The rows prove the parked child idle between turns: the reopen law
+    // interrupts it (owner lost) and owes it nothing.
+    assert_eq!(
+        reopened.node(&parked).unwrap().status,
+        NodeStatus::Interrupted
+    );
+    assert!(!reopened.recovery_owed(&parked));
     assert_eq!(
         reopened.parked_reopen_targets(),
         [] as [(String, String, String); 0]
     );
-    reopened.resume_tree().unwrap();
-    let targets = reopened
-        .parked_reopen_targets()
-        .into_iter()
-        .map(|(agent_id, locator, _)| (agent_id, locator))
-        .collect::<Vec<_>>();
-    assert_eq!(targets, [(parked, "locator".to_owned())]);
+    // A bound turn is owed a recover_node and joined, not marked.
+    assert!(reopened.recovery_owed(&running));
+    assert_eq!(reopened.node(&running).unwrap().status, NodeStatus::Running);
     assert!(
         reopened
             .inflight_join_targets()
             .iter()
             .any(|(agent_id, ..)| agent_id == &running)
     );
+    // Neither an unstarted spawn nor a fresh followup spent a turn.
+    for untouched in [&unstarted, &retasked] {
+        assert_eq!(
+            reopened.node(untouched).unwrap().status,
+            NodeStatus::Running
+        );
+        assert!(!reopened.recovery_owed(untouched));
+    }
 }
 
-/// Between `/tree resume` and the host's reopen wake, mail to a derived
-/// parked child waits for that wake instead of starting a second turn,
-/// and an interrupt still ends the park.
+/// A child interrupted while its turn was still bound (an owner-lost mark,
+/// or an operator interrupt, written before the turn's terminal was
+/// projected) is owed its recover_node like a running one: only that run
+/// projects the feed that ends the turn and releases its binding.
 #[test]
-fn a_resume_holds_derived_parked_children_for_the_reopen_wake() {
+fn a_bound_child_interrupted_before_the_loss_is_still_owed() {
     let (_root, mut tree) = tree();
-    let held = after_one_turn(&mut tree);
-    tree.release_attempt_turn(&held).unwrap();
-    tree.park_child(&held, Vec::new()).unwrap();
+    let marked = after_one_turn(&mut tree);
+    tree.mark_owner_lost(&marked);
+    let interrupted = after_one_turn(&mut tree);
+    tree.interrupt_agent("root", &close_req(&interrupted), None)
+        .unwrap();
+    let reopened = ProductAgentTree::reopen(tree.to_persisted());
+    for agent in [&marked, &interrupted] {
+        assert_eq!(
+            reopened.node(agent).unwrap().status,
+            NodeStatus::Interrupted
+        );
+        assert!(reopened.recovery_owed(agent), "{agent} keeps its binding");
+        assert!(
+            reopened
+                .inflight_join_targets()
+                .iter()
+                .any(|(agent_id, ..)| agent_id == agent)
+        );
+    }
+}
+
+/// A child interrupted with a command no fact names and the tree has not
+/// withdrawn (an owner-lost mark that projected its feed but was lost before
+/// the withdrawal) is owed the rest of that mark.
+#[test]
+fn an_interrupted_child_with_an_unwithdrawn_command_is_owed() {
+    let (_root, mut tree) = tree();
+    let child = after_one_turn(&mut tree);
+    tree.release_attempt_turn(&child).unwrap();
+    tree.park_child(&child, Vec::new()).unwrap();
+    let attempt = tree.node(&child).unwrap().attempt_id.clone();
+    tree.record_command(AgentCommand::intent(
+        "wake-lost",
+        &child,
+        attempt,
+        AgentCommandKind::Wake,
+        "text wake-lost".to_owned(),
+        Vec::new(),
+    ))
+    .unwrap();
+    tree.mark_owner_lost(&child);
+    assert_eq!(tree.node(&child).unwrap().status, NodeStatus::Interrupted);
+    let reopened = ProductAgentTree::reopen(tree.to_persisted());
+    assert_eq!(
+        reopened.node(&child).unwrap().status,
+        NodeStatus::Interrupted
+    );
+    assert!(reopened.recovery_owed(&child));
+}
+
+/// A parked child holding a prepared command that is not its own start (a
+/// Followup, a transient Resume, or a Wake of another attempt) is marked
+/// owner-lost and owed in the same reopen, and a second reopen of those
+/// rows classifies it the same way.
+#[test]
+fn a_parked_child_with_another_unresolved_command_is_marked_and_owed_once() {
+    let other = AttemptId::from_persisted("other-attempt".to_owned());
+    for (kind, label) in [
+        (AgentCommandKind::Followup, "followup"),
+        (AgentCommandKind::Resume, "resume"),
+        (AgentCommandKind::Wake, "other-wake"),
+    ] {
+        let (_root, mut tree) = tree();
+        let child = after_one_turn(&mut tree);
+        tree.release_attempt_turn(&child).unwrap();
+        tree.park_child(&child, Vec::new()).unwrap();
+        let attempt = if kind == AgentCommandKind::Wake {
+            Some(other.clone())
+        } else {
+            tree.node(&child).unwrap().attempt_id.clone()
+        };
+        tree.record_command(AgentCommand::intent(
+            label,
+            &child,
+            attempt,
+            kind,
+            format!("text {label}"),
+            Vec::new(),
+        ))
+        .unwrap();
+        let first = ProductAgentTree::reopen(tree.to_persisted());
+        assert_eq!(
+            first.node(&child).unwrap().status,
+            NodeStatus::Interrupted,
+            "{label}"
+        );
+        assert!(
+            first.recovery_owed(&child),
+            "{label}: owed on the first reopen"
+        );
+        let second = ProductAgentTree::reopen(first.to_persisted());
+        assert_eq!(
+            second.node(&child).unwrap().status,
+            NodeStatus::Interrupted,
+            "{label}"
+        );
+        assert!(second.recovery_owed(&child), "{label}: owed again");
+    }
+}
+
+/// A parked child with a start the lost process prepared and no fact names
+/// is exempt from the reopen law's mark: it stays running and owed, its
+/// recover_node rejoins the start under the reopening state, mail waits for
+/// that boundary, and an interrupt ends it.
+#[test]
+fn an_owed_parked_start_rejoins_under_a_reopening_state_an_interrupt_ends() {
+    let (_root, mut tree) = tree();
+    let woken = after_one_turn(&mut tree);
+    tree.release_attempt_turn(&woken).unwrap();
+    tree.park_child(&woken, Vec::new()).unwrap();
     let interrupted = after_one_turn(&mut tree);
     tree.release_attempt_turn(&interrupted).unwrap();
     tree.park_child(&interrupted, Vec::new()).unwrap();
+    for (agent, command) in [(&woken, "wake-w"), (&interrupted, "wake-i")] {
+        let attempt = tree.node(agent).unwrap().attempt_id.clone();
+        tree.record_command(AgentCommand::intent(
+            command,
+            agent,
+            attempt,
+            AgentCommandKind::Wake,
+            format!("text {command}"),
+            Vec::new(),
+        ))
+        .unwrap();
+    }
     let mut reopened = ProductAgentTree::reopen(tree.to_persisted());
-    assert!(!reopened.is_parked(&held));
-    reopened.resume_tree().unwrap();
-    assert!(reopened.is_parked(&held));
-    assert_eq!(
-        reopened.waiting_on(&held),
-        Some(&WaitingOn::default()),
-        "a held child reads as parked before its wake names what it waits on"
-    );
+    for agent in [&woken, &interrupted] {
+        assert_eq!(reopened.node(agent).unwrap().status, NodeStatus::Running);
+        assert!(reopened.recovery_owed(agent), "exempt, and owed");
+        assert!(!reopened.is_parked(agent));
+    }
+
+    assert!(reopened.begin_reopen_wake(&woken));
+    assert!(reopened.reopen_wake_admissible(&woken));
+    assert!(!reopened.begin_reopen_wake(&woken), "one rejoin at a time");
+    assert!(reopened.is_parked(&woken));
+    assert!(reopened.waiting_on(&woken).is_none());
     let sent = reopened
-        .send_agent_message("root", &mail(&held, "status?"), None)
+        .send_agent_message("root", &mail(&woken, "status?"), None)
         .unwrap();
     assert_eq!(sent.disposition, MailDisposition::Queued);
-    assert_eq!(reopened.wake_mail(&held).len(), 1);
+    reopened.unpark_child(&woken);
+    assert!(!reopened.is_parked(&woken));
+
+    assert!(reopened.begin_reopen_wake(&interrupted));
     assert_eq!(
         reopened
             .interrupt_agent("root", &close_req(&interrupted), None)
             .unwrap(),
         NodeStatus::Interrupted
     );
-
-    // The wake ran and its turn waiter parked the child again: releasing
-    // the hold leaves that park alone.
-    reopened
-        .bind_attempt_turn(&held, "00000000-0000-0000-0000-000000000002")
-        .unwrap();
-    reopened.set_active_turn(&held, true).unwrap();
-    reopened.release_attempt_turn(&held).unwrap();
-    reopened.park_child(&held, vec!["p1".to_owned()]).unwrap();
-    reopened.release_reopen_hold(&held);
-    assert_eq!(reopened.waiting_on(&held).unwrap().processes, ["p1"]);
-    reopened.unpark_child(&held);
-
-    // A wake that never ran releases the hold outright.
-    let mut again = ProductAgentTree::reopen(reopened.to_persisted());
-    again.resume_tree().unwrap();
-    assert!(again.is_parked(&held));
-    again.release_reopen_hold(&held);
-    assert!(!again.is_parked(&held));
-}
-
-/// The reopen wake of a held child starts only from the hold: an
-/// interrupt before it began, or while it is being admitted, ends it,
-/// and a released hold is not woken.
-#[test]
-fn a_reopen_wake_begins_only_from_a_hold_an_interrupt_has_not_ended() {
-    let (_root, mut tree) = tree();
-    let woken = after_one_turn(&mut tree);
-    tree.release_attempt_turn(&woken).unwrap();
-    tree.park_child(&woken, Vec::new()).unwrap();
-    let interrupted_early = after_one_turn(&mut tree);
-    tree.release_attempt_turn(&interrupted_early).unwrap();
-    tree.park_child(&interrupted_early, Vec::new()).unwrap();
-    let interrupted_late = after_one_turn(&mut tree);
-    tree.release_attempt_turn(&interrupted_late).unwrap();
-    tree.park_child(&interrupted_late, Vec::new()).unwrap();
-    let mut reopened = ProductAgentTree::reopen(tree.to_persisted());
-    assert!(!reopened.begin_reopen_wake(&woken), "nothing is held yet");
-    reopened.resume_tree().unwrap();
-
-    assert!(reopened.begin_reopen_wake(&woken));
-    assert!(reopened.reopen_wake_admissible(&woken));
+    assert!(!reopened.reopen_wake_admissible(&interrupted));
+    assert!(!reopened.is_parked(&interrupted));
     assert!(
-        !reopened.begin_reopen_wake(&woken),
-        "one reopen wake at a time"
+        !reopened.begin_reopen_wake(&interrupted),
+        "an interrupted child is not rejoined"
     );
-    assert!(reopened.waiting_on(&woken).is_none());
-    let sent = reopened
-        .send_agent_message("root", &mail(&woken, "status?"), None)
-        .unwrap();
-    assert_eq!(sent.disposition, MailDisposition::Queued);
-    reopened.release_reopen_hold(&woken);
-    assert!(!reopened.is_parked(&woken));
-
-    reopened
-        .interrupt_agent("root", &close_req(&interrupted_early), None)
-        .unwrap();
-    assert!(!reopened.begin_reopen_wake(&interrupted_early));
-
-    assert!(reopened.begin_reopen_wake(&interrupted_late));
-    assert_eq!(
-        reopened
-            .interrupt_agent("root", &close_req(&interrupted_late), None)
-            .unwrap(),
-        NodeStatus::Interrupted
-    );
-    assert!(!reopened.reopen_wake_admissible(&interrupted_late));
-    assert!(!reopened.is_parked(&interrupted_late));
 }
 
 #[test]

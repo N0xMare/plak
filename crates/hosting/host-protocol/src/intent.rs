@@ -204,8 +204,6 @@ pub enum SessionIntent<P: ProtocolExtension = Core> {
     /// answers even when the revision has not advanced, so a dropped push can
     /// always be recovered by hand.
     RefreshTopologyTree,
-    /// Resume a `RestoredPaused` tree (`ResumeTree`).
-    ResumeTopologyTree,
     /// Interrupt one exact node after overlay confirmation.
     InterruptTopologyNode {
         /// Exact agent id.
@@ -302,7 +300,6 @@ impl<P: ProtocolExtension> fmt::Debug for SessionIntent<P> {
             Self::CloseAgentTranscript => "CloseAgentTranscript",
             Self::ResyncTranscript { .. } => "ResyncTranscript(..)",
             Self::RefreshTopologyTree => "RefreshTopologyTree",
-            Self::ResumeTopologyTree => "ResumeTopologyTree",
             Self::InterruptTopologyNode { .. } => "InterruptTopologyNode(..)",
             Self::CloseTopologyNode { .. } => "CloseTopologyNode(..)",
             Self::StopAllTopology => "StopAllTopology",

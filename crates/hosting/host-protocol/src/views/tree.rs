@@ -188,15 +188,16 @@ pub struct TreeView {
     pub revision: u64,
     /// What the tree admits right now.
     pub state: TreeAdmissionState,
-    /// True when this view is the echo of an explicit `tree` / `resume_tree`.
+    /// True when this view is the echo of an explicit `tree`.
     pub solicited: bool,
     /// Deterministic preorder rows.
     pub nodes: Vec<NodeView>,
 }
 
 impl TreeView {
-    /// mutating spawn, mail, and merge are blocked until an
-    /// explicit resume. Derived from `state` rather than carried beside it.
+    /// Whether `state` is the retained `restored_paused` spelling. A tree
+    /// reopens live, so a current host never projects it. Derived from
+    /// `state` rather than carried beside it.
     #[must_use]
     pub const fn restored_paused(&self) -> bool {
         matches!(self.state, TreeAdmissionState::RestoredPaused)

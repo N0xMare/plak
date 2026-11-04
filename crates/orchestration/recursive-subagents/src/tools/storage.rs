@@ -17,35 +17,22 @@ pub(crate) struct TreeMutationGuard<'a> {
     live: &'a Mutex<ProductAgentTree>,
     locked: Option<MutexGuard<'a, ProductAgentTree>>,
     candidate: Option<ProductAgentTree>,
-    restored_paused: &'a AtomicBool,
 }
 
 impl<'a> TreeMutationGuard<'a> {
-    pub(super) fn lock(
-        live: &'a Mutex<ProductAgentTree>,
-        restored_paused: &'a AtomicBool,
-    ) -> Result<Self, ()> {
+    pub(super) fn lock(live: &'a Mutex<ProductAgentTree>) -> Result<Self, ()> {
         let locked = live.lock().map_err(|_| ())?;
         Ok(Self {
             live,
             locked: Some(locked),
             candidate: None,
-            restored_paused,
         })
     }
 
     pub(crate) fn detach(&mut self) {
         if let Some(locked) = self.locked.take() {
             self.candidate = Some(locked.clone());
-            self.publish_admission(&locked);
         }
-    }
-
-    fn publish_admission(&self, tree: &ProductAgentTree) {
-        self.restored_paused.store(
-            tree.state == crate::tree::TreeAdmissionState::RestoredPaused,
-            Ordering::Release,
-        );
     }
 }
 
@@ -73,13 +60,10 @@ impl Drop for TreeMutationGuard<'_> {
         if let Some(candidate) = &mut self.candidate {
             let mut live = self.live.lock().unwrap_or_else(PoisonError::into_inner);
             std::mem::swap(&mut *live, candidate);
-            self.publish_admission(&live);
             // A detached writer's wakes fired before its copy went live: a
             // waiter that woke and read the live tree in between saw the old
             // rows, so wake it again now that they are current.
             live.waiters().notify_waiters();
-        } else if let Some(locked) = &self.locked {
-            self.publish_admission(locked);
         }
     }
 }

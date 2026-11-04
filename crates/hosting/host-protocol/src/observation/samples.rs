@@ -81,7 +81,6 @@ pub(crate) fn class_samples() -> Vec<Observation> {
             questions: 0,
             process_exits: 0,
             auto_continue_paused: false,
-            tree_paused: false,
         },
         Observation::LastUserPromptAt(None),
     ]

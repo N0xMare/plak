@@ -54,12 +54,10 @@ impl HostPhase {
     }
 }
 
-/// Independent tree/queue admission pauses.
+/// The restored root queue's admission pause.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct HostPause {
-    /// The restored tree requires explicit admission.
-    pub tree: bool,
     /// Automatic queue drain requires explicit admission.
     pub queue: bool,
 }

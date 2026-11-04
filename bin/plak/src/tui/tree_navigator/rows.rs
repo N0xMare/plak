@@ -57,11 +57,6 @@ pub(super) fn wrap_footer_segments(hint: &str, budget: usize) -> Vec<String> {
 pub(crate) fn recover_intent(tree: &CanvasTree, agent_id: &str) -> Option<crate::tui::UserAction> {
     let node = tree.nodes.iter().find(|node| node.agent_id == agent_id)?;
     let attempt = node.attempt_id.clone()?;
-    // The canvas pause flag is the same admission fact as `state`, checked
-    // here so a paused snapshot cannot confirm what the host refuses.
-    if tree.restored_paused {
-        return None;
-    }
     if !plakous_host_protocol::topology::operator_child_recover_eligible(
         tree.state.as_str(),
         node.status.as_str(),

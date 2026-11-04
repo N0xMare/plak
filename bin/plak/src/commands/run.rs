@@ -107,7 +107,6 @@ impl PlakousApplication {
                 plakous_hosted::runtime::test_kit::registered_authority(provider),
                 prompt,
                 print_session_id,
-                false,
                 stdout,
                 stderr,
                 limits,
@@ -214,7 +213,6 @@ impl PlakousApplication {
             target,
             prompt,
             print_session_id,
-            false,
             stdout,
             stderr,
             limits,
@@ -293,7 +291,6 @@ impl PlakousApplication {
             target,
             prompt,
             print_session_id,
-            false,
             stdout,
             stderr,
             limits,
@@ -303,7 +300,7 @@ impl PlakousApplication {
     #[allow(
         clippy::too_many_arguments,
         clippy::too_many_lines,
-        reason = "Continuation loads recorded authority before driving the requested draft, resume-tree choice, output streams, and run bounds."
+        reason = "Continuation loads recorded authority before driving the requested draft, output streams, and run bounds."
     )]
     pub(crate) fn continue_session(
         &mut self,
@@ -311,7 +308,6 @@ impl PlakousApplication {
         session_id: &str,
         prompt: plakous_host_protocol::Draft,
         print_session_id: bool,
-        resume_tree: bool,
         stdout: &mut dyn io::Write,
         stderr: &mut dyn io::Write,
         limits: product_host::RunBounds,
@@ -334,7 +330,6 @@ impl PlakousApplication {
                 plakous_hosted::runtime::test_kit::registered_authority(NativeProvider::Codex),
                 prompt,
                 print_session_id,
-                resume_tree,
                 stdout,
                 stderr,
                 limits,
@@ -374,7 +369,6 @@ impl PlakousApplication {
                 target,
                 prompt,
                 print_session_id,
-                resume_tree,
                 stdout,
                 stderr,
                 limits,
@@ -475,7 +469,6 @@ impl PlakousApplication {
             target,
             prompt,
             print_session_id,
-            resume_tree,
             stdout,
             stderr,
             limits,
@@ -485,7 +478,7 @@ impl PlakousApplication {
     #[allow(
         clippy::too_many_arguments,
         clippy::too_many_lines,
-        reason = "Hosted run admission keeps the selected session and target beside the draft, output streams, resume choice, and termination bounds."
+        reason = "Hosted run admission keeps the selected session and target beside the draft, output streams, and termination bounds."
     )]
     fn run_hosted(
         &self,
@@ -494,7 +487,6 @@ impl PlakousApplication {
         target: product_host::HostTargetAuthority,
         prompt: plakous_host_protocol::Draft,
         print_session_id: bool,
-        resume_tree: bool,
         stdout: &mut dyn io::Write,
         stderr: &mut dyn io::Write,
         limits: product_host::RunBounds,
@@ -511,22 +503,6 @@ impl PlakousApplication {
         let paths = self.product_paths()?;
         paths.ensure_layout().map_err(CliFailure::new)?;
         let roots = self.state_roots()?;
-        let tree_id = crate::topology_product::durable_topology_tree_id(&roots, &session);
-        let resume_tree =
-            crate::topology_product::requested_tree_resume(paths, &tree_id, resume_tree)?;
-        if !resume_tree
-            && product_host::requires_explicit_resume(
-                &product_host::HostRows::new(&roots, self.session_records()?.as_ref()),
-                &tree_id,
-            )
-        {
-            return Err(CliFailure::new(crate::refusal_text::paused_tree_text(
-                crate::notice_text::RemedyContext {
-                    frontend: crate::notice_text::Frontend::Run,
-                    session_id: Some(&session.id),
-                },
-            )));
-        }
         let policy = admitted.session_policy();
         policy.install_request_budget();
         let child_agents = face::child_agents(admitted, paths);
@@ -556,7 +532,6 @@ impl PlakousApplication {
                 config,
                 prompt,
                 print_session_id,
-                resume_tree,
                 child_agents,
                 TerminalMode::of_stdout(),
                 stdout,
@@ -603,7 +578,6 @@ impl PlakousApplication {
             config,
             prompt,
             print_session_id,
-            resume_tree,
             child_agents,
             TerminalMode::of_stdout(),
             stdout,
@@ -654,7 +628,6 @@ pub(crate) fn run_config(
     config: product_host::HostConfig<crate::surface_protocol::PlakExtension>,
     prompt: plakous_host_protocol::Draft,
     print_session_id: bool,
-    resume_tree: bool,
     child_agents: face::ChildAgents,
     stdout_mode: TerminalMode,
     stdout: &mut dyn io::Write,
@@ -724,8 +697,7 @@ pub(crate) fn run_config(
             output_error = Some(CliFailure::new("stderr failed"));
         }
     };
-    let result =
-        product_host::OneShot::run_until_idle(config, prompt, resume_tree, limits, observe);
+    let result = product_host::OneShot::run_until_idle(config, prompt, limits, observe);
     interrupt.abort();
     let (assistant, outcome) = match result? {
         product_host::OneShotOutcome::Completed { assistant } => {

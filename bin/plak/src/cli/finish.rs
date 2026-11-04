@@ -36,7 +36,6 @@ pub(super) fn finish_continue_session(
     session_id: String,
     prompt: RunPrompt,
     print_session_id: bool,
-    resume_tree: bool,
     limits: plakous_hosted::runtime::RunBounds,
 ) -> Result<Command, String> {
     if session_id.trim().is_empty() {
@@ -54,7 +53,6 @@ pub(super) fn finish_continue_session(
         session_id,
         prompt: plakous_host_protocol::Draft::new(prompt, images),
         print_session_id,
-        resume_tree,
     })
 }
 
@@ -179,7 +177,6 @@ pub(super) fn finish_agent(
     composition: Option<String>,
     protocol: Option<String>,
     session: Option<String>,
-    resume_tree: bool,
 ) -> Result<Command, String> {
     if let Some(session_id) = session {
         if account.is_some()
@@ -205,12 +202,8 @@ pub(super) fn finish_agent(
             effort: None,
             effort_explicit: false,
             composition: None,
-            resume_tree,
             wire_v2: false,
         });
-    }
-    if resume_tree {
-        return Err("agent --resume-tree requires --session".to_owned());
     }
     if let Some(account) = account.as_deref() {
         if let Some(platform) = plakous_hosted::binding::PlatformProvider::for_account(account) {
@@ -250,7 +243,6 @@ pub(super) fn finish_agent(
         effort,
         effort_explicit,
         composition,
-        resume_tree: false,
         wire_v2: false,
     })
 }
@@ -291,7 +283,6 @@ fn finish_openrouter_agent(
         effort,
         effort_explicit,
         composition: Some(composition),
-        resume_tree: false,
         wire_v2: false,
     })
 }
@@ -341,7 +332,6 @@ fn finish_platform_agent(
         effort,
         effort_explicit: effort.is_some(),
         composition,
-        resume_tree: false,
         wire_v2: false,
     })
 }

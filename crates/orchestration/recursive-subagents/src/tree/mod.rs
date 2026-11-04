@@ -107,13 +107,11 @@ impl std::fmt::Debug for TreeVcs {
 }
 
 impl NodeRecord {
-    /// The restored tree's pause is presentation, not a child fold input.
+    /// The status a face shows. A tree no longer pauses on reopen, so it is
+    /// the node's own.
     #[must_use]
-    pub const fn presentation_status(&self, state: TreeAdmissionState) -> NodeStatus {
-        match (state, self.status) {
-            (TreeAdmissionState::RestoredPaused, NodeStatus::Running) => NodeStatus::Paused,
-            _ => self.status,
-        }
+    pub const fn presentation_status(&self, _state: TreeAdmissionState) -> NodeStatus {
+        self.status
     }
 }
 
@@ -639,7 +637,6 @@ impl EpochRebindRefusal {
     #[must_use]
     pub const fn message(self) -> &'static str {
         match self {
-            Self::RestoredPaused => ProductAgentTree::TREE_EPOCH_REBIND_PAUSED,
             Self::PendingSpawns => ProductAgentTree::TREE_EPOCH_REBIND_PENDING_SPAWNS,
             Self::LiveDescendants => ProductAgentTree::TREE_EPOCH_REBIND_LIVE_DESCENDANTS,
         }
@@ -737,6 +734,10 @@ pub struct ProductAgentTree {
     /// Host turn waiters running in this process, per child. A bound turn
     /// with no waiter is released by nobody. Process-local; never persisted.
     turn_waiters: BTreeMap<String, usize>,
+    /// Children whose bound or active turn the last process left: each
+    /// takes no new turn until its `recover_node` ran in this process
+    /// (spec 03 section 14.1). Process-local; never persisted.
+    recovery_owed: BTreeSet<String>,
     /// Startup and waiter ownership, mirrored under the hub admission lock.
     /// Never included in tree rows or view rebuilds.
     turn_owners: BTreeMap<String, (Option<AttemptId>, Option<String>)>,
@@ -881,6 +882,7 @@ mod projection;
 mod projector;
 mod recovery;
 mod refresh;
+mod reopen_law;
 mod retention;
 mod revert;
 mod stages;
@@ -1068,11 +1070,10 @@ impl ProductAgentTree {
 
     fn require_live(&self) -> Result<(), TopologyError> {
         match self.state {
-            TreeAdmissionState::Live | TreeAdmissionState::Interrupted => Ok(()),
-            TreeAdmissionState::RestoredPaused => Err(TopologyError::new(
-                TopologyErrorCode::TreeRestoredPaused,
-                Self::TREE_PAUSED_REFUSAL,
-            )),
+            // A stored `restored_paused` reads as live (the reopen law).
+            TreeAdmissionState::Live
+            | TreeAdmissionState::Interrupted
+            | TreeAdmissionState::RestoredPaused => Ok(()),
             TreeAdmissionState::TreeTerminal => Err(TopologyError::new(
                 TopologyErrorCode::GrantDenied,
                 Self::TREE_STOPPED_REFUSAL,
@@ -1088,11 +1089,8 @@ impl ProductAgentTree {
         match self.state {
             TreeAdmissionState::Live
             | TreeAdmissionState::Interrupted
+            | TreeAdmissionState::RestoredPaused
             | TreeAdmissionState::TreeTerminal => Ok(()),
-            TreeAdmissionState::RestoredPaused => Err(TopologyError::new(
-                TopologyErrorCode::TreeRestoredPaused,
-                Self::TREE_PAUSED_REFUSAL,
-            )),
             TreeAdmissionState::Closed => Err(TopologyError::new(
                 TopologyErrorCode::GrantDenied,
                 "tree is closed",

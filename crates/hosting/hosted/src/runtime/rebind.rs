@@ -602,11 +602,7 @@ fn refuse_unready_rebind<P: plakous_host_protocol::ProtocolExtension>(
     if let Some(reason) = tree_epoch_rebind_refusal(&config.topology_rows(), &config.session)
         && !switch
     {
-        return Err(CliFailure::new(reason.message()).with_optional_remedy(
-            (reason == crate::agent_tree::EpochRebindRefusal::RestoredPaused)
-                .then_some(plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeTree {})
-                .as_ref(),
-        ));
+        return Err(CliFailure::new(reason.message()));
     }
     if !session_rebind_boundary_ready(&config.session) {
         return Err(CliFailure::new(

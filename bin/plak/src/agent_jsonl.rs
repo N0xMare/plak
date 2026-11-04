@@ -44,9 +44,6 @@ pub enum AgentCommand {
     ResumeQueue {
         id: String,
     },
-    ResumeTree {
-        id: String,
-    },
     Tree {
         id: String,
     },
@@ -92,7 +89,6 @@ impl AgentCommand {
             Self::Recover { .. } => "recover",
             Self::ResolveApproval { .. } => "resolve_approval",
             Self::ResumeQueue { .. } => "resume_queue",
-            Self::ResumeTree { .. } => "resume_tree",
             Self::Tree { .. } => "tree",
             Self::InterruptNode { .. } => "interrupt_node",
             Self::CloseNode { .. } => "close_node",
@@ -121,7 +117,6 @@ impl AgentCommand {
             | Self::Recover { id }
             | Self::ResolveApproval { id, .. }
             | Self::ResumeQueue { id }
-            | Self::ResumeTree { id }
             | Self::Tree { id }
             | Self::InterruptNode { id, .. }
             | Self::CloseNode { id, .. }
@@ -171,7 +166,6 @@ impl AgentCommand {
                 choice,
             }),
             Self::ResumeQueue { .. } => Some(UserAction::ResumeQueueDrain),
-            Self::ResumeTree { .. } => Some(UserAction::ResumeTopologyTree),
             Self::Tree { .. } => Some(UserAction::OpenTopologyNavigator),
             Self::InterruptNode { agent_id, .. } => {
                 Some(UserAction::InterruptTopologyNode { agent_id })
@@ -277,7 +271,6 @@ pub fn parse_command_line(line: &str) -> ParseOutcome {
         "recover" => ParseOutcome::Command(AgentCommand::Recover { id }),
         "resolve_approval" => parse_resolve_approval(id, &value),
         "resume_queue" => ParseOutcome::Command(AgentCommand::ResumeQueue { id }),
-        "resume_tree" => ParseOutcome::Command(AgentCommand::ResumeTree { id }),
         "tree" => ParseOutcome::Command(AgentCommand::Tree { id }),
         "interrupt_node" => parse_node_action(id, &value, true),
         "close_node" => parse_node_action(id, &value, false),

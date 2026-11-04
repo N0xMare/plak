@@ -27,8 +27,8 @@ use serde_json::json;
 use super::*;
 use crate::agent::{ApiTopologyParent, NATIVE_RUN_MAX_MODEL_ROUNDS, ProductStateRoots};
 use crate::agent_tree::{
-    CustodyClaim, MemoryTreeStore, PersistedTree, ProductAgentTree, RECOVERED_WITHOUT_TURN,
-    Revision, TURN_ABANDONED, TreeCustody, TreeStore, TreeStoreError,
+    CustodyClaim, MemoryTreeStore, PersistedTree, ProductAgentTree, Revision, TURN_ABANDONED,
+    TreeCustody, TreeStore, TreeStoreError,
 };
 use crate::agent_tree_protocol::{
     AdoptCandidateRequest, AttemptStatus, MessagePurpose, NodeStatus, SendAgentMessageRequest,
@@ -350,7 +350,7 @@ async fn sql_deleted_cascade_views_rebuild_through_real_reopen_in_postorder() {
     );
     assert!(targets.contains(&sessionless));
     // This is the product's real reopen recovery entry, not explicit fold calls.
-    let report = run_tree_recovery_pass(&fixture.tree_id).await.unwrap();
+    let report = recover_tree(&fixture.tree_id).await.unwrap();
     assert!(report.refused.is_empty(), "{:?}", report.refused);
     assert_eq!(report.recovered.len(), 3);
     assert_eq!(
@@ -386,7 +386,7 @@ async fn sql_deleted_cascade_views_rebuild_through_real_reopen_in_postorder() {
             assert_eq!(rebuilt.commands(), live.commands());
         })
         .unwrap();
-    let again = run_tree_recovery_pass(&fixture.tree_id).await.unwrap();
+    let again = recover_tree(&fixture.tree_id).await.unwrap();
     assert!(again.recovered.is_empty() && again.refused.is_empty());
     assert!(
         fixture
@@ -649,7 +649,7 @@ async fn explicit_deleted_fold_rebuilds_in_the_existing_recovery_pass() {
         })
         .await
         .unwrap();
-    let report = run_tree_recovery_pass(&fixture.tree_id).await.unwrap();
+    let report = recover_tree(&fixture.tree_id).await.unwrap();
     assert!(report.refused.is_empty(), "{:?}", report.refused);
     assert!(report.recovered.contains(&id));
     let final_feed = read_tree_feed(
@@ -776,9 +776,11 @@ async fn interactive_exit_batches_real_root_and_child_leases_without_settling() 
         );
     }
     // Abort recovery before any child grant can be reacquired.
-    fixture
-        .runtime
-        .start_recovery_pass(|| crate::TaskSet::new().spawn(std::future::pending()));
+    assert!(
+        fixture
+            .runtime
+            .track_recovery(crate::TaskSet::new().spawn(std::future::pending()))
+    );
     let root = AttachedCodingSession {
         output_bound_rederived: None,
         reachability_probe: None,
@@ -815,7 +817,7 @@ async fn interactive_exit_batches_real_root_and_child_leases_without_settling() 
     .unwrap();
     assert!(started.elapsed() < Duration::from_secs(1));
     assert!(fixture.runtime.is_closed());
-    assert!(!fixture.runtime.recovery_pass_running());
+    assert!(!fixture.runtime.recovery_running());
     assert_eq!(active(), 0);
     assert_eq!(
         mutations(),
@@ -1061,7 +1063,7 @@ async fn late_release_recovery(submitted: bool, installed: bool) {
                 .runtime
                 .set_retirement_recovery(Arc::new(move || {
                     let reports = reports.clone();
-                    start_tree_recovery_pass(tree_id.clone(), move |report| {
+                    start_tree_recovery(tree_id.clone(), move |report| {
                         reports.send_replace(report);
                     });
                 }))
@@ -1109,29 +1111,24 @@ async fn late_release_recovery(submitted: bool, installed: bool) {
         TopologyErrorCode::RecoveryOwnerLive
     );
     tokio::time::resume();
-    let pass_lock = if installed {
+    if installed {
+        // Every run started so far found the child's owner live.
         tokio::time::timeout(Duration::from_secs(5), async {
-            while fixture.runtime.recovery_pass_running() {
+            while fixture.runtime.recovery_running() {
                 tokio::task::yield_now().await;
             }
         })
         .await
         .unwrap();
-        Some(fixture.runtime.lock_reattach().await)
-    } else {
-        None
-    };
+    }
     let runtime = fixture.runtime.clone();
     let child = id.clone();
     let joined = tokio::spawn(async move { runtime.cancel_live(&child).await });
     finish.notify_one();
     joined.await.unwrap().unwrap();
     if installed {
-        assert!(
-            fixture.runtime.recovery_pass_running(),
-            "the installed callback must start a new pass after the late release"
-        );
-        drop(pass_lock);
+        // Only a run the installed callback starts after the late release
+        // can settle the child now.
         tokio::time::timeout(Duration::from_secs(5), async {
             while fixture
                 .runtime
@@ -1170,12 +1167,12 @@ async fn late_release_recovery(submitted: bool, installed: bool) {
             .unwrap();
         return;
     }
-    let _lock = fixture.runtime.lock_reattach().await;
     let receipt = recover_child(&fixture.runtime, &port, &id, None)
         .await
         .unwrap();
     assert!(receipt.recovered);
-    assert_eq!(receipt.attempt, Some(AttemptStatus::Failed));
+    assert_eq!(receipt.attempt, Some(AttemptStatus::Running));
+    assert_eq!(fixture.status(&id), NodeStatus::Interrupted);
 }
 
 #[tokio::test]
@@ -1626,29 +1623,6 @@ impl Fixture {
         self.invoke("recover_agent", json!({ "agent_id": id }))
             .await
     }
-
-    fn admit_followup(&self, id: &str) {
-        self.runtime
-            .mutate_then_emit_borrowed_for_test(false, |tree| {
-                tree.send_agent_message(
-                    "root",
-                    &SendAgentMessageRequest {
-                        refresh: None,
-                        agent_id: id.to_owned(),
-                        message: "again".into(),
-                        purpose: Some(MessagePurpose::Followup),
-                        priority: None,
-                        in_reply_to: None,
-                        output_schema_json: None,
-                    },
-                    None,
-                )
-                .map(|_| ())
-                .map_err(|error| error.message)
-            })
-            .block()
-            .unwrap();
-    }
 }
 
 fn code(refusal: &serde_json::Value) -> &str {
@@ -1773,15 +1747,14 @@ async fn quiescent_failed_child_terminal_before_tree_publication_delivers_withhe
         })
         .await
         .unwrap();
-    assert_eq!(fixture.status(&id), NodeStatus::Paused);
-    fixture
-        .runtime
-        .mutate_then_emit(false, |tree| {
-            tree.resume_tree().map_err(|error| error.message)
-        })
-        .await
-        .unwrap();
-    crate::agent::rejoin_inflight_after_resume(&fixture.tree_id).await;
+    assert_eq!(fixture.status(&id), NodeStatus::Running);
+    assert!(
+        fixture
+            .runtime
+            .read(|tree| tree.recovery_owed(&id))
+            .unwrap()
+    );
+    crate::agent::recover_owed_children(&fixture.parent, &fixture.runtime).await;
     assert_eq!(fixture.attempt_status(&id), AttemptStatus::Failed);
     assert_eq!(fixture.failure_kind(&id).as_deref(), Some("turn_failed"));
     assert_eq!(
@@ -1832,9 +1805,9 @@ async fn quiescent_failed_child_terminal_before_tree_publication_delivers_withhe
 
 /// A child stranded by a refused recycle is settled by `recover_agent`
 /// through the product reopen: a refusal while the store still refuses says
-/// why with its exact code and settles nothing; the retry settles the attempt
-/// as an abandoned turn without replaying the model; a followup is admitted
-/// again; and close frees the node's slot.
+/// why with its exact code and settles nothing; the retry interrupts the
+/// child with its attempt open (law L) without replaying the model; and
+/// close frees the node's slot.
 #[tokio::test]
 async fn recover_agent_settles_a_stranded_child_through_the_product_reopen() {
     let fixture = Fixture::new("recover-tool");
@@ -1855,9 +1828,9 @@ async fn recover_agent_settles_a_stranded_child_through_the_product_reopen() {
     let (succeeded, receipt) = fixture.recover_agent(&id).await;
     assert!(succeeded, "{receipt}");
     assert_eq!(receipt["recovered"], true);
-    assert_eq!(receipt["failure_kind"], TURN_ABANDONED);
-    assert_eq!(fixture.status(&id), NodeStatus::Failed);
-    assert_eq!(fixture.attempt_status(&id), AttemptStatus::Failed);
+    assert!(receipt["failure_kind"].is_null(), "{receipt}");
+    assert_eq!(fixture.status(&id), NodeStatus::Interrupted);
+    assert_eq!(fixture.attempt_status(&id), AttemptStatus::Running);
     assert_eq!(fixture.dispatches(), dispatched, "nothing was replayed");
 
     // The first settlement wins: a repeat reopens nothing and changes nothing.
@@ -1870,19 +1843,6 @@ async fn recover_agent_settles_a_stranded_child_through_the_product_reopen() {
         revision
     );
 
-    fixture.admit_followup(&id);
-    assert_eq!(fixture.attempt_status(&id), AttemptStatus::Running);
-    fixture
-        .runtime
-        .mutate_then_emit(false, {
-            let id = id.clone();
-            move |tree| {
-                tree.record_turn_completed(&id)
-                    .map_err(|error| error.message)
-            }
-        })
-        .await
-        .unwrap();
     let before = fixture.live_nodes();
     let (succeeded, closed) = fixture
         .invoke("close_agent", json!({ "agent_id": id }))
@@ -1905,13 +1865,14 @@ async fn the_recovery_pass_settles_a_stranded_child_through_the_product_reopen()
         .map(|quiet| (fixture.status(quiet), fixture.attempt_status(quiet)))
         .collect();
 
-    let report = run_tree_recovery_pass(&fixture.tree_id).await.unwrap();
+    let report = recover_tree(&fixture.tree_id).await.unwrap();
     assert_eq!(report.recovered, vec![id.clone()]);
     assert!(report.refused.is_empty(), "{:?}", report.refused);
     let note = report.note().unwrap();
     assert!(note.contains(&id) && note.contains("close_agent"), "{note}");
-    assert_eq!(fixture.status(&id), NodeStatus::Failed);
-    assert_eq!(fixture.failure_kind(&id).as_deref(), Some(TURN_ABANDONED));
+    assert_eq!(fixture.status(&id), NodeStatus::Interrupted);
+    assert_eq!(fixture.attempt_status(&id), AttemptStatus::Running);
+    assert_eq!(fixture.failure_kind(&id), None);
     assert_eq!(fixture.dispatches(), dispatched, "nothing was replayed");
     let after: Vec<_> = quiet
         .iter()
@@ -1919,178 +1880,50 @@ async fn the_recovery_pass_settles_a_stranded_child_through_the_product_reopen()
         .collect();
     assert_eq!(before, after, "only the stranded child changed");
 
-    let again = run_tree_recovery_pass(&fixture.tree_id).await.unwrap();
+    let again = recover_tree(&fixture.tree_id).await.unwrap();
     assert!(again.note().is_none(), "a second pass has nothing to do");
-    assert!(
-        run_tree_recovery_pass("recover-no-such-tree")
-            .await
-            .is_none()
-    );
+    assert!(recover_tree("recover-no-such-tree").await.is_none());
 }
 
 #[tokio::test]
-async fn recovery_receipt_describes_the_completed_seal() {
+async fn recovering_a_stuck_fork_keeps_its_attempt_and_seals_nothing() {
     let fixture = Fixture::new("recover-seal-receipt");
     let id = fixture.stuck_fork().await;
     let (succeeded, receipt) = fixture.recover_agent(&id).await;
     assert!(succeeded, "{receipt}");
-    assert_eq!(receipt["status"], "failed");
-    assert_eq!(receipt["attempt"], "failed");
-    assert_eq!(receipt["failure_kind"], TURN_ABANDONED);
+    assert_eq!(receipt["status"], "interrupted");
+    assert_eq!(receipt["attempt"], "running");
+    assert!(receipt["failure_kind"].is_null(), "{receipt}");
     assert!(receipt.get("workspace_recovery").is_none(), "{receipt}");
     assert!(
         fixture
             .runtime
-            .read(|tree| tree.attempt(&id).unwrap().candidate_id.is_some())
+            .read(|tree| tree.attempt(&id).unwrap().candidate_id.is_none())
             .unwrap()
     );
-}
-
-#[tokio::test]
-async fn recovery_pass_reports_a_completed_seal_without_ambiguity() {
-    let fixture = Fixture::new("recover-seal-pass");
-    let id = fixture.stuck_fork().await;
-    let report = run_tree_recovery_pass(&fixture.tree_id).await.unwrap();
-    assert_eq!(report.recovered, vec![id.clone()]);
-    assert!(report.refused.is_empty(), "{:?}", report.refused);
-    assert!(!report.note().unwrap().contains("recovery_vcs_ambiguous"));
-    assert_eq!(fixture.status(&id), NodeStatus::Failed);
-}
-
-#[tokio::test]
-async fn recovery_pass_publication_refusal_names_explicit_retry() {
-    let fixture = Fixture::new("recover-pass-publish-guidance");
-    let id = fixture.stuck_fork().await;
-    fixture.store.refuse_sealed.store(true, Ordering::SeqCst);
-    let report = run_tree_recovery_pass(&fixture.tree_id).await.unwrap();
-    assert_eq!(
-        report.refused[0].1.code,
-        TopologyErrorCode::RecoveryStorageUnavailable
-    );
-    let note = report.note().unwrap();
     assert!(
-        note.contains("retry recovery for each obligation"),
-        "{note}"
-    );
-    assert!(
-        note.contains("root recovery only selects unresolved child sessions"),
-        "{note}"
-    );
-    assert!(
-        !note.contains("/recover (or recover_agent) retries"),
-        "{note}"
-    );
-    fixture.store.refuse_sealed.store(false, Ordering::SeqCst);
-    let again = run_tree_recovery_pass(&fixture.tree_id).await.unwrap();
-    assert!(
-        again.note().is_none(),
-        "already-settled children are not session recovery targets"
-    );
-    let (succeeded, receipt) = fixture.recover_agent(&id).await;
-    assert!(succeeded, "{receipt}");
-    let reopened = ProductAgentTree::reopen(fixture.store.load(&fixture.tree_id).unwrap().unwrap());
-    assert_eq!(reopened.node(&id).unwrap().status, NodeStatus::Failed);
-    assert_eq!(
         fixture
             .vcs
             .calls_of(crate::occupancy_vcs::fake::FakeOp::Seal)
-            .len(),
-        1
+            .is_empty()
     );
 }
 
 #[tokio::test]
-async fn recovery_seal_failure_diagnostic_survives_tree_reopen() {
-    let fixture = Fixture::new("recover-seal-failure-reopen");
+async fn a_recovery_run_reports_a_stuck_fork_recovered_without_ambiguity() {
+    let fixture = Fixture::new("recover-seal-pass");
     let id = fixture.stuck_fork().await;
-    fixture
-        .vcs
-        .seal_next_with(Err(crate::occupancy_vcs::VcsError::seal_failed(
-            "persisted seal diagnostic",
-        )));
-    let (succeeded, refused) = fixture.recover_agent(&id).await;
-    assert!(!succeeded);
-    assert_eq!(code(&refused), "mint_unavailable");
-    let reopened = ProductAgentTree::reopen(fixture.store.load(&fixture.tree_id).unwrap().unwrap());
-    let RecoveryNeed::Workspace { code, reason } = reopened.recovery_need(&id).unwrap() else {
-        panic!("expected a recorded seal failure");
-    };
-    assert_eq!(code, TopologyErrorCode::MintUnavailable);
-    assert!(reason.contains("persisted seal diagnostic"), "{reason}");
-    assert!(
-        reason.contains("inspect the copy") && reason.contains("close_agent"),
-        "{reason}"
-    );
-    assert!(
-        !reason.contains("whether its snapshot landed is not recorded"),
-        "{reason}"
-    );
-}
-
-#[tokio::test]
-async fn recovery_storage_refusal_includes_the_seal_failure() {
-    let fixture = Fixture::new("recover-seal-and-storage-failure");
-    let id = fixture.stuck_fork().await;
-    fixture
-        .store
-        .refuse_seal_failed
-        .store(true, Ordering::SeqCst);
-    fixture
-        .vcs
-        .seal_next_with(Err(crate::occupancy_vcs::VcsError::seal_failed(format!(
-            "injected seal failure: {}",
-            "s".repeat(1024)
-        ))));
-    let (succeeded, refused) = fixture.recover_agent(&id).await;
-    assert!(!succeeded);
-    assert_eq!(code(&refused), "recovery_storage_unavailable");
-    let message = refused["message"].as_str().unwrap();
-    assert!(message.contains("injected tree store refusal"), "{message}");
-    assert!(message.contains("injected seal failure"), "{message}");
-    assert!(message.len() <= 512);
-    assert_eq!(fixture.failure_kind(&id).as_deref(), Some("seal_failed"));
-}
-
-#[tokio::test]
-async fn recovery_session_settlement_is_durable_when_a_later_step_fails() {
-    for seal_fails in [false, true] {
-        let fixture = Fixture::new(if seal_fails {
-            "recover-settle-seal-failure"
-        } else {
-            "recover-settle-publish-failure"
-        });
-        let id = fixture.stuck_fork().await;
-        if seal_fails {
-            fixture
-                .vcs
-                .seal_next_with(Err(crate::occupancy_vcs::VcsError::seal_failed(
-                    "seal refused after session publication",
-                )));
-        } else {
-            fixture.store.refuse_sealed.store(true, Ordering::SeqCst);
-        }
-        let (succeeded, refused) = fixture.recover_agent(&id).await;
-        assert!(!succeeded, "{refused}");
-        let stored =
-            ProductAgentTree::reopen(fixture.store.load(&fixture.tree_id).unwrap().unwrap());
-        // The settlement published first; a refused seal then records its
-        // own failure over it.
-        assert_eq!(
-            stored.attempt(&id).unwrap().failure.as_ref().unwrap().kind,
-            if seal_fails {
-                "seal_failed"
-            } else {
-                "turn_abandoned"
-            },
-            "the session settlement is durable even though a later step failed"
-        );
-    }
+    let report = recover_tree(&fixture.tree_id).await.unwrap();
+    assert_eq!(report.recovered, vec![id.clone()]);
+    assert!(report.refused.is_empty(), "{:?}", report.refused);
+    assert!(!report.note().unwrap().contains("recovery_vcs_ambiguous"));
+    assert_eq!(fixture.status(&id), NodeStatus::Interrupted);
 }
 
 /// The reopen that abandons a turn moves the head, so a retry's reopen
 /// finds it quiescent. With no in-process memory of the abandonment, the
-/// retry settles `turn_abandoned` from the child's feed (spec 03 section
-/// 14.2), never `recovered_without_turn`.
+/// retry reads the abandonment from the child's feed (spec 03 section 14.2)
+/// and interrupts the child, attempt open.
 #[tokio::test]
 async fn a_retry_after_a_refused_settlement_derives_the_abandonment_from_the_feed() {
     let fixture = Fixture::new("recover-retry-from-feed");
@@ -2103,148 +1936,10 @@ async fn a_retry_after_a_refused_settlement_derives_the_abandonment_from_the_fee
     let (succeeded, receipt) = fixture.recover_agent(&id).await;
     assert!(succeeded, "{receipt}");
     assert_eq!(receipt["recovered"], true, "{receipt}");
-    assert_eq!(fixture.failure_kind(&id).as_deref(), Some("turn_abandoned"));
+    assert_eq!(fixture.status(&id), NodeStatus::Interrupted);
+    assert_eq!(fixture.failure_kind(&id), None);
     let stored = ProductAgentTree::reopen(fixture.store.load(&fixture.tree_id).unwrap().unwrap());
-    let failure = stored.attempt(&id).unwrap().failure.clone().unwrap();
-    assert!(
-        !failure.message.contains("no abandonment evidence"),
-        "{failure:?}"
-    );
-}
-
-#[tokio::test]
-async fn recovery_seal_failure_is_reported_not_as_vcs_ambiguity() {
-    for pass in [false, true] {
-        let fixture = Fixture::new(if pass {
-            "recover-seal-fail-pass"
-        } else {
-            "recover-seal-fail-tool"
-        });
-        let id = fixture.stuck_fork().await;
-        fixture
-            .vcs
-            .seal_next_with(Err(crate::occupancy_vcs::VcsError::seal_failed(
-                "injected seal failure",
-            )));
-        if pass {
-            let report = run_tree_recovery_pass(&fixture.tree_id).await.unwrap();
-            assert_eq!(report.recovered, [] as [String; 0]);
-            assert_eq!(report.refused.len(), 1);
-            assert_eq!(report.refused[0].1.code, TopologyErrorCode::MintUnavailable);
-            assert!(
-                report.refused[0]
-                    .1
-                    .message
-                    .contains("injected seal failure")
-            );
-        } else {
-            let (succeeded, refused) = fixture.recover_agent(&id).await;
-            assert!(!succeeded, "{refused}");
-            assert_eq!(code(&refused), "mint_unavailable", "{refused}");
-            assert!(
-                refused["message"]
-                    .as_str()
-                    .unwrap()
-                    .contains("injected seal failure")
-            );
-        }
-        assert_eq!(fixture.status(&id), NodeStatus::RecoveryRequired);
-        assert_eq!(fixture.failure_kind(&id).as_deref(), Some("seal_failed"));
-        let (succeeded, refused) = fixture.recover_agent(&id).await;
-        assert!(!succeeded);
-        assert_eq!(code(&refused), "mint_unavailable", "{refused}");
-    }
-}
-
-#[tokio::test]
-async fn recovery_seal_publication_failure_is_reported_as_storage_unavailable() {
-    for pass in [false, true] {
-        let fixture = Fixture::new(if pass {
-            "recover-seal-publish-pass"
-        } else {
-            "recover-seal-publish-tool"
-        });
-        let id = fixture.stuck_fork().await;
-        fixture.store.refuse_sealed.store(true, Ordering::SeqCst);
-        if pass {
-            let report = run_tree_recovery_pass(&fixture.tree_id).await.unwrap();
-            assert_eq!(report.recovered, [] as [String; 0]);
-            assert_eq!(report.refused.len(), 1);
-            assert_eq!(
-                report.refused[0].1.code,
-                TopologyErrorCode::RecoveryStorageUnavailable
-            );
-        } else {
-            let (succeeded, refused) = fixture.recover_agent(&id).await;
-            assert!(!succeeded, "{refused}");
-            assert_eq!(code(&refused), "recovery_storage_unavailable", "{refused}");
-        }
-        assert!(
-            fixture
-                .runtime
-                .read(|tree| tree.attempt(&id).unwrap().candidate_id.is_some())
-                .unwrap(),
-            "the seal completion was recorded even though its publish failed"
-        );
-        let persisted = fixture.store.load(&fixture.tree_id).unwrap().unwrap();
-        let reopened = ProductAgentTree::reopen(persisted);
-        assert_eq!(
-            reopened.node(&id).unwrap().status,
-            NodeStatus::RecoveryRequired,
-            "the durable seal remains unresolved"
-        );
-        let (succeeded, refused) = fixture.recover_agent(&id).await;
-        assert!(
-            !succeeded,
-            "an in-memory seal must not hide a refused publish: {refused}"
-        );
-        assert_eq!(code(&refused), "recovery_storage_unavailable");
-        fixture.store.refuse_sealed.store(false, Ordering::SeqCst);
-        let (succeeded, receipt) = fixture.recover_agent(&id).await;
-        assert!(succeeded, "{receipt}");
-        assert_eq!(receipt["status"], "failed");
-        assert_eq!(
-            receipt["recovered"], false,
-            "the session was already settled"
-        );
-        let reopened =
-            ProductAgentTree::reopen(fixture.store.load(&fixture.tree_id).unwrap().unwrap());
-        assert_eq!(reopened.node(&id).unwrap().status, NodeStatus::Failed);
-        assert_eq!(
-            fixture
-                .vcs
-                .calls_of(crate::occupancy_vcs::fake::FakeOp::Seal)
-                .len(),
-            1,
-            "retry publishes without resealing"
-        );
-    }
-}
-
-/// The pass deadline covers waiting for the reattach lock: a pass that
-/// cannot get it in time reports every target as not attempted and touches
-/// nothing.
-#[tokio::test]
-async fn a_pass_that_cannot_get_the_lock_by_its_deadline_reports_not_attempted() {
-    let fixture = Fixture::new("recover-pass-deadline");
-    let id = fixture.stuck_child().await;
-    let before = fixture.snapshot(&id);
-    let lock = fixture.runtime.lock_reattach().await;
-    let deadline = tokio::time::Instant::now() + Duration::from_millis(200);
-    let report = run_tree_recovery_pass_by(&fixture.tree_id, deadline)
-        .await
-        .unwrap();
-    drop(lock);
-    assert!(report.recovered.is_empty(), "{report:?}");
-    assert!(report.refused.is_empty(), "{report:?}");
-    assert_eq!(report.not_attempted, vec![id.clone()]);
-    assert!(report.note().unwrap().contains(&id));
-    let after = fixture.snapshot(&id);
-    assert_eq!(
-        (after.1.status, after.2),
-        (before.1.status, before.2),
-        "nothing was settled"
-    );
+    assert_eq!(stored.node(&id).unwrap().status, NodeStatus::Interrupted);
 }
 
 /// A lease another owner still holds is `recovery_lease_held`, exactly:
@@ -2280,7 +1975,7 @@ async fn a_held_lease_is_refused_as_recovery_lease_held() {
     // The background pass makes exactly the try `recover_agent` repeats,
     // without waiting; its duration is one try's cost on this host now.
     let pass_started = std::time::Instant::now();
-    let report = run_tree_recovery_pass(&fixture.tree_id).await.unwrap();
+    let report = recover_tree(&fixture.tree_id).await.unwrap();
     let one_try = pass_started.elapsed();
     assert_eq!(report.recovered, [] as [String; 0]);
     assert_eq!(report.refused.len(), 1);
@@ -2296,10 +1991,10 @@ async fn a_held_lease_is_refused_as_recovery_lease_held() {
     let lease_wait = Duration::from_millis(1500).max(one_try * 3);
     test_lease_wait::set(lease_wait);
     let started = std::time::Instant::now();
-    // Between polls of the held lease the reattach lock is free, so the
-    // tree's other recoveries and reattaches are not queued behind it. The
-    // probe is budgeted by the lease wait, not by wall time: it must see the
-    // lock taken and then free again before `recover_agent` returns.
+    // Between polls of the held lease the child is not held, so a recycle
+    // or another recovery of it is not queued behind the wait. The probe is
+    // budgeted by the lease wait, not by wall time: it must see the child
+    // held and then free again before `recover_agent` returns.
     let recover = fixture.recover_agent(&id);
     tokio::pin!(recover);
     let mut seen_held = false;
@@ -2309,16 +2004,17 @@ async fn a_held_lease_is_refused_as_recovery_lease_held() {
             biased;
             outcome = &mut recover => break outcome,
             () = tokio::time::sleep(Duration::from_millis(5)) => {
-                match fixture.runtime.try_lock_reattach() {
-                    Err(_) => seen_held = true,
-                    Ok(_) => freed_while_waiting |= seen_held,
+                if fixture.runtime.is_recovering(&id) {
+                    seen_held = true;
+                } else {
+                    freed_while_waiting |= seen_held;
                 }
             }
         }
     };
     assert!(
         freed_while_waiting,
-        "recover_agent held the reattach lock while polling"
+        "recover_agent held the child while polling"
     );
     assert!(!succeeded, "{refused}");
     assert_eq!(code(&refused), "recovery_lease_held", "{refused}");
@@ -2332,17 +2028,18 @@ async fn a_held_lease_is_refused_as_recovery_lease_held() {
 
     // The holder let go by an ordinary release, which closed the turn with
     // an unknown outcome as abandoned. That closure is in the child's feed,
-    // so the retry settles the attempt from it (spec 03 section 14.2),
+    // so the retry settles the child from it (spec 03 section 14.2),
     // although the head it reopens is quiescent.
     held.release().await.unwrap();
     let (succeeded, receipt) = fixture.recover_agent(&id).await;
     assert!(succeeded, "{receipt}");
     assert_eq!(receipt["recovered"], true);
-    assert_eq!(receipt["failure_kind"], "turn_abandoned");
+    assert_eq!(receipt["status"], "interrupted", "{receipt}");
+    assert!(receipt["failure_kind"].is_null(), "{receipt}");
 }
 
 /// A refused tree publish leaves the tree exactly as it was and is reported
-/// as `recovery_storage_unavailable`; the retry still settles the attempt as
+/// as `recovery_storage_unavailable`; the retry still settles the child from
 /// the abandoned turn the first reopen observed, not as a quiescent head.
 #[tokio::test]
 async fn a_refused_publish_changes_nothing_and_the_retry_still_reports_the_abandonment() {
@@ -2364,13 +2061,14 @@ async fn a_refused_publish_changes_nothing_and_the_retry_still_reports_the_aband
 
     let (succeeded, receipt) = fixture.recover_agent(&id).await;
     assert!(succeeded, "{receipt}");
-    assert_eq!(receipt["failure_kind"], TURN_ABANDONED);
+    assert_eq!(receipt["status"], "interrupted", "{receipt}");
+    assert!(receipt["failure_kind"].is_null(), "{receipt}");
 }
 
 /// A recovery and the turn waiter's own late failure report settle one
-/// attempt once: while the waiter holds the reattach lock, `recover_agent`
-/// waits; after the waiter settled, the recovery is a no-op; and a waiter
-/// report that arrives after a recovery changes nothing.
+/// attempt once: while the waiter recycles the child, `recover_agent` is
+/// refused as the owner's; after the waiter settled, the recovery is a
+/// no-op; and a waiter report that arrives after a recovery changes nothing.
 #[tokio::test]
 async fn a_recovery_and_the_waiter_settle_an_attempt_once() {
     let fixture = Fixture::new("recover-interleave");
@@ -2380,27 +2078,27 @@ async fn a_recovery_and_the_waiter_settle_an_attempt_once() {
         .read(|tree| tree.attempt(&id).unwrap().attempt_id.clone())
         .unwrap();
 
-    // The waiter is mid-recycle: it holds the lock until it has settled.
-    let lock = fixture.runtime.lock_reattach().await;
-    let recovering = {
+    // The waiter is mid-recycle: it holds the child until it has settled.
+    let recycling = fixture.runtime.mark_recycling(&id);
+    let recover = |key: &'static str| {
         let tree_id = fixture.tree_id.clone();
         let id = id.clone();
-        tokio::spawn(async move {
+        async move {
             crate::agent::invoke_topology_tool_on_hub(
                 &tree_id,
                 None,
                 "recover_agent",
                 &json!({ "agent_id": id }),
-                "recover:interleave",
+                key,
             )
             .await
-        })
+            .unwrap()
+        }
     };
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    assert!(
-        !recovering.is_finished(),
-        "recover_agent waits for the lock"
-    );
+    let refused = recover("recover:interleave-owner").await;
+    assert!(!refused.succeeded);
+    let detail: serde_json::Value = serde_json::from_str(&refused.detail).unwrap();
+    assert_eq!(code(&detail), "recovery_owner_live", "{detail}");
     fixture
         .runtime
         .mutate_then_emit(false, {
@@ -2419,8 +2117,8 @@ async fn a_recovery_and_the_waiter_settle_an_attempt_once() {
         })
         .await
         .unwrap();
-    drop(lock);
-    let receipt = recovering.await.unwrap().unwrap();
+    drop(recycling);
+    let receipt = recover("recover:interleave").await;
     assert!(receipt.succeeded, "{}", receipt.detail);
     let receipt: serde_json::Value = serde_json::from_str(&receipt.detail).unwrap();
     assert_eq!(receipt["recovered"], false);
@@ -2520,7 +2218,7 @@ async fn interrupted_adopt(fixture: &Fixture) -> String {
 async fn recovery_pass_keeps_a_genuinely_interrupted_adopt_ambiguous() {
     let fixture = Fixture::new("recover-adopt-pass");
     let id = interrupted_adopt(&fixture).await;
-    let report = run_tree_recovery_pass(&fixture.tree_id).await.unwrap();
+    let report = recover_tree(&fixture.tree_id).await.unwrap();
     assert_eq!(report.recovered, [] as [String; 0]);
     assert_eq!(report.refused.len(), 1);
     assert_eq!(report.refused[0].0, id);
@@ -2824,7 +2522,24 @@ async fn a_followup_while_the_previous_slot_retires_starts_once_it_is_vacant() {
     let id = fixture.stuck_child().await;
     let (recovered, receipt) = fixture.recover_agent(&id).await;
     assert!(recovered, "{receipt}");
-    assert_eq!(fixture.status(&id), NodeStatus::Failed);
+    // Interrupted with its attempt open; its turn then ends, so a followup
+    // re-tasks it with a new attempt.
+    assert_eq!(fixture.status(&id), NodeStatus::Interrupted);
+    fixture
+        .runtime
+        .mutate_then_emit(false, {
+            let id = id.clone();
+            move |tree| {
+                tree.record_turn_completed(&id)
+                    .map_err(|error| error.message)
+            }
+        })
+        .await
+        .unwrap();
+    let interrupted = fixture
+        .runtime
+        .read(|tree| tree.attempt(&id).unwrap().attempt_id.clone())
+        .unwrap();
     let dispatched = fixture.dispatches();
     // The previous turn's live slot is still being released.
     let OpenSessionOutcome::Opened { session, .. } = fixture
@@ -2880,7 +2595,12 @@ async fn a_followup_while_the_previous_slot_retires_starts_once_it_is_vacant() {
         }
     });
     tokio::time::timeout(Duration::from_secs(10), async {
-        while fixture.attempt_status(&id) != AttemptStatus::Running {
+        while fixture
+            .runtime
+            .read(|tree| tree.attempt(&id).unwrap().attempt_id.clone())
+            .unwrap()
+            == interrupted
+        {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
@@ -2896,8 +2616,8 @@ async fn a_followup_while_the_previous_slot_retires_starts_once_it_is_vacant() {
         .expect("the send returns")
         .unwrap();
     assert!(receipt.succeeded, "{}", receipt.detail);
-    let sent: serde_json::Value = serde_json::from_str(&receipt.detail).unwrap();
-    assert_eq!(sent["disposition"], "started", "{sent}");
+    let delivery: serde_json::Value = serde_json::from_str(&receipt.detail).unwrap();
+    assert_eq!(delivery["disposition"], "started", "{delivery}");
     tokio::time::timeout(Duration::from_secs(10), async {
         while fixture.dispatches() == dispatched {
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -2908,7 +2628,8 @@ async fn a_followup_while_the_previous_slot_retires_starts_once_it_is_vacant() {
 }
 
 /// Startup uncertainty: the create may or may not have run, and no locator
-/// was published. Replaying the spawn's own create settles both cases.
+/// was published. Replaying the spawn's own create settles both cases: the
+/// session is bound and the child interrupted, its attempt open.
 #[tokio::test]
 async fn startup_uncertainty_settles_through_the_spawns_create() {
     for present in [true, false] {
@@ -2953,12 +2674,9 @@ async fn startup_uncertainty_settles_through_the_spawns_create() {
 
         let (succeeded, receipt) = fixture.recover_agent(&id).await;
         assert!(succeeded, "{receipt}");
-        assert_eq!(
-            fixture.failure_kind(&id).as_deref(),
-            Some(RECOVERED_WITHOUT_TURN)
-        );
-        assert_eq!(fixture.status(&id), NodeStatus::Failed);
-        assert_ne!(fixture.attempt_status(&id), AttemptStatus::Completed);
+        assert_eq!(fixture.failure_kind(&id), None);
+        assert_eq!(fixture.status(&id), NodeStatus::Interrupted);
+        assert_eq!(fixture.attempt_status(&id), AttemptStatus::Running);
         let bound: SessionLocator = fixture.locator(&id).unwrap().parse().unwrap();
         if let Some(created) = created {
             assert_eq!(
@@ -3193,8 +2911,7 @@ async fn a_refusal_records_nothing_on_the_node() {
     assert_eq!(error.code, TopologyErrorCode::RecoveryEffectEvidenceRefused);
     assert_eq!(fixture.snapshot(&id), before);
 
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-    let report = recover_unresolved_children(&fixture.runtime, &port, deadline).await;
+    let report = recover_unresolved_children(&fixture.runtime, &port).await;
     assert_eq!(report.refused.len(), 1);
     assert_eq!(
         report.refused[0].1.code,
@@ -3300,8 +3017,7 @@ async fn a_terminal_refusal_lets_close_agent_end_the_node() {
         .unwrap()
         .clone();
     assert_eq!(row["remedy"], "close_agent", "{row}");
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-    let report = recover_unresolved_children(&fixture.runtime, &port, deadline).await;
+    let report = recover_unresolved_children(&fixture.runtime, &port).await;
     assert!(report.refused.is_empty() && report.recovered.is_empty());
     assert_eq!(port.reopens.load(Ordering::SeqCst), 1);
 
@@ -3462,7 +3178,7 @@ async fn a_recycling_waiter_is_an_owner_that_recovery_never_waits_on() {
     assert!(!succeeded, "{refused}");
     assert_eq!(code(&refused), "recovery_owner_live", "{refused}");
     // The pass gets the reattach lock at once and leaves the child alone.
-    let report = run_tree_recovery_pass(&fixture.tree_id).await.unwrap();
+    let report = recover_tree(&fixture.tree_id).await.unwrap();
     assert!(report.recovered.is_empty(), "{report:?}");
     assert!(
         report
@@ -3471,7 +3187,6 @@ async fn a_recycling_waiter_is_an_owner_that_recovery_never_waits_on() {
             .all(|(_, error)| error.code == TopologyErrorCode::RecoveryOwnerLive),
         "{report:?}"
     );
-    assert!(report.not_attempted.is_empty(), "{report:?}");
     assert!(
         started.elapsed() < Duration::from_secs(5),
         "recovery waited {:?} behind the recycle",
@@ -3570,7 +3285,7 @@ async fn fenced_waiter_recycle_of_quiescent_head_settles_as_failed() {
 }
 
 #[tokio::test]
-async fn recover_agent_finalization_debt_settles_as_recovered_without_turn() {
+async fn recover_agent_finalization_debt_settles_and_interrupts_the_child() {
     let fixture = Fixture::new("recover-finalization-debt-no-turn");
     let id = fixture.spawn();
     let (held, handle, _) = fixture.start_failing_turn(&fixture.sessions(), &id).await;
@@ -3610,8 +3325,8 @@ async fn recover_agent_finalization_debt_settles_as_recovered_without_turn() {
     let (succeeded, receipt) = fixture.recover_agent(&id).await;
     assert!(succeeded, "{receipt}");
     assert_eq!(receipt["recovered"], true);
-    assert_eq!(receipt["failure_kind"], RECOVERED_WITHOUT_TURN);
-    assert_eq!(fixture.status(&id), NodeStatus::Failed);
+    assert!(receipt["failure_kind"].is_null(), "{receipt}");
+    assert_eq!(fixture.status(&id), NodeStatus::Interrupted);
     let closed = fixture
         .runtime
         .read(|tree| tree.node(&id).unwrap().session_locator.clone().unwrap())
@@ -3636,7 +3351,7 @@ async fn recover_agent_finalization_debt_settles_as_recovered_without_turn() {
 }
 
 #[tokio::test]
-async fn automatic_recovery_settles_a_followup_hold_without_an_admitted_start() {
+async fn automatic_recovery_interrupts_a_followup_hold_without_an_admitted_start() {
     let fixture = Fixture::new("followup-hold-no-start");
     let id = fixture.spawn();
     let sessions = fixture.sessions();
@@ -3730,41 +3445,28 @@ async fn automatic_recovery_settles_a_followup_hold_without_an_admitted_start() 
     let port = ParentSessionPort {
         parent: fixture.parent.clone(),
     };
-    let report = recover_unresolved_children(
-        &fixture.runtime,
-        &port,
-        tokio::time::Instant::now() + Duration::from_secs(30),
-    )
-    .await;
+    let report = recover_unresolved_children(&fixture.runtime, &port).await;
     assert_eq!(report.recovered, vec![id.clone()]);
     assert_eq!(report.refused, [] as [(String, TopologyError); 0]);
-    assert_eq!(report.not_attempted, [] as [String; 0]);
     assert_eq!(fixture.dispatches(), 0);
     fixture
         .runtime
         .read(|tree| {
+            // Law L: the followup's attempt is kept and the child is
+            // interrupted; nothing is reported for it.
             let attempt = tree.attempt(&id).unwrap();
             assert_eq!(attempt.attempt_id, opened);
-            assert_eq!(attempt.status, AttemptStatus::Failed);
-            assert_eq!(
-                attempt.failure.as_ref().unwrap().kind,
-                RECOVERED_WITHOUT_TURN
-            );
+            assert_eq!(attempt.status, AttemptStatus::Running);
+            assert_eq!(attempt.failure, None);
             assert!(attempt.turn_id.is_none());
-            assert_eq!(tree.node(&id).unwrap().status, NodeStatus::Failed);
+            assert_eq!(tree.node(&id).unwrap().status, NodeStatus::Interrupted);
             assert!(matches!(
                 tree.recovery_need(&id).unwrap(),
                 RecoveryNeed::NotRequired
             ));
-            assert_eq!(
-                tree.mail(&opening.message_id).unwrap().durable,
-                crate::agent_tree::MailDurableState::Acknowledged
-            );
-            assert!(tree.pending_result_mail("root").iter().any(|mail| {
+            assert!(!tree.pending_result_mail("root").iter().any(|mail| {
                 let body: serde_json::Value = serde_json::from_str(&mail.body).unwrap();
-                mail.from == id
-                    && body["attempt_id"] == opened.as_str()
-                    && body["status"] == "failed"
+                mail.from == id && body["attempt_id"] == opened.as_str()
             }));
         })
         .unwrap();
@@ -3795,17 +3497,19 @@ async fn automatic_recovery_settles_a_followup_hold_without_an_admitted_start() 
         .runtime
         .read(|tree| {
             assert_ne!(tree.attempt(&id).unwrap().attempt_id, opened);
+            // The interrupted followup's brief was never delivered, so it
+            // waits with the new one rather than being dropped.
             assert_eq!(
                 tree.pending_mail(&id)
                     .iter()
                     .map(|mail| &mail.message_id)
                     .collect::<Vec<_>>(),
-                vec![&next.message_id]
+                vec![&opening.message_id, &next.message_id]
             );
             assert!(
                 tree.wake_mail(&id)
                     .iter()
-                    .all(|mail| mail.message_id != opening.message_id)
+                    .any(|mail| mail.message_id == opening.message_id)
             );
             let mut rebuilt = tree.clone();
             rebuilt.clear_feed_views();
@@ -3826,12 +3530,7 @@ async fn automatic_recovery_settles_a_followup_hold_without_an_admitted_start() 
                 tree.node(&id).unwrap().attempt_id
             );
             assert_eq!(rebuilt.pending_mail(&id), tree.pending_mail(&id));
-            assert!(
-                rebuilt
-                    .wake_mail(&id)
-                    .iter()
-                    .all(|mail| mail.message_id != opening.message_id)
-            );
+            assert_eq!(rebuilt.wake_mail(&id), tree.wake_mail(&id));
         })
         .unwrap();
 }
@@ -4373,30 +4072,6 @@ async fn operator_recover_dispatch_refuses_what_the_host_will_not_settle() {
     let attempt = attempt_of(&fixture, &id);
     let revision = tree_revision(&fixture);
 
-    fixture
-        .runtime
-        .mutate_then_emit(false, |tree| {
-            tree.state = crate::agent_tree_protocol::TreeAdmissionState::RestoredPaused;
-            Ok(())
-        })
-        .await
-        .unwrap();
-    let notes = navigator_notes(&fixture, recover_action(&fixture, revision, &id, &attempt)).await;
-    assert!(
-        notes
-            .iter()
-            .any(|note| note.contains("Resume agents first")),
-        "{notes:?}"
-    );
-
-    fixture
-        .runtime
-        .mutate_then_emit(false, |tree| {
-            tree.state = crate::agent_tree_protocol::TreeAdmissionState::Live;
-            Ok(())
-        })
-        .await
-        .unwrap();
     let notes = navigator_notes(
         &fixture,
         recover_action(&fixture, tree_revision(&fixture), "root", &attempt),
@@ -4529,4 +4204,101 @@ async fn operator_recover_dispatch_refuses_a_held_lease_after_the_wait() {
     );
     held.release().await.unwrap();
     crate::topology_runtime::force_release(&fixture.tree_id).await;
+}
+
+/// The reopen law owes a `recover_node` to a child with a bound turn. Mail
+/// for it before that runs starts nothing: the send waits, nothing
+/// dispatches, and the mail stays durable. The exact open closed the lost
+/// turn, so `recover_node` marks the child owner-lost (the marked bound
+/// case); the waiting send then settles.
+#[tokio::test]
+async fn mail_before_recover_node_waits_and_the_marked_child_then_takes_it() {
+    let fixture = Fixture::new("owed-mail");
+    // A native account, so the product composes the mail's Start.
+    fixture
+        .runtime
+        .mutate_then_emit(false, |tree| {
+            tree.pin_bind_hints_for_test(crate::orchestration::BindHints::from_names(
+                &["claude"],
+                &[],
+            ));
+            tree.pin_template(
+                "review",
+                crate::orchestration::RosterBinding::leaf("claude", "test-model"),
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let id = fixture.spawn();
+    // The lost owner's turn: started, bound, and closed with an unknown
+    // outcome when its session was released.
+    let holder = fixture.sessions();
+    let (held, handle, _) = fixture.start_failing_turn(&holder, &id).await;
+    Fixture::await_unknown_outcome(&handle).await;
+    fixture.bind_turn(&id, &held.locator(), handle.turn_id());
+    held.release().await.unwrap();
+    fixture
+        .runtime
+        .mutate_then_emit(false, |tree| {
+            tree.apply_reopen_law();
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let owed = |fixture: &Fixture| {
+        fixture
+            .runtime
+            .read(|tree| tree.recovery_owed(&id))
+            .unwrap()
+    };
+    assert!(owed(&fixture), "a bound turn is owed a recover_node");
+    let dispatched = fixture.dispatches();
+    let send = tokio::spawn({
+        let (tree_id, id) = (fixture.tree_id.clone(), id.clone());
+        async move {
+            crate::agent::invoke_topology_tool_on_hub(
+                &tree_id,
+                None,
+                "send_agent_message",
+                &json!({ "agent_id": id, "message": "while owed" }),
+                "owed-mail",
+            )
+            .await
+            .unwrap()
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        !fixture.runtime.live.lock().await.contains_key(&id),
+        "the mail started no turn"
+    );
+    assert_eq!(fixture.dispatches(), dispatched);
+    assert_eq!(
+        fixture
+            .runtime
+            .read(|tree| tree.pending_mail(&id).len())
+            .unwrap(),
+        1,
+        "the mail is durable while the child is owed"
+    );
+
+    crate::agent::recover_owed_children(&fixture.parent, &fixture.runtime).await;
+    assert!(!owed(&fixture));
+    fixture
+        .runtime
+        .read(|tree| {
+            assert_eq!(tree.node(&id).unwrap().status, NodeStatus::Interrupted);
+            let attempt = tree.attempt(&id).unwrap();
+            assert_eq!(attempt.status, AttemptStatus::Running);
+            assert_eq!(attempt.turn_id, None);
+        })
+        .unwrap();
+    let receipt = tokio::time::timeout(Duration::from_secs(30), send)
+        .await
+        .expect("the send settles once recover_node ran")
+        .unwrap();
+    assert!(receipt.succeeded, "{}", receipt.detail);
+    let delivery: serde_json::Value = serde_json::from_str(&receipt.detail).unwrap();
+    assert_eq!(delivery["disposition"], "started", "{delivery}");
 }

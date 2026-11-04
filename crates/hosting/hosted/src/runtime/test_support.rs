@@ -322,7 +322,12 @@ pub(super) fn host_config_with_tree_epoch_rebind_block(
 ) -> (HostConfig, String) {
     let (config, _) = fresh_injected_attached_host(root);
     let session_id = config.session.id.clone();
-    test_kit::seed_restored_paused_tree(&config.topology_rows(), &session_id, &config.cwd).unwrap();
+    test_kit::seed_reopened_tree_with_live_descendant(
+        &config.topology_rows(),
+        &session_id,
+        &config.cwd,
+    )
+    .unwrap();
     assert!(tree_epoch_blocks_rebind(
         &config.topology_rows(),
         &config.session
@@ -417,7 +422,6 @@ pub(super) fn install_live_descendant_on_hub(tree_id: &str, workspace: &std::pat
             .tree_handle_for_test()
             .lock()
             .expect("hub tree lock");
-        let _ = tree.resume_tree();
         let root_id = tree.root_agent_id.clone();
         tree.spawn_agent(&root_id, &SpawnAgentRequest::test_review(), None)
             .expect("hub spawn for live-descendant rebind test");

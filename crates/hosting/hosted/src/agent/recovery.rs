@@ -2,15 +2,17 @@
 //!
 //! A child whose turn outcome, retirement, or startup is unresolved is settled
 //! the way a relaunch would settle it: its session is reopened exactly, which
-//! abandons what a lost or fenced owner left (Plakous §13.1), and the tree
-//! records the answer. Nothing a child ran is replayed: no model call, no tool.
-//! A child whose startup never published a session locator is settled by
-//! replaying the spawn's own deterministic create, which either returns the
-//! session that create already made or makes the one it was admitted to make.
+//! abandons what a lost or fenced owner left (Plakous §13.1), and the child is
+//! then interrupted with cause `owner_lost`, its attempt kept (law L). Nothing
+//! a child ran is replayed: no model call, no tool. A child whose startup
+//! never published a session locator is settled by replaying the spawn's own
+//! deterministic create, which either returns the session that create already
+//! made or makes the one it was admitted to make.
 //!
 //! The same [`recover_child`] serves the `recover_agent` tool, which may wait
-//! out a held lease, and the one recovery pass each tree open, `ResumeTree`, and
-//! `/recover` runs in the background, which never waits on a lease. A refusal
+//! out a held lease, and each `recover_node` run over a tree (a custody take,
+//! `/recover`, a release with a recovery need), which never waits on a lease.
+//! Each child is held by one run at a time ([`claim_child`]). A refusal
 //! may advance (or, for a replayed create, record) the node's session locator;
 //! it never settles the attempt. The session part of an interrupted seal or
 //! adopt is settled like any other; what the VCS step did is never decided
@@ -28,7 +30,7 @@ use plakous::sessions::{
 };
 
 use crate::agent_tree::{RecoverAgentOutput, RecoveryNeed, RecoveryResolution, TopologyError};
-use crate::agent_tree_protocol::{AttemptId, TopologyErrorCode};
+use crate::agent_tree_protocol::{AttemptId, AttemptStatus, TopologyErrorCode};
 use crate::topology_runtime::ProductTopologyRuntime;
 
 use super::children::{
@@ -38,11 +40,6 @@ use super::children::{
 };
 use super::{AttachedCodingSession, SpawnParent, occupancy_session_fence, spawn_parent_tree_id};
 use crate::driver::reopen::wait_evidence;
-
-/// The most one background recovery pass spends before it reports; children
-/// it did not reach are reported as not attempted and wait for `recover_agent`
-/// or the next pass.
-const RECOVERY_PASS_DEADLINE: Duration = Duration::from_secs(60);
 
 /// A child session reopened for recovery, not yet released.
 pub(super) struct ChildReopened {
@@ -115,8 +112,8 @@ impl ChildSessionPort for ParentSessionPort {
         locator: &'a str,
     ) -> PortFuture<'a, ChildReopened> {
         Box::pin(async move {
-            // Never waits on a held lease: the pass skips such a child and
-            // `recover_agent` polls with the reattach lock released.
+            // Never waits on a held lease: a `recover_node` run skips such a
+            // child and `recover_agent` polls between tries.
             let mode = ChildReopenMode {
                 lease_wait: Duration::ZERO,
                 recovery: true,
@@ -300,31 +297,29 @@ pub(super) async fn replay_create_with(
     }
 }
 
-/// What one recovery pass over a tree did.
+/// What one `recover_node` run over a tree's unresolved sessions did.
 #[derive(Debug, Default)]
 pub(crate) struct ChildRecoveryReport {
-    /// Children this pass settled to failed and idle.
+    /// Children this run settled: each is interrupted, its attempt kept.
     pub(crate) recovered: Vec<String>,
     /// Children still waiting, with the typed refusal that kept them waiting.
     /// A child whose session settled but whose seal or adopt is still
     /// ambiguous is here (`recovery_vcs_ambiguous`), not in `recovered`.
     pub(crate) refused: Vec<(String, TopologyError)>,
-    /// Children the pass did not reach before its deadline.
-    pub(crate) not_attempted: Vec<String>,
 }
 
 impl ChildRecoveryReport {
-    /// The one operator line for this pass, or `None` when it did nothing.
+    /// The one operator line for this run, or `None` when it did nothing.
     #[must_use]
     pub(crate) fn note(&self) -> Option<String> {
-        if self.recovered.is_empty() && self.refused.is_empty() && self.not_attempted.is_empty() {
+        if self.recovered.is_empty() && self.refused.is_empty() {
             return None;
         }
         let mut parts = Vec::new();
         if !self.recovered.is_empty() {
             parts.push(format!(
-                "recovered {} child agent(s) ({}) as failed and idle; followup re-tasks and \
-                 close_agent ends each",
+                "recovered {} child agent(s) ({}) as interrupted, attempt kept; followup \
+                 continues and close_agent ends each",
                 self.recovered.len(),
                 self.recovered.join(", ")
             ));
@@ -338,13 +333,6 @@ impl ChildRecoveryReport {
                     .map(|(id, error)| format!("{id}: {}", code_name(error.code)))
                     .collect::<Vec<_>>()
                     .join(", ")
-            ));
-        }
-        if !self.not_attempted.is_empty() {
-            parts.push(format!(
-                "{} child agent(s) not attempted before the recovery pass deadline ({}); another explicit recovery pass retries them",
-                self.not_attempted.len(),
-                self.not_attempted.join(", ")
             ));
         }
         Some(format!("plak: {}", parts.join("; ")))
@@ -651,30 +639,72 @@ pub(crate) async fn read_tree_feed(
     Ok(feed)
 }
 
+/// Who in this process already owns a child [`claim_child`] refused.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ChildOwner {
+    /// A live turn, startup, or retirement, or its turn waiter's recycle.
+    Process,
+    /// Another `recover_node` run.
+    Recovery,
+}
+
+/// Holds `agent_id` for one recovery. The live table is read before the
+/// claim: a turn waiter marks its recycle before the live entry goes, so a
+/// child seen without a live entry is either recycling (and refused here)
+/// or owned by nobody in this process.
+pub(super) async fn claim_child(
+    runtime: &Arc<ProductTopologyRuntime>,
+    agent_id: &str,
+) -> Result<crate::topology_runtime::RecoveryClaim, ChildOwner> {
+    if runtime.live.lock().await.contains_key(agent_id) {
+        return Err(ChildOwner::Process);
+    }
+    runtime
+        .claim_recovery(agent_id)
+        .map_err(|refusal| match refusal {
+            crate::topology_runtime::RecoveryClaimRefusal::Recycling => ChildOwner::Process,
+            crate::topology_runtime::RecoveryClaimRefusal::Recovering => ChildOwner::Recovery,
+        })
+}
+
 /// Settles one child, or refuses without settling.
 ///
-/// The caller holds the runtime's reattach lock, so no other recovery,
-/// reattach, or fenced-turn recycle of the same tree runs concurrently.
-#[allow(
-    clippy::too_many_lines,
-    reason = "Child recovery reconciles tree ownership and canonical terminal state before reopening or retiring the existing attempt."
-)]
+/// The child is held for the whole call ([`claim_child`]), so no other
+/// recovery or fenced-turn recycle of it runs concurrently.
 pub(super) async fn recover_child(
-    runtime: &ProductTopologyRuntime,
+    runtime: &Arc<ProductTopologyRuntime>,
     port: &dyn ChildSessionPort,
     agent_id: &str,
     expected_attempt_id: Option<&AttemptId>,
 ) -> Result<RecoverAgentOutput, TopologyError> {
     // A child this process still owns (a live turn, a startup, a retirement,
-    // or a turn waiter's recycle) settles on its own; recovery never reopens
-    // under it and never waits for it.
-    if runtime.live.lock().await.contains_key(agent_id) || runtime.is_recycling(agent_id) {
-        return Err(refusal(
-            TopologyErrorCode::RecoveryOwnerLive,
-            "this process still owns the child's turn, startup, or retirement; it settles on \
-             its own, and recover_agent retries after that",
-        ));
-    }
+    // a turn waiter's recycle, or another recovery) settles on its own;
+    // recovery never reopens under it and never waits for it.
+    let _claim = claim_child(runtime, agent_id)
+        .await
+        .map_err(|_| owner_live())?;
+    recover_claimed_child(runtime, port, agent_id, expected_attempt_id).await
+}
+
+fn owner_live() -> TopologyError {
+    refusal(
+        TopologyErrorCode::RecoveryOwnerLive,
+        "this process still owns the child's turn, startup, retirement, or recovery; it \
+         settles on its own, and recover_agent retries after that",
+    )
+}
+
+/// [`recover_child`] for a child its caller holds.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Child recovery reconciles tree ownership and canonical terminal state before reopening or retiring the existing attempt."
+)]
+async fn recover_claimed_child(
+    runtime: &ProductTopologyRuntime,
+    port: &dyn ChildSessionPort,
+    agent_id: &str,
+    expected_attempt_id: Option<&AttemptId>,
+) -> Result<RecoverAgentOutput, TopologyError> {
     let rebuilding = runtime
         .read(|tree| {
             tree.node(agent_id)
@@ -803,25 +833,49 @@ pub(super) async fn recover_child(
             })
         })
         .await?;
-    if rebuilding {
+    // No turn of the lost owner is left to lose on an attempt that already
+    // ended or submitted: only its session's release was unresolved, and
+    // that settles as before, a submitted result completing the attempt.
+    let ended = runtime
+        .read(|tree| {
+            tree.attempt(agent_id).is_some_and(|attempt| {
+                attempt.output_json.is_some()
+                    || (attempt.status.is_stopped()
+                        && attempt.status != AttemptStatus::RecoveryRequired)
+            })
+        })
+        .map_err(|error| session_refusal(&error.message))?;
+    if ended && rebuilding {
+        // The rebuild already settled the attempt from its feed.
         return runtime
             .read(|tree| tree.recover_receipt(agent_id, Some(&attempt_id), true))
             .map_err(|error| session_refusal(&error.message))?;
     }
-    let recovered = if projection.abandoned.iter().any(|id| id == agent_id) {
-        true
-    } else {
-        runtime
+    if ended {
+        let recorded = runtime
             .record_then_apply(agent_id, {
                 let (agent_id, attempt_id) = (agent_id.to_owned(), attempt_id.clone());
-                move |tree| {
-                    let (agent_id, attempt_id) = (agent_id.as_str(), &attempt_id);
-                    tree.record_host_recovery(agent_id, attempt_id, resolution)
-                }
+                move |tree| tree.record_host_recovery(&agent_id, &attempt_id, resolution)
             })
             .await
-            .map_err(|error| session_refusal(&error))?
-    };
+            .map_err(|error| session_refusal(&error))?;
+        return runtime
+            .read(|tree| tree.recover_receipt(agent_id, Some(&attempt_id), recorded))
+            .map_err(|error| session_refusal(&error.message))?;
+    }
+    // Law L: the projection already interrupted a child whose abandoned
+    // or cancelled turn it folded; one that reopened quiescent with no turn
+    // to fold is interrupted here. Either way the attempt is kept. A child
+    // whose views were rebuilt is judged on the rebuilt rows the same way.
+    if !projection.abandoned.iter().any(|id| id == agent_id) {
+        let (id, attempt) = (agent_id.to_owned(), attempt_id.clone());
+        mutate_and_publish(runtime, agent_id, move |tree| {
+            tree.lose_owner(&id, Some(attempt));
+            Ok(())
+        })
+        .await?;
+    }
+    let recovered = true;
     runtime
         .read(|tree| tree.recover_receipt(agent_id, Some(&attempt_id), recovered))
         .map_err(|error| session_refusal(&error.message))?
@@ -961,30 +1015,33 @@ async fn mutate_and_publish<R: Send + 'static>(
     Ok(result)
 }
 
-/// Settles every child an exact reopen can settle. Reopen refusals are
-/// reported without changing the attempt; effect failures retain their recorded
-/// evidence. Children not reached before `deadline` are reported as not attempted.
+/// Runs `recover_node` for every child whose session outcome is still
+/// unresolved, descendants first: law L interrupts each one whose lost
+/// turn the exact reopen closed, keeping its attempt. Reopen refusals are
+/// reported without changing the attempt; effect failures retain their
+/// recorded evidence.
 pub(super) async fn recover_unresolved_children(
-    runtime: &ProductTopologyRuntime,
+    runtime: &Arc<ProductTopologyRuntime>,
     port: &dyn ChildSessionPort,
-    deadline: tokio::time::Instant,
 ) -> ChildRecoveryReport {
     let mut report = ChildRecoveryReport::default();
-    let Ok(targets) = runtime.read(|tree| {
-        let mut targets = tree.session_recovery_targets();
-        if tree.state == crate::agent_tree::TreeAdmissionState::RestoredPaused {
-            targets.retain(|id| tree.node(id).is_ok_and(|node| node.fold_order.is_none()));
-        }
-        targets
-    }) else {
+    let Ok(targets) = runtime.read(crate::agent_tree::ProductAgentTree::session_recovery_targets)
+    else {
         return report;
     };
     for agent_id in targets {
-        if tokio::time::Instant::now() >= deadline {
-            report.not_attempted.push(agent_id);
-            continue;
-        }
-        match recover_child(runtime, port, &agent_id, None).await {
+        // A child another run holds is that run's to report.
+        let claim = match claim_child(runtime, &agent_id).await {
+            Ok(claim) => claim,
+            Err(ChildOwner::Recovery) => continue,
+            Err(ChildOwner::Process) => {
+                report.refused.push((agent_id, owner_live()));
+                continue;
+            }
+        };
+        let outcome = recover_claimed_child(runtime, port, &agent_id, None).await;
+        drop(claim);
+        match outcome {
             Ok(output) if output.recovered => match output.workspace_recovery {
                 Some(reason) => report.refused.push((
                     agent_id,
@@ -1046,24 +1103,21 @@ impl ProductChildRecoverer {
         expected_attempt_id: Option<AttemptId>,
     ) -> Pin<Box<dyn Future<Output = Result<RecoverAgentOutput, TopologyError>> + Send + '_>> {
         Box::pin(async move {
-            // Each try holds the reattach lock without waiting on the lease,
-            // and the lock is released between tries, so a held lease never
-            // stalls the tree's other recoveries, recycles, or reattaches.
+            // Each try holds the child without waiting on the lease, and
+            // releases it between tries, so a held lease never stalls a
+            // recycle or another recovery of it.
             let deadline = tokio::time::Instant::now() + recover_agent_lease_wait();
             let port = ParentSessionPort {
                 parent: self.parent.clone(),
             };
             loop {
-                let outcome = {
-                    let _reattach = self.runtime.lock_reattach().await;
-                    recover_child(
-                        &self.runtime,
-                        &port,
-                        &agent_id,
-                        expected_attempt_id.as_ref(),
-                    )
-                    .await
-                };
+                let outcome = recover_child(
+                    &self.runtime,
+                    &port,
+                    &agent_id,
+                    expected_attempt_id.as_ref(),
+                )
+                .await;
                 let lease_held = matches!(
                     &outcome,
                     Err(error) if error.code == TopologyErrorCode::RecoveryLeaseHeld
@@ -1096,9 +1150,6 @@ pub(crate) fn refuse_operator_child_recover(
     if revision != expected_revision {
         return Some("stale tree revision");
     }
-    if state == TreeAdmissionState::RestoredPaused {
-        return Some("Resume agents first");
-    }
     if state == TreeAdmissionState::Closed {
         return Some("tree is closed");
     }
@@ -1121,8 +1172,8 @@ pub(crate) fn refuse_operator_child_recover(
 }
 
 /// One operator child recover: the `recover_agent` port, not the model tool
-/// and not the tree's background pass. The tree mutex is not held across the
-/// lease wait.
+/// and not a `recover_node` run over the tree. The tree mutex is not held
+/// across the lease wait.
 pub(crate) async fn operator_child_recover(
     runtime: &Arc<ProductTopologyRuntime>,
     expected_revision: u64,
@@ -1160,129 +1211,62 @@ pub(crate) async fn operator_child_recover(
     .map_err(|error| format!("{}: {}", code_name(error.code), error.message))
 }
 
-/// The one recovery pass for a tree open, `ResumeTree`, or `/recover`: under
-/// the reattach lock, never waiting on a lease, and bounded by
-/// [`RECOVERY_PASS_DEADLINE`] from the moment it is asked for, waiting for
-/// the lock included. `None` when this tree has no attached hub, no parked
-/// parent, or is paused.
-pub(crate) async fn run_tree_recovery_pass(tree_id: &str) -> Option<ChildRecoveryReport> {
-    run_tree_recovery_pass_by(
-        tree_id,
-        tokio::time::Instant::now() + RECOVERY_PASS_DEADLINE,
-    )
-    .await
-}
-
-async fn run_tree_recovery_pass_by(
-    tree_id: &str,
-    deadline: tokio::time::Instant,
-) -> Option<ChildRecoveryReport> {
+/// One `recover_node` run over the tree's children (design section 6.3),
+/// for a custody take, `/recover`, an operator retry, or a release with a
+/// recovery need: the children owed a recovery first, then every child
+/// whose session outcome is unresolved, each held for its own recovery. It
+/// never waits on a lease. `None` when this tree has no attached hub or no
+/// parent to reopen under.
+pub(crate) async fn recover_tree(tree_id: &str) -> Option<ChildRecoveryReport> {
     let runtime = crate::topology_runtime::lookup(tree_id)?;
     let parent = super::build::rejoin_parent(&runtime)?;
-    let Ok(_reattach) = tokio::time::timeout_at(deadline, runtime.lock_reattach()).await else {
-        return Some(ChildRecoveryReport {
-            not_attempted: runtime
-                .read(crate::agent_tree::ProductAgentTree::session_recovery_targets)
-                .unwrap_or_default(),
-            ..ChildRecoveryReport::default()
-        });
-    };
-    if tree_paused(&runtime)?
-        && !runtime
-            .read(|tree| {
-                tree.session_recovery_targets()
-                    .iter()
-                    .any(|id| tree.node(id).is_ok_and(|node| node.fold_order.is_none()))
-            })
-            .ok()?
-    {
-        return None;
-    }
+    super::children::recover_owed_children(&parent, &runtime).await;
     let port = ParentSessionPort { parent };
-    Some(recover_unresolved_children(&runtime, &port, deadline).await)
+    Some(recover_unresolved_children(&runtime, &port).await)
 }
 
-fn tree_paused(runtime: &ProductTopologyRuntime) -> Option<bool> {
-    runtime
-        .read(|tree| tree.state == crate::agent_tree::TreeAdmissionState::RestoredPaused)
-        .ok()
-}
-
-/// What [`start_tree_recovery_pass`] did.
+/// What [`start_tree_recovery`] did.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum RecoveryPassStart {
-    /// A pass started; it reports through `notify` when it finishes.
+pub(crate) enum TreeRecoveryStart {
+    /// A run started; it reports through `notify` when it finishes.
     /// `pending` is how many children it has to try.
     Started { pending: usize },
-    /// This tree's pass is still running; it runs once more before it
-    /// reports, so this request is covered by that report.
-    RerunQueued,
-    /// The tree is restored paused; resuming it runs the pass.
-    Paused,
     /// No hub is attached for this tree, or its hub is shutting down.
     NoTree,
 }
 
-/// Starts this tree's one background recovery pass on the current executor;
-/// the hub keeps its handle, so a shutdown waits for (or aborts) it before
-/// releasing leases. A request while a pass runs makes that pass run once
-/// more, so a child that became recoverable meanwhile is not left behind.
-/// `notify` receives the report when the pass finishes, `None` when it had
-/// nothing to run on.
-pub(crate) fn start_tree_recovery_pass(
+/// Starts one [`recover_tree`] run on the tree's tasks; the hub tracks it,
+/// so a shutdown waits for (or aborts) it before releasing leases. Runs
+/// may overlap: each child is held by one of them at a time, and a run
+/// skips a child another one holds. `notify` receives the report when the
+/// run finishes, `None` when it had nothing to run on.
+pub(crate) fn start_tree_recovery(
     tree_id: String,
     notify: impl FnOnce(Option<ChildRecoveryReport>) + Send + 'static,
-) -> RecoveryPassStart {
+) -> TreeRecoveryStart {
     let Some(runtime) = crate::topology_runtime::lookup(&tree_id) else {
-        return RecoveryPassStart::NoTree;
+        return TreeRecoveryStart::NoTree;
     };
-    match tree_paused(&runtime) {
-        None => return RecoveryPassStart::NoTree,
-        Some(true) => {
-            let rebuilding = runtime
-                .read(|tree| {
-                    tree.session_recovery_targets()
-                        .iter()
-                        .any(|id| tree.node(id).is_ok_and(|node| node.fold_order.is_none()))
-                })
-                .unwrap_or(false);
-            if !rebuilding {
-                return RecoveryPassStart::Paused;
-            }
-        }
-        Some(false) => {}
-    }
     let pending = runtime
-        .read(|tree| tree.session_recovery_targets().len())
+        .read(|tree| tree.session_recovery_targets().len() + tree.recovery_owed_targets().len())
         .unwrap_or(0);
-    let pass_runtime = Arc::clone(&runtime);
-    let tasks = runtime.driver().tasks();
-    let request = runtime.start_recovery_pass(|| {
-        tasks.spawn(async move {
-            let mut report = run_tree_recovery_pass(&tree_id).await;
-            while pass_runtime.finish_recovery_pass() {
-                let again = run_tree_recovery_pass(&tree_id).await;
-                report = merge_pass_reports(report, again);
-            }
-            if let Some(report) = report.as_ref().filter(|report| report.note().is_some()) {
-                tracing::info!(
-                    target: "plak.topology",
-                    tree_id,
-                    recovered = ?report.recovered,
-                    refused = ?report.refused,
-                    not_attempted = ?report.not_attempted,
-                    "child recovery pass finished"
-                );
-            }
-            notify(report);
-        })
-    });
-    match request {
-        crate::topology_runtime::RecoveryPassRequest::Started => {
-            RecoveryPassStart::Started { pending }
+    let task = runtime.driver().tasks().spawn(async move {
+        let report = recover_tree(&tree_id).await;
+        if let Some(report) = report.as_ref().filter(|report| report.note().is_some()) {
+            tracing::info!(
+                target: "plak.topology",
+                tree_id,
+                recovered = ?report.recovered,
+                refused = ?report.refused,
+                "child recovery finished"
+            );
         }
-        crate::topology_runtime::RecoveryPassRequest::Rerun => RecoveryPassStart::RerunQueued,
-        crate::topology_runtime::RecoveryPassRequest::Closed => RecoveryPassStart::NoTree,
+        notify(report);
+    });
+    if runtime.track_recovery(task) {
+        TreeRecoveryStart::Started { pending }
+    } else {
+        TreeRecoveryStart::NoTree
     }
 }
 
@@ -1290,27 +1274,9 @@ pub(super) async fn install_retirement_recovery(runtime: &ProductTopologyRuntime
     let tree_id = tree_id.to_owned();
     runtime
         .set_retirement_recovery(Arc::new(move || {
-            start_tree_recovery_pass(tree_id.clone(), |_| {});
+            start_tree_recovery(tree_id.clone(), |_| {});
         }))
         .await;
-}
-
-/// One report for a pass that ran more than once: every child recovered on
-/// any run, and what the last run still refused or did not reach.
-fn merge_pass_reports(
-    earlier: Option<ChildRecoveryReport>,
-    later: Option<ChildRecoveryReport>,
-) -> Option<ChildRecoveryReport> {
-    let Some(earlier) = earlier else {
-        return later;
-    };
-    let Some(mut later) = later else {
-        return Some(earlier);
-    };
-    let mut recovered = earlier.recovered;
-    recovered.append(&mut later.recovered);
-    later.recovered = recovered;
-    Some(later)
 }
 
 #[cfg(test)]
@@ -1329,18 +1295,6 @@ mod operator_recover_tests {
         assert_eq!(
             refuse_operator_child_recover(3, 3, live, false, recover, Some("a2"), "a1"),
             Some("attempt mismatch")
-        );
-        assert_eq!(
-            refuse_operator_child_recover(
-                3,
-                3,
-                TreeAdmissionState::RestoredPaused,
-                false,
-                recover,
-                Some("a1"),
-                "a1"
-            ),
-            Some("Resume agents first")
         );
         assert_eq!(
             refuse_operator_child_recover(

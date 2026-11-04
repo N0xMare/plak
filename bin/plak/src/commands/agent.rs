@@ -44,7 +44,6 @@ pub(crate) fn run_agent(
     effort: Option<ReasoningEffort>,
     effort_explicit: bool,
     composition: Option<product_config::ProductCompositionSelection>,
-    resume_tree: bool,
     wire_v2: bool,
 ) -> CliResult<ProcessOutcome> {
     // Installed before admission, and before the session opens: a session open
@@ -77,13 +76,12 @@ pub(crate) fn run_agent(
         effort,
         effort_explicit,
         composition,
-        resume_tree,
     );
     // Exactly one terminal record. Everything before the host opens is
     // terminated here; once the host owns the stream it terminates its own,
     // including on a panic, so this must not also write one.
-    let admitted = match outcome {
-        Ok(admitted) => admitted,
+    let config = match outcome {
+        Ok(config) => config,
         Err(failure) => {
             return Err(report_pre_dispatch_rejection(&mut io::stdout(), failure));
         }
@@ -91,14 +89,9 @@ pub(crate) fn run_agent(
     let mut stdout = io::stdout();
     let mut stderr = io::stderr();
     if wire_v2 {
-        return crate::agent_wire::run_agent_wire(admitted.config, io::stdin(), &mut stdout);
+        return crate::agent_wire::run_agent_wire(config, io::stdin(), &mut stdout);
     }
-    crate::agent_stdio::run_agent_stdio(
-        admitted.config,
-        admitted.resume_tree,
-        &mut stdout,
-        &mut stderr,
-    )
+    crate::agent_stdio::run_agent_stdio(config, &mut stdout, &mut stderr)
 }
 
 /// Terminates the JSONL stream on a rejection that precedes the host.
@@ -213,8 +206,7 @@ fn run_agent_after_admission(
     effort: Option<ReasoningEffort>,
     effort_explicit: bool,
     composition: Option<product_config::ProductCompositionSelection>,
-    resume_tree: bool,
-) -> CliResult<AdmittedAgent> {
+) -> CliResult<product_host::HostConfig<crate::surface_protocol::PlakExtension>> {
     if let Some(provider) = provider {
         plakous_hosted::capabilities::require_native(provider)?;
     }
@@ -233,15 +225,12 @@ fn run_agent_after_admission(
     crate::home::state::ensure_usable_state(paths, &mut io::stderr().lock())
         .map_err(CliFailure::new)?;
     let cwd = env::current_dir().map_err(|_| CliFailure::new("cwd unavailable"))?;
-    let (record, resume_tree) = if let Some(session_id) = session_id {
-        (
-            crate::carry::load_for_work(
-                services,
-                load_admitted_product_session(paths, store.as_ref(), &session_id)?,
-                &mut io::stderr().lock(),
-            )?,
-            resume_tree,
-        )
+    let record = if let Some(session_id) = session_id {
+        crate::carry::load_for_work(
+            services,
+            load_admitted_product_session(paths, store.as_ref(), &session_id)?,
+            &mut io::stderr().lock(),
+        )?
     } else {
         let mut record = new_agent_record(
             &cfg,
@@ -262,19 +251,9 @@ fn run_agent_after_admission(
         )?;
         crate::build_features::admit_session(&record)?;
         store.save(&mut record).map_err(CliFailure::new)?;
-        (record, false)
+        record
     };
     let state_roots = services.state_roots()?;
-    let tree_id = crate::topology_product::durable_topology_tree_id(&state_roots, &record);
-    let resume_tree = crate::topology_product::requested_tree_resume(paths, &tree_id, resume_tree)?;
-    if !resume_tree && crate::topology_product::tree_requires_explicit_resume(paths, &tree_id) {
-        return Err(CliFailure::new(crate::refusal_text::paused_tree_text(
-            crate::notice_text::RemedyContext {
-                frontend: crate::notice_text::Frontend::Jsonl,
-                session_id: Some(&record.id),
-            },
-        )));
-    }
     let account = record.account.clone().ok_or_else(|| {
         CliFailure::classified(
             CliFailureKind::Usage,
@@ -339,17 +318,7 @@ fn run_agent_after_admission(
         presentation_ms,
         resolve_ms: u64::try_from(resolve_started.elapsed().as_millis()).unwrap_or(u64::MAX),
     };
-    Ok(AdmittedAgent {
-        config,
-        resume_tree,
-    })
-}
-
-/// The admitted host binding, past every pre-dispatch rejection.
-struct AdmittedAgent {
-    config: product_host::HostConfig<crate::surface_protocol::PlakExtension>,
-    /// The resolved disposition, which the exact session record may set.
-    resume_tree: bool,
+    Ok(config)
 }
 
 #[cfg(test)]

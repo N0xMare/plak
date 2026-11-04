@@ -1,6 +1,6 @@
 use super::{
     DeserializeOwned, OperationRecord, ProductAgentTree, Serialize, TopologyError,
-    TopologyErrorCode, TreeAdmissionState, canonical_json, digest_text, operation_request,
+    TopologyErrorCode, canonical_json, digest_text, operation_request,
 };
 
 impl ProductAgentTree {
@@ -28,10 +28,6 @@ impl ProductAgentTree {
         }
         match prior.terminal_response.as_ref() {
             Some(response) => Ok(Some(response.clone())),
-            None if self.state == TreeAdmissionState::RestoredPaused => Err(TopologyError::new(
-                TopologyErrorCode::OperationRecoveryRequired,
-                "prepared operation did not finish before restore",
-            )),
             None => Ok(None),
         }
     }

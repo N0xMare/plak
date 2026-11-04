@@ -80,38 +80,6 @@ pub fn durable_topology_tree_id(
     )
 }
 
-/// `--resume-tree` is meaningful only when this session has a durable tree.
-/// A root-only session resumes normally; a store error is not mistaken for an
-/// absent tree.
-pub(crate) fn requested_tree_resume(
-    paths: &crate::home::paths::PlakPaths,
-    tree_id: &str,
-    requested: bool,
-) -> plakous_hosted::CliResult<bool> {
-    if !requested {
-        return Ok(false);
-    }
-    crate::store::tree::tree_exists(paths, tree_id).map_err(plakous_hosted::CliFailure::new)
-}
-
-/// True when a live tree epoch still has non-terminal descendants or pending
-/// spawns, or the tree is RestoredPaused (ResumeTree required before rebind).
-/// CLI `run --session --resume-tree -- <prompt>` is explicit ResumeTree.
-/// TUI attach sends `ResumeTopologyTree` (tree unpause). Crash-restored
-/// queue drain stays `RestoredPaused` until the operator resumes it.
-///
-/// # Errors
-///
-/// Returns a redaction-safe failure when the tree cannot be resumed.
-pub async fn resume_topology_tree_for_cli_prompt(
-    paths: &crate::home::paths::PlakPaths,
-    tree_id: &str,
-) -> plakous_hosted::CliResult<()> {
-    resume_tree_for_cli_prompt(paths, tree_id)
-        .await
-        .map_err(plakous_hosted::CliFailure::new)
-}
-
 /// Tree-only queries for headless flows. Session ancestry uses the record
 /// service supplied to the state roots, never a database reopened from paths.
 impl plakous_hosted::runtime::TreeRows for crate::home::paths::PlakPaths {
@@ -134,17 +102,6 @@ impl plakous_hosted::runtime::TreeRows for crate::home::paths::PlakPaths {
 #[cfg(test)]
 pub(crate) fn epoch_blocks_rebind(paths: &crate::home::paths::PlakPaths, tree_id: &str) -> bool {
     plakous_hosted::runtime::epoch_rebind_refusal(paths, tree_id).is_some()
-}
-
-/// Next CLI prompt on a restored session is explicit ResumeTree via `--resume-tree`.
-///
-/// The hub's runtime owns the store now; `_paths` stays in the signature
-/// for the product callers until they are handed the hub.
-pub(crate) async fn resume_tree_for_cli_prompt(
-    _paths: &crate::home::paths::PlakPaths,
-    tree_id: &str,
-) -> Result<(), String> {
-    plakous_hosted::runtime::resume_tree(tree_id).await
 }
 
 pub(crate) async fn install_successor_epoch(
@@ -173,7 +130,6 @@ pub(crate) async fn install_successor_epoch(
 /// `StoreUnavailable` are the added ones.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RosterApplyRefusal {
-    RestoredPaused,
     PendingSpawns,
     LiveDescendants,
     RootBusy,
@@ -187,9 +143,6 @@ impl RosterApplyRefusal {
     #[must_use]
     pub fn message(&self) -> &str {
         match self {
-            Self::RestoredPaused => {
-                "cannot apply a roster while the agent tree is paused · /tree then r resumes it"
-            }
             Self::PendingSpawns => ProductAgentTree::TREE_EPOCH_REBIND_PENDING_SPAWNS,
             Self::LiveDescendants => ProductAgentTree::TREE_EPOCH_REBIND_LIVE_DESCENDANTS,
             Self::RootBusy => Self::ROOT_BUSY,
@@ -201,7 +154,6 @@ impl RosterApplyRefusal {
 
     const fn from_epoch(refusal: EpochRebindRefusal) -> Self {
         match refusal {
-            EpochRebindRefusal::RestoredPaused => Self::RestoredPaused,
             EpochRebindRefusal::PendingSpawns => Self::PendingSpawns,
             EpochRebindRefusal::LiveDescendants => Self::LiveDescendants,
         }
@@ -344,10 +296,7 @@ pub fn roster_apply_refusal(
 
 /// Headless gate: a session-less apply names no tree, so every
 /// persisted tree must be *quiescent* — no pending spawn and no non-terminal
-/// descendant. `RestoredPaused` is deliberately not consulted here: every
-/// persisted tree reopens in that state, so judging it would refuse
-/// `plak config set` for ever after the first session, with no CLI verb able to
-/// lift the fence. A vacuous singleton tree passes.
+/// descendant. A vacuous singleton tree passes.
 fn every_tree_refusal(paths: &crate::home::paths::PlakPaths) -> Option<RosterApplyRefusal> {
     let tree_ids = match crate::store::tree::tree_ids(paths) {
         Ok(tree_ids) => tree_ids,
@@ -460,16 +409,6 @@ async fn stop_all_now(paths: &crate::home::paths::PlakPaths, tree_id: &str) -> R
         ));
     }
     Ok(())
-}
-
-/// Hub first, then the product store. Used by `plak agent --session` so
-/// RestoredPaused cannot attach without explicit `--resume-tree`.
-#[must_use]
-pub(crate) fn tree_requires_explicit_resume(
-    paths: &crate::home::paths::PlakPaths,
-    tree_id: &str,
-) -> bool {
-    plakous_hosted::runtime::requires_explicit_resume(paths, tree_id)
 }
 
 #[cfg(test)]

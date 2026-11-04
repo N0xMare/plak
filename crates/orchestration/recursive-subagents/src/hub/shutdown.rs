@@ -50,16 +50,7 @@ pub async fn abandon_live_agents(tree_id: &str) -> Vec<Agent> {
         return Vec::new();
     };
     runtime.close_for_shutdown();
-    let pass = runtime.recovery_pass.lock().ok().and_then(|mut slot| {
-        slot.running = false;
-        slot.rerun = false;
-        slot.task.take()
-    });
-    if let Some(pass) = pass {
-        pass.abort();
-        let _ = pass.await;
-    }
-    for task in runtime.take_explicit_recovers() {
+    for task in runtime.take_recoveries() {
         task.abort();
         let _ = task.await;
     }
@@ -111,22 +102,10 @@ pub(super) async fn shutdown_runtime(
 
 async fn close_runtime_admission(runtime: &ProductTopologyRuntime) -> TopologyShutdownError {
     runtime.close_for_shutdown();
-    // A recovery pass reopens child sessions; it ends (or is aborted) before
-    // the drain, so no reopen outlives the leases this shutdown releases.
-    let pass = runtime
-        .recovery_pass
-        .lock()
-        .ok()
-        .and_then(|mut slot| slot.task.take());
-    if let Some(mut pass) = pass
-        && tokio::time::timeout(HOST_SHUTDOWN_RELEASE_TIMEOUT, &mut pass)
-            .await
-            .is_err()
-    {
-        pass.abort();
-        let _ = tokio::time::timeout(HOST_SHUTDOWN_DETACH_TIMEOUT, pass).await;
-    }
-    finish_explicit_recovers(runtime).await;
+    // A `recover_node` run reopens child sessions; it ends (or is aborted)
+    // before the drain, so no reopen outlives the leases this shutdown
+    // releases.
+    finish_recoveries(runtime).await;
     let mut failure = TopologyShutdownError::default();
     let driver = runtime.driver.clone();
     let observer = runtime.observer();
@@ -158,8 +137,8 @@ async fn close_runtime_admission(runtime: &ProductTopologyRuntime) -> TopologySh
     failure
 }
 
-async fn finish_explicit_recovers(runtime: &ProductTopologyRuntime) {
-    let tasks = runtime.take_explicit_recovers();
+async fn finish_recoveries(runtime: &ProductTopologyRuntime) {
+    let tasks = runtime.take_recoveries();
     if tasks.is_empty() {
         return;
     }

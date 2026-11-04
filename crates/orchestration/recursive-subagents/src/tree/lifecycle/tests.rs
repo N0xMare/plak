@@ -669,37 +669,13 @@ fn submit_harness_round_is_persisted_on_the_attempt() {
 }
 
 #[test]
-fn restored_paused_blocks_spawn_and_mail() {
+fn a_reopened_tree_admits_spawn_and_mail() {
     let (_tmp, mut tree) = tree();
     let spawned = tree.spawn_agent("root", &spawn_req(), None).unwrap();
-    tree.restore_paused();
-    assert_eq!(
-        tree.spawn_agent("root", &spawn_req(), None)
-            .unwrap_err()
-            .code,
-        TopologyErrorCode::TreeRestoredPaused
-    );
-    assert_eq!(
-        tree.send_agent_message("root", &mail(&spawned.agent_id, "hi"), None)
-            .unwrap_err()
-            .code,
-        TopologyErrorCode::TreeRestoredPaused
-    );
-    assert_eq!(
-        tree.discard_workspace(
-            "root",
-            &WorkspaceIdRequest {
-                workspace_id: spawned.workspace.id,
-            },
-            None,
-        )
-        .unwrap_err()
-        .code,
-        TopologyErrorCode::TreeRestoredPaused
-    );
-    tree.settle_for_test();
-    tree.resume_tree().unwrap();
+    tree.apply_reopen_law();
     tree.spawn_agent("root", &spawn_req(), None).unwrap();
+    tree.send_agent_message("root", &mail(&spawned.agent_id, "hi"), None)
+        .unwrap();
 }
 
 /// Spawn authority is the caller's own menu: the root's is the working
@@ -1665,7 +1641,7 @@ fn bind_after_materialization_failure_restores_running() {
 }
 
 #[test]
-fn prepared_spawn_replays_and_restore_refuses_unfinished_operation() {
+fn prepared_spawn_replays_and_a_reopen_runs_an_unfinished_one_once() {
     let (_tmp, mut tree) = tree();
     let req = spawn_req();
     assert!(
@@ -1683,13 +1659,17 @@ fn prepared_spawn_replays_and_restore_refuses_unfinished_operation() {
     assert_eq!(replay.attempt_id, first.attempt_id);
     tree.prepare_operation("op-spawn-crash", "root", "spawn_agent", &req)
         .unwrap();
-    tree.restore_paused();
-    assert_eq!(
-        tree.spawn_agent("root", &req, Some("op-spawn-crash"))
-            .unwrap_err()
-            .code,
-        TopologyErrorCode::OperationRecoveryRequired
-    );
+    tree.apply_reopen_law();
+    // The lost process recorded no result, so nothing ran: the reopened
+    // tree runs it, once.
+    let ran = tree
+        .spawn_agent("root", &req, Some("op-spawn-crash"))
+        .unwrap();
+    assert_ne!(ran.agent_id, first.agent_id);
+    let again = tree
+        .spawn_agent("root", &req, Some("op-spawn-crash"))
+        .unwrap();
+    assert_eq!(again.agent_id, ran.agent_id);
 }
 
 /// B9: a child that needs recovery is not idle, and a followup would open

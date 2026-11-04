@@ -644,12 +644,6 @@ pub const BINDINGS: &[Binding] = &[
         double_tap: None,
     },
     Binding {
-        chord: "r",
-        when: When::Tree,
-        effect: "ask to resume the restored-paused tree — the only exit from it — in the confirmation pop-up",
-        double_tap: None,
-    },
-    Binding {
         chord: "Tab / Shift+Tab",
         when: When::Tree,
         effect: "switch to Activity Processes",
@@ -709,7 +703,7 @@ pub const BINDINGS: &[Binding] = &[
         effect: "close output or Activity",
         double_tap: None,
     },
-    // The destructive confirmation pop-up (stop, interrupt, close, resume,
+    // The destructive confirmation pop-up (stop, interrupt, close,
     // quit over processes, apply a profile, reset a setting).
     Binding {
         chord: "← / → / Tab",

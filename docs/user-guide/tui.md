@@ -112,16 +112,14 @@ more prominent than either storage label.
 
 While the root is idle and work is waiting, that HUD shows a steady `◆` and
 what is pending, joined by ` · `: unread child results and questions, process
-exits the next turn has not seen, `auto-continue paused`, and
-`agents paused · /tree resume`. Counts refresh from the live tree, or from
+exits the next turn has not seen, and `auto-continue paused`. Counts refresh from the live tree, or from
 fresh stored-tree observations when it is not live; a failed observation
 leaves the displayed line unchanged until a successful check. A running turn
 hides the line. Esc pauses auto-continue until the next prompt, and so does a
 wake that did not fit the window; when auto-continue is on and a child or
 background process could still wake the root, the HUD says so and the
-transcript keeps one `auto-continue paused until the next prompt` line. A
-paused tree leaves one `agents paused · /tree resume` line. Both lines come
-back the same after a restart or `/resume`, without a second copy. A wake the
+transcript keeps one `auto-continue paused until the next prompt` line. It
+comes back the same after a restart or `/resume`, without a second copy. A wake the
 session store refuses because it is busy or unavailable, or whose delivery the
 product store refuses because another writer holds it, is retried on its own
 for about 30 s; after that the transcript shows one `Sub-agent auto-continue
@@ -741,8 +739,8 @@ Activity uses the same full-page frame as Menu: the centered **Activity** title,
 composer or hint line sits beneath them, at every terminal width. A terminal too small to draw the frame says `Activity · terminal too small` and forgets the previous body's clicks. If the root
 needs you (an approval, a context decision), the footer starts with a red
 `root needs approval · Esc`; the top border shows the root's turn timer or how
-long ago you last prompted when there is room. The live/paused tree state appears
-in the Agents body. If sub-agents are unavailable, their reason appears there
+long ago you last prompted when there is room. The tree state appears in the
+Agents body. If sub-agents are unavailable, their reason appears there
 rather than in the transcript. Escape hints belong to the focused body when it
 handles back or cancel; the close glyph always closes Activity and brightens
 on hover.
@@ -855,11 +853,10 @@ not the row: when it leaves the list its parent is selected instead.
 | `End` | Last listed agent |
 | `y` | Copy the agent id to the clipboard |
 | `R` | Ask the host for a fresh snapshot and re-read acknowledgements |
-| `r` | Resume a restored-paused tree (in the confirmation pop-up; also `/tree resume` and the `▶ resume agents` row) — the only exit from it |
 | `i` | Interrupt the selected agent (in the confirmation pop-up; not the root) |
 | `c` | Close the selected agent (in the confirmation pop-up; not the root) |
 | `s` | Stop every non-root agent (in the confirmation pop-up) |
-| `u` | Recover the selected child that is a failed or recovery-required child (in the confirmation pop-up; not while agents are paused) |
+| `u` | Recover the selected child that is a failed or recovery-required child (in the confirmation pop-up) |
 | `Esc` | Leave the list |
 
 The footer's `i interrupt`, `c close`, `s stop all` and `t history` are
@@ -889,7 +886,7 @@ owning-cell receipt and definitive tool outcome, including failed calls. Missing
 or oversized older outcomes are not reconstructed. Calls whose receipt was pruned
 or whose parent is outside the visible history remain ordinary rows; the cell
 keeps its own result status. The Activity title, the Agents and Processes tabs and the close glyph stay. The body starts with `root › #<id> · <description>`, then the transcript, then the agent's row from the Agents list
-(click it to return to the list on that agent). The transcript's scrollbar pages when you click the track and follows when you drag the thumb. `Tab`, `Shift+Tab` or a click on Processes leaves the transcript; a click on Agents, or coming back to Agents, shows the list on this agent. An agent that needs recovery shows `u recovers` above that row, or `Resume agents first` while agents are paused. The footer carries the keys below; `i`, `c`, `y` and `x` are clickable.
+(click it to return to the list on that agent). The transcript's scrollbar pages when you click the track and follows when you drag the thumb. `Tab`, `Shift+Tab` or a click on Processes leaves the transcript; a click on Agents, or coming back to Agents, shows the list on this agent. An agent that needs recovery shows `u recovers` above that row. The footer carries the keys below; `i`, `c`, `y` and `x` are clickable.
 
 | Key | Effect |
 | --- | --- |
@@ -898,7 +895,7 @@ keeps its own result status. The Activity title, the Agents and Processes tabs a
 | `Enter` | Open or close the focused row |
 | `[` / `]` | Previous / next agent in the Agents list's order |
 | `i` / `c` | Interrupt / close this agent (in the confirmation pop-up) |
-| `u` | Recover this child when it is a failed or recovery-required child (in the confirmation pop-up; resume agents first while the tree is paused) |
+| `u` | Recover this child when it is a failed or recovery-required child (in the confirmation pop-up) |
 | `x` | Acknowledge this agent's attention |
 | `y` | Copy the agent id |
 | `Ctrl+T`, close glyph | Close Activity and return to the root transcript |

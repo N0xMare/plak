@@ -1006,6 +1006,10 @@ impl TopologyTool {
         if tree.is_parked(agent_id) {
             return Ok(Some(TurnEndedMail::Left));
         }
+        // A child owed its recover_node takes no delivery until that ran.
+        if tree.recovery_owed(agent_id) {
+            return Ok(None);
+        }
         let bound = state.is_some_and(|(.., bound)| bound);
         let turn = tree.has_current_turn_owner(agent_id);
         let reserved = tree

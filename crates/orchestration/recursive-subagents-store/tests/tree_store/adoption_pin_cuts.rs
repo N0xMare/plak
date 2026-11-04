@@ -129,9 +129,6 @@ async fn adoption_cut(jj: bool, cut: Cut) {
         expected_target: None,
         evidence: None,
     });
-    if retry.is_some() {
-        reopened.resume_tree().unwrap();
-    }
     // Dropping the first mutation's effects cannot lose attachment recovery.
     drop(reopened.take_effects());
     reopened.acknowledge_revision(store.save_in_custody(&reopened).unwrap());

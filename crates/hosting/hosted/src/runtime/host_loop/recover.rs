@@ -14,9 +14,9 @@ use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 
 use super::{
     CliFailure, CliResult, ContextQuery, HostStep, RootActor, SessionEvent,
-    build_session_from_config, durable_tree_id, emit_queue_snapshot, emit_restored_paused_note,
-    emit_unavailable_context, log_ev, native_compact_facet, query_context, report_context,
-    restored_paused_status_suffix,
+    build_session_from_config, durable_tree_id, emit_queue_pause_note, emit_queue_snapshot,
+    emit_unavailable_context, log_ev, native_compact_facet, query_context, queue_pause,
+    report_context,
 };
 use crate::context::ContextDisposition;
 use crate::sessions::{NoticeScope, TranscriptRow};
@@ -153,14 +153,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         // What was queued behind the fenced turn was written for a turn whose
         // outcome nobody saw, so it stays paused (spec 02 §4.2); the note says
         // exactly how to resume it, and a prompt typed now still runs at once.
-        let rows = self.role.config.topology_rows();
         emit_queue_snapshot(&self.role.events, &self.role.config.session);
-        emit_restored_paused_note(
-            &self.role.events,
-            &rows,
-            &self.role.config.session,
-            self.role.config.interactive,
-        );
+        emit_queue_pause_note(&self.role.events, &self.role.config.session);
         if restored_working {
             return self.drive_restored_turn().await;
         }
@@ -169,18 +163,18 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             queue_len: self.role.config.session.pending_queue.len(),
             detail: Some(HostStatusDetail::Ready {
                 model_id: self.role.config.model_id.clone(),
-                pause: restored_paused_status_suffix(&rows, &self.role.config.session),
+                pause: queue_pause(&self.role.config.session),
             }),
         });
         Ok(HostStep::Continue)
     }
 
     /// Finishes the tree's custody-attach scan (design section 6.6): the
-    /// first root open since this process took the tree's custody starts
-    /// the background recovery pass, after the attach rejoined the tree's
-    /// in-flight children. A later open of a tree already in custody starts
-    /// none; `/recover`, `ResumeTree` and a recovery of the root start their
-    /// own.
+    /// first root open since this process took the tree's custody starts a
+    /// background `recover_node` run over the children, after the attach
+    /// recovered the children it owed one. A later open of a tree already in
+    /// custody starts none; `/recover` and a recovery of the root start
+    /// their own.
     pub(super) fn finish_attach_scan(&self) {
         let tree_id = durable_tree_id(&self.role.config.topology_rows(), &self.role.config.session);
         if crate::topology_runtime::lookup(&tree_id)
@@ -190,9 +184,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         }
     }
 
-    /// Starts this tree's one child recovery pass in the background. It never
-    /// waits on a lease, and what it settled or refused reaches the user as
-    /// one system note when it finishes.
+    /// Starts a `recover_node` run over this tree's children in the
+    /// background. It never waits on a lease, and what it settled or refused
+    /// reaches the user as one system note when it finishes.
     pub(super) fn spawn_tree_recovery(&self) {
         let tree_id = durable_tree_id(&self.role.config.topology_rows(), &self.role.config.session);
         let events = self.role.events.clone();
@@ -200,10 +194,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         super::super::tree::start_child_recovery(&events, &session_id, tree_id, false, None);
     }
 
-    /// An explicit `/recover` with no interrupted root turn: starts the tree's
-    /// recovery pass in the background and says so; its report, or
-    /// `nothing` when it had nothing to do, follows as a note. Never waits on
-    /// the pass.
+    /// An explicit `/recover` with no interrupted root turn: starts a
+    /// `recover_node` run over the tree's children in the background and says
+    /// so; its report, or `nothing` when it had nothing to do, follows as a
+    /// note. Never waits on the run.
     pub(super) fn recover_tree_children(&mut self, nothing: Option<String>) {
         let tree_id = durable_tree_id(&self.role.config.topology_rows(), &self.role.config.session);
         let events = self.role.events.clone();
@@ -217,7 +211,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             SessionEvent::new("topology.children_recovery_requested")
                 .str("start", format!("{started:?}")),
         );
-        if started == crate::agent::RecoveryPassStart::NoTree
+        if started == crate::agent::TreeRecoveryStart::NoTree
             && let Some(nothing) = nothing
         {
             let _ = self

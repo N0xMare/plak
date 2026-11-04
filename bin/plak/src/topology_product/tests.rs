@@ -137,63 +137,6 @@ async fn headless_successor_epoch_and_a_live_hub_cannot_overwrite_each_other() {
     force_release(&tree_id).await;
 }
 
-#[tokio::test]
-async fn cli_prompt_resumes_restored_paused_tree() {
-    let tree_id = unique_tree_id();
-    let root = tempfile::tempdir().unwrap();
-    let paths = crate::home::paths::PlakPaths::explicit(root.path().join("p"));
-    paths.ensure_layout().unwrap();
-    let mut tree = bootstrap(&tree_id, root.path().to_path_buf());
-    tree.spawn_agent(
-        "root",
-        &plakous_hosted::agent_tree_protocol::SpawnAgentRequest::test_review(),
-        None,
-    )
-    .unwrap();
-    tree.restore_paused();
-    let runtime = insert_root(tree_id.clone(), tree, None).await.unwrap();
-    assert_eq!(
-        runtime.tree_handle_for_test().lock().unwrap().state,
-        plakous_hosted::agent_tree::TreeAdmissionState::RestoredPaused
-    );
-    assert!(plakous_hosted::topology_runtime::is_restored_paused(
-        &tree_id
-    ));
-    resume_tree_for_cli_prompt(&paths, &tree_id).await.unwrap();
-    assert_eq!(
-        runtime.tree_handle_for_test().lock().unwrap().state,
-        plakous_hosted::agent_tree::TreeAdmissionState::Live
-    );
-    assert!(!plakous_hosted::topology_runtime::is_restored_paused(
-        &tree_id
-    ));
-    force_release(&tree_id).await;
-}
-
-#[test]
-fn resume_tree_hub_miss_is_fail_closed() {
-    let root = tempfile::tempdir().unwrap();
-    let paths = crate::home::paths::PlakPaths::explicit(root.path().join("p"));
-    paths.ensure_layout().unwrap();
-    let error = resume_tree_for_cli_prompt(&paths, "missing-tree")
-        .block()
-        .unwrap_err();
-    assert!(error.contains("missing from the hub"));
-}
-
-#[test]
-fn requested_tree_resume_only_resumes_a_persisted_tree() {
-    let (_tmp, paths) = crate::home::paths::PlakPaths::isolated_test_home();
-    paths.ensure_layout().unwrap();
-    let tree_id = unique_tree_id();
-    assert!(!requested_tree_resume(&paths, &tree_id, true).unwrap());
-
-    let mut tree = bootstrap(&tree_id, paths.home().to_path_buf());
-    crate::store::tree::save_tree(&paths, &mut tree).unwrap();
-    assert!(requested_tree_resume(&paths, &tree_id, true).unwrap());
-    assert!(!requested_tree_resume(&paths, &tree_id, false).unwrap());
-}
-
 #[test]
 fn durable_tree_id_walks_rebind_source_to_persisted_tree() {
     let (_tmp, paths) = crate::home::paths::PlakPaths::isolated_test_home();
@@ -314,23 +257,20 @@ async fn save_is_rejected_on_a_live_epoch_and_leaves_the_file_byte_identical() {
         apply_roster(&paths, Some(&bind(&tree_id, false)), &next).await,
         Err(RosterApplyError::Refused(RosterApplyRefusal::RootBusy))
     );
-    // Pending spawns and restored-paused are distinct strings.
+    // Pending spawns and live descendants are distinct strings.
     assert_ne!(
         RosterApplyRefusal::PendingSpawns.message(),
         RosterApplyRefusal::LiveDescendants.message()
     );
-    assert_ne!(
-        RosterApplyRefusal::RestoredPaused.message(),
-        RosterApplyRefusal::RootBusy.message()
-    );
+    // A reopened tree is refused for its live descendant, not a pause.
     {
         let mut tree = runtime.tree_handle_for_test().lock().unwrap();
-        tree.restore_paused();
+        tree.apply_reopen_law();
     }
     assert_eq!(
         apply_roster(&paths, Some(&bind(&tree_id, true)), &next).await,
         Err(RosterApplyError::Refused(
-            RosterApplyRefusal::RestoredPaused
+            RosterApplyRefusal::LiveDescendants
         ))
     );
 
@@ -469,15 +409,11 @@ async fn stop_all_then_apply_closes_descendants_then_applies_the_same_save() {
     force_release(&tree_id).await;
 }
 
-/// On a restored-paused tree the first `s`
-/// refuses and offers `a stop all agents, then apply`. Taking that offer
-/// closed every descendant and then refused the very save it exists to
-/// unblock, with byte-identical text — so from the operator's seat the
-/// Agents tab went silent for ever. Stop-all is the operator's explicit
-/// close of every agent; once it has run there is nothing left to resume,
-/// and every later save answers too.
+/// On a reopened tree with a live descendant the first `s` refuses and
+/// offers `a stop all agents, then apply`. Taking that offer closes every
+/// descendant and applies the save, and every later save answers too.
 #[tokio::test]
-async fn stop_all_then_apply_lifts_a_restored_pause_and_later_saves_still_answer() {
+async fn stop_all_then_apply_on_a_reopened_tree_applies_and_later_saves_still_answer() {
     let (_tmp, paths) = crate::home::paths::PlakPaths::isolated_test_home();
     paths.ensure_layout().unwrap();
     roster_config("review", "critic", "claude", "claude-opus-5")
@@ -492,17 +428,17 @@ async fn stop_all_then_apply_lifts_a_restored_pause_and_later_saves_still_answer
             None,
         )
         .unwrap();
-    // Reopened after a quit or an interrupt: the tree is paused and its
-    // running child is demoted to a non-terminal `paused`.
-    tree.restore_paused();
+    // Reopened after a quit or an interrupt: the tree is live and its
+    // child still runs.
+    tree.apply_reopen_law();
     let runtime = insert_root(tree_id.clone(), tree, None).await.unwrap();
 
     let next = roster_config("review", "scout", "codex", "gpt-5.6-luna");
-    // The plain save is refused, naming the pause and not the descendants.
+    // The plain save is refused for the live descendant.
     assert_eq!(
         apply_roster(&paths, Some(&bind(&tree_id, true)), &next).await,
         Err(RosterApplyError::Refused(
-            RosterApplyRefusal::RestoredPaused
+            RosterApplyRefusal::LiveDescendants
         ))
     );
 
@@ -514,8 +450,8 @@ async fn stop_all_then_apply_lifts_a_restored_pause_and_later_saves_still_answer
     {
         let tree = runtime.tree_handle_for_test().lock().unwrap();
         assert!(tree.node(&child.agent_id).unwrap().status.is_terminal());
-        // The successor epoch returns the tree to Live with the new
-        // frozen roster; the pause bit is gone either way.
+        // The successor epoch keeps the tree Live with the new frozen
+        // roster.
         assert_eq!(
             tree.state,
             plakous_hosted::agent_tree::TreeAdmissionState::Live
@@ -664,16 +600,16 @@ fn epoch_blocks_rebind_reads_store_when_hub_misses() {
     crate::store::tree::save_tree(&paths, &mut tree).unwrap();
     assert!(lookup(&tree_id).is_none());
     assert!(epoch_blocks_rebind(&paths, &tree_id));
-    // Store load always restore_paused(); hub miss cannot see Live descendants.
+    // Store load applies the reopen law; the live descendant still refuses.
     assert_eq!(
         plakous_hosted::runtime::epoch_rebind_refusal(&paths, &tree_id),
-        Some(EpochRebindRefusal::RestoredPaused)
+        Some(EpochRebindRefusal::LiveDescendants)
     );
     let _ = spawned;
 }
 
 #[test]
-fn epoch_blocks_rebind_when_restored_paused() {
+fn epoch_blocks_rebind_for_a_reopened_live_descendant() {
     let (_tmp, paths) = crate::home::paths::PlakPaths::isolated_test_home();
     paths.ensure_layout().unwrap();
     let tree_id = unique_tree_id();
@@ -685,12 +621,12 @@ fn epoch_blocks_rebind_when_restored_paused() {
         None,
     )
     .unwrap();
-    tree.restore_paused();
+    tree.apply_reopen_law();
     crate::store::tree::save_tree(&paths, &mut tree).unwrap();
     assert!(epoch_blocks_rebind(&paths, &tree_id));
     assert_eq!(
         plakous_hosted::runtime::epoch_rebind_refusal(&paths, &tree_id),
-        Some(EpochRebindRefusal::RestoredPaused)
+        Some(EpochRebindRefusal::LiveDescendants)
     );
 }
 

@@ -4,9 +4,7 @@ use super::{
 };
 use crate::protocol::{AttemptId, CandidateId};
 use crate::tree::test_support::tree;
-use crate::tree::{
-    AttemptFailure, FoldAnchor, MemoryTreeStore, OperationRecord, ProductAgentTree, TreeStore,
-};
+use crate::tree::{AttemptFailure, FoldAnchor, MemoryTreeStore, OperationRecord, TreeStore};
 
 const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 const TIP: &str = "89abcdef0123456789abcdef0123456789abcdef";
@@ -17,7 +15,7 @@ fn attempt() -> AttemptId {
 }
 
 /// Saves `operations` on a fresh tree through the in-memory store and hands
-/// back what a reopen reads.
+/// back the rows a reopen reads.
 fn round_trip(operations: Vec<OperationRecord>) -> Vec<OperationRecord> {
     let (_root, mut tree) = tree();
     let ids = operations
@@ -30,9 +28,10 @@ fn round_trip(operations: Vec<OperationRecord>) -> Vec<OperationRecord> {
     }
     let store = MemoryTreeStore::new();
     let _ = store.save_in_custody(&tree).unwrap();
-    let reopened = ProductAgentTree::reopen(store.load(&tree.tree_id).unwrap().unwrap());
+    // The rows as read, before the reopen law settles any stage they hold.
+    let loaded = store.load(&tree.tree_id).unwrap().unwrap().0;
     ids.iter()
-        .map(|id| reopened.operations()[id].clone())
+        .map(|id| loaded.operations()[id].clone())
         .collect()
 }
 

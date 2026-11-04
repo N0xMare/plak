@@ -22,20 +22,7 @@ pub(crate) fn restored_pause(
     context: RemedyContext<'_>,
 ) -> String {
     let mut text = String::new();
-    if pause.tree {
-        text = with_remedy(
-            "the agent tree is paused after an interrupt; spawning is refused until explicit tree resume",
-            Some(&NoticeRemedy::ResumeTree {}),
-            RemedyContext {
-                frontend: context.frontend,
-                session_id: context.session_id,
-            },
-        );
-    }
     if pause.queue {
-        if !text.is_empty() {
-            text.push_str(". ");
-        }
         text.push_str("the queue is paused and will not auto-drain; ");
         text.push_str(&match context.frontend {
             Frontend::Tui => "press Tab to focus the queue, then r to resume delivery or Enter to send one item now".to_owned(),
@@ -164,11 +151,7 @@ pub(crate) fn remedy_text(remedy: &NoticeRemedy, context: RemedyContext<'_>) -> 
             Run => String::new(),
             Jsonl => "already attached; reopening is only needed for a detached host".into(),
         },
-        R::ResumeTree {} => match face {
-            Tui => "use /tree resume, or open /tree and press r, to resume the tree".into(),
-            Run => format!("resume with `plak run --session {session} --resume-tree -- <prompt>`"),
-            Jsonl => format!("send resume_tree, or relaunch `plak agent --session {session} --resume-tree`"),
-        },
+        R::ResumeTree {} => String::new(),
         R::StartFresh {} => match face {
             Tui => "use /new, or start a new session on the chosen model".into(),
             Run => "start a new `plak run` without --session".into(),

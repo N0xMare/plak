@@ -109,7 +109,7 @@ fn child_owner_spawns_stay_release_owners() {
         ("waiter.rs", include_str!("waiter.rs"), 2),
         ("live.rs", include_str!("../live.rs"), 0),
         ("deliver.rs", include_str!("deliver.rs"), 1),
-        ("park.rs", include_str!("../park.rs"), 1),
+        ("park.rs", include_str!("../park.rs"), 0),
     ];
     let allowed = [
         ("turns.rs", "retirements.spawn"),

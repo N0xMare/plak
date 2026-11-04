@@ -2274,8 +2274,12 @@ fn interrupt_refuses_rebind_before_any_branch_is_created() {
 fn handle_rebind_fails_closed_when_tree_epoch_blocks_rebind() {
     let root = tempfile::tempdir().unwrap();
     let (mut config, _) = fresh_injected_attached_host(root.path());
-    test_kit::seed_restored_paused_tree(&config.topology_rows(), &config.session.id, &config.cwd)
-        .unwrap();
+    test_kit::seed_reopened_tree_with_live_descendant(
+        &config.topology_rows(),
+        &config.session.id,
+        &config.cwd,
+    )
+    .unwrap();
     let mut opened = memory_attached_stub();
     config
         .session
@@ -2308,7 +2312,7 @@ fn handle_rebind_fails_closed_when_tree_epoch_blocks_rebind() {
         .unwrap_err();
     assert_eq!(
         error.message(),
-        crate::agent_tree::ProductAgentTree::TREE_EPOCH_REBIND_PAUSED
+        crate::agent_tree::ProductAgentTree::TREE_EPOCH_REBIND_LIVE_DESCENDANTS
     );
     assert!(no_unsettled_rebind_requests(&config));
 }

@@ -1,14 +1,14 @@
 use super::{
     Any, Arc, AtomicBool, Future, HashSet, LiveCancelError, LiveCancelOutcome, LiveCancelReport,
     LiveChildHandle, LiveChildTable, LiveRetirementFailure, Mutex, Ordering, ProductAgentTree,
-    ProductTopologyRuntime, RETIRE_JOIN_EXPIRED, RecoveryPassRequest, RecoveryPassSlot,
+    ProductTopologyRuntime, RETIRE_JOIN_EXPIRED, RecoveryClaim, RecoveryClaimRefusal,
     RecyclingGuard, RetirementJoin, TopologyObserver, TreeDriver, TreeStore, TurnId, VcsOps,
     begin_retire_live, retire_live,
 };
 
 impl ProductTopologyRuntime {
     /// Installs the host's recovery trigger for returned startup/retirement owners.
-    /// The callback must not retain this runtime; shutdown closes pass admission.
+    /// The callback must not retain this runtime; shutdown closes its admission.
     pub async fn set_retirement_recovery(&self, recovery: Arc<dyn Fn() + Send + Sync>) {
         self.driver.set_retirement_recovery(recovery.clone());
         self.live.lock().await.retirement_recovery = Some(recovery);
@@ -32,10 +32,9 @@ impl ProductTopologyRuntime {
             })),
             driver,
             closed: AtomicBool::new(false),
-            reattach: tokio::sync::Mutex::new(()),
             recycling: Mutex::new(HashSet::new()),
-            recovery_pass: Mutex::new(RecoveryPassSlot::default()),
-            explicit_recovers: Mutex::new(Vec::new()),
+            recovering: Mutex::new(HashSet::new()),
+            recoveries: Mutex::new(Vec::new()),
             rejoin_spec: Mutex::new(None),
             observer,
             residents: std::sync::atomic::AtomicUsize::new(0),
@@ -330,15 +329,9 @@ impl ProductTopologyRuntime {
         self.closed.load(Ordering::SeqCst)
     }
 
-    /// Serializes crash-cut reattach so overlapping root attaches wait for
-    /// `resume_tree` instead of exposing a still-paused tree.
-    pub async fn lock_reattach(&self) -> tokio::sync::MutexGuard<'_, ()> {
-        self.reattach.lock().await
-    }
-
-    /// Marks `agent_id` as owned by its turn waiter's recycle, which runs
-    /// without the reattach lock. Set under that lock before the live entry
-    /// goes, so a recovery never sees the child unowned mid-recycle. The mark
+    /// Marks `agent_id` as owned by its turn waiter's recycle. Set before the
+    /// live entry goes, so a recovery never sees the child unowned
+    /// mid-recycle (see [`Self::claim_recovery`]). The mark
     /// lasts until the returned guard drops, so a recycle that panics or is
     /// cancelled cannot leave the child owned for good.
     #[must_use = "the mark is cleared when the guard drops"]
@@ -359,55 +352,47 @@ impl ProductTopologyRuntime {
             .is_ok_and(|recycling| recycling.contains(agent_id))
     }
 
-    /// Starts this tree's background recovery pass with `spawn`. While one is
-    /// running, the request is not dropped: the running pass runs once more
-    /// before it finishes (see [`Self::finish_recovery_pass`]). A closed hub
-    /// starts nothing.
-    pub fn start_recovery_pass(
-        &self,
-        spawn: impl FnOnce() -> crate::task_set::TaskHandle<()>,
-    ) -> RecoveryPassRequest {
-        let Ok(mut slot) = self.recovery_pass.lock() else {
-            return RecoveryPassRequest::Closed;
+    /// Holds `agent_id` for one `recover_node` run until the claim drops.
+    /// Refused while its turn waiter recycles it or another run holds it.
+    /// The caller checks the live table first: a waiter marks its recycle
+    /// before the live entry goes, so a child seen without a live entry and
+    /// then without a mark is owned by nobody in this process.
+    ///
+    /// # Errors
+    ///
+    /// Names the owner that holds the child.
+    pub fn claim_recovery(
+        self: &Arc<Self>,
+        agent_id: &str,
+    ) -> Result<RecoveryClaim, RecoveryClaimRefusal> {
+        if self.is_recycling(agent_id) {
+            return Err(RecoveryClaimRefusal::Recycling);
+        }
+        let Ok(mut recovering) = self.recovering.lock() else {
+            return Err(RecoveryClaimRefusal::Recovering);
         };
-        if self.is_closed() {
-            return RecoveryPassRequest::Closed;
+        if !recovering.insert(agent_id.to_owned()) {
+            return Err(RecoveryClaimRefusal::Recovering);
         }
-        if slot.busy() {
-            slot.rerun = true;
-            return RecoveryPassRequest::Rerun;
-        }
-        slot.rerun = false;
-        slot.running = true;
-        slot.task = Some(spawn());
-        RecoveryPassRequest::Started
+        Ok(RecoveryClaim {
+            runtime: Arc::clone(self),
+            agent_id: agent_id.to_owned(),
+        })
     }
 
-    /// Called by a pass when it is done: `true` when a request arrived while
-    /// it ran and it must run once more; otherwise the slot is released.
-    /// Decided under the slot lock, so no request can fall between the
-    /// answer and the pass ending.
-    pub fn finish_recovery_pass(&self) -> bool {
-        let Ok(mut slot) = self.recovery_pass.lock() else {
-            return false;
-        };
-        if slot.rerun && !self.is_closed() {
-            slot.rerun = false;
-            return true;
-        }
-        slot.running = false;
-        false
+    /// Whether a `recover_node` run holds `agent_id`, without claiming it,
+    /// so a test can watch a claim being released between tries.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn is_recovering(&self, agent_id: &str) -> bool {
+        self.recovering
+            .lock()
+            .is_ok_and(|recovering| recovering.contains(agent_id))
     }
 
-    /// Whether this tree's background recovery pass is still running.
-    pub fn recovery_pass_running(&self) -> bool {
-        self.recovery_pass.lock().is_ok_and(|slot| slot.busy())
-    }
-
-    /// Remembers one operator child-recover task. A closed hub aborts it
-    /// instead. Finished tasks are dropped so the list stays the live set.
-    pub fn track_explicit_recover(&self, task: crate::task_set::TaskHandle<()>) -> bool {
-        let Ok(mut tasks) = self.explicit_recovers.lock() else {
+    /// Remembers one `recover_node` run. A closed hub aborts it instead.
+    /// Finished runs are dropped so the list stays the live set.
+    pub fn track_recovery(&self, task: crate::task_set::TaskHandle<()>) -> bool {
+        let Ok(mut tasks) = self.recoveries.lock() else {
             task.abort();
             return false;
         };
@@ -423,21 +408,19 @@ impl ProductTopologyRuntime {
         true
     }
 
-    /// Takes every operator child-recover task, for shutdown.
-    pub fn take_explicit_recovers(&self) -> Vec<crate::task_set::TaskHandle<()>> {
-        self.explicit_recovers
+    /// Takes every running `recover_node` run, for shutdown.
+    pub fn take_recoveries(&self) -> Vec<crate::task_set::TaskHandle<()>> {
+        self.recoveries
             .lock()
             .map(|mut tasks| std::mem::take(&mut *tasks))
             .unwrap_or_default()
     }
 
-    /// The reattach lock without waiting, so a test can prove a second
-    /// reattach is actually excluded rather than merely slow.
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn try_lock_reattach(
-        &self,
-    ) -> Result<tokio::sync::MutexGuard<'_, ()>, tokio::sync::TryLockError> {
-        self.reattach.try_lock()
+    /// Whether a `recover_node` run over this tree is still running.
+    pub fn recovery_running(&self) -> bool {
+        self.recoveries
+            .lock()
+            .is_ok_and(|tasks| tasks.iter().any(|task| !task.is_finished()))
     }
 
     /// Stores `child` if this agent is vacant and the hub is still open.

@@ -68,9 +68,8 @@ pub(crate) async fn dispatch_topology_navigator_action<
             UserAction::CloseAgentTranscript => return,
             _ => {}
         }
-        // `ResumeTopologyTree` is an explicit operator intent (spec 02 §5.7 `r`,
-        // §10.4) — never part of an attach sequence — so a hub
-        // miss is reported like any other, not swallowed.
+        // A navigator intent is explicit operator input — never part of an
+        // attach sequence — so a hub miss is reported, not swallowed.
         emit_navigator_unavailable(
             send,
             "agent tree navigator unavailable: no topology hub is attached",
@@ -82,11 +81,6 @@ pub(crate) async fn dispatch_topology_navigator_action<
         // so a dropped push is always recoverable by hand.
         UserAction::OpenTopologyNavigator | UserAction::RefreshTopologyTree => {
             emit_snapshot(&runtime, session, send, true);
-        }
-        UserAction::ResumeTopologyTree => {
-            resume_tree(session, &runtime, send).await;
-            // The caller starts the tree's background recovery pass.
-            crate::agent::rejoin_inflight_after_resume(&tree_id).await;
         }
         UserAction::InterruptTopologyNode { agent_id } => {
             interrupt_node(session, &runtime, &send, agent_id).await;
@@ -176,7 +170,7 @@ fn spawn_operator_child_recover<P: plakous_host_protocol::ProtocolExtension>(
         }
         emit_snapshot(&task_runtime, &task_session, send, true);
     });
-    if !runtime.track_explicit_recover(task) {
+    if !runtime.track_recovery(task) {
         send(ContentEvent::Row(TranscriptRow::error(
             NoticeScope::Tree,
             "agent tree navigator unavailable: hub is shutting down",
@@ -266,35 +260,6 @@ fn emit_snapshot<P: plakous_host_protocol::ProtocolExtension>(
     apply_session_root_binding(&mut snapshot, session);
     snapshot.solicited = solicited;
     send(ContentEvent::TopologyNavigatorSnapshot(snapshot));
-}
-
-async fn resume_tree<P: plakous_host_protocol::ProtocolExtension>(
-    session: &SessionRecord,
-    runtime: &ProductTopologyRuntime,
-    send: impl Fn(ContentEvent<P>) + Copy,
-) {
-    // Only a reopened tree is paused. Resuming anything else would fault this
-    // process's own in-flight seals, adopts and removals as if a lost process
-    // had left them, so a live tree is left alone and the operator told so.
-    let Some(paused) = read_tree(runtime, send, |tree| {
-        tree.state == crate::agent_tree_protocol::TreeAdmissionState::RestoredPaused
-    }) else {
-        return;
-    };
-    if !paused {
-        send(ContentEvent::Row(TranscriptRow::info(
-            NoticeScope::Tree,
-            "agent tree is not paused; nothing to resume",
-        )));
-    } else if mutate_tree(runtime, send, "tree resume failed", |tree| {
-        tree.resume_tree().map_err(|error| error.message)
-    })
-    .await
-    .is_none()
-    {
-        return;
-    }
-    emit_snapshot(runtime, session, send, true);
 }
 
 /// Purposes a host-authored mail envelope may carry. `result` is

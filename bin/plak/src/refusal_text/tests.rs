@@ -1,5 +1,5 @@
 use super::*;
-use plakous_host_protocol::notice_remedy::{AccountTarget, NoticeRemedy};
+use plakous_host_protocol::notice_remedy::AccountTarget;
 
 #[test]
 fn action_refusals_keep_typed_facts_in_each_frontend_without_parsing_prose() {
@@ -51,23 +51,19 @@ fn action_refusals_keep_typed_facts_in_each_frontend_without_parsing_prose() {
             assert!(rendered.contains(&advice_text(advice, frontend)));
             assert_eq!(failure.host_failure().advice.as_deref(), Some(advice));
         }
+        // The retained code carries no remedy of its own any more.
         let raw = serde_json::json!({"code":"tree_restored_paused","message":"opaque"}).to_string();
-        let restored = tool_error_text(
-            "spawn_agent",
-            &raw,
-            RemedyContext {
-                frontend,
-                session_id: Some("exact-root"),
-            },
-        )
-        .unwrap();
-        assert!(restored.contains(&crate::notice_text::remedy_text(
-            &NoticeRemedy::ResumeTree {},
-            RemedyContext {
-                frontend,
-                session_id: Some("exact-root")
-            }
-        )));
+        assert!(
+            tool_error_text(
+                "spawn_agent",
+                &raw,
+                RemedyContext {
+                    frontend,
+                    session_id: Some("exact-root"),
+                },
+            )
+            .is_none()
+        );
         assert!(
             tool_error_text(
                 "spawn_agent",

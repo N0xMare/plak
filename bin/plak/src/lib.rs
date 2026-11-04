@@ -932,14 +932,12 @@ fn execute_application_command(
             session_id,
             prompt,
             print_session_id,
-            resume_tree,
         } => backend.continue_session(
             &admit(stderr)?,
             // A session a carry moved on runs on its successor (spec 02 §2.6).
             &carry::work_id(services, &session_id, stderr)?,
             prompt,
             print_session_id,
-            resume_tree,
             stdout,
             stderr,
             limits,
@@ -1233,7 +1231,6 @@ fn run_agent_command(services: &Services, command: Command) -> CliResult<Process
         effort,
         effort_explicit,
         composition,
-        resume_tree,
         wire_v2,
     } = command
     else {
@@ -1249,7 +1246,6 @@ fn run_agent_command(services: &Services, command: Command) -> CliResult<Process
         effort,
         effort_explicit,
         composition,
-        resume_tree,
         wire_v2,
     )
 }

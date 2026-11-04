@@ -1010,14 +1010,7 @@ fn traced_reopen(
     label: &str,
     provider_release: Option<&std::path::Path>,
 ) -> Result<AgentProcess, AgentOutcome> {
-    let script: Value = serde_json::from_slice(&std::fs::read(fixture.script()).unwrap()).unwrap();
-    // A cut can leave a live tree paused. This shape supplies the operator's
-    // explicit resume instead of weakening the product's admission rule.
-    let resume_tree = script["durable_tree"] == true;
     reopen_configured(fixture, session, |command, attempt| {
-        if resume_tree {
-            command.arg("--resume-tree");
-        }
         command.env(
             TRACE_ENV,
             fixture.root.join(format!("{label}-{attempt}.jsonl")),

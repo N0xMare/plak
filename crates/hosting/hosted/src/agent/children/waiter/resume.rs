@@ -1,10 +1,10 @@
 //! A failed child turn's transient resume: its gate and its instruction turn.
 
 use super::{
-    Arc, ChildFeedSource, ChildStartup, ChildTurnIdentity, CommandKind, FailedTurnWaits,
-    ResumeGate, ResumeOwner, TreeDriver, TurnResult, TurnResultHandle, TurnResultOutcome,
-    end_attempt_work, failed_worktree, finalize_child_failure, mutate_child, persist_or_fault,
-    project_turn_end, settle_or_fault, start_instruction_turn, transient,
+    Arc, ChildFeedSource, ChildTurnIdentity, CommandKind, FailedTurnWaits, ResumeGate, ResumeOwner,
+    TreeDriver, TurnResult, TurnResultHandle, TurnResultOutcome, end_attempt_work, failed_worktree,
+    finalize_child_failure, mutate_child, persist_or_fault, project_turn_end, settle_or_fault,
+    start_instruction_turn, transient,
 };
 
 pub(super) fn resume_allowed_in(
@@ -44,18 +44,6 @@ pub(in crate::agent::children) async fn wait_transient_gate(
         .await
         .get(agent_id)
         .and_then(crate::topology_runtime::LiveChildHandle::reachability_probe);
-    wait_resume_gate(driver, live.into(), None, agent_id, identity, probe, gate).await
-}
-
-pub(in crate::agent) async fn wait_resume_gate(
-    driver: &TreeDriver,
-    live: Option<&Arc<tokio::sync::Mutex<crate::topology_runtime::LiveChildTable>>>,
-    startup: Option<&ChildStartup>,
-    agent_id: &str,
-    identity: &ChildTurnIdentity,
-    probe: Option<plakous::model::ReachabilityProbe>,
-    gate: ResumeGate,
-) -> bool {
     let cancellation = plakous::model::CancellationToken::new();
     transient::wait_gate(
         gate,
@@ -72,15 +60,11 @@ pub(in crate::agent) async fn wait_resume_gate(
         },
         || async move {
             resume_allowed(driver, agent_id, identity)
-                && !startup.is_some_and(ChildStartup::is_cancelled)
-                && if let Some(live) = live {
-                    live.lock()
-                        .await
-                        .get(agent_id)
-                        .is_some_and(|child| child.turn_id() == identity.turn)
-                } else {
-                    true
-                }
+                && live
+                    .lock()
+                    .await
+                    .get(agent_id)
+                    .is_some_and(|child| child.turn_id() == identity.turn)
         },
     )
     .await

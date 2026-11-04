@@ -16,8 +16,8 @@ impl TreeDriver {
     ) -> Result<R, TopologyError> {
         let order = self.writer.order();
         let _permit = order.lock().await;
-        let mut tree = storage::TreeMutationGuard::lock(&self.tree, &self.restored_paused)
-            .map_err(|()| Self::lock_poisoned())?;
+        let mut tree =
+            storage::TreeMutationGuard::lock(&self.tree).map_err(|()| Self::lock_poisoned())?;
         Ok(work(&mut tree))
     }
 

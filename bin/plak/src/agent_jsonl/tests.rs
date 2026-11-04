@@ -40,10 +40,7 @@ fn remedies_and_live_pause_project_through_existing_jsonl_envelopes() {
     );
     assert!(!value.contains_key("remedy"));
     let line = project_host_event(
-        &HostEvent::RestoredPause(plakous_host_protocol::status::HostPause {
-            tree: true,
-            queue: true,
-        }),
+        &HostEvent::RestoredPause(plakous_host_protocol::status::HostPause { queue: true }),
         correlation,
         Some("exact-root"),
     )
@@ -52,7 +49,7 @@ fn remedies_and_live_pause_project_through_existing_jsonl_envelopes() {
     assert_eq!(value["id"], "command");
     assert_eq!(value["queue_len"], 0);
     let detail = value["detail"].as_str().unwrap();
-    assert!(detail.contains("resume_tree") && detail.contains("resume_queue"));
+    assert!(detail.contains("resume_queue") && !detail.contains("resume_tree"));
     assert!(!detail.contains("Tab") && !detail.contains("/attach"));
     let line = project_host_event(
         &HostEvent::StorageAdmissionRefused(DiagnosticText::new("opaque storage facts")),
@@ -81,6 +78,19 @@ fn removed_binding_kinds_are_unknown_commands() {
         };
         assert!(message.starts_with("unknown JSONL kind `set_"), "{message}");
     }
+}
+
+#[test]
+fn removed_resume_tree_is_an_unknown_command() {
+    let ParseOutcome::Diagnostic { message, .. } =
+        parse_command_line(r#"{"v":1,"kind":"resume_tree","id":"r"}"#)
+    else {
+        panic!("resume_tree is no longer a command");
+    };
+    assert!(
+        message.starts_with("unknown JSONL kind `resume_tree`"),
+        "{message}"
+    );
 }
 
 #[test]
@@ -284,10 +294,6 @@ fn closed_kinds_round_trip_to_user_actions() {
         (
             r#"{"v":1,"kind":"resume_queue","id":"rq"}"#,
             UserAction::ResumeQueueDrain,
-        ),
-        (
-            r#"{"v":1,"kind":"resume_tree","id":"r"}"#,
-            UserAction::ResumeTopologyTree,
         ),
         (
             r#"{"v":1,"kind":"tree","id":"t"}"#,

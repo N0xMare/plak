@@ -572,8 +572,7 @@ fn fold_assistant(records: Vec<Record>) -> Vec<Record> {
 ///    table below and the production function agree on every observation the
 ///    scenarios produce.
 /// 2. *The JSONL face opens the navigator itself at attach.* `agent_stdio::
-///     actions_on_successful_attach` sends `OpenTopologyNavigator` (and
-///    `ResumeTopologyTree` under `--resume-tree`) as soon as
+///     actions_on_successful_attach` sends `OpenTopologyNavigator` as soon as
 ///    `AgentAttached(true)` is observed, so a `tree` / `tree_unavailable`
 ///    observation appears in driver 2's stream that no TUI script asked for.
 ///    Those are dropped here; a scenario that *scripts* the navigator would
@@ -1211,7 +1210,6 @@ fn drive_config(
             if !attach_actions_sent && matches!(event, HostEvent::AgentAttached(true)) {
                 attach_actions_sent = true;
                 for action in crate::agent_stdio::actions_on_successful_attach(
-                    false,
                     true,
                     topology_enabled
                         && plakous_hosted::topology_runtime::lookup(&tree_id).is_some(),

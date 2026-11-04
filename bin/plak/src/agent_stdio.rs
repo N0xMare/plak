@@ -20,19 +20,16 @@ use plakous_hosted::topology_runtime;
 const JOIN_TIMEOUT: Duration = Duration::from_secs(30);
 const EVENT_POLL: Duration = Duration::from_millis(20);
 const ACTION_RETRY: Duration = Duration::from_secs(2);
-const RESUME_WAIT: Duration = Duration::from_secs(5);
 const IDLE_STEER_MESSAGE: &str = "steer is only valid while a turn is busy";
 
 /// Attach the product host and drive it from JSONL stdin until quit or EOF.
 pub fn run_agent_stdio(
     config: HostConfig<crate::surface_protocol::PlakExtension>,
-    resume_tree: bool,
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
 ) -> CliResult<ProcessOutcome> {
     let outcome = run_agent_stdio_with_input(
         config,
-        resume_tree,
         stdout,
         stderr,
         std::io::BufReader::new(std::io::stdin()),
@@ -63,14 +60,12 @@ pub fn run_agent_stdio(
 
 fn run_agent_stdio_with_input(
     config: HostConfig<crate::surface_protocol::PlakExtension>,
-    resume_tree: bool,
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
     input: impl BufRead + Send + 'static,
 ) -> CliResult<ProcessOutcome> {
     run_agent_stdio_stopping_on(
         config,
-        resume_tree,
         stdout,
         stderr,
         input,
@@ -92,7 +87,6 @@ fn run_agent_stdio_with_input(
 )]
 fn run_agent_stdio_stopping_on(
     mut config: HostConfig<crate::surface_protocol::PlakExtension>,
-    resume_tree: bool,
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
     input: impl BufRead + Send + 'static,
@@ -158,16 +152,13 @@ fn run_agent_stdio_stopping_on(
     let mut tree_state = "unknown".to_owned();
     let mut turn_busy = false;
     let mut shutdown_started = Instant::now();
-    let mut attached_at = Instant::now();
     let mut pending_stdout: Vec<String> = Vec::new();
 
-    let mut resume_sent = false;
     let mut navigator_opened = false;
     let mut pending_command: Option<(
         Instant,
         plakous_hosted::product_observation::JsonlCommandKind,
     )> = None;
-    let mut refuse: Option<String> = None;
 
     // A panic anywhere in the drive would unwind past the terminal record and
     // leave a JSONL client at end of stream with no `bye` and no `error` —
@@ -259,22 +250,16 @@ fn run_agent_stdio_stopping_on(
                         }
                         if matches!(event, HostEvent::AgentAttached(true)) {
                             attached = true;
-                            attached_at = Instant::now();
-                            let need_resume = resume_tree && !resume_sent;
                             let need_navigator = !navigator_opened;
                             // A home may enable orchestration before this
                             // session has ever created a tree. The idle host
                             // pushes its first tree revision if one appears.
                             let hub_attached = topology_runtime::lookup(&tree_id).is_some();
                             for action in actions_on_successful_attach(
-                                need_resume,
                                 need_navigator,
                                 topology_enabled && hub_attached,
                             ) {
                                 send_action(&actions, action)?;
-                            }
-                            if need_resume {
-                                resume_sent = true;
                             }
                             if need_navigator && topology_enabled && hub_attached {
                                 navigator_opened = true;
@@ -282,7 +267,6 @@ fn run_agent_stdio_stopping_on(
                         }
                         if matches!(event, HostEvent::AgentAttached(false)) {
                             attached = true;
-                            attached_at = Instant::now();
                             shutting_down = true;
                             shutdown_started = Instant::now();
                             begin_shutdown(&actions, busy)?;
@@ -291,70 +275,46 @@ fn run_agent_stdio_stopping_on(
                     Err(RecvTimeoutError::Timeout) => {}
                     Err(RecvTimeoutError::Disconnected) => break,
                 }
-                if attached && !hello_sent && refuse.is_none() {
-                    // Admission resolved `--resume-tree` against the durable tree.
-                    // If that tree exists, a missing hub must wait for its
-                    // registration and explicit resume before hello.
-                    let paused = topology_runtime::hub_tree_is_restored_paused(&tree_id)
-                        .unwrap_or(resume_tree);
-                    match hello_gate(resume_tree, paused, attached_at.elapsed() >= RESUME_WAIT) {
-                        HelloGate::Wait => {}
-                        HelloGate::RefusePaused => {
-                            let text = crate::refusal_text::paused_tree_text(
-                                crate::notice_text::RemedyContext {
-                                    frontend: crate::notice_text::Frontend::Jsonl,
-                                    session_id: Some(&session_id),
-                                },
-                            );
-                            refuse = Some(text.clone());
-                            write_line(&mut stdout, &diagnostic_line(None, &text))?;
-                            shutting_down = true;
-                            shutdown_started = Instant::now();
-                            begin_shutdown(&actions, busy)?;
-                        }
-                        HelloGate::Hello => {
-                            if tree_state == "unknown" {
-                                tree_state = "live".to_owned();
-                            }
-                            let (javascript_host, javascript_host_target) =
-                                crate::sidecars::js_host::hello_status();
-                            let (python_host, python_host_target) =
-                                crate::sidecars::python_bundle::python_host_hello_status();
-                            let python_available =
-                                crate::build_features::require_feature("python").is_ok();
-                            let elapsed_ms = u64::try_from(process_started.elapsed().as_millis())
-                                .unwrap_or(u64::MAX);
-                            let handshake = format!(
-                                "{}\n{}",
-                                hello_line(
-                                    None,
-                                    &session_id,
-                                    &tree_id,
-                                    account.as_deref(),
-                                    model.as_deref(),
-                                    effort.as_deref(),
-                                    &composition,
-                                    &tree_state,
-                                    Some(&javascript_host),
-                                    Some(javascript_host_target),
-                                    python_available.then_some(python_host.as_str()),
-                                    python_available.then_some(python_host_target),
-                                    Some(&crate::build_features::compiled_features()),
-                                    Some(elapsed_ms),
-                                ),
-                                ready_line(None, Some(elapsed_ms))
-                            );
-                            writeln!(stdout, "{handshake}")
-                                .map_err(|_| CliFailure::new("stdout failed"))?;
-                            stdout
-                                .flush()
-                                .map_err(|_| CliFailure::new("stdout failed"))?;
-                            for line in pending_stdout.drain(..) {
-                                write_line(&mut stdout, &line)?;
-                            }
-                            hello_sent = true;
-                        }
+                if attached && !hello_sent {
+                    if tree_state == "unknown" {
+                        tree_state = "live".to_owned();
                     }
+                    let (javascript_host, javascript_host_target) =
+                        crate::sidecars::js_host::hello_status();
+                    let (python_host, python_host_target) =
+                        crate::sidecars::python_bundle::python_host_hello_status();
+                    let python_available = crate::build_features::require_feature("python").is_ok();
+                    let elapsed_ms =
+                        u64::try_from(process_started.elapsed().as_millis()).unwrap_or(u64::MAX);
+                    let handshake = format!(
+                        "{}\n{}",
+                        hello_line(
+                            None,
+                            &session_id,
+                            &tree_id,
+                            account.as_deref(),
+                            model.as_deref(),
+                            effort.as_deref(),
+                            &composition,
+                            &tree_state,
+                            Some(&javascript_host),
+                            Some(javascript_host_target),
+                            python_available.then_some(python_host.as_str()),
+                            python_available.then_some(python_host_target),
+                            Some(&crate::build_features::compiled_features()),
+                            Some(elapsed_ms),
+                        ),
+                        ready_line(None, Some(elapsed_ms))
+                    );
+                    writeln!(stdout, "{handshake}")
+                        .map_err(|_| CliFailure::new("stdout failed"))?;
+                    stdout
+                        .flush()
+                        .map_err(|_| CliFailure::new("stdout failed"))?;
+                    for line in pending_stdout.drain(..) {
+                        write_line(&mut stdout, &line)?;
+                    }
+                    hello_sent = true;
                 }
 
                 // A signal stops this face the way end of input does. Ctrl-C
@@ -440,11 +400,8 @@ fn run_agent_stdio_stopping_on(
                                 session_id = %session_id,
                             )
                             .entered();
-                            match &command {
-                                AgentCommand::Tree { .. } | AgentCommand::ResumeTree { .. } => {
-                                    pending_tree_snapshot_id = Some(cmd_id.clone());
-                                }
-                                _ => {}
+                            if matches!(command, AgentCommand::Tree { .. }) {
+                                pending_tree_snapshot_id = Some(cmd_id.clone());
                             }
                             if matches!(command, AgentCommand::Quit { .. }) {
                                 quit_id = Some(cmd_id.clone());
@@ -488,9 +445,6 @@ fn run_agent_stdio_stopping_on(
                 }
             }
 
-            if let Some(message) = refuse {
-                return Err(CliFailure::new(message));
-            }
             Ok(())
         },
     )) {
@@ -710,33 +664,14 @@ fn read_frame(input: &mut impl BufRead, limit: usize) -> std::io::Result<Option<
 }
 
 pub(crate) fn actions_on_successful_attach(
-    send_resume: bool,
     send_navigator: bool,
     topology_available: bool,
 ) -> Vec<UserAction> {
     let mut actions = Vec::new();
-    if send_resume {
-        actions.push(UserAction::ResumeTopologyTree);
-    }
     if send_navigator && topology_available {
         actions.push(UserAction::OpenTopologyNavigator);
     }
     actions
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HelloGate {
-    Wait,
-    Hello,
-    RefusePaused,
-}
-
-fn hello_gate(resume_tree: bool, paused: bool, wait_elapsed: bool) -> HelloGate {
-    match (paused, resume_tree, wait_elapsed) {
-        (true, false, _) | (true, true, true) => HelloGate::RefusePaused,
-        (true, true, false) => HelloGate::Wait,
-        (false, _, _) => HelloGate::Hello,
-    }
 }
 
 fn emit_lines(

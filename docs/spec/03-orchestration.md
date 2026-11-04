@@ -990,7 +990,7 @@ rolled up:
 | `blocked` | `{ quota, account, resets_at? }`; `resets_at` only when the provider's own retry disposition said when |
 | `failure` | `{ kind, message }` from the fault the host recorded |
 | `usage` | `elapsed_ms`, `turns`, `tool_calls`, `input_tokens`, `output_tokens` |
-| `waiting_on` | while the child is parked (§5.2), or waiting for a transient continuation: `network: true` names live route readiness; otherwise `{ processes: ["p3"], agents: ["c2"] }`, its own running processes and its children that are still live work; both lists empty is the explicit parked marker (an arrival already woke it, or a resume holds it for its reopen wake); absent while a wake is admitted or the attempt is ending; process-local |
+| `waiting_on` | while the child is parked (§5.2), or waiting for a transient continuation: `network: true` names live route readiness; otherwise `{ processes: ["p3"], agents: ["c2"] }`, its own running processes and its children that are still live work; both lists empty is the explicit parked marker (an arrival already woke it); absent while a wake is admitted or the attempt is ending; process-local |
 
 A wait returns when a watched child **settles, asks a question, replies, or
 sends urgent mail**. Deferred finding/coordinate mail does not wake it; it
@@ -1197,8 +1197,7 @@ then ends the node.
 The Agents list's `u`, after its confirmation pop-up, is the same port for
 one child: `RecoverTopologyNode` names the tree, the snapshot revision, the
 agent and the attempt. The host refuses a different tree (`this session has a different tree`), a revision that
-has moved (`stale tree revision`), a paused tree (`Resume agents first`),
-a closed tree (`tree is closed`),
+has moved (`stale tree revision`), a closed tree (`tree is closed`),
 a root, a child that is not `failed` or `recovery_required` (or has no attempt),
 or a different attempt
 (`attempt mismatch`) before it calls this port. Failed-idle is eligible: the
@@ -1208,15 +1207,15 @@ cleanup). A matching call is
 `ProductChildRecoverer::recover` with that attempt. It is not the root
 `Recover` intent and not an `invoke_tool` of `recover_agent`. The call
 runs on the host executor without holding the tree mutex across the lease
-wait. The hub tracks that task apart from the background pass. Shutdown
-waits up to `HOST_SHUTDOWN_RELEASE_TIMEOUT`, then aborts it, before any
-lease is released. Quit or `/reload` uses that same shutdown.
+wait. The hub tracks that task with the tree's other `recover_node` runs.
+Shutdown waits up to `HOST_SHUTDOWN_RELEASE_TIMEOUT`, then aborts it, before
+any lease is released. Quit or `/reload` uses that same shutdown.
 
 `recover_agent` is the one trigger that waits on a lease: it waits up to 35
-seconds for a lapsed owner's lease and then refuses. It polls: each try takes
-the tree's reattach lock and never waits on the lease, and the lock is released
-between tries, every two seconds, so a held lease never stalls the tree's other
-recoveries, recycles, or reattaches. What it settles,
+seconds for a lapsed owner's lease and then refuses. It polls: each try holds
+the child for one recovery and never waits on the lease, and the child is
+released between tries, every two seconds, so a held lease never stalls a
+recycle or another recovery of it. What it settles,
 and how, is section 14.2. Nothing a child ran is replayed — no model call, no
 tool. A refusal before the session settlement is published never settles the
 attempt and records no fault on the node; the reopen it attempted may have
@@ -1242,8 +1241,8 @@ An already-terminal root with only exact same-turn finalization debt closes
 quiescently on reopen (chapter 01 §5.5), without another result or
 abandonment report. The fenced turn waiter's successful recycle then settles
 the attempt as an ordinary failed attempt (`turn_abandoned`), not
-`recovery_required`; an explicit `recover_agent` settles such a quiescent
-reopen as `RecoveredWithoutTurn` (`recovered_without_turn`).
+`recovery_required`; an explicit `recover_agent` of such a quiescent reopen
+interrupts the child with cause `owner_lost`, attempt kept (law L, §14.1).
 An abandonment report already proves a successful recycle; only a reopen
 without that report needs a quiescent-head probe. A probe failure is logged as
 such and keeps the attempt recovery-required; it is not a reopen failure.
@@ -1945,7 +1944,7 @@ that session failure's kind on the attempt; settling the session (section
 `seal_failed`. A seal that failed on its own (`seal_failed`) is not retried
 by recovery and reports `mint_unavailable` with the seal diagnostic. An
 interrupted seal reports `recovery_vcs_ambiguous` (section 14.2). Neither is
-settled by the automatic recovery pass or by `recover_agent`; the operator
+settled by a `recover_node` run or by `recover_agent`; the operator
 inspects the copy and closes the node.
 
 ### 6.6 Dormant checkout reclamation
@@ -3287,7 +3286,8 @@ stays empty. `append_epoch` (§1.2) is the only writer of
 `agent_tree_epochs` rows and of a non-zero `current_epoch` or `epoch_no`; a
 save after it writes the new row, moves `current_epoch` and the root's
 `epoch_no`, and deletes the rows it folded, in the tree's one save
-transaction. The state CHECK still admits `restored_paused`.
+transaction. The state CHECK still admits `restored_paused`, a spelling no
+current tree writes; it reads as `live` (§14.1).
 
 **Custody.** `agent_tree_custody` holds one fenced claim per tree, naming one
 host process by its stable `host_id`, its typed process instance, its binary id
@@ -3409,8 +3409,8 @@ a child, or by a root that is not attaching) arms no dormancy watch and is not
 ended at the host's quit either: it stays resident until a root attaches and
 releases it, or the process ends (an open residency item). A takeover needs `HolderGone` or a
 released record; another process's attach is refused with the typed
-`tree_hosted_elsewhere` refusal. After a takeover the reopen hold and the
-background recovery pass run unchanged.
+`tree_hosted_elsewhere` refusal. After a takeover the reopen law and the
+custody take's `recover_node` runs apply unchanged (§14.1).
 
 **There is no migration.** A schema change moves the product's state directory
 (chapter 02 §2.5); an older store stays in its own directory and is never read. The store fails closed on a **DDL
@@ -3453,8 +3453,8 @@ to reconstruct the saved round, re-enters its gate and retries the same
 `plak:resume-transient:{agent}:{attempt}:{round}` identity. A prepared exact
 Resume keeps its original prompt/mail batch rather than being withdrawn like a
 generation-dependent corrective command. Accepted commands are never replayed.
-The reopened gate holds a cancellable hub startup reservation, not the global
-reattach lock; interruption, close and hub shutdown release the session.
+The reopened gate holds a cancellable hub startup reservation; interruption,
+close and hub shutdown release the session.
 While waiting for reachability, live list/wait `waiting_on` includes
 `network: true`, and the host tree view includes `network`. This label is not
 persisted recovery authority.
@@ -3471,19 +3471,10 @@ it. A second child stale answer is `recovery_session_unavailable`, not a held
 lease or another adoption opportunity. No artifact lookup advances or repairs
 a checkpoint.
 
-A restored tree opens `restored_paused` and does not dispatch until the user
-resumes it; a tool call meanwhile is `tree_restored_paused`. Root rebind
-follows the settled-tree predicate.
-An attached runtime mirrors whether its last installed admission state is
-`restored_paused` in an atomic predicate. Initialization and every live-tree
-mutation guard publish that predicate before unlocking, including installation
-of a detached mutation or rollback. Pause and hello gates read it without
-taking the tree mutex: contention never means paused, and a real pause remains
-visible while the mutex is held. A missing hub remains distinct from a live
-one, so the JSONL resume handshake still waits for attachment.
-`paused` is a presentation overlay on a folded `running` node, accessed through
-`NodeRecord::presentation_status`; restore and resume change tree admission,
-not child statuses. Interrupted, sealing and terminal statuses are never hidden.
+A restored tree opens live (the reopen law below); nothing pauses it. A
+stored `restored_paused` or `interrupted` admission from an earlier build reads
+as `live` and is not written again. Root rebind follows the settled-tree
+predicate. `NodeRecord::presentation_status` is the node's own status.
 
 An unresolved seal reservation, or a workspace row observed `adopting`, is
 `recovery_required` and MUST NOT auto-retry: the subprocess may have completed.
@@ -3507,49 +3498,100 @@ The root is never `recovery_required`: nothing can recover it, so an adopt
 landing into the root is recorded as the root's fault reason instead, and a
 root persisted `recovery_required` reopens `running`.
 
-A child that was mid-turn when its parent's process was lost is reopened on
-reattach, and that open abandons the turn the lost process left (Plakous
-§13.1). The attempt then ends `failed { kind: "turn_abandoned" }` with the
-abandonment's operator line as its message, the node is `failed` and idle, its
-partial work is sealed like any failed attempt's, and one `result` mail goes to
-the parent. A child whose own turn a live owner fenced is recovered the same
-way at once, without waiting for the parent: its session is released and
-reopened as soon as the turn settles. Only a reopen that cannot abandon — the
-session cannot be opened, or its head is some other unresolved shape — leaves
-the node `recovery_required`; that status remains only for such heads and
-for seal, adopt and retirement ambiguity.
+**The reopen law.** What the lost process left in flight was its lost owner's
+(design laws L and R). A reopen marks only what the tree rows prove:
 
-A child the previous process left parked (§5.2) is recognised from durable
-rows alone: a `running` node whose current attempt is
-open and unsubmitted, with no bound turn, no active turn, a session, and at
-least one turn already spent or a child command intent (a retained-head
-seed may no longer observe earlier turns). An unstarted spawn or fresh
-followup with neither has no parked work; an interrupted node is `interrupted`.
-Reattach, which runs after a
-`restored_paused` tree resumes, reopens each one and admits one wake (§8):
-processes stopped at release come back as terminal notices in that turn, and
-its end parks, nudges or settles as usual. A reopen that abandons a turn or
-cannot open the session settles as for an in-flight child, its await receipts
-settled from the abandoned head's committed history. No wake runs while the
-tree is `restored_paused`. Resuming the tree holds each such child for its
-wake until reattach has run it. While held, its rows carry the empty
-`waiting_on` parked marker and mail sent to the child waits for that wake (it
-never starts a second turn beside it). An interrupt or close ends the hold:
-the child becomes `interrupted` (or closed) and no wake or rejoin runs for it.
-The reopen wake moves the hold to an admission state before any Start or
-bind, and its reservation, bind and rejoin each re-check it under the live
-lock, so an interrupt that lands meanwhile refuses the Start (or cancels the
-rejoined turn) instead of being written back to `running`; the session is
-released and any batch prepared for a Start that was refused before the
-runtime admitted it is settled unread. A turn the runtime had already
-admitted carried its batch into history: a rejoined turn that is cancelled,
-and a reopen wake whose bind is refused after admission, settle that batch
-accepted, so the resume does not deliver it again. The parked
-set, the hold and `waiting_on` are process-local.
+- In-flight VCS is faulted as above.
+- A running child the rows show parked between turns is interrupted with
+  cause `owner_lost` by an anchored interrupt intent, its attempt, subtree and
+  surviving processes kept. Parked between turns means a `running` node whose
+  current attempt is open and unsubmitted, with no bound or active turn, a
+  session, and at least one turn of that attempt spent (an accepted command of
+  the attempt, or a pending transient Resume, proves one when a retained-head
+  seed no longer counts it). An unstarted spawn or fresh followup, even one
+  whose Start was prepared, has none and is not marked.
+- **Exempt from that mark:** a parked child with a Wake or mail Start command
+  the lost process prepared for its current attempt that no fact names and the
+  tree has not withdrawn. That start may have been admitted, so the child is
+  owed a `recover_node` instead.
+- A running child with a bound or active turn is owed a `recover_node`; so is
+  an interrupted one, whose interrupt was written before its turn's terminal
+  was projected.
+- An interrupted child with a command that no fact names and the tree has
+  not withdrawn is owed a `recover_node` too, which finishes the withdrawal.
 
-Before that wake dispatches, the tree projector applies the child's feed to its
-tail (§14.3), which settles the child's await receipts (§4.4), and a spent
-`max_turns` ends the attempt `blocked` as the live path does, its subtree closed
+An owed child takes no turn until its `recover_node` ran in this process:
+mail for it is not delivered (the send waits as for a busy slot, `SlotBusy`,
+and the mail stays durable), and an interrupt of it takes effect and ends
+what its `recover_node` would rejoin. The owed set is process-local; every
+custody take rebuilds it from the tree rows. The first root attach after a
+custody take runs `recover_node` for every owed child, descendants first,
+before the root actor's first open; the root actor's open then starts one more
+background run over the tree (below). Each run holds a child for its whole
+recovery; another run skips a child that is held, a live turn, startup or
+retirement owns, or a turn waiter's recycle owns.
+
+`recover_node` opens the child's session exactly and lets the open decide:
+
+- **Exempt, rejoined:** an open that restores the lost turn (`RestoredWorking`:
+  a decision barrier, or an admitted Start not yet dispatched) rejoins it. A
+  bound turn occupies the child's live slot under a new waiter; an exempt
+  parked start rejoins through the parked rejoin, which binds the turn to the
+  command that admitted it. The child is not marked.
+- **Marked:** any other open (the open closed the lost turn as abandoned, or
+  found no turn) marks the child right after the open: the interrupt with cause
+  `owner_lost` is written first, then the reopened session is released and the
+  feed its open left is projected, so the abandoned turn's terminal folds as
+  the interrupted turn's. A prepared command that feed does not name never ran
+  and is withdrawn, its mail unread; a turn binding no terminal released is
+  released. The owed mark settles last, so no delivery sees the child between
+  the mark and the projection.
+- A refused open leaves the child owed, takes no new turn, and records the
+  refusal as its fault.
+
+Inside a feed fold, law L applies in place: the terminal of a turn an exact
+open closed (or a resumable turn a recovery reopen cancelled) interrupts its
+`running` node, keeps the attempt open with no failure, and lifts the
+retryable `recovery_required` the old law left; the abandonment is recorded
+once on the node. A rebuild of the same feed applies it again. Neither path
+ends the attempt, seals the copy, or sends a result: nothing is reported to the
+parent for a lost turn. An attempt that already ended, or that submitted a
+result, has no lost turn: its unresolved release settles as before, a submitted
+result completing the attempt. A child whose copy is in an unknown VCS step
+keeps `recovery_required` and leaves only by `close_agent`; its session part
+still settles.
+
+*Durable before and after.* The parked mark: before the reopen the rows hold a
+running parked child and no interrupt intent; after it they hold one anchored
+`owner_lost` interrupt intent for its current attempt, nothing else. The bound
+mark: before `recover_node`, the bound turn and the child session's head the
+lost process left; after it, the interrupt intent, the feed records the exact
+open wrote (an abandoned terminal or none), the projection of those records,
+and the withdrawn unadmitted commands. A rejoin writes the turn's binding to
+its waiter and no mark. A crash between any two of these leaves rows the next
+reopen classifies the same way: an intent written is folded again, never
+duplicated (it is keyed by its fold position); a child marked but not yet
+projected is interrupted and still bound, so it is owed again and its next
+`recover_node` projects the feed, withdraws what never ran and releases the
+binding; a child whose mark projected its feed but did not reach the
+withdrawal is owed again for the commands still unresolved; an owed child is
+owed again.
+
+*The reopen is idempotent.* The mark reads durable rows only and its intent is
+keyed, so two reopens of the same rows mark the same children once; a reopen
+of rows an earlier reopen already marked finds those children `interrupted`,
+not running, and marks nothing. Deleted views prove nothing until the feed
+rebuilds them: such a child is neither marked nor owed at reopen, and its
+`recover_node` judges the rebuilt rows by the same law.
+
+A child whose own turn a live owner fenced is recovered at once, without
+waiting for the parent: its turn waiter releases and reopens the session as
+soon as the turn settles and records the outcome itself (section 14.2). The
+parked set and `waiting_on` are process-local.
+
+Before a parked child's wake dispatches, the tree projector applies the
+child's feed to its tail (§14.3), which settles the child's await receipts
+(§4.4), and a spent `max_turns` ends the attempt `blocked`, its subtree closed
 and processes stopped. Every child command is an `agent_commands` intent written
 before submission, and what became of it is the child feed's
 `CommandAccepted` or `CommandRejected` fact with that command id:
@@ -3572,14 +3614,9 @@ before submission, and what became of it is the child feed's
   will name, is withdrawn with its mail unread. An accepted command binds no
   turn onto a node an interrupt or close settled; its batch, already in
   history, is still acknowledged.
-- A command with neither fact was never recorded. A single unrecorded command
-  of the current attempt — a wake, a mail Start, a followup — wins over a new
-  wake: it is submitted again exactly, under its own command id and text, so
-  nothing starts twice. Several unrecorded commands have no single exact retry
-  and are withdrawn (their mail unread) for one fresh wake. A command whose id
-  names an earlier attempt is never submitted onto the current one; it is
-  withdrawn. An unrecorded corrective round is withdrawn and its round is
-  re-derived from the attempt's state.
+- A command with neither fact was never recorded. After a process loss
+  nothing submits it again: the owner-lost mark withdraws it with its mail
+  unread (the reopen law above).
 
 A tree cursor that reached a child's tail through a `BehindRetention` rebuild
 proves nothing below `feed_retained_from`: an `agent_commands` intent with no
@@ -3591,10 +3628,7 @@ acceptance with `feed_retained_from == 0` is an integrity refusal. A `Reclaimed`
 refusal also settles as consumed, its batch acknowledged and nothing derived
 from it. This rule does not depend on an acknowledgement's `feed_seq`, which
 may be absent on a reopened receipt. Both the
-Start and the parked-wake submission sites apply this; a reopen wake whose
-feed pass went behind retention withdraws none of the several unresolved
-commands, and submits their ordered retry queue on one reopened attachment,
-continuing past consumed acknowledgements before starting a fresh wake. The pass
+Start and the parked-wake submission sites apply this. The pass
 writes keyed `agent_operations` intents of kind `behind_retention_command` for the
 unresolved command identities, atomically with its cursor. These markers survive
 cursor catch-up and a process loss between retries: each remaining marked
@@ -3608,8 +3642,7 @@ identities and resubmits consumed commands under the same identities; their
 duplicate acknowledgements reproduce the same consumed settlement and mail
 acknowledgement without running them again.
 A fresh wake skips any identity already settled consumed; this chooses a new
-command id, not a spent turn. The hold and interrupt checks remain in force
-between consumed acknowledgements and the next submission.
+command id, not a spent turn.
 
 A turn binds to at most one attempt. An accepted command whose attempt already
 binds another turn fails closed: the binding is untouched, the recovered turn is
@@ -3641,11 +3674,11 @@ session failure (`turn_recovery_required`, `session_retirement`, or a startup
 or materialization failure) to a terminal outcome. The ordered session-binding
 intent can instead clear its exact materialization failure and continue running
 (§14.3); close, seal completion, adoption and replayed binding never clear it.
-Terminal recovery ends the current attempt `failed` with kind
-`turn_abandoned` (the reopen abandoned the lost turn, message its operator line),
-`recovered_without_turn` (the head was quiescent and no result exists), or
-`spawn_refused` (the startup never produced a session; see the replay below).
-One exception preserves result authority: a quiescent reopen of retirement-only
+A lost turn is never settled here: law L (§14.1) interrupts its child and keeps
+the attempt open. Terminal recovery settles only an attempt with no lost turn:
+one that already ended or submitted and whose release alone was uncertain, and
+one whose startup never produced a session, which ends `failed` with kind
+`spawn_refused` (see the replay below). A quiescent reopen of retirement-only
 uncertainty with a durably submitted result settles `completed`, retaining that
 result and clearing the retirement failure. An actually abandoned turn, or a
 recorded authoritative terminal failure, still settles failed even with submitted
@@ -3725,9 +3758,11 @@ fault, seal state and copy are left untouched: it stays `recovery_required`,
 the receipt's `workspace_recovery` names the remaining blocker, and
 `close_agent` ends the node once the operator has inspected the copy.
 
-The host settles a child by reopening its session exactly (§14.1). A head that
-restores a resumable working turn is cancelled and released, never rejoined,
-and settles as `turn_abandoned`. A head that requires effect evidence is
+The host settles a child by reopening its session exactly (§14.1). Here (for
+`recover_agent` and an unresolved session outcome; an owed child's
+`recover_node` rejoins instead, §14.1) a head that restores a resumable working
+turn is cancelled and released, never rejoined, and the child is interrupted
+(law L). A head that requires effect evidence is
 refused `recovery_effect_evidence_refused`: the product holds no
 executor-owned effect evidence to finalize it with. A startup that never
 published a session locator is settled by replaying the spawn's own
@@ -3763,18 +3798,18 @@ refusal of that create stays a retryable refusal,
 
 A recovery reopen settles nothing on its own: what it closed is in the child's
 feed, and the attempt's settlement is the tree projector's application of that
-record (§14.3). A child's `TurnTerminal` abandonment fact derives
-`turn_abandoned` with its operator line, in this process or any later one; so
-does the closure record of a turn whose terminal was `RecoveryRequired` (it
+record (§14.3). A child's `TurnTerminal` abandonment fact applies law L, the
+abandonment recorded once with its operator line, in this process or any later
+one; so does the closure record of a turn whose terminal was `RecoveryRequired` (it
 finalizes the turn's operations and appends its history with no second
 terminal), when its `feed_terminal` read reports the abandonment. If
 the tree transaction that would record it is refused, the tree cursor stays
 behind and the refusal is `recovery_storage_unavailable`; the next attempt
 applies the same record and settles the same way. There is no in-process memory
-of an observed abandonment. `recovered_without_turn` is derived only when the
-child's feed, applied to its tail, holds no terminal for the attempt's bound
-turn and its head is quiescent; its message says no abandonment evidence is
-available, never that nothing was abandoned. A locator advance is a view and is
+of an observed abandonment. When the child's feed, applied to its tail, holds
+no terminal for the attempt's bound turn and its head is quiescent, the child is
+interrupted the same way; its note says no abandonment evidence is available,
+never that nothing was abandoned. A locator advance is a view and is
 never published separately. Refusals record no fault reason and no failure kind
 change.
 
@@ -3791,7 +3826,7 @@ An explicit retry in the same process publishes the recorded state before
 returning even a no-op receipt; it does not rerun the seal or claim to have
 settled the session a second time.
 For an already-settled, failed-idle child this retry is `recover_agent`, not
-`/recover`: the background pass only selects unresolved child session outcomes.
+`/recover`: a `recover_node` run only selects unresolved child session outcomes.
 A dirty whole-tree revision alone does not identify which child's recovery
 outcome has not yet been reported; it is not automatic child recovery authority.
 
@@ -3801,50 +3836,40 @@ Settlement has three triggers:
   including the Agents list's confirmed `u` (`RecoverTopologyNode`), which
   uses that port and no other;
 
-- the tree's background pass. One is started by the tree's custody-attach
-  scan, which runs once per custody take: the first root attach after this
-  process takes the tree's custody rejoins the tree's in-flight children, and
-  the first root open after it starts the pass; a later open of a tree
-  already in custody starts none. One is also started per `ResumeTree`
-  (from the idle loop or during a running turn), per returned child startup or
-  retirement release with recorded fault or remaining recovery need (including
-  release/publication failure), per next-prompt or `/recover`
-  recovery of an interrupted root turn, and per explicit `/recover` with no
-  interrupted root turn; it never runs on a `restored_paused` tree, and an
-  explicit `/recover` on one says the tree is paused and that resuming it
-  recovers its children. The host loop never waits on it. The hub keeps the
-  pass's task, at most one at a time. A start while one runs is not dropped:
-  the running pass runs once more before it reports, so a child that became
-  recoverable meanwhile is tried, and its one report lists every child either
-  run recovered and what the last run refused or did not reach. Release-triggered
-  passes publish the recovered tree view and log their report. An explicit
-  `/recover` says so, and one that starts a pass with children to try says so;
-  one that starts a pass with no child to try answers `nothing to recover`
-  itself, before the next intent, rather than from the pass, which a quit
-  right after it would abort before it reported. The pass takes the
-  tree's reattach lock, tries each child with an unresolved session failure
-  once, never waits on a lease (a held lease is `recovery_lease_held` at
-  once), and has 60 seconds from when it was started, waiting for the lock
-  included; children it did not reach are reported as not attempted. Quit and
-  `/reload` wait briefly for a running pass at hub shutdown and then abort it,
-  before any lease is released (below).
+- a `recover_node` run over the tree: the custody take's (the first root
+  attach after this process takes the tree's custody runs `recover_node` for
+  every owed child, and the first root open after it starts one background
+  run; a later open of a tree already in custody starts none), one per
+  returned child startup or retirement release with recorded fault or
+  remaining recovery need (including release/publication failure), one per
+  next-prompt or `/recover` recovery of an interrupted root turn, and one per
+  explicit `/recover` with no interrupted root turn. A run tries the owed
+  children first, then each child with an unresolved session outcome, each
+  held for its own recovery; it never waits on a lease (a held lease is
+  `recovery_lease_held` at once) and has no deadline. The host loop never
+  waits on it. Runs may overlap: a run skips a child another holds, and that
+  run reports it. The hub tracks every run; quit and `/reload` wait briefly
+  for running ones at hub shutdown and then abort them, before any lease is
+  released (below). Release-triggered runs publish the recovered tree view and
+  log their report. An explicit `/recover` says so, and one that starts a run
+  with children to try says so; one that starts a run with no child to try
+  answers `nothing to recover` itself, before the next intent, rather than from
+  the run, which a quit right after it would abort before it reported.
 
 A fenced child's turn waiter releases and reopens the child session itself
-(section 14.1). Its reopen may wait out a lease, so it never holds the
-reattach lock while it does: the node is marked as owned by the waiter under
-that lock before its live entry goes, the lock is released for the reopen, and
-it is retaken to record the outcome and clear the mark. The mark is held by a
-guard, so a recycle that panics or is cancelled clears it too. Recovery treats the
-mark as a live owner (`recovery_owner_live`) and reattach leaves the node to
-the waiter.
+(section 14.1). Its reopen may wait out a lease. The node is marked as owned by
+the waiter before its live entry goes, and the mark is cleared only once the
+outcome is recorded; it is held by a guard, so a recycle that panics or is
+cancelled clears it too. A recovery reads the live entry, then the mark, so it
+treats the child as owned (`recovery_owner_live`) throughout, and the custody
+scan leaves the node to the waiter.
 
-Each host-loop-requested pass that settled, refused, or skipped anything reports
-once to the user as a system note naming the children it recovered, each refused
-child with its `recovery_*` code, and the children not attempted. A refusal note names
+Each host-loop-requested run that settled or refused anything reports once to
+the user as a system note naming the children it recovered (interrupted, attempt
+kept) and each refused child with its `recovery_*` code. A refusal note names
 `recover_agent` as the retry and explains that `/recover` only selects unresolved
-child sessions, not an already-settled child's pending publication. A
-not-attempted note may also name `/recover` as a retry. A child whose session
-settled but
+child sessions, not an already-settled child's pending publication. A child
+whose session settled but
 whose seal or adopt is still ambiguous is listed as refused
 (`recovery_vcs_ambiguous`), never as recovered. A VCS-ambiguous child stays
 `recovery_required`; `list_agents` and `/tree` show it.
@@ -3891,7 +3916,7 @@ tree asked for, what it derived from its sessions' change feeds (chapter 01
 
 | State | Class | Identity or source |
 | --- | --- | --- |
-| Tree identity, selected tuple, launch checkout, frozen snapshot, admission state (`live`, `interrupted`, `restored_paused`, `tree_terminal`, `closed`), host generation | intent | the root session; `ResumeTree`, interrupt and close requests |
+| Tree identity, selected tuple, launch checkout, frozen snapshot, admission state (`live`, `interrupted`, `restored_paused`, `tree_terminal`, `closed`), host generation | intent | the root session; interrupt and close requests |
 | Node ancestry, brief, template, tuple, account, effort, tier, workspace id, path, branch; grants | intent | the spawn request (`request_key`, spawn identity) |
 | Child-to-runtime-session association | external-effect record | `agent_operations` of kind `child_session`, keyed by child id, records the exact locator allocated by the create effect; another session or branch is refused |
 | Node session locator | view | the child session's `Created` and newest record on its branch |
@@ -3982,16 +4007,13 @@ A successful withdrawal, its opening envelope's `undeliverable_mail` decision
 and the send's terminal failure receipt publish in one `fold_and_commit` CAS.
 A refused CAS retains all three parts of the complete opening. A definitive
 Start refusal settles the opening too; no withdrawn envelope can reach a later Start.
-The later automatic recovery pass exact-opens and owns the child session. If
-its authoritative head is quiescent with no admitted Start or abandonment,
-the existing `host_recovery` / `recovered_without_turn` decision settles the
-opened attempt as failed and sends its parent a failure result. It does not
-leave a clean opening requiring an explicit `recover_agent` call. Recovery
-captures the opened attempt's unread opening envelope as an existing
-`undeliverable_mail` intent in the same acknowledged save as `host_recovery`;
-the mail projection settles it read. It cannot be counted as unread, carried
-in a later attempt's Start, or used to wake that attempt. Replaying recovery
-consumes only that original envelope, never a later followup's mail.
+A later `recover_node` run exact-opens and owns the child session. If its
+authoritative head is quiescent with no admitted Start or abandonment, the
+child is interrupted with cause `owner_lost` and the opened attempt kept
+(§14.1); nothing is reported to the parent. It does not leave a clean opening
+requiring an explicit `recover_agent` call. The opened attempt's unread
+opening envelope stays unread and durable: it reaches the child with its next
+turn, ahead of any later followup's mail.
 The deliverer reserves startup
 and exact-opens the child, then reads its authoritative feed tail before the
 tree revision CAS. Startup and session ownership remain held through that CAS,
@@ -4256,9 +4278,9 @@ In-memory and SQL view deletion reset the same columns and derived rows,
 including command-acknowledged and failed-wake/undeliverable mail and the
 command-keyed `returned_admission` receipts. Current schema resets to the
 chain root's retained schema until opening intents advance it again.
-The driver publishes the intent, then folds due consequences and lifts
-`restored_paused` if the tree is
-quiescent inside `fold_and_commit`. That boundary requires an acknowledged
+The driver publishes the intent, then folds due consequences inside
+`fold_and_commit`; work that rebuilds the last views of a subtree also runs
+the intent folds a reopen deferred over them. That boundary requires an acknowledged
 revision and snapshots immediately before its work, after the caller's
 process-local ownership changes. It restores that snapshot on a work or save
 refusal. Start binding, waiter registration and reopen unpark happen under
@@ -4313,7 +4335,7 @@ and VCS faults rebuild from their anchored events. Reopen never retries an
 uncertain VCS effect automatically.
 
 The live child restart port takes the tree driver explicitly, so its duplicate
-settlement uses the same feed-to-view pass as an initial Start or reopen wake.
+settlement uses the same feed-to-view pass as an initial Start or a wake.
 Submission acknowledgements never write command facts or acknowledge batches.
 Acceptance and rejection come only from the feed projector; a definite
 unrecorded refusal withdraws the intent with its mail unread. A Duplicate
@@ -4332,7 +4354,7 @@ refused because its recipient ended, or cancelled after its unstarted followup
 is rolled back, records an undeliverable-envelope intent instead. Its projector
 join and view rebuild derive that acknowledgement without a runtime fact.
 
-Root and child quiescent reopen and explicit recovery pass retained wait-call evidence as
+Root and child quiescent reopen and explicit recovery read retained wait-call evidence as
 bounded reads at the exact committed head, alongside its feed. The projector
 authenticates the read's session and checkpoint against that feed or the child's
 retention-seeded locator (the root uses its feed's exact retention heads), then retires committed receipts or rolls back
@@ -4408,7 +4430,7 @@ derived rows, and CAS-advances that session's cursor together with the tree
 revision; a concurrent applier fails the CAS and changes nothing. It runs in one
 code path: live after each feed notification of the root or a child, before a
 root prompt or a child wake is admitted (both require the tree cursors of the
-sessions they depend on at their tails), on every open and recovery pass, and in
+sessions they depend on at their tails), on every open and `recover_node` run, and in
 memory in the read-only rehearsal. Deleting the view columns and cursors of a
 tree is safe: the next open re-derives them from the root's and every child's
 feed. Attempt bindings and active-turn flags are derived in feed order from
@@ -4493,7 +4515,6 @@ Topology-relevant commands:
 | `kind` | Effect |
 | --- | --- |
 | `tree` | request a topology snapshot |
-| `resume_tree` | resume a `restored_paused` tree |
 | `interrupt_node` | this-turn cancel of one child; requires `agent_id` |
 | `close_node` | terminal close of one node and its subtree; requires `agent_id` |
 | `stop_all` | host postorder close of every non-root, non-terminal node |
@@ -4782,10 +4803,12 @@ stage. Seals, mints, removals, reclamations, base pins and refresh
 applications are reproducible; adopts and `on_mint` hooks are ambiguous; no
 single-runner stage is verifiable. A stage whose step lost its outcome (the
 link was lost past its window, or the runner restarted under it), and a stage
-a crashed process left recorded, settle by their class when the tree resumes:
+a crashed process left recorded, settle by their class when the tree reopens
+(the reopen law, §14.1):
 a reproducible stage stays recorded while its node is open (it is removed once
 the node is closed or gone) and its effect's own failure stands; its workflow
-runs the effect again, and a stage recorded with exactly the inputs of an
+runs the effect again when that effect is next dispatched (the reopen and
+`recover_node` do not rerun it by themselves), and a stage recorded with exactly the inputs of an
 unfinished one takes that one's id again, so each step reaches the runner
 under the key it was first sent with. The runner answers a step the lost run
 still runs once that step ends, and a step it finished with its stored
@@ -4871,10 +4894,10 @@ under the runtime's `DEFAULT_STORE_OPERATION_TIMEOUT` (30 s); `plakous-hosted`
 asserts at compile time that the release timeout covers both. A slow but healthy release
 is therefore waited for, not fenced, and close of a completed child keeps its
 terminal.
-After publication and slot removal the host requests the tree's background
-recovery pass only if a fault was recorded or session recovery remains required.
-Clean, fast retirement does not start a pass; a tree-read failure requests a pass
-rather than skipping one. Joiner deadline expiry is a typed refusal, separate
+After publication and slot removal the host starts a `recover_node` run over the
+tree only if a fault was recorded or session recovery remains required. Clean,
+fast retirement starts none; a tree-read failure starts one rather than
+skipping it. Joiner deadline expiry is a typed refusal, separate
 from owner-confirmed failures through the explicit bounded cancel and batch
 cancel interfaces. It does not authorize another fault publication: the release
 owner records its deadline evidence. Tool and navigator requesting paths use
@@ -4994,7 +5017,7 @@ capacity wait (chapter 01 §5); it does not end the old attempt or replay its
 previous turn merely because the first acquire write was refused.
 
 Process-exit abandonment is separate from joined retirement: the hub closes
-admission, aborts and joins its recovery pass before collecting root/child
+admission, aborts and joins its `recover_node` runs before collecting root/child
 runtime capabilities, cancels startups and aborts retirements. Live and retiring
 child leases are included in the root's batched release, without waiting for
 provider settlement or tree publication. A one-second product exit bound is
@@ -5010,10 +5033,10 @@ outcomes; these observations are not recovery authority.
 The background operation-receipt owner waits for actual release completion,
 not the joiner ceiling; expiry does not settle its prepared receipt prematurely.
 
-Shutdown closes admission (no recovery pass starts after that), then gives a
-running recovery pass its
-own two-second allowance; at expiry it aborts the pass and joins it for at most
-250 ms, so no reopen of a child session outlives the leases released next. It
+Shutdown closes admission (no `recover_node` run starts after that), then gives
+running runs one two-second allowance; at expiry it aborts them and joins each
+for at most 250 ms, so no reopen of a child session outlives the leases
+released next. It
 then starts active releases, and joins them together with existing retirements
 and tracked tool-side retirement tasks within one two-second allowance. Those
 tasks own job stops, effect settlement and operation-receipt completion even
@@ -5021,8 +5044,8 @@ after the live slot clears. Headless run exit joins both kinds of owner under
 the same allowance, including when no live child remains. At expiry it returns
 a bounded failure and retains
 fault evidence, while release workers retain ownership until they return and
-may publish their released locator afterward. No new recovery pass starts on
-the closed hub. Explicit process-exit abandonment, not ordinary joined shutdown,
+may publish their released locator afterward. No new `recover_node` run starts
+on the closed hub. Explicit process-exit abandonment, not ordinary joined shutdown,
 aborts these workers.
 Every task the tree runs for its children belongs to the tree, never to a
 root, so no root's release touches it. Work that owns a child's session or
@@ -5033,7 +5056,7 @@ shutdown aborts. Shutdown bounds its join only on retirement completions and
 on cancelled startups, as above, and leaves the other owners running
 detached. Process-exit abandonment aborts release workers; the other owners
 end with the exiting process's executor. The rest (projections, join
-observers, recovery passes) is the tree's task set: after the joins above,
+observers, `recover_node` runs) is the tree's task set: after the joins above,
 the tree's shutdown closes it, aborting what still runs and joining it for
 at most 250 ms.
 A live child's actor is the one owner of its attached session. The hub's

@@ -3,7 +3,7 @@
 {"kind":"binding","payload":"Binding { session_id: Some(\"<uuid>\"), account: Some(\"codex\"), model: Some(\"offline-loopback-v1\"), effort: Some(\"medium\"), extra: None, composition: JsPtc, protocol: Auto, effective_presentation: \"js-ptc\" }"}
 {"kind":"context_capacity_recovery","payload":"ContextCapacityRecovery(None)"}
 {"kind":"last_user_prompt_at","payload":"LastUserPromptAt(None)"}
-{"kind":"pending_continuation","payload":"PendingContinuation { results: 0, questions: 0, process_exits: 0, auto_continue_paused: false, tree_paused: false }"}
+{"kind":"pending_continuation","payload":"PendingContinuation { results: 0, questions: 0, process_exits: 0, auto_continue_paused: false }"}
 {"kind":"presentation","payload":"PresentationRows([(RowKey { anchor: 0, lane: Runtime, ordinal: 0 }, SessionHeader { session_id: \"<uuid>\", carried_from: None })])"}
 {"kind":"prompt_history","payload":"PromptHistorySnapshot([\"run the loopback\"])"}
 {"kind":"session_info","payload":"SessionInfo(SessionInfoView { storage_level: Available, host_version: \"0.0.3\", session_id: \"<uuid>\", working_dir: \"<root>/workspace\", root_template: None, root_model: Some(\"offline-loopback-v1\"), root_effort: Some(\"medium\"), thinking: \"reasoning summaries (auto) requested at medium\", tool_policy: Some(\"js-ptc\"), admitted_options: [\"effort = medium\"], api_kernel: Some(\"Responses\"), turn_number: Some(0), tree_epoch: None, context: None })"}

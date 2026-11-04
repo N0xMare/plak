@@ -1168,9 +1168,9 @@ async fn a_session_switch_re_resolves_the_tree_and_pushes_keep_arriving() {
 }
 
 /// An explicit recovery with nothing pending answers before it returns, not
-/// from its background pass: a quit right after the request would stop the
-/// pass before it reported, and the request would go unanswered. The pass
-/// runs on this thread and has not run yet when the answer is read.
+/// from its background run: a quit right after the request would stop the
+/// run before it reported, and the request would go unanswered. The run
+/// is on this thread and has not run yet when the answer is read.
 #[tokio::test(flavor = "current_thread")]
 async fn an_explicit_recovery_with_nothing_pending_answers_before_it_returns() {
     let root = tempfile::tempdir().unwrap();
@@ -1198,17 +1198,13 @@ async fn an_explicit_recovery_with_nothing_pending_answers_before_it_returns() {
 
     assert_eq!(
         started,
-        crate::agent::RecoveryPassStart::Started { pending: 0 }
+        crate::agent::TreeRecoveryStart::Started { pending: 0 }
     );
     let mut seen: Vec<HostEvent> = received.try_iter().collect();
-    assert_eq!(answers(&seen), 1, "answered before the pass ran: {seen:#?}");
+    assert_eq!(answers(&seen), 1, "answered before the run ran: {seen:#?}");
     for _ in 0..50 {
         tokio::task::yield_now().await;
     }
     seen.extend(received.try_iter());
-    assert_eq!(
-        answers(&seen),
-        1,
-        "the pass did not answer again: {seen:#?}"
-    );
+    assert_eq!(answers(&seen), 1, "the run did not answer again: {seen:#?}");
 }

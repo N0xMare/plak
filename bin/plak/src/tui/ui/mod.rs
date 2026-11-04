@@ -101,7 +101,6 @@ use crate::tui::text_input::{
     sanitize_single_line,
 };
 use crate::tui::theme::{Theme, ThemeId};
-use crate::tui::tree_navigator::RESTORED_PAUSED_NAVIGATOR_HINT;
 use crate::tui::usage_tab;
 use crate::tui::{
     CanvasTree, HostEvent, QueueDrainState, QueueItem, ResumeMenu, ResumePickerOutcome,
@@ -150,15 +149,9 @@ fn unknown_context_usage() -> ContextUsage {
         status: "unavailable".into(),
     }
 }
-/// The §5.4 row a restored-paused tree owns until the operator resumes it.
-///
-/// `restored_paused` blocked every spawn and stopped the queue
-/// draining, silently. The row states the condition, the exit, and the second
-/// consequence the operator would otherwise discover by waiting.
 /// Status-row label painted on the last frame before the UI hands the
 /// terminal back (§6).
 pub(crate) const QUITTING_STATUS: &str = "quitting…";
-pub(crate) const TREE_PAUSED_STATUS: &str = "agents paused · /tree resume";
 /// Matches Plak's durable prompt admission bound so the renderer cannot retain
 /// an input the product could never accept.
 const MAX_COMPOSER_BYTES: usize = 1024 * 1024;
@@ -309,7 +302,6 @@ const TREE_KEYS: &[(&str, KeyCode, TopologyNavigatorKey)] = &[
     ("x", KeyCode::Char('x'), TopologyNavigatorKey::Acknowledge),
     ("y", KeyCode::Char('y'), TopologyNavigatorKey::Copy),
     ("R", KeyCode::Char('R'), TopologyNavigatorKey::Refresh),
-    ("r", KeyCode::Char('r'), TopologyNavigatorKey::Resume),
     ("i", KeyCode::Char('i'), TopologyNavigatorKey::Interrupt),
     ("c", KeyCode::Char('c'), TopologyNavigatorKey::Close),
     ("s", KeyCode::Char('s'), TopologyNavigatorKey::StopAll),
@@ -764,12 +756,6 @@ pub(crate) struct App {
     status_agents_hit: Option<Rect>,
     /// Active descendants from the last topology snapshot the host sent.
     tree_live_descendants: usize,
-    /// The host's last word on whether the agent tree is `RestoredPaused`.
-    ///
-    /// While it is, every spawn is refused and the queue stops
-    /// auto-draining. The idle HUD pending indicator names it until the host
-    /// reports the tree resumed.
-    tree_restored_paused: bool,
     /// Latest idle pending-work snapshot. Empty until the host publishes one.
     pending_continuation: plakous_host_protocol::PendingContinuation,
     /// The host's open approval handle, when one is pending. Kept beside the
@@ -1035,7 +1021,6 @@ impl App {
             composer_chrome: composer_chrome::ComposerChrome::default(),
             status_agents_hit: None,
             tree_live_descendants: 0,
-            tree_restored_paused: false,
             pending_continuation: plakous_host_protocol::PendingContinuation::default(),
             open_approval: None,
             mouse_scroll_queue: 0,

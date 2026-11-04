@@ -510,7 +510,6 @@ fn retry_overwrites_unrecorded_conflict_pin_and_lineage_reopens() {
     let first = candidate.snapshot.commit;
     // Nothing records the first pin. The retry reserves the same ordinal.
     f.tree = ProductAgentTree::reopen(store.load("conflict-tests").unwrap().unwrap());
-    f.tree.resume_tree().unwrap();
     f.tree.settle_for_test();
     f.tree
         .begin_adopt_for_test("root", &request(&f.source, false))

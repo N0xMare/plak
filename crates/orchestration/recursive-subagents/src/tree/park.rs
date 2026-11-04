@@ -39,11 +39,9 @@ enum ParkState {
     /// The host is admitting the wake turn: mail still waits for the next
     /// boundary rather than racing the Start.
     Waking,
-    /// Held by a resume for the host's reopen wake, not parked by a turn
-    /// waiter; only [`ProductAgentTree::release_reopen_hold`] removes it.
-    Held,
-    /// The host is admitting or rejoining the reopen wake of a held child:
-    /// mail still waits, and an interrupt ends it like a hold.
+    /// The host is rejoining the start the lost process prepared for an
+    /// owed child (its recover_node): mail still waits, and an interrupt
+    /// ends it.
     Reopening,
     /// The wake was not admitted and the host is ending the attempt: new mail
     /// is refused as terminal and an interrupt no longer applies.
@@ -188,19 +186,27 @@ impl ProductAgentTree {
                 .is_some_and(|node| node.status == NodeStatus::Running)
     }
 
-    /// Moves a held child to its reopen wake, before any Start or rejoin
-    /// binds a turn for it. Returns whether the child is still held on a
-    /// running node with an open, unsubmitted attempt: an interrupt or close
-    /// that landed since the resume ended the hold, and nothing may start.
+    /// Begins the rejoin of an owed child's prepared start, before the
+    /// rejoin binds a turn for it. Returns whether the child is still owed
+    /// its recover_node on a running node with an open, unsubmitted attempt:
+    /// an interrupt or close that landed since ended it, and nothing may
+    /// start.
     pub fn begin_reopen_wake(&mut self, agent_id: &str) -> bool {
-        let open = self.reopen_target_open(agent_id);
-        match self.parked.get_mut(agent_id) {
-            Some(parked) if open && parked.state == ParkState::Held => {
-                parked.state = ParkState::Reopening;
-                true
-            }
-            _ => false,
+        if !self.reopen_target_open(agent_id)
+            || !self.recovery_owed(agent_id)
+            || self.parked.contains_key(agent_id)
+        {
+            return false;
         }
+        self.parked.insert(
+            agent_id.to_owned(),
+            ParkedChild {
+                waiting_on: WaitingOn::default(),
+                state: ParkState::Reopening,
+                continuation: false,
+            },
+        );
+        true
     }
 
     /// Whether a reopen wake begun by [`Self::begin_reopen_wake`] may still
@@ -294,45 +300,18 @@ impl ProductAgentTree {
             .nodes
             .get(agent_id)
             .is_some_and(|node| node.status == NodeStatus::Running);
-        (running
-            && (matches!(parked.state, ParkState::Parked | ParkState::Held) || parked.continuation))
+        (running && (parked.state == ParkState::Parked || parked.continuation))
             .then_some(&parked.waiting_on)
-    }
-
-    /// Holds every child a reopen finds parked until the host's reopen wake
-    /// has run for it, so mail sent in between waits for that wake (a second
-    /// turn is never started beside it) and an interrupt still ends the
-    /// park. Called when the tree resumes.
-    pub(super) fn hold_parked_reopen_targets(&mut self) {
-        for (agent_id, ..) in self.parked_reopen_targets() {
-            self.parked.entry(agent_id).or_insert(ParkedChild {
-                waiting_on: WaitingOn::default(),
-                state: ParkState::Held,
-                continuation: false,
-            });
-        }
-    }
-
-    /// Ends a resume's hold once the reopen wake for `agent_id` ran or was
-    /// abandoned. A park its turn waiter recorded since is left alone.
-    pub fn release_reopen_hold(&mut self, agent_id: &str) {
-        if self.parked.get(agent_id).is_some_and(|parked| {
-            !parked.continuation && matches!(parked.state, ParkState::Held | ParkState::Reopening)
-        }) {
-            self.parked.remove(agent_id);
-        }
     }
 
     /// Children a reopen finds parked, derived from durable rows alone:
     /// running node, open unsubmitted attempt with no bound or active turn, a
-    /// session, and at least one turn already spent (an unstarted spawn or a
-    /// fresh followup has none; an interrupted node is `interrupted`).
+    /// session, and at least one turn of that attempt already spent (an
+    /// unstarted spawn or a fresh followup, even one whose start was
+    /// prepared, has none; an interrupted node is `interrupted`).
     /// Returns `(agent_id, session_locator, path)`.
     #[must_use]
     pub fn parked_reopen_targets(&self) -> Vec<(String, String, String)> {
-        if self.state != super::TreeAdmissionState::Live {
-            return Vec::new();
-        }
         self.nodes
             .values()
             .filter(|node| node.agent_id != self.root_agent_id)
@@ -348,9 +327,12 @@ impl ProductAgentTree {
                     && attempt.output_json.is_none()
                     && ((!node.active_turn && attempt.turn_id.is_none()) || resume)
                     && (attempt.usage.turns >= 1
+                        || resume
                         || self.commands.values().any(|command| {
                             command.recipient == node.agent_id
                                 && command.kind != super::AgentCommandKind::RootBatch
+                                && command.attempt_id.as_ref() == Some(&attempt.attempt_id)
+                                && command.fact.is_some()
                         }));
                 parked.then(|| {
                     Some((

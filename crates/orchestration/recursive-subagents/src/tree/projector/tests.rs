@@ -1825,7 +1825,6 @@ fn restore_unallocated_children(tree: &mut ProductAgentTree) {
         tree.ensure_fold_started(&agent).unwrap();
         tree.fold_due(&agent).unwrap();
     }
-    tree.lift_restored_pause_if_quiescent();
 }
 
 /// A running child with one open attempt and a session.
@@ -1929,30 +1928,6 @@ fn a_refused_host_join_does_not_poison_the_feed_or_later_intents() {
         "session_retirement"
     );
     assert!(tree.take_effects().is_empty());
-}
-
-#[test]
-fn an_ignored_host_join_does_not_lift_restored_paused() {
-    let (_tmp, mut tree) = tree();
-    let (child, _) = running_child(&mut tree);
-    tree.record_host_cancellation(&child).unwrap();
-    tree.close_agent(
-        "root",
-        &AttemptScopedRequest {
-            agent_id: child.clone(),
-            expected_attempt_id: None,
-        },
-        None,
-    )
-    .unwrap();
-    tree.state = TreeAdmissionState::RestoredPaused;
-    tree.project_feed(&child, CHILD_SESSION, &[], &TreeFeedReads::default())
-        .unwrap();
-    assert_eq!(tree.state, TreeAdmissionState::RestoredPaused);
-    assert_eq!(
-        tree.node("root").unwrap().presentation_status(tree.state),
-        NodeStatus::Paused
-    );
 }
 
 #[test]
@@ -3005,7 +2980,7 @@ fn a_second_running_turn_for_one_attempt_fails_closed() {
 }
 
 #[test]
-fn an_abandoned_child_turn_settles_turn_abandoned_with_the_read_operator_line() {
+fn an_abandoned_child_turn_interrupts_its_node_and_keeps_the_attempt() {
     let (_tmp, mut tree) = tree();
     let (child, attempt) = running_child(&mut tree);
     child_command(&mut tree, &child, &attempt, "start-1");
@@ -3030,11 +3005,13 @@ fn an_abandoned_child_turn_settles_turn_abandoned_with_the_read_operator_line() 
     );
     tree.project_feed(&child, CHILD_SESSION, &feed.records, &reads)
         .unwrap();
+    // Law L: the lost owner's turn is gone; the node is interrupted and its
+    // attempt stays open with no failure.
     let attempt = tree.attempt(&child).unwrap();
-    assert_eq!(attempt.status, AttemptStatus::Failed);
-    let failure = attempt.failure.clone().unwrap();
-    assert_eq!(failure.kind, TURN_ABANDONED);
-    assert!(failure.message.contains("operator line"), "{failure:?}");
+    assert_eq!(attempt.status, AttemptStatus::Running);
+    assert_eq!(attempt.failure, None);
+    assert_eq!(attempt.turn_id, None);
+    assert_eq!(tree.node(&child).unwrap().status, NodeStatus::Interrupted);
     assert_eq!(
         tree.node(&child)
             .unwrap()
@@ -3622,9 +3599,6 @@ fn assert_generated_host_interleavings(steps: &[HostInterleaving]) -> Result<(),
 }
 
 fn rows(tree: &ProductAgentTree) -> String {
-    // The driver lifts a quiescent restored overlay after the fold, not inside it.
-    let mut tree = tree.clone();
-    tree.lift_restored_pause_if_quiescent();
     let persisted = tree.to_persisted();
     let rows = persisted.rows();
     format!(
@@ -4094,9 +4068,12 @@ fn assert_child_rebuild_laws(
     prop_assert_eq!(replay.applied, 0);
     prop_assert_eq!(rows(&rebuilt), expected.clone());
 
-    // A reopen pauses the tree and clears its active-turn flags whether or
-    // not the views were deleted first.
-    let expected = rows(&ProductAgentTree::reopen(live.to_persisted()));
+    // A reopen clears active-turn flags and marks the children its rows
+    // prove parked whether or not the views were deleted first. Deleted
+    // views prove nothing until the feed rebuilds them; recover_node then
+    // marks what the rebuilt rows prove. The marks' anchors follow their
+    // fold position, which a rebuild moves, so they are compared by cause.
+    let expected = rows_modulo_anchors(&ProductAgentTree::reopen(live.to_persisted()));
     let mut cleared = live.clone();
     cleared.clear_feed_views();
     restore_unallocated_children(&mut cleared);
@@ -4111,8 +4088,32 @@ fn assert_child_rebuild_laws(
             )
             .unwrap();
     }
-    prop_assert_eq!(rows(&reopened), expected);
+    for (parked, ..) in reopened.parked_reopen_targets() {
+        let attempt = reopened.node(&parked).unwrap().attempt_id.clone();
+        reopened.lose_owner(&parked, attempt);
+    }
+    prop_assert_eq!(rows_modulo_anchors(&reopened), expected);
     Ok(())
+}
+
+/// [`rows`] with each node's fold position and each operator intent's
+/// anchor dropped: what a rebuild may legitimately move.
+fn rows_modulo_anchors(tree: &ProductAgentTree) -> String {
+    let mut tree = tree.clone();
+    for node in tree.nodes.values_mut() {
+        node.fold_order = None;
+    }
+    tree.operations = std::mem::take(&mut tree.operations)
+        .into_values()
+        .map(|mut operation| {
+            if operation.tool_name == "interrupt" {
+                operation.operation_id = format!("plak:interrupt:{}", operation.caller_agent_id);
+                operation.fold = None;
+            }
+            (operation.operation_id.clone(), operation)
+        })
+        .collect();
+    rows(&tree)
 }
 
 #[test]
@@ -4702,7 +4703,6 @@ fn caller_terminal_survives_a_cold_cursor_without_a_tree_cache() {
     )
     .unwrap();
     cold.fold_due(&child).unwrap();
-    cold.lift_restored_pause_if_quiescent();
     assert_eq!(
         cold.attempt(&child).unwrap().status,
         AttemptStatus::CompletedWithoutSubmission

@@ -143,7 +143,6 @@ pub(super) struct CanvasSnapshot {
     pub selected_has_session: Option<bool>,
     pub node_count: usize,
     pub filter: &'static str,
-    pub restored_paused: bool,
     pub confirmation: &'static str,
 }
 
@@ -455,7 +454,6 @@ impl App {
             selected_has_session: selected.map(|node| node.has_session),
             node_count: tree.map_or(0, |tree| tree.nodes.len()),
             filter: nav.scope.label(),
-            restored_paused: tree.is_some_and(|tree| tree.restored_paused),
             confirmation: self
                 .destructive_confirm
                 .as_ref()
@@ -586,13 +584,6 @@ impl App {
                 }
                 add_key("toggle-filter", When::Tree, "f");
                 add_key("refresh", When::Tree, "R");
-                if self.tree_navigator.as_ref().is_some_and(|nav| {
-                    nav.snapshot
-                        .as_ref()
-                        .is_some_and(|tree| tree.restored_paused)
-                }) {
-                    add_key("resume", When::Tree, "r");
-                }
                 if self
                     .tree_navigator
                     .as_ref()

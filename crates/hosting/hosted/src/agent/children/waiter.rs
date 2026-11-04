@@ -7,8 +7,8 @@ use crate::driver::transient::{self, ResumeGate, ResumeOwner};
 use crate::node::AfterTerminal;
 
 use super::{
-    Arc, AttachedCodingSession, ChildReopen, ChildReopenMode, ChildStartup, ChildTurnIdentity,
-    CommandId, StartAdmission, SubmitNudgeBudget, TreeDriver, TurnId, TurnOutcome, TurnResult,
+    Arc, AttachedCodingSession, ChildReopen, ChildReopenMode, ChildTurnIdentity, CommandId,
+    StartAdmission, SubmitNudgeBudget, TreeDriver, TurnId, TurnOutcome, TurnResult,
     TurnResultHandle, TurnResultOutcome, end_attempt_work, failed_worktree, mutate_child,
     persist_or_fault, reopen_spawned_child, retire_live_child, settle_or_fault,
     submit_harness_prompt,
@@ -22,7 +22,6 @@ mod resume;
 
 #[cfg(test)]
 pub(in crate::agent) use resume::transient_resume_bound;
-pub(in crate::agent) use resume::wait_resume_gate;
 #[cfg(test)]
 pub(super) use resume::wait_transient_gate;
 use resume::{resume_allowed, try_transient_resume};
@@ -286,31 +285,17 @@ impl crate::node::TurnRole<()> for ChildTurns {
                 retire_live_child(&driver, live, &agent_id, completed_turn).await;
                 return AfterTerminal::Settled(());
             }
-            // The recycle may wait out the fenced owner's lease, so it
-            // never runs under the reattach lock. Under that lock the
-            // node is marked recycling before its live entry goes, which a
-            // `recover_agent` or a recovery pass treats as a live owner;
-            // the lock is retaken to record the outcome and clear the
-            // mark, so recovery either settled the attempt first (and
-            // this failure report then changes nothing) or starts after
-            // it is recorded.
-            let runtime = driver
+            // The node is marked recycling before its live entry goes, and
+            // the mark is cleared only once the outcome is recorded, so a
+            // recovery of it (which reads the live entry, then the mark)
+            // starts only after this failure report.
+            let recycling = driver
                 .read(|tree| tree.tree_id.clone())
                 .ok()
-                .and_then(|tree_id| crate::topology_runtime::lookup(&tree_id));
-            let recycling = match runtime.as_ref() {
-                Some(runtime) => {
-                    let _reattach = runtime.lock_reattach().await;
-                    Some(runtime.mark_recycling(&agent_id))
-                }
-                None => None,
-            };
+                .and_then(|tree_id| crate::topology_runtime::lookup(&tree_id))
+                .map(|runtime| runtime.mark_recycling(&agent_id));
             retire_live_child(&driver, live, &agent_id, completed_turn).await;
             let recycled = recycle_fenced_child(&driver, &agent_id).await;
-            let reattach = match runtime.as_ref() {
-                Some(runtime) => Some(runtime.lock_reattach().await),
-                None => None,
-            };
             let (disposition, message) = match recycled {
                 Some(FencedChildRecycle::Abandoned(report)) => (
                     crate::agent_tree::turn_outcome::FailedTurnDisposition::Failed {
@@ -357,9 +342,7 @@ impl crate::node::TurnRole<()> for ChildTurns {
                 observer.as_ref(),
             )
             .await;
-            // Cleared while the reattach lock is still held.
             drop(recycling);
-            drop(reattach);
             return AfterTerminal::Settled(());
         }
         if let Ok(result) = &terminal

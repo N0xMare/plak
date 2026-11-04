@@ -52,7 +52,6 @@ impl App {
         self.agents_unavailable = None;
         self.tree_epoch_state = None;
         self.tree_live_descendants = 0;
-        self.tree_restored_paused = false;
         self.pending_open_tree = self.agent_enabled;
         self.agent_acks = super::tree::AgentAcknowledgements::default();
         self.call_details = super::call_detail::CallDetails::default();
@@ -1304,14 +1303,12 @@ impl App {
                 questions,
                 process_exits,
                 auto_continue_paused,
-                tree_paused,
             } => {
                 self.pending_continuation = plakous_host_protocol::PendingContinuation {
                     results,
                     questions,
                     process_exits,
                     auto_continue_paused,
-                    tree_paused,
                 };
                 self.mark_dirty();
             }

@@ -218,218 +218,72 @@ fn inflight_children(tree: &crate::agent_tree::ProductAgentTree) -> Vec<Inflight
         .collect()
 }
 
+/// Runs `recover_node` (design section 6.3) for every child this custody
+/// take owes one, descendants first: each child the reopen law found with a
+/// bound or active turn, or parked with a start the lost process prepared.
+///
+/// The exact open decides. A turn the open restores (a decision barrier, or
+/// an admitted start not yet dispatched) rejoins. Anything else was the lost
+/// owner's: right after the open the child is interrupted with cause
+/// `owner_lost`, attempt and subtree kept, and the feed the open left is
+/// projected after that mark. A child whose open refuses stays owed, takes
+/// no new turn, and records the refusal as its fault. Each child is held
+/// for its own recovery; one another run holds is skipped.
 #[allow(
     clippy::too_many_lines,
-    reason = "Child reattachment reconciles each persisted attempt with its live owner, runtime locator, pending delivery, and terminal publication state."
+    reason = "Child recovery reconciles each owed attempt with its live owner, the exact reopen, the rejoin and the owner-lost mark."
 )]
-pub(in crate::agent) async fn reattach_inflight_children(
+pub(in crate::agent) async fn recover_owed_children(
     parent: &SpawnParent,
-    runtime: &crate::topology_runtime::ProductTopologyRuntime,
+    runtime: &Arc<crate::topology_runtime::ProductTopologyRuntime>,
 ) {
-    let Ok(paused) =
-        runtime.read(|tree| tree.state == crate::agent_tree::TreeAdmissionState::RestoredPaused)
-    else {
+    let Ok((owed, bound)) = runtime.read(|tree| {
+        let bound: std::collections::BTreeMap<String, InflightChild> = inflight_children(tree)
+            .into_iter()
+            .map(|child| (child.agent_id.clone(), child))
+            .collect();
+        (tree.recovery_owed_targets(), bound)
+    }) else {
         return;
     };
-    if paused {
-        // RestoredPaused: do not occupy recovered child turns until ResumeTree.
-        return;
-    }
-    let _reattach = runtime.lock_reattach().await;
-    let Ok(paused) =
-        runtime.read(|tree| tree.state == crate::agent_tree::TreeAdmissionState::RestoredPaused)
-    else {
-        return;
-    };
-    if paused {
-        return;
-    }
-    let Ok(children) = runtime.read(inflight_children) else {
-        return;
-    };
-    let mut failed = Vec::new();
-    let mut joined = Vec::new();
-    let mut abandoned_children = Vec::new();
-    let mut failure_reasons: Vec<(String, String)> = Vec::new();
-    for child in children {
-        if runtime.live.lock().await.contains_key(&child.agent_id)
-            || runtime.is_recycling(&child.agent_id)
-        {
-            joined.push(child.agent_id);
-            continue;
-        }
-        let _stored_turn = if let Ok(turn_id) = TurnId::from_str(&child.turn_id) {
-            turn_id
-        } else {
-            failed.push(child.agent_id);
-            continue;
-        };
-        match reopen_spawned_child(
-            parent,
-            &child.agent_id,
-            &child.path,
-            &child.locator,
-            "reattach",
-            ChildReopenMode::OWNER,
-        )
-        .await
-        {
-            Ok(ChildReopen::Attached {
-                session: attached,
-                recovered: Some(recovered),
-            }) if bound_child_turn_matches(runtime, &child.agent_id, recovered.turn_id()) => {
-                match occupy_recovered_child(runtime, child.agent_id.clone(), *attached, recovered)
-                    .await
-                {
-                    Ok(_) => joined.push(child.agent_id),
-                    Err(_) => failed.push(child.agent_id),
-                }
-            }
-            Ok(ChildReopen::Attached {
-                session: attached, ..
-            }) => {
-                // Process death dropped the live turn. The lifecycle contract
-                // forbids a replacement Start (restart drain). A reopen that
-                // abandoned the turn the lost process left settles it as an
-                // ordinary failure the parent can re-task; a quiescent head
-                // with nothing abandoned while the tree still lists the child
-                // inflight stays RecoveryRequired, not a silent Completed.
-                let abandoned = attached
-                    .agent()
-                    .and_then(plakous::agent::Agent::abandoned_turn)
-                    .cloned();
-                // Read before the release, at the head the abandonment left;
-                // an unreadable history restores every receipt's mail.
-                let retained = runtime
-                    .read(|tree| tree.retained_wait_receipts(&child.agent_id))
-                    .unwrap_or_default();
-                let evidence = match crate::driver::reopen::wait_evidence(
-                    attached.sessions(),
-                    attached.locator(),
-                    retained.clone(),
-                )
-                .await
-                {
-                    Ok(evidence) => evidence,
-                    Err(_) => retained.into_iter().map(|id| (id, false)).collect(),
-                };
-                let _ = attached.release_opened().await;
-                match abandoned {
-                    Some(report) => abandoned_children.push((child.agent_id, report, evidence)),
-                    None => failed.push(child.agent_id),
-                }
-            }
-            Ok(ChildReopen::RecoveryRequired(report)) => {
-                failure_reasons.push((
-                    child.agent_id.clone(),
-                    format!(
-                        "the child's session is recovery-required after the process was lost \
-                         ({:?})",
-                        report.phase()
-                    ),
-                ));
-                match recover_reattach_effect_evidence(parent, &child.agent_id, &report).await {
-                    Ok(RecoverEffectEvidenceOutcome::Finalized { target, .. }) => {
-                        let locator = target.to_string();
-                        let projected = match parent.state_roots().runtime_sessions() {
-                            Ok(sessions) => {
-                                crate::agent::ledger::project_feed(
-                                    runtime,
-                                    &child.agent_id,
-                                    &sessions,
-                                    target.session_id(),
-                                )
-                                .await
-                            }
-                            Err(error) => Err(error.to_string()),
-                        };
-                        if let Err(error) = projected {
-                            failure_reasons.push((child.agent_id.clone(), error));
-                            failed.push(child.agent_id);
-                            continue;
-                        }
-                        match reopen_spawned_child(
-                            parent,
-                            &child.agent_id,
-                            &child.path,
-                            &locator,
-                            "reattach-finalized",
-                            ChildReopenMode::OWNER,
-                        )
-                        .await
-                        {
-                            Ok(ChildReopen::Attached {
-                                session: attached,
-                                recovered: Some(recovered),
-                            }) if bound_child_turn_matches(
-                                runtime,
-                                &child.agent_id,
-                                recovered.turn_id(),
-                            ) =>
-                            {
-                                match occupy_recovered_child(
-                                    runtime,
-                                    child.agent_id.clone(),
-                                    *attached,
-                                    recovered,
-                                )
-                                .await
-                                {
-                                    Ok(_) => joined.push(child.agent_id),
-                                    Err(_) => failed.push(child.agent_id),
-                                }
-                            }
-                            Ok(ChildReopen::Attached {
-                                session: attached, ..
-                            }) => {
-                                let _ = attached.release_opened().await;
-                                failed.push(child.agent_id);
-                            }
-                            _ => failed.push(child.agent_id),
-                        }
-                    }
-                    _ => failed.push(child.agent_id),
-                }
-            }
-            Err(reason) => {
-                failure_reasons.push((child.agent_id.clone(), reason.message));
-                failed.push(child.agent_id);
-            }
-        }
-    }
-    // Spec 03 §14.1: a child the lost process left parked wakes once, with
-    // whatever its stopped processes and its mailbox now hold.
-    let owner = runtime
-        .read(|tree| tree.tree_id.clone())
-        .ok()
-        .and_then(|tree_id| crate::topology_runtime::lookup(&tree_id));
-    let parked = owner
-        .as_ref()
-        .and_then(|owner| {
-            owner
-                .read(crate::agent_tree::ProductAgentTree::parked_reopen_targets)
-                .ok()
+    let parked = runtime
+        .read(|tree| {
+            tree.nodes()
+                .values()
+                .filter_map(|node| {
+                    Some((
+                        node.agent_id.clone(),
+                        (
+                            node.session_locator.clone()?,
+                            node.path.display().to_string(),
+                        ),
+                    ))
+                })
+                .collect::<std::collections::BTreeMap<_, _>>()
         })
         .unwrap_or_default();
-    for (agent_id, locator, path) in parked {
-        // The resume held this child for its reopen wake; whatever happens
-        // to that wake below, the hold ends with this iteration.
-        let held = agent_id.clone();
-        let release_hold = async || {
-            let child = held.clone();
-            mutate_child(runtime.driver(), &held, move |tree| {
-                tree.release_reopen_hold(&child);
-            })
-            .await;
+    let mut faults: Vec<(String, String)> = Vec::new();
+    for agent_id in owed {
+        let _claim = match crate::agent::recovery::claim_child(runtime, &agent_id).await {
+            Ok(claim) => claim,
+            Err(crate::agent::recovery::ChildOwner::Process) => {
+                // This process owns the child's turn already; nothing was lost.
+                settle_owed(runtime, &agent_id).await;
+                continue;
+            }
+            Err(crate::agent::recovery::ChildOwner::Recovery) => continue,
         };
-        let Some(owner) = owner.as_ref() else {
-            release_hold().await;
-            continue;
-        };
-        if runtime.live.lock().await.contains_key(&agent_id) || runtime.is_recycling(&agent_id) {
-            release_hold().await;
+        if let Some(child) = bound.get(&agent_id) {
+            match recover_bound_child(parent, runtime, child).await {
+                Ok(()) => {}
+                Err(reason) => faults.push((agent_id, reason)),
+            }
             continue;
         }
+        let Some((locator, path)) = parked.get(&agent_id).cloned() else {
+            mark_owner_lost(runtime, &agent_id, None).await;
+            continue;
+        };
         match reopen_spawned_child(
             parent,
             &agent_id,
@@ -440,69 +294,48 @@ pub(in crate::agent) async fn reattach_inflight_children(
         )
         .await
         {
-            Ok(ChildReopen::Attached {
-                session,
-                recovered: None,
-            }) => {
-                if let Some(report) = session
-                    .agent()
-                    .and_then(plakous::agent::Agent::abandoned_turn)
-                    .cloned()
-                {
-                    // Same evidence read as the in-flight reattach above.
-                    let retained = runtime
-                        .read(|tree| tree.retained_wait_receipts(&agent_id))
-                        .unwrap_or_default();
-                    let evidence = match crate::driver::reopen::wait_evidence(
-                        session.sessions(),
-                        session.locator(),
-                        retained.clone(),
-                    )
-                    .await
-                    {
-                        Ok(evidence) => evidence,
-                        Err(_) => retained.into_iter().map(|id| (id, false)).collect(),
-                    };
-                    let _ = session.release_opened().await;
-                    abandoned_children.push((agent_id, report, evidence));
-                    release_hold().await;
-                    continue;
-                }
-                // An interrupt that ended the hold leaves the child
-                // `interrupted`: nothing to wake and nothing to recover.
-                if crate::agent::park::wake_reopened(owner, &agent_id, *session)
-                    .await
-                    .is_err()
-                {
-                    failed.push(agent_id);
-                }
-            }
             // A wake or mail Start the lost process journaled was admitted
-            // before its turn bound: that turn rejoins (spec 03 §14.1). The
-            // rejoin binds the turn active itself, and never over an
-            // interrupt that ended the hold, so it is not in `joined`.
+            // before its turn bound: that turn rejoins (spec 03 §14.1).
             Ok(ChildReopen::Attached {
                 session,
                 recovered: Some(recovered),
             }) => {
-                if crate::agent::park::rejoin_reopened(owner, &agent_id, *session, recovered)
-                    .await
-                    .is_err()
-                {
-                    failed.push(agent_id);
+                let owner = runtime
+                    .read(|tree| tree.tree_id.clone())
+                    .ok()
+                    .and_then(|tree_id| crate::topology_runtime::lookup(&tree_id));
+                match owner {
+                    Some(owner) => {
+                        if crate::agent::park::rejoin_reopened(
+                            &owner, &agent_id, *session, recovered,
+                        )
+                        .await
+                        .is_err()
+                        {
+                            mark_owner_lost(runtime, &agent_id, None).await;
+                        } else {
+                            settle_owed(runtime, &agent_id).await;
+                        }
+                    }
+                    None => mark_owner_lost(runtime, &agent_id, None).await,
                 }
             }
-            Ok(ChildReopen::RecoveryRequired(_)) => failed.push(agent_id),
-            Err(reason) => {
-                failure_reasons.push((agent_id.clone(), reason.message));
-                failed.push(agent_id);
+            Ok(ChildReopen::Attached { session, .. }) => {
+                mark_owner_lost(runtime, &agent_id, Some(*session)).await;
             }
+            Ok(ChildReopen::RecoveryRequired(report)) => faults.push((
+                agent_id,
+                format!(
+                    "the child's session is recovery-required after the process was lost ({:?})",
+                    report.phase()
+                ),
+            )),
+            Err(reason) => faults.push((agent_id, reason.message)),
         }
-        release_hold().await;
     }
-    let live_ids: std::collections::HashSet<String> =
-        runtime.live.lock().await.keys().cloned().collect();
-    let observer = parent.state_roots().topology_observer();
+    if faults.is_empty() {
+        return;
+    }
     let driver = runtime.driver().clone();
     mutate_child(
         runtime.driver(),
@@ -510,61 +343,200 @@ pub(in crate::agent) async fn reattach_inflight_children(
             .read(|tree| tree.root_agent_id.clone())
             .unwrap_or_default(),
         move |tree| {
-            for (agent_id, report, evidence) in &abandoned_children {
-                if live_ids.contains(agent_id) {
-                    continue;
-                }
-                let recorded = tree.record_host_turn_failure(
-                    agent_id,
-                    crate::agent_tree::turn_outcome::FailedTurnDisposition::Failed {
-                        kind: crate::agent_tree::TURN_ABANDONED,
-                    },
-                    crate::runtime::events::abandoned_turn_operator_line(report).to_owned(),
-                    evidence.clone(),
-                );
-                if recorded.is_err() || driver.apply_recorded(tree, agent_id).is_err() {
-                    continue;
-                }
-                if let Some(status) = tree
-                    .node(agent_id)
-                    .ok()
-                    .and_then(|node| crate::agent_tree::NodeDetach::from_node_status(node.status))
-                {
-                    tree.try_emit_tree_node_detached(observer.as_ref(), agent_id, status);
-                }
-            }
-            for (agent_id, reason) in &failure_reasons {
-                if failed.contains(agent_id) && !live_ids.contains(agent_id) {
-                    tree.record_fault(agent_id, reason.clone());
-                }
-            }
-            for agent_id in &failed {
-                if live_ids.contains(agent_id) {
-                    continue;
-                }
-                let terminal = tree
-                    .node(agent_id)
-                    .is_ok_and(|node| node.status.is_terminal())
-                    || tree
-                        .attempt(agent_id)
-                        .is_some_and(|assignment| assignment.status.is_stopped());
-                if terminal {
-                    continue;
-                }
-                let _ = tree
-                    .record_host_materialization(agent_id)
-                    .and_then(|value| driver.apply_recorded(tree, agent_id).map(|()| value));
-                let status = tree
-                    .node(agent_id)
-                    .ok()
-                    .and_then(|node| crate::agent_tree::NodeDetach::from_node_status(node.status))
-                    .unwrap_or(crate::agent_tree::NodeDetach::RecoveryRequired);
-                tree.try_emit_tree_node_detached(observer.as_ref(), agent_id, status);
+            for (agent_id, reason) in &faults {
+                tree.record_fault(agent_id, reason.clone());
             }
             let root_id = tree.root_agent_id.clone();
             persist_or_fault(&driver, tree, &root_id);
         },
     )
+    .await;
+}
+
+/// recover_node for a child with a bound turn: the exact open rejoins a
+/// turn it restores, and marks the child owner-lost otherwise.
+async fn recover_bound_child(
+    parent: &SpawnParent,
+    runtime: &crate::topology_runtime::ProductTopologyRuntime,
+    child: &InflightChild,
+) -> Result<(), String> {
+    if TurnId::from_str(&child.turn_id).is_err() {
+        mark_owner_lost(runtime, &child.agent_id, None).await;
+        return Ok(());
+    }
+    let reopened = reopen_spawned_child(
+        parent,
+        &child.agent_id,
+        &child.path,
+        &child.locator,
+        "reattach",
+        ChildReopenMode::OWNER,
+    )
+    .await
+    .map_err(|reason| reason.message)?;
+    match reopened {
+        ChildReopen::Attached {
+            session: attached,
+            recovered: Some(recovered),
+        } if bound_child_turn_matches(runtime, &child.agent_id, recovered.turn_id()) => {
+            if occupy_recovered_child(runtime, child.agent_id.clone(), *attached, recovered)
+                .await
+                .is_ok()
+            {
+                settle_owed(runtime, &child.agent_id).await;
+            } else {
+                mark_owner_lost(runtime, &child.agent_id, None).await;
+            }
+            Ok(())
+        }
+        ChildReopen::Attached {
+            session: attached, ..
+        } => {
+            mark_owner_lost(runtime, &child.agent_id, Some(*attached)).await;
+            Ok(())
+        }
+        ChildReopen::RecoveryRequired(report) => {
+            match recover_reattach_effect_evidence(parent, &child.agent_id, &report).await {
+                Ok(RecoverEffectEvidenceOutcome::Finalized { target, .. }) => {
+                    let locator = target.to_string();
+                    let sessions = parent
+                        .state_roots()
+                        .runtime_sessions()
+                        .map_err(|error| error.to_string())?;
+                    crate::agent::ledger::project_feed(
+                        runtime,
+                        &child.agent_id,
+                        &sessions,
+                        target.session_id(),
+                    )
+                    .await?;
+                    let finalized = InflightChild {
+                        agent_id: child.agent_id.clone(),
+                        locator,
+                        path: child.path.clone(),
+                        turn_id: child.turn_id.clone(),
+                    };
+                    Box::pin(recover_bound_child(parent, runtime, &finalized)).await
+                }
+                _ => Err(format!(
+                    "the child's session is recovery-required after the process was lost ({:?})",
+                    report.phase()
+                )),
+            }
+        }
+    }
+}
+
+/// The child's owed recovery ran and nothing was lost.
+async fn settle_owed(runtime: &crate::topology_runtime::ProductTopologyRuntime, agent_id: &str) {
+    let id = agent_id.to_owned();
+    mutate_child(runtime.driver(), agent_id, move |tree| {
+        tree.recovery_settled(&id);
+    })
+    .await;
+}
+
+/// The owner-lost mark, written right after the exact open (design section
+/// 6.3, step 5): the anchored interrupt first, then the release of the
+/// reopened session and the projection of the feed its open left, so the
+/// abandoned turn's terminal folds as the interrupted turn's. A command the
+/// lost process prepared that the feed does not name never ran: it is
+/// withdrawn and its mail returns to unread. The owed mark settles last,
+/// so no delivery sees the child before its lost turn is folded.
+async fn mark_owner_lost(
+    runtime: &crate::topology_runtime::ProductTopologyRuntime,
+    agent_id: &str,
+    reopened: Option<AttachedCodingSession>,
+) {
+    mark_and_project(runtime, agent_id, reopened).await;
+    settle_owed(runtime, agent_id).await;
+}
+
+async fn mark_and_project(
+    runtime: &crate::topology_runtime::ProductTopologyRuntime,
+    agent_id: &str,
+    reopened: Option<AttachedCodingSession>,
+) {
+    let driver = runtime.driver().for_agent(agent_id);
+    let id = agent_id.to_owned();
+    mutate_child(&driver, agent_id, {
+        let writer = driver.clone();
+        move |tree| {
+            tree.mark_owner_lost(&id);
+            persist_or_fault(&writer, tree, &id);
+        }
+    })
+    .await;
+    let Some(session) = reopened else {
+        return;
+    };
+    let sessions = Arc::clone(&session.sessions);
+    let session_id = session.locator().session_id();
+    let _ = session.release_opened().await;
+    if let Err(error) =
+        crate::agent::ledger::project_feed(runtime, agent_id, &sessions, session_id).await
+    {
+        record_mark_fault(
+            &driver,
+            agent_id,
+            format!("the feed did not project: {error}"),
+        )
+        .await;
+        return;
+    }
+    let withdrawn = match crate::agent::ledger::prepared_commands(&driver, agent_id) {
+        Ok(commands) => {
+            let mut withdrawn = Ok(());
+            for command in commands {
+                if let Err(error) = command.settle(&driver, false).await {
+                    withdrawn = Err(error);
+                }
+            }
+            withdrawn
+        }
+        Err(error) => Err(error),
+    };
+    if let Err(error) = withdrawn {
+        record_mark_fault(
+            &driver,
+            agent_id,
+            format!("an unadmitted command was not withdrawn: {error}"),
+        )
+        .await;
+    }
+    // A turn the open neither restored nor closed never ran: no terminal
+    // will release its binding.
+    let id = agent_id.to_owned();
+    mutate_child(&driver, agent_id, {
+        let writer = driver.clone();
+        move |tree| {
+            let stale = tree.node(&id).is_ok_and(|node| {
+                node.status == crate::agent_tree_protocol::NodeStatus::Interrupted
+            }) && tree
+                .attempt(&id)
+                .is_some_and(|attempt| !attempt.status.is_stopped() && attempt.turn_id.is_some());
+            if stale && tree.release_attempt_turn(&id).is_ok() {
+                persist_or_fault(&writer, tree, &id);
+            }
+        }
+    })
+    .await;
+}
+
+/// What an owner-lost mark could not finish, as the child's fault reason.
+async fn record_mark_fault(
+    driver: &crate::agent_tree_tools::TreeDriver,
+    agent_id: &str,
+    reason: String,
+) {
+    let id = agent_id.to_owned();
+    mutate_child(driver, agent_id, {
+        let writer = driver.clone();
+        move |tree| {
+            tree.record_fault(&id, format!("owner-lost recovery: {reason}"));
+            persist_or_fault(&writer, tree, &id);
+        }
+    })
     .await;
 }
 

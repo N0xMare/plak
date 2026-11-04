@@ -357,8 +357,8 @@ turn it left. That includes a turn lost inside a Code Mode `exec` (or a
 JavaScript or Python cell), even while a command the cell started was still
 running: the cell and that command are reported as **a tool may have run**
 (or **its pending work never started** when the cell had not begun), and
-neither is run again. Recovered child agents end `failed` with kind
-`turn_abandoned`;
+neither is run again. Recovered child agents are marked `interrupted` (owner
+lost) with their attempt kept;
 the parent can re-task them with a follow-up, and a crash does not spend the
 tree's attempt budget.
 
@@ -895,8 +895,8 @@ warning for debug binaries precisely because their cold start is visible.
 Reopening a session preserves queued prompts but pauses automatic delivery.
 In `plak agent`, send `{"v":1,"kind":"resume_queue","id":"resume-1"}` to
 resume the queue explicitly. In the TUI, focus the queue with `Tab` and press
-`r`. `resume_tree` controls a persisted agent tree separately; it does not
-resume the prompt queue.
+`r`. A reopened agent tree is never paused; resuming the queue does not touch
+it.
 
 If scheduled compaction leaves a prompt queued, read the preceding compaction
 result and correct its cause before resuming. Retrying compaction is a new

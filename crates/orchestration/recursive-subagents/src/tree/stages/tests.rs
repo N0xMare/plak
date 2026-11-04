@@ -309,3 +309,45 @@ fn a_child_on_another_runner_is_refused_typed() {
             .is_ok()
     );
 }
+
+/// The reopen law settles what a lost process left recorded: a bundle stage
+/// of an open node stays for its rerun, and an ambiguous stage faults its
+/// node and is removed.
+#[test]
+fn a_reopen_settles_an_unfinished_bundle_stage() {
+    let (_root, _vcs, mut tree) = fake_tree();
+    let child = tree.spawn_agent("root", &mint_req(), None).unwrap();
+    let commit = "0123456789abcdef0123456789abcdef01234567".to_owned();
+    let bundle = VcsStageIntent {
+        source_runner: Some("parent-runner".to_owned()),
+        base_commit: Some(commit.clone()),
+        tip_commit: Some("89abcdef0123456789abcdef0123456789abcdef".to_owned()),
+        ..local_stage(
+            VcsStageKind::BundleCreate,
+            VcsStageClass::Reproducible,
+            &child.agent_id,
+            "child-runner",
+        )
+    };
+    let lost = tree.record_vcs_stage(&bundle).unwrap();
+    tree.record_vcs_stage(&local_stage(
+        VcsStageKind::Mint,
+        VcsStageClass::Ambiguous,
+        &child.agent_id,
+        "loopback",
+    ))
+    .unwrap();
+    assert_eq!(stage_rows(&tree), 2);
+
+    let reopened = ProductAgentTree::reopen(tree.to_persisted());
+    let faults = reopened
+        .operations()
+        .values()
+        .filter(|row| row.tool_name == "vcs_fault" && row.caller_agent_id == child.agent_id)
+        .count();
+    assert_eq!((stage_rows(&reopened), faults), (1, 1));
+    assert!(
+        reopened.operations().contains_key(lost.operation_id()),
+        "the bundle stage stays for its rerun"
+    );
+}

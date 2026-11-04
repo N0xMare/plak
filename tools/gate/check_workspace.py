@@ -630,6 +630,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-recursive-subagents", "src/tree/cross_runner.rs"): {"task_local"},
     ("plakous-recursive-subagents", "src/tree/candidates.rs"): {"error"},
     ("plakous-recursive-subagents", "src/tree/workspaces.rs"): {"error"},
+    ("plakous-recursive-subagents", "src/tree/reopen_law.rs"): {"error"},
     # Private capture diagnostics use closed metadata, never request bodies.
     ("plak", "src/commands/exchange_capture.rs"): {"env", "warn"},
     # A published export whose directory sync failed is kept and logged.

@@ -148,7 +148,6 @@ impl ProductAgentTree {
     /// `Interrupted`; with no bound turn the next mail is `Started`, i.e. a
     /// fresh turn on the same attempt, rather than a rejoin of a turn that no
     /// longer exists.
-    #[cfg(any(test, feature = "test-support"))]
     pub fn release_attempt_turn(&mut self, agent_id: &str) -> Result<(), TopologyError> {
         let attempt = self.current_attempt_mut(agent_id).ok_or_else(|| {
             TopologyError::new(TopologyErrorCode::GrantDenied, "agent id is unknown")

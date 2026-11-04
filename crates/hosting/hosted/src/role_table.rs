@@ -85,7 +85,7 @@ pub(crate) enum Row {
     Readiness,
     /// `Recover`.
     Recover,
-    /// `OpenTopologyNavigator`, `RefreshTopologyTree`, `ResumeTopologyTree`,
+    /// `OpenTopologyNavigator`, `RefreshTopologyTree`,
     /// `InterruptTopologyNode`, `CloseTopologyNode`, `StopAllTopology`,
     /// `RecoverTopologyNode`.
     Navigator,
@@ -248,7 +248,6 @@ pub(crate) fn row_of(action: &UserAction) -> Row {
         UserAction::Recover => Row::Recover,
         UserAction::OpenTopologyNavigator
         | UserAction::RefreshTopologyTree
-        | UserAction::ResumeTopologyTree
         | UserAction::InterruptTopologyNode { .. }
         | UserAction::CloseTopologyNode { .. }
         | UserAction::StopAllTopology
@@ -281,7 +280,7 @@ pub(crate) fn child_address(action: &UserAction) -> Option<&str> {
 }
 
 /// The number of intent variants [`row_of`] places.
-const INTENT_VARIANTS: usize = 36;
+const INTENT_VARIANTS: usize = 35;
 
 /// One intent of every variant, child-addressed wherever the intent can be.
 pub(crate) fn every_intent() -> Vec<UserAction> {
@@ -339,7 +338,6 @@ pub(crate) fn every_intent() -> Vec<UserAction> {
             scope: TranscriptScope::Agent(id()),
         },
         UserAction::RefreshTopologyTree,
-        UserAction::ResumeTopologyTree,
         UserAction::InterruptTopologyNode { agent_id: id() },
         UserAction::CloseTopologyNode { agent_id: id() },
         UserAction::StopAllTopology,

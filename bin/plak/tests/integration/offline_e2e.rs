@@ -1585,10 +1585,9 @@ fn a_crash_restored_jsonl_queue_resumes_only_after_resume_queue() {
     );
 }
 
-/// An explicit tree-resume flag on a root-only session remains an ordinary
-/// exact session resume on both headless faces.
+/// A root-only session resumes exactly on both headless faces.
 #[test]
-fn absent_tree_resume_flag_works_on_run_and_agent() {
+fn a_root_only_session_resumes_on_run_and_agent() {
     let fixture = Fixture::new(&json!({
         "version": 1,
         "repeat_last_step": true,
@@ -1613,19 +1612,12 @@ fn absent_tree_resume_flag_works_on_run_and_agent() {
     let session = first.session_id();
     let second = run_cli(
         &fixture,
-        &[
-            "run",
-            "--session",
-            &session,
-            "--resume-tree",
-            "--",
-            "resume without a tree",
-        ],
+        &["run", "--session", &session, "--", "resume without a tree"],
     );
     assert!(second.status.success(), "{}", second.stderr);
     assert!(second.stdout.contains("recovered and answered"));
 
-    let mut agent = AgentProcess::start(&fixture, &["--session", &session, "--resume-tree"]);
+    let mut agent = AgentProcess::start(&fixture, &["--session", &session]);
     agent.wait_for("root-only agent ready", |record| record["kind"] == "ready");
     agent.send(&prompt_frame("JSONL also resumes without a tree"));
     agent.wait_for("JSONL answer", |record| record["kind"] == "assistant_done");
@@ -1666,18 +1658,11 @@ fn corrupt_tree_store_never_counts_as_an_absent_tree() {
 
     let run = run_cli(
         &fixture,
-        &[
-            "run",
-            "--session",
-            &session,
-            "--resume-tree",
-            "--",
-            "must not dispatch",
-        ],
+        &["run", "--session", &session, "--", "must not dispatch"],
     );
     assert!(!run.status.success(), "damaged tree store was accepted");
     assert!(!run.stdout.contains("recovered and answered"));
-    let agent = AgentProcess::start(&fixture, &["--session", &session, "--resume-tree"]);
+    let agent = AgentProcess::start(&fixture, &["--session", &session]);
     let rejected = agent.finish();
     assert!(
         !rejected.status.success(),

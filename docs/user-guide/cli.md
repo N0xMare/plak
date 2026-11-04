@@ -397,7 +397,6 @@ plak run --account codex --model gpt-5.6-luna --effort low --image shot.png -- '
 | `--composition <c>` | `direct`, `plakous-default`, `native-ptc`, `js-ptc`, `py-ptc`, `py-sdk`. `py-sdk` selects the typed, fresh-cell Python SDK for a core-tools-only single-agent root; it never follows from `plakous-default`. `native-ptc` is the vertical's own programmatic tool calling; today only Codex Code Mode is enrolled (Codex `CodeModeOnly` rows and OpenAI API models enrolled as `CodeModeOnly`), and elsewhere it is refused naming the vertical. `js-ptc` and `py-ptc` are harness PTC on every account. `plakous-default` (the default when omitted) is the per-model recommendation: `native-ptc` where Codex Code Mode is enrolled, `direct` on Grok, Claude, OpenRouter and the Anthropic and xAI API accounts. |
 | `--protocol <p>` | `auto`, `chat`, `responses`, `messages`. OpenRouter only, default `auto` → `chat`. Other accounts reject it at parse time. |
 | `--session <id>` | Continue an idle session: the full UUID or the short id `plak resume` accepts, resolved among this directory's sessions. Its recorded binding wins, so `--account`, `--model`, `--effort`, `--composition` and `--protocol` are refused alongside it. |
-| `--resume-tree` | Resume a `RestoredPaused` topology. Requires `--session`. |
 | `--max-turns <n>` | Admitted turns including the first, 1..=100; default 25. |
 | `--timeout <seconds>` | Whole-run wall clock, including authentication/catalog preparation and idle waiting; default none. |
 | `--leave-jobs-running` | Leave shell `&` leftover jobs alive and unowned at exit; the caller must clean them up. Budget-promoted jobs hold the run open while their leaders live. |
@@ -449,7 +448,7 @@ Intel macOS, fail closed.
 The same host loop the TUI drives, speaking newline-delimited JSON (`v=1`) on
 stdin and stdout. Stdio is the pipe; there is no `plak agent stdio` subcommand.
 Binding flags match `plak run` (`--account`, `--model`, `--effort`,
-`--composition`, `--protocol`, `--session`, `--resume-tree`); an omitted flag
+`--composition`, `--protocol`, `--session`); an omitted flag
 falls back to the `[root] agent` template's value, and `plak agent` refuses to
 start when neither supplies an account, a model, or a required effort. A model
 that is not a row of the account's catalog is refused before anything attaches,
@@ -462,11 +461,11 @@ model `gpt-5.6-luna` is not in the SuperGrok subscription catalog of account `gr
 
 ```
 plak agent --account codex --model gpt-5.6-luna --effort low
-plak agent --session 0f2c… --resume-tree
+plak agent --session 0f2c…
 printf '{"v":1,"kind":"prompt","id":"1","text":"hi"}\n' | plak agent --account grok --model grok-4.6 --effort low
 ```
 
-Stdin commands: `prompt`, `interrupt`, `compact`, `resume_queue`, `resume_tree`, `tree`,
+Stdin commands: `prompt`, `interrupt`, `compact`, `resume_queue`, `tree`,
 `interrupt_node`, `close_node`, `stop_all`, `clear`,
 `invoke_tool`, `fork`, `recover`, `background`, `resolve_approval`, `quit`.
 `clear` starts a new session, as `/new` does in the TUI.

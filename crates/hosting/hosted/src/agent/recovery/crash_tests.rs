@@ -543,11 +543,12 @@ impl Fixture {
         cut_ready(&id).await;
     }
 
-    async fn recover(&self, id: &str, abandoned: bool) {
-        crate::runtime::resume_tree(&self.tree_id).await.unwrap();
-        super::super::children::reattach_inflight_children(&self.parent, &self.runtime).await;
-        let _ = super::run_tree_recovery_pass(&self.tree_id).await;
-        self.until_settled(id).await;
+    /// The custody take's `recover_node` runs, then what they left. A child
+    /// whose turn ended on its own reported to the root; one whose owner was
+    /// lost is interrupted with its attempt open and reports nothing.
+    async fn recover(&self, id: &str, after: After) {
+        super::super::children::recover_owed_children(&self.parent, &self.runtime).await;
+        let _ = super::recover_tree(&self.tree_id).await;
         let commands = self.commands();
         let attempts = self.runtime.read(|tree| tree.attempts().len()).unwrap();
         let recoverer = super::ProductChildRecoverer {
@@ -556,19 +557,33 @@ impl Fixture {
         };
         self.runtime
             .read(|tree| {
-                assert!(tree.attempt(id).unwrap().status.is_stopped());
-                if abandoned {
-                    assert_eq!(tree.node(id).unwrap().status, NodeStatus::Failed);
-                    assert_eq!(
-                        tree.attempt(id).unwrap().failure.as_ref().unwrap().kind,
-                        "turn_abandoned"
-                    );
+                assert!(!tree.recovery_owed(id), "recover_node ran");
+                let attempt = tree.attempt(id).unwrap();
+                match after {
+                    After::Settled => {
+                        assert!(attempt.status.is_stopped());
+                        assert_eq!(tree.pending_mail("root").len(), 1);
+                    }
+                    After::OwnerLost { .. } => {
+                        assert_eq!(tree.node(id).unwrap().status, NodeStatus::Interrupted);
+                        assert_eq!(
+                            attempt.status,
+                            crate::agent_tree_protocol::AttemptStatus::Running
+                        );
+                        assert_eq!(attempt.failure, None);
+                        assert_eq!(
+                            tree.pending_mail("root"),
+                            [] as [plakous_recursive_subagents::tree::MailRecord; 0]
+                        );
+                    }
                 }
-                assert_eq!(tree.pending_mail("root").len(), 1);
             })
             .unwrap();
         let before = self.abandonments(id).await;
-        assert_eq!(before, usize::from(abandoned));
+        assert_eq!(
+            before,
+            usize::from(matches!(after, After::OwnerLost { abandoned: true }))
+        );
         let outcome = tokio::time::timeout(Duration::from_secs(20), async {
             loop {
                 match recoverer.recover(id.into(), None).await {
@@ -582,12 +597,15 @@ impl Fixture {
         .await
         .expect("the asynchronous retirement owner settles within 20 seconds");
         assert!(!outcome.recovered);
-        let _ = super::run_tree_recovery_pass(&self.tree_id).await;
+        let _ = super::recover_tree(&self.tree_id).await;
         assert_eq!(self.abandonments(id).await, before);
         assert_eq!(self.commands(), commands);
         self.runtime
             .read(|tree| {
-                assert_eq!(tree.pending_mail("root").len(), 1);
+                assert_eq!(
+                    tree.pending_mail("root").len(),
+                    usize::from(after == After::Settled)
+                );
                 assert_eq!(tree.attempts().len(), attempts);
             })
             .unwrap();
@@ -689,6 +707,16 @@ impl Fixture {
         }
         found
     }
+}
+
+/// What [`Fixture::recover`] expects of the recovered child.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum After {
+    /// Its turn ended in this process and reported.
+    Settled,
+    /// The lost owner's turn is gone (`abandoned` when the reopen closed
+    /// one): interrupted, attempt open, nothing reported.
+    OwnerLost { abandoned: bool },
 }
 
 async fn cut_ready(id: &str) -> ! {
@@ -812,7 +840,9 @@ fn child_wake_admitted_before_dispatch_rejoins_without_duplicate_admission() {
             2,
             "the cut must follow durable wake admission"
         );
-        fixture.recover(&id, true).await;
+        fixture
+            .recover(&id, After::OwnerLost { abandoned: true })
+            .await;
     });
     assert_eq!(
         count(),
@@ -846,13 +876,64 @@ fn await_owner(child: &mut std::process::Child, mode: &str) -> String {
         })
 }
 
+/// The exempt bound case: recover_node over an owed child whose exact open
+/// restores its turn (the decision barrier the lost owner left) rejoins it.
+/// The child stays running and unmarked, its owed mark is gone, and nothing
+/// dispatches again.
+#[test]
+fn an_owed_child_whose_open_restores_its_turn_rejoins_unmarked() {
+    let root = tempfile::tempdir().unwrap();
+    let id = kill_owner(root.path(), "certified");
+    let dispatched = || {
+        plakous_offline_crash_harness::evidence::read_evidence(root.path().join("dispatch.jsonl"))
+            .unwrap()
+            .into_iter()
+            .filter(|row| {
+                row.kind
+                    == plakous_offline_crash_harness::evidence::EvidenceKind::ProviderDispatched
+            })
+            .count()
+    };
+    let before = dispatched();
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let fixture = Fixture::new(root.path(), "certified", None, true);
+        assert!(
+            fixture
+                .runtime
+                .read(|tree| tree.recovery_owed(&id))
+                .unwrap(),
+            "a bound turn is owed a recover_node"
+        );
+        super::super::children::recover_owed_children(&fixture.parent, &fixture.runtime).await;
+        assert!(fixture.runtime.live.lock().await.contains_key(&id));
+        fixture
+            .runtime
+            .read(|tree| {
+                assert!(!tree.recovery_owed(&id));
+                assert_eq!(tree.node(&id).unwrap().status, NodeStatus::Running);
+                assert!(
+                    !tree.operations().values().any(|operation| {
+                        operation.caller_agent_id == id && operation.tool_name == "interrupt"
+                    }),
+                    "not marked"
+                );
+            })
+            .unwrap();
+        crate::topology_runtime::force_release(&fixture.tree_id).await;
+    });
+    assert_eq!(
+        dispatched(),
+        before,
+        "the rejoined turn waits at its decision"
+    );
+}
+
 #[test]
 fn child_rejoin_preserves_certified_decision_and_settles_waits() {
     let root = tempfile::tempdir().unwrap();
     let id = kill_owner(root.path(), "certified");
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let fixture = Fixture::new(root.path(), "certified", None, true);
-        crate::runtime::resume_tree(&fixture.tree_id).await.unwrap();
         fixture
             .runtime
             .mutate_then_emit_borrowed_for_test(false, |tree| {
@@ -885,7 +966,6 @@ fn child_rejoin_preserves_certified_decision_and_settles_waits() {
             })
             .await
             .unwrap();
-        crate::runtime::resume_tree(&fixture.tree_id).await.unwrap();
         let locator = std::fs::read_to_string(root.path().join("created-locator")).unwrap();
         let path = root.path().to_string_lossy().into_owned();
         let super::super::children::ChildReopen::Attached { session, recovered } =
@@ -985,7 +1065,7 @@ fn child_rejoin_preserves_certified_decision_and_settles_waits() {
                 .unwrap(),
             1
         );
-        fixture.recover(&id, false).await;
+        fixture.recover(&id, After::Settled).await;
     });
     let evidence =
         plakous_offline_crash_harness::evidence::read_evidence(root.path().join("dispatch.jsonl"))
@@ -1098,7 +1178,19 @@ fn recover_agent_waits_for_a_still_held_child_lease() {
         fixture
             .runtime
             .read(|tree| {
-                assert_eq!(tree.pending_mail("root").len(), 1);
+                // Law L: the lost turn interrupts the child, attempt kept,
+                // and nothing is reported to the parent.
+                assert_eq!(
+                    tree.pending_mail("root"),
+                    [] as [crate::agent_tree::MailRecord; 0]
+                );
+                assert_eq!(tree.node(&id).unwrap().status, NodeStatus::Interrupted);
+                let attempt = tree.attempt(&id).unwrap();
+                assert_eq!(
+                    attempt.status,
+                    crate::agent_tree_protocol::AttemptStatus::Running
+                );
+                assert_eq!(attempt.failure, None);
                 assert_eq!(tree.attempts().len(), attempts);
             })
             .unwrap();
@@ -1180,12 +1272,20 @@ fn child_sigkill_wake_and_mid_turn_recover_once_without_redispatch() {
         );
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             let fixture = Fixture::new(root.path(), mode, None, true);
-            fixture.recover(&id, matches!(mode, "wake" | "mid")).await;
+            fixture
+                .recover(
+                    &id,
+                    After::OwnerLost {
+                        abandoned: matches!(mode, "wake" | "mid"),
+                    },
+                )
+                .await;
         });
         assert_eq!(
             count(),
-            before + usize::from(matches!(mode, "idle" | "wake-prepared")),
-            "only never-admitted work can dispatch once"
+            before,
+            "{mode}: nothing the lost owner left dispatches again: a parked child, \
+             even one with a prepared wake, is interrupted rather than woken"
         );
     }
 }

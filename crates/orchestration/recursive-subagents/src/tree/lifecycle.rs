@@ -53,6 +53,9 @@ impl ProductAgentTree {
         // ending its attempt after a wake that was not admitted has neither.
         let parked = self.is_parked(&request.agent_id) && !self.is_park_ending(&request.agent_id);
         let owned = self.has_turn_owner(&request.agent_id);
+        // A child still owed its recover_node is the lost owner's: its next
+        // turn waits on that recovery, which an interrupt ends.
+        let awaiting_recovery = self.recovery_owed(&request.agent_id);
         // The terminal observation clears ownership; requesting an
         // interrupt cannot make a still-unwinding copy safe to seal.
         // An interrupt that only cleared `active_turn` left the
@@ -66,7 +69,7 @@ impl ProductAgentTree {
             &request.agent_id,
             attempt_id,
             super::operator_intents::Decision::Interrupt {
-                effective: owned || parked,
+                effective: owned || parked || awaiting_recovery,
                 cause: None,
             },
         )?;
@@ -292,6 +295,32 @@ impl ProductAgentTree {
         self.turn_owners.remove(agent_id);
     }
 
+    /// Whether this child's bound or active turn still waits for its
+    /// `recover_node`: until then it takes no new turn.
+    #[must_use]
+    pub fn recovery_owed(&self, agent_id: &str) -> bool {
+        self.recovery_owed.contains(agent_id)
+    }
+
+    /// The children still owed a `recover_node`, descendants first.
+    #[must_use]
+    pub fn recovery_owed_targets(&self) -> Vec<String> {
+        let mut ordered = Vec::new();
+        self.preorder(self.root_agent_id.as_str(), &mut ordered);
+        ordered
+            .into_iter()
+            .rev()
+            .filter(|id| self.recovery_owed.contains(id))
+            .collect()
+    }
+
+    /// `recover_node` ran for this child: it takes turns again.
+    pub fn recovery_settled(&mut self, agent_id: &str) {
+        if self.recovery_owed.remove(agent_id) {
+            self.notify.notify_waiters();
+        }
+    }
+
     /// Live ownership fences interrupt and close; after restart the projected
     /// active-turn view is the only remaining evidence.
     #[must_use]
@@ -440,18 +469,6 @@ impl ProductAgentTree {
         }
         self.refresh_epoch_after_close();
         if self.state == TreeAdmissionState::Live && self.quiescence_refusal().is_none() {
-            self.state = TreeAdmissionState::TreeTerminal;
-            self.bump();
-        }
-        // stop-all is the operator's explicit "close every agent",
-        // and the second half of the one confirmed compound action the Agents
-        // tab offers when a roster save is refused. On a restored tree the
-        // pause bit fences descendants that were in flight when the process
-        // ended; once stop-all has closed every one of them there is nothing
-        // left to resume. Leaving the bit up made the offered remedy a dead end:
-        // the very save it exists to unblock was refused again with
-        // the same text, for every press after it.
-        if self.state == TreeAdmissionState::RestoredPaused && self.quiescence_refusal().is_none() {
             self.state = TreeAdmissionState::TreeTerminal;
             self.bump();
         }

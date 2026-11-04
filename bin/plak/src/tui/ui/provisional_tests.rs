@@ -131,12 +131,6 @@ fn storage_warning_is_idle_chrome_and_clears_with_a_healthy_projection() {
         app.turn_status_label().as_deref(),
         Some("storage low · new turns refused")
     );
-    app.tree_restored_paused = true;
-    assert!(
-        app.turn_status_label()
-            .is_some_and(|label| label.contains("agents paused"))
-    );
-    app.tree_restored_paused = false;
     info.storage_level = plakous_host_protocol::views::presentation::StorageLevel::Available;
     app.apply_host_event(HostEvent::SessionInfo(info));
     assert_eq!(app.turn_status_label(), None);

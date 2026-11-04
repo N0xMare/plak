@@ -3,9 +3,9 @@
 use super::{
     Alignment, App, Block, BorderType, Borders, Clear, Constraint, Duration, Frame,
     HUD_SCAN_BLOCKS, Instant, Layout, Line, PROMPT_PREFIX, Paragraph, QUITTING_STATUS,
-    QueueDrainState, Rect, ScrollBlock, Span, Style, TREE_PAUSED_STATUS, UnicodeWidthStr,
-    block_height_for_rows, bounded_panel_height, modal_chrome, tool_is_running, user_phase,
-    user_status_detail, visual_cursor_xy_from_rows,
+    QueueDrainState, Rect, ScrollBlock, Span, Style, UnicodeWidthStr, block_height_for_rows,
+    bounded_panel_height, modal_chrome, tool_is_running, user_phase, user_status_detail,
+    visual_cursor_xy_from_rows,
 };
 use plakous_host_protocol::status::HostPhase;
 use unicode_segmentation::UnicodeSegmentation;
@@ -218,8 +218,7 @@ impl App {
         // chrome. A running turn hides them even when the facts remain, and
         // a problem label outranks them.
         if !self.busy
-            && let Some(label) =
-                pending_indicator_label(self.pending_continuation, self.tree_restored_paused)
+            && let Some(label) = pending_indicator_label(self.pending_continuation)
         {
             return Some(label);
         }
@@ -297,14 +296,11 @@ impl App {
         if self.busy {
             return None;
         }
-        pending_indicator_label(self.pending_continuation, self.tree_restored_paused)
+        pending_indicator_label(self.pending_continuation)
     }
 }
 
-fn pending_indicator_label(
-    pending: plakous_host_protocol::PendingContinuation,
-    tree_restored_paused: bool,
-) -> Option<String> {
+fn pending_indicator_label(pending: plakous_host_protocol::PendingContinuation) -> Option<String> {
     let mut parts = Vec::new();
     push_pending_count(&mut parts, pending.results, "result", "results");
     push_pending_count(&mut parts, pending.questions, "question", "questions");
@@ -315,9 +311,6 @@ fn pending_indicator_label(
     }
     if pending.auto_continue_paused {
         parts.push("auto-continue paused".to_owned());
-    }
-    if pending.tree_paused || tree_restored_paused {
-        parts.push(TREE_PAUSED_STATUS.to_owned());
     }
     if parts.is_empty() {
         None

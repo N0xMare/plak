@@ -2,9 +2,8 @@
 
 use super::terminal::copy_text_osc52;
 use super::{
-    App, CanvasTree, KeyCode, MouseEvent, MouseEventKind, RESTORED_PAUSED_NAVIGATOR_HINT,
-    TopologyNavigatorKey, TopologyNavigatorOutcome, UserAction, event, route_submit,
-    tree_navigator_key,
+    App, CanvasTree, KeyCode, MouseEvent, MouseEventKind, TopologyNavigatorKey,
+    TopologyNavigatorOutcome, UserAction, event, route_submit, tree_navigator_key,
 };
 use plakous_host_protocol::status::HostPhase;
 
@@ -126,14 +125,6 @@ impl App {
         if self.agents_unavailable.take().is_some() {
             self.mark_dirty();
         }
-        if self.tree_restored_paused != snap.restored_paused {
-            self.tree_restored_paused = snap.restored_paused;
-            self.mark_dirty();
-        }
-        if snap.restored_paused && self.tree_navigator.is_none() {
-            self.status_detail = Some(RESTORED_PAUSED_NAVIGATOR_HINT.to_owned());
-            self.mark_dirty();
-        }
         let unseen = self.agent_acks.tree_id.as_deref() != Some(snap.tree_id.as_str());
         let retry = self.agent_acks.retry.as_deref() == Some(snap.tree_id.as_str());
         if unseen || retry {
@@ -163,10 +154,7 @@ impl App {
 
     /// After attach or in-process `/resume` load, request a tree snapshot.
     ///
-    /// Never `ResumeTopologyTree`: the topology contract
-    /// say a `RestoredPaused` tree never auto-resumes on reattach, and the
-    /// navigator's `r` is its only exit. Overlay stays closed; a crash-restored
-    /// queue drain is not resumed either.
+    /// The overlay stays closed; a crash-restored queue drain is not resumed.
     pub(crate) fn maybe_request_tree_snapshot_after_attach(
         &mut self,
         actions: Option<&crate::tui::UserActionSender>,
@@ -307,7 +295,7 @@ impl App {
                         nav.focus_on(&agent_id);
                     }
                     self.mark_dirty();
-                    if double || agent_id == crate::tui::tree_navigator::RESUME_ROW_ID {
+                    if double {
                         return self.handle_tree_navigator_key(KeyCode::Enter);
                     }
                 }

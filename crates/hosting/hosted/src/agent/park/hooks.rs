@@ -9,7 +9,6 @@ pub(in crate::agent) type Hook =
 static BEFORE_WAKE_ADMISSION: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
 static BEFORE_FAILED_WAKE_END: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
 static AFTER_FOLLOW_UP_ADMISSION: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
-static AFTER_START_ADMISSION: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
 static AFTER_RECOVERED_OCCUPY: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
 static AROUND_REOPEN_SPAWNED_CHILD: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
 
@@ -49,16 +48,6 @@ pub(in crate::agent) fn set_before_failed_wake_end(agent_id: &str, hook: Hook) {
 
 pub(in crate::agent) async fn before_failed_wake_end(agent_id: &str) {
     run(&BEFORE_FAILED_WAKE_END, agent_id).await;
-}
-
-/// Runs `hook` after the runtime admitted a child Start and before its
-/// turn binds.
-pub(in crate::agent) fn set_after_start_admission(agent_id: &str, hook: Hook) {
-    set(&AFTER_START_ADMISSION, agent_id, hook);
-}
-
-pub(in crate::agent) async fn after_start_admission(agent_id: &str) {
-    run(&AFTER_START_ADMISSION, agent_id).await;
 }
 
 pub(in crate::agent) fn set_after_follow_up_admission(agent_id: &str, hook: Hook) {

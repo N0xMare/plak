@@ -24,7 +24,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("compact", "Compact this conversation"),
     ("config", "Open config.toml in your editor"),
     ("resume", "Resume a previous session · <id>"),
-    ("tree", "Open Activity: Agents · [resume]"),
+    ("tree", "Open Activity: Agents"),
     ("ps", "Open Activity: Processes"),
     ("stop-all", "Stop all non-root agents"),
     ("fork", "Fork this conversation"),
@@ -257,8 +257,7 @@ pub fn resolve(parsed: &ParsedSlash, _ctx: &SlashContext) -> SlashEffect {
         "ps" => SlashEffect::OpenProcesses,
         "tree" => match parsed.args.as_str() {
             "" => SlashEffect::Action(UserAction::OpenTopologyNavigator),
-            "resume" => SlashEffect::Action(UserAction::ResumeTopologyTree),
-            _ => SlashEffect::LocalNote("usage: /tree [resume]".to_owned()),
+            _ => SlashEffect::LocalNote("usage: /tree".to_owned()),
         },
         "stop-all" | "stop_all" => SlashEffect::Action(UserAction::StopAllTopology),
         "fork" => resolve_fork(&parsed.args),

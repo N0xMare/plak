@@ -1843,15 +1843,17 @@ fn malformed_argv_has_exact_usage_exit() {
 }
 
 #[test]
-fn agent_resume_tree_without_session_is_parse_error() {
+fn the_removed_resume_tree_flag_is_a_parse_error() {
     let dir = isolated_home_dir();
-    let out = run_plak(dir.path(), &["agent", "--resume-tree"]);
-    assert_eq!(out.status.code(), Some(2), "stderr={}", stderr(&out));
-    let err = stderr(&out);
-    assert!(
-        err.contains("--session"),
-        "agent --resume-tree without --session must fail closed: {err}"
-    );
+    for args in [
+        &["agent", "--resume-tree"][..],
+        &["run", "--session", "s", "--resume-tree", "--", "p"][..],
+    ] {
+        let out = run_plak(dir.path(), args);
+        assert_eq!(out.status.code(), Some(2), "stderr={}", stderr(&out));
+        let err = stderr(&out);
+        assert!(err.contains("unknown option"), "{args:?}: {err}");
+    }
 }
 
 #[test]

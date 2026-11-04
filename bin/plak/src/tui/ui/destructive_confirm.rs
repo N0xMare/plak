@@ -74,7 +74,6 @@ impl DestructiveConfirm {
             Some(ConfirmButton::Send(UserAction::InterruptTopologyNode { .. })) => "interrupt",
             Some(ConfirmButton::Send(UserAction::CloseTopologyNode { .. })) => "close",
             Some(ConfirmButton::Send(UserAction::StopAllTopology)) => "stop-all",
-            Some(ConfirmButton::Send(UserAction::ResumeTopologyTree)) => "resume",
             Some(ConfirmButton::Send(UserAction::RecoverTopologyNode { .. })) => "recover",
             Some(ConfirmButton::Send(UserAction::StopProcesses { id: Some(_), .. })) => {
                 "process-stop"
@@ -237,17 +236,6 @@ impl App {
                     "Settle this child's recorded session recovery. No task is retried and no model call or tool is replayed.".to_owned(),
                 ],
                 "[ Recover ]",
-            ),
-            UserAction::ResumeTopologyTree => (
-                "Resume all agents?".to_owned(),
-                vec![
-                    format!(
-                        "{} of the paused tree start working again.",
-                        plural(self.open_agents(), "open agent", "open agents")
-                    ),
-                    "Their turns continue and spend again.".to_owned(),
-                ],
-                "[ Resume all ]",
             ),
             UserAction::StopProcesses { id: Some(id), .. } => (
                 "Stop this process?".to_owned(),
@@ -549,18 +537,13 @@ impl App {
             UserAction::InterruptTopologyNode { agent_id }
             | UserAction::CloseTopologyNode { agent_id } => agent_active(agent_id),
             UserAction::StopAllTopology => self.open_agents() > 0,
-            UserAction::ResumeTopologyTree => self
-                .agent_tree
-                .as_ref()
-                .is_some_and(|tree| tree.restored_paused),
             UserAction::RecoverTopologyNode {
                 tree_id,
                 agent_id,
                 expected_attempt_id,
                 ..
             } => self.agent_tree.as_ref().is_some_and(|tree| {
-                !tree.restored_paused
-                    && tree.tree_id == *tree_id
+                tree.tree_id == *tree_id
                     && tree.nodes.iter().any(|node| {
                         node.agent_id == *agent_id
                             && node.attempt_id.as_deref() == Some(expected_attempt_id.as_str())

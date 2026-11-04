@@ -2633,7 +2633,7 @@ fn an_interrupted_grandparent_adopt_faults_the_adopter_not_the_hub() {
     );
     assert_eq!(row.adopter_agent_id.as_deref(), Some("root"));
     let _lost_with_the_process = tree.take_effects();
-    tree.restore_paused();
+    tree.apply_reopen_law();
     assert_ne!(
         tree.node(&hub).unwrap().status,
         NodeStatus::RecoveryRequired,
@@ -2666,7 +2666,7 @@ fn an_interrupted_adopt_faults_a_non_root_adopter() {
         Some(hub.as_str())
     );
     let _lost_with_the_process = tree.take_effects();
-    tree.restore_paused();
+    tree.apply_reopen_law();
     assert_eq!(
         tree.node(&hub).unwrap().status,
         NodeStatus::RecoveryRequired,

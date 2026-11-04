@@ -296,7 +296,6 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
         }
         UserAction::OpenTopologyNavigator
         | UserAction::RefreshTopologyTree
-        | UserAction::ResumeTopologyTree
         | UserAction::InterruptTopologyNode { .. }
         | UserAction::CloseTopologyNode { .. }
         | UserAction::StopAllTopology

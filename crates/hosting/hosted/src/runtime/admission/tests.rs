@@ -278,46 +278,25 @@ fn unresolved_delivery_locks_every_queue_mutation() {
     assert!(session.validate_for_store().is_ok());
 }
 
-/// A paused tree or a paused
-/// queue must reach the HUD, and attach must say what the
-/// state is and exactly how to leave it.
+/// A paused queue must reach the HUD, and attach must say what the state
+/// is and exactly how to leave it.
 #[test]
 fn a_paused_queue_is_named_in_the_status_row_and_in_an_attach_note() {
     let root = tempfile::tempdir().unwrap();
-    let paths = MemoryRows::new();
     let mut session = SessionRecord::new(root.path().to_path_buf());
 
-    assert_eq!(
-        restored_paused_status_suffix(&paths, &session),
-        HostPause::default()
-    );
-    // A note claims only what the host observed: a tree the host cannot
-    // read is not reported paused (a contended hub lock would otherwise make
-    // every fresh attach announce a paused tree).
-    assert!(!topology_state::observed_restored_paused(
-        &paths,
-        "no-such-tree"
-    ));
+    assert_eq!(queue_pause(&session), HostPause::default());
 
     // A restored drain state with nothing queued is not a paused
     // queue; a childless reopen says nothing about draining.
     session.queue_drain_state = SessionQueueDrainState::RestoredPaused;
-    assert_eq!(
-        restored_paused_status_suffix(&paths, &session),
-        HostPause::default()
-    );
+    assert_eq!(queue_pause(&session), HostPause::default());
     session.pending_queue.push(SessionQueueItem::new("later"));
-    assert_eq!(
-        restored_paused_status_suffix(&paths, &session),
-        HostPause {
-            tree: false,
-            queue: true
-        }
-    );
+    assert_eq!(queue_pause(&session), HostPause { queue: true });
 
     let (tx, rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let events = Sender::over(tx);
-    emit_restored_paused_note(&events, &paths, &session, false);
+    emit_queue_pause_note(&events, &session);
     assert!(
         events.take_notice_intents().is_empty(),
         "every attach re-announces the note, so it is never stored"
@@ -331,29 +310,4 @@ fn a_paused_queue_is_named_in_the_status_row_and_in_an_attach_note() {
         })
         .expect("attach names the paused state");
     assert!(pause.queue);
-    assert!(!pause.tree);
-}
-
-/// Every operator-facing string for the paused state is prose and
-/// names a remedy. `ResumeTree` and `restored_paused` are wire values.
-#[test]
-fn paused_tree_copy_is_prose_with_a_remedy() {
-    for copy in [
-        crate::agent_tree::ProductAgentTree::TREE_PAUSED_REFUSAL,
-        crate::agent_tree::ProductAgentTree::TREE_EPOCH_REBIND_PAUSED,
-        crate::agent::RESTORED_PAUSED_REFUSAL,
-    ] {
-        assert!(
-            !copy.contains("ResumeTree") && !copy.contains("restored_paused"),
-            "raw enum variant in operator copy: {copy}"
-        );
-        assert!(
-            copy.contains("paused"),
-            "the copy must name the state: {copy}"
-        );
-        assert!(
-            copy.contains("resume") || copy.contains("--resume-tree"),
-            "the copy must name a remedy: {copy}"
-        );
-    }
 }

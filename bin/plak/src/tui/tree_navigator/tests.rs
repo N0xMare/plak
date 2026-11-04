@@ -178,7 +178,6 @@ fn snapshot(nodes: Vec<CanvasNode>) -> CanvasTree {
         tree_id: "tree1".into(),
         revision: 3,
         state: "live".into(),
-        restored_paused: false,
         solicited: false,
         nodes,
     }
@@ -236,55 +235,6 @@ fn enter_shows_the_selected_transcript_and_esc_dismisses_tree() {
     assert_eq!(
         nav.handle_key(TopologyNavigatorKey::Escape),
         TopologyNavigatorOutcome::Dismiss
-    );
-}
-
-#[test]
-fn footer_hint_explicit_when_restored_paused() {
-    // The paused footer says what the key does, in words the
-    // operator can act on, and never repeats a wire value or a request
-    // type name.
-    let paused = agents_footer_hint(FooterView {
-        restored_paused: true,
-        scope: AgentScope::All,
-        hidden: 0,
-        history: false,
-        failures_only: false,
-        query: "",
-        offer_recover: false,
-    });
-    assert!(paused.contains("Tree paused"), "{paused}");
-    assert!(paused.contains("r resumes"), "{paused}");
-    assert!(!paused.contains("ResumeTree"), "{paused}");
-    assert!(!paused.contains("restored_paused"), "{paused}");
-    let live = agents_footer_hint(FooterView {
-        restored_paused: false,
-        scope: AgentScope::All,
-        hidden: 0,
-        history: false,
-        failures_only: false,
-        query: "",
-        offer_recover: false,
-    });
-    assert!(live.contains("Enter transcript"), "{live}");
-    assert!(live.contains("all agents · f live"), "{live}");
-    assert!(live.contains("R refresh"), "{live}");
-}
-
-#[test]
-fn resume_only_when_restored_paused() {
-    let mut live = TreeNavigator::from_snapshot(snapshot(vec![node("root", None, 0)]));
-    assert_eq!(
-        live.handle_key(TopologyNavigatorKey::Resume),
-        TopologyNavigatorOutcome::Consumed
-    );
-    let mut paused = snapshot(vec![node("root", None, 0)]);
-    paused.restored_paused = true;
-    paused.state = "restored_paused".into();
-    let mut nav = TreeNavigator::from_snapshot(paused);
-    assert_eq!(
-        nav.handle_key(TopologyNavigatorKey::Resume),
-        TopologyNavigatorOutcome::Confirm(crate::tui::UserAction::ResumeTopologyTree)
     );
 }
 
@@ -667,32 +617,6 @@ fn keys_paint_no_optimistic_transition() {
         let _ = nav.handle_key(key);
     }
     assert_eq!(nav.snapshot, before);
-}
-
-#[test]
-fn restored_paused_never_auto_resumes() {
-    let mut paused = family();
-    paused.restored_paused = true;
-    paused.state = "restored_paused".into();
-    let mut nav = TreeNavigator::from_snapshot(paused);
-    // Every navigation key is inert with respect to admission state.
-    for key in [
-        TopologyNavigatorKey::Down,
-        TopologyNavigatorKey::Up,
-        TopologyNavigatorKey::Home,
-        TopologyNavigatorKey::Filter,
-        TopologyNavigatorKey::Left,
-        TopologyNavigatorKey::Right,
-    ] {
-        assert_eq!(nav.handle_key(key), TopologyNavigatorOutcome::Consumed);
-    }
-    assert!(nav.snapshot.as_ref().unwrap().restored_paused);
-    // Only an explicit r, confirmed in the pop-up, leaves RestoredPaused.
-    assert_eq!(
-        nav.handle_key(TopologyNavigatorKey::Resume),
-        TopologyNavigatorOutcome::Confirm(crate::tui::UserAction::ResumeTopologyTree)
-    );
-    assert!(nav.snapshot.as_ref().unwrap().restored_paused);
 }
 
 #[test]
@@ -1242,10 +1166,6 @@ fn history_search_keeps_a_hidden_selection_and_restores_scope() {
     for ch in ['u', 'r', 't', '!', '/'] {
         nav.push_search(ch);
         assert_eq!(
-            nav.handle_key(TopologyNavigatorKey::Resume),
-            TopologyNavigatorOutcome::Consumed
-        );
-        assert_eq!(
             nav.handle_key(TopologyNavigatorKey::History),
             TopologyNavigatorOutcome::Consumed
         );
@@ -1296,34 +1216,6 @@ fn history_search_keeps_a_hidden_selection_and_restores_scope() {
 }
 
 #[test]
-fn a_paused_tree_leads_with_a_resume_control_until_the_host_resumes() {
-    let mut paused = family();
-    paused.restored_paused = true;
-    let mut nav = TreeNavigator::from_snapshot(paused);
-    assert_eq!(nav.selected.as_deref(), Some(RESUME_ROW_ID));
-    let frame = paint(&mut nav, 80, 24, 0);
-    assert_eq!(frame.rows[0].id, RESUME_ROW_ID);
-    assert!(frame.rows[0].cells.body.contains("resume agents"));
-    assert!(frame.rows[0].selected);
-    assert_ne!(frame.rows[1].id, RESUME_ROW_ID);
-    assert_eq!(
-        nav.handle_key(TopologyNavigatorKey::Enter),
-        TopologyNavigatorOutcome::Confirm(crate::tui::UserAction::ResumeTopologyTree)
-    );
-    let _ = nav.handle_key(TopologyNavigatorKey::Down);
-    assert_eq!(nav.selected_agent_id(), Some("root"));
-    let _ = nav.handle_key(TopologyNavigatorKey::Up);
-    assert_eq!(nav.selected.as_deref(), Some(RESUME_ROW_ID));
-    let mut live = family();
-    live.revision = 4;
-    live.restored_paused = false;
-    nav.apply_snapshot(live);
-    let frame = paint(&mut nav, 80, 24, 0);
-    assert!(frame.rows.iter().all(|row| row.id != RESUME_ROW_ID));
-    assert_eq!(nav.selected_agent_id(), Some("root"));
-}
-
-#[test]
 fn u_recovers_only_a_child_that_still_needs_recovery() {
     let mut child = settled("c-stuck", 10, "stuck");
     child.status = "recovery_required".into();
@@ -1343,28 +1235,6 @@ fn u_recovers_only_a_child_that_still_needs_recovery() {
             agent_id: "c-stuck".into(),
             expected_attempt_id: "c-stuck-a1".into(),
         })
-    );
-
-    let mut paused = snapshot(vec![node("root", None, 0), {
-        let mut child = settled("c-stuck", 10, "stuck");
-        child.status = "recovery_required".into();
-        child.attempt_status = Some("recovery_required".into());
-        child
-    }]);
-    paused.restored_paused = true;
-    let mut nav = TreeNavigator::from_snapshot(paused);
-    let _ = nav.handle_key(TopologyNavigatorKey::Down);
-    let _ = nav.handle_key(TopologyNavigatorKey::Down);
-    assert_eq!(
-        nav.handle_key(TopologyNavigatorKey::Recover),
-        TopologyNavigatorOutcome::Consumed
-    );
-    let frame = paint(&mut nav, 100, 24, 20);
-    assert_eq!(frame.inspector.len(), 6, "{:?}", frame.inspector);
-    assert!(
-        frame.inspector[0].contains("Resume agents first"),
-        "{:?}",
-        frame.inspector
     );
 }
 
@@ -1412,45 +1282,8 @@ fn history_esc_clears_a_filter_that_hides_the_selection() {
 }
 
 #[test]
-fn history_keeps_the_resume_row_and_the_agent_under_it() {
-    let now = 1_700_000_000_u64;
-    let mut paused = snapshot(vec![
-        node("root", None, 0),
-        settled("c-old", now, "old notes"),
-    ]);
-    paused.restored_paused = true;
-    paused.revision = 3;
-    let mut nav = TreeNavigator::from_snapshot(paused);
-    assert_eq!(
-        nav.handle_key(TopologyNavigatorKey::History),
-        TopologyNavigatorOutcome::Consumed
-    );
-    let _ = nav.handle_key(TopologyNavigatorKey::Search);
-    nav.paste_search("missing");
-    let _ = nav.handle_key(TopologyNavigatorKey::Enter);
-    let frame = paint(&mut nav, 80, 24, now);
-    assert_eq!(frame.rows[0].id, RESUME_ROW_ID);
-    assert!(
-        frame.footer.contains("t tree") || frame.rows.iter().any(|row| row.id == RESUME_ROW_ID)
-    );
-    let _ = nav.handle_key(TopologyNavigatorKey::Escape);
-    let _ = nav.handle_key(TopologyNavigatorKey::Down);
-    let remembered = nav.selected_agent_id().unwrap().to_owned();
-    let _ = nav.handle_key(TopologyNavigatorKey::Up);
-    assert_eq!(nav.selected.as_deref(), Some(RESUME_ROW_ID));
-    let mut live = snapshot(vec![
-        node("root", None, 0),
-        settled("c-old", now, "old notes"),
-    ]);
-    live.revision = 4;
-    nav.apply_snapshot(live);
-    assert_eq!(nav.selected_agent_id(), Some(remembered.as_str()));
-}
-
-#[test]
 fn an_eighty_column_footer_keeps_t_history_on_one_row() {
     let footer = agents_footer_hint(FooterView {
-        restored_paused: false,
         scope: AgentScope::Live,
         hidden: 0,
         history: false,

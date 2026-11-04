@@ -19,10 +19,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             return Ok(HostStep::Continue);
         };
         let _ = self.role.events.send(ContentEvent::SetBusy(true));
-        let pause = super::restored_paused_status_suffix(
-            &self.role.config.topology_rows(),
-            &self.role.config.session,
-        );
+        let pause = super::queue_pause(&self.role.config.session);
         let _ = self.role.events.send(ContentEvent::Status {
             phase: HostPhase::Running,
             queue_len: self.role.config.session.pending_queue.len(),

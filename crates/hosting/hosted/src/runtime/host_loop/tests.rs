@@ -54,7 +54,6 @@ fn one_shot_drive_does_not_refuse_a_live_tree_under_contention() {
     );
     let mut state = super::super::oneshot::OneShotState {
         attempted: false,
-        resume_tree: false,
         result: None,
         run: None,
     };

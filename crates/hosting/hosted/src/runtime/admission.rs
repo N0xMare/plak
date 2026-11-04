@@ -9,10 +9,7 @@ use crate::sessions::{
 use crate::surface_protocol::ContentEvent;
 use plakous_host_protocol::status::HostPause;
 
-use super::rebind::durable_tree_id;
-use super::{
-    MAX_PENDING_PROMPTS, MAX_PROMPT_BYTES, Sender, TopologyRows, UserAction, queue, topology_state,
-};
+use super::{MAX_PENDING_PROMPTS, MAX_PROMPT_BYTES, Sender, UserAction, queue};
 use crate::sessions::{NoticeScope, TranscriptRow};
 
 pub(super) fn emit_queue_snapshot<P: plakous_host_protocol::ProtocolExtension>(
@@ -35,17 +32,9 @@ pub(super) fn emit_queue_snapshot<P: plakous_host_protocol::ProtocolExtension>(
     let _ = events.send(ContentEvent::QueueSnapshot { items, drain });
 }
 
-/// A `restored_paused` tree used to be
-/// a silent trap. Every `spawn_agent` failed and the queue stopped draining,
-/// and the transcript said nothing about either. Attach now names both states
-/// and the exact keystrokes that clear them, and the HUD carries
-/// the pause so it is visible without opening a panel.
-pub(super) fn restored_paused_status_suffix(
-    rows: &dyn TopologyRows,
-    session: &SessionRecord,
-) -> HostPause {
+/// The restored queue's pause, for the HUD's status suffix.
+pub(super) fn queue_pause(session: &SessionRecord) -> HostPause {
     HostPause {
-        tree: topology_state::observed_restored_paused(rows, &durable_tree_id(rows, session)),
         queue: queue_drain_is_paused(session),
     }
 }
@@ -60,26 +49,14 @@ pub(super) fn queue_drain_is_paused(session: &SessionRecord) -> bool {
 /// The attach-time note. Distinct from the status suffix because the note has
 /// room for the whole remedy and the HUD does not. Every attach
 /// re-announces it, so it is live only (spec 02 §5.4).
-///
-/// An interactive face already shows a paused tree as its one persisted
-/// `agents paused` row (see `host_loop::pending`), so `tree_in_row` leaves the
-/// tree out of the note; a JSONL face keeps the whole remedy here.
-pub(super) fn emit_restored_paused_note<P: plakous_host_protocol::ProtocolExtension>(
+pub(super) fn emit_queue_pause_note<P: plakous_host_protocol::ProtocolExtension>(
     events: &Sender<P>,
-    rows: &dyn TopologyRows,
     session: &SessionRecord,
-    tree_in_row: bool,
 ) {
-    let tree_paused = !tree_in_row
-        && topology_state::observed_restored_paused(rows, &durable_tree_id(rows, session));
-    let queue_paused = queue_drain_is_paused(session);
-    if !tree_paused && !queue_paused {
+    if !queue_drain_is_paused(session) {
         return;
     }
-    let _ = events.send(ContentEvent::RestoredPause(HostPause {
-        tree: tree_paused,
-        queue: queue_paused,
-    }));
+    let _ = events.send(ContentEvent::RestoredPause(queue_pause(session)));
 }
 
 pub(super) fn emit_prompt_history<P: plakous_host_protocol::ProtocolExtension>(

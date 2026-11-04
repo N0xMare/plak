@@ -684,24 +684,23 @@ pub(super) fn record_emitted_tree_revision(
     }
 }
 
-/// Starts `tree_id`'s background child-recovery pass. Must run on the host's
-/// executor. Its report reaches the user as one system note when it
-/// finishes, so the host loop never waits on a pass.
+/// Starts one `recover_node` run over `tree_id`'s children. Must run on the
+/// host's executor. Its report reaches the user as one system note when it
+/// finishes, so the host loop never waits on it.
 ///
-/// `explicit` is the operator's `/recover`: it also says that a pass started
-/// (when it has children to try), that a running pass will run once more, or
-/// that the tree is paused, and `nothing` is the
-/// note for a pass that found nothing to do.
+/// `explicit` is the operator's `/recover`: it also says that a run started
+/// (when it has children to try), and `nothing` is the note for a run that
+/// found nothing to do.
 pub(super) fn start_child_recovery<P: plakous_host_protocol::ProtocolExtension>(
     events: &Sender<P>,
     session_id: &str,
     tree_id: String,
     explicit: bool,
     nothing: Option<String>,
-) -> crate::agent::RecoveryPassStart {
-    // The pass reports after the host may have switched sessions.
+) -> crate::agent::TreeRecoveryStart {
+    // The run reports after the host may have switched sessions.
     let finished = events.pinned_to(session_id);
-    // The automatic pass runs on every open and reports the children it still
+    // The automatic run starts on every custody take and reports the children it still
     // could not settle each time, so its report is live only; the operator's
     // own `/recover` answer is a one-time event and is stored.
     let report_row = move |row: TranscriptRow| {
@@ -711,19 +710,13 @@ pub(super) fn start_child_recovery<P: plakous_host_protocol::ProtocolExtension>(
             finished.send(ContentEvent::Row(row))
         }
     };
-    // The pass's nothing-to-recover answer, taken by whichever of the pass
+    // The run's nothing-to-recover answer, taken by whichever of the run
     // and an explicit request with nothing pending reports first.
     let nothing = std::sync::Arc::new(std::sync::Mutex::new(nothing));
-    let nothing_for_pass = std::sync::Arc::clone(&nothing);
-    let started = crate::agent::start_tree_recovery_pass(tree_id, move |report| {
-        match report.and_then(|report| {
-            report.note().map(|note| {
-                (
-                    note,
-                    !report.refused.is_empty() || !report.not_attempted.is_empty(),
-                )
-            })
-        }) {
+    let nothing_for_run = std::sync::Arc::clone(&nothing);
+    let started = crate::agent::start_tree_recovery(tree_id, move |report| {
+        match report.and_then(|report| report.note().map(|note| (note, !report.refused.is_empty())))
+        {
             Some((note, needs_recovery)) => {
                 let row = TranscriptRow::info(NoticeScope::Tree, note);
                 let _ = report_row(if needs_recovery {
@@ -735,7 +728,7 @@ pub(super) fn start_child_recovery<P: plakous_host_protocol::ProtocolExtension>(
                 });
             }
             None => {
-                if let Some(nothing) = take_nothing(&nothing_for_pass) {
+                if let Some(nothing) = take_nothing(&nothing_for_run) {
                     let _ = report_row(TranscriptRow::info(NoticeScope::Tree, nothing));
                 }
             }
@@ -743,36 +736,18 @@ pub(super) fn start_child_recovery<P: plakous_host_protocol::ProtocolExtension>(
     });
     if explicit {
         let note = match started {
-            // Nothing is pending, so the pass has nothing to report: answer
-            // now, before the next intent, rather than from the pass, whose
+            // Nothing is pending, so the run has nothing to report: answer
+            // now, before the next intent, rather than from the run, whose
             // note a quit right after this request would never let through.
-            crate::agent::RecoveryPassStart::Started { pending: 0 } => take_nothing(&nothing),
-            crate::agent::RecoveryPassStart::Started { pending } => Some(format!(
+            crate::agent::TreeRecoveryStart::Started { pending: 0 } => take_nothing(&nothing),
+            crate::agent::TreeRecoveryStart::Started { pending } => Some(format!(
                 "plak: recovering {pending} child agent(s) in the background; a note follows \
-                 when the pass finishes"
+                 when that finishes"
             )),
-            crate::agent::RecoveryPassStart::RerunQueued => Some(
-                "plak: a child recovery pass is running; it runs once more and reports when it \
-                 finishes"
-                    .to_owned(),
-            ),
-            crate::agent::RecoveryPassStart::Paused => Some(
-                "this agent tree is paused; explicitly resuming it recovers its children"
-                    .to_owned(),
-            ),
-            crate::agent::RecoveryPassStart::NoTree => None,
+            crate::agent::TreeRecoveryStart::NoTree => None,
         };
         if let Some(note) = note {
-            let row = TranscriptRow::info(NoticeScope::Tree, note);
-            let _ = events.notice(
-                if matches!(started, crate::agent::RecoveryPassStart::Paused) {
-                    row.with_remedy(
-                        plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeTree {},
-                    )
-                } else {
-                    row
-                },
-            );
+            let _ = events.notice(TranscriptRow::info(NoticeScope::Tree, note));
         }
     }
     started
@@ -793,7 +768,6 @@ pub(super) async fn dispatch_topology_navigator<P: plakous_host_protocol::Protoc
     action: &UserAction<P>,
     push: &mut TreeSnapshotPush,
 ) {
-    let resumed = matches!(action, UserAction::ResumeTopologyTree);
     if matches!(action, UserAction::CloseAgentTranscript) {
         push.child_live.close_agent_transcript(events);
         return;
@@ -814,15 +788,6 @@ pub(super) async fn dispatch_topology_navigator<P: plakous_host_protocol::Protoc
             )
             .await;
         emit_child_progress_on_refresh(&runtime, session, push, events, action);
-    }
-    if resumed {
-        start_child_recovery(
-            events,
-            &session.id,
-            durable_tree_id(rows, session),
-            false,
-            None,
-        );
     }
 }
 

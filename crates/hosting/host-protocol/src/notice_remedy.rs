@@ -107,7 +107,8 @@ pub enum NoticeRemedy {
     RetryCompaction {},
     /// Already attached; reopening applies only when detached.
     AttachOnlyWhenDetached {},
-    /// Resume the paused agent tree before dispatch.
+    /// Retained spelling of the removed tree resume. Stored notice rows and
+    /// previous-version exports still carry it; no frontend renders an action.
     ResumeTree {},
     /// Start a new conversation instead of replaying the failed turn.
     StartFresh {},

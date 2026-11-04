@@ -235,7 +235,7 @@ impl PersistedTree {
 
 impl ProductAgentTree {
     /// The reopen law: a new host generation, and
-    /// `restore_paused` to fence work that was in flight when the last
+    /// `apply_reopen_law` to fence work that was in flight when the last
     /// process ended.
     #[must_use]
     pub fn reopen(persisted: PersistedTree) -> Self {
@@ -246,7 +246,7 @@ impl ProductAgentTree {
         tree.max_attempts = super::MAX_TREE_ATTEMPTS;
         let bound = usize::from(tree.current_epoch().max_attempts);
         tree.lower_max_attempts(bound);
-        tree.restore_paused();
+        tree.apply_reopen_law();
         tree
     }
 

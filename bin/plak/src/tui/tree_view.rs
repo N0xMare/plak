@@ -89,10 +89,8 @@ pub struct CanvasTree {
     pub tree_id: String,
     /// Tree revision; intents echo this so the host can resnapshot on mismatch.
     pub revision: u64,
-    /// Admission state label (`live`, `restored_paused`, `closed`, …).
+    /// Admission state label (`live`, `interrupted`, `closed`, …).
     pub state: String,
-    /// True when mutating spawn/mail/merge is blocked until `ResumeTree`.
-    pub restored_paused: bool,
     /// True when this snapshot answers an explicit `/tree` or `r`.
     pub solicited: bool,
     /// Deterministic preorder rows.
@@ -149,7 +147,6 @@ impl From<&TreeView> for CanvasTree {
             tree_id: view.tree_id.clone(),
             revision: view.revision,
             state: view.state.as_str().to_owned(),
-            restored_paused: view.restored_paused(),
             solicited: view.solicited,
             nodes: view.nodes.iter().map(CanvasNode::from).collect(),
         }

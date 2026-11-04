@@ -7,8 +7,8 @@
 use super::App;
 use super::destructive_confirm::DestructiveConfirm;
 use super::test_support::{
-    FIXED_NOW, confirm_action, key, key_alt, key_ctrl, launch_basic, left_click, open_tree,
-    pass_time, queue_item, render_to_string, tree_node, tree_snapshot,
+    FIXED_NOW, key, key_alt, key_ctrl, launch_basic, left_click, open_tree, pass_time, queue_item,
+    render_to_string, tree_node, tree_snapshot,
 };
 use crate::tui::{HostEvent, QueueDrainState, UserAction};
 use crossterm::event::KeyCode;
@@ -25,7 +25,6 @@ fn irreversible(action: &UserAction) -> bool {
             | UserAction::InterruptTopologyNode { .. }
             | UserAction::CloseTopologyNode { .. }
             | UserAction::StopAllTopology
-            | UserAction::ResumeTopologyTree
             | UserAction::RecoverTopologyNode { .. }
             | UserAction::DeleteQueued { .. }
             | UserAction::DropQueued { .. }
@@ -131,29 +130,6 @@ fn i_and_c_on_the_root_row_open_nothing() {
             "{code:?} on the root row"
         );
     }
-}
-
-/// `r` on a paused tree asks first; the pop-up's button resumes.
-#[test]
-fn r_on_a_paused_tree_opens_the_pop_up() {
-    let mut app = App::new(launch_basic(), true);
-    let mut snapshot = tree_snapshot(vec![
-        tree_node("root", None, 0),
-        tree_node("child-a", Some("root"), 1),
-    ]);
-    snapshot.state = TreeAdmissionState::RestoredPaused;
-    open_tree(&mut app, snapshot);
-    assert_eq!(app.handle_key(key(KeyCode::Char('r'))), None);
-    assert_eq!(
-        app.destructive_confirm
-            .as_ref()
-            .map(DestructiveConfirm::kind),
-        Some("resume")
-    );
-    assert_eq!(
-        confirm_action(&mut app),
-        Some(UserAction::ResumeTopologyTree)
-    );
 }
 
 /// An Alt chord is not `s`: where there is no prompt it does nothing.

@@ -10,7 +10,7 @@ use super::topology::{
 };
 use crate::agent::{
     ProductStateRoots, format_session_reopen_error, incompatible_session_message,
-    reattach_inflight_children,
+    recover_owed_children,
 };
 use plakous::agent::{Agent, RecoveredTurnHandle};
 use plakous::sessions::{
@@ -991,7 +991,7 @@ async fn attach_native_source(
         && let Some(topology) = crate::topology_runtime::lookup(&tree_id)
         && topology.begin_attach_scan()
     {
-        reattach_inflight_children(&reattach_parent, &topology).await;
+        recover_owed_children(&reattach_parent, &topology).await;
     }
     result
 }
@@ -1215,7 +1215,7 @@ async fn attach_api_source(
         && let Some(topology) = crate::topology_runtime::lookup(&tree_id)
         && topology.begin_attach_scan()
     {
-        reattach_inflight_children(&reattach_parent, &topology).await;
+        recover_owed_children(&reattach_parent, &topology).await;
     }
     result
 }

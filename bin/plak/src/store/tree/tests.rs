@@ -131,7 +131,6 @@ fn keyed_spawn_identity_survives_sqlite_close_and_reopen() {
         loaded.attempt(&first.agent_id).unwrap().spawn_identity,
         identity
     );
-    loaded.resume_tree().unwrap();
     assert_eq!(
         loaded.spawn_agent("root", &request, None).unwrap().agent_id,
         first.agent_id
@@ -145,9 +144,9 @@ fn keyed_spawn_identity_survives_sqlite_close_and_reopen() {
 }
 
 #[test]
-fn agent_tree_save_load_round_trips_and_reopens_paused() {
+fn agent_tree_save_load_round_trips_and_reopens_live() {
     use plakous_hosted::agent_tree::{ProductAgentTree, TreeAdmissionState};
-    use plakous_hosted::agent_tree_protocol::{SpawnAgentRequest, TopologyErrorCode, WriterMode};
+    use plakous_hosted::agent_tree_protocol::{SpawnAgentRequest, WriterMode};
 
     let root = tempdir().unwrap();
     let paths = PlakPaths::explicit(root.path().join("p"));
@@ -168,16 +167,8 @@ fn agent_tree_save_load_round_trips_and_reopens_paused() {
     save_tree(&paths, &mut tree).unwrap();
 
     let mut loaded = load_tree(&paths, "tree1").unwrap().expect("persisted tree");
-    assert_eq!(loaded.state, TreeAdmissionState::RestoredPaused);
+    assert_eq!(loaded.state, TreeAdmissionState::Live);
     assert_eq!(loaded.host_generation, saved_generation.saturating_add(1));
-    assert_eq!(
-        loaded
-            .spawn_agent("root", &spawn_request, None)
-            .unwrap_err()
-            .code,
-        TopologyErrorCode::TreeRestoredPaused
-    );
-    loaded.resume_tree().unwrap();
     loaded.spawn_agent("root", &spawn_request, None).unwrap();
     assert_eq!(loaded.nodes().len(), 3);
     assert_eq!(loaded.grants().len(), 3);
@@ -249,8 +240,7 @@ fn a_tree_deletes_under_its_inspected_revision_and_only_once() {
 fn tree_store_conformance(store: &dyn TreeStore, root: &Path) {
     use plakous_hosted::agent_tree::{ProductAgentTree, TreeStoreErrorKind};
     use plakous_hosted::agent_tree_protocol::{
-        AttemptScopedRequest, NodeStatus, SpawnAgentRequest, SpawnWorkspace, Tier,
-        TopologyErrorCode, WriterMode,
+        AttemptScopedRequest, NodeStatus, SpawnAgentRequest, SpawnWorkspace, Tier, WriterMode,
     };
     use plakous_hosted::occupancy_vcs::fake::FakeVcs;
 
@@ -338,11 +328,9 @@ fn tree_store_conformance(store: &dyn TreeStore, root: &Path) {
     let mut first = ProductAgentTree::reopen(store.load("tree-conf").unwrap().unwrap());
     let mut second = ProductAgentTree::reopen(store.load("tree-conf").unwrap().unwrap());
     assert_eq!(first.stored_revision, second.stored_revision);
-    first.resume_tree().unwrap();
     first.spawn_agent("root", &request, None).unwrap();
     first.acknowledge_revision(store.save_in_custody(&first).unwrap());
     assert_eq!(first.stored_revision, first.revision);
-    second.resume_tree().unwrap();
     second.spawn_agent("root", &request, None).unwrap();
     second.spawn_agent("root", &request, None).unwrap();
     let refused = store.save_in_custody(&second).unwrap_err();
@@ -402,9 +390,8 @@ fn tree_store_conformance(store: &dyn TreeStore, root: &Path) {
         vec!["tree-aux".to_owned(), "tree-conf".to_owned()]
     );
 
-    // Reopen law: a running descendant pauses the tree and bumps the
-    // generation; the replayed operation returns its receipt; a fresh
-    // spawn is refused until resume.
+    // Reopen law: the tree reopens live with a new generation, and the
+    // replayed operation returns its receipt.
     let stored_generation = store
         .load("tree-conf")
         .unwrap()
@@ -412,15 +399,8 @@ fn tree_store_conformance(store: &dyn TreeStore, root: &Path) {
         .rows()
         .host_generation;
     let mut reopened = ProductAgentTree::reopen(store.load("tree-conf").unwrap().unwrap());
-    assert_eq!(reopened.state, TreeAdmissionState::RestoredPaused);
+    assert_eq!(reopened.state, TreeAdmissionState::Live);
     assert_eq!(reopened.host_generation, stored_generation + 1);
-    assert_eq!(
-        reopened
-            .spawn_agent("root", &request, None)
-            .unwrap_err()
-            .code,
-        TopologyErrorCode::TreeRestoredPaused
-    );
     assert_eq!(
         reopened
             .spawn_agent("root", &request, Some("op-1"))
@@ -428,7 +408,6 @@ fn tree_store_conformance(store: &dyn TreeStore, root: &Path) {
         child,
         "the ledger replays across a reopen"
     );
-    reopened.resume_tree().unwrap();
     reopened.spawn_agent("root", &request, None).unwrap();
 
     // An acknowledged seal reservation, not a painted Sealing view,

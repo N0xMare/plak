@@ -165,13 +165,6 @@ fn idle_pending_indicator_names_each_source_and_hides_while_a_turn_runs() {
             },
             "auto-continue paused",
         ),
-        (
-            plakous_host_protocol::PendingContinuation {
-                tree_paused: true,
-                ..Default::default()
-            },
-            "agents paused · /tree resume",
-        ),
     ];
     for (pending, needle) in cases {
         app.apply_host_event(HostEvent::PendingContinuation {
@@ -179,7 +172,6 @@ fn idle_pending_indicator_names_each_source_and_hides_while_a_turn_runs() {
             questions: pending.questions,
             process_exits: pending.process_exits,
             auto_continue_paused: pending.auto_continue_paused,
-            tree_paused: pending.tree_paused,
         });
         let text = render_to_string(&mut app, 160, 24);
         assert!(
@@ -191,7 +183,6 @@ fn idle_pending_indicator_names_each_source_and_hides_while_a_turn_runs() {
             questions: 0,
             process_exits: 0,
             auto_continue_paused: false,
-            tree_paused: false,
         });
         let cleared = render_to_string(&mut app, 160, 24);
         assert!(
@@ -204,7 +195,6 @@ fn idle_pending_indicator_names_each_source_and_hides_while_a_turn_runs() {
         questions: 0,
         process_exits: 0,
         auto_continue_paused: true,
-        tree_paused: true,
     });
     app.apply_host_event(HostEvent::SetBusy(true));
     let busy = render_to_string(&mut app, 160, 24);
@@ -534,12 +524,6 @@ fn hud_priority_and_verbs_never_expose_the_tool_subject() {
         assert_eq!(app.turn_status_label().as_deref(), Some("cancelling…"));
         assert_hud_width_classes(&mut app);
         app.busy = false;
-        app.tree_restored_paused = true;
-        assert_eq!(
-            app.turn_status_label().as_deref(),
-            Some(super::TREE_PAUSED_STATUS)
-        );
-        assert_hud_width_classes(&mut app);
         app.apply_host_event(HostEvent::ApprovalRequired {
             approval_id: "a".into(),
             call_id: None,

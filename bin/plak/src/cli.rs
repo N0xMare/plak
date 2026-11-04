@@ -414,8 +414,6 @@ enum TopCommand {
         /// Leave leftover background jobs alive at exit, giving up ownership.
         #[arg(long, action = ArgAction::SetTrue)]
         leave_jobs_running: bool,
-        #[arg(long = "resume-tree", action = ArgAction::SetTrue)]
-        resume_tree: bool,
         /// Attach an image file (png, jpeg, gif, webp; at most 3.75 MiB). Repeatable.
         #[arg(long = "image", value_name = "PATH")]
         image: Vec<std::path::PathBuf>,
@@ -438,8 +436,6 @@ enum TopCommand {
         protocol: Option<String>,
         #[arg(long = "session")]
         session: Option<String>,
-        #[arg(long = "resume-tree", action = ArgAction::SetTrue)]
-        resume_tree: bool,
         /// The stdio protocol: `v1` (JSONL, the default) or `v2` (the
         /// framed wire, not yet supported).
         #[arg(long = "wire", hide = true, value_parser = ["v1", "v2"])]

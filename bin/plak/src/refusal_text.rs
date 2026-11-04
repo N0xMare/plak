@@ -22,14 +22,6 @@ pub(crate) fn node_fault(node: &plakous_host_protocol::views::NodeView) -> Optio
     })
 }
 
-pub(crate) fn paused_tree_text(context: RemedyContext<'_>) -> String {
-    with_remedy(
-        plakous_hosted::agent::RESTORED_PAUSED_REFUSAL,
-        Some(&plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeTree {}),
-        context,
-    )
-}
-
 pub(crate) fn advice_text(advice: &RefusalAdvice, frontend: Frontend) -> String {
     match advice {
         RefusalAdvice::CheckStorage => "check `plak doctor`".into(),
@@ -56,7 +48,6 @@ pub(crate) fn advice_text(advice: &RefusalAdvice, frontend: Frontend) -> String 
 /// Read only the topology tool's structured error payload, never rendered prose.
 pub(crate) fn tool_error_text(name: &str, raw: &str, context: RemedyContext<'_>) -> Option<String> {
     use plakous_host_protocol::refusal::ToolRefusal;
-    use plakous_host_protocol::topology::TopologyErrorCode;
     use plakous_host_protocol::views::{ActivityKind, ToolOperation as O};
     let operation = O::classify(name, ActivityKind::Tool);
     if operation == O::Mcp {
@@ -111,18 +102,14 @@ pub(crate) fn tool_error_text(name: &str, raw: &str, context: RemedyContext<'_>)
         return None;
     }
     let ToolRefusal::Topology {
-        code,
         message,
         advice,
         remedy,
+        ..
     } = ToolRefusal::decode(raw)?
     else {
         return None;
     };
-    let remedy = remedy.or_else(|| {
-        matches!(code, TopologyErrorCode::TreeRestoredPaused)
-            .then_some(plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeTree {})
-    });
     if remedy.is_none() && advice.is_none() {
         return None;
     }

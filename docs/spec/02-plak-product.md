@@ -2297,8 +2297,8 @@ version. There is no top-level prompt positional.
 | `key set\|clear <openai\|xai-api\|anthropic\|openrouter>`, `key status [<account>]` | `set` and `clear` refuse an account that is not an API-key account |
 | `secret set\|rm <name>`, `secret list` | named secrets config.toml refers to by name (spec 04 §3.1); `set` prompts with masked input, `list` prints names only |
 | `mcp add <id> [--scope user\|project] [--env K=V]… [--secret-env K=SECRET_NAME]… [--tools a,b] [--resources] [--startup-seconds <n>] [--call-seconds <n>] [--replace] -- <command> [args…]`, `mcp add <id> --url <url> [--scope user\|project] [--bearer-secret SECRET_NAME \| --oauth [--oauth-issuer <url>] [--oauth-client-id <id>] [--oauth-client-secret SECRET_NAME] [--oauth-callback-port <port>]] [--header N=V]… [--header-secret N=SECRET_NAME]… [--tools a,b] [--resources] [--startup-seconds <n>] [--call-seconds <n>] [--replace]`, `mcp list`, `mcp show <id>`, `mcp test <id>`, `mcp remove <id> [--scope user\|project] [--force]`, `mcp enable <id> --template <name> [--tool <t>]…`, `mcp disable <id> --template <name>`, `mcp login <id> [--scope <scopes>] [--remote]`, `mcp logout <id> [--local]`, `mcp prompts <id> [<prompt> [--arg NAME=VALUE]…]` | MCP server setup (spec 07 §3.5). `add` writes `[mcp_servers.<id>]` in place, validated by the load parser, and refuses an existing id without `--replace`; secrets are names only; `--oauth` writes `auth = "oauth"` and the `oauth_*` keys given, and `--resources` writes `resources = true`. `list` and `show` print transport, scope, the templates that enable each server, the secrets it names that are not stored, whether resources are enabled, and an OAuth server's login state (§2.3). `test` starts or connects to the server through the bind's spawn, environment, secret and login path on a pool of its own, lists the tools `mcp:<id>` would bind (with `read_resource` when resources are enabled) and the ones left out with the reason (schema not representable, not in the allowlist), reports with resources enabled how many resources and resource templates the server lists, stops it, and exits non-zero with the cause on failure; it calls no model. `login` runs the server's OAuth login (§8.3): discovery, registration, the browser or remote flow, and the token exchange, then stores the login; `--scope` replaces the discovered scope (space-separated, quoted as one argument) and is united with the replaced login's scope, so a step-up keeps earlier grants; it refuses for a server without `auth = "oauth"`. `logout` revokes at the authorization server when it offers revocation, else and with `--local` retires the login locally and says the grant may remain; a revocation that fails retires nothing and names `--local`. `prompts <id>` lists the server's prompts with their arguments; `prompts <id> <prompt>` gets one with the given arguments and prints its flattened expansion, exactly the user message a prompt invocation would send, with control characters shown as `�`; neither calls a model. `enable`/`disable` edit only that template's `tools` array (spec 07 §1). `remove` refuses while a template would be left listing what its layer no longer serves unless `--force`, which removes those entries first; it leaves a stored login in place, which `logout` retires; every edit is checked against the home alone and with the trusted project over it (spec 07 §3.5); secret flags take `SECRET_NAME`s and a rejected one is never echoed |
-| `run [--account\|--provider <id>] [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>] [--resume-tree] [--print-session-id] [--max-turns <1..100>] [--timeout <seconds>] [--leave-jobs-running] -- <prompt…>` | runs until idle, including continuation turns, bounded by `--max-turns` (default 25); each turn can be billable |
-| `agent [--account\|--provider <id>] [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>] [--resume-tree]` | the long-lived JSONL host client |
+| `run [--account\|--provider <id>] [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>] [--print-session-id] [--max-turns <1..100>] [--timeout <seconds>] [--leave-jobs-running] -- <prompt…>` | runs until idle, including continuation turns, bounded by `--max-turns` (default 25); each turn can be billable |
+| `agent [--account\|--provider <id>] [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>]` | the long-lived JSONL host client |
 | `resume [<session>]` | the TUI picker, or an exact id |
 | `config show\|set <key> <value> [--scope user\|project]\|edit\|init\|trust\|untrust` | product configuration |
 | `doctor` | local health diagnosis and compiled review warnings within 14 days of a subscription expiry or an API review-due date (§8.6); no arguments and no flags |
@@ -2609,10 +2609,6 @@ and its parents are directories they own and can write.
 - **`run --session` uses the recorded binding.** It refuses alongside
   `--account`, `--model`, `--effort`, `--composition`, or `--protocol`: a
   resume reconstructs, it does not rebind. `agent --session` is the same.
-- **`--resume-tree` requires `--session`.** A paused topology is resumed
-  explicitly against an exact session, never inferred. If that session has no
-  durable tree, the flag resumes the plain session normally; a failed store
-  read remains an error.
 - **A new `run` requires `--account` and `--model`**, and the prompt must
   follow `--`, be non-empty after trimming, and stay under 64 KiB. There is no
   silent default effort: the catalog decides whether an effort is required. The
@@ -3241,10 +3237,8 @@ a fork, rebind or clear is never resubmitted without a new operator action. A
 target product session exists only once a `Branched` record names it (§2.6), so
 no unused target is ever left behind.
 
-A restored topology is likewise paused. `--resume-tree`, valid only with
-`--session`, is the explicit `ResumeTree` that a `RestoredPaused` epoch needs;
-there is no auto-resume on reattach in any surface. Chapter 03 owns what the
-tree does after that.
+A restored topology is not paused: it reopens live, and chapter 03 §14.1 (the
+reopen law) owns what happens to the children the lost process left.
 
 ### 4.3 The JSONL host
 
@@ -3260,7 +3254,7 @@ after terminal observation; durable tree revision and root command correlation
 retain their existing meanings. A parked child's row (chapter 03 §5.2) also
 carries optional `waiting_on`, the flat ids it waits on (`["p3", "c2"]`: its
 own running processes, then its children that are still live work). It is
-present exactly while the child is parked or held for its reopen wake, and
+present exactly while the child is parked, and
 `[]` is the explicit parked marker when nothing is named yet; it is absent
 otherwise, including while a wake is being admitted. A non-root row also
 carries optional `dormancy`, an object of only the true facts among `parked`,
@@ -3435,12 +3429,12 @@ after a gap; a fresh attachment starts with clean prompt provenance.
 | `clear` | — |
 | `quit` | — |
 | `fork` | optional `account`; optional `compact` (`true` compacts the new session). `account` together with `compact` is refused |
-| `tree`, `resume_tree`, `stop_all` | — |
+| `tree`, `stop_all` | — |
 | `interrupt_node`, `close_node` | `agent_id` |
 | `invoke_tool` | `name`, `arguments` (an object), optional `agent_id` |
 
-`resume_tree`, `tree`, `interrupt_node`, `close_node`, `stop_all`, and
-`invoke_tool` are the topology commands; chapter 03 §15 owns their semantics
+`tree`, `interrupt_node`, `close_node`, `stop_all`, and `invoke_tool` are the
+topology commands; chapter 03 §15 owns their semantics
 and their refusals.
 
 `resolve_approval` uses the same single-use `ResolveApproval` intent as the
@@ -3551,7 +3545,7 @@ closes. This does not change the v1 command or event encoding.
 | `turn` | terminal usage: `input_tokens`, `output_tokens`, `reasoning_tokens`, `cached_input_tokens`, `cache_write_tokens` |
 | `turn_lifecycle` | `turn_id`, `phase` ∈ `admitted` \| `completed` \| `refused` \| `cancelled` \| `failed` \| `recovery_required` \| `unresolved`, and where known `model_error_kind`, `http_status` |
 | `recovered` | `operations[]`, and when the reopen closed an unfinished turn its `claim` ∈ `running_tool` \| `model_request` \| `compaction_not_applied` \| `nothing_started` \| `tool_round_completed` and `cause` ∈ `process_lost` \| `interrupted`; correlated with the `prompt` or `recover` that triggered it, or emitted on its own when the host recovered a fenced turn in place at idle, or after `ready` when the attach itself recovered a crash |
-| `tree` | `tree_id`, `revision`, `state`, `restored_paused`, `nodes[]` |
+| `tree` | `tree_id`, `revision`, `state`, `restored_paused` (always `false`; a reopened tree is live), `nodes[]` |
 | `error` | `message`, and `code` for a typed refusal a client keys on (`tree_hosted_elsewhere`) |
 | `bye` | — |
 
@@ -3577,11 +3571,7 @@ replaces that `detail` with the JSONL sentence for the typed repair, including
 left as the host wrote it. A `tree` snapshot renders each node's `fault` and
 live progress in that same sentence before the neutral tree event is encoded;
 the fault stays a field of the snapshot and is not a separate event, so it
-does not reorder the snapshot against other lines. A restored-paused tree that
-was asked to resume, and whose hub does not register before the hello wait
-ends, writes one `error` diagnostic naming `resume_tree` (or
-`plak agent --session <id> --resume-tree`) and then shuts down. It does not
-send `hello`.
+does not reorder the snapshot against other lines.
 
 `turn_lifecycle` is correlated observational evidence for one admitted turn:
 `admitted` opens the marker at durable admission, and a terminal phase is
@@ -3629,11 +3619,8 @@ For OpenRouter, `hello.effort` reflects the canonical session selection: an
 explicit effort is retained, including on reopen, and omitted effort stays
 omitted. Attach-time fallback values do not override that persisted selection.
 
-A `RestoredPaused` tree gates the handshake: without `--resume-tree` the
-client is refused with the resume hint and the process exits with a failure;
-with it, the host waits briefly for the resume to take and refuses if it does
-not. On a successful attach the driver sends the tree resume, when asked for,
-and then opens the topology navigator — once each, in that order.
+On a successful attach the driver opens the topology navigator, once; no tree
+state gates the handshake.
 
 Shutdown is a `quit` command, stdin EOF, `SIGINT`, the host detaching, or a
 transport or control failure. `SIGINT` (Ctrl-C) interrupts a running turn,
@@ -3846,9 +3833,8 @@ starts no server, and reads the session's frozen tools only when it opens.
 answers `usage: /image <path>...  —  attach png, jpeg, gif or webp files; Ctrl+V
 (not Cmd+V) attaches a clipboard image`.
 
-`/tree resume` explicitly resumes a restored paused agent tree; on a tree that
-is not paused it changes nothing and says `agent tree is not paused; nothing to
-resume`. Bare `/tree` opens the Agents list. Other tree arguments are refused.
+Bare `/tree` opens the Agents list. Any tree argument is refused with its
+usage.
 
 `/rebind` carries the full neutral conversation, committed session-owned named
 JSON state and typed transcript into a new
@@ -4233,18 +4219,13 @@ the same kind supersedes its accepted value. Coalescing retains one value per
 kind within the unchanged 512-slot mailbox. This keeps a
 consumed child result from remaining displayed when the host has no changed
 facts to send. On an interactive face, pausing
-auto-continue or the tree also writes one typed `tree` warning as a notice
-intent — `auto-continue paused until the next prompt` or
-`agents paused · /tree resume` — once per
-pause episode; a
-JSONL face writes neither row and its output is unchanged. An auto-continue
-episode ends when a prompt is admitted (the admitted-turn count advances), a
-tree episode when the tree is seen unpaused. A wake failure that already said
+auto-continue also writes one typed `tree` warning as a notice intent —
+`auto-continue paused until the next prompt` — once per pause episode; a JSONL
+face writes no row and its output is unchanged. An episode ends when a prompt is
+admitted (the admitted-turn count advances). A wake failure that already said
 auto-continue is paused writes no second line. Attaching to a session, or
 switching to it in place, keeps an already recorded row instead of writing a
-second copy. Opening a restored-paused tree on an interactive face shows only
-that row; the attach note then names only a paused queue, while JSONL keeps
-the full tree remedy in its note. The suppression intent is written
+second copy. The suppression intent is written
 immediately even with live children, and an attached host re-reads the view at
 the wake check. Wake failures write an error notice intent and a
 `wake_suppression` intent, and leave the host attached; if that write fails the
@@ -4636,23 +4617,24 @@ diagnostic for a remedy. Plak renders TUI, `run` and JSONL guidance separately.
 No new JSONL envelope fields, kinds or phases expose this internal metadata.
 
 The TUI retains the tree, queue, attach, profile, binding, recovery, compaction,
-process-stop, login, storage-reclamation and saved-fork actions. `run` names a
-complete `plak run --session <id> --resume-tree -- <prompt>` when tree resume is
-required, and opens `plak --resume <id>` for actions only the TUI supports;
+process-stop, login, storage-reclamation and saved-fork actions. `run` opens
+`plak --resume <id>` for actions only the TUI supports;
 it does not invent compact/rebind/queue flags. JSONL notice prose deliberately
-uses `resume_tree`, `resume_queue`, `recover`, `compact`, `fork`, `clear` and
+uses `resume_queue`, `recover`, `compact`, `fork`, `clear` and
 `interrupt` where those commands exist; queue send-one and arbitrary profile
 rebind remain TUI actions. Ordinary typed host status phase/detail spellings,
 pause combinations, steering punctuation, transition labels, queue counts,
 correlation IDs and omitted-detail behavior remain stable. Notice-derived
 `note` details/messages change to the frontend-specific recipes. A row without
-a remedy is displayed verbatim, including previous-version imports.
+a remedy is displayed verbatim, including previous-version imports. The
+`resume_tree` remedy is a retained spelling: stored rows and previous-version
+exports still carry it, and no frontend renders an action for it.
 
 Transient refusals retain structured model/effort, child-credential,
 MCP-server/scope, missing-secret and incompatible-session facts until the
 product formats them. Usage projections retain credential state and inference
 key source, and child activity retains the waiting account. A restored open
-warning carries typed tree/queue pause facts; it remains live-only and does not
+warning carries typed queue pause facts; it remains live-only and does not
 write a second stored pause notice. Log-only retained compaction overflow is a
 typed presentation fact whose Plak log adapter preserves the `/new` hint.
 Preventive low-storage refusal carries a typed live-only admission warning and
@@ -4672,9 +4654,7 @@ because it names an operator action; a child live-stream gap (the host's
 reattach marker and the observation channel's coalescing marker alike) is a
 `tree` notice in the agent transcript view, live only because it describes the
 stream rather than the child's conversation. On an interactive face, an
-auto-continue pause and a restored-paused tree each persist one `tree` warning
-per pause episode (`auto-continue paused until the next prompt`,
-`agents paused · /tree resume`; §5.2), written by the host's pause tracker as a
+auto-continue pause persists one `tree` warning per pause episode (`auto-continue paused until the next prompt`; §5.2), written by the host's pause tracker as a
 notice intent (§2.6). A later attach or in-place switch does
 not write a second copy while that row is still current and no user row follows
 it; a JSONL face writes no pause row. A pinned table test fixes
@@ -4702,10 +4682,9 @@ has exactly one writer, named by the provenance table of §2.6:
   notice intents use the full-durability record commit, never a transcript
   catch-up or per-event projection write.
 - A notice that restates state every attach, open or in-place switch
-  re-announces is live only: the restored-paused queue note (and on a JSONL
-  face the paused tree it folds in), an unreadable context report (at open,
-  recover, `/new` and `/resume`) and the automatic child-recovery pass's
-  report (an explicit `/recover` answer is a notice intent). It is never
+  re-announces is live only: the restored-paused queue note, an unreadable
+  context report (at open, recover, `/new` and `/resume`) and the automatic
+  child-recovery run's report (an explicit `/recover` answer is a notice intent). It is never
   stored, so a session's transcript does not grow per open; the state itself
   persists and the next attach announces it again. An event that happened once
   during an open (an abandoned turn, a recovered turn outcome, a rejected
@@ -5149,7 +5128,7 @@ bottom border is a plain line. HUD vocabulary, highest priority first:
 | Quitting | `quitting…` |
 | Session opening | `starting…` |
 | An approval is pending (dormant in ordinary Plak) | pulsing `◆ approval needed` |
-| Idle, with pending continuation (yields to a problem label) | steady `◆` plus the pending parts joined by ` · `: `1 result pending` / `N results pending`, `1 question pending` / `N questions pending`, `1 process exited` / `N processes exited`, `auto-continue paused`, and `agents paused · /tree resume` |
+| Idle, with pending continuation (yields to a problem label) | steady `◆` plus the pending parts joined by ` · `: `1 result pending` / `N results pending`, `1 question pending` / `N questions pending`, `1 process exited` / `N processes exited`, and `auto-continue paused` |
 | Idle, no pending indicator, product-home capacity refused (§2.2) | `storage low · new turns refused` |
 | Idle, no pending indicator, product-home capacity warning (§2.2) | `storage warning · plak doctor` |
 | Stop in progress | `cancelling…` |
@@ -6015,7 +5994,7 @@ prompt is dropped. A paste never reaches a draft under the pop-up or a dialog.
 
 **The destructive confirmation pop-up.** Stopping the root turn or a
 fork/rebind operation (busy `Esc`, §5.3), interrupting or closing an agent,
-stopping every agent, resuming a restored-paused tree, stopping one or all
+stopping every agent, stopping one or all
 background processes, quitting over running processes, and `/new` over running
 agents or processes (§5.1) are sent only from one pop-up, shared by the root
 view (busy `Esc` and the busy `Ctrl+C`), Activity > Agents (`i`, `c`, `s`,
@@ -6159,7 +6138,7 @@ again; rows appearing and disappearing never move it to an unrelated agent.
 `←`/`h` the parent, `→`/`l` the remembered child (or first child), and `Home`
 the root; the list scrolls to keep the selection in view. A docked inspector is six lines.
 It names the selected agent, its description and its status (`u recovers` when
-recovery is required, or `Resume agents first` while the tree is paused, and `x acknowledges` only while the selected row needs
+recovery is required, and `x acknowledges` only while the selected row needs
 attention and an acknowledgement can be recorded), its task or
 fault, model with attempt and workspace, turns, tokens, process count and times, its place in
 the tree with its full id, and what it is authorised to do; it is dropped when
@@ -6174,8 +6153,7 @@ asks to recover the selected child when that child is a failed or recovery-requi
 in the same pop-up: `Recover #id?` and `Settle this child's recorded session recovery. No task is retried and no model call or tool is replayed.`
 The intent is `RecoverTopologyNode`, bound to the tree id, revision, agent
 id and attempt id the pop-up opened on. It is not the root `Recover` intent
-and not a model tool call. A restored-paused tree does not confirm it; the
-inspector says `Resume agents first`. A child that is not waiting on
+and not a model tool call. A child that is not waiting on
 recovery, or the root, does nothing. The pop-up stays open while that same tree, agent and attempt are still
 eligible and the tree is not paused. Eligibility is the host's predicate:
 a non-root `failed` or `recovery_required` child that still has an attempt,
@@ -6185,15 +6163,9 @@ child need not be active. `u` through the pop-up is the only place it is
 sent. A key the
 list does not map does nothing. `y` copies the agent id, `R` requests a fresh
 snapshot and re-reads acknowledgements, and `Esc` dismisses the list (`q` does
-nothing). `r`
-(or `/tree resume`) resumes a restored-paused tree, `r` through the pop-up,
-and is **the only exit from that state inside the TUI**; the footer names it
-explicitly. While the tree is paused the list pins a non-agent control,
-`▶ resume agents`, above the agents. Opening the list focuses it. `Enter`
-or a click confirms `ResumeTopologyTree`; it is not an agent and it is not
-counted as one. It stays until a host snapshot reports the tree resumed. A footer that would need more rows than it has reads every key in
-short form (`↑/↓ · Enter · x · i · c · s · y · u · R · t · f all · Esc`, led by
-`paused · r resume ·` on a paused tree), each still clickable. `t history`
+nothing). A footer that would need more rows than it has reads every key in
+short form (`↑/↓ · Enter · x · i · c · s · y · u · R · t · f all · Esc`), each still
+clickable. `t history`
 is clickable on the long footer.
 
 **History.** `t` replaces the outline with a flat history of this snapshot and
@@ -6241,8 +6213,8 @@ finishes. The frame keeps the Activity title, the Agents and Processes tabs (Age
 #<id> · <description>` (the session banner belongs to the root and is not
 drawn), the scrollable transcript, and the agent bar: the agent's row exactly as the Agents list paints it (the
 same row function, no second format). A recovery-required agent shows
-`u recovers`, or `Resume agents first` while the tree is paused, warning-coloured, above the bar.
-The footer carries the view's keys: `Esc back`, `↑↓ PgUp/PgDn scroll`, `Enter expand`, `[ ] prev/next agent`, `i interrupt`, `c close`, `u recover` while this child is a failed or recovery-required child and the tree is not paused, `y copy`, and `x acknowledge` while the agent needs
+`u recovers`, warning-coloured, above the bar.
+The footer carries the view's keys: `Esc back`, `↑↓ PgUp/PgDn scroll`, `Enter expand`, `[ ] prev/next agent`, `i interrupt`, `c close`, `u recover` while this child is a failed or recovery-required child, `y copy`, and `x acknowledge` while the agent needs
 attention that can be acknowledged. `i`, `c`, `y` and `x` are clickable.
 The view has **no composer** and no line that says so: a key it does
 not map does nothing.

@@ -5,9 +5,9 @@ use super::{
     Instant, InterruptWatchState, Ordering, RefCell, RootActor, Sender, SessionEvent,
     SessionLedger, SessionLog, SessionQueueDrainState, SessionQueueItem, SubscriptionUsageRefresh,
     TreeSnapshotPush, build_session_from_config, elapsed_ms_since, emit_agent_plan_notes,
-    emit_prompt_history, emit_queue_snapshot, emit_restored_paused_note, emit_unavailable_context,
+    emit_prompt_history, emit_queue_pause_note, emit_queue_snapshot, emit_unavailable_context,
     log_ev, log_host_attached, log_host_ready, log_session_ready, native_compact_facet, persist,
-    query_context, report_context, restored_paused_status_suffix, send_binding, sessions, surface,
+    query_context, queue_pause, report_context, send_binding, sessions, surface,
 };
 use crate::sessions::projector::{ProductTreeJoin as _, SubmissionKind, pending_command_ids};
 use crate::sessions::{NoticeScope, TranscriptRow};
@@ -439,13 +439,8 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
                     .with_optional_remedy(error.remedy()),
             ));
         }
-        emit_restored_paused_note(
-            &events,
-            &config.topology_rows(),
-            &config.session,
-            config.interactive,
-        );
-        let pause = restored_paused_status_suffix(&config.topology_rows(), &config.session);
+        emit_queue_pause_note(&events, &config.session);
+        let pause = queue_pause(&config.session);
         if restored_working {
             let _ = events.send(ContentEvent::Status {
                 phase: HostPhase::Running,

@@ -222,7 +222,6 @@ pub(crate) enum Command {
         prompt: plakous_host_protocol::Draft,
         print_session_id: bool,
         limits: plakous_hosted::runtime::RunBounds,
-        resume_tree: bool,
     },
     Agent {
         session_id: Option<String>,
@@ -233,7 +232,6 @@ pub(crate) enum Command {
         effort: Option<ReasoningEffort>,
         effort_explicit: bool,
         composition: Option<product_config::ProductCompositionSelection>,
-        resume_tree: bool,
         /// Speak wire v2 on stdio instead of JSONL v1 (hidden, not yet
         /// supported).
         wire_v2: bool,
@@ -311,7 +309,6 @@ impl Command {
                 effort,
                 effort_explicit,
                 composition,
-                resume_tree,
                 ..
             } => Self::Agent {
                 session_id,
@@ -322,7 +319,6 @@ impl Command {
                 effort,
                 effort_explicit,
                 composition,
-                resume_tree,
                 wire_v2: v2,
             },
             other => other,

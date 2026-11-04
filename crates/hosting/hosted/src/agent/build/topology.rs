@@ -4,7 +4,6 @@ use crate::{CliFailure, CliResult};
 
 use crate::agent::{
     ProductChildSessionBinder, ProductLiveCanceller, ProductMailDeliverer, ProductStateRoots,
-    reattach_inflight_children,
 };
 use crate::binding::CompositionSelection;
 use crate::tools::ProductToolExtensions;
@@ -914,22 +913,4 @@ pub fn api_topology_parent(
         topology_enabled,
         created_output_bound: None,
     }
-}
-
-#[must_use]
-pub fn topology_tree_is_restored_paused(tree_id: &str) -> bool {
-    crate::topology_runtime::is_restored_paused(tree_id)
-}
-
-pub const RESTORED_PAUSED_REFUSAL: &str =
-    "the agent tree is paused after an interrupt; explicitly resume it before dispatch";
-
-pub async fn rejoin_inflight_after_resume(tree_id: &str) {
-    let Some(runtime) = crate::topology_runtime::lookup(tree_id) else {
-        return;
-    };
-    let Some(parent) = rejoin_parent(&runtime) else {
-        return;
-    };
-    reattach_inflight_children(&parent, &runtime).await;
 }

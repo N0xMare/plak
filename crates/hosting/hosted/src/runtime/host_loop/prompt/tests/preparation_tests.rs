@@ -111,7 +111,6 @@ pub(super) fn stopped_preparation(
     ));
     let mut invocation = crate::runtime::oneshot::OneShotState {
         attempted: true,
-        resume_tree: false,
         result: None,
         run: None,
     };

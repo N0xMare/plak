@@ -110,7 +110,6 @@ impl TopCommand {
                 max_turns,
                 timeout,
                 leave_jobs_running,
-                resume_tree,
                 image,
                 prompt,
             } => {
@@ -134,7 +133,6 @@ impl TopCommand {
                     && protocol.is_none()
                     && session.is_none()
                     && !print_session_id
-                    && !resume_tree
                     && !leave_jobs_running
                     && max_turns == 25
                     && timeout.is_none()
@@ -165,12 +163,8 @@ impl TopCommand {
                             images: image,
                         },
                         print_session_id,
-                        resume_tree,
                         limits,
                     );
-                }
-                if resume_tree {
-                    return Err("run --resume-tree requires --session".to_owned());
                 }
                 let account = account.or(provider).ok_or_else(|| {
                     "run requires --account <codex|grok|claude|openrouter|openai|anthropic|xai-api>".to_owned()
@@ -198,7 +192,6 @@ impl TopCommand {
                 composition,
                 protocol,
                 session,
-                resume_tree,
                 stdio_wire,
             } => finish_agent(
                 account.or(provider),
@@ -207,7 +200,6 @@ impl TopCommand {
                 composition,
                 protocol,
                 session,
-                resume_tree,
             )
             .map(|command| command.speaking_wire(stdio_wire.as_deref() == Some("v2"))),
             Self::Resume { session } => Ok(Command::Resume {

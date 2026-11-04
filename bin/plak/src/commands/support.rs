@@ -11,7 +11,6 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use plakous::application::ApplicationExecutor;
 use plakous::subscriptions::{
     CompatibilityStatus as FacadeCompatibilityStatus, NativeAuthStatus as FacadeAuthStatus,
     NativeModelVisibility, NativeProvider, NativeSubscriptionError, NativeToolMode,
@@ -756,29 +755,6 @@ fn unsafe_storage_status_cell(detail: &str, account: &str) -> String {
 /// API-key failure cell. Same backtick-free column style as the OAuth cells.
 pub(crate) fn api_key_status_failure_cell(detail: &str) -> String {
     format!("Unreadable · {}", detail.replace('`', ""))
-}
-
-pub fn resume_opened_continue_tree(
-    executor: &ApplicationExecutor,
-    paths: &product_paths::PlakPaths,
-    resume_tree: bool,
-    tree_id: &str,
-) -> CliResult<()> {
-    if resume_tree {
-        return executor
-            .block_on(async {
-                crate::topology_product::resume_topology_tree_for_cli_prompt(paths, tree_id)
-                    .await?;
-                product_agent::rejoin_inflight_after_resume(tree_id).await;
-                Ok(())
-            })
-            .map_err(application_execution_failure)?;
-    }
-    if product_agent::topology_tree_is_restored_paused(tree_id) {
-        return Err(CliFailure::new(product_agent::RESTORED_PAUSED_REFUSAL)
-            .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeTree {}));
-    }
-    Ok(())
 }
 
 pub fn application_execution_failure<T>(_: T) -> CliFailure {

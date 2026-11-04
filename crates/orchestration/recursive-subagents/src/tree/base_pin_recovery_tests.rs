@@ -42,7 +42,6 @@ impl Fixture {
     fn reopen(&mut self) {
         self.tree = ProductAgentTree::reopen(self.tree.to_persisted());
         self.tree.set_vcs(self.vcs.clone());
-        self.tree.resume_tree().unwrap();
     }
 }
 
@@ -180,7 +179,7 @@ async fn base_pin_failure_is_workspace_local_and_is_not_retried_by_settle() {
             .contains("pin locked")
     );
     assert_eq!(fixture.vcs.calls_of(FakeOp::RestoreBase).len(), 1);
-    tree.restore_paused();
+    tree.apply_reopen_law();
     assert!(
         tree.take_effects().is_empty(),
         "same generation never queues again"
@@ -251,7 +250,7 @@ fn base_pin_pending_reconciliation_fences_adopt_until_completion_not_merely_vcs_
         .begin_adopt_for_test("root", &fixture.request)
         .unwrap();
     fixture.tree.settle_for_test();
-    fixture.tree.restore_paused();
+    fixture.tree.apply_reopen_law();
     fixture.tree.settle_for_test();
     let calls = fixture.vcs.calls();
     assert_eq!(fixture.vcs.calls_of(FakeOp::RestoreBase).len(), 1);
@@ -288,7 +287,7 @@ fn base_pin_interrupted_adopt_retry_unavailable_retains_the_target_recovery_hold
         fixture.tree.workspace(&fixture.workspace).unwrap().status,
         WorkspaceStatus::Adopting
     );
-    fixture.tree.restore_paused();
+    fixture.tree.apply_reopen_law();
     assert!(fixture.tree.take_effects().is_empty());
 }
 

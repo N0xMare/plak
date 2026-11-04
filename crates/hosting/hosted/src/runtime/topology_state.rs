@@ -10,10 +10,10 @@
 
 use std::sync::Arc;
 
-use crate::agent_tree::{ProductAgentTree, TreeAdmissionState};
+use crate::agent_tree::ProductAgentTree;
 use crate::orchestration::OrchestrationSnapshot;
 use crate::sessions::SessionRecord;
-use crate::topology_runtime::{is_restored_paused, lookup};
+use crate::topology_runtime::lookup;
 
 /// The durable rows behind the questions in this module.
 ///
@@ -161,34 +161,6 @@ fn inherited_tree_source(session: &SessionRecord) -> Option<String> {
     session.source_product_session_id.clone()
 }
 
-/// Whether the tree must be resumed explicitly before it admits work.
-///
-/// Attached trees expose their last installed admission state without taking
-/// the tree mutex. A busy tree is not a paused tree.
-pub fn requires_explicit_resume(rows: &dyn TreeRows, tree_id: &str) -> bool {
-    if is_restored_paused(tree_id) {
-        return true;
-    }
-    matches!(
-        rows.tree(tree_id),
-        Ok(Some(tree)) if tree.state == TreeAdmissionState::RestoredPaused
-    )
-}
-
-/// Whether the host has *observed* this tree paused, for operator copy.
-///
-/// The same lock-free state used by admission: observation cadence and a busy
-/// tree mutex cannot hide a real pause or invent one.
-pub(crate) fn observed_restored_paused(rows: &dyn TreeRows, tree_id: &str) -> bool {
-    if let Some(paused) = crate::topology_runtime::hub_tree_is_restored_paused(tree_id) {
-        return paused;
-    }
-    matches!(
-        rows.tree(tree_id),
-        Ok(Some(tree)) if tree.state == TreeAdmissionState::RestoredPaused
-    )
-}
-
 /// Operator-facing reason when rebind is blocked.
 ///
 /// Store-open or load failure fails closed as live descendants, not quiescent.
@@ -207,22 +179,6 @@ pub fn epoch_rebind_refusal(
         Ok(None) => None,
         Err(_) => Some(crate::agent_tree::EpochRebindRefusal::LiveDescendants),
     }
-}
-
-/// Explicit ResumeTree on a restored tree; a tree that is not paused is a
-/// no-op, and a tree with no hub cannot be resumed at all.
-pub async fn resume_tree(tree_id: &str) -> Result<(), String> {
-    let Some(runtime) = lookup(tree_id) else {
-        return Err("topology tree is missing from the hub; cannot ResumeTree".to_owned());
-    };
-    runtime
-        .mutate_then_emit(false, |tree| {
-            if tree.state != TreeAdmissionState::RestoredPaused {
-                return Ok(());
-            }
-            tree.resume_tree().map_err(|error| error.message)
-        })
-        .await
 }
 
 /// Root Ctrl-C: cancels this turn and interrupts every running descendant,

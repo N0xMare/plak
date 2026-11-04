@@ -43,7 +43,6 @@ pub struct TreeDriver {
     storage_waiting: Arc<tokio::sync::watch::Sender<bool>>,
     // Readers must not infer admission state from a busy tree mutex. Every
     // mutation guard installs this predicate before releasing the live tree.
-    restored_paused: Arc<std::sync::atomic::AtomicBool>,
     writer: Arc<storage::TreeWriter>,
     storage_parking: Arc<storage::StorageParking>,
     /// The agent a publication waits for when no other owner is named.
@@ -162,7 +161,7 @@ impl TreeDriver {
             .order()
             .try_lock_owned()
             .unwrap_or_else(|_| panic!("a synchronous test runs with no other writer"));
-        let mut tree = storage::TreeMutationGuard::lock(&self.tree, &self.restored_paused)
+        let mut tree = storage::TreeMutationGuard::lock(&self.tree)
             .unwrap_or_else(|()| panic!("topology tree lock is poisoned"));
         work(&mut tree)
     }
@@ -183,14 +182,11 @@ impl TreeDriver {
         if let Ok(mut guard) = tree.lock() {
             guard.set_vcs(Arc::clone(&vcs));
         }
-        let (restored_paused, root_agent_id) = {
+        let root_agent_id = {
             let tree = tree
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            (
-                tree.state == crate::tree::TreeAdmissionState::RestoredPaused,
-                Arc::from(tree.root_agent_id.as_str()),
-            )
+            Arc::from(tree.root_agent_id.as_str())
         };
         Self {
             tree,
@@ -205,7 +201,6 @@ impl TreeDriver {
             observer,
             next_reclaim_probe: Arc::new(Mutex::new(0)),
             storage_waiting: Arc::new(tokio::sync::watch::Sender::new(false)),
-            restored_paused: Arc::new(std::sync::atomic::AtomicBool::new(restored_paused)),
             writer: Arc::default(),
             storage_parking: Arc::default(),
             root_agent_id,
@@ -706,9 +701,7 @@ impl TreeDriver {
         let driver = self.clone();
         drop(tokio::task::spawn_blocking(move || {
             let _permit = driver.writer.order().blocking_lock_owned();
-            if let Ok(mut tree) =
-                storage::TreeMutationGuard::lock(&driver.tree, &driver.restored_paused)
-            {
+            if let Ok(mut tree) = storage::TreeMutationGuard::lock(&driver.tree) {
                 undo(&mut tree);
             }
         }));
@@ -733,7 +726,7 @@ impl TreeDriver {
         let mut running = tokio::task::spawn_blocking(move || {
             let _permit = permit;
             let _writer = driver.writer.enter(parks);
-            let mut tree = storage::TreeMutationGuard::lock(&driver.tree, &driver.restored_paused)
+            let mut tree = storage::TreeMutationGuard::lock(&driver.tree)
                 .map_err(|()| Self::lock_poisoned())?;
             work(&mut tree);
             Ok::<_, TopologyError>(())
@@ -841,11 +834,6 @@ impl TreeDriver {
             select(Box::pin(tree), Box::pin(host)),
         )
         .await;
-    }
-
-    pub(crate) fn is_restored_paused(&self) -> bool {
-        self.restored_paused
-            .load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// Binds subsequent publication waits to the agent that owns this work.
@@ -1101,7 +1089,6 @@ impl TreeDriver {
             let (more, next, save_error) = self
                 .write_owed(move |tree| {
                     let more = tree.complete(completed);
-                    tree.lift_restored_pause_if_quiescent();
                     if let Err(error) = driver.save_guarded(tree) {
                         // No follow-on refresh write was dispatched. Keep its intent
                         // for exact-state recovery rather than a stranded local hold.
@@ -1209,9 +1196,7 @@ impl TreeDriver {
                 driver.save_guarded(tree)?;
             }
             let targets = tree.startup_fold_targets();
-            let lift_pause = tree.state == crate::protocol::TreeAdmissionState::RestoredPaused
-                && tree.quiescence_refusal().is_none();
-            if targets.is_empty() && tree.pending_close_folds.is_empty() && !lift_pause {
+            if targets.is_empty() && tree.pending_close_folds.is_empty() {
                 return Ok(tree.take_effects());
             }
             driver.fold_and_commit_guarded(tree, |tree| {
@@ -1363,8 +1348,12 @@ impl TreeDriver {
         tree: &mut ProductAgentTree,
         work: impl FnOnce(&mut ProductAgentTree) -> Result<R, TopologyError>,
     ) -> Result<R, TopologyError> {
+        // A reopen that left views to rebuild deferred the fold of intents
+        // over them; the work that rebuilds the last of a subtree's views
+        // lets those folds run.
+        let rebuilding = tree.nodes().values().any(|node| node.fold_order.is_none());
         let result = work(tree)?;
-        if tree.state == crate::protocol::TreeAdmissionState::RestoredPaused {
+        if rebuilding {
             for agent in tree.startup_fold_targets() {
                 tree.fold_due_in_place(&agent)?;
             }
@@ -1372,7 +1361,6 @@ impl TreeDriver {
         tree.fold_reserved_closes_in_place()?;
         tree.refresh_epoch_after_close();
         tree.prune_closed_copies();
-        tree.lift_restored_pause_if_quiescent();
         Ok(result)
     }
 
@@ -1426,7 +1414,6 @@ impl TreeDriver {
         driver.save_host_intent(tree, agent_id)?;
         driver.fold_and_commit(tree, |tree| {
             tree.fold_due_in_place(agent_id)?;
-            tree.lift_restored_pause_if_quiescent();
             Ok(())
         })
     }
@@ -1440,7 +1427,6 @@ impl TreeDriver {
         driver.save_guarded(tree)?;
         driver.fold_and_commit_guarded(tree, |tree| {
             tree.fold_due_in_place(agent_id)?;
-            tree.lift_restored_pause_if_quiescent();
             Ok(())
         })
     }

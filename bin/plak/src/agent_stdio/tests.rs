@@ -40,7 +40,6 @@ fn a_completed_session_ends_with_exactly_one_bye() {
     let mut stdout = Vec::new();
     let outcome = run_agent_stdio_with_input(
         config,
-        false,
         &mut stdout,
         &mut Vec::new(),
         std::io::Cursor::new(
@@ -96,7 +95,6 @@ fn a_signalled_stop_is_reported_before_the_terminal_record() {
     let mut stdout = Vec::new();
     let outcome = run_agent_stdio_stopping_on(
         config,
-        false,
         &mut stdout,
         &mut Vec::new(),
         std::io::Cursor::new(
@@ -139,7 +137,6 @@ fn a_failed_drive_emits_an_error_then_exactly_one_bye() {
     let oversized = format!("{}\n", "x".repeat(agent_jsonl::MAX_FRAME_BYTES + 1));
     let outcome = run_agent_stdio_with_input(
         config,
-        false,
         &mut stdout,
         &mut Vec::new(),
         std::io::Cursor::new(oversized),
@@ -236,7 +233,7 @@ fn a_teardown_failure_after_the_stream_started_still_writes_the_terminal_record(
         "",
     );
     let mut stdout = Vec::new();
-    let outcome = run_agent_stdio_with_input(config, false, &mut stdout, &mut Vec::new(), input);
+    let outcome = run_agent_stdio_with_input(config, &mut stdout, &mut Vec::new(), input);
     let error = outcome.expect_err("the injected child shutdown must fail the run");
     assert!(
         error.message().contains("injected child release refusal"),
@@ -277,7 +274,7 @@ fn a_hung_teardown_reports_the_shutdown_bound_and_still_writes_the_terminal_reco
         "",
     );
     let mut stdout = Vec::new();
-    let outcome = run_agent_stdio_with_input(config, false, &mut stdout, &mut Vec::new(), input);
+    let outcome = run_agent_stdio_with_input(config, &mut stdout, &mut Vec::new(), input);
     let error = outcome.expect_err("a hung child shutdown must fail the run");
     assert!(error.message().contains("child retirement"), "{error:?}");
     let records = assert_terminated_exactly_once(&stdout);
@@ -427,7 +424,6 @@ fn a_panicking_drive_still_terminates_its_stream() {
     let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
         let _ = run_agent_stdio_with_input(
             config,
-            false,
             &mut Shared(held),
             &mut Vec::new(),
             std::io::Cursor::new(
@@ -521,7 +517,6 @@ fn handshake_failure_still_joins_and_preserves_release_failure() {
         .unwrap();
     let error = run_agent_stdio_with_input(
         config,
-        false,
         &mut FailedWriter,
         &mut Vec::new(),
         std::io::Cursor::new(Vec::<u8>::new()),
@@ -563,7 +558,6 @@ fn input_failure_still_joins_and_writes_bye() {
     let mut stdout = Vec::new();
     let error = run_agent_stdio_with_input(
         config,
-        false,
         &mut stdout,
         &mut Vec::new(),
         std::io::BufReader::new(FailedRead),
@@ -630,7 +624,6 @@ fn admitted_output_failure_joins_and_publishes_parent_locator() {
     let command = thread::spawn(move || {
         run_agent_stdio_with_input(
             config,
-            false,
             &mut FailAdmitted(Vec::new(), output_failed),
             &mut Vec::new(),
             std::io::BufReader::new(reader),
@@ -711,7 +704,6 @@ fn openrouter_hello_preserves_canonical_effort_and_omission() {
         let mut stdout = Vec::new();
         run_agent_stdio_with_input(
             config,
-            false,
             &mut stdout,
             &mut Vec::new(),
             std::io::Cursor::new("{\"v\":1,\"kind\":\"quit\",\"id\":\"q\"}\n"),
@@ -768,7 +760,7 @@ fn jsonl_returns_child_shutdown_failure_after_publishing_parent_locator() {
     );
     let mut stdout = Vec::new();
     let error =
-        run_agent_stdio_with_input(config, false, &mut stdout, &mut Vec::new(), input).unwrap_err();
+        run_agent_stdio_with_input(config, &mut stdout, &mut Vec::new(), input).unwrap_err();
     assert!(
         error.message().contains("injected child release refusal"),
         "{error:?}"
@@ -791,7 +783,6 @@ fn jsonl_command_refusal_does_not_become_a_terminal_worker_failure() {
     let mut stdout = Vec::new();
     let outcome = run_agent_stdio_with_input(
         config,
-        false,
         &mut stdout,
         &mut Vec::new(),
         std::io::Cursor::new(concat!(
@@ -823,7 +814,7 @@ fn actual_jsonl_idle_invocation_keeps_its_command_id() {
     );
     let mut stdout = Vec::new();
     let outcome = run_agent_stdio_with_input(
-        config, false, &mut stdout, &mut Vec::new(),
+        config, &mut stdout, &mut Vec::new(),
         std::io::Cursor::new(concat!(
             "{\"v\":1,\"kind\":\"invoke_tool\",\"id\":\"iv\",\"name\":\"list_agents\",\"arguments\":{}}\n",
             "{\"v\":1,\"kind\":\"quit\",\"id\":\"q\"}\n",
@@ -842,37 +833,19 @@ fn actual_jsonl_idle_invocation_keeps_its_command_id() {
 }
 
 #[test]
-fn attach_actions_resume_then_navigator() {
+fn attach_actions_open_the_navigator() {
     assert_eq!(
-        actions_on_successful_attach(true, true, true),
-        vec![
-            UserAction::ResumeTopologyTree,
-            UserAction::OpenTopologyNavigator,
-        ]
-    );
-    assert_eq!(
-        actions_on_successful_attach(false, true, true),
+        actions_on_successful_attach(true, true),
         vec![UserAction::OpenTopologyNavigator]
     );
     assert_eq!(
-        actions_on_successful_attach(false, false, true),
+        actions_on_successful_attach(false, true),
         [] as [plakous_host_protocol::SessionIntent<crate::surface_protocol::PlakExtension>; 0]
     );
     assert_eq!(
-        actions_on_successful_attach(false, true, false),
+        actions_on_successful_attach(true, false),
         [] as [plakous_host_protocol::SessionIntent<crate::surface_protocol::PlakExtension>; 0]
     );
-}
-
-#[test]
-fn hello_gate_refuses_paused_without_resume_tree() {
-    assert_eq!(hello_gate(false, true, false), HelloGate::RefusePaused);
-    assert_eq!(hello_gate(true, true, false), HelloGate::Wait);
-    assert_eq!(hello_gate(true, true, true), HelloGate::RefusePaused);
-    assert_eq!(hello_gate(false, false, true), HelloGate::Hello);
-    assert_eq!(hello_gate(true, false, true), HelloGate::Hello);
-    // resume requested, hub not registered yet is treated as paused Wait
-    assert_eq!(hello_gate(true, true, false), HelloGate::Wait);
 }
 
 #[test]
@@ -1424,7 +1397,6 @@ fn actual_jsonl_refusal_pauses_followup_until_resume_queue() {
     let worker = thread::spawn(move || {
         run_agent_stdio_with_input(
             config,
-            false,
             &mut Lines {
                 pending: vec![],
                 tx,

@@ -11,8 +11,8 @@ type UserAction = crate::surface_protocol::UserAction<TestExtension>;
 
 use super::*;
 use crate::agent_tree_protocol::{
-    AttemptStatus, CandidateId, NodeStatus, SpawnAgentRequest, Tier, TreeAdmissionState,
-    WorkspaceMode, WorkspaceStatus, WriterMode,
+    AttemptStatus, CandidateId, NodeStatus, SpawnAgentRequest, Tier, WorkspaceMode,
+    WorkspaceStatus, WriterMode,
 };
 use std::str::FromStr;
 use std::sync::Arc;
@@ -575,22 +575,21 @@ fn terminal_nodes_project_terminal_and_survive_the_snapshot() {
 }
 
 #[test]
-fn restored_paused_is_visible() {
+fn a_reopened_tree_with_a_live_child_is_painted_live() {
     let (_dir, mut tree) = tree();
     tree.spawn_agent("root", &spawn_req(), None).unwrap();
-    tree.restore_paused();
+    tree.apply_reopen_law();
     let snap = project_snapshot(&tree);
-    assert!(snap.restored_paused());
-    assert_eq!(snap.state.as_str(), "restored_paused");
-    assert_eq!(snap.nodes[0].status.as_str(), "paused");
+    assert!(!snap.restored_paused());
+    assert_eq!(snap.state.as_str(), "live");
+    assert_eq!(snap.nodes[0].status.as_str(), "running");
 }
 
-/// A reopened singleton has nothing to resume, so the canvas never paints
-/// it paused and never offers `r`.
+/// A reopened singleton is painted live too.
 #[test]
 fn a_reopened_singleton_is_not_painted_paused() {
     let (_dir, mut tree) = tree();
-    tree.restore_paused();
+    tree.apply_reopen_law();
     let snap = project_snapshot(&tree);
     assert!(!snap.restored_paused());
     assert_eq!(snap.state.as_str(), "live");
@@ -720,97 +719,6 @@ async fn missing_hub_fails_closed_without_load() {
     assert!(crate::topology_runtime::lookup(&tree_id).is_none());
 }
 
-/// `ResumeTopologyTree` is an explicit intent, so a hub miss answers it
-/// like any other navigator action. It was silent only because attach used
-/// to auto-send it, which the topology contract forbids.
-#[tokio::test]
-async fn missing_hub_resume_tree_reports_unavailable_like_any_other_intent() {
-    let root = tempdir().unwrap();
-    let tree_id = format!("nav-{}", uuid::Uuid::new_v4().simple());
-    let paths = MemoryRows::new();
-    let session = session_for(&tree_id, root.path().to_path_buf());
-    let events = std::sync::Mutex::new(Vec::new());
-    dispatch_captured_action(
-        &paths,
-        &session,
-        |event| events.lock().unwrap().push(event),
-        &UserAction::ResumeTopologyTree,
-    )
-    .await;
-    let events = events.lock().unwrap();
-    assert!(matches!(
-        events.as_slice(),
-        [HostEvent::TopologyNavigatorUnavailable { .. }]
-    ));
-}
-
-/// Opening the canvas over a `RestoredPaused` tree paints it paused.
-///
-/// Spec 02 §5.7: "`RestoredPaused` never auto-resumes", `r` is "the only
-/// exit from `RestoredPaused`", §10.4 "do not auto-resume on reattach",
-/// Every intent an attach or a reattach can issue leaves the
-/// tree paused; only the explicit `ResumeTopologyTree` moves it.
-#[tokio::test]
-async fn attach_intents_paint_a_restored_paused_tree_and_never_resume_it() {
-    let root = tempdir().unwrap();
-    let tree_id = format!("nav-{}", uuid::Uuid::new_v4().simple());
-    let paths = MemoryRows::new();
-    let mut tree = ProductAgentTree::bootstrap_root_for_test(
-        tree_id.clone(),
-        "root",
-        "owner",
-        root.path().to_path_buf(),
-        "selected-tuple",
-        WriterMode::SingleLease,
-    )
-    .unwrap();
-    tree.spawn_agent("root", &spawn_req(), Some("op-spawn"))
-        .unwrap();
-    tree.restore_paused();
-    crate::topology_runtime::insert_root(tree_id.clone(), tree, None)
-        .await
-        .unwrap();
-    let session = session_for(&tree_id, root.path().to_path_buf());
-
-    for action in [
-        UserAction::OpenTopologyNavigator,
-        UserAction::RefreshTopologyTree,
-    ] {
-        let events = std::sync::Mutex::new(Vec::new());
-        dispatch_captured_action(
-            &paths,
-            &session,
-            |event| events.lock().unwrap().push(event),
-            &action,
-        )
-        .await;
-        let captured = events.lock().unwrap();
-        let snapshot = captured
-            .iter()
-            .find_map(|event| match event {
-                HostEvent::TopologyNavigatorSnapshot(snapshot) => Some(snapshot),
-                _ => None,
-            })
-            .unwrap_or_else(|| panic!("{action:?} must paint the tree"));
-        assert!(
-            snapshot.restored_paused(),
-            "{action:?} auto-resumed the tree"
-        );
-        assert_eq!(snapshot.state.as_str(), "restored_paused", "{action:?}");
-        assert_eq!(
-            crate::topology_runtime::lookup(&tree_id)
-                .unwrap()
-                .tree_handle_for_test()
-                .lock()
-                .unwrap()
-                .state,
-            TreeAdmissionState::RestoredPaused,
-            "{action:?} must leave the persisted epoch paused"
-        );
-    }
-    crate::topology_runtime::force_release(&tree_id).await;
-}
-
 #[tokio::test]
 async fn hub_open_emits_snapshot() {
     let root = tempdir().unwrap();
@@ -853,7 +761,7 @@ async fn hub_open_emits_snapshot() {
 }
 
 #[tokio::test]
-async fn resume_and_interrupt_resnapshot() {
+async fn interrupt_resnapshots() {
     let root = tempdir().unwrap();
     let tree_id = format!("nav-{}", uuid::Uuid::new_v4().simple());
     let paths = MemoryRows::new();
@@ -869,62 +777,12 @@ async fn resume_and_interrupt_resnapshot() {
     let spawned = tree
         .spawn_agent("root", &spawn_req(), Some("op-spawn"))
         .unwrap();
-    tree.restore_paused();
+    tree.apply_reopen_law();
     crate::topology_runtime::insert_root(tree_id.clone(), tree, None)
         .await
         .unwrap();
     let session = session_for(&tree_id, root.path().to_path_buf());
     let events = std::sync::Mutex::new(Vec::new());
-    dispatch_captured_action(
-        &paths,
-        &session,
-        |event| events.lock().unwrap().push(event),
-        &UserAction::ResumeTopologyTree,
-    )
-    .await;
-    {
-        let captured = events.lock().unwrap();
-        let snap = captured
-            .iter()
-            .find_map(|event| match event {
-                HostEvent::TopologyNavigatorSnapshot(snap) => Some(snap),
-                _ => None,
-            })
-            .unwrap();
-        assert!(!snap.restored_paused());
-        assert_eq!(snap.state.as_str(), "live");
-        assert!(
-            !captured
-                .iter()
-                .any(|event| matches!(event, HostEvent::Row(TranscriptRow::Notice(_)))),
-            "resuming a paused tree is not a no-op: {captured:?}"
-        );
-    }
-    events.lock().unwrap().clear();
-    // A second resume finds the tree live and says so instead of
-    // returning silently.
-    dispatch_captured_action(
-        &paths,
-        &session,
-        |event| events.lock().unwrap().push(event),
-        &UserAction::ResumeTopologyTree,
-    )
-    .await;
-    {
-        let captured = events.lock().unwrap();
-        assert!(
-            captured.iter().any(|event| matches!(
-                event,
-                HostEvent::Row(row) if row.text() == Some("agent tree is not paused; nothing to resume")
-            )),
-            "{captured:?}"
-        );
-        assert!(
-            captured
-                .iter()
-                .any(|event| matches!(event, HostEvent::TopologyNavigatorSnapshot(_)))
-        );
-    }
     events.lock().unwrap().clear();
     let revision = crate::topology_runtime::lookup(&tree_id)
         .unwrap()

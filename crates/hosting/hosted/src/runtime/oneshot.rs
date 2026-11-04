@@ -50,7 +50,6 @@ pub enum OneShotOutcome {
 
 pub(super) struct OneShotState {
     pub attempted: bool,
-    pub resume_tree: bool,
     pub result: Option<CliResult<OneShotOutcome>>,
     pub run: Option<RunState>,
 }
@@ -74,23 +73,13 @@ impl OneShot {
         prompt: String,
         observe: impl FnMut(Option<&HostEvent<P>>, &UserActionSender<P>),
     ) -> CliResult<OneShotOutcome> {
-        Self::drive(config, prompt.into(), false, None, observe)
-    }
-
-    /// Explicitly resume the attached tree after canonical opening, then drive one prompt.
-    pub fn run_resuming_tree<P: plakous_host_protocol::ProtocolExtension>(
-        config: HostConfig<P>,
-        prompt: String,
-        observe: impl FnMut(Option<&HostEvent<P>>, &UserActionSender<P>),
-    ) -> CliResult<OneShotOutcome> {
-        Self::drive(config, prompt.into(), true, None, observe)
+        Self::drive(config, prompt.into(), None, observe)
     }
 
     /// Admit distinct continuation turns until no processes or children remain.
     pub fn run_until_idle<P: plakous_host_protocol::ProtocolExtension>(
         config: HostConfig<P>,
         prompt: plakous_host_protocol::Draft,
-        resume_tree: bool,
         bounds: RunBounds,
         observe: impl FnMut(Option<&HostEvent<P>>, &UserActionSender<P>),
     ) -> CliResult<OneShotOutcome> {
@@ -100,13 +89,12 @@ impl OneShot {
                 "max-turns must be 1..=100",
             ));
         }
-        Self::drive(config, prompt, resume_tree, Some(bounds), observe)
+        Self::drive(config, prompt, Some(bounds), observe)
     }
 
     fn drive<P: plakous_host_protocol::ProtocolExtension>(
         mut config: HostConfig<P>,
         prompt: plakous_host_protocol::Draft,
-        resume_tree: bool,
         bounds: Option<RunBounds>,
         mut observe: impl FnMut(Option<&HostEvent<P>>, &UserActionSender<P>),
     ) -> CliResult<OneShotOutcome> {
@@ -134,7 +122,6 @@ impl OneShot {
         let worker = std::thread::spawn(move || {
             let mut state = OneShotState {
                 attempted: false,
-                resume_tree,
                 result: None,
                 run: bounds.map(|bounds| RunState {
                     bounds,

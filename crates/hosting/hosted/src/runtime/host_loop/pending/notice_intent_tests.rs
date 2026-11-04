@@ -5,8 +5,8 @@
 
 use std::sync::Arc;
 
-use super::tests::{pause_rows, pause_tree, reopen, snapshots, spawn_child, with_configured_tree};
-use super::{AUTO_CONTINUE_PAUSE_TEXT, TREE_PAUSE_TEXT};
+use super::AUTO_CONTINUE_PAUSE_TEXT;
+use super::tests::{pause_rows, reopen, snapshots, spawn_child, with_configured_tree};
 use crate::runtime::host_loop::RootActor;
 use crate::runtime::test_kit::TestExtension;
 use crate::session_store::{MemoryStore, SessionRecordStore as _};
@@ -72,18 +72,18 @@ fn pause_lines_and_milestones_are_notice_intents_that_survive_a_rebuild() {
                     .unwrap(),
                 crate::runtime::host_loop::HostStep::Continue
             ));
-            pause_tree(runtime);
             host.publish_pending_continuation();
             let _ = snapshots(observed);
 
             let intents = notice_texts(&store, &id);
-            for expected in [AUTO_CONTINUE_PAUSE_TEXT, TREE_PAUSE_TEXT] {
-                assert_eq!(
-                    intents.iter().filter(|text| *text == expected).count(),
-                    1,
-                    "{expected} is one notice intent: {intents:?}"
-                );
-            }
+            assert_eq!(
+                intents
+                    .iter()
+                    .filter(|text| *text == AUTO_CONTINUE_PAUSE_TEXT)
+                    .count(),
+                1,
+                "the pause is one notice intent: {intents:?}"
+            );
             let notices: Vec<TranscriptRow> = host
                 .role
                 .config
@@ -95,8 +95,7 @@ fn pause_lines_and_milestones_are_notice_intents_that_survive_a_rebuild() {
                 .filter(|row| {
                     matches!(row, TranscriptRow::Milestone(_))
                         || matches!(row, TranscriptRow::Notice(notice)
-                            if notice.text == AUTO_CONTINUE_PAUSE_TEXT
-                                || notice.text == TREE_PAUSE_TEXT)
+                            if notice.text == AUTO_CONTINUE_PAUSE_TEXT)
                 })
                 .collect();
             let milestones = notices
@@ -135,7 +134,6 @@ fn pause_lines_and_milestones_are_notice_intents_that_survive_a_rebuild() {
                 }
                 let session = &restored.role.config.session;
                 assert_eq!(pause_rows(session, AUTO_CONTINUE_PAUSE_TEXT), 1);
-                assert_eq!(pause_rows(session, TREE_PAUSE_TEXT), 1);
             });
         },
     );

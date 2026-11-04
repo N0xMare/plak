@@ -27,7 +27,6 @@ fn session_switch_retires_source_usage_waits_queue_and_tree_but_keeps_preference
         app.credential_wait = Some("codex".into());
         app.request_slot_wait = Some("slots".into());
         app.cancel_pending = true;
-        app.tree_restored_paused = true;
         app.tree_live_descendants = 3;
         app.composer_chrome
             .sent_steers
@@ -57,7 +56,6 @@ fn session_switch_retires_source_usage_waits_queue_and_tree_but_keeps_preference
         assert!(app.credential_wait.is_none());
         assert!(app.request_slot_wait.is_none());
         assert!(!app.cancel_pending);
-        assert!(!app.tree_restored_paused);
         assert_eq!(app.tree_live_descendants, 0);
         assert!(app.composer_chrome.sent_steers.is_empty());
         assert!(app.open_approval.is_none());

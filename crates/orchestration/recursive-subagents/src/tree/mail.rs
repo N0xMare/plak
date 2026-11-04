@@ -468,7 +468,7 @@ impl ProductAgentTree {
                 MessagePriority::Deferred
             }
         });
-        // A bound turn survives restore_paused (active_turn is cleared). Restart
+        // A bound turn survives apply_reopen_law (active_turn is cleared). Restart
         // drain is forbidden: that child gets follow-up/steer, never a second Start.
         let has_bound_turn = self
             .current_attempt(&request.agent_id)

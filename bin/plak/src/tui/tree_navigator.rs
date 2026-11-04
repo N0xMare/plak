@@ -21,21 +21,14 @@ use rows::{
 };
 pub(crate) use rows::{acknowledge_intent, agent_role, recover_intent, short_id, wrap_footer_hint};
 
-/// The Agents list's resume control. Not an agent id.
-pub(crate) const RESUME_ROW_ID: &str = "resume-agents";
-
 /// Rows the docked inspector takes when the overlay is tall enough for it.
 const INSPECTOR_ROWS: u16 = 6;
 /// Shortest overlay that still carries an inspector.
 const INSPECTOR_MIN_HEIGHT: u16 = 12;
 
-/// Compact chrome when a `restored_paused` snapshot arrives with the overlay closed.
-pub const RESTORED_PAUSED_NAVIGATOR_HINT: &str = "the agent tree is paused · /tree then r resumes";
-
 /// What the Agents footer names besides the keys.
 #[derive(Clone, Copy, Debug)]
 pub struct FooterView<'a> {
-    pub restored_paused: bool,
     pub scope: AgentScope,
     pub hidden: usize,
     pub history: bool,
@@ -76,20 +69,13 @@ pub fn agents_footer_hint(view: FooterView<'_>) -> String {
         }
         AgentScope::All => "all agents · f live".to_owned(),
     };
-    let head = if view.restored_paused {
-        // `restored_paused` is a wire value and `ResumeTree` is the
-        // name of a request type. Neither is something an operator reads.
-        "Tree paused · r resumes · "
-    } else {
-        ""
-    };
     let recover = if view.offer_recover {
         " · u recover"
     } else {
         ""
     };
     format!(
-        "{shown} · {head}↑/↓ select · Enter transcript · x acknowledge · i interrupt · c close · s stop all · y copy{recover} · R refresh · t history · Esc back"
+        "{shown} · ↑/↓ select · Enter transcript · x acknowledge · i interrupt · c close · s stop all · y copy{recover} · R refresh · t history · Esc back"
     )
 }
 
@@ -116,13 +102,8 @@ pub fn fitted_agents_footer(view: FooterView<'_>, width: u16, max_rows: usize) -
         AgentScope::Live => "f all",
         AgentScope::All => "f live",
     };
-    let head = if view.restored_paused {
-        "paused · r resume · "
-    } else {
-        ""
-    };
     let recover = if view.offer_recover { " · u" } else { "" };
-    format!("{head}↑/↓ · Enter · x · i · c · s · y{recover} · R · t · {shown} · Esc")
+    format!("↑/↓ · Enter · x · i · c · s · y{recover} · R · t · {shown} · Esc")
 }
 
 /// Rows the list footer may take before it gives up and clips.
@@ -216,8 +197,6 @@ pub struct TreeNavigator {
     list_rows: usize,
     /// Profile the last frame used to name roles in the history query.
     last_profile: Option<crate::tui::ProfileRow>,
-    /// Agent to restore when a paused tree leaves the resume row.
-    resume_agent: Option<String>,
     /// History lines for one snapshot, query, failures flag, and local day.
     history_cache: Option<crate::tui::agent_history::HistoryCache>,
 }
@@ -263,7 +242,6 @@ impl TreeNavigator {
             zone: &crate::tui::UTC_ZONE,
             list_rows: 1,
             last_profile: None,
-            resume_agent: None,
             history_cache: None,
         }
     }
@@ -398,17 +376,8 @@ impl TreeNavigator {
             self.acknowledged.clear();
             self.reset_history();
         }
-        let paused = snapshot.restored_paused;
         self.snapshot = Some(snapshot);
         self.history_cache = None;
-        if paused && self.selected.is_none() {
-            self.selected = Some(RESUME_ROW_ID.to_owned());
-        } else if !paused && self.selected.as_deref() == Some(RESUME_ROW_ID) {
-            self.selected = self
-                .resume_agent
-                .take()
-                .filter(|id| self.node(id).is_some());
-        }
     }
 
     fn reset_history(&mut self) {
@@ -420,9 +389,8 @@ impl TreeNavigator {
         self.failures_only = false;
     }
 
-    fn footer_view(&self, hidden: usize, restored_paused: bool) -> FooterView<'_> {
+    fn footer_view(&self, hidden: usize) -> FooterView<'_> {
         FooterView {
-            restored_paused,
             scope: self.scope,
             hidden,
             history: self.history,
@@ -486,9 +454,6 @@ impl TreeNavigator {
     /// by the query or the failures filter.
     #[must_use]
     pub fn selected_node(&self) -> Option<&CanvasNode> {
-        if self.selected.as_deref() == Some(RESUME_ROW_ID) {
-            return None;
-        }
         if self.history {
             let id = self.selected.as_deref()?;
             let node = self.node(id)?;
@@ -517,15 +482,6 @@ impl TreeNavigator {
             self.move_by(isize::from(delta));
             return;
         }
-        if self.resume_row_shown() && self.selected.as_deref() == Some(RESUME_ROW_ID) {
-            if delta > 0 {
-                if let Some(first) = self.projection().rows.first() {
-                    let id = first.id.clone();
-                    self.focus_on(&id);
-                }
-            }
-            return;
-        }
         let projection = self.projection();
         if projection.rows.is_empty() {
             return;
@@ -534,10 +490,6 @@ impl TreeNavigator {
             .resolve_selection(&projection)
             .and_then(|id| projection.position(&id))
             .unwrap_or(0);
-        if delta < 0 && current == 0 && self.resume_row_shown() {
-            self.selected = Some(RESUME_ROW_ID.to_owned());
-            return;
-        }
         let next = if delta < 0 {
             current.saturating_sub(1)
         } else {
@@ -545,12 +497,6 @@ impl TreeNavigator {
         };
         let id = projection.rows[next].id.clone();
         self.focus_on(&id);
-    }
-
-    fn resume_row_shown(&self) -> bool {
-        self.snapshot
-            .as_ref()
-            .is_some_and(|snap| snap.restored_paused)
     }
 
     /// `u` is offered only for a visible eligible selection.
@@ -575,9 +521,6 @@ impl TreeNavigator {
         let Some(id) = self.selected.as_deref() else {
             return false;
         };
-        if id == RESUME_ROW_ID {
-            return self.resume_row_shown();
-        }
         self.history_agent_ids().iter().any(|row| row == id)
     }
 
@@ -648,9 +591,10 @@ impl TreeNavigator {
 
     fn clear_or_dismiss(&mut self) -> TopologyNavigatorOutcome {
         let filtered = self.failures_only || !self.search.trim().is_empty();
-        let hidden = self.selected.as_deref().is_some_and(|id| {
-            id != RESUME_ROW_ID && !self.history_agent_ids().iter().any(|row| row == id)
-        });
+        let hidden = self
+            .selected
+            .as_deref()
+            .is_some_and(|id| !self.history_agent_ids().iter().any(|row| row == id));
         if self.history && filtered && (self.history_agent_ids().is_empty() || hidden) {
             self.search.clear();
             self.failures_only = false;
@@ -674,12 +618,7 @@ impl TreeNavigator {
     }
 
     fn history_selectable_ids(&self) -> Vec<String> {
-        let mut ids = Vec::new();
-        if self.resume_row_shown() {
-            ids.push(RESUME_ROW_ID.to_owned());
-        }
-        ids.extend(self.history_agent_ids());
-        ids
+        self.history_agent_ids()
     }
 
     fn history_lines_now(
@@ -792,22 +731,8 @@ impl TreeNavigator {
     }
 
     pub(crate) fn focus_on(&mut self, agent_id: &str) {
-        if agent_id == RESUME_ROW_ID && self.resume_row_shown() {
-            if self
-                .selected
-                .as_deref()
-                .is_some_and(|id| id != RESUME_ROW_ID && self.node(id).is_some())
-            {
-                self.resume_agent.clone_from(&self.selected);
-            }
-            self.selected = Some(RESUME_ROW_ID.to_owned());
-            return;
-        }
         if self.node(agent_id).is_some() {
             self.selected = Some(agent_id.to_owned());
-            if self.resume_row_shown() {
-                self.resume_agent = Some(agent_id.to_owned());
-            }
         }
     }
     /// Route one overlay key. The TUI maps Crossterm codes into this method.
@@ -925,12 +850,6 @@ impl TreeNavigator {
             TopologyNavigatorKey::Refresh => {
                 TopologyNavigatorOutcome::Action(crate::tui::UserAction::RefreshTopologyTree)
             }
-            TopologyNavigatorKey::Enter if self.selected.as_deref() == Some(RESUME_ROW_ID) => {
-                self.resume_action().map_or(
-                    TopologyNavigatorOutcome::Consumed,
-                    TopologyNavigatorOutcome::Confirm,
-                )
-            }
             TopologyNavigatorKey::Enter => match self.actionable_node() {
                 None => TopologyNavigatorOutcome::Consumed,
                 Some(node) if node.parent_agent_id.is_none() => TopologyNavigatorOutcome::ShowRoot,
@@ -939,10 +858,6 @@ impl TreeNavigator {
                     label: agent_view_label(node),
                 },
             },
-            TopologyNavigatorKey::Resume => self.resume_action().map_or(
-                TopologyNavigatorOutcome::Consumed,
-                TopologyNavigatorOutcome::Confirm,
-            ),
             TopologyNavigatorKey::Interrupt => self.interrupt_action().map_or(
                 TopologyNavigatorOutcome::Consumed,
                 TopologyNavigatorOutcome::Confirm,
@@ -992,12 +907,8 @@ impl TreeNavigator {
             .as_ref()
             .and_then(|snap| agent_list::next_age_boundary(&snap.nodes, &projection, now));
         self.age_wake_at = wake;
-        let restored_paused = self
-            .snapshot
-            .as_ref()
-            .is_some_and(|snap| snap.restored_paused);
         let footer = fitted_agents_footer(
-            self.footer_view(projection.hidden, restored_paused),
+            self.footer_view(projection.hidden),
             width,
             footer_max_rows(height),
         );
@@ -1016,35 +927,22 @@ impl TreeNavigator {
                 .saturating_sub(inspector_rows),
         );
         self.list_rows = list_rows.max(1);
-        let resume = restored_paused;
-        let agent_slots = list_rows.saturating_sub(usize::from(resume));
-        let resume_selected = resume && self.selected.as_deref() == Some(RESUME_ROW_ID);
-        let selected = if resume_selected {
-            None
-        } else {
-            self.resolve_selection(&projection)
-        };
+        let selected = self.resolve_selection(&projection);
         self.scroll_to(
             selected.as_deref().and_then(|id| projection.position(id)),
             projection.rows.len(),
-            agent_slots,
+            list_rows,
         );
-        let mut rows = Vec::new();
-        if resume {
-            rows.push(Self::resume_row(resume_selected));
-        }
-        rows.extend(self.visible_rows(
+        let rows = self.visible_rows(
             &projection,
             selected.as_deref(),
-            agent_slots,
+            list_rows,
             width,
             spinner,
             profile,
-        ));
+        );
         let inspector = if inspector_rows == 0 {
             Vec::new()
-        } else if resume_selected {
-            vec!["Resumes every paused agent. Turns continue and spend again.".to_owned()]
         } else {
             selected
                 .as_deref()
@@ -1096,20 +994,6 @@ impl TreeNavigator {
             .collect()
     }
 
-    fn resume_row(selected: bool) -> AgentListRow {
-        AgentListRow {
-            id: RESUME_ROW_ID.to_owned(),
-            cells: RowCells {
-                rails: String::new(),
-                body: " \u{25b6} resume agents".to_owned(),
-                mark: "   ".to_owned(),
-            },
-            dim: false,
-            selected,
-            selectable: true,
-        }
-    }
-
     fn history_frame(
         &mut self,
         width: u16,
@@ -1120,15 +1004,7 @@ impl TreeNavigator {
     ) -> AgentListFrame {
         let lines = self.history_lines_now(profile);
         self.age_wake_at = crate::tui::agent_history::next_local_midnight(self.now_unix, self.zone);
-        let restored_paused = self
-            .snapshot
-            .as_ref()
-            .is_some_and(|snap| snap.restored_paused);
-        let footer = fitted_agents_footer(
-            self.footer_view(0, restored_paused),
-            width,
-            footer_max_rows(height),
-        );
+        let footer = fitted_agents_footer(self.footer_view(0), width, footer_max_rows(height));
         let header = header_line(&self.projection(), self.snapshot.as_ref(), width);
         let header = truncate_display(&format!("History · {header}"), usize::from(width));
         let footer_rows = footer_row_count(height, &footer, width);
@@ -1144,39 +1020,21 @@ impl TreeNavigator {
                 .saturating_sub(inspector_rows),
         );
         self.list_rows = list_rows.max(1);
-        let resume = self.resume_row_shown();
-        let resume_selected = resume && self.selected.as_deref() == Some(RESUME_ROW_ID);
         let selected = self.selected_agent_id().map(str::to_owned);
-        let agent_at = selected.as_ref().and_then(|id| {
+        let at = selected.as_ref().and_then(|id| {
             lines.iter().position(|line| {
                 matches!(line, crate::tui::agent_history::HistoryLine::Agent(row) if row == id)
             })
         });
-        let at = if resume_selected {
-            Some(0)
-        } else {
-            agent_at.map(|index| index + usize::from(resume))
-        };
-        let len = lines.len() + usize::from(resume);
-        self.scroll_to(at, len, list_rows);
-        let mut rows = Vec::new();
-        if resume && self.list_scroll == 0 {
-            rows.push(Self::resume_row(resume_selected));
-        }
-        let skip = self.list_scroll.saturating_sub(usize::from(resume));
-        rows.extend(
-            lines
-                .iter()
-                .skip(skip)
-                .take(list_rows.saturating_sub(rows.len()))
-                .filter_map(|line| {
-                    self.history_row(line, selected.as_deref(), width, spinner, profile)
-                }),
-        );
+        self.scroll_to(at, lines.len(), list_rows);
+        let rows = lines
+            .iter()
+            .skip(self.list_scroll)
+            .take(list_rows)
+            .filter_map(|line| self.history_row(line, selected.as_deref(), width, spinner, profile))
+            .collect();
         let inspector = if inspector_rows == 0 {
             Vec::new()
-        } else if resume_selected {
-            vec!["Resumes every paused agent. Turns continue and spend again.".to_owned()]
         } else {
             self.history_inspector(
                 &lines,
@@ -1329,28 +1187,19 @@ impl TreeNavigator {
             (None, _) => "start unknown".to_owned(),
         };
         let can_ack = attention.is_some() && !acknowledged && node.attempt_id.is_some();
-        let resume_first = self
-            .snapshot
-            .as_ref()
-            .is_some_and(|snap| snap.restored_paused)
-            && matches!(attention, Some(agent_list::Attention::RecoveryRequired));
-        let remedy = if resume_first {
-            " · Resume agents first".to_owned()
-        } else {
-            match (attention, can_ack, acknowledged) {
-                (Some(agent_list::Attention::RecoveryRequired), true, _) => {
-                    format!(" · {RECOVERY_REMEDY} · x acknowledges")
-                }
-                (Some(agent_list::Attention::RecoveryRequired), false, true) => {
-                    format!(" · {RECOVERY_REMEDY} · acknowledged")
-                }
-                (Some(agent_list::Attention::RecoveryRequired), _, _) => {
-                    format!(" · {RECOVERY_REMEDY}")
-                }
-                (Some(_), true, _) => " · needs attention · x acknowledges".to_owned(),
-                (Some(_), false, true) => " · acknowledged".to_owned(),
-                _ => String::new(),
+        let remedy = match (attention, can_ack, acknowledged) {
+            (Some(agent_list::Attention::RecoveryRequired), true, _) => {
+                format!(" · {RECOVERY_REMEDY} · x acknowledges")
             }
+            (Some(agent_list::Attention::RecoveryRequired), false, true) => {
+                format!(" · {RECOVERY_REMEDY} · acknowledged")
+            }
+            (Some(agent_list::Attention::RecoveryRequired), _, _) => {
+                format!(" · {RECOVERY_REMEDY}")
+            }
+            (Some(_), true, _) => " · needs attention · x acknowledges".to_owned(),
+            (Some(_), false, true) => " · acknowledged".to_owned(),
+            _ => String::new(),
         };
         let name = agent_name(node);
         let description = node.description.trim();
@@ -1418,12 +1267,6 @@ impl TreeNavigator {
         acknowledge_intent(&snap.tree_id, node, &self.acknowledged)
     }
 
-    fn resume_action(&self) -> Option<crate::tui::UserAction> {
-        let snap = self.snapshot.as_ref()?;
-        snap.restored_paused
-            .then_some(crate::tui::UserAction::ResumeTopologyTree)
-    }
-
     /// The selected agent, unless it is the root: the root's turn stops
     /// from the root view, and the root is never closed from the list.
     fn selected_child_id(&self) -> Option<&str> {
@@ -1467,8 +1310,6 @@ pub enum TopologyNavigatorKey {
     Enter,
     /// Esc.
     Escape,
-    /// r — `ResumeTree` when paused.
-    Resume,
     /// i — ask to interrupt the selected agent.
     Interrupt,
     /// c — ask to close the selected agent.
@@ -1508,4 +1349,4 @@ pub enum TopologyNavigatorKey {
 mod tests;
 
 #[cfg(test)]
-mod paused_copy_tests;
+mod footer_copy_tests;

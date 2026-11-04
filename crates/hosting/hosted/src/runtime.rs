@@ -209,8 +209,7 @@ pub use surface::{
 pub use topology_state::{HostRows, TopologyRows, TreeRows, TreeWriteError};
 pub use topology_state::{
     durable_tree_id as durable_topology_tree_id, epoch_rebind_refusal, install_successor_epoch,
-    requires_explicit_resume, resume_tree, settle_switch_epoch_on_open,
-    withdraw_stale_switch_epochs,
+    settle_switch_epoch_on_open, withdraw_stale_switch_epochs,
 };
 pub use worker::{HostQuitOutcome, HostWorkerHandle};
 

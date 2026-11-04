@@ -264,14 +264,14 @@ fn a_completed_child_is_idle_for_followup_but_quiescent_for_the_epoch() {
 #[test]
 fn reopening_a_quiescent_tree_never_pauses_it() {
     let (_tmp, mut singleton) = tree();
-    singleton.restore_paused();
+    singleton.apply_reopen_law();
     assert_eq!(singleton.state, TreeAdmissionState::Live);
     assert_eq!(singleton.epoch_rebind_refusal(), None);
     assert!(singleton.spawn_agent("root", &spawn_req(), None).is_ok());
 
     let (_tmp, mut persisted_paused) = tree();
     persisted_paused.state = TreeAdmissionState::RestoredPaused;
-    persisted_paused.restore_paused();
+    persisted_paused.apply_reopen_law();
     assert_eq!(persisted_paused.state, TreeAdmissionState::Live);
     assert_eq!(persisted_paused.epoch_rebind_refusal(), None);
 
@@ -283,50 +283,53 @@ fn reopening_a_quiescent_tree_never_pauses_it() {
         .close_agent("root", &close_req(&spawned.agent_id), None)
         .unwrap();
     all_terminal.state = TreeAdmissionState::Interrupted;
-    all_terminal.restore_paused();
+    all_terminal.apply_reopen_law();
     assert_eq!(all_terminal.state, TreeAdmissionState::Live);
     assert_eq!(all_terminal.epoch_rebind_refusal(), None);
 
     let (_tmp, mut terminal_epoch) = tree();
     terminal_epoch.state = TreeAdmissionState::TreeTerminal;
-    terminal_epoch.restore_paused();
+    terminal_epoch.apply_reopen_law();
     assert_eq!(terminal_epoch.state, TreeAdmissionState::TreeTerminal);
 }
 
-/// Only a tree with a live descendant (or a pending spawn) reopens paused.
+/// A tree with a live descendant (or a pending spawn) reopens live; its
+/// descendants, not a pause, are what refuse a rebind.
 #[test]
-fn reopening_a_tree_with_live_descendants_pauses_it() {
+fn reopening_a_tree_with_live_descendants_keeps_it_live() {
     let (_tmp, mut live) = tree();
     let spawned = live.spawn_agent("root", &spawn_req(), None).unwrap();
-    live.restore_paused();
-    assert_eq!(live.state, TreeAdmissionState::RestoredPaused);
+    live.apply_reopen_law();
+    assert_eq!(live.state, TreeAdmissionState::Live);
     assert_eq!(
         live.node(&spawned.agent_id)
             .unwrap()
             .presentation_status(live.state),
-        NodeStatus::Paused
+        NodeStatus::Running
     );
     assert_eq!(
         live.epoch_rebind_refusal(),
-        Some(ProductAgentTree::TREE_EPOCH_REBIND_PAUSED)
+        Some(ProductAgentTree::TREE_EPOCH_REBIND_LIVE_DESCENDANTS)
     );
 
     let (_tmp, mut pending) = tree();
     pending.pending_spawns = 1;
-    pending.restore_paused();
-    assert_eq!(pending.state, TreeAdmissionState::RestoredPaused);
+    pending.apply_reopen_law();
+    assert_eq!(pending.state, TreeAdmissionState::Live);
+    assert_eq!(
+        pending.epoch_rebind_refusal(),
+        Some(ProductAgentTree::TREE_EPOCH_REBIND_PENDING_SPAWNS)
+    );
 }
 
 #[test]
-fn epoch_rebind_refusal_splits_paused_spawns_and_descendants() {
+fn epoch_rebind_refusal_splits_spawns_and_descendants() {
     let (_tmp, mut tree) = tree();
     assert_eq!(tree.epoch_rebind_refusal(), None);
 
+    // A stored `restored_paused` reads as live: it refuses nothing.
     tree.state = TreeAdmissionState::RestoredPaused;
-    assert_eq!(
-        tree.epoch_rebind_refusal(),
-        Some(ProductAgentTree::TREE_EPOCH_REBIND_PAUSED)
-    );
+    assert_eq!(tree.epoch_rebind_refusal(), None);
     assert!(tree.epoch_allows_rebind());
 
     tree.state = TreeAdmissionState::Live;

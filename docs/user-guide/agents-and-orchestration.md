@@ -108,8 +108,9 @@ attempt held for recovery, not running without a Start. The send's wait budget
 never cuts a submission in flight: a Start that is admitted late is delivered
 late, and the child keeps running.
 After a
-restart, a parked child wakes once when the tree resumes; interrupting it before
-that wake runs keeps it interrupted. JSONL roots and roots with
+restart, a parked child is interrupted (owner lost), keeps its attempt and waits
+for mail or a followup; one whose wake was still pending rejoins that wake
+instead. JSONL roots and roots with
 auto-continue disabled must use `wait_agent` to learn child results before
 ending a turn. An idle wake
 failure pauses auto-continue, emits an error note and leaves the host attached;
@@ -235,48 +236,46 @@ a timeout does not mean the child was cancelled or that spawning it again is
 safe. A repeated identical `request_key` identifies the original admitted spawn,
 including its candidate inputs, even after its workspace changes.
 
-A child that was mid-turn when your `plak` crashed, or whose own turn ended
-recovery required, is recovered rather than stranded: its session is reopened,
+Nothing pauses after a crash: the agent tree reopens live. A child the lost
+`plak` left parked between turns is marked `interrupted` (owner lost) when the
+tree reopens. A child that was mid-turn, or whose own turn ended recovery
+required, is recovered rather than stranded: its session is reopened exactly,
 the unfinished turn is recorded once as abandoned (never re-sent or re-run), and
-the child ends `failed` with kind `turn_abandoned`. The parent can re-task it
-with a follow-up or close it, and a crash does not spend the tree's attempt
-budget. A child that still reads `recovery_required` holds none of its parent's
-child slots, but it does count toward the tree's node budget until it is
-closed.
+the child is marked `interrupted` the same way. Either way its attempt, its
+sub-agents and its surviving processes are kept, nothing is retried by itself,
+and no result is sent for it; the parent can re-task it with a follow-up or
+close it, and a crash does not spend the tree's attempt budget. A child whose
+lost turn the reopen finds still waiting (at an approval, or admitted but not
+yet sent) rejoins that turn instead. Until its recovery has run, a child takes
+no turn: mail for it waits and is kept. A child that still reads
+`recovery_required` holds none of its parent's child slots, but it does count
+toward the tree's node budget until it is closed.
 
 Such a child is settled by reopening its session once more, without replaying
 anything it ran:
 
-- automatically, in the background, when the tree is reopened or resumed;
-- when you run `/recover` (on a paused tree, `/recover` says to resume it
-  first: `r` on `/tree`, or `--resume-tree`; running it while a pass is
-  already going makes that pass run once more);
+- automatically, in the background, when the tree is reopened;
+- when you run `/recover`;
 - by its parent calling `recover_agent { agent_id }`, which `list_agents` and
   `close_agent` name as the remedy on that row.
 
-Recovery runs in the background and never holds up the session. Each pass
-that did something posts one note naming the children it recovered, the ones
-it could not (with the reason), and any it did not reach in time. `recover_agent`
-retries a refusal; `/recover` only selects children with unresolved session
-outcomes. A child whose interrupted turn may have run a
-tool gets a warning that its workspace may have changed. The tool's
-unobserved conversation result is not kept or replayed; workspace changes
-remain in the child's workspace or sealed candidate for review, not erased.
-A recovered child ends `failed` with kind `turn_abandoned`, or
-`recovered_without_turn` when the session was quiet and nothing was left
-running, or `spawn_refused` when its session was never created (the create
-was refused before it wrote anything, so there was nothing to reopen). A durably submitted result is preserved as `completed` when recovery
-finds a quiet session and only retirement was uncertain; a recorded failed
-terminal or an abandoned turn still fails. The parent can then re-task it with a follow-up or
-close it, except a `spawn_refused` child: it never had a session, so a
-follow-up is refused (`followup_closed`) and the parent closes it and spawns a
-new agent. A delivered terminal with only local finalization bookkeeping also
-recovers this way, without rerunning tools or producing a second result. A
-fenced child's automatic waiter recycle settles a successful quiet reopen as
-an ordinary failure, not another recovery request.
+Recovery runs in the background and never holds up the session. Each run that
+did something posts one note naming the children it recovered and the ones it
+could not (with the reason). `recover_agent` retries a refusal; `/recover` only
+selects children with unresolved session outcomes. A child whose interrupted
+turn may have run a tool gets a warning that its workspace may have changed.
+The tool's unobserved conversation result is not kept or replayed; workspace
+changes remain in the child's workspace for review, not erased. A child whose
+session was never created (the create was refused before it wrote anything)
+ends `failed` with kind `spawn_refused`: a follow-up is refused
+(`followup_closed`), and the parent closes it and spawns a new agent. A durably
+submitted result is preserved as `completed` when only retirement was
+uncertain. A fenced child's automatic waiter recycle settles a successful quiet
+reopen as an ordinary failure, not another recovery request. A child whose copy
+was mid seal or adopt stays `recovery_required` until it is closed.
 A refusal to reopen or initially publish settles nothing and says why:
 `recovery_lease_held` means
-another process still holds the child's session (the automatic pass does not
+another process still holds the child's session (automatic recovery does not
 wait; `recover_agent` waits up to 35 seconds), and the others are
 `recovery_session_unavailable`, `recovery_storage_unavailable`,
 `recovery_effect_evidence_refused` and `recovery_owner_live` (the child is
@@ -483,7 +482,7 @@ $ plak agent --account grok --model grok-4.6 --effort low
 ```
 
 Commands you can send: `prompt`, `interrupt`, `background`, `compact`,
-`recover`, `resume_queue`, `resume_tree`, `tree`, `interrupt_node`,
+`recover`, `resume_queue`, `tree`, `interrupt_node`,
 `close_node`, `stop_all`, `clear`, `invoke_tool`, `fork`, `quit`.
 
 Events you will commonly receive: `hello`, `ready`, `status`, `busy`,
@@ -501,8 +500,7 @@ turn, models still call the topology tools themselves. `fork` maps to
 the TUI's `/fork`.
 
 To attach to an existing session, `plak agent --session <uuid>`; its recorded
-binding wins over any flags. A session that was left as a paused tree needs
-`--resume-tree` to attach, the same as `plak run`.
+binding wins over any flags.
 
 ## Trying it
 

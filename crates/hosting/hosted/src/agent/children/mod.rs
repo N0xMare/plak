@@ -65,19 +65,23 @@ pub(super) use deliver::turn_ended_or;
 pub(super) use deliver::{ProductLiveCanceller, ProductMailDeliverer, submit_harness_prompt};
 pub(super) use reopen::{
     CHILD_LEASE_POLL, CHILD_LEASE_WAIT, ChildReopen, ChildReopenError, ChildReopenErrorKind,
-    ChildReopenMode, format_session_reopen_error, reattach_inflight_children,
-    rejoin_recovered_start, reopen_spawned_child,
+    ChildReopenMode, format_session_reopen_error, recover_owed_children, rejoin_recovered_start,
+    reopen_spawned_child,
 };
 #[cfg(test)]
 pub(super) use reopen::{SESSION_LEASE_HOLD_HINT, reconcile_reopened_results};
 pub(super) use turns::{
-    CHILD_COMMAND_CONSUMED, ChildCommand, ChildStartFailure, ChildTurnIdentity, StartAdmission,
-    end_attempt_work, end_spent_attempt, mutate_child, release_startup, start_child_turn,
-    start_child_turn_as, start_child_turn_owned_with_ack,
+    CHILD_COMMAND_CONSUMED, ChildStartFailure, ChildTurnIdentity, StartAdmission, end_attempt_work,
+    mutate_child, release_startup, start_child_turn,
 };
+#[cfg(test)]
+pub(super) use turns::{ChildCommand, start_child_turn_owned_with_ack};
+#[cfg(test)]
+use waiter::finalize_child_turn;
+#[cfg(test)]
+pub(super) use waiter::read_finalize_terminal;
 pub(super) use waiter::{
-    ChildFeedSource, FailedTurnWaits, TurnWaiterRegistration, finalize_child_failure,
-    read_finalize_terminal, turn_watch, wait_resume_gate,
+    ChildFeedSource, FailedTurnWaits, TurnWaiterRegistration, finalize_child_failure, turn_watch,
 };
 #[cfg(test)]
 pub(super) use waiter::{child_turn_was_cancelled, start_instruction_turn, transient_resume_bound};
@@ -86,7 +90,7 @@ use bind::{SPAWN_MATERIALIZE_TIMEOUT, StartupCaller};
 use deliver::mail_command_id;
 use reopen::{bound_child_turn_matches, occupy_recovered_child};
 use turns::start_child_turn_owned;
-use waiter::{finalize_child_turn, register_admitted_turn};
+use waiter::register_admitted_turn;
 
 use super::{
     ApiTopologyParent, AttachedCodingSession, ProductAgentSpec, SessionToolFence, SpawnParent,

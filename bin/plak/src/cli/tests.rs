@@ -288,42 +288,28 @@ fn run_session_rejects_conflicting_binding_flags() {
 }
 
 #[test]
-fn run_session_resume_tree_is_explicit() {
-    let cmd = parse([
-        "run".into(),
-        "--session".into(),
-        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee".into(),
-        "--resume-tree".into(),
-        "--".into(),
-        "continue".into(),
-    ])
-    .unwrap();
-    match cmd {
-        Command::ContinueSession {
-            resume_tree: true,
-            prompt,
-            ..
-        } => assert_eq!(prompt, "continue"),
-        _ => panic!("expected continue with resume_tree"),
+fn run_and_agent_refuse_the_removed_resume_tree_flag() {
+    for args in [
+        vec![
+            "run",
+            "--session",
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "--resume-tree",
+            "--",
+            "continue",
+        ],
+        vec![
+            "agent",
+            "--session",
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "--resume-tree",
+        ],
+    ] {
+        let Err(message) = parse(args.into_iter().map(OsString::from)) else {
+            panic!("--resume-tree is not a flag");
+        };
+        assert!(message.starts_with("unknown option"), "{message}");
     }
-}
-
-#[test]
-fn run_resume_tree_without_session_fails() {
-    let err = parse([
-        "run".into(),
-        "--account".into(),
-        "codex".into(),
-        "--model".into(),
-        "m".into(),
-        "--resume-tree".into(),
-        "--".into(),
-        "hello".into(),
-    ]);
-    let Err(message) = err else {
-        panic!("--resume-tree without --session must fail closed");
-    };
-    assert!(message.contains("--session"));
 }
 
 #[test]
@@ -331,47 +317,10 @@ fn agent_stdio_is_the_default_pipe() {
     let cmd = parse(["agent".into()]).unwrap();
     match cmd {
         Command::Agent {
-            session_id: None,
-            resume_tree: false,
-            ..
+            session_id: None, ..
         } => {}
         _ => panic!("expected bare agent"),
     }
-}
-
-#[test]
-fn agent_session_resume_tree_is_explicit() {
-    let cmd = parse([
-        "agent".into(),
-        "--session".into(),
-        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee".into(),
-        "--resume-tree".into(),
-    ])
-    .unwrap();
-    match cmd {
-        Command::Agent {
-            session_id: Some(id),
-            resume_tree: true,
-            ..
-        } => assert_eq!(id, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
-        _ => panic!("expected agent continue with resume_tree"),
-    }
-}
-
-#[test]
-fn agent_resume_tree_without_session_fails() {
-    let err = parse([
-        "agent".into(),
-        "--account".into(),
-        "codex".into(),
-        "--model".into(),
-        "m".into(),
-        "--resume-tree".into(),
-    ]);
-    let Err(message) = err else {
-        panic!("agent --resume-tree without --session must fail closed");
-    };
-    assert!(message.contains("--session"));
 }
 
 #[test]

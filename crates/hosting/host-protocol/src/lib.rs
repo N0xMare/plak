@@ -49,7 +49,7 @@
 //! | `prompt` | `text`, optional `steer` (only literal `true` counts) |
 //! | `interrupt`, `compact`, `clear`, `quit` | — |
 //! | `fork` | optional `account` |
-//! | `tree`, `resume_tree`, `stop_all` | — |
+//! | `tree`, `stop_all` | — |
 //! | `interrupt_node`, `close_node` | `agent_id` |
 //! | `invoke_tool` | `name` (a [`topology::TOPOLOGY_PRESENTATION_ORDER`] entry), `arguments` (an object), optional `agent_id` |
 //!

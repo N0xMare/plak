@@ -766,13 +766,7 @@ impl ProductAgentTree {
                         }
                     }
                     if let Some(turn_id) = closure_turn(record) {
-                        self.apply_closure(
-                            agent_id,
-                            &turn_id.to_string(),
-                            header.committed_at_ms,
-                            reads,
-                            &mut projection,
-                        )?;
+                        self.apply_closure(agent_id, &turn_id.to_string(), reads, &mut projection)?;
                     }
                     if let Some(attempt) = read_attempt.and_then(|id| self.attempts.get_mut(&id)) {
                         attempt.applied_terminal_read_seqs.insert(seq);
@@ -836,13 +830,7 @@ impl ProductAgentTree {
                 }
             }
             if let Some(turn_id) = closure_turn(record) {
-                self.apply_closure(
-                    agent_id,
-                    &turn_id.to_string(),
-                    header.committed_at_ms,
-                    reads,
-                    &mut projection,
-                )?;
+                self.apply_closure(agent_id, &turn_id.to_string(), reads, &mut projection)?;
             }
             self.project_compactions(agent_id, session_id, record);
             if let Some(attempt) = read_attempt.and_then(|id| self.attempts.get_mut(&id)) {

@@ -485,12 +485,9 @@ fn the_explicit_recover_control_reports_the_child_it_settled() {
     );
     assert_eq!(
         fixture.status(&id),
-        crate::agent_tree_protocol::NodeStatus::Failed
+        crate::agent_tree_protocol::NodeStatus::Interrupted
     );
-    assert_eq!(
-        fixture.failure_kind(&id).as_deref(),
-        Some(crate::agent_tree::TURN_ABANDONED)
-    );
+    assert_eq!(fixture.failure_kind(&id), None);
     send_attached_action(&actions, UserAction::Quit);
     worker.join().unwrap().unwrap();
 }

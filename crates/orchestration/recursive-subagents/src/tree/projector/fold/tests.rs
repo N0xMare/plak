@@ -50,7 +50,7 @@ fn idle_folds_and_only_deleted_close_targets_need_no_scratch_clone() {
 }
 
 #[test]
-fn resume_tree_propagates_a_fold_integrity_refusal() {
+fn a_vcs_fault_fold_propagates_a_fold_integrity_refusal() {
     let (_tmp, _vcs, mut tree) = fake_tree();
     let id = "malformed-vcs-fault".to_owned();
     tree.operations.insert(
@@ -70,7 +70,7 @@ fn resume_tree_propagates_a_fold_integrity_refusal() {
         },
     );
     assert_eq!(
-        tree.resume_tree().unwrap_err().code,
+        tree.fold_due("root").unwrap_err().code,
         TopologyErrorCode::OperationRecoveryRequired
     );
 }

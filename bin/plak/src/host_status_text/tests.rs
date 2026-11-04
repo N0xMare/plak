@@ -161,33 +161,10 @@ fn every_unit_status_detail_keeps_its_jsonl_spelling() {
 #[test]
 fn structured_status_facts_preserve_pause_and_steer_projection() {
     for (pause, suffix) in [
+        (HostPause { queue: false }, ""),
         (
-            HostPause {
-                tree: false,
-                queue: false,
-            },
-            "",
-        ),
-        (
-            HostPause {
-                tree: true,
-                queue: false,
-            },
-            " · agent tree paused · /tree then r",
-        ),
-        (
-            HostPause {
-                tree: false,
-                queue: true,
-            },
+            HostPause { queue: true },
             " · queue paused, not draining · Tab then r",
-        ),
-        (
-            HostPause {
-                tree: true,
-                queue: true,
-            },
-            " · agent tree paused · queue not draining · /tree then r",
         ),
     ] {
         assert_eq!(

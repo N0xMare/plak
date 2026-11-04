@@ -192,10 +192,6 @@ impl ToolRefusal {
             Self::McpLogin { .. }
                 | Self::McpSecret { .. }
                 | Self::Topology {
-                    code: crate::topology::TopologyErrorCode::TreeRestoredPaused,
-                    ..
-                }
-                | Self::Topology {
                     advice: Some(_),
                     ..
                 }

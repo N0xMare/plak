@@ -57,11 +57,7 @@ fn resolve_core_actions() {
     );
     assert_eq!(
         resolve(&parse_slash("/tree resume").unwrap(), &ctx),
-        SlashEffect::Action(UserAction::ResumeTopologyTree)
-    );
-    assert_eq!(
-        resolve(&parse_slash("/tree later").unwrap(), &ctx),
-        SlashEffect::LocalNote("usage: /tree [resume]".to_owned())
+        SlashEffect::LocalNote("usage: /tree".to_owned())
     );
     assert_eq!(
         resolve(&parse_slash("/stop-all").unwrap(), &ctx),
@@ -241,7 +237,6 @@ fn the_catalog_is_closed_and_carries_no_deferred_capability_rows() {
     for (name, hint) in [
         ("resume", "<id>"),
         ("agents", "<profile>"),
-        ("tree", "[resume]"),
         ("image", "<path>..."),
     ] {
         let help = COMMANDS

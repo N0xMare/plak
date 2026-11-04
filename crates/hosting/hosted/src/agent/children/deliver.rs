@@ -237,6 +237,7 @@ impl ProductMailDeliverer {
                 return Err(crate::agent_tree_tools::MailDeliveryFailure::SlotBusy);
             }
         }
+        self.refuse_while_recovery_owed(&request.agent_id)?;
         let stored_turn = self
             .runtime
             .read(|tree| {
@@ -467,6 +468,23 @@ impl ProductMailDeliverer {
         })
     }
 
+    /// A child the reopen law owes a `recover_node` takes no turn before it
+    /// runs: whether its lost turn rejoins or it is marked is not known yet.
+    /// The mail stays durable and the send looks again once that settles.
+    fn refuse_while_recovery_owed(
+        &self,
+        agent_id: &str,
+    ) -> Result<(), crate::agent_tree_tools::MailDeliveryFailure> {
+        let owed = self
+            .runtime
+            .read(|tree| tree.recovery_owed(agent_id))
+            .map_err(|error| error.message)?;
+        if owed {
+            return Err(crate::agent_tree_tools::MailDeliveryFailure::SlotBusy);
+        }
+        Ok(())
+    }
+
     async fn ensure_live(
         &self,
         request: &crate::agent_tree_tools::MailDeliveryRequest,
@@ -485,6 +503,7 @@ impl ProductMailDeliverer {
                 return Err(crate::agent_tree_tools::MailDeliveryFailure::SlotBusy);
             }
         }
+        self.refuse_while_recovery_owed(&request.agent_id)?;
         let stored_turn = self
             .runtime
             .read(|tree| {

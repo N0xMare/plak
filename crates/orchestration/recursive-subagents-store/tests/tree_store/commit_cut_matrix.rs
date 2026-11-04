@@ -784,14 +784,6 @@ fn oracle(frame: &Frame) -> (Value, BTreeSet<String>) {
             node["active_turn"] = json!(0);
         }
     }
-    // Faulting the last sealing child makes the tree quiescent. Reopen then
-    // lifts its restoration-only pause; an obligation is not live work.
-    let live = tree.nodes().values().any(|node| {
-        node.agent_id != "root" && !faulted.contains(&node.agent_id) && !node.status.is_finished()
-    });
-    if live {
-        expected["agent_trees"][0]["state"] = json!("restored_paused");
-    }
     if frame.feeds[0].wait_evidence == Some(false) {
         // The cut's bounded canonical read proves this provisional ack did
         // not commit. The independent oracle returns its mail to unread.

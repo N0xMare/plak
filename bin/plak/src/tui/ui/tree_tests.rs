@@ -7,7 +7,6 @@ use super::test_support::{
     tree_snapshot,
 };
 use crate::tui::TreeNavigator;
-use crate::tui::tree_navigator::RESTORED_PAUSED_NAVIGATOR_HINT;
 use crate::tui::{HostEvent, UserAction, user_action_channel};
 use crossterm::event::KeyCode;
 use plakous_host_protocol::status::HostPhase;
@@ -17,47 +16,6 @@ use plakous_host_protocol::topology::{
 };
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
-
-/// After any `[interrupted]` episode the tree enters
-/// `RestoredPaused`, every spawn is refused and the queue stops draining —
-/// and the chrome said neither, so a queued follow-up sat unsent while the
-/// session looked idle. The §5.4 row now names the state, the exit, and
-/// the queue consequence until the host reports the tree resumed.
-#[test]
-fn a_restored_paused_tree_names_itself_in_the_turn_status_row() {
-    let mut app = App::new(launch_basic(), true);
-    assert_eq!(app.turn_status_label(), None, "an idle session has no row");
-
-    let mut snapshot = tree_snapshot(vec![tree_node("root", None, 0)]);
-    snapshot.state = TreeAdmissionState::RestoredPaused;
-    app.apply_host_event(HostEvent::TopologyNavigatorSnapshot(snapshot.clone()));
-    assert_eq!(
-        app.turn_status_label().as_deref(),
-        Some(super::TREE_PAUSED_STATUS),
-        "the row states the condition, the exit and the queue consequence"
-    );
-
-    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-    terminal.draw(|frame| app.draw(frame)).unwrap();
-    let screen = terminal
-        .backend()
-        .buffer()
-        .content()
-        .iter()
-        .map(ratatui::buffer::Cell::symbol)
-        .collect::<String>();
-    assert!(screen.contains("agents paused"), "{screen}");
-    assert!(screen.contains("/tree resume"), "{screen}");
-    // No wire value reaches the operator, here or on the queue.
-    assert!(!screen.contains("restored_paused"), "{screen}");
-    assert!(!screen.contains("ResumeTree"), "{screen}");
-
-    // Resumed: the row goes away again.
-    let mut resumed = snapshot;
-    resumed.state = TreeAdmissionState::Live;
-    app.apply_host_event(HostEvent::TopologyNavigatorSnapshot(resumed));
-    assert_eq!(app.turn_status_label(), None);
-}
 
 /// After `/resume` of a session whose tree outlived a rebind,
 /// the canvas read the binding the tree recorded when the root was minted
@@ -228,20 +186,6 @@ fn tree_esc_on_tree_focus_dismisses_overlay() {
 }
 
 #[test]
-fn tree_restored_paused_resume_emits_action() {
-    let mut app = App::new(launch_basic(), true);
-    let mut snap = tree_snapshot(vec![tree_node("root", None, 0)]);
-    snap.state = TreeAdmissionState::RestoredPaused;
-    open_tree(&mut app, snap);
-    // `r` asks in the pop-up; its button resumes.
-    assert_eq!(app.handle_key(key(KeyCode::Char('r'))), None);
-    assert_eq!(
-        super::test_support::confirm_action(&mut app),
-        Some(UserAction::ResumeTopologyTree)
-    );
-}
-
-#[test]
 fn tree_close_confirm_emits_action() {
     let mut app = App::new(launch_basic(), true);
     open_tree(
@@ -288,19 +232,6 @@ fn tree_snapshot_ignored_when_overlay_closed_and_live() {
 }
 
 #[test]
-fn tree_restored_paused_snapshot_stays_on_root_chat() {
-    let mut app = App::new(launch_basic(), true);
-    let mut snap = tree_snapshot(vec![tree_node("root", None, 0)]);
-    snap.state = TreeAdmissionState::RestoredPaused;
-    app.apply_host_event(HostEvent::TopologyNavigatorSnapshot(snap));
-    assert!(app.tree_navigator.is_none());
-    assert_eq!(
-        app.status_detail.as_deref(),
-        Some(RESTORED_PAUSED_NAVIGATOR_HINT)
-    );
-}
-
-#[test]
 fn attach_requests_open_topology_navigator() {
     let mut app = App::new(launch_basic(), true);
     let (tx, rx) = user_action_channel();
@@ -313,7 +244,7 @@ fn attach_requests_open_topology_navigator() {
     );
     assert!(
         rx.try_recv().is_err(),
-        "attach must send neither ResumeTopologyTree nor ResumeQueueDrain"
+        "attach must not resume the queue drain"
     );
 }
 
@@ -344,31 +275,6 @@ fn resume_session_load_requests_open_topology_navigator() {
     assert!(
         rx.try_recv().is_err(),
         "resume attach must not auto-resume the tree or the queue drain"
-    );
-}
-
-/// Attach never auto-resumes a `RestoredPaused` tree (spec 02 §5.7). `r` on
-/// the canvas is its only exit, and it still works.
-#[test]
-fn a_restored_paused_tree_resumes_only_through_the_navigator() {
-    let mut app = App::new(launch_basic(), true);
-    let (tx, rx) = user_action_channel();
-    app.apply_host_event(HostEvent::AgentAttached(true));
-    app.maybe_request_tree_snapshot_after_attach(Some(&tx));
-    assert_eq!(
-        rx.try_recv().expect("attach requests the navigator"),
-        UserAction::OpenTopologyNavigator
-    );
-    assert!(rx.try_recv().is_err(), "attach resumes nothing");
-
-    let mut snap = tree_snapshot(vec![tree_node("root", None, 0)]);
-    snap.state = TreeAdmissionState::RestoredPaused;
-    open_tree(&mut app, snap);
-    assert_eq!(app.handle_key(key(KeyCode::Char('r'))), None);
-    assert_eq!(
-        super::test_support::confirm_action(&mut app),
-        Some(UserAction::ResumeTopologyTree),
-        "the navigator's `r`, confirmed, is the explicit exit"
     );
 }
 

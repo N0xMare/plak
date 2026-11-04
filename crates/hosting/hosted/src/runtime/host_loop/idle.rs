@@ -973,7 +973,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     | UserAction::RefreshTopologyTree
                     | UserAction::OpenAgentTranscript { .. }
                     | UserAction::CloseAgentTranscript
-                    | UserAction::ResumeTopologyTree
                     | UserAction::InterruptTopologyNode { .. }
                     | UserAction::CloseTopologyNode { .. }
                     | UserAction::StopAllTopology

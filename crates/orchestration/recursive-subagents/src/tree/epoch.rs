@@ -220,22 +220,9 @@ impl ProductAgentTree {
         epoch.digest = epoch.compute_digest();
     }
 
-    /// Every refusal that a paused tree produces names the state in prose and
-    /// the exact keystrokes that clear it.
-    ///
-    /// `ResumeTree` is the name of a request type and `restored_paused`
-    /// is a wire value. The refusals state the condition and the operator's own
-    /// way out of it instead.
-    pub const TREE_PAUSED_REFUSAL: &str =
-        "the agent tree is paused after an interrupt; explicitly resume the tree before dispatch";
-
     /// Refusal shown after stop-all until the next admitted root prompt.
     pub const TREE_STOPPED_REFUSAL: &str = "delegation is stopped for this turn; send a new prompt after all agents \
          have retired, or resolve any recovery-required agents first";
-
-    /// Refusal shown when a roster apply arrives on a paused tree.
-    pub const TREE_EPOCH_REBIND_PAUSED: &str =
-        "cannot apply a roster while the agent tree is paused; explicitly resume the tree first";
 
     /// Refusal shown when a rebind arrives while a spawn is mid-mint.
     pub const TREE_EPOCH_REBIND_PENDING_SPAWNS: &str =
@@ -257,8 +244,7 @@ impl ProductAgentTree {
             .all(|node| node.agent_id == self.root_agent_id || node.status.is_finished())
     }
 
-    /// Distinct operator strings: paused vs pending spawns vs live descendants.
-    /// RestoredPaused is reported even when the roster is otherwise quiescent.
+    /// Distinct operator strings: pending spawns vs live descendants.
     #[must_use]
     pub fn epoch_rebind_refusal(&self) -> Option<&'static str> {
         self.epoch_rebind_refusal_kind()
@@ -268,9 +254,6 @@ impl ProductAgentTree {
     /// Typed form of [`Self::epoch_rebind_refusal`] for the roster apply.
     #[must_use]
     pub fn epoch_rebind_refusal_kind(&self) -> Option<EpochRebindRefusal> {
-        if self.state == TreeAdmissionState::RestoredPaused {
-            return Some(EpochRebindRefusal::RestoredPaused);
-        }
         self.quiescence_refusal()
     }
 
@@ -278,9 +261,6 @@ impl ProductAgentTree {
     /// non-terminal descendant.
     ///
     /// This is the judgement a headless `plak config set` needs.
-    /// `RestoredPaused` is an admission state for the *next* root turn on a
-    /// tree that reopened with descendants in flight, not the quiescence
-    /// judgement itself; a session-less apply consults only the roster.
     #[must_use]
     pub fn quiescence_refusal(&self) -> Option<EpochRebindRefusal> {
         if self.pending_spawns > 0 {

@@ -208,7 +208,6 @@ fn stopped_wake_preflight_persists_operator_stop_not_capacity_failure() {
 fn completed_run(max_turns: u8) -> super::super::super::oneshot::OneShotState {
     super::super::super::oneshot::OneShotState {
         attempted: true,
-        resume_tree: false,
         result: Some(Ok(crate::runtime::OneShotOutcome::Completed {
             assistant: "first answer".into(),
         })),

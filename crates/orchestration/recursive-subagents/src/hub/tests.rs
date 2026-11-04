@@ -525,7 +525,7 @@ async fn cancel_live_missing_agent_is_idempotent() {
 }
 
 #[tokio::test]
-async fn crash_cut_reattach_is_single_flight() {
+async fn a_recovery_claim_excludes_a_second_run_and_a_recycle() {
     let tree_id = unique_tree_id();
     let root = tempfile::tempdir().unwrap();
     let runtime = insert_root(
@@ -535,12 +535,26 @@ async fn crash_cut_reattach_is_single_flight() {
     )
     .await
     .unwrap();
-    let held = runtime.lock_reattach().await;
-    assert!(runtime.try_lock_reattach().is_err());
+    let held = runtime.claim_recovery("c1").unwrap();
     let shared = lookup(&tree_id).expect("hub remains");
-    assert!(shared.try_lock_reattach().is_err());
+    assert_eq!(
+        shared.claim_recovery("c1").err(),
+        Some(RecoveryClaimRefusal::Recovering)
+    );
+    assert!(
+        shared.claim_recovery("c2").is_ok(),
+        "a claim holds one child only"
+    );
     drop(held);
-    assert!(runtime.try_lock_reattach().is_ok());
+    let again = runtime.claim_recovery("c1").unwrap();
+    drop(again);
+    let recycling = runtime.mark_recycling("c1");
+    assert_eq!(
+        runtime.claim_recovery("c1").err(),
+        Some(RecoveryClaimRefusal::Recycling)
+    );
+    drop(recycling);
+    assert!(runtime.claim_recovery("c1").is_ok());
     force_release(&tree_id).await;
 }
 
@@ -2157,121 +2171,62 @@ fn recovery_runtime(name: &str, root: &Path) -> Arc<ProductTopologyRuntime> {
     ))
 }
 
-/// A request while a pass runs is not dropped: the running pass is told to
-/// run once more, and only then gives up the slot.
 #[tokio::test]
-async fn recovery_pass_request_while_running_reruns_it() {
+async fn a_recovery_tracked_after_close_is_aborted() {
     let root = tempfile::tempdir().unwrap();
-    let runtime = recovery_runtime("recovery-pass-rerun", root.path());
-    let gate = Arc::new(tokio::sync::Notify::new());
-    let runs = Arc::new(AtomicUsize::new(0));
-    let (pass_gate, pass_runs, pass_runtime) = (gate.clone(), runs.clone(), runtime.clone());
-    let started = runtime.start_recovery_pass(move || {
-        crate::task_set::TaskSet::new().spawn(async move {
-            loop {
-                pass_gate.notified().await;
-                pass_runs.fetch_add(1, Ordering::SeqCst);
-                if !pass_runtime.finish_recovery_pass() {
-                    break;
-                }
-            }
-        })
-    });
-    assert_eq!(started, RecoveryPassRequest::Started);
-    let second = runtime.start_recovery_pass(|| unreachable!("a running pass reruns"));
-    assert_eq!(second, RecoveryPassRequest::Rerun);
-    gate.notify_one();
-    // A liveness bound only: generous, so load never trips it.
-    tokio::time::timeout(Duration::from_secs(30), async {
-        while runs.load(Ordering::SeqCst) < 1 {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-    assert!(
-        runtime.recovery_pass_running(),
-        "the queued rerun holds the slot"
-    );
-    gate.notify_one();
-    let task = runtime.recovery_pass.lock().unwrap().task.take().unwrap();
-    tokio::time::timeout(Duration::from_secs(30), task)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(runs.load(Ordering::SeqCst), 2);
-    assert!(!runtime.recovery_pass_running());
-}
-
-#[tokio::test]
-async fn recovery_pass_request_after_close_starts_nothing() {
-    let root = tempfile::tempdir().unwrap();
-    let runtime = recovery_runtime("recovery-pass-closed", root.path());
+    let runtime = recovery_runtime("recovery-closed", root.path());
     runtime.close_for_shutdown();
-    let request = runtime.start_recovery_pass(|| unreachable!("a closed hub starts nothing"));
-    assert_eq!(request, RecoveryPassRequest::Closed);
-    assert!(!runtime.recovery_pass_running());
-}
-
-/// A pass that never finishes gets its own bounded wait, then is aborted
-/// and joined briefly, so shutdown still ends.
-#[tokio::test]
-async fn shutdown_aborts_a_recovery_pass_that_overruns() {
-    let root = tempfile::tempdir().unwrap();
-    let runtime = recovery_runtime("recovery-pass-shutdown", root.path());
-    let (dropped_tx, dropped_rx) = tokio::sync::oneshot::channel::<()>();
-    let request = runtime.start_recovery_pass(move || {
-        crate::task_set::TaskSet::new().spawn(async move {
-            let _dropped = dropped_tx;
-            std::future::pending::<()>().await;
-        })
-    });
-    assert_eq!(request, RecoveryPassRequest::Started);
-    let begun = std::time::Instant::now();
-    // The verdict on the tree's own teardown is not this test's subject.
-    let _ = tokio::time::timeout(Duration::from_secs(4), shutdown_runtime(runtime.clone()))
-        .await
-        .expect("shutdown must not wait out a stuck recovery pass");
-    assert!(begun.elapsed() < HOST_SHUTDOWN_RELEASE_TIMEOUT + Duration::from_millis(1500));
-    assert!(
-        dropped_rx.await.is_err(),
-        "the aborted pass dropped its state"
-    );
-    assert!(runtime.is_closed());
-}
-
-/// An operator child recover is not the background pass, and shutdown still
-/// aborts it before the hub is closed for good.
-#[tokio::test]
-async fn shutdown_aborts_an_explicit_child_recover() {
-    let root = tempfile::tempdir().unwrap();
-    let runtime = recovery_runtime("explicit-recover-shutdown", root.path());
     let (dropped_tx, dropped_rx) = tokio::sync::oneshot::channel::<()>();
     assert!(
-        runtime.track_explicit_recover(crate::task_set::TaskSet::new().spawn(async move {
+        !runtime.track_recovery(crate::task_set::TaskSet::new().spawn(async move {
             let _dropped = dropped_tx;
             std::future::pending::<()>().await;
         }))
     );
-    assert!(runtime.recovery_pass.lock().unwrap().task.is_none());
-    let _ = tokio::time::timeout(Duration::from_secs(4), shutdown_runtime(runtime.clone()))
-        .await
-        .expect("shutdown must not wait out a stuck child recover");
-    // A liveness bound only: generous, so load never trips it.
     assert!(
         tokio::time::timeout(Duration::from_secs(30), dropped_rx)
             .await
             .expect("the abort is observed")
             .is_err(),
-        "the aborted recover dropped its state"
+        "a closed hub aborts the run"
+    );
+    assert!(!runtime.recovery_running());
+}
+
+/// A run that never finishes gets the shutdown's bounded wait, then is
+/// aborted and joined briefly, so shutdown still ends.
+#[tokio::test]
+async fn shutdown_aborts_a_recovery_that_overruns() {
+    let root = tempfile::tempdir().unwrap();
+    let runtime = recovery_runtime("recovery-shutdown", root.path());
+    let (dropped_tx, dropped_rx) = tokio::sync::oneshot::channel::<()>();
+    assert!(
+        runtime.track_recovery(crate::task_set::TaskSet::new().spawn(async move {
+            let _dropped = dropped_tx;
+            std::future::pending::<()>().await;
+        }))
+    );
+    assert!(runtime.recovery_running());
+    let begun = std::time::Instant::now();
+    // The verdict on the tree's own teardown is not this test's subject.
+    let _ = tokio::time::timeout(Duration::from_secs(4), shutdown_runtime(runtime.clone()))
+        .await
+        .expect("shutdown must not wait out a stuck recovery");
+    assert!(begun.elapsed() < HOST_SHUTDOWN_RELEASE_TIMEOUT + Duration::from_millis(1500));
+    assert!(
+        tokio::time::timeout(Duration::from_secs(2), dropped_rx)
+            .await
+            .expect("the abort is observed")
+            .is_err(),
+        "the aborted run dropped its state"
     );
     assert!(runtime.is_closed());
 }
 
-/// `abandon_live_agents` aborts an operator child recover the same way
-/// shutdown does, and the drop is observed within a bound.
+/// `abandon_live_agents` aborts a `recover_node` run the same way shutdown
+/// does, and the drop is observed within a bound.
 #[tokio::test]
-async fn abandon_live_agents_aborts_an_explicit_child_recover() {
+async fn abandon_live_agents_aborts_a_recovery() {
     let tree_id = unique_tree_id();
     let root = tempfile::tempdir().unwrap();
     let runtime = insert_root(
@@ -2283,7 +2238,7 @@ async fn abandon_live_agents_aborts_an_explicit_child_recover() {
     .unwrap();
     let (dropped_tx, dropped_rx) = tokio::sync::oneshot::channel::<()>();
     assert!(
-        runtime.track_explicit_recover(crate::task_set::TaskSet::new().spawn(async move {
+        runtime.track_recovery(crate::task_set::TaskSet::new().spawn(async move {
             let _dropped = dropped_tx;
             std::future::pending::<()>().await;
         }))
@@ -2295,7 +2250,7 @@ async fn abandon_live_agents_aborts_an_explicit_child_recover() {
             .await
             .expect("the abort is observed")
             .is_err(),
-        "the abandoned recover dropped its state"
+        "the abandoned run dropped its state"
     );
     force_release(&tree_id).await;
 }

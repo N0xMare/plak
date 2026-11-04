@@ -628,7 +628,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                     action @ (UserAction::OpenTopologyNavigator
                     | UserAction::RefreshTopologyTree
                     | UserAction::OpenAgentTranscript { .. }
-                    | UserAction::ResumeTopologyTree
                     | UserAction::InterruptTopologyNode { .. }
                     | UserAction::CloseTopologyNode { .. }
                     | UserAction::StopAllTopology
@@ -664,18 +663,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                             self.host.last_tree_revision,
                             self.host.events,
                             &action,
-                        );
-                    }
-                    if matches!(action, UserAction::ResumeTopologyTree) {
-                        crate::runtime::tree::start_child_recovery(
-                            self.host.events,
-                            &self.host.session.id,
-                            crate::runtime::rebind::durable_tree_id(
-                                self.host.rows,
-                                self.host.session,
-                            ),
-                            false,
-                            None,
                         );
                     }
                     record_emitted_tree_revision(

@@ -181,15 +181,7 @@ impl App {
         }
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                if self
-                    .agent_tree
-                    .as_ref()
-                    .is_some_and(|tree| tree.restored_paused)
-                {
-                    "Resume agents first"
-                } else {
-                    RECOVERY_REMEDY
-                },
+                RECOVERY_REMEDY,
                 self.theme.warning,
             ))),
             Rect::new(area.x + 1, area.y, area.width.saturating_sub(2), 1),

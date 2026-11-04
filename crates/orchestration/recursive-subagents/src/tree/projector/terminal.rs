@@ -1,8 +1,8 @@
 use super::{
     AttemptStatus, BlockedReason, CommandFact, FAILED_TURN_NOTICE_KIND, FailedTurnDisposition,
     FailureRead, FeedCancelCause, FeedTurnOutcome, NodeStatus, ProductAgentTree, RecoveryNeed,
-    RecoveryResolution, TURN_ABANDONED, TerminalRead, TopologyError, TreeFeedReads, TreeProjection,
-    TurnRefusal, classify_provider_refusal, failed_turn_notice_id, host_recovery,
+    TerminalRead, TopologyError, TreeFeedReads, TreeProjection, TurnRefusal,
+    classify_provider_refusal, failed_turn_notice_id,
 };
 
 impl ProductAgentTree {
@@ -134,14 +134,11 @@ impl ProductAgentTree {
         // does a resumable turn a recovery reopen cancelled, for a node
         // waiting on recovery. A live interrupt's cancel settles nothing here.
         let recovering = matches!(self.recovery_need(agent_id)?, RecoveryNeed::Session { .. });
-        let fallback = match outcome {
+        match outcome {
             FeedTurnOutcome::Cancelled {
                 cause: FeedCancelCause::Abandoned { .. },
-            } => format!("plak: {agent_id} recovered an interrupted turn"),
-            FeedTurnOutcome::Cancelled { .. } if recovering => format!(
-                "plak: {agent_id} recovered a resumable turn and cancelled it; nothing from it \
-                 is replayed"
-            ),
+            } => {}
+            FeedTurnOutcome::Cancelled { .. } if recovering => {}
             FeedTurnOutcome::RecoveryRequired => return Ok(()),
             _ => {
                 if let Some(attempt) = self.current_attempt_mut(agent_id) {
@@ -150,15 +147,12 @@ impl ProductAgentTree {
                 self.bump();
                 return Ok(());
             }
-        };
+        }
         self.settle_abandoned(
             agent_id,
-            &attempt_id,
             stopped,
             recovering,
-            fallback,
             reads.terminal(turn_id),
-            committed_at_ms,
             projection,
         )
     }
@@ -327,7 +321,6 @@ impl ProductAgentTree {
         &mut self,
         agent_id: &str,
         turn_id: &str,
-        committed_at_ms: u64,
         reads: &TreeFeedReads,
         projection: &mut TreeProjection,
     ) -> Result<(), TopologyError> {
@@ -348,69 +341,36 @@ impl ProductAgentTree {
         else {
             return Ok(());
         };
-        let attempt_id = attempt.attempt_id.clone();
         let stopped = attempt.status.is_stopped();
         if self.node(agent_id)?.active_turn {
             self.set_active_turn(agent_id, false)?;
         }
-        self.settle_abandoned(
-            agent_id,
-            &attempt_id,
-            stopped,
-            true,
-            String::new(),
-            Some(read),
-            committed_at_ms,
-            projection,
-        )
+        self.settle_abandoned(agent_id, stopped, true, Some(read), projection)
     }
 
-    #[allow(clippy::too_many_arguments, reason = "one settlement's inputs")]
     fn settle_abandoned(
         &mut self,
         agent_id: &str,
-        attempt_id: &crate::protocol::AttemptId,
         stopped: bool,
         recovering: bool,
-        fallback: String,
         read: Option<&TerminalRead>,
-        committed_at_ms: u64,
         projection: &mut TreeProjection,
     ) -> Result<(), TopologyError> {
-        let message = read.map_or(fallback, |read| read.message.clone());
-        if recovering {
-            self.apply_host_recovery(
-                agent_id,
-                &host_recovery::HostRecovery {
-                    attempt_id: attempt_id.clone(),
-                    resolution: RecoveryResolution::TurnAbandoned { message },
-                    observed_at_ms: committed_at_ms,
-                    closed: self
-                        .current_attempt(agent_id)
-                        .is_some_and(|attempt| attempt.status == AttemptStatus::Closed),
-                    submitted_retirement: false,
-                },
-                true,
-            )?;
-        } else if !stopped
+        // Law L (design section 6.1): a lost owner's turn closed by a reopen,
+        // or a resumable turn a recovery reopen cancelled, interrupts its
+        // node with cause `owner_lost`; the attempt stays open.
+        let open = !stopped
             && self.node(agent_id)?.status != NodeStatus::Closed
             && self
                 .current_attempt(agent_id)
-                .is_some_and(|attempt| attempt.status == AttemptStatus::Running)
-        {
-            self.record_attempt_failure(
-                agent_id,
-                Some(attempt_id),
-                FailedTurnDisposition::Failed {
-                    kind: TURN_ABANDONED,
-                },
-                message,
-                true,
-                committed_at_ms,
-            )?;
-        } else {
+                .is_some_and(|attempt| attempt.status == AttemptStatus::Running || recovering);
+        if !open {
             return Ok(());
         }
+        if let Some(attempt) = self.current_attempt_mut(agent_id) {
+            attempt.turn_id = None;
+        }
+        self.lose_owner_in_fold(agent_id);
         projection.abandoned.push(agent_id.to_owned());
         if let Some(abandoned) = read.and_then(|read| read.abandoned.clone()) {
             self.record_abandoned_turn(agent_id, abandoned)?;

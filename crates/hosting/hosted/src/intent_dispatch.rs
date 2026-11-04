@@ -92,7 +92,6 @@ impl IntentClass {
             | UserAction::CloseAgentTranscript
             | UserAction::ResyncTranscript { .. }
             | UserAction::RefreshTopologyTree
-            | UserAction::ResumeTopologyTree
             | UserAction::InterruptTopologyNode { .. }
             | UserAction::CloseTopologyNode { .. }
             | UserAction::StopAllTopology

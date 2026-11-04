@@ -1,10 +1,10 @@
 //! Idle pending-work indicator.
 //!
 //! The composer HUD shows unread child results and questions, process exits
-//! not yet seen by a turn, an Esc-suppressed auto-continue that has something
-//! to wake for, and a restored-paused tree. The snapshot is emitted on attach
-//! and on change. On an interactive face a pause also persists one typed
-//! notice so a restore shows the same operator line; JSONL gains nothing.
+//! not yet seen by a turn, and an Esc-suppressed auto-continue that has
+//! something to wake for. The snapshot is emitted on attach and on change. On
+//! an interactive face the pause also persists one typed notice so a restore
+//! shows the same operator line; JSONL gains nothing.
 //!
 //! Reads use the live hub tree when present; otherwise store observations
 //! are limited to the existing tree observation interval.
@@ -17,36 +17,12 @@ use crate::runtime::topology_state::TreeRows;
 use crate::sessions::{NoticeScope, TranscriptRow};
 
 pub(super) const AUTO_CONTINUE_PAUSE_TEXT: &str = "auto-continue paused until the next prompt";
-pub(super) const TREE_PAUSE_TEXT: &str = "agents paused";
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum PauseKind {
-    AutoContinue,
-    Tree,
-}
-
-impl PauseKind {
-    fn row(self) -> TranscriptRow {
-        let text = match self {
-            Self::AutoContinue => AUTO_CONTINUE_PAUSE_TEXT,
-            Self::Tree => TREE_PAUSE_TEXT,
-        };
-        let row = TranscriptRow::warning(NoticeScope::Tree, text);
-        match self {
-            Self::Tree => {
-                row.with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeTree {})
-            }
-            Self::AutoContinue => row,
-        }
-    }
-}
 
 /// What the indicator reads from the session's agent tree.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct TreeFacts {
     results: u32,
     questions: u32,
-    paused: bool,
     /// The tree has a node besides the root, so a child could wake the root.
     descendants: bool,
 }
@@ -54,7 +30,6 @@ struct TreeFacts {
 impl TreeFacts {
     fn of(tree: &crate::agent_tree::ProductAgentTree) -> Self {
         let mut facts = Self {
-            paused: tree.state == crate::agent_tree_protocol::TreeAdmissionState::RestoredPaused,
             descendants: tree.nodes().len() > 1,
             ..Self::default()
         };
@@ -90,7 +65,6 @@ pub(super) struct PendingTrack {
     /// Only an admitted user prompt ends suppression and it advances the
     /// count, so a different count is a new episode.
     auto_continue_noted: Option<u64>,
-    tree_noted: bool,
     /// The first publish for this session. A pause already recorded in the
     /// transcript is the restored line, not a second one.
     baseline: bool,
@@ -135,7 +109,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             auto_continue_paused: suppressed
                 && self.role.config.prompt_host_facts().host_wakes
                 && (tree.descendants || !jobs.is_empty()),
-            tree_paused: tree.paused,
         };
         if self.role.pending_track.last != Some(next) {
             let sent = self.role.events.send(ContentEvent::PendingContinuation {
@@ -143,7 +116,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 questions: next.questions,
                 process_exits: next.process_exits,
                 auto_continue_paused: next.auto_continue_paused,
-                tree_paused: next.tree_paused,
             });
             tracing::debug!(target: "plak.pending", source, results = next.results,
                 questions = next.questions, sent);
@@ -152,7 +124,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             }
         }
         self.note_auto_continue_pause(suppressed, next.auto_continue_paused);
-        self.note_tree_pause(next.tree_paused);
         self.role.pending_track.baseline = false;
     }
 
@@ -227,25 +198,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             return;
         }
         self.role.pending_track.auto_continue_noted = Some(turn);
-        self.record_pause(PauseKind::AutoContinue);
+        self.record_auto_continue_pause();
     }
 
-    fn note_tree_pause(&mut self, paused: bool) {
-        if !paused {
-            self.role.pending_track.tree_noted = false;
-            return;
-        }
-        if !self.role.pending_track.tree_noted {
-            self.role.pending_track.tree_noted = true;
-            self.record_pause(PauseKind::Tree);
-        }
-    }
-
-    fn record_pause(&mut self, kind: PauseKind) {
+    fn record_auto_continue_pause(&mut self) {
         if self.role.storage_interrupted && self.role.config.store.storage_unavailable() {
             return;
         }
-        let row = kind.row();
+        let row = TranscriptRow::warning(NoticeScope::Tree, AUTO_CONTINUE_PAUSE_TEXT);
         if !self.role.config.interactive
             || (self.role.pending_track.baseline
                 && pause_already_recorded(&self.role.config.session, &row))

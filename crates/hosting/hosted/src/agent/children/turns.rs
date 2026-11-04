@@ -7,7 +7,7 @@ use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind};
 use super::{
     Arc, AttachedCodingSession, ChildFeedSource, ChildStartup, ChildStartupStage, CommandId,
     Future, LiveRelease, SPAWN_MATERIALIZE_TIMEOUT, SessionLocator, StartupCaller, TreeDriver,
-    TurnId, finalize_child_turn, register_admitted_turn,
+    TurnId, register_admitted_turn,
 };
 
 /// Starts `prompt` on an opened child session and installs it as the live
@@ -275,23 +275,16 @@ pub(super) async fn start_child_turn_owned(
     .await
 }
 
-/// What a child Start admits: a fresh prompt the result journal prepares,
-/// or a command the journal already holds, retried exactly after a reopen.
-pub(in crate::agent) enum ChildCommand {
-    Fresh {
-        prompt: String,
-        kind: CommandKind,
-        mail_id: Option<String>,
-    },
-    Reopened {
-        first: crate::agent::ledger::JournaledCommand,
-        remaining: std::collections::VecDeque<crate::agent::ledger::JournaledCommand>,
-    },
+/// What a child Start admits: a prompt the result journal prepares.
+pub(in crate::agent) struct ChildCommand {
+    prompt: String,
+    kind: CommandKind,
+    mail_id: Option<String>,
 }
 
 impl ChildCommand {
     pub(in crate::agent) fn fresh(prompt: String, kind: CommandKind) -> Self {
-        Self::Fresh {
+        Self {
             prompt,
             kind,
             mail_id: None,
@@ -299,7 +292,7 @@ impl ChildCommand {
     }
 
     pub(super) fn mail_start(prompt: String, mail_id: String) -> Self {
-        Self::Fresh {
+        Self {
             prompt,
             kind: CommandKind::MailStart,
             mail_id: Some(mail_id),
@@ -347,163 +340,99 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
         release_startup(runtime, agent_id, startup, attached).await;
         return Err("child startup cancelled before assignment admission".into());
     }
-    let mut command_id = command_id;
-    let mut command_text = command_id.as_str().to_owned();
-    let (mut result_context, mut remaining) = match prompt {
-        ChildCommand::Fresh {
-            prompt,
+    let command_text = command_id.as_str().to_owned();
+    let ChildCommand {
+        prompt,
+        kind,
+        mail_id,
+    } = prompt;
+    let batch = match kind {
+        CommandKind::Wake | CommandKind::Resume => BatchRule::WakeAll,
+        CommandKind::MailStart => BatchRule::MailStart(
+            mail_id
+                .as_deref()
+                .ok_or("mail Start has no message identity")?,
+        ),
+        _ => BatchRule::Results,
+    };
+    let result_context = match crate::agent::ledger::ChildLedger::new(runtime.driver(), agent_id)
+        .prepare(CommandIntent {
+            command_id: &command_text,
             kind,
-            mail_id,
-        } => {
-            let batch = match kind {
-                CommandKind::Wake | CommandKind::Resume => BatchRule::WakeAll,
-                CommandKind::MailStart => BatchRule::MailStart(
-                    mail_id
-                        .as_deref()
-                        .ok_or("mail Start has no message identity")?,
-                ),
-                _ => BatchRule::Results,
-            };
-            match crate::agent::ledger::ChildLedger::new(runtime.driver(), agent_id)
-                .prepare(CommandIntent {
-                    command_id: &command_text,
-                    kind,
-                    base_text: &prompt,
-                    batch,
-                })
-                .await
-                .map_err(String::from)
-            {
-                Ok(context) => (context, None),
-                Err(error) => {
-                    release_startup(runtime, agent_id, startup, attached).await;
-                    return Err(error.into());
-                }
-            }
+            base_text: &prompt,
+            batch,
+        })
+        .await
+        .map_err(String::from)
+    {
+        Ok(context) => context,
+        Err(error) => {
+            release_startup(runtime, agent_id, startup, attached).await;
+            return Err(error.into());
         }
-        ChildCommand::Reopened { first, remaining } => (first.context, Some(remaining)),
     };
     startup.set_stage(ChildStartupStage::Starting);
     let Some(agent) = attached.agent() else {
         release_startup(runtime, agent_id, startup, attached).await;
         return Err("opened child has no agent".into());
     };
-    let mut acknowledged = Some(acknowledged);
-    let mut submission = loop {
-        let command = if result_context.instruction {
-            plakous::agent::TurnCommand::StartInstruction {
-                command_id,
-                text: result_context.prompt.clone(),
-            }
-        } else {
-            plakous::agent::TurnCommand::Start {
-                command_id,
-                input: result_context.prompt.clone().into(),
-            }
-        };
-        let submission = match agent.command(command).await {
-            Ok(submission) => crate::runtime::child_projection::ChildAdmission::new(
-                &runtime.driver().tasks(),
-                submission,
-                agent,
-            ),
-            Err(error) => {
-                let message = format!("child turn start was refused: {error}");
-                release_startup(runtime, agent_id, startup, attached).await;
-                return Err(message.into());
-            }
-        };
-        if let Some(acknowledged) = acknowledged.take() {
-            acknowledged.await;
+    let command = if result_context.instruction {
+        plakous::agent::TurnCommand::StartInstruction {
+            command_id,
+            text: result_context.prompt.clone(),
         }
-        // A resubmission whose original was recorded below the feed's retention
-        // started nothing now: it settles consumed (spec 03 section 14.1).
-        match crate::agent::ledger::consumed_below_retention(
-            runtime.driver(),
-            &attached.sessions,
-            attached.locator().session_id(),
-            &command_text,
-            submission.acknowledgement.disposition(),
-            submission
-                .acknowledgement
-                .rejection()
-                .is_some_and(|rejection| {
-                    rejection.kind() == plakous::agent::ControlErrorKind::Reclaimed
-                }),
-        )
-        .await
-        {
-            Ok(false) => break submission,
-            consumed => {
-                let settled = match consumed {
-                    Ok(_) => crate::agent::ledger::ChildLedger::settlement_only(runtime.driver())
-                        .settle(&command_text, crate::driver::ledger::Settlement::Consumed)
-                        .await
-                        .map_err(String::from),
-                    Err(error) => Err(error),
-                };
-                if let Err(error) = settled {
-                    release_startup(runtime, agent_id, startup, attached).await;
-                    return Err(error.into());
-                }
-                let Some(pending) = remaining.as_mut() else {
-                    release_startup(runtime, agent_id, startup, attached).await;
-                    return Err(CHILD_COMMAND_CONSUMED.into());
-                };
-                // A consumed acknowledgement started nothing. Keep the same
-                // startup/attachment and drain the durable retry snapshot.
-                let allowed = runtime
-                    .read(|tree| admission.check(tree, agent_id))
-                    .map_err(|error| error.message)
-                    .and_then(std::convert::identity);
-                if startup.is_cancelled() || runtime.is_closed() || allowed.is_err() {
-                    release_startup(runtime, agent_id, startup, attached).await;
-                    return Err(allowed
-                        .err()
-                        .unwrap_or_else(|| "child startup cancelled before retry".into())
-                        .into());
-                }
-                let next = if let Some(next) = pending.pop_front() {
-                    Ok((next.command_id, next.context))
-                } else {
-                    match runtime
-                        .read(|tree| crate::agent::park::wake_command(tree, agent_id))
-                        .map_err(|error| error.message)
-                        .and_then(std::convert::identity)
-                    {
-                        Ok(id) => {
-                            crate::agent::ledger::ChildLedger::new(runtime.driver(), agent_id)
-                                .prepare(CommandIntent {
-                                    command_id: &id,
-                                    kind: CommandKind::Wake,
-                                    base_text: crate::child_prompts::PLAK_CHILD_WAKE_PROMPT,
-                                    batch: BatchRule::WakeAll,
-                                })
-                                .await
-                                .map_err(String::from)
-                                .map(|context| (id, context))
-                        }
-                        Err(error) => Err(error),
-                    }
-                };
-                match next.and_then(|(id, context)| {
-                    CommandId::new(id.clone())
-                        .map(|command| (id, command, context))
-                        .map_err(|error| error.to_string())
-                }) {
-                    Ok((id, command, context)) => {
-                        command_text = id;
-                        command_id = command;
-                        result_context = context;
-                    }
-                    Err(error) => {
-                        release_startup(runtime, agent_id, startup, attached).await;
-                        return Err(error.into());
-                    }
-                }
-            }
+    } else {
+        plakous::agent::TurnCommand::Start {
+            command_id,
+            input: result_context.prompt.clone().into(),
         }
     };
+    let mut submission = match agent.command(command).await {
+        Ok(submission) => crate::runtime::child_projection::ChildAdmission::new(
+            &runtime.driver().tasks(),
+            submission,
+            agent,
+        ),
+        Err(error) => {
+            let message = format!("child turn start was refused: {error}");
+            release_startup(runtime, agent_id, startup, attached).await;
+            return Err(message.into());
+        }
+    };
+    acknowledged.await;
+    // A resubmission whose original was recorded below the feed's retention
+    // started nothing now: it settles consumed (spec 03 section 14.1).
+    match crate::agent::ledger::consumed_below_retention(
+        runtime.driver(),
+        &attached.sessions,
+        attached.locator().session_id(),
+        &command_text,
+        submission.acknowledgement.disposition(),
+        submission
+            .acknowledgement
+            .rejection()
+            .is_some_and(|rejection| {
+                rejection.kind() == plakous::agent::ControlErrorKind::Reclaimed
+            }),
+    )
+    .await
+    {
+        Ok(false) => {}
+        consumed => {
+            let settled = match consumed {
+                Ok(_) => crate::agent::ledger::ChildLedger::settlement_only(runtime.driver())
+                    .settle(&command_text, crate::driver::ledger::Settlement::Consumed)
+                    .await
+                    .map_err(String::from),
+                Err(error) => Err(error),
+            };
+            release_startup(runtime, agent_id, startup, attached).await;
+            return Err(settled
+                .err()
+                .unwrap_or_else(|| CHILD_COMMAND_CONSUMED.to_owned())
+                .into());
+        }
+    }
     if let Some(rejection) = submission.acknowledgement.rejection() {
         let storage_pressure =
             rejection.kind() == plakous::agent::ControlErrorKind::StoragePressure;
@@ -560,8 +489,6 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
         return Err("start produced no turn identity".into());
     };
     startup.set_stage(ChildStartupStage::Registering);
-    #[cfg(test)]
-    crate::agent::park::hooks::after_start_admission(agent_id).await;
     // The turn's waiter registers with the bind, so the bound turn never
     // reads as one nobody will release. Kept outside the lock: it is dropped
     // (unregistered) on every path that never spawns the waiter.
@@ -820,55 +747,6 @@ impl ChildTurnIdentity {
     }
 }
 
-/// Ends a reopened parked attempt whose `max_turns` is spent, as the live
-/// path ends one: its subtree closes, its processes stop, and the ordinary
-/// completion records it `blocked`. The caller already released its session.
-pub(in crate::agent) async fn end_spent_attempt(
-    runtime: &crate::topology_runtime::ProductTopologyRuntime,
-    agent_id: &str,
-    terminal: crate::agent_tree::ChildTerminal,
-) -> Result<(), String> {
-    let driver = &runtime.driver().for_agent(agent_id);
-    let writer = driver.clone();
-    let id = agent_id.to_owned();
-    let (closed, effects) = driver
-        .mutate(move |tree| {
-            if tree.revision != tree.stored_revision {
-                writer.save(tree)?;
-            }
-            writer.fold_and_commit(tree, |tree| tree.close_live_descendants(&id))
-        })
-        .await
-        .map_err(|error| error.message)?;
-    // Held across the retirements: an early return or an abort leaves the
-    // closed copies' seals to a release owner.
-    let effects = driver.hold_effects(effects);
-    let closed = closed.map_err(|error| error.message)?;
-    for child in &closed {
-        crate::topology_runtime::retire_live(driver, &runtime.live, child, None, true)
-            .await
-            .map_err(|error| error.to_string())?;
-    }
-    let mut owners = closed;
-    owners.push(agent_id.to_owned());
-    driver
-        .stop_agent_jobs(&owners)
-        .await
-        .map_err(|error| error.message)?;
-    effects.settle().await.map_err(|error| error.message)?;
-    finalize_child_turn(
-        driver,
-        agent_id,
-        None,
-        Some(terminal),
-        false,
-        true,
-        runtime.observer().as_ref(),
-    )
-    .await;
-    Ok(())
-}
-
 pub(in crate::agent) async fn end_attempt_work(
     driver: &TreeDriver,
     live: &Arc<tokio::sync::Mutex<crate::topology_runtime::LiveChildTable>>,
@@ -920,7 +798,8 @@ pub(in crate::agent) async fn end_attempt_work(
             })
             .await
             .map_err(|error| error.message)?;
-        // Held across the retirements and the job stop; see end_spent_attempt.
+        // Held across the retirements and the job stop, so an early return
+        // or an abort leaves the closed copies' seals to a release owner.
         let effects = driver.hold_effects(effects);
         let (closed, mut failure, ended) = result.map_err(|error| error.message)?;
         if !ended {

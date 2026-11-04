@@ -177,7 +177,7 @@ pub struct JsonlCorrelation<'a> {
     pub omit_unknown_turn_id: bool,
     /// The command currently being answered.
     pub command_id: Option<&'a str>,
-    /// Set when stdin admits `tree` / `resume_tree`; cleared after the matching
+    /// Set when stdin admits `tree`; cleared after the matching
     /// snapshot is projected. Unsolicited topology revisions omit `id`.
     pub pending_tree_snapshot_id: Option<&'a str>,
 }

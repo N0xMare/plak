@@ -5,7 +5,6 @@ fn run_zero_timeout_stops_with_a_bound_not_a_successful_turn() {
     let outcome = OneShot::run_until_idle(
         config,
         "task".into(),
-        false,
         RunBounds {
             max_turns: 25,
             leave_jobs_running: false,

@@ -86,9 +86,8 @@ pub(super) use topology::SpawnParentInputs;
 #[cfg(test)]
 pub(crate) use topology::topology_extensions_if_enabled;
 pub use topology::{
-    ApiTopologyParent, ProductAgentSpec, RESTORED_PAUSED_REFUSAL, SpawnParent,
-    TopologyInvokeReceipt, api_topology_parent, invoke_topology_tool_on_hub,
-    rejoin_inflight_after_resume, topology_tree_is_restored_paused,
+    ApiTopologyParent, ProductAgentSpec, SpawnParent, TopologyInvokeReceipt, api_topology_parent,
+    invoke_topology_tool_on_hub,
 };
 pub(crate) use topology::{
     node_coding_presentation, seed_genesis_tree, vocabulary_for_presentation,

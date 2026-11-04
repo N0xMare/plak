@@ -9,12 +9,9 @@ use plakous_host_protocol::status::{
 mod tests;
 
 pub(crate) fn pause_suffix(pause: HostPause) -> Option<&'static str> {
-    match (pause.tree, pause.queue) {
-        (false, false) => None,
-        (true, true) => Some("agent tree paused · queue not draining · /tree then r"),
-        (true, false) => Some("agent tree paused · /tree then r"),
-        (false, true) => Some("queue paused, not draining · Tab then r"),
-    }
+    pause
+        .queue
+        .then_some("queue paused, not draining · Tab then r")
 }
 
 fn with_pause(detail: String, pause: HostPause) -> String {

@@ -1,9 +1,8 @@
 use super::super::RootActor;
-use super::{AUTO_CONTINUE_PAUSE_TEXT, PendingContinuation, TREE_PAUSE_TEXT};
+use super::{AUTO_CONTINUE_PAUSE_TEXT, PendingContinuation};
 use crate::agent_tree::ProductAgentTree;
 use crate::agent_tree_protocol::{
-    MessagePurpose, SendAgentMessageRequest, SpawnAgentRequest, SubmitResultRequest,
-    TreeAdmissionState, WriterMode,
+    MessagePurpose, SendAgentMessageRequest, SpawnAgentRequest, SubmitResultRequest, WriterMode,
 };
 use crate::runtime::test_kit::BlockOn as _;
 use crate::runtime::test_kit::TestExtension;
@@ -24,13 +23,11 @@ pub(super) fn snapshots(observed: &HostEventReceiver<TestExtension>) -> Vec<Pend
                 questions,
                 process_exits,
                 auto_continue_paused,
-                tree_paused,
             } => Some(PendingContinuation {
                 results,
                 questions,
                 process_exits,
                 auto_continue_paused,
-                tree_paused,
             }),
             _ => None,
         })
@@ -162,21 +159,6 @@ pub(super) fn spawn_child(runtime: &crate::topology_runtime::ProductTopologyRunt
         .mutate_then_emit(false, |tree| {
             tree.spawn_agent("root", &SpawnAgentRequest::test_review(), None)
                 .map_err(|error| error.message)
-        })
-        .block()
-        .unwrap();
-}
-
-pub(super) fn pause_tree(runtime: &crate::topology_runtime::ProductTopologyRuntime) {
-    runtime
-        .mutate_then_emit(false, |tree| {
-            let child = tree
-                .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
-                .map_err(|error| error.message)?;
-            tree.set_active_turn(&child.agent_id, true)
-                .map_err(|error| error.message)?;
-            tree.state = TreeAdmissionState::RestoredPaused;
-            Ok(())
         })
         .block()
         .unwrap();
@@ -536,29 +518,6 @@ fn auto_continue_pause_raises_a_notice_and_restores_the_same_row() {
     });
 }
 
-#[test]
-fn paused_tree_raises_the_indicator_and_restores_the_same_notice() {
-    with_tree(0, |host, runtime, _, observed| {
-        let _ = snapshots(observed);
-        pause_tree(runtime);
-        host.publish_pending_continuation();
-        let raised = snapshots(observed);
-        assert!(raised.last().is_some_and(|pending| pending.tree_paused));
-        assert_eq!(pause_rows(&host.role.config.session, TREE_PAUSE_TEXT), 1);
-        reopen(host, |restored| {
-            assert_eq!(
-                pause_rows(&restored.role.config.session, TREE_PAUSE_TEXT),
-                1
-            );
-            let again = snapshots(observed);
-            assert!(
-                again.last().is_some_and(|pending| pending.tree_paused),
-                "restored tree did not stay paused: {again:?}"
-            );
-        });
-    });
-}
-
 /// The attach-time paused-queue note restates state every open
 /// re-announces, so it is live only: reopening a still-paused session
 /// never adds a copy.
@@ -610,8 +569,7 @@ fn reopening_a_paused_queue_does_not_grow_the_transcript() {
 /// open of a paused session later opens add nothing to its transcript.
 #[test]
 fn reopening_an_unchanged_paused_session_stores_nothing_new() {
-    with_tree(0, |host, runtime, _, _| {
-        pause_tree(runtime);
+    with_tree(0, |host, _, _, _| {
         host.role.config.session.queue_drain_state =
             crate::sessions::QueueDrainState::RestoredPaused;
         host.role
@@ -643,78 +601,8 @@ fn reopening_an_unchanged_paused_session_stores_nothing_new() {
     });
 }
 
-/// A JSONL face writes no pause rows (spec 02 §5.4): its folded open
-/// note names the paused tree live only, and the drain stores nothing.
 #[test]
-fn a_jsonl_face_persists_no_tree_pause_note() {
-    with_configured_tree(
-        0,
-        |config| config.interactive = false,
-        |host, runtime, _, _| {
-            pause_tree(runtime);
-            host.commit_notice_intents();
-            let before = host.role.config.session.clone();
-            for _ in 0..2 {
-                reopen(host, |restored| {
-                    restored.commit_notice_intents();
-                });
-            }
-            let stored = host
-                .role
-                .config
-                .store
-                .load(&host.role.config.session.id)
-                .unwrap();
-            assert_eq!(
-                stored.transcript, before.transcript,
-                "an open of a JSONL face stores nothing"
-            );
-            let persisted: Vec<_> = stored
-                .transcript
-                .iter()
-                .filter_map(|row| match row {
-                    TranscriptRow::Notice(notice)
-                        if notice.text.starts_with("the agent tree is paused") =>
-                    {
-                        Some(notice.text.clone())
-                    }
-                    _ => None,
-                })
-                .collect();
-            assert!(
-                persisted.is_empty(),
-                "a JSONL face persisted {} pause notes",
-                persisted.len()
-            );
-        },
-    );
-}
-
-#[test]
-fn opening_a_paused_tree_shows_one_tree_line() {
-    with_tree(0, |host, runtime, _, observed| {
-        pause_tree(runtime);
-        reopen(host, |restored| {
-            let events: Vec<_> = observed.try_iter().collect();
-            let tree_lines: Vec<_> = notes(&events)
-                .into_iter()
-                .filter(|note| note.contains("paused") && !note.contains("queue"))
-                .collect();
-            assert_eq!(
-                tree_lines,
-                [TREE_PAUSE_TEXT],
-                "opening a paused tree said it more than once"
-            );
-            assert_eq!(
-                pause_rows(&restored.role.config.session, TREE_PAUSE_TEXT),
-                1
-            );
-        });
-    });
-}
-
-#[test]
-fn a_jsonl_face_keeps_the_open_note_and_writes_no_pause_rows() {
+fn a_jsonl_face_writes_no_pause_rows() {
     with_configured_tree(
         0,
         |config| config.interactive = false,
@@ -724,26 +612,18 @@ fn a_jsonl_face_keeps_the_open_note_and_writes_no_pause_rows() {
             let _ = host
                 .block(async |host| host.next_prompt(None).await)
                 .unwrap();
-            pause_tree(runtime);
             host.publish_pending_continuation();
             reopen(host, |restored| {
                 let events: Vec<_> = observed.try_iter().collect();
                 let notes = notes(&events);
                 assert!(
-                    events.iter().any(
-                        |event| matches!(event, HostEvent::RestoredPause(pause) if pause.tree)
-                    ),
-                    "the JSONL open note lost its tree remedy: {notes:?}"
-                );
-                assert!(
-                    !notes
-                        .iter()
-                        .any(|note| note == TREE_PAUSE_TEXT || note == AUTO_CONTINUE_PAUSE_TEXT),
+                    !notes.iter().any(|note| note == AUTO_CONTINUE_PAUSE_TEXT),
                     "a JSONL face gained a pause line: {notes:?}"
                 );
-                for text in [TREE_PAUSE_TEXT, AUTO_CONTINUE_PAUSE_TEXT] {
-                    assert_eq!(pause_rows(&restored.role.config.session, text), 0);
-                }
+                assert_eq!(
+                    pause_rows(&restored.role.config.session, AUTO_CONTINUE_PAUSE_TEXT),
+                    0
+                );
             });
         },
     );
@@ -1109,13 +989,20 @@ fn interrupt_without_auto_continue_shows_no_pause() {
 /// the publish returned: a holder that re-locked in a tight loop could
 /// starve the host's wait indefinitely on a loaded machine.
 #[test]
-fn contended_tree_lock_neither_flaps_nor_rewrites_the_tree_pause_row() {
+fn contended_tree_lock_neither_flaps_nor_rewrites_the_pause_row() {
     const ROUNDS: usize = 200;
     const HOLD: Duration = Duration::from_millis(1);
-    with_tree(0, |host, runtime, _, observed| {
-        pause_tree(runtime);
+    with_tree(0, |host, runtime, actions, observed| {
+        spawn_child(runtime);
+        actions.send(UserAction::Interrupt).unwrap();
+        let _ = host
+            .block(async |host| host.next_prompt(None).await)
+            .unwrap();
         host.publish_pending_continuation();
-        assert_eq!(pause_rows(&host.role.config.session, TREE_PAUSE_TEXT), 1);
+        assert_eq!(
+            pause_rows(&host.role.config.session, AUTO_CONTINUE_PAUSE_TEXT),
+            1
+        );
         let _ = snapshots(observed);
         let (held, held_rx) = std::sync::mpsc::channel::<()>();
         let (published, published_rx) = std::sync::mpsc::channel::<()>();
@@ -1144,11 +1031,11 @@ fn contended_tree_lock_neither_flaps_nor_rewrites_the_tree_pause_row() {
         });
         let flaps = snapshots(observed)
             .iter()
-            .filter(|pending| !pending.tree_paused)
+            .filter(|pending| !pending.auto_continue_paused)
             .count();
         assert_eq!(
             (
-                pause_rows(&host.role.config.session, TREE_PAUSE_TEXT),
+                pause_rows(&host.role.config.session, AUTO_CONTINUE_PAUSE_TEXT),
                 flaps
             ),
             (1, 0),

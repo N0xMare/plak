@@ -236,7 +236,7 @@ impl ProductAgentTree {
 
     /// The VCS step still standing between `agent_id` and an ordinary state,
     /// if any: an in-flight seal, adopt, or copy removal.
-    fn workspace_blocker(&self, agent_id: &str) -> Option<String> {
+    pub(super) fn workspace_blocker(&self, agent_id: &str) -> Option<String> {
         let node = self.nodes.get(agent_id)?;
         if let Some(row) = self
             .workspaces

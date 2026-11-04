@@ -90,6 +90,7 @@ fn every_remedy_has_each_existing_frontend_route_and_strict_encoding() {
                     NoticeRemedy::ResumeExactSession {},
                     Frontend::Run | Frontend::Jsonl
                 ) | (NoticeRemedy::AttachOnlyWhenDetached {}, Frontend::Run)
+                    | (NoticeRemedy::ResumeTree {}, _)
             );
             assert_eq!(
                 rendered == "neutral facts",
@@ -124,11 +125,6 @@ fn action_help_uses_the_exact_target_and_valid_frontend_commands() {
             },
         )
     };
-    assert!(
-        render(&NoticeRemedy::ResumeTree {}, Frontend::Run)
-            .contains("plak run --session current-id --resume-tree -- <prompt>")
-    );
-    assert!(render(&NoticeRemedy::ResumeTree {}, Frontend::Jsonl).contains("resume_tree"));
     assert!(
         render(&NoticeRemedy::ResumeQueueOrStartFresh {}, Frontend::Jsonl).contains("resume_queue")
     );
@@ -182,34 +178,26 @@ fn absent_remedy_is_verbatim_and_never_inferred_from_text() {
 }
 
 #[test]
-fn live_restored_pause_retains_both_actions_in_every_existing_face() {
+fn live_restored_pause_names_the_queue_action_in_every_existing_face() {
     use plakous_host_protocol::status::HostPause;
     for frontend in [Frontend::Tui, Frontend::Run, Frontend::Jsonl] {
-        for (tree, queue) in [(true, false), (false, true), (true, true)] {
-            let text = restored_pause(
-                HostPause { tree, queue },
-                RemedyContext {
-                    frontend,
-                    session_id: Some("exact-root"),
-                },
-            );
-            let (tree_action, queue_action) = match frontend {
-                Frontend::Tui => ("/tree", "Tab"),
-                Frontend::Run => (
-                    "plak run --session exact-root --resume-tree",
-                    "plak --resume exact-root",
-                ),
-                Frontend::Jsonl => ("resume_tree", "resume_queue"),
-            };
-            assert_eq!(text.contains(tree_action), tree, "{text}");
-            assert_eq!(text.contains(queue_action), queue, "{text}");
-            if queue {
-                assert!(
-                    text.contains("one item") || text.contains("one queued item"),
-                    "{text}"
-                );
-            }
-        }
+        let text = restored_pause(
+            HostPause { queue: true },
+            RemedyContext {
+                frontend,
+                session_id: Some("exact-root"),
+            },
+        );
+        let queue_action = match frontend {
+            Frontend::Tui => "Tab",
+            Frontend::Run => "plak --resume exact-root",
+            Frontend::Jsonl => "resume_queue",
+        };
+        assert!(text.contains(queue_action), "{text}");
+        assert!(
+            text.contains("one item") || text.contains("one queued item"),
+            "{text}"
+        );
     }
 }
 

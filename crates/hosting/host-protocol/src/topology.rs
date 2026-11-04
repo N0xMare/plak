@@ -456,7 +456,7 @@ pub enum TopologyErrorCode {
     SubmitDuplicateConflict,
     /// Submission would leave a running child attempt or process unattended.
     LiveWork,
-    /// The tree was restored paused; resume it before driving it.
+    /// Retained wire code; a tree reopens live, so no current host sends it.
     TreeRestoredPaused,
     /// An earlier operation left this state needing recovery.
     OperationRecoveryRequired,
@@ -912,8 +912,8 @@ pub enum TreeAdmissionState {
     Live,
     /// A root interrupt fences mutating work until it is lifted.
     Interrupted,
-    /// Reopened with work still in flight; nothing mutating is admitted until
-    /// an explicit resume.
+    /// Retained stored and wire spelling of a state no tree enters any more: a
+    /// tree reopens live, and a stored `restored_paused` reads as live.
     RestoredPaused,
     /// Every descendant is terminal; the root may be rebound.
     TreeTerminal,

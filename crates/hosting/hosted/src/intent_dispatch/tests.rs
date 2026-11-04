@@ -44,7 +44,6 @@ fn expected_class(action: &UserAction) -> IntentClass {
         | UserAction::CloseAgentTranscript
         | UserAction::ResyncTranscript { .. }
         | UserAction::RefreshTopologyTree
-        | UserAction::ResumeTopologyTree
         | UserAction::InterruptTopologyNode { .. }
         | UserAction::CloseTopologyNode { .. }
         | UserAction::StopAllTopology
@@ -111,7 +110,6 @@ fn every_intent() -> Vec<UserAction> {
             scope: plakous_host_protocol::views::transcript::TranscriptScope::Root,
         },
         UserAction::RefreshTopologyTree,
-        UserAction::ResumeTopologyTree,
         UserAction::InterruptTopologyNode { agent_id: id() },
         UserAction::CloseTopologyNode { agent_id: id() },
         UserAction::StopAllTopology,
@@ -138,7 +136,7 @@ fn every_intent() -> Vec<UserAction> {
 }
 
 /// The number of `SessionIntent` variants `expected_class` matches.
-const INTENT_VARIANTS: usize = 36;
+const INTENT_VARIANTS: usize = 35;
 
 #[test]
 fn every_intent_has_its_class_and_disposition() {

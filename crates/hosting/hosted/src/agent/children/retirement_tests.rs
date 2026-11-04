@@ -271,7 +271,7 @@ async fn hosted_descendant_close_refusal_and_commit_cut_never_dispatch_unpublish
     use crate::agent_tree_protocol::{SpawnAgentRequest, Tier, WriterMode};
     use crate::occupancy_vcs::fake::{FakeOp, FakeVcs};
     use std::sync::atomic::{AtomicUsize, Ordering};
-    for spent in [false, true] {
+    {
         for stale in [false, true] {
             let root = tempfile::tempdir().unwrap();
             let vcs = Arc::new(FakeVcs::new());
@@ -340,20 +340,8 @@ async fn hosted_descendant_close_refusal_and_commit_cut_never_dispatch_unpublish
             store
                 .fail_at
                 .store(store.saves.load(Ordering::SeqCst) + 1, Ordering::SeqCst);
-            let terminal = crate::agent_tree::ChildTerminal {
-                attempt_id: identity.attempt.clone(),
-                turn_id: turn.to_string(),
-                committed_at_ms: 1000,
-                outcome: plakous::sessions::feed::FeedTurnOutcome::Completed {
-                    finish: plakous::model::FinishReason::Stop,
-                },
-                seq: 1,
-            };
-            let refused = if spent {
-                end_spent_attempt(&runtime, &parent, terminal.clone()).await
-            } else {
-                end_attempt_work(runtime.driver(), &runtime.live, &parent, &identity).await
-            };
+            let refused =
+                end_attempt_work(runtime.driver(), &runtime.live, &parent, &identity).await;
             assert!(refused.is_err());
             assert!(vcs.calls_of(FakeOp::Seal).is_empty());
             runtime
@@ -364,11 +352,22 @@ async fn hosted_descendant_close_refusal_and_commit_cut_never_dispatch_unpublish
                 .unwrap();
             // A successful retry publishes the reservation before dispatch. Capture that
             // save as the crash cut between closure and the effect-result publication.
-            // end_attempt_work records the parent's retirement on refusal;
-            // the released/spent recovery path retries descendant closure.
-            end_spent_attempt(&runtime, &parent, terminal)
+            // end_attempt_work records the parent's retirement on refusal; a
+            // later descendant closure retries it.
+            let driver = runtime.driver().for_agent(&parent);
+            let writer = driver.clone();
+            let closing = parent.clone();
+            let (closed, effects) = driver
+                .mutate(move |tree| {
+                    if tree.revision != tree.stored_revision {
+                        writer.save(tree)?;
+                    }
+                    writer.fold_and_commit(tree, |tree| tree.close_live_descendants(&closing))
+                })
                 .await
                 .unwrap();
+            closed.unwrap();
+            driver.settle(effects).await.unwrap();
             assert_eq!(vcs.calls_of(FakeOp::Seal).len(), 1);
             let persisted = store
                 .prepared

@@ -1041,26 +1041,26 @@ waiter's own recycle reopen, so the node is left `recovery_required` and its
 turn is never abandoned. Every settlement goes through the product reopen
 (`reopen_spawned_child`) with the spawn's real create identity and a parked
 rejoin spec. They prove that `recover_agent` (through the hub tool executor)
-and the automatic pass each settle the child as `turn_abandoned` with no
-additional provider dispatch, that a followup is admitted afterwards and close
-frees the slot, and that `/recover` shows the user which child it recovered. A
-lease another session holds is refused `recovery_lease_held` exactly, by
-`recover_agent` after a short injected lease wait, with the reattach lock free
-between its polls, and by the pass at once. A pass that cannot take the
-reattach lock by its deadline reports every target as not attempted and
-settles nothing. Hub unit tests prove that a start while a pass runs makes it
-run once more, that a closed hub starts no pass, and that shutdown aborts a
-pass that overruns its allowance and still returns. A
-refused tree publish changes nothing and its retry still reports
-`turn_abandoned`; a refusal records nothing on the node. Recovery racing the
+and a `recover_node` run each interrupt the child (law L, attempt kept, no
+failure) with no additional provider dispatch, that close frees the slot, and
+that `/recover` shows the user which child it recovered. A lease another
+session holds is refused `recovery_lease_held` exactly, by `recover_agent`
+after a short injected lease wait, with the child not held between its polls,
+and by a run at once. Hub unit tests prove that a recovery claim excludes a
+second run and a recycling child, that a run tracked on a closed hub is
+aborted, and that shutdown aborts a run that overruns its allowance and still
+returns. A refused tree publish changes nothing and its retry still interrupts
+the child; a refusal records nothing on the node. Mail for an owed child
+before its `recover_node` starts nothing and stays durable; an owed child whose
+exact open restores its turn rejoins unmarked. Recovery racing the
 turn waiter settles the attempt once, and a real turn waiter whose recycle is
 waiting out a held lease makes `recover_agent` answer `recovery_owner_live`
 and the pass skip the child at once, without either waiting behind it. A
 terminal refusal lets `close_agent` settle the attempt with the refusal's code
 and end the node. An interrupted adopt behind an unknown
 outcome settles its session first and then closes to a free slot. Startup
-uncertainty is settled by replaying the spawn's create, as
-`recovered_without_turn` and never `completed`. Reopen errors map to exact
+uncertainty is settled by replaying the spawn's create: the session is bound
+and the child interrupted with its attempt open, never `completed`. Reopen errors map to exact
 `recovery_*` codes from their typed kind, a live owner is never reopened
 under, and a leaf caller is refused before any reopen because the tool is not
 compiled for it.
@@ -1460,7 +1460,7 @@ assertions do not measure elapsed time and need no budget lane.
 | Detached writer cleanup | `host_future_drop_is_bounded_with_a_detached_continuous_writer` |
 | Auth deadlines | `cancelling_claimed_refresh_after_request_observation_restores_ready`, `local_browser_rejects_wrong_host_without_dispatch_and_returns_no_store` |
 | Host quit, compaction and session round trips | `interactive_observation_timeout_releases_gate_and_joins_without_masking_failure`, `interrupt_then_quit_publishes_the_cancelled_terminal`, `quit_during_active_turn_waits_for_cancelled_terminal_projection`, `scheduled_compaction_failure_keeps_host_worker_alive`, `product_session_facade_create_turn_shutdown_and_reopen`, `retiring_a_live_child_advances_its_session_locator`, `real_session_late_start_ack_releases_after_deadline_without_redispatch` |
-| Wall-clock promptness bounds | `shutdown_aborts_a_recovery_pass_that_overruns`, `the_idle_wait_wakes_on_an_intent_and_not_before`, `host_service_ignoring_sigterm_is_killed_after_the_grace`, `an_exited_session_reports_its_joined_status_while_active_and_after_retirement`, `codex_observations_accumulate_one_bound_and_resume_exactly`, `the_whole_fetch_deadline_bounds_a_stalled_peer`, `deadline_bounds_the_wait_behind_an_in_flight_fetch`, the eight quit-grace scenarios (`disconnected_control_plane_*`, `ordinary_quit_*`, `process_exit_quit_with_settled_cancel_reports_a_stuck_child_release`, `quit_grace_*`), `a_recycling_waiter_is_an_owner_that_recovery_never_waits_on`, `user_stop_grants_the_term_grace_without_blocking_the_caller`, `jj_cli_doctor_bounds_output_wait_after_leader_exit`, `pending_wakes_return_the_wait_and_are_consumed` — each asserts that something returns within one to five real seconds instead of waiting out a longer grace or window, a real timing assertion that parallel load could trip |
+| Wall-clock promptness bounds | `the_idle_wait_wakes_on_an_intent_and_not_before`, `host_service_ignoring_sigterm_is_killed_after_the_grace`, `an_exited_session_reports_its_joined_status_while_active_and_after_retirement`, `codex_observations_accumulate_one_bound_and_resume_exactly`, `the_whole_fetch_deadline_bounds_a_stalled_peer`, `deadline_bounds_the_wait_behind_an_in_flight_fetch`, the eight quit-grace scenarios (`disconnected_control_plane_*`, `ordinary_quit_*`, `process_exit_quit_with_settled_cancel_reports_a_stuck_child_release`, `quit_grace_*`), `a_recycling_waiter_is_an_owner_that_recovery_never_waits_on`, `user_stop_grants_the_term_grace_without_blocking_the_caller`, `jj_cli_doctor_bounds_output_wait_after_leader_exit`, `pending_wakes_return_the_wait_and_are_consumed` — each asserts that something returns within one to five real seconds instead of waiting out a longer grace or window, a real timing assertion that parallel load could trip |
 | A real race, listed not hidden | `completed_terminal_outcome_remains_authoritative_when_exit_was_requested` |
 | Product durability scenarios | `durability::` — quit, resume and failure-wave tests. Not crash matrices; they stay in this lane |
 
@@ -1960,8 +1960,6 @@ through spawn, validated submission and adoption. Its pilot inspects the stored
 output and landing provenance. Its indexed cuts exercise tree transactions and
 derived-output reload with the fake VCS port; real Git pin publication and
 collection are covered separately by the workspace transaction and GC laws.
-Relaunching this shape explicitly requests `--resume-tree`; the product's
-paused-tree admission policy is unchanged.
 The opt-in `tree_conflict_accept` shape uses the fake VCS port to persist a
 textual conflict candidate and explicitly accept it. Its pilot verifies source,
 conflict and `adopted_via` ownership. Indexed cuts cover conflict-record
@@ -2608,10 +2606,12 @@ The durability-lane child SIGKILL matrix uses separate real child sessions and
 SQLite runtime/tree stores. It kills the owner mid-turn, during a parked wake,
 while idle before wake, and after a wake intent is prepared. A traced cut follows
 durable wake admission but precedes its first provider dispatch; that admitted
-turn is honestly abandoned, never replayed. Relaunch uses production startup
-reattach and the tree recovery pass. A still-live lost owner exercises the
-explicit recovery lease wait before that owner dies. Repeated recovery preserves
-the single result mail, attempt count and command rows.
+turn is honestly abandoned, never replayed. Relaunch runs the custody take's
+`recover_node` and a recovery run: every mode leaves the child interrupted with
+its attempt open and dispatches nothing again (a parked child, even one with a
+prepared wake, is not woken). A still-live lost owner exercises the explicit
+recovery lease wait before that owner dies. Repeated recovery preserves the
+attempt count and command rows and sends no result mail.
 `root_stale_open_reprojects_once_then_opens_the_new_head` pins root stale-head
 adoption; `root_second_stale_open_refuses_contention_without_a_third_projection`
 and `root_stale_open_with_projection_debt_refuses_without_retry` pin its refusal
@@ -4687,7 +4687,7 @@ Where no new intent is minted, the original full-row comparisons remain exact.
 SQL deletion followed by the real product recovery entry rebuilds a
 parent/child tree in post-order with no explicit fold calls; durable session
 bindings remain intact and sessionless children fold without opening a session.
-Normal reopen selects no new target, and a second recovery pass is inert.
+Normal reopen selects no new target, and a second recovery run is inert.
 An opt-in ignored tree-fold microbenchmark replays twenty agents with 500
 records and 200 intents each, both with all intents above the window and with
 fenced intents due throughout it. It reports replay time and 100 whole-tree
@@ -4707,7 +4707,7 @@ A stale page-intent index law injects a same-agent due intent after indexing
 and requires the debug integrity assertion rather than silently omitting it.
 The applier-diff injection law covers all foreign row and queue categories,
 including commands, cursors, inbound, effects and fault reasons. A malformed
-VCS fold input must make `resume_tree` propagate the integrity refusal.
+VCS fold input must make the reopen law's fold propagate the integrity refusal.
 An attach store probe requires the hub entries lock to be available during
 every startup save. An empty started singleton saves only its initial input,
 and reattaching an occupant saves nothing.

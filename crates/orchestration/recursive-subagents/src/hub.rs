@@ -460,34 +460,6 @@ async fn record_retirement_fault(
     }
 }
 
-/// The tree's one background recovery pass.
-#[derive(Default)]
-struct RecoveryPassSlot {
-    task: Option<crate::task_set::TaskHandle<()>>,
-    /// Set from start until the pass gives up the slot.
-    running: bool,
-    /// A start arrived while the pass ran.
-    rerun: bool,
-}
-
-impl RecoveryPassSlot {
-    /// A pass that panicked or was aborted no longer holds the slot.
-    fn busy(&self) -> bool {
-        self.running && self.task.as_ref().is_some_and(|task| !task.is_finished())
-    }
-}
-
-/// What [`ProductTopologyRuntime::start_recovery_pass`] did.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RecoveryPassRequest {
-    /// A new pass started.
-    Started,
-    /// A pass was running; it runs once more before it finishes.
-    Rerun,
-    /// The hub is closed for shutdown.
-    Closed,
-}
-
 /// Holds a child's recycling mark; dropping it clears the mark.
 pub struct RecyclingGuard {
     runtime: Arc<ProductTopologyRuntime>,
@@ -500,6 +472,29 @@ impl Drop for RecyclingGuard {
             recycling.remove(&self.agent_id);
         }
     }
+}
+
+/// One `recover_node` run's hold on a child; dropping it releases the child.
+pub struct RecoveryClaim {
+    runtime: Arc<ProductTopologyRuntime>,
+    agent_id: String,
+}
+
+impl Drop for RecoveryClaim {
+    fn drop(&mut self) {
+        if let Ok(mut recovering) = self.runtime.recovering.lock() {
+            recovering.remove(&self.agent_id);
+        }
+    }
+}
+
+/// Why [`ProductTopologyRuntime::claim_recovery`] refused a child.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RecoveryClaimRefusal {
+    /// Its turn waiter is recycling it: this process owns it.
+    Recycling,
+    /// Another `recover_node` run holds it.
+    Recovering,
 }
 
 /// One attached tree and everything a host process holds around it: the tree
@@ -517,15 +512,15 @@ pub struct ProductTopologyRuntime {
     /// publish for this tree goes through it.
     driver: TreeDriver,
     closed: AtomicBool,
-    reattach: tokio::sync::Mutex<()>,
     /// Children whose fenced turn's owner is releasing and reopening their
-    /// session outside the reattach lock. Recovery treats them as owned.
+    /// session. Recovery treats them as owned.
     recycling: Mutex<HashSet<String>>,
-    /// The tree's background child-recovery pass, while one runs.
-    recovery_pass: Mutex<RecoveryPassSlot>,
-    /// Operator recovers of one child (`u`), separate from the background pass.
-    /// Shutdown aborts every one before it releases leases.
-    explicit_recovers: Mutex<Vec<crate::task_set::TaskHandle<()>>>,
+    /// Children a `recover_node` run holds, so two runs never reopen one
+    /// child at once.
+    recovering: Mutex<HashSet<String>>,
+    /// Running `recover_node` runs over this tree's children. Shutdown waits
+    /// for, or aborts, every one before it releases leases.
+    recoveries: Mutex<Vec<crate::task_set::TaskHandle<()>>>,
     rejoin_spec: Mutex<Option<Arc<dyn Any + Send + Sync>>>,
     observer: Option<Arc<dyn TopologyObserver>>,
     /// Root runtimes built against this tree without a session attachment
@@ -1204,26 +1199,6 @@ impl std::fmt::Display for TopologyShutdownError {
     }
 }
 impl std::error::Error for TopologyShutdownError {}
-
-/// Whether this tree reopened paused, treating "no hub yet" as not paused.
-///
-/// Callers that must not race the attach ask the `Option`-returning form
-/// instead; this one is for the readers that only render a state.
-#[must_use]
-pub fn is_restored_paused(tree_id: &str) -> bool {
-    hub_tree_is_restored_paused(tree_id).unwrap_or(false)
-}
-
-/// `None` while the hub is not registered yet. `--resume-tree` must Wait on
-/// that gap instead of treating a missing hub as Live.
-///
-/// Reads the driver's atomic mirror of the last installed tree state, so the
-/// JSONL thread cannot deadlock against ResumeTree's tree mutex. Contention
-/// never manufactures a paused state.
-pub fn hub_tree_is_restored_paused(tree_id: &str) -> Option<bool> {
-    let runtime = lookup(tree_id)?;
-    Some(runtime.driver.is_restored_paused())
-}
 
 /// Shutdown and headless exit join children within this allowance. Expiry is a
 /// bounded refusal, not cancellation of the workers that still own release.

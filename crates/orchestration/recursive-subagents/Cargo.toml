@@ -20,7 +20,7 @@ neutral = true
 
 [package.metadata.plakous-lint]
 too-many-lines-ceiling = 39
-too-many-arguments-ceiling = 6
+too-many-arguments-ceiling = 5
 large-file-ceiling = 0
 reason = "Scoped tree transition and scenario-test debt; large-file and crate-wide allowances are retired."
 

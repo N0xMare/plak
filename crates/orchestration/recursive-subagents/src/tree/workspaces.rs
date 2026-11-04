@@ -4,9 +4,9 @@
 use super::{
     Arc, AtomicU64, AttemptFailure, BoundWorkspace, DiscardWorkspaceOutput, LiveGeneration,
     MintHook, MintTicket, MintedCopy, NodeStatus, Ordering, Path, PathBuf, ProductAgentTree,
-    SpawnAgentRequest, SpawnWorkspace, Tier, TopologyError, TopologyErrorCode, TreeAdmissionState,
-    UnmintTicket, VcsError, VcsSnapshot, WorkspaceIdRequest, WorkspaceMode, WorkspacePlan,
-    WorkspaceRecord, WorkspaceStatus, bounded_text, copy_id, now_unix_millis,
+    SpawnAgentRequest, SpawnWorkspace, Tier, TopologyError, TopologyErrorCode, UnmintTicket,
+    VcsError, VcsSnapshot, WorkspaceIdRequest, WorkspaceMode, WorkspacePlan, WorkspaceRecord,
+    WorkspaceStatus, bounded_text, copy_id, now_unix_millis,
 };
 
 #[cfg(any(test, feature = "test-support"))]
@@ -86,7 +86,7 @@ impl ProductAgentTree {
             .collect()
     }
 
-    fn queue_recovery_base_pins(&mut self) {
+    pub(super) fn queue_recovery_base_pins(&mut self) {
         for ticket in self.recovery_base_pins() {
             if self.base_pin_recovery.contains_key(&ticket.workspace_id) {
                 continue;
@@ -175,59 +175,6 @@ impl ProductAgentTree {
                 && serde_json::from_str::<VcsFault>(&op.canonical_request)
                     .is_ok_and(|fault| fault.workspace_id.as_deref() == Some(workspace))
         })
-    }
-
-    /// Lifts the restore overlay after acknowledged host consequences quiesce.
-    pub(crate) fn lift_restored_pause_if_quiescent(&mut self) {
-        if self.state == TreeAdmissionState::RestoredPaused && self.quiescence_refusal().is_none() {
-            self.state = TreeAdmissionState::Live;
-            self.bump();
-        }
-    }
-
-    /// Reopen law for a persisted tree. Only a tree with work
-    /// still in flight — a non-terminal descendant or a pending spawn — has
-    /// anything to resume, so only that shape becomes `RestoredPaused`. A
-    /// quiescent tree (the attached singleton, or every descendant terminal)
-    /// reopens on its persisted admission state; a stale pause or interrupt
-    /// fence from an earlier process is lifted because there is no descendant
-    /// left for it to fence. Painting such a tree paused offered the operator a
-    /// resume with nothing to resume and refused every rebind behind it.
-    pub fn restore_paused(&mut self) {
-        // Nothing recovers the root (`recovery_need` is `NotRequired` for it),
-        // so a root an earlier build faulted for a child copy's VCS step
-        // reopens running instead of refusing its own waits for good.
-        if let Some(root) = self.nodes.get_mut(&self.root_agent_id)
-            && root.status == NodeStatus::RecoveryRequired
-        {
-            root.status = NodeStatus::Running;
-        }
-        self.fault_in_flight_vcs();
-        self.queue_recovery_base_pins();
-        self.queue_refresh_recovery();
-        let agents: std::collections::BTreeSet<_> = self
-            .operations
-            .values()
-            .filter(|record| record.tool_name == VCS_FAULT_KIND)
-            .map(|record| record.caller_agent_id.clone())
-            .collect();
-        for agent in agents {
-            if let Err(error) = self.fold_due(&agent) {
-                tracing::error!(agent_id = %agent, refusal = %error.message, "tree restore fold refused");
-            }
-        }
-        if self.quiescence_refusal().is_none() {
-            if matches!(
-                self.state,
-                TreeAdmissionState::RestoredPaused | TreeAdmissionState::Interrupted
-            ) {
-                self.state = TreeAdmissionState::Live;
-            }
-            self.bump();
-            return;
-        }
-        self.state = TreeAdmissionState::RestoredPaused;
-        self.bump();
     }
 
     /// A pending seal reservation or an `Adopting` or `Discarding` workspace row means
@@ -606,41 +553,6 @@ impl ProductAgentTree {
                 tracing::error!(agent_id = %agent_id, refusal = %error.message, "workspace fault settlement fold refused");
             }
         }
-    }
-
-    /// Resumes a tree that reopened paused, after faulting anything the
-    /// crash left mid-VCS.
-    ///
-    /// # Errors
-    ///
-    /// Refuses a tree that is closed or terminal — those never resume.
-    pub fn resume_tree(&mut self) -> Result<(), TopologyError> {
-        self.fault_in_flight_vcs();
-        // A stage left recorded is kept across reopen for node recovery,
-        // and settles by its class when the tree resumes.
-        self.settle_unfinished_vcs_stages();
-        let agents: std::collections::BTreeSet<_> = self
-            .operations
-            .values()
-            .filter(|record| record.tool_name == VCS_FAULT_KIND)
-            .map(|record| record.caller_agent_id.clone())
-            .collect();
-        for agent in agents {
-            self.fold_due(&agent)?;
-        }
-        if matches!(
-            self.state,
-            TreeAdmissionState::Closed | TreeAdmissionState::TreeTerminal
-        ) {
-            return Err(TopologyError::new(
-                TopologyErrorCode::GrantDenied,
-                "closed tree cannot resume",
-            ));
-        }
-        self.state = TreeAdmissionState::Live;
-        self.hold_parked_reopen_targets();
-        self.bump();
-        Ok(())
     }
 
     /// The `on_mint` hook a just-spawned node's copy owes, or

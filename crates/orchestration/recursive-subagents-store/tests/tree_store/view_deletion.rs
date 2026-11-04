@@ -231,7 +231,9 @@ fn assert_late_recovery_read(later_retirement: bool, retained: bool, new_termina
         cold.revision, before,
         "the applied-read view survives reopen"
     );
-    assert_eq!(settle_law_effects(&mut live, &vcs), 1);
+    // Law L keeps the attempt open, so the late read ends nothing and seals
+    // nothing.
+    assert_eq!(settle_law_effects(&mut live, &vcs), 0);
     if let Some(page) = &retained_page {
         let expected = law_rows(&live);
         for sql in [false, true] {
@@ -1196,7 +1198,6 @@ async fn sqlite_followup_open_save_and_withdrawal_cuts_rebuild_remaining_inputs(
             .unread_mail(child)
             .any(|mail| mail.message_id == opener)
     );
-    rebuilt.resume_tree().unwrap();
     let later = rebuilt
         .send_agent_message(
             "root",
@@ -1546,7 +1547,7 @@ fn sqlite_submitted_rebuilds_output_and_status_from_its_intent() {
             .node(child)
             .unwrap()
             .presentation_status(rebuilt.state),
-        NodeStatus::Paused
+        NodeStatus::Running
     );
     assert!(rebuilt.take_effects().is_empty());
     let revision = rebuilt.revision;
@@ -1868,7 +1869,7 @@ fn sqlite_vcs_fault_captures_prior_diagnostic_and_replays_its_settlement() {
         )
         .unwrap();
         tree.record_fault(child, "earlier precise diagnostic");
-        tree.restore_paused();
+        tree.apply_reopen_law();
         assert_eq!(tree.fault_reason(child), Some("earlier precise diagnostic"));
         if settled {
             let effects = tree.take_effects();

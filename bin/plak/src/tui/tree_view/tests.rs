@@ -56,8 +56,10 @@ fn the_canvas_row_carries_the_label_of_every_typed_field() {
         )],
     };
     let tree = CanvasTree::from(&view);
-    assert_eq!(tree.state, "restored_paused");
-    assert!(tree.restored_paused, "derived from the state, not carried");
+    assert_eq!(
+        tree.state, "restored_paused",
+        "a retained stored spelling still reads"
+    );
     assert!(tree.solicited);
     let row = &tree.nodes[0];
     assert_eq!(row.status, "recovery_required");

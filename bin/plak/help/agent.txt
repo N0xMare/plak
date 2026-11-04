@@ -2,7 +2,7 @@ plak agent — long-lived JSONL host client
 
 USAGE:
   plak agent [--account <codex|grok|claude|openrouter|openai|anthropic|xai-api> --model <exact-id> [options]]
-  plak agent --session <uuid> [--resume-tree]
+  plak agent --session <uuid>
 
 DESCRIPTION:
   Attaches the same plakous-hosted loop as the TUI and speaks newline-delimited
@@ -14,7 +14,7 @@ DESCRIPTION:
 
 EXAMPLES:
   plak agent --account codex --model gpt-5.6-luna --effort medium
-  plak agent --session 0f2c… --resume-tree
+  plak agent --session 0f2c…
   printf '{"v":1,"kind":"prompt","id":"1","text":"hi"}\n' | plak agent --account grok --model grok-4.6 --effort low
 
 OPTIONS:
@@ -27,12 +27,11 @@ OPTIONS:
   --protocol <p>     auto | chat | responses | messages (OpenRouter only;
                      default auto→chat; other accounts reject it at parse time)
   --session <uuid>   Attach that session; its recorded binding wins
-  --resume-tree      Resume a RestoredPaused topology (requires --session)
   Omitted flags use the configured defaults. Binding flags match `plak run`.
 
 COMMANDS (stdin):
-  prompt, interrupt, compact, resume_queue, resume_tree, tree, interrupt_node,
-  close_node, stop_all, clear, invoke_tool, fork, recover, background, quit
+  prompt, interrupt, compact, resume_queue, tree, interrupt_node, close_node,
+  stop_all, clear, invoke_tool, fork, recover, background, quit
 
 EVENTS (stdout):
   hello, ready, status, busy, assistant, assistant_done, tool, error,
@@ -40,10 +39,7 @@ EVENTS (stdout):
 
 NOTES:
   Stdout is machine-only. Diagnostics go to stderr.
-  RestoredPaused attach requires --resume-tree (same as plak run). Mid-session
-  stdin resume_tree sends ResumeTopologyTree on an already-live hub.
   A restored queue stays paused until stdin resume_queue explicitly resumes it.
-  --resume-tree on a session without a durable tree resumes the plain session.
   `--composition js-ptc|py-ptc` is one engine per agent; exec_js uses source
   (async module; text(...)), exec_py uses code. Same overlay as `plak run` on
   new sessions. native-ptc and js-ptc locate PLAK_JS_HOST or a sibling

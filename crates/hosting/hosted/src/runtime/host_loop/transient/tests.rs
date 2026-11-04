@@ -400,7 +400,6 @@ fn root_transient_uncancelled_product_full_pauses_without_submission_or_retry() 
     assert!(!host.role.config.store.storage_wait_cancelled());
     let mut state = OneShotState {
         attempted: true,
-        resume_tree: false,
         result: Some(Err(CliFailure::new("original failure"))),
         run: Some(RunState {
             bounds: RunBounds {
@@ -476,7 +475,6 @@ fn root_transient_run_bounds_cancel_the_pending_wait() {
         let deadline = timeout.then(Instant::now);
         let mut state = OneShotState {
             attempted: true,
-            resume_tree: false,
             result: Some(Err(CliFailure::new("original failure"))),
             run: Some(RunState {
                 bounds: RunBounds {
