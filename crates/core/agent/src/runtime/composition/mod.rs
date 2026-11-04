@@ -162,7 +162,7 @@ pub(super) struct CompositionOwner {
     exec_correlation: Option<ToolCorrelation>,
     pending_updates: Vec<ToolResultUpdateBlock>,
     possible_start: bool,
-    started_at: Option<tokio::time::Instant>,
+    started_at: Option<crate::executor::Instant>,
     interpreter_observation: Option<InterpreterObservation>,
 }
 
@@ -263,7 +263,7 @@ impl CompositionOwner {
     pub(super) fn interpreter_observation(&self) -> Option<&InterpreterObservation> {
         self.interpreter_observation.as_ref()
     }
-    pub(super) fn started_at(&self) -> Option<tokio::time::Instant> {
+    pub(super) fn started_at(&self) -> Option<crate::executor::Instant> {
         self.started_at
     }
     pub(super) fn take_evaluation(&mut self) -> Option<OperationId> {

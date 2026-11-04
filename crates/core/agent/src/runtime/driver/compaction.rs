@@ -381,7 +381,7 @@ impl Driver {
                 reason: compaction_reason,
             },
         );
-        let compaction_started = std::time::Instant::now();
+        let compaction_started = crate::executor::now();
         let mut measured_source_tokens = None;
         let outcome = Box::pin(self.compact_session_after_runtime(
             active,

@@ -521,7 +521,7 @@ impl Driver {
             },
         )?
         .workflow_id;
-        let compact_started = std::time::Instant::now();
+        let compact_started = crate::executor::now();
         let _ = command.shared.events.publish(
             EventContext::turn(command.turn_id),
             AgentEventKind::CompactionStarted {

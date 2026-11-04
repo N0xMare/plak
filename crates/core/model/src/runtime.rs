@@ -49,6 +49,14 @@ pub type RuntimeTask = MaybeSendFuture<()>;
 /// A future that completes when a [`Runtime::sleep`] has elapsed.
 pub type RuntimeSleep = MaybeSendFuture<()>;
 
+/// Blocking work a [`Runtime`] runs where it does not stall its tasks.
+#[cfg(not(target_arch = "wasm32"))]
+pub type RuntimeBlockingTask = Box<dyn FnOnce() + Send + 'static>;
+
+/// Blocking work a [`Runtime`] runs where it does not stall its tasks.
+#[cfg(target_arch = "wasm32")]
+pub type RuntimeBlockingTask = Box<dyn FnOnce() + 'static>;
+
 /// Control over one task a [`Runtime`] spawned. Dropping it detaches the task.
 pub trait SpawnedTask: MaybeSend + MaybeSync {
     /// Requests that the task stop. A task that has not finished is dropped
@@ -64,6 +72,15 @@ pub trait SpawnedTask: MaybeSend + MaybeSync {
 pub trait Runtime: MaybeSend + MaybeSync + 'static {
     /// Starts `task` concurrently with the caller.
     fn spawn(&self, task: RuntimeTask) -> Box<dyn SpawnedTask>;
+
+    /// Starts `work`, which may block its thread, without stalling the
+    /// runtime's other tasks. Aborting it has no effect once it has started.
+    ///
+    /// The default runs it as an ordinary task, for a single-threaded host
+    /// that has nowhere else to run it; a native runtime overrides it.
+    fn spawn_blocking(&self, work: RuntimeBlockingTask) -> Box<dyn SpawnedTask> {
+        self.spawn(Box::pin(async move { work() }))
+    }
 
     /// A future that completes once `duration` has elapsed.
     fn sleep(&self, duration: Duration) -> RuntimeSleep;

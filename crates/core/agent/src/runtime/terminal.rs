@@ -215,7 +215,7 @@ impl TurnShared {
         Ok(true)
     }
 
-    pub(super) fn mark_telemetry_started(&self, started: tokio::time::Instant) {
+    pub(super) fn mark_telemetry_started(&self, started: crate::executor::Instant) {
         if let Some(telemetry) = &self.telemetry {
             *lock_mutex(&telemetry.started) = Some(started);
         }
@@ -521,7 +521,7 @@ impl TurnShared {
             return;
         };
         let started = lock_mutex(&telemetry.started).take();
-        let elapsed = started.map_or(Duration::ZERO, |started| started.elapsed());
+        let elapsed = started.map_or(Duration::ZERO, crate::executor::Instant::elapsed);
         let compartments = *lock_mutex(&telemetry.compartments);
         let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
             telemetry.emitter.emit(TelemetryObservation::new(

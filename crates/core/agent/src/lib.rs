@@ -67,6 +67,7 @@ mod control;
 mod derived_id;
 mod error;
 mod event;
+mod executor;
 mod facade_support;
 mod feed;
 mod input;
@@ -80,6 +81,8 @@ mod runtime;
 mod session;
 mod state;
 mod telemetry;
+#[cfg(not(target_arch = "wasm32"))]
+mod tokio_runtime;
 mod tool_runtime;
 mod usage;
 
@@ -334,6 +337,10 @@ pub use internal::{
     compile_explicit_profile, compile_explicit_runtime_profile, compiler_model_facts_from_model,
     recommended_neutral_coding_profile,
 };
+
+/// The native [`plakous_model::Runtime`] on Tokio.
+#[cfg(not(target_arch = "wasm32"))]
+pub use tokio_runtime::TokioRuntime;
 
 /// Session-owned process observations and optional host registry.
 pub use plakous_tools::{

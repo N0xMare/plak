@@ -232,7 +232,7 @@ impl Driver {
         let descriptor = provider_configuration.effective().descriptor().clone();
         let start = loop {
             if self.request_slot.is_none() {
-                let queued_at = tokio::time::Instant::now();
+                let queued_at = crate::executor::now();
                 self.request_slot = self
                     .take_compaction_request_slot(cancellation.clone())
                     .await?;
@@ -248,7 +248,7 @@ impl Driver {
             if self.shutdown.is_cancelled() || cancellation.is_cancelled() {
                 return Err(cancelled_error());
             }
-            if tokio::time::Instant::now() >= deadline_at {
+            if crate::executor::now() >= deadline_at {
                 return Err(self.model_timeout_error());
             }
             self.authority.check_heartbeat()?;
@@ -295,7 +295,7 @@ impl Driver {
             if self.shutdown.is_cancelled() || cancellation.is_cancelled() {
                 return Err(cancelled_error());
             }
-            if tokio::time::Instant::now() >= deadline_at {
+            if crate::executor::now() >= deadline_at {
                 return Err(self.model_timeout_error());
             }
             let mut start = live.take_prepared()?.start_with_control(context);
@@ -305,7 +305,7 @@ impl Driver {
                 std::task::Poll::Ready(result) => ModelStartAdmission::Ready(result),
             };
         };
-        let mut timeout = Box::pin(tokio::time::sleep_until(deadline_at));
+        let mut timeout = Box::pin(crate::executor::sleep_until(deadline_at));
         let mut stream = match start {
             ModelStartAdmission::Ready(result) => result.map_err(compaction_provider_error)?,
             ModelStartAdmission::Pending(mut start) => loop {

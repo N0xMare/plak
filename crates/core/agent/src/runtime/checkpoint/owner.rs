@@ -148,7 +148,7 @@ impl StartAuthority {
         }
         let guard = if let Some(branch) = branch {
             Some(
-                tokio::time::timeout(
+                crate::executor::timeout(
                     branch.store_timeouts.operation,
                     branch.lease_gate.lock_owned(),
                 )
@@ -348,18 +348,18 @@ impl CheckpointOwner {
             .durable
             .as_ref()
             .map(|branch| (Arc::clone(&branch.store), branch.store_timeouts.operation))?;
-        let mut usage = tokio::time::timeout(timeout, store.usage())
+        let mut usage = crate::executor::timeout(timeout, store.usage())
             .await
             .ok()?
             .ok()?;
         if usage.ordinary_exhausted().is_some() {
             // Pressure is exceptional; ordinary admission remains snapshot-only.
-            let _ = tokio::time::timeout(
+            let _ = crate::executor::timeout(
                 timeout,
                 store.reclaim(crate::session::StoreReclaimMode::Bounded),
             )
             .await;
-            usage = tokio::time::timeout(timeout, store.usage())
+            usage = crate::executor::timeout(timeout, store.usage())
                 .await
                 .ok()?
                 .ok()?;
@@ -400,7 +400,7 @@ impl CheckpointOwner {
         let lease_gate = gate.as_ref().map(|(gate, _)| Arc::clone(gate));
         let _lease_guard = if let Some(gate) = lease_gate.as_ref() {
             Some(
-                tokio::time::timeout(gate_timeout, gate.lock())
+                crate::executor::timeout(gate_timeout, gate.lock())
                     .await
                     .map_err(|_| {
                         AgentError::new(
@@ -559,7 +559,7 @@ impl CheckpointOwner {
         // costs what it reclaims (at most about `minimum` checkpoints' closure
         // once caught up), and the store call is bounded by the operation
         // deadline.
-        let _guard = tokio::time::timeout(timeout, gate.lock())
+        let _guard = crate::executor::timeout(timeout, gate.lock())
             .await
             .map_err(|_| {
                 AgentError::new(
@@ -651,7 +651,7 @@ impl CheckpointOwner {
         // leave this cleanup holding a superseded lease, and the store refuses
         // that release fail-closed. Joining first makes the authority's lease
         // the exact lease the store made active.
-        let heartbeat_started = std::time::Instant::now();
+        let heartbeat_started = crate::executor::now();
         let heartbeat_result =
             contain_cleanup_panic(self.heartbeat.stop_and_join(cleanup_timeout)).await;
         if let Some(telemetry) = telemetry {
@@ -663,7 +663,7 @@ impl CheckpointOwner {
         }
         let durable = lock_mutex(&self.state).durable.clone();
         let store_result = if let Some(branch) = durable {
-            let release_started = std::time::Instant::now();
+            let release_started = crate::executor::now();
             let release = contain_cleanup_panic(async {
                 capacity_store_call(
                     StorePhase::Release,
@@ -685,7 +685,7 @@ impl CheckpointOwner {
             if release.is_ok() {
                 lock_mutex(&self.state).released = true;
             }
-            let flush_started = std::time::Instant::now();
+            let flush_started = crate::executor::now();
             let flush = contain_cleanup_panic(async {
                 capacity_store_call(
                     StorePhase::Flush,
@@ -1126,9 +1126,17 @@ impl PreparedCheckpoint {
     pub(in crate::runtime) fn checkpoint(&self) -> Arc<RuntimeCheckpoint> {
         self.state.checkpoint()
     }
+    #[cfg(test)]
     pub(in crate::runtime) fn start(self) -> CheckpointOwner {
+        self.start_on(&crate::executor::Executor::current())
+    }
+
+    pub(in crate::runtime) fn start_on(
+        self,
+        executor: &crate::executor::Executor,
+    ) -> CheckpointOwner {
         let state = Arc::new(Mutex::new(self.state));
-        let heartbeat = LeaseHeartbeat::start(Arc::clone(&state));
+        let heartbeat = LeaseHeartbeat::start(Arc::clone(&state), executor);
         CheckpointOwner { state, heartbeat }
     }
     /// Publishes one pure closure under the newly opened owner's fenced lease.

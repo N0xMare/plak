@@ -85,7 +85,7 @@ impl ActorToolDispatchObserver {
                     "tool dispatch observer was invoked more than once",
                 ));
             }
-            *started = Some(tokio::time::Instant::now());
+            *started = Some(crate::executor::now());
         }
         if let Err(error) = self.shared.begin_local_tool_dispatch(
             self.event_context,

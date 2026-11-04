@@ -1,3 +1,4 @@
+use crate::executor::Instant;
 use crate::runtime::compaction::{
     CompactOrigin, DurableCompactionIdentity, DurableCompactionRequestRecord,
     ExactCompactionRuntime,
@@ -11,7 +12,6 @@ use plakous_model::{
     PreparedModelCall, ProviderCallRecoveryLocator, ProviderCallRecoveryLocatorStage, TurnId,
     ValidatedRequestPlan,
 };
-use tokio::time::Instant;
 /// Canonical publication remains with Driver. This owner retains only the
 /// one-shot provider capability, fixed call budget and observed stream evidence.
 pub(in super::super) struct LiveCompaction {

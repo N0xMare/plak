@@ -38,7 +38,7 @@ impl Driver {
         command.shared.begin_model_streaming()?;
         command
             .shared
-            .mark_telemetry_started(tokio::time::Instant::now());
+            .mark_telemetry_started(crate::executor::now());
         let pending_steering = self
             .authority
             .checkpoint()

@@ -15,7 +15,7 @@ pub(super) struct LeaseHeartbeat {
     stop: CancellationToken,
     lost: CancellationToken,
     failure: Arc<Mutex<Option<AgentError>>>,
-    task: Option<tokio::task::JoinHandle<()>>,
+    task: Option<crate::executor::JoinHandle<()>>,
 }
 
 impl Drop for LeaseHeartbeat {
@@ -33,7 +33,10 @@ impl LeaseHeartbeat {
         &self.lost
     }
 
-    pub(super) fn start(authority: Arc<Mutex<CheckpointAuthority>>) -> Self {
+    pub(super) fn start(
+        authority: Arc<Mutex<CheckpointAuthority>>,
+        executor: &crate::executor::Executor,
+    ) -> Self {
         let stop = CancellationToken::new();
         let lost = CancellationToken::new();
         let failure = Arc::new(Mutex::new(None));
@@ -43,22 +46,22 @@ impl LeaseHeartbeat {
             let lost_task = lost.clone();
             let failure_task = Arc::clone(&failure);
             let interval = heartbeat_interval(branch.lease.lease_seconds());
-            tokio::spawn(async move {
-                let mut tick = tokio::time::interval(Duration::from_millis(100));
-                tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            executor.spawn(async move {
+                let mut tick =
+                    crate::executor::Executor::current().interval(Duration::from_millis(100));
                 // The store clock counts suspend time even when Tokio's does
                 // not. Expiry wakes renewal/revival; it is not proof of loss.
                 // Once attempted, capacity retries keep their bounded cadence.
                 let mut expiry_attempted = false;
-                let mut next_renewal = tokio::time::Instant::now() + interval;
+                let mut next_renewal = crate::executor::now() + interval;
                 loop {
                     tokio::select! {
                         // Biased: once cleanup has requested the stop, the
                         // heartbeat must not start one more renewal.
                         biased;
                         () = stop_task.cancelled() => return,
-                        () = tokio::time::sleep_until(next_renewal) => {}
-                        _ = tick.tick() => {
+                        () = crate::executor::sleep_until(next_renewal) => {}
+                        () = tick.tick() => {
                             if expiry_attempted || lease_live(&authority) == Some(true) {
                                 continue;
                             }
@@ -68,7 +71,7 @@ impl LeaseHeartbeat {
                     // Stores stamp expiry before returning the acknowledgement.
                     // A slow acknowledgement must not add another full sleep;
                     // anchor at this start rather than replaying missed ticks.
-                    next_renewal = tokio::time::Instant::now() + interval;
+                    next_renewal = crate::executor::now() + interval;
                     let error = match renew_once(&authority).await {
                         Ok(()) => {
                             expiry_attempted = false;
@@ -82,7 +85,7 @@ impl LeaseHeartbeat {
                                 || storage_waiting(&authority)
                                 || lease_live(&authority) != Some(false) =>
                         {
-                            next_renewal = tokio::time::Instant::now()
+                            next_renewal = crate::executor::now()
                                 + if error.is_storage_full() || storage_waiting(&authority) {
                                     Duration::from_secs(5)
                                 } else {
@@ -135,7 +138,7 @@ impl LeaseHeartbeat {
     pub(super) async fn stop_and_join(&mut self, timeout: Duration) -> Result<(), AgentError> {
         self.stop.cancel();
         if let Some(mut task) = self.task.take() {
-            match tokio::time::timeout(timeout, &mut task).await {
+            match crate::executor::timeout(timeout, &mut task).await {
                 Ok(Ok(())) => {}
                 Ok(Err(_)) => {
                     return Err(AgentError::new(
@@ -225,14 +228,15 @@ async fn renew_once(authority: &Arc<Mutex<CheckpointAuthority>>) -> Result<(), R
     let Some(initial) = initial else {
         return Ok(());
     };
-    let _gate = tokio::time::timeout(initial.store_timeouts.operation, initial.lease_gate.lock())
-        .await
-        .map_err(|_| {
-            RenewalFailure::Transient(AgentError::new(
-                AgentErrorKind::Session,
-                "durable lease-renew gate exceeded its configured deadline",
-            ))
-        })?;
+    let _gate =
+        crate::executor::timeout(initial.store_timeouts.operation, initial.lease_gate.lock())
+            .await
+            .map_err(|_| {
+                RenewalFailure::Transient(AgentError::new(
+                    AgentErrorKind::Session,
+                    "durable lease-renew gate exceeded its configured deadline",
+                ))
+            })?;
     renew_under_gate(authority).await?;
     Ok(())
 }

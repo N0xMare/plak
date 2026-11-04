@@ -225,7 +225,7 @@ impl Driver {
                 };
             }
         };
-        let started = tokio::time::Instant::now();
+        let started = crate::executor::now();
         let parked_before = self.credential_wait_elapsed;
         let operation_deadline = started + self.config.model_operation_timeout;
         let context = self
@@ -353,8 +353,8 @@ impl Driver {
         command: &PromptCommand,
         attempt_id: AttemptId,
         request: RoundRequest,
-        started: tokio::time::Instant,
-        operation_deadline: tokio::time::Instant,
+        started: crate::executor::Instant,
+        operation_deadline: crate::executor::Instant,
         observed_usage: &mut Option<Usage>,
         operation_id: &mut Option<OperationId>,
         validated_plan: &mut Option<ValidatedRequestPlan>,
@@ -522,7 +522,7 @@ impl Driver {
         }
         let start = loop {
             if self.request_slot.is_none() {
-                let queued_at = tokio::time::Instant::now();
+                let queued_at = crate::executor::now();
                 self.request_slot = self.take_request_slot(command).await?;
                 slot_wait_elapsed = slot_wait_elapsed.saturating_add(queued_at.elapsed());
             }
@@ -531,7 +531,7 @@ impl Driver {
                     .credential_wait_elapsed
                     .saturating_sub(wait_elapsed_before)
                 + slot_wait_elapsed;
-            if tokio::time::Instant::now() >= operation_deadline {
+            if crate::executor::now() >= operation_deadline {
                 return Err(self.model_timeout_error());
             }
             let provider_dispatch_gate = Arc::clone(&self.provider_dispatch_gate);
@@ -539,7 +539,7 @@ impl Driver {
             if command.cancellation.is_cancelled() || self.shutdown.is_cancelled() {
                 return Err(cancelled_error());
             }
-            if tokio::time::Instant::now() >= operation_deadline {
+            if crate::executor::now() >= operation_deadline {
                 return Err(self.model_timeout_error());
             }
             let dispatch_checked_at = self.clock.now();
@@ -587,7 +587,7 @@ impl Driver {
             if command.cancellation.is_cancelled() || self.shutdown.is_cancelled() {
                 return Err(cancelled_error());
             }
-            if tokio::time::Instant::now() >= operation_deadline {
+            if crate::executor::now() >= operation_deadline {
                 return Err(self.model_timeout_error());
             }
             let mut start = prepared.start_with_control(context);
@@ -602,7 +602,7 @@ impl Driver {
             };
         };
         let digest = plan.digest();
-        let operation_timeout = tokio::time::sleep_until(operation_deadline);
+        let operation_timeout = crate::executor::sleep_until(operation_deadline);
         tokio::pin!(operation_timeout);
         let mut stream = match start {
             ModelStartAdmission::Ready(result) => {

@@ -1158,12 +1158,7 @@ pub(in crate::runtime) fn validate_durable_builder(
             "agent instruction prefix exceeds the canonical block limit",
         ));
     }
-    tokio::runtime::Handle::try_current().map_err(|_| {
-        AgentError::new(
-            AgentErrorKind::InvalidInput,
-            "agent construction requires an active Tokio runtime",
-        )
-    })?;
+    builder.executor()?;
     Ok(())
 }
 

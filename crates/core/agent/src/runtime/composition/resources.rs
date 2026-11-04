@@ -64,7 +64,7 @@ pub(in crate::runtime) async fn join_extracted_local_composition_owner(
             }
         }
     };
-    let _ = tokio::time::timeout(Duration::from_secs(1), deliveries).await;
+    let _ = crate::executor::timeout(Duration::from_secs(1), deliveries).await;
     if terminate_active_cell && let Some(cell) = state.cell.clone() {
         match contain_cleanup_panic(async { Ok(resources.session.terminate(cell).await) }).await {
             Ok(LocalCompositionTerminateResult::Joined(_)) => {
@@ -317,7 +317,7 @@ impl CompositionOwner {
         self.exec_correlation = Some(invocation.correlation().clone());
         self.pending_updates.clear();
         self.possible_start = true;
-        self.started_at = Some(tokio::time::Instant::now());
+        self.started_at = Some(crate::executor::now());
         self.reset_nested_for_cell();
     }
 

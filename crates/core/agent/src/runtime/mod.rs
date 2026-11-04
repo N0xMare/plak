@@ -181,6 +181,8 @@ pub struct AgentBuilder {
     request_policy: AgentRequestPolicy,
     instructions: Vec<InstructionBlock>,
     harness_plan: Option<ResolvedHarnessPlan>,
+    /// The host's runtime; `None` is the Tokio runtime current at build.
+    runtime: Option<crate::executor::Executor>,
     clock: Arc<dyn Clock>,
     ids: Arc<dyn IdGenerator>,
     event_ids: Arc<dyn IdGenerator>,
@@ -230,6 +232,7 @@ struct PreparedAgent {
     config: AgentConfig,
     stable_request_prefix: StableRequestPrefix,
     harness_plan: ResolvedHarnessPlan,
+    executor: crate::executor::Executor,
     clock: Arc<dyn Clock>,
     ids: Arc<dyn IdGenerator>,
     agent_id: DriverInstanceId,
@@ -275,7 +278,7 @@ struct AgentInner {
     provider_dispatch_gate: Arc<tokio::sync::Mutex<()>>,
     credential_wait: Arc<Mutex<Option<CredentialWait>>>,
     job_stop: Mutex<JobStopState>,
-    job_runtime: tokio::runtime::Handle,
+    executor: crate::executor::Executor,
     job_sessions: plakous_tools::JoinedProcessSessions,
     /// Whether a host-owned `JobHost` holds the process service, so a
     /// transfer release can leave running jobs for the next owner.
@@ -298,7 +301,7 @@ struct AgentInner {
     recovered_turn: Option<RecoveredTurnHandle>,
     abandoned_turn: Option<AbandonedTurnReport>,
     #[cfg(test)]
-    driver_abort: tokio::task::AbortHandle,
+    driver_abort: crate::executor::JoinHandle<()>,
     /// Whether the driver drew a digest salt and measured the request footprint.
     #[cfg(test)]
     measurement_state: (bool, bool),
@@ -599,7 +602,7 @@ struct PreparedPromptCommand {
     turn_id: TurnId,
     input: UserInput,
     follow_up: bool,
-    admitted_at: tokio::time::Instant,
+    admitted_at: crate::executor::Instant,
     cancellation: CancellationToken,
     shared: Arc<TurnShared>,
 }
@@ -617,7 +620,7 @@ pub(crate) struct PromptCommand {
     follow_up: bool,
     operation_id: OperationId,
     binding: Digest,
-    admitted_at: tokio::time::Instant,
+    admitted_at: crate::executor::Instant,
     cancellation: CancellationToken,
     shared: Arc<TurnShared>,
 }
@@ -679,7 +682,7 @@ struct TurnTelemetry {
     context: TelemetryContext,
     clock: Arc<dyn Clock>,
     shutdown: CancellationToken,
-    started: Mutex<Option<tokio::time::Instant>>,
+    started: Mutex<Option<crate::executor::Instant>>,
     compartments: Mutex<TurnTelemetryCompartments>,
 }
 

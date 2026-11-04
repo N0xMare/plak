@@ -73,9 +73,9 @@ impl Driver {
         } else {
             Ok(())
         };
-        let tool_started = std::time::Instant::now();
+        let tool_started = crate::executor::now();
         let tool_result = contain_cleanup_panic(async {
-            tokio::time::timeout(
+            crate::executor::timeout(
                 self.config.model_cleanup_timeout,
                 self.tools.shutdown_tasks(),
             )
@@ -95,11 +95,11 @@ impl Driver {
             DurabilityAttemptKind::CleanupToolDrain,
             &tool_result,
         );
-        let jobs_started = std::time::Instant::now();
+        let jobs_started = crate::executor::now();
         let jobs_result = if release_mode == super::super::JobReleaseMode::Terminal {
             let sessions = self.job_sessions.clone();
             let owner = self.agent_id.to_string();
-            tokio::task::spawn_blocking(move || {
+            crate::executor::spawn_blocking(move || {
                 plakous_tools::internal::stop_jobs_for_owner(
                     &sessions,
                     &owner,
@@ -513,7 +513,7 @@ impl Driver {
         // wrap this owner in an async timeout: dropping a timed-out `JoinHandle`
         // detaches the cleanup, allowing it to retire children after this driver
         // has stopped correlating their durable lifetimes.
-        let cleanup = tokio::task::spawn_blocking(move || {
+        let cleanup = crate::executor::spawn_blocking(move || {
             let mut failure = None;
             for id in cleanup_ids {
                 if let Err(error) = cleanup_sessions.terminate(id) {

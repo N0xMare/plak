@@ -650,7 +650,7 @@ impl Driver {
     ) -> Result<AuthorizationOutcome, AgentError> {
         let binding_digest = decision_ref.binding_digest();
         let mut pending = Some(pending);
-        let expiry = tokio::time::sleep(remaining);
+        let expiry = crate::executor::sleep(remaining);
         tokio::pin!(expiry);
 
         loop {

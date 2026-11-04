@@ -264,6 +264,16 @@ an export.
   session ledger, kept from the child turn usage the tree projects. The
   intent x role table's B1 cells close. Embedder break: the new intents
   and `ProtocolExtension::reads_usage` (defaults to false).
+- An agent runs on a host `Runtime`: `AgentBuilder::runtime` supplies it, and
+  without one the agent runs, as before, on the Tokio runtime current at
+  build. The driver, the lease heartbeat, job-stop and cleanup blocking calls,
+  every sleep and store or model timeout, and every monotonic reading go
+  through it. `AgentBuilder::clock` replaces the wall clock alone.
+  `Runtime::spawn_blocking` is new, with a default that runs the work as a
+  task; `TokioRuntime` now lives in `plakous-agent`, still at
+  `plakous::runtime::TokioRuntime`, and runs it on Tokio's blocking pool. The
+  tool runtime keeps its Tokio-backed `ToolTimer` and `ToolTaskOwner`
+  defaults.
 - Version control on a runner (unsupported; only the test route selects a
   runner): an orchestration tree on a selected runner drives its copies
   through `RemoteVcs` over the runner link instead of refusing every effect.

@@ -1169,7 +1169,7 @@ impl Driver {
             turn_id,
             input,
             follow_up,
-            admitted_at: tokio::time::Instant::now(),
+            admitted_at: crate::executor::now(),
             cancellation,
             shared: Arc::clone(&shared),
         };

@@ -118,24 +118,42 @@ pub async fn abandon_and_release_many(
     for agent in agents {
         agent.begin_abandon();
     }
-    let settlement = async {
-        let mut stops = tokio::task::JoinSet::new();
-        for agent in agents {
-            let receiver = match &*agent
-                .inner
-                .job_stop
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-            {
-                super::JobStopState::Idle => None,
-                super::JobStopState::Stopping(receiver) => Some(receiver.clone()),
-            };
-            if let Some(receiver) = receiver {
-                stops.spawn(wait_for_completion(receiver));
-            }
+    let executor = agents
+        .first()
+        .map_or_else(crate::executor::Executor::current, |agent| {
+            agent.inner.executor.clone()
+        });
+    Box::pin(executor.scope(settle_and_release_many(agents, job_budget, &executor))).await
+}
+
+async fn settle_and_release_many(
+    agents: &[Agent],
+    job_budget: std::time::Duration,
+    executor: &crate::executor::Executor,
+) -> Result<(), AgentError> {
+    let mut stops = futures_util::stream::FuturesUnordered::new();
+    for agent in agents {
+        let receiver = match &*agent
+            .inner
+            .job_stop
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        {
+            super::JobStopState::Idle => None,
+            super::JobStopState::Stopping(receiver) => Some(receiver.clone()),
+        };
+        if let Some(receiver) = receiver {
+            stops.push(agent.inner.executor.spawn(wait_for_completion(receiver)));
         }
+    }
+    // Waits that outlive the budget are aborted, as a dropped JoinSet's were.
+    let aborts = stops
+        .iter()
+        .map(crate::executor::JoinHandle::abort_handle)
+        .collect::<Vec<_>>();
+    let settlement = async {
         let mut errors = Vec::new();
-        while let Some(result) = stops.join_next().await {
+        while let Some(result) = futures_util::StreamExt::next(&mut stops).await {
             if let Err(error) = result
                 .map_err(|_| AgentError::new(AgentErrorKind::Tool, "job stop task failed"))
                 .and_then(std::convert::identity)
@@ -156,13 +174,16 @@ pub async fn abandon_and_release_many(
         errors.extend(records.into_iter().filter_map(Result::err));
         errors
     };
-    let mut errors = match tokio::time::timeout(job_budget, settlement).await {
-        Ok(errors) => errors,
-        Err(_) => vec![AgentError::new(
+    let settled = executor.timeout(job_budget, settlement).await;
+    let mut errors = settled.unwrap_or_else(|_| {
+        for abort in &aborts {
+            abort.abort();
+        }
+        vec![AgentError::new(
             AgentErrorKind::Tool,
             "job stop and terminal recording deadline exceeded",
-        )],
-    };
+        )]
+    });
     let mut stores = Vec::<LeaseBatch>::new();
     let mut seen = Vec::<&Agent>::new();
     let mut guards = Vec::new();
@@ -733,9 +754,9 @@ impl Agent {
         *stop = super::JobStopState::Stopping(receiver);
         let sessions = self.inner.job_sessions.clone();
         let owner = self.id().to_string();
-        let runtime = self.inner.job_runtime.clone();
-        self.inner.job_runtime.spawn(async move {
-            let result = runtime
+        let executor = self.inner.executor.clone();
+        drop(self.inner.executor.spawn(async move {
+            let result = executor
                 .spawn_blocking(move || {
                     plakous_tools::internal::stop_jobs_for_owner(
                         &sessions,
@@ -752,7 +773,7 @@ impl Agent {
                     })
                 });
             let _ = sender.send(Some(result));
-        });
+        }));
     }
 
     /// Starts process-exit abandonment while retaining the lease, so the host

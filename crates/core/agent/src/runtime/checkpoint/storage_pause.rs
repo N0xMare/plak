@@ -70,7 +70,7 @@ impl StoragePause {
     }
 
     pub(super) async fn retry(&self, externally_cancelled: &(impl Fn() -> bool + Sync)) -> bool {
-        let retry_at = tokio::time::Instant::now() + Duration::from_secs(5);
+        let retry_at = crate::executor::now() + Duration::from_secs(5);
         loop {
             if externally_cancelled() || interrupted(&self.interrupt) {
                 return false;
@@ -79,8 +79,8 @@ impl StoragePause {
                 biased;
                 () = self.cancel.cancelled() => return false,
                 () = self.shutdown.cancelled() => return false,
-                () = tokio::time::sleep_until(retry_at) => return true,
-                () = tokio::time::sleep(Duration::from_millis(100)) => {}
+                () = crate::executor::sleep_until(retry_at) => return true,
+                () = crate::executor::sleep(Duration::from_millis(100)) => {}
             }
         }
     }

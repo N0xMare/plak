@@ -8,7 +8,7 @@ pub(super) async fn join_cancelled_control_start(
     start: plakous_model::StartModelCallWithControl,
     timeout: Duration,
 ) -> ModelCleanupOutcome {
-    match tokio::time::timeout(timeout, drain_cancelled_control_start(start)).await {
+    match crate::executor::timeout(timeout, drain_cancelled_control_start(start)).await {
         Ok(result) => result,
         Err(_) => ModelCleanupOutcome::Unjoined(model_cleanup_timeout_error()),
     }
@@ -51,7 +51,7 @@ pub(super) async fn join_cancelled_control_stream(
     stream: &mut plakous_model::ModelControlStream,
     timeout: Duration,
 ) -> ModelCleanupOutcome {
-    match tokio::time::timeout(timeout, drain_cancelled_control_stream(stream)).await {
+    match crate::executor::timeout(timeout, drain_cancelled_control_stream(stream)).await {
         Ok(result) => result,
         Err(_) => ModelCleanupOutcome::Unjoined(model_cleanup_timeout_error()),
     }

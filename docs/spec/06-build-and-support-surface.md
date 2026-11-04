@@ -1877,10 +1877,14 @@ are known and accepted for now; their APIs do not change with this check:
   wasm host injects its own `Clock` and `SubscriptionGateClock`.
 - `ReachabilityProbe` takes a `std::time::Instant` deadline in its signature,
   so a wasm caller cannot construct one without a substitute clock.
-- `plakous-tools` and `plakous-agent` read `std::time::Instant` and
-  `SystemTime` for deadlines, timestamps and supervision, and start tasks with
-  `tokio::spawn` and `tokio::task::spawn_blocking`; none of these works on
-  `wasm32-unknown-unknown` without a host-supplied substitute.
+- `plakous-tools` reads `std::time::Instant` and `SystemTime` for deadlines,
+  timestamps and supervision, and runs its blocking lane on
+  `tokio::task::spawn_blocking`; neither works on `wasm32-unknown-unknown`
+  without a host-supplied substitute. `plakous-agent` routes its tasks,
+  sleeps and monotonic time through the `Runtime` a host supplies with
+  `AgentBuilder::runtime` (chapter 01 §2.5), and has no native default on that
+  target, but its tool runtime still defaults to a Tokio timer and task owner
+  and reads `std::time::Instant` for tool deadlines.
 - `uuid`'s `js` feature calls `globalThis.crypto.getRandomValues` through
   `wasm-bindgen`. A v7 identifier generated in a host without the generated
   JavaScript glue or without `globalThis.crypto` fails at run time.

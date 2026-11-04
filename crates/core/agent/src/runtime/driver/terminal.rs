@@ -93,7 +93,7 @@ impl Driver {
                 },
             );
         }
-        let started = tokio::time::Instant::now();
+        let started = crate::executor::now();
         command.shared.mark_telemetry_started(started);
         self.emit_telemetry(
             self.telemetry_context.with_turn(command.turn_id),
@@ -189,7 +189,7 @@ impl Driver {
 
     /// Idle-only maintenance; failures leave history for the next terminal's retry.
     pub(super) async fn retain_history_when_idle(&self, turn_id: plakous_model::TurnId) {
-        let started = tokio::time::Instant::now();
+        let started = crate::executor::now();
         let pruned = AssertUnwindSafe(
             self.authority
                 .prune_superseded(AUTOMATIC_PRUNE_MINIMUM_CHECKPOINTS),

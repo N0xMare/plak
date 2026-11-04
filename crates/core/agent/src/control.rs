@@ -862,7 +862,7 @@ impl AgentSessionEndpoint {
                 mpsc::error::TrySendError::Full(_) => AgentSessionEndpointError::Backpressure,
                 mpsc::error::TrySendError::Closed(_) => AgentSessionEndpointError::Unavailable,
             })?;
-        tokio::time::timeout(SESSION_ENDPOINT_REPLY_TIMEOUT, receiver)
+        crate::executor::timeout(SESSION_ENDPOINT_REPLY_TIMEOUT, receiver)
             .await
             .ok()
             .and_then(Result::ok)

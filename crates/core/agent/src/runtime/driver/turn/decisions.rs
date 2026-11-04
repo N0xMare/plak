@@ -215,7 +215,7 @@ impl Driver {
             tokio::select! {
                 () = command.cancellation.cancelled() => return Err(cancelled_error()),
                 () = self.shutdown.cancelled() => return Err(cancelled_error()),
-                () = tokio::time::sleep(std::time::Duration::from_millis(delay.as_millis())) => {}
+                () = crate::executor::sleep(std::time::Duration::from_millis(delay.as_millis())) => {}
             }
         }
         command.shared.continue_after_model()?;

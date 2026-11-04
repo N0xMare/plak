@@ -269,6 +269,7 @@ impl AgentBuilder {
             request_policy: AgentRequestPolicy::default(),
             instructions: Vec::new(),
             harness_plan: None,
+            runtime: None,
             clock: Arc::new(SystemClock),
             ids: Arc::new(SystemIdGenerator),
             event_ids: Arc::new(SystemIdGenerator),
@@ -544,6 +545,41 @@ impl AgentBuilder {
         self
     }
 
+    /// Runs the agent on `runtime`: its driver, its tasks, its sleeps and its
+    /// monotonic time. Without one the agent runs on the Tokio runtime that is
+    /// current when it is built. The handle is `Send` and `Sync` on every
+    /// target, so the agent's own futures stay `Send`; the futures it returns
+    /// need not be on `wasm32`.
+    #[must_use]
+    pub fn runtime<R>(mut self, runtime: Arc<R>) -> Self
+    where
+        R: plakous_model::Runtime + Send + Sync + ?Sized,
+    {
+        self.runtime = Some(crate::executor::Executor::new(runtime));
+        self
+    }
+
+    /// Replaces the wall clock that stamps identities, timestamps and
+    /// decision expiries ([`SystemClock`] by default).
+    #[must_use]
+    pub fn clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
+
+    /// The executor this builder's agent runs on.
+    pub(crate) fn executor(&self) -> Result<crate::executor::Executor, AgentError> {
+        match &self.runtime {
+            Some(executor) => Ok(executor.clone()),
+            None => crate::executor::Executor::native().ok_or_else(|| {
+                AgentError::new(
+                    AgentErrorKind::InvalidInput,
+                    "agent construction requires an active Tokio runtime",
+                )
+            }),
+        }
+    }
+
     /// Replaces time and identity sources for deterministic tests or embedding.
     #[must_use]
     pub fn identity_sources(mut self, clock: Arc<dyn Clock>, ids: Arc<dyn IdGenerator>) -> Self {
@@ -617,6 +653,16 @@ impl AgentBuilder {
     /// Returns a typed error when the builder's model, plan, tools, or prefix
     /// disagree with the validated durable checkpoint.
     pub(crate) async fn build_durable(
+        self,
+        bootstrap: DurableRuntimeBootstrap,
+    ) -> Result<Agent, AgentError> {
+        // Recovery publication runs here, on the caller's task, before the
+        // driver exists: it waits on the agent's runtime too.
+        let executor = self.executor()?;
+        Box::pin(executor.scope(self.build_durable_scoped(bootstrap))).await
+    }
+
+    async fn build_durable_scoped(
         self,
         bootstrap: DurableRuntimeBootstrap,
     ) -> Result<Agent, AgentError> {
@@ -792,6 +838,7 @@ impl PreparedAgent {
         let restored = restored_frame
             .map(|frame| restore_startup(&builder, frame, run_id, &tools, &tool_presentation))
             .transpose()?;
+        let executor = builder.executor()?;
         Ok(Self {
             job_sessions,
             job_host: builder.job_host,
@@ -804,6 +851,7 @@ impl PreparedAgent {
             config,
             stable_request_prefix,
             harness_plan,
+            executor,
             clock: builder.clock,
             ids: builder.ids,
             agent_id,
@@ -1029,12 +1077,7 @@ fn validate_construction_inputs(
             "agent instruction prefix exceeds the canonical block limit",
         ));
     }
-    tokio::runtime::Handle::try_current().map_err(|_| {
-        AgentError::new(
-            AgentErrorKind::InvalidInput,
-            "agent construction requires an active Tokio runtime",
-        )
-    })?;
+    builder.executor()?;
     Ok(model_error_target)
 }
 

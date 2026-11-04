@@ -548,7 +548,7 @@ impl Driver {
             .await;
             return Err(error_with_cleanup_disposition(primary, &cleanup));
         }
-        let source_deadline = tokio::time::Instant::now() + self.config.model_operation_timeout;
+        let source_deadline = crate::executor::now() + self.config.model_operation_timeout;
         let source_authority = self.start_authority();
         let source_cancellation = command.cancellation.clone();
         let request = LocalCompositionExecuteRequest {
@@ -562,8 +562,7 @@ impl Driver {
                                 "source admission lost branch authority".into(),
                             )
                         })?;
-                        if cancellation.is_cancelled()
-                            || tokio::time::Instant::now() >= source_deadline
+                        if cancellation.is_cancelled() || crate::executor::now() >= source_deadline
                         {
                             return Err(LocalCompositionSessionLoss::HostLost(
                                 "source admission was cancelled or expired".into(),
@@ -588,7 +587,7 @@ impl Driver {
             let execute = session.execute(request);
             drop(lease_guard);
             tokio::pin!(execute);
-            let execute_deadline = tokio::time::sleep_until(source_deadline);
+            let execute_deadline = crate::executor::sleep_until(source_deadline);
             tokio::pin!(execute_deadline);
             tokio::select! {
                 () = self.shutdown.cancelled() => {
@@ -692,7 +691,7 @@ impl Driver {
             max_output_tokens,
             wall_time: state
                 .started_at()
-                .map_or(Duration::ZERO, |started| started.elapsed()),
+                .map_or(Duration::ZERO, crate::executor::Instant::elapsed),
         })
     }
 
@@ -849,7 +848,7 @@ impl Driver {
             max_output_tokens,
             wall_time: state
                 .started_at()
-                .map_or(Duration::ZERO, |started| started.elapsed()),
+                .map_or(Duration::ZERO, crate::executor::Instant::elapsed),
         })
     }
 }

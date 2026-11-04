@@ -382,7 +382,7 @@ impl DurableSessionRuntime {
                                 "persisted compaction recovery locator is contradictory",
                             )
                         })?;
-                let Ok(Ok(result)) = tokio::time::timeout(
+                let Ok(Ok(result)) = crate::executor::timeout(
                     runtime.model_operation_timeout,
                     Arc::clone(&runtime.model).recover_call(recovery_request.clone()),
                 )

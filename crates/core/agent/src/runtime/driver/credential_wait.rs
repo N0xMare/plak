@@ -101,7 +101,7 @@ impl Driver {
             events: self.events.clone(),
             context,
         };
-        let started = tokio::time::Instant::now();
+        let started = crate::executor::now();
         let clock = Arc::clone(&self.clock);
         let mut ready = Box::pin(async move {
             let mut delay = std::time::Duration::from_millis(250);
@@ -115,7 +115,7 @@ impl Driver {
                     Err(RuntimeModelAuthorityError::AwaitingCredential) => {
                         // A readiness edge can race another logout or refresh.
                         // Keep one visible park and bound even a spurious wake.
-                        tokio::time::sleep(delay).await;
+                        crate::executor::sleep(delay).await;
                         delay = (delay * 2).min(std::time::Duration::from_secs(2));
                     }
                     Err(error) => return Err(error),
@@ -130,7 +130,7 @@ impl Driver {
                 () = self.shutdown.cancelled() => break Err(cancelled_error()),
                 () = self.authority.lease_lost() => break Err(self.authority.heartbeat_failure()),
                 result = &mut ready => break result.map_err(|error| self.authority_error(error)),
-                () = tokio::time::sleep(std::time::Duration::from_millis(100)), if active.is_none() => {
+                () = crate::executor::sleep(std::time::Duration::from_millis(100)), if active.is_none() => {
                     if interruption.cooperative_wait_interrupted() { break Err(cancelled_error()); }
                 }
                 control = self.control_receiver.recv() => {

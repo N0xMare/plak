@@ -92,7 +92,7 @@ impl Driver {
         if !self.telemetry.is_enabled() {
             return None;
         }
-        let now = tokio::time::Instant::now();
+        let now = crate::executor::now();
         self.last_provider_request_at
             .replace(now)
             .map(|then| now.saturating_duration_since(then))

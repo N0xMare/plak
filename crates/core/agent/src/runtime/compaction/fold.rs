@@ -423,7 +423,7 @@ pub(super) async fn measure_compaction_successor(
         .map_err(ModelError::from)
         .map_err(AgentError::from_model)?;
     let checked_at = clock.now();
-    let authority = tokio::time::timeout(
+    let authority = crate::executor::timeout(
         authority_timeout,
         Arc::clone(&model).revalidate_runtime_authority(checked_at),
     )

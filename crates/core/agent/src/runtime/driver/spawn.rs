@@ -49,7 +49,7 @@ impl PreparedAgent {
             .manifest()
             .topology()
             .branch_revision;
-        let checkpoint_owner = self.authority.start();
+        let checkpoint_owner = self.authority.start_on(&self.executor);
         let authority = checkpoint_owner.reader();
         let provider_dispatch_gate = Arc::new(AsyncMutex::new(()));
         let command_nonce = Arc::new(AtomicU64::new(1));
@@ -111,7 +111,7 @@ impl PreparedAgent {
                 follow_up: restored.frame.root().follow_up,
                 operation_id: restored.frame.root().operation_id,
                 binding: restored.frame.root().binding,
-                admitted_at: tokio::time::Instant::now(),
+                admitted_at: self.executor.now(),
                 cancellation,
                 shared: Arc::clone(&shared),
             };
@@ -283,7 +283,7 @@ impl PreparedAgent {
         let panic_events = events.clone();
         let storage_pause =
             crate::runtime::checkpoint::storage_pause::StoragePause::new(shutdown.clone());
-        let driver_task = tokio::spawn(async move {
+        let driver_task = self.executor.spawn(async move {
             let result = if let Ok(result) =
                 Box::pin(AssertUnwindSafe(storage_pause.scope(driver.run())).catch_unwind()).await
             {
@@ -295,7 +295,8 @@ impl PreparedAgent {
             let _ = completion_sender.send(Some(result));
         });
         #[cfg(test)]
-        let driver_abort = driver_task.abort_handle();
+        let driver_abort = driver_task;
+        #[cfg(not(test))]
         drop(driver_task);
 
         Agent {
@@ -304,7 +305,7 @@ impl PreparedAgent {
                 provider_dispatch_gate,
                 credential_wait,
                 job_stop: Mutex::new(crate::runtime::JobStopState::Idle),
-                job_runtime: tokio::runtime::Handle::current(),
+                executor: self.executor.clone(),
                 job_sessions,
                 has_job_host,
                 job_release_mode,

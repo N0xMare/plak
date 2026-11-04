@@ -255,7 +255,10 @@ module organization grants no additional public runtime or persistence authority
 `plakous-model` defines the executor-neutral interfaces a host runs Plakous
 code on. `Runtime::spawn` starts a boxed `'static` task and returns a
 `SpawnedTask` that can abort it and report whether it finished; dropping that
-handle detaches the task. `Runtime::sleep` returns a future that completes after
+handle detaches the task. `Runtime::spawn_blocking` starts work that may block
+its thread where it does not stall the runtime's tasks; its default runs the
+work as an ordinary task, for a single-threaded host, and aborting work that
+has started has no effect. `Runtime::sleep` returns a future that completes after
 a duration, and `Runtime::now` is monotonic time since the runtime's own origin,
 never wall-clock time. Wall-clock time is the existing `Clock` (`SystemClock`
 natively). `HttpTransport::send` performs one HTTP exchange: an `HttpRequest`
@@ -274,12 +277,37 @@ Body chunks are owned byte vectors.
 The facade's `plakous::runtime` re-exports these interfaces with their native
 implementations: `TokioRuntime`, on the Tokio runtime the caller runs on, and,
 with any HTTP-capable feature, `http::NativeHttpTransport`, over one bounded
-`plakous-http` client for absolute `https` URLs. The interfaces are in the
-portable crate set (chapter 06 §7.5); the native implementations are not.
+`plakous-http` client for absolute `https` URLs. `TokioRuntime` is defined in
+`plakous-agent` (native targets only) and `spawn_blocking` runs on Tokio's
+blocking pool. The interfaces are in the portable crate set (chapter 06 §7.5);
+the native implementations are not portable.
 
-Hosted task sets start every task through `Runtime::spawn`. The agent driver,
-its tool runtime and the durable checkpoint owner still use Tokio's timers,
-`Instant` and spawns directly; moving them onto these interfaces is later work.
+An agent runs on one `Runtime`. `AgentBuilder::runtime` supplies the host's;
+without it the agent runs on the Tokio runtime current at `build`, held by
+handle, so construction outside a Tokio runtime fails as before and a host
+thread outside it can still start the agent's job stop. The handle is `Send`
+and `Sync` on every target, because the agent's own futures are; on `wasm32` a
+sleep runs as a runtime task that signals a `Send` waiter. Through that
+runtime go the driver task, the durable lease heartbeat, every job-stop and
+cleanup blocking call, every sleep, deadline and store or model timeout, and
+every monotonic reading (operation deadlines, queue and telemetry durations).
+The driver, every task started through the runtime, durable construction and
+the batch abandon run in the agent's scope, so code below them reaches the
+same runtime without carrying it; a session-store operation called outside any
+agent's scope runs on the native Tokio runtime of its caller. A task the agent
+aborts is dropped at its next poll on any runtime, and aborted blocking work
+that has not started never runs; a task that panics reports the same
+cancellation as one that was aborted. On the default runtime a sleep binds to
+the timer of the Tokio runtime that creates it, as Tokio's own sleep does, and
+to the build runtime only when it is created outside every Tokio runtime; its
+monotonic origin lies far in the past, so a paused test clock never reads
+before it. `AgentBuilder::clock`
+replaces the wall clock alone (`SystemClock` by default);
+`AgentBuilder::identity_sources` still replaces the clock and the identity
+source together. Hosted task sets start every task through `Runtime::spawn`.
+The tool runtime keeps its own injectable `ToolTimer` (whose deadlines are
+`std::time::Instant`) and `ToolTaskOwner`, Tokio-backed by default; moving it
+onto `Runtime` changes that public API and is later work.
 
 ## 3. The agent loop and turn lifecycle
 
@@ -10109,9 +10137,11 @@ attach its turn-scoped preempt watch through the crate-private `with_preempt`.
 `ToolExecutorBindingsBuilder::owner`. They are supported inventory, pinned by
 the external `tests/fixtures/facade-consumer`.
 
-`plakous::runtime` names the runtime interfaces of §2.5 and their native
-implementations, `TokioRuntime` and the feature-gated
-`http::NativeHttpTransport`.
+`plakous::runtime` names the runtime interfaces of §2.5 (with
+`RuntimeBlockingTask`) and their native implementations, `TokioRuntime`
+(re-exported from `plakous-agent`) and the feature-gated
+`http::NativeHttpTransport`. `AgentBuilder::runtime` and `AgentBuilder::clock`
+(§2.5) are on the facade's agent builder.
 
 **Agent lines** (§5.1, §5.7, §8.5) are on the facade:
 `plakous::model::LineId`, `AgentSessions::line_head`, `line_head_of` and `LineHead`,

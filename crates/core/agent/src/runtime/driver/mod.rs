@@ -194,7 +194,7 @@ struct Driver {
     /// measured once when telemetry is enabled.
     request_footprint: Option<(u64, u64)>,
     /// When this driver last sent a provider request, for the idle gap.
-    last_provider_request_at: Option<tokio::time::Instant>,
+    last_provider_request_at: Option<crate::executor::Instant>,
 }
 
 impl Driver {
@@ -411,7 +411,7 @@ pub(in crate::runtime) struct ActorToolDispatchObserver {
     telemetry_context: TelemetryContext,
     clock: Arc<dyn Clock>,
     access_salt: Option<[u8; 32]>,
-    started: Mutex<Option<tokio::time::Instant>>,
+    started: Mutex<Option<crate::executor::Instant>>,
     dispatch_witness: Arc<AtomicBool>,
     error: Mutex<Option<AgentError>>,
 }

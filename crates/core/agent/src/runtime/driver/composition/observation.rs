@@ -176,7 +176,8 @@ impl Driver {
             .map_or(self.config.model_operation_timeout, |budget| {
                 budget.saturating_add(Duration::from_secs(5))
             });
-        let response_deadline = tokio::time::sleep(observation.timeout(operation_timeout, false));
+        let response_deadline =
+            crate::executor::sleep(observation.timeout(operation_timeout, false));
         tokio::pin!(response_deadline);
         let mut steer_settlement_started = false;
         let mut nested_was_settled = true;
@@ -193,8 +194,8 @@ impl Driver {
                     plakous_tools::ToolPreempt::Steer | plakous_tools::ToolPreempt::Notice(_)
                 );
             if steer_pending && resume_in_flight && !expedited {
-                let deadline = tokio::time::Instant::now() + EXPEDITED_OBSERVATION_BOUND;
-                let expedited_result = tokio::time::timeout_at(
+                let deadline = crate::executor::now() + EXPEDITED_OBSERVATION_BOUND;
+                let expedited_result = crate::executor::timeout_at(
                     deadline,
                     session.expedite(observation.cell_id().to_owned()),
                 )
@@ -214,10 +215,9 @@ impl Driver {
                 && (!nested_was_settled
                     || (steer_pending && !steer_settlement_started && !expedited))
             {
-                response_deadline.as_mut().reset(
-                    tokio::time::Instant::now()
-                        + observation.timeout(operation_timeout, steer_pending && !expedited),
-                );
+                response_deadline.set(crate::executor::sleep(
+                    observation.timeout(operation_timeout, steer_pending && !expedited),
+                ));
                 steer_settlement_started = steer_pending;
             }
             nested_was_settled = executions_settled;
@@ -226,9 +226,7 @@ impl Driver {
                 && state.deliveries_are_empty()
                 && !expedited_deadline_started
             {
-                response_deadline
-                    .as_mut()
-                    .reset(tokio::time::Instant::now() + EXPEDITED_OBSERVATION_BOUND);
+                response_deadline.set(crate::executor::sleep(EXPEDITED_OBSERVATION_BOUND));
                 expedited_deadline_started = true;
             }
             let response_ready = state.pending_is_empty()

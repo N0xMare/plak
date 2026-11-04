@@ -113,7 +113,7 @@ pub(in crate::runtime) async fn store_call<T>(
     timeout: Duration,
     future: impl Future<Output = Result<T, SessionStoreError>>,
 ) -> Result<T, StoreCallError> {
-    tokio::time::timeout(timeout, future)
+    crate::executor::timeout(timeout, future)
         .await
         .map_err(|_| StoreCallError::Timeout(phase))?
         .map_err(StoreCallError::Store)
@@ -135,7 +135,7 @@ where
     let pause = StoragePause::current();
     let mut waiting = None;
     loop {
-        let result = tokio::time::timeout(timeout, operation())
+        let result = crate::executor::timeout(timeout, operation())
             .await
             .map_err(|_| StoreCallError::Timeout(phase))?
             .map_err(StoreCallError::Store);
@@ -308,13 +308,13 @@ pub(in crate::runtime) async fn commit_with_acknowledgement_recovery(
     telemetry: Option<&DurabilityCommitTelemetry>,
     lease: &mut BranchLease,
 ) -> Result<CommitReceipt, AgentError> {
-    let durability_started = std::time::Instant::now();
+    let durability_started = crate::executor::now();
     let finish_durability = |status: TelemetryTerminalStatus| {
         if let Some(telemetry) = telemetry {
             telemetry.emit_finished(durability_started.elapsed(), status);
         }
     };
-    let commit_started = std::time::Instant::now();
+    let commit_started = crate::executor::now();
     let (committed, latest_lease) = capacity_checkpoint_commit(store, timeout, request).await;
     // Revival is authoritative even when publication or acknowledgement
     // recovery fails. The caller retains this grant for renewal and release.
@@ -352,7 +352,7 @@ pub(in crate::runtime) async fn commit_with_acknowledgement_recovery(
                 finish_durability(TelemetryTerminalStatus::Failed);
                 return Err(commit_error.into_agent());
             }
-            let recovery_started = std::time::Instant::now();
+            let recovery_started = crate::executor::now();
             match store_call(
                 StorePhase::RecoverCommit,
                 timeout,

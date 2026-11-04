@@ -3624,3 +3624,58 @@ async fn steering_queue_is_fifo_and_bounded_at_safe_boundaries() -> TestResult {
     agent.shutdown().await?;
     Ok(())
 }
+
+/// The native runtime, counting the tasks and sleeps an agent starts on it.
+#[derive(Default)]
+struct CountingRuntime {
+    native: plakous_agent::TokioRuntime,
+    spawns: std::sync::atomic::AtomicUsize,
+    sleeps: std::sync::atomic::AtomicUsize,
+}
+
+impl plakous_model::Runtime for CountingRuntime {
+    fn spawn(&self, task: plakous_model::RuntimeTask) -> Box<dyn plakous_model::SpawnedTask> {
+        self.spawns.fetch_add(1, Ordering::Relaxed);
+        self.native.spawn(task)
+    }
+
+    fn sleep(&self, duration: Duration) -> plakous_model::RuntimeSleep {
+        self.sleeps.fetch_add(1, Ordering::Relaxed);
+        self.native.sleep(duration)
+    }
+
+    fn now(&self) -> Duration {
+        self.native.now()
+    }
+}
+
+#[tokio::test]
+async fn an_agent_built_on_a_host_runtime_runs_its_driver_and_waits_on_it() -> TestResult {
+    let descriptor = descriptor(false, false)?;
+    let expected = request(&descriptor, 5, 7, vec![user_item()?], Vec::new())?;
+    let scenario = text_scenario(
+        &descriptor,
+        expected,
+        100,
+        "plain answer",
+        plakous_test_support::ScenarioStart::Immediate,
+    )?;
+    let model = Arc::new(scripted_model(descriptor, [scenario])?);
+    let (_directory, workspace) = workspace()?;
+    let (clock, ids) = identity_sources()?;
+    let runtime = Arc::new(CountingRuntime::default());
+    let agent = agent_builder(model, ToolRegistryBuilder::default().freeze(), workspace)?
+        .identity_sources(Arc::new(plakous_model::SystemClock), ids)
+        .clock(clock)
+        .runtime(Arc::clone(&runtime) as Arc<dyn plakous_model::Runtime>)
+        .build()?;
+    assert_eq!(runtime.spawns.load(Ordering::Relaxed), 1, "the driver task");
+    let result = agent.prompt(PROMPT).await?.result().await?;
+    assert_completed(&result, "plain answer")?;
+    assert!(
+        runtime.sleeps.load(Ordering::Relaxed) > 0,
+        "the model operation's deadline sleeps on the host runtime"
+    );
+    agent.shutdown().await?;
+    Ok(())
+}

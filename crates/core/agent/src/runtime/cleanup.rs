@@ -20,7 +20,7 @@ pub(super) async fn settle_local_composition_deliveries(
             }
         }
     };
-    if tokio::time::timeout(Duration::from_secs(1), deliveries)
+    if crate::executor::timeout(Duration::from_secs(1), deliveries)
         .await
         .is_err()
     {
