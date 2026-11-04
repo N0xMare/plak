@@ -14,79 +14,19 @@ use super::{
     Arc, AtomicBool, AtomicU8, AtomicU64, AtomicUsize, BTreeMap, BTreeSet, CancellationToken,
     Condvar, Duration, EnvironmentVariableName, EnvironmentVariableValue, ExecutionBackendError,
     ExecutionBackendErrorKind, ExecutionEnvironment, ExecutionEnvironmentLimits,
-    ExecutionWorkspace, HostProcessContext, Instant, JOINED_PROCESS_SERVICE_GENERATION,
-    JoinedProcessCommand, JoinedProcessCursorPollResult, JoinedProcessInputDisposition,
-    JoinedProcessOutputCursor, JoinedProcessOutputRecord, JoinedProcessOutputStream,
-    JoinedProcessPollResult, JoinedProcessSessionId, JoinedProcessStartRequest,
-    JoinedProcessStatus, MAX_JOINED_PROCESS_SESSION_POLL_RECORDS, MAX_JOINED_PROCESS_SESSION_QUEUE,
+    ExecutionWorkspace, HostProcessContext, HostProcessOwner, Instant,
+    JOINED_PROCESS_SERVICE_GENERATION, JoinedProcessCommand, JoinedProcessCursorPollResult,
+    JoinedProcessInputDisposition, JoinedProcessOutputCursor, JoinedProcessOutputRecord,
+    JoinedProcessOutputStream, JoinedProcessPollResult, JoinedProcessSessionId,
+    JoinedProcessStartRequest, JoinedProcessStatus, JoinedSessionInput,
+    MAX_JOINED_PROCESS_SESSION_POLL_RECORDS, MAX_JOINED_PROCESS_SESSION_QUEUE,
     MAX_JOINED_PROCESS_SESSION_WRITE_BYTES, MAX_JOINED_PROCESS_SESSIONS,
-    MAX_LITERAL_PROCESS_STDIN_BYTES, Mutex, NonZeroU64, OperationContext, Ordering, PtyInputSender,
-    Receiver, TryLockError, VecDeque, Weak, backend_error, cleanup_unresolved_error,
+    MAX_LITERAL_PROCESS_STDIN_BYTES, Mutex, NonZeroU64, OperationContext, Ordering, Receiver,
+    TryLockError, VecDeque, Weak, backend_error, cleanup_unresolved_error,
     close_joined_session_input, conflict_error, fmt, invalid_request, io_error, lock,
-    recovery_required_error, resource_error, sleep_until_next_poll, start_joined_host_process,
-    sync_channel, write_joined_session_input,
+    recovery_required_error, resource_error, start_joined_host_process, sync_channel,
+    write_joined_session_input,
 };
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum HostProcessStop {
-    Completed,
-    Cancelled,
-    TimedOut,
-    OutputLimit,
-    Io,
-}
-
-#[derive(Default)]
-pub(super) struct HostProcessOutput {
-    pub(super) stdout: Vec<u8>,
-    pub(super) stderr: Vec<u8>,
-}
-
-#[derive(Clone, Copy)]
-pub(super) enum HostProcessStream {
-    Stdout,
-    Stderr,
-}
-
-pub(super) struct HostProcessOwner {
-    pub(super) stop: Arc<AtomicBool>,
-    pub(super) thread: Option<std::thread::JoinHandle<()>>,
-}
-
-impl HostProcessOwner {
-    pub(super) fn join_until(&mut self, deadline: Instant) -> Result<bool, ExecutionBackendError> {
-        let Some(thread) = self.thread.as_ref() else {
-            // An owner is removed after a successful join. A retained owner
-            // without its handle means that a prior join observed a panic.
-            return Err(io_error("host process supervisor failed"));
-        };
-        let started = Instant::now();
-        while Instant::now() < deadline && !thread.is_finished() {
-            sleep_until_next_poll(started, deadline);
-        }
-        if !thread.is_finished() {
-            return Ok(false);
-        }
-        let thread = self
-            .thread
-            .take()
-            .ok_or_else(|| io_error("host process supervisor failed"))?;
-        thread
-            .join()
-            .map_err(|_| io_error("host process supervisor failed"))?;
-        Ok(true)
-    }
-}
-
-impl Drop for HostProcessOwner {
-    fn drop(&mut self) {
-        let Some(thread) = self.thread.take() else {
-            return;
-        };
-        self.stop.store(true, Ordering::Release);
-        drop(thread);
-    }
-}
 
 #[derive(Default)]
 pub(super) struct JoinedSessionOutput {
@@ -202,11 +142,6 @@ impl JoinedSessionShared {
             }
         }
     }
-}
-
-pub(super) enum JoinedSessionInput {
-    Pipes(std::process::ChildStdin),
-    Pty(PtyInputSender),
 }
 
 // Promotion and dispatch cancellation compete for the same foreground owner.

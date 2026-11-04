@@ -8,14 +8,16 @@ use std::sync::Arc;
 
 use rustix::fs::Dir;
 
+use super::super::text_search::{
+    PathGlob, RepositoryLiteralMatcher, repository_row_bytes, utf8_prefix_len,
+};
 use super::super::workspace_types::compile_query_regex;
 use super::super::{RepositoryQueryLimits, RepositoryQueryMatch, validate_path_bytes};
 use super::{
-    ExecutionBackendError, FileObservation, IgnoreChain, OperationContext, PathGlob, QueryFileRead,
-    RepositoryLiteralMatcher, RepositoryQuery, RepositoryQueryEntry, RepositoryQueryResult,
-    RepositoryQueryStopReason, WorkspaceContentIdentity, directory_ignores, is_ignored,
-    open_directory_entry_for_query, query_entry_kind_is_walkable, read_unchanged_query_file,
-    repository_row_bytes, utf8_prefix_len,
+    ExecutionBackendError, FileObservation, IgnoreChain, OperationContext, QueryFileRead,
+    RepositoryQuery, RepositoryQueryEntry, RepositoryQueryResult, RepositoryQueryStopReason,
+    WorkspaceContentIdentity, directory_ignores, is_ignored, open_directory_entry_for_query,
+    query_entry_kind_is_walkable, read_unchanged_query_file,
 };
 
 pub(super) type OpenedRepositoryFile = (PathBuf, u64, FileObservation, fs::File);

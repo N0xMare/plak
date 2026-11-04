@@ -13,29 +13,25 @@ use std::collections::{BTreeMap, VecDeque};
 use std::fs;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
-use std::sync::LazyLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use tokio::sync::Semaphore;
 
 use std::io::Write;
 use std::os::unix::fs::MetadataExt;
 
 use super::{
-    ExecutionBackendError, ExecutionBackendErrorKind, ExecutionBackendFuture, ExecutionWorkspace,
-    MAX_WORKSPACE_FILE_BYTES, OperationContext, RepositoryMatchCase, RepositoryQuery,
-    RepositoryQueryResult, RepositoryQueryStopReason, WORKSPACE_CONTENT_IDENTITY_REVISION,
-    WorkspaceContentIdentity, WorkspaceExpectedFileState, WorkspaceMutationDisposition,
-    WorkspaceMutationResultItem, WorkspaceMutationTransaction, WorkspaceMutationTransactionResult,
-    WorkspaceReadCursor, WorkspaceReadSlice, WorkspaceReadSliceRequest, WorkspaceReplacement,
-    backend_error, conflict_error, io_error, lock, recovery_required_error, resource_error,
-    validate_relative_path, workspace_error, workspace_path_not_found,
+    ExecutionBackendError, ExecutionBackendErrorKind, ExecutionWorkspace, MAX_WORKSPACE_FILE_BYTES,
+    OperationContext, RepositoryQuery, RepositoryQueryResult, RepositoryQueryStopReason,
+    WORKSPACE_CONTENT_IDENTITY_REVISION, WorkspaceContentIdentity, WorkspaceExpectedFileState,
+    WorkspaceMutationDisposition, WorkspaceMutationResultItem, WorkspaceMutationTransaction,
+    WorkspaceMutationTransactionResult, WorkspaceReadCursor, WorkspaceReadSlice,
+    WorkspaceReadSliceRequest, WorkspaceReplacement, backend_error, conflict_error, io_error, lock,
+    recovery_required_error, resource_error, validate_relative_path, workspace_error,
+    workspace_path_not_found,
 };
-mod admitted;
 mod aliases;
 mod query;
 
-pub use admitted::{AdmittedTextQuery, AdmittedTextScan, AdmittedTextSearch, search_admitted_text};
 use query::{
     RepositoryQueryWalk, list_repository_query_paths, retain_repository_query_glob_matches,
     scan_repository_query_files, walk_repository_query_directories,
@@ -769,42 +765,6 @@ fn literal_directory_prefix(pattern: &str) -> PathBuf {
     prefix
 }
 
-/// One compiled path glob. A pattern without `/` matches the file name at any
-/// depth, as ripgrep's `-g` does; a pattern with `/` matches the path relative
-/// to the query root. `*` and `?` stay within one component, `**` crosses
-/// components, and `[...]` classes and `{a,b}` alternatives are supported.
-struct PathGlob {
-    matcher: globset::GlobMatcher,
-    name_only: bool,
-}
-
-impl PathGlob {
-    fn new(pattern: &str) -> Result<Self, ExecutionBackendError> {
-        let name_only = !pattern.contains('/');
-        let pattern = pattern.strip_prefix("./").unwrap_or(pattern);
-        let matcher = globset::GlobBuilder::new(pattern)
-            .literal_separator(true)
-            .build()
-            .map_err(|_| {
-                backend_error(
-                    ExecutionBackendErrorKind::InvalidRequest,
-                    "repository glob pattern is invalid",
-                )
-            })?
-            .compile_matcher();
-        Ok(Self { matcher, name_only })
-    }
-
-    fn matches(&self, path: &Path) -> bool {
-        if self.name_only {
-            return path
-                .file_name()
-                .is_some_and(|name| self.matcher.is_match(Path::new(name)));
-        }
-        self.matcher.is_match(path)
-    }
-}
-
 /// The `.gitignore`-style rules in force in one directory: every ancestor's
 /// rules, deepest last.
 type IgnoreChain = Arc<[Arc<ignore::gitignore::Gitignore>]>;
@@ -916,26 +876,6 @@ fn add_ignore_file(
     added
 }
 
-/// Bytes one reported match row costs in the model-visible result.
-fn repository_row_bytes(
-    relative: &Path,
-    line_number: u64,
-    column: usize,
-    retained: usize,
-    truncated: bool,
-) -> usize {
-    relative
-        .to_string_lossy()
-        .len()
-        .saturating_add(decimal_len(line_number))
-        .saturating_add(decimal_len(
-            u64::try_from(column.saturating_add(1)).unwrap_or(u64::MAX),
-        ))
-        .saturating_add(retained)
-        .saturating_add(4)
-        .saturating_add(if truncated { " …".len() } else { 0 })
-}
-
 fn expand_glob_braces(pattern: &str) -> Vec<String> {
     let Some(start) = pattern.find('{') else {
         return vec![pattern.to_owned()];
@@ -954,56 +894,6 @@ fn expand_glob_braces(pattern: &str) -> Vec<String> {
         .split(',')
         .map(|alt| format!("{prefix}{alt}{suffix}"))
         .collect()
-}
-
-struct RepositoryLiteralMatcher<'a> {
-    needle: &'a [u8],
-    match_case: RepositoryMatchCase,
-    failure: Vec<usize>,
-}
-
-impl<'a> RepositoryLiteralMatcher<'a> {
-    fn new(needle: &'a [u8], match_case: RepositoryMatchCase) -> Self {
-        let mut failure = vec![0; needle.len()];
-        let mut matched = 0_usize;
-        for index in 1..needle.len() {
-            while matched > 0 && !literal_byte_eq(needle[index], needle[matched], match_case) {
-                matched = failure[matched - 1];
-            }
-            if literal_byte_eq(needle[index], needle[matched], match_case) {
-                matched = matched.saturating_add(1);
-            }
-            failure[index] = matched;
-        }
-        Self {
-            needle,
-            match_case,
-            failure,
-        }
-    }
-
-    fn matches(&self, byte: u8, needle_index: usize) -> bool {
-        literal_byte_eq(byte, self.needle[needle_index], self.match_case)
-    }
-}
-
-fn literal_byte_eq(left: u8, right: u8, match_case: RepositoryMatchCase) -> bool {
-    match match_case {
-        RepositoryMatchCase::Sensitive => left == right,
-        RepositoryMatchCase::AsciiInsensitive => left.eq_ignore_ascii_case(&right),
-    }
-}
-
-fn utf8_prefix_len(bytes: &[u8], maximum: usize) -> usize {
-    let mut retained = maximum.min(bytes.len());
-    while retained > 0 && std::str::from_utf8(&bytes[..retained]).is_err() {
-        retained = retained.saturating_sub(1);
-    }
-    retained
-}
-
-fn decimal_len(value: u64) -> usize {
-    value.checked_ilog10().map_or(1, |log| log as usize + 1)
 }
 
 struct PreflightMutation {
@@ -1533,29 +1423,6 @@ pub(super) fn resolve_existing_no_symlink(
         .with_proven_no_effect(true));
     }
     Ok(canonical)
-}
-
-const MAX_BLOCKING_FILESYSTEM_OPERATIONS: usize = 8;
-
-static FILESYSTEM_BLOCKING_LANES: LazyLock<Arc<Semaphore>> =
-    LazyLock::new(|| Arc::new(Semaphore::new(MAX_BLOCKING_FILESYSTEM_OPERATIONS)));
-
-pub(super) fn run_filesystem_blocking<T, F>(operation: F) -> ExecutionBackendFuture<T>
-where
-    T: Send + 'static,
-    F: FnOnce() -> Result<T, ExecutionBackendError> + Send + 'static,
-{
-    Box::pin(async move {
-        let permit = Arc::clone(&FILESYSTEM_BLOCKING_LANES)
-            .acquire_owned()
-            .await
-            .map_err(|_| io_error("filesystem blocking lane closed"))?;
-        let result = tokio::task::spawn_blocking(operation)
-            .await
-            .map_err(|_| io_error("filesystem blocking operation failed to join"))?;
-        drop(permit);
-        result
-    })
 }
 
 #[cfg(test)]

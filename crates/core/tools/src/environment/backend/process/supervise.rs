@@ -6,15 +6,75 @@ use super::start::JoinedProcessResources;
 
 use super::{
     Arc, AtomicBool, AtomicU8, AtomicU64, Command, Duration, ExecutionBackendError,
-    ExecutionBackendErrorKind, ExecutionEnvironmentLimits, GroupProbe, HostProcessContext,
-    HostProcessOutput, HostProcessStop, HostProcessStream, Instant, JoinedProcessStatus,
-    JoinedSessionShared, LiteralProcessResult, Mutex, OperationContext, Ordering, Path, PathBuf,
-    PreparedLiteralProcess, Stdio, backend_error, cancel_foreground, cleanup_setup_error,
-    host_process_home, host_process_path, io_error, lock, observe_leftover_group, peek_leader_exit,
-    resource_error, set_nonblocking, spawn_output_reader, terminate_direct_child,
-    terminate_owned_process_group, terminate_owned_process_group_until,
+    ExecutionBackendErrorKind, ExecutionEnvironmentLimits, GroupProbe, HostProcessContext, Instant,
+    JoinedProcessStatus, JoinedSessionShared, LiteralProcessResult, Mutex, OperationContext,
+    Ordering, Path, PathBuf, PreparedLiteralProcess, Stdio, backend_error, cancel_foreground,
+    cleanup_setup_error, host_process_home, host_process_path, io_error, lock,
+    observe_leftover_group, peek_leader_exit, resource_error, set_nonblocking, spawn_output_reader,
+    terminate_direct_child, terminate_owned_process_group, terminate_owned_process_group_until,
     wait_for_output_readers_until, write_process_input,
 };
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum HostProcessStop {
+    Completed,
+    Cancelled,
+    TimedOut,
+    OutputLimit,
+    Io,
+}
+
+#[derive(Default)]
+pub(super) struct HostProcessOutput {
+    pub(super) stdout: Vec<u8>,
+    pub(super) stderr: Vec<u8>,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum HostProcessStream {
+    Stdout,
+    Stderr,
+}
+
+pub(super) struct HostProcessOwner {
+    pub(super) stop: Arc<AtomicBool>,
+    pub(super) thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl HostProcessOwner {
+    pub(super) fn join_until(&mut self, deadline: Instant) -> Result<bool, ExecutionBackendError> {
+        let Some(thread) = self.thread.as_ref() else {
+            // An owner is removed after a successful join. A retained owner
+            // without its handle means that a prior join observed a panic.
+            return Err(io_error("host process supervisor failed"));
+        };
+        let started = Instant::now();
+        while Instant::now() < deadline && !thread.is_finished() {
+            sleep_until_next_poll(started, deadline);
+        }
+        if !thread.is_finished() {
+            return Ok(false);
+        }
+        let thread = self
+            .thread
+            .take()
+            .ok_or_else(|| io_error("host process supervisor failed"))?;
+        thread
+            .join()
+            .map_err(|_| io_error("host process supervisor failed"))?;
+        Ok(true)
+    }
+}
+
+impl Drop for HostProcessOwner {
+    fn drop(&mut self) {
+        let Some(thread) = self.thread.take() else {
+            return;
+        };
+        self.stop.store(true, Ordering::Release);
+        drop(thread);
+    }
+}
 
 /// How long a supervisor sleeps between checks of a live child. A young child
 /// is checked every 2 ms so short commands keep their exit latency; a child

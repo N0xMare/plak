@@ -6,6 +6,7 @@ mod output_reader;
 mod sessions;
 mod start;
 mod supervise;
+mod validate;
 
 pub(super) use cleanup::process_group_exists;
 use cleanup::{
@@ -26,25 +27,24 @@ use output_reader::{
 };
 pub(in crate::environment) use sessions::JoinedProcessServiceCache;
 use sessions::{
-    FOREGROUND, HostProcessOutput, HostProcessOwner, HostProcessStop, HostProcessStream,
-    JoinedSession, JoinedSessionInput, JoinedSessionOutput, JoinedSessionShared, LeftoverJob,
+    FOREGROUND, JoinedSession, JoinedSessionOutput, JoinedSessionShared, LeftoverJob,
     PendingJobOutput, cancel_foreground, displayed_command,
 };
 pub use sessions::{JoinedProcessHostCapacity, JoinedProcessSessions};
 #[cfg(test)]
 use start::joined_pty_command;
 use start::{
-    PtyInputSender, close_joined_session_input, start_joined_host_process,
+    JoinedSessionInput, close_joined_session_input, start_joined_host_process,
     write_joined_session_input,
 };
-pub(super) use start::{
-    validate_absolute_program, validate_process_value, validate_process_values,
+use supervise::{
+    HostProcessOutput, HostProcessOwner, HostProcessStream, sleep_until_next_poll,
+    supervise_host_process, supervise_joined_process, supervision_poll_interval,
 };
 #[cfg(test)]
 use supervise::{joined_process_final_status, supervision_sleep};
-use supervise::{
-    sleep_until_next_poll, supervise_host_process, supervise_joined_process,
-    supervision_poll_interval,
+pub(super) use validate::{
+    validate_absolute_program, validate_process_value, validate_process_values,
 };
 
 use plakous_model::CancellationToken;

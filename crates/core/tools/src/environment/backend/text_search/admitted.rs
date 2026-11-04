@@ -4,12 +4,12 @@ use std::path::Path;
 use std::sync::Arc;
 
 use super::super::workspace_types::compile_query_regex;
-use super::super::{RepositoryMatchCase, RepositoryQueryLimits, RepositoryQueryMatch};
-use super::{
-    ExecutionBackendError, OperationContext, PathGlob, RepositoryLiteralMatcher,
-    RepositoryQueryResult, RepositoryQueryStopReason, WorkspaceContentIdentity,
-    repository_row_bytes, utf8_prefix_len,
+use super::super::{
+    ExecutionBackendError, OperationContext, RepositoryQueryResult, RepositoryQueryStopReason,
+    WorkspaceContentIdentity,
 };
+use super::super::{RepositoryMatchCase, RepositoryQueryLimits, RepositoryQueryMatch};
+use super::{PathGlob, RepositoryLiteralMatcher, repository_row_bytes, utf8_prefix_len};
 
 /// One already-admitted text file and the matcher to run over it.
 ///

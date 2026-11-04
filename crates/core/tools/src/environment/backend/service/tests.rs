@@ -5,13 +5,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use plakous_model::{CancellationToken, RunId};
-use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
+use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
 
 use super::*;
 use crate::{
     DeterministicExecutionBackend, DeterministicProcessPolicy, DeterministicServiceStep,
     EnvironmentDelegation, ExecutionEnvironment, ExecutionEnvironmentConfig,
-    ExecutionEnvironmentLimits, ExecutionEnvironmentScope,
+    ExecutionEnvironmentLimits, ExecutionEnvironmentScope, OperationContext,
 };
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
