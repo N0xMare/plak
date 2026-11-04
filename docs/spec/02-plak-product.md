@@ -3719,19 +3719,25 @@ verdicts) are addressed, the session profile and workspace chrome states.
 - **Host service.** `plakous_hosted::host_service::HostService` is one
   session's side of the wire, the only consumer of its observations and the
   only sender of its attachments' intents; `plak agent --wire v2` speaks
-  through it, and the TUI and JSONL v1 do not yet. An attachment targets the
-  session's root (any other node is `unknown_node` until node attach).
-  Addressed answers follow the session's answer window: each intent carries
-  its attachment (and the client's own correlation) as its correlation, the
-  `IntentStarted` that opens the window names that attachment, which gets
-  its own correlation back, and the answers until the next `IntentStarted`
-  go to it. An answer inside a window no attachment opened (`IntentStarted`
-  without a correlation, or before any) goes to every attachment. The
-  observation types carry no other requester, so an answer the session gives
-  after another request's window opened goes to that window's attachment;
-  the session is to open the requester's window again before such a late
-  answer, which the host loop does not do yet. A transcript observation (snapshot, keyed patch, stream) goes,
-  whatever its class, to the attachments holding its scope: the root's to
+  through it, and the TUI and JSONL v1 are its faces (below). An attachment
+  targets the session's root (any other node is `unknown_node` until node
+  attach).
+  Every intent carries its attachment as its origin beside the client's own
+  correlation, and the `IntentStarted` that opens the session's answer
+  window names both (`attachment:<id>` or `attachment:<id>:<client>`); the
+  attachment gets back only its own correlation, and the addressed answers
+  until the next `IntentStarted` go to it. The host treats an intent as a
+  command whose verdict it reports (an accepted approval) only when the
+  client gave its own correlation; the origin alone is not one. An answer
+  inside a window no attachment opened (`IntentStarted` without an
+  attachment, or before any) goes to every attachment. A publisher that
+  answers after the host moved on (a call-detail read, a usage refresh, a
+  profile apply's finish) answers in the window of the intent it serves:
+  when another window opened since, the session sends that intent's
+  `IntentStarted` again, then the answer, then the `IntentStarted` of the
+  window it interrupted, or one without a correlation when a correlation
+  reset closed that window. A transcript observation (snapshot, keyed patch,
+  stream) goes, whatever its class, to the attachments holding its scope: the root's to
   all, an agent's to those that opened it. The session serves one agent
   transcript: its first holder's open reaches the session, a later holder's
   open asks for a fresh snapshot of it instead, and only its last holder's
@@ -3752,8 +3758,28 @@ verdicts) are addressed, the session profile and workspace chrome states.
   and which takes and sends nothing more. Transcript content an attachment
   lost to a full queue is a gap in that scope, repaid at its next take or
   observation: the root's from the kept baseline, any other by asking the
-  session for a fresh snapshot of that scope. The session never waits on an
-  attachment.
+  session for a fresh snapshot of that scope. The session's presentation
+  baselines and revisions are one set its publisher keeps for every
+  attachment, which is sound because each attachment's gaps and their
+  repair are its own. The session never waits on an attachment.
+- **Faces.** The TUI, `plak agent` JSONL v1, an attached session command
+  and the shell host are in-process attachments of their session's service
+  (`plakous_hosted::host_service::face`). A face sends its intents itself,
+  through the session's own mailbox sender tagged with its attachment, so
+  the mailbox's urgent interrupt and quit lanes with their coalescing, its
+  one clear, compaction or fork in flight, its shutdown hooks (run on quit
+  or when the face's sender, the last one, drops) and its storage interrupt
+  probe are unchanged. It takes its observations through `FaceReceiver`,
+  which has the observation mailbox's receiving methods: each observation
+  the session published passes through the service on the face's own read,
+  into a queue that holds every transcript scope and is unbounded, so
+  the face receives what the session sent, in order, with its own
+  correlation (a JSONL command id, or none from the TUI) back in each
+  `IntentStarted` it owns. The session's observation mailbox stays the
+  bound a slow face meets, with its own loss and resnapshot rules; a face's
+  service keeps nothing for later attachments and asks the session nothing,
+  and passes an `IntentStarted` naming an attachment it does not hold
+  through unchanged, as no attachment's.
 - **Serde.** Frames, intents and observations refuse unknown fields;
   intents and observations are tagged objects (`kind`, and `body` when
   they carry one), snake case. A

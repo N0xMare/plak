@@ -1243,6 +1243,13 @@ mod detail_tests;
     clippy::expect_used,
     reason = "unit tests may assert with unwrap/expect"
 )]
+mod face_tests;
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "unit tests may assert with unwrap/expect"
+)]
 mod follow_live_tests;
 #[cfg(test)]
 #[allow(

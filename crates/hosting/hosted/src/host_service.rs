@@ -29,6 +29,13 @@
 //! content an attachment lost to a full queue is a gap in that scope, repaid
 //! at its next take or observation: the root's from the kept baseline, any
 //! other by asking the session for a fresh snapshot of that scope.
+//!
+//! An in-process face (the TUI, `plak agent` JSONL) is an attachment too
+//! ([`face`]): it sends its intents itself, through the session's own
+//! mailbox sender tagged with its attachment, and takes its observations
+//! through [`FaceReceiver`].
+
+mod face;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Mutex, PoisonError};
@@ -40,6 +47,8 @@ use plakous_host_protocol::{
     IntentSendError, IntentSender, ObservationExtension, ProtocolExtension, SessionIntent,
     SessionObservation,
 };
+
+pub use face::{FaceReceiver, face};
 
 /// The most root patches the service keeps after the root snapshot for an
 /// attach; past it, a new attachment asks the session for a fresh one.
@@ -69,9 +78,14 @@ pub enum Outbound<P: ProtocolExtension> {
 
 /// One attachment's state.
 struct Attachment<P: ProtocolExtension> {
+    /// The session's mailbox sender tagged with this attachment, or `None`
+    /// for a face that sends its intents itself.
+    sender: Option<IntentSender<P>>,
     queue: VecDeque<Outbound<P>>,
     seq: u64,
-    scopes: BTreeSet<TranscriptScope>,
+    /// The transcripts this attachment holds; a face holds every one, since
+    /// its transcript intents do not pass through the service.
+    scopes: Scopes,
     /// Scopes whose transcript content this attachment lost to a full
     /// queue; repaid with a fresh baseline.
     gapped: BTreeSet<TranscriptScope>,
@@ -79,6 +93,32 @@ struct Attachment<P: ProtocolExtension> {
     /// count against the capacity.
     snapshot_held: usize,
     dropped: bool,
+}
+
+/// The transcript scopes an attachment holds.
+enum Scopes {
+    Held(BTreeSet<TranscriptScope>),
+    All,
+}
+
+impl Scopes {
+    fn contains(&self, scope: &TranscriptScope) -> bool {
+        match self {
+            Self::Held(held) => held.contains(scope),
+            Self::All => true,
+        }
+    }
+
+    fn agents(&self) -> impl Iterator<Item = &String> {
+        let held = match self {
+            Self::Held(held) => Some(held),
+            Self::All => None,
+        };
+        held.into_iter().flatten().filter_map(|scope| match scope {
+            TranscriptScope::Agent(agent) => Some(agent),
+            TranscriptScope::Root => None,
+        })
+    }
 }
 
 /// What the service keeps for a new attachment.
@@ -107,19 +147,17 @@ struct State<P: ProtocolExtension> {
 
 /// One session's host service.
 pub struct HostService<P: ProtocolExtension> {
-    actions: IntentSender<P>,
+    /// The session's mailbox, or `None` when the service only serves a face.
+    actions: Option<IntentSender<P>>,
     root: NodeAddress,
     capacity: usize,
     state: Mutex<State<P>>,
 }
 
-/// The correlation an attachment's intents carry, so the session's
+/// The origin tag an attachment's intents carry, so the session's
 /// `IntentStarted` names the attachment its answers belong to.
-fn correlation(attachment: AttachmentId, client: Option<&str>) -> String {
-    match client {
-        Some(client) => format!("attachment:{attachment}:{client}"),
-        None => format!("attachment:{attachment}"),
-    }
+fn origin(attachment: AttachmentId) -> String {
+    format!("attachment:{attachment}")
 }
 
 /// The attachment a correlation names, and the client's own correlation
@@ -159,6 +197,10 @@ impl<P: ProtocolExtension> HostService<P> {
     /// attach snapshot.
     #[must_use]
     pub fn new(actions: IntentSender<P>, root: NodeAddress, capacity: usize) -> Self {
+        Self::serving(Some(actions), root, capacity)
+    }
+
+    fn serving(actions: Option<IntentSender<P>>, root: NodeAddress, capacity: usize) -> Self {
         Self {
             actions,
             root,
@@ -191,6 +233,24 @@ impl<P: ProtocolExtension> HostService<P> {
         if *node != self.root {
             return Err(RequestRefusal::UnknownNode);
         }
+        let (id, ask) = self.admit();
+        if let Some(sender) = ask {
+            // No baseline is kept: the session's fresh root snapshot reaches
+            // every attachment holding the root, this one included. An
+            // attach the session cannot be asked for one fails.
+            if let Err(error) = sender.send(SessionIntent::ResyncTranscript {
+                scope: TranscriptScope::Root,
+            }) {
+                self.lock().attachments.remove(&id);
+                return Err(refusal_of(&error));
+            }
+        }
+        Ok(id)
+    }
+
+    /// Adds an attachment with the attach snapshot queued, and the sender
+    /// to ask the session for a root baseline through when none is kept.
+    fn admit(&self) -> (AttachmentId, Option<IntentSender<P>>) {
         let mut state = self.lock();
         let id = state.next_attachment;
         state.next_attachment += 1;
@@ -203,10 +263,20 @@ impl<P: ProtocolExtension> HostService<P> {
         }
         items.extend(snapshot.approvals.iter().map(|(_, asked)| asked.clone()));
         items.extend(snapshot.credential_wait.iter().cloned());
+        let sender = self
+            .actions
+            .as_ref()
+            .map(|actions| actions.clone().tagged(origin(id)));
+        let scopes = match sender {
+            Some(_) => Scopes::Held(BTreeSet::from([TranscriptScope::Root])),
+            None => Scopes::All,
+        };
+        let ask = sender.clone().filter(|_| needs_baseline);
         let mut attachment = Attachment {
+            sender,
             queue: VecDeque::new(),
             seq: 0,
-            scopes: BTreeSet::from([TranscriptScope::Root]),
+            scopes,
             gapped: BTreeSet::new(),
             snapshot_held: items.len(),
             dropped: false,
@@ -220,22 +290,7 @@ impl<P: ProtocolExtension> HostService<P> {
             });
         }
         state.attachments.insert(id, attachment);
-        drop(state);
-        if needs_baseline {
-            // No baseline is kept: the session's fresh root snapshot reaches
-            // every attachment holding the root, this one included. An
-            // attach the session cannot be asked for one fails.
-            if let Err(error) = self.actions.send_correlated(
-                SessionIntent::ResyncTranscript {
-                    scope: TranscriptScope::Root,
-                },
-                Some(correlation(id, None)),
-            ) {
-                self.lock().attachments.remove(&id);
-                return Err(refusal_of(&error));
-            }
-        }
-        Ok(id)
+        (id, ask)
     }
 
     /// Detaches `attachment`; the session runs on.
@@ -249,11 +304,7 @@ impl<P: ProtocolExtension> HostService<P> {
             .attachments
             .get(&attachment)
             .into_iter()
-            .flat_map(|held| held.scopes.iter())
-            .filter_map(|scope| match scope {
-                TranscriptScope::Agent(agent) => Some(agent.clone()),
-                TranscriptScope::Root => None,
-            })
+            .flat_map(|held| held.scopes.agents().cloned())
             .collect();
         for agent in &agents {
             state.release_agent(attachment, agent);
@@ -269,7 +320,8 @@ impl<P: ProtocolExtension> HostService<P> {
     /// # Errors
     ///
     /// [`RequestRefusal::NotAttached`] for an attachment not attached (or
-    /// dropped); the mailbox's own refusals otherwise. A refused intent did
+    /// dropped), [`RequestRefusal::Disconnected`] for a face, which sends its
+    /// own; the mailbox's own refusals otherwise. A refused intent did
     /// nothing.
     pub fn intent(
         &self,
@@ -299,10 +351,10 @@ impl<P: ProtocolExtension> HostService<P> {
         else {
             return Err(RequestRefusal::NotAttached);
         };
-        let held_agent = held.scopes.iter().find_map(|scope| match scope {
-            TranscriptScope::Agent(agent) => Some(agent.clone()),
-            TranscriptScope::Root => None,
-        });
+        let Some(sender) = held.sender.clone() else {
+            return Err(RequestRefusal::Disconnected);
+        };
+        let held_agent = held.scopes.agents().next().cloned();
         // An agent transcript is opened in the session by its first holder
         // and closed by its last; the others only hold or release it.
         let forwarded = match &intent {
@@ -326,8 +378,8 @@ impl<P: ProtocolExtension> HostService<P> {
             }
             _ => intent.clone(),
         };
-        self.actions
-            .send_correlated(forwarded, Some(correlation(attachment, client)))
+        sender
+            .send_correlated(forwarded, client.map(str::to_owned))
             .map_err(|error| refusal_of(&error))?;
         // Scope changes take effect only once the session took the intent.
         match intent {
@@ -336,7 +388,8 @@ impl<P: ProtocolExtension> HostService<P> {
                     state.release_agent(attachment, &agent);
                 }
                 if let Some(held) = state.attachments.get_mut(&attachment)
-                    && held.scopes.insert(TranscriptScope::Agent(agent_id.clone()))
+                    && let Scopes::Held(scopes) = &mut held.scopes
+                    && scopes.insert(TranscriptScope::Agent(agent_id.clone()))
                 {
                     *state.agent_holders.entry(agent_id).or_default() += 1;
                 }
@@ -373,7 +426,10 @@ impl<P: ProtocolExtension> HostService<P> {
         {
             let mut state = self.lock();
             let class = observation.class();
-            state.remember(&observation, class);
+            // A face's service takes no later attachment to keep anything for.
+            if self.actions.is_some() {
+                state.remember(&observation, class);
+            }
             let mut observation = observation;
             let targets: Vec<AttachmentId> = match (class, baseline_scope(&observation)) {
                 (_, Some(scope)) => state
@@ -384,7 +440,15 @@ impl<P: ProtocolExtension> HostService<P> {
                     .collect(),
                 (ObservationClass::Addressed, None) => {
                     if let SessionObservation::IntentStarted(started) = &observation {
-                        let owner = started.as_deref().and_then(attachment_of);
+                        // A face's mailbox may carry another sender's
+                        // correlation that only looks like an attachment's:
+                        // it is passed through as no attachment's.
+                        let owner = started
+                            .as_deref()
+                            .and_then(attachment_of)
+                            .filter(|(id, _)| {
+                                self.actions.is_some() || state.attachments.contains_key(id)
+                            });
                         state.requester = owner.as_ref().map(|(id, _)| *id);
                         if let Some((_, client)) = owner {
                             // The attachment sees its own correlation.
@@ -400,9 +464,14 @@ impl<P: ProtocolExtension> HostService<P> {
                 }
                 _ => state.attachments.keys().copied().collect(),
             };
-            for id in targets {
-                if let Some(held) = state.attachments.get_mut(&id) {
-                    held.offer(observation.clone(), class, self.capacity);
+            if let Some((last, others)) = targets.split_last() {
+                for id in others {
+                    if let Some(held) = state.attachments.get_mut(id) {
+                        held.offer(observation.clone(), class, self.capacity);
+                    }
+                }
+                if let Some(held) = state.attachments.get_mut(last) {
+                    held.offer(observation, class, self.capacity);
                 }
             }
         }
@@ -416,33 +485,29 @@ impl<P: ProtocolExtension> HostService<P> {
         let mut asks = Vec::new();
         {
             let mut state = self.lock();
-            let baseline: Option<Vec<SessionObservation<P>>> =
-                state.snapshot.baseline.as_ref().map(|(snapshot, patches)| {
-                    std::iter::once(snapshot.clone())
-                        .chain(patches.iter().cloned())
-                        .collect()
-                });
-            for (id, held) in &mut state.attachments {
+            let State {
+                attachments,
+                snapshot,
+                ..
+            } = &mut *state;
+            for held in attachments.values_mut() {
                 if held.dropped {
                     continue;
                 }
                 for scope in std::mem::take(&mut held.gapped) {
-                    match (&scope, &baseline) {
-                        (TranscriptScope::Root, Some(baseline)) => {
-                            for item in baseline {
+                    match (&scope, &snapshot.baseline) {
+                        (TranscriptScope::Root, Some((baseline, patches))) => {
+                            for item in std::iter::once(baseline).chain(patches) {
                                 held.offer(item.clone(), item.class(), self.capacity);
                             }
                         }
-                        _ => asks.push((*id, scope)),
+                        _ => asks.extend(held.sender.clone().map(|sender| (sender, scope))),
                     }
                 }
             }
         }
-        for (id, scope) in asks {
-            let _ = self.actions.send_correlated(
-                SessionIntent::ResyncTranscript { scope },
-                Some(correlation(id, None)),
-            );
+        for (sender, scope) in asks {
+            let _ = sender.send(SessionIntent::ResyncTranscript { scope });
         }
     }
 }
@@ -460,9 +525,8 @@ impl<P: ProtocolExtension> State<P> {
     /// `attachment` stops holding `agent`'s transcript.
     fn release_agent(&mut self, attachment: AttachmentId, agent: &str) {
         if let Some(held) = self.attachments.get_mut(&attachment)
-            && held
-                .scopes
-                .remove(&TranscriptScope::Agent(agent.to_owned()))
+            && let Scopes::Held(scopes) = &mut held.scopes
+            && scopes.remove(&TranscriptScope::Agent(agent.to_owned()))
             && let Some(count) = self.agent_holders.get_mut(agent)
         {
             *count = count.saturating_sub(1);

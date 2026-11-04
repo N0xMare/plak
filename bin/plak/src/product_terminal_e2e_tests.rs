@@ -237,7 +237,9 @@ impl TuiAttacher for OfflineAttacher {
         if let Err(error) = &attached {
             let _ = std::fs::write(paths.home().join("pty-attach-error.txt"), error.message());
         }
-        attached.map_err(|failure| failure.host_failure())
+        attached
+            .map(crate::surface_protocol::face_of)
+            .map_err(|failure| failure.host_failure())
     }
 }
 
@@ -1822,7 +1824,8 @@ fn exact_resume_is_published_only_by_successfully_attached_runtime_host()
         b"binding-b-account",
     )?;
     config.resume_publication = Some(Arc::clone(&publication));
-    let (actions, _events, worker) = crate::product_host::spawn_host_worker(config)?;
+    let (actions, _events, worker) =
+        crate::surface_protocol::face_of(crate::product_host::spawn_host_worker(config)?);
 
     assert!(publication.load(Ordering::Acquire));
     assert!(product_sessions::load_session(&paths, &id)?.store_revision > revision);
@@ -1877,7 +1880,8 @@ fn injected_dual_profile_fork_continues_history_queue_and_reverse_switch()
     let mut first_config = host_config(&paths, &workspace, source);
     first_config.ready_catalog = profile_ready_catalog();
     first_config.runtime_factory = account_injection(&workspace, &controller, A, B)?;
-    let (actions, events, worker) = crate::product_host::spawn_host_worker(first_config)?;
+    let (actions, events, worker) =
+        crate::surface_protocol::face_of(crate::product_host::spawn_host_worker(first_config)?);
     let mut observed = Vec::new();
     send_action(
         &actions,
@@ -2062,7 +2066,8 @@ fn profile_fork_maps_the_fast_lane_on_and_off() -> Result<(), Box<dyn Error + Se
     let mut first = host_config(&paths, &workspace, source);
     first.ready_catalog = profile_ready_catalog();
     first.runtime_factory = account_injection(&workspace, &controller, A, B)?;
-    let (actions, events, worker) = crate::product_host::spawn_host_worker(first)?;
+    let (actions, events, worker) =
+        crate::surface_protocol::face_of(crate::product_host::spawn_host_worker(first)?);
     let mut observed = Vec::new();
     send_action(
         &actions,
@@ -2117,7 +2122,8 @@ fn profile_fork_maps_the_fast_lane_on_and_off() -> Result<(), Box<dyn Error + Se
     reverse.model_id = "binding-b-model".to_owned();
     reverse.effort = Some(ReasoningEffort::Low);
     reverse.runtime_factory = account_injection(&workspace, &controller, B, FAST)?;
-    let (actions, events, worker) = crate::product_host::spawn_host_worker(reverse)?;
+    let (actions, events, worker) =
+        crate::surface_protocol::face_of(crate::product_host::spawn_host_worker(reverse)?);
     let mut observed = Vec::new();
     send_action(&actions, fork_onto("pa"))?;
     wait_for_event(&events, &mut observed, |event| {
@@ -2175,7 +2181,8 @@ fn profile_fork_from_native_ptc_onto_direct_commits_a_turn()
     let mut config = host_config(&paths, &workspace, source);
     config.ready_catalog = profile_ready_catalog();
     config.runtime_factory = account_injection(&workspace, &controller, A, B)?;
-    let (actions, events, worker) = crate::product_host::spawn_host_worker(config)?;
+    let (actions, events, worker) =
+        crate::surface_protocol::face_of(crate::product_host::spawn_host_worker(config)?);
     let mut observed = Vec::new();
     send_action(
         &actions,
@@ -2258,7 +2265,8 @@ fn drive_injected_binding_host(
     steps: Vec<BindingHostStep>,
 ) -> Result<Vec<crate::surface_protocol::HostEvent>, Box<dyn Error + Send + Sync>> {
     config.runtime_factory = injection;
-    let (actions, events, worker) = crate::product_host::spawn_host_worker(config)?;
+    let (actions, events, worker) =
+        crate::surface_protocol::face_of(crate::product_host::spawn_host_worker(config)?);
     let mut observed = Vec::new();
     for (action, completed) in steps {
         send_action(&actions, action)?;
@@ -3287,7 +3295,8 @@ fn profile_fork_now_branches_onto_its_own_tree_and_leaves_the_default()
     // the quit below always lands while it is pending.
     config.runtime_factory = account_injection(&workspace, &controller, A, B)?
         .with_source_release_delay(Duration::from_millis(500));
-    let (actions, events, worker) = crate::product_host::spawn_host_worker(config)?;
+    let (actions, events, worker) =
+        crate::surface_protocol::face_of(crate::product_host::spawn_host_worker(config)?);
     let mut observed = Vec::new();
     send_action(
         &actions,
@@ -3385,7 +3394,8 @@ fn profile_fork_now_branches_onto_its_own_tree_and_leaves_the_default()
     );
     reopen.ready_catalog = profile_ready_catalog();
     reopen.runtime_factory = account_injection(&workspace, &controller, A, B)?;
-    let (actions, events, worker) = crate::product_host::spawn_host_worker(reopen)?;
+    let (actions, events, worker) =
+        crate::surface_protocol::face_of(crate::product_host::spawn_host_worker(reopen)?);
     let mut observed = Vec::new();
     send_action(
         &actions,
@@ -3424,7 +3434,8 @@ fn a_refused_profile_fork_saves_nothing() -> Result<(), Box<dyn Error + Send + S
     let mut config = host_config(&paths, &workspace, source);
     config.ready_catalog = profile_ready_catalog();
     config.runtime_factory = account_injection(&workspace, &controller, A, B)?;
-    let (actions, events, worker) = crate::product_host::spawn_host_worker(config)?;
+    let (actions, events, worker) =
+        crate::surface_protocol::face_of(crate::product_host::spawn_host_worker(config)?);
     let mut observed = Vec::new();
     send_action(
         &actions,
@@ -3519,7 +3530,8 @@ fn same_profile_fork(with_tree: bool) -> Result<(), Box<dyn Error + Send + Sync>
     host.ready_catalog = profile_ready_catalog();
     host.runtime_factory =
         account_injection(&workspace, &controller, A, if with_tree { A } else { B })?;
-    let (actions, events, worker) = crate::product_host::spawn_host_worker(host)?;
+    let (actions, events, worker) =
+        crate::surface_protocol::face_of(crate::product_host::spawn_host_worker(host)?);
     let mut observed = Vec::new();
     send_action(
         &actions,
@@ -3610,7 +3622,8 @@ fn a_live_follow_up_drains_after_a_resume_with_a_stale_pause()
     let mut config = host_config(&paths, &workspace, source);
     config.ready_catalog = dual_binding_ready_catalog();
     config.runtime_factory = account_injection(&workspace, &controller, A, A)?;
-    let (actions, events, worker) = crate::product_host::spawn_host_worker(config)?;
+    let (actions, events, worker) =
+        crate::surface_protocol::face_of(crate::product_host::spawn_host_worker(config)?);
     let mut observed = Vec::new();
     send_action(
         &actions,

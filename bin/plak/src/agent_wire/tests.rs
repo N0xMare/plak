@@ -10,8 +10,7 @@ use super::*;
 /// The first attachment the service makes.
 const ROOT_ATTACHMENT: AttachmentId = 1;
 use crate::surface_protocol::{
-    PlakExtension, SettingsView, SurfaceIntent, SurfaceObservation, host_event_channel,
-    user_action_channel,
+    PlakExtension, SettingsView, SurfaceIntent, SurfaceObservation, user_action_channel,
 };
 
 fn root() -> NodeAddress {
@@ -67,7 +66,7 @@ fn fake_session(
 #[test]
 fn the_adapter_attaches_the_root_and_carries_intents_and_events() {
     let (actions, intents) = user_action_channel();
-    let (observations, events) = host_event_channel();
+    let (observations, events) = plakous_host_protocol::observation_channel();
     let (client, lines) = mpsc::sync_channel(64);
     let image = DraftImage {
         name: "a.png".into(),

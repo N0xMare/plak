@@ -917,7 +917,7 @@ fn run_tui_rounds(
             let prep_resume_picker = state.open_resume_picker;
             let deferred_resume_publication = resume_publication.clone();
             let prep_needs_setup = product_onboarding::needs_setup(&cfg);
-            let (action_tx, event_rx, join) =
+            let (action_tx, event_rx, join) = surface_protocol::face_of(
                 product_host::spawn_deferred_host_with_clear_publication(
                     move || {
                         prepare_deferred_tui_host(
@@ -935,7 +935,8 @@ fn run_tui_rounds(
                         )
                     },
                     Some(Arc::clone(&clear_publication)),
-                );
+                ),
+            );
             let mut launch = launch_base;
             if state.open_resume_picker {
                 request_resume_picker(&action_tx)?;

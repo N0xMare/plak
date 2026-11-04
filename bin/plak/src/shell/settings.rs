@@ -405,7 +405,7 @@ fn apply_profile(
         switch: switch.then(|| prepared.id.clone()),
         finish: Box::new({
             let paths = paths.clone();
-            let events = events.clone();
+            let events = events.answering();
             move |outcome| {
                 let outcome = match outcome {
                     ProfileForkOutcome::Forked => ProfileOutcome::Forked,
@@ -1018,7 +1018,7 @@ impl ProductSurface {
         };
         let state_home = self.state_home.clone();
         let generation = std::sync::Arc::clone(&self.usage_accounts_generation);
-        let events = events.clone();
+        let events = events.answering();
         std::thread::spawn(move || {
             let _ = reads.wait_settled(USAGE_READ_SETTLE_LIMIT);
             let accounts = state_home
@@ -1051,7 +1051,7 @@ impl ProductSurface {
         let paths = self.paths.clone();
         let state_home = self.state_home.clone();
         let running = std::sync::Arc::clone(&self.usage_refreshing);
-        let events = events.clone();
+        let events = events.answering();
         std::thread::spawn(move || {
             let _telemetry = crate::telemetry_sink::install_product_credential_telemetry(&paths);
             let result = state_home

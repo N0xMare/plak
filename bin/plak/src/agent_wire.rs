@@ -15,12 +15,12 @@ use plakous_host_protocol::wire::{
     NodeAddress, Op, Outcome, RequestRefusal, WIRE_VERSION, Welcome, WireError, admit_hello,
     decode_line, encode_line, page_snapshot, take_observation_images,
 };
-use plakous_host_protocol::{SessionIntent, SessionObservation};
+use plakous_host_protocol::{ObservationReceiver, SessionIntent, SessionObservation};
 use plakous_hosted::error::{CliFailure, CliResult, ProcessOutcome};
 use plakous_hosted::host_service::{HostService, Outbound};
 use plakous_hosted::runtime::{HostConfig, spawn_host_worker};
 
-use crate::surface_protocol::{HostEventReceiver, PlakExtension, UserActionSender};
+use crate::surface_protocol::{PlakExtension, UserActionSender};
 
 type Client = ClientFrame<PlakExtension>;
 type Host = HostFrame<PlakExtension>;
@@ -177,7 +177,7 @@ impl<'a> Adapter<'a> {
     pub(crate) fn serve(
         mut self,
         lines: &mpsc::Receiver<Result<String, WireError>>,
-        events: &HostEventReceiver,
+        events: &ObservationReceiver<PlakExtension>,
     ) -> CliResult<()> {
         let mut reading = true;
         loop {

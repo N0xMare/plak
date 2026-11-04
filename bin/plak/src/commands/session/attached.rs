@@ -282,7 +282,8 @@ fn run_attached_config(
     stdout: &mut dyn io::Write,
 ) -> CliResult<()> {
     let session_id = config.session.id.clone();
-    let (actions, events, worker) = product_host::spawn_host_worker(config)?;
+    let (actions, events, worker) =
+        crate::surface_protocol::face_of(product_host::spawn_host_worker(config)?);
     actions
         .send(action)
         .map_err(|_| CliFailure::new("attached session command channel closed"))?;

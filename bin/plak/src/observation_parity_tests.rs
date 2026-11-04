@@ -1171,7 +1171,10 @@ fn drive_config(
     let tree_id =
         crate::topology_product::durable_topology_tree_id(&config.state_roots, &config.session);
     let evidence_path = config.product_home.parent().unwrap().join("evidence.jsonl");
-    let (actions, events, worker) = spawn_host_worker(config).expect("host worker");
+    // Both faces run as the product runs them: through the host service,
+    // so the parity goldens pin the face path.
+    let (actions, events, worker) =
+        crate::surface_protocol::face_of(spawn_host_worker(config).expect("host worker"));
     let mut observed: Vec<HostEvent> = Vec::new();
     let mut attach_actions_sent = !jsonl_face;
     for (step_index, step) in steps.into_iter().enumerate() {

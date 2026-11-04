@@ -220,12 +220,23 @@ an export.
   read`). Embedder break: `JoinedSessionsPort::refresh_jobs` returns a
   `Result`.
 - `plakous_hosted::host_service::HostService`: one session's wire v2 host
-  side (not yet served): attachments on the session's root, observations
-  fanned out by class with addressed answers routed by intent correlation,
-  an attach snapshot of every state, the root baseline, pending approvals
-  and the holding credential wait, and bounded per-attachment queues that
-  drop a slow attachment with `resync_required` instead of blocking the
-  session.
+  side: attachments on the session's root, observations fanned out by class
+  with addressed answers routed by the intent's origin attachment, an
+  attach snapshot of every state, the root baseline, pending approvals and
+  the holding credential wait, and bounded per-attachment queues that drop
+  a slow attachment with `resync_required` instead of blocking the session.
+  The TUI and `plak agent` JSONL v1 are its in-process faces
+  (`host_service::face`, `FaceReceiver`): their intents go out on the
+  session's own mailbox sender tagged with their attachment, and their
+  observations pass through the service, so they receive exactly what they
+  did before. A publisher answering after the host moved on
+  (`Sender::answering`) reopens its requester's `IntentStarted` window
+  around the answer. Embedder break: `IntentSender::tagged` and
+  `IntentDelivery::correlated`; an intent's origin is part of the
+  `IntentStarted` correlation, and only a client's own correlation makes an
+  intent a command reply. In `plak agent` JSONL v1, a late answer (a
+  profile apply's finish, a usage refresh) now carries the command id of
+  the command it answers rather than the one running when it arrived.
 - Version control on a runner (unsupported; only the test route selects a
   runner): an orchestration tree on a selected runner drives its copies
   through `RemoteVcs` over the runner link instead of refusing every effect.

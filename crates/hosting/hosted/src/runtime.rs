@@ -104,6 +104,9 @@ use usage::request_subscription_usage_service;
 
 mod admission;
 mod agent_transcript;
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "unit tests")]
+mod answer_window_tests;
 mod binding_document;
 mod child_live;
 pub(crate) mod child_projection;
@@ -262,10 +265,20 @@ pub struct Sender<P: plakous_host_protocol::ProtocolExtension = plakous_host_pro
     request_tools: Arc<std::sync::Mutex<Vec<String>>>,
     session_id: Option<Arc<str>>,
     quit_receipt: worker::QuitReceipt,
+    /// The correlation of the `IntentStarted` window the session's answers
+    /// are in now, shared by every clone; `None` before the first window
+    /// and after a correlation reset.
+    window: Arc<std::sync::Mutex<Option<Started>>>,
+    /// The window this sender answers in ([`Self::answering`]).
+    answers: Option<Started>,
     /// Unit laws inspect publication order before latest-state coalescing.
     #[cfg(test)]
     recorded: Option<Arc<std::sync::Mutex<Vec<ContentEvent<P>>>>>,
 }
+
+/// The correlation one `IntentStarted` carried.
+#[derive(Clone, Eq, PartialEq)]
+struct Started(Option<String>);
 
 /// An authored notice intent the host has not committed yet.
 ///
@@ -292,6 +305,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             request_tools: Arc::default(),
             session_id: None,
             quit_receipt: worker::QuitReceipt::default(),
+            window: Arc::default(),
+            answers: None,
             #[cfg(test)]
             recorded: None,
         }
@@ -307,6 +322,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             request_tools: Arc::clone(&self.request_tools),
             session_id: Some(Arc::from(session_id)),
             quit_receipt: self.quit_receipt.clone(),
+            window: Arc::clone(&self.window),
+            answers: self.answers.clone(),
             #[cfg(test)]
             recorded: self.recorded.clone(),
         }
@@ -348,6 +365,57 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             recorded.lock().unwrap().push(value.clone());
         }
         let value: HostEvent<P> = value.into();
+        let mut window = self
+            .window
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match &value {
+            HostEvent::IntentStarted(started) => {
+                *window = Some(Started(started.clone()));
+                return self.publish(value);
+            }
+            // A reset closes the window: what follows answers no intent.
+            HostEvent::PromptCorrelationReset => {
+                *window = None;
+                return self.publish(value);
+            }
+            _ => {}
+        }
+        let late = self.answers.as_ref().filter(|answers| {
+            value.class() == plakous_host_protocol::observation::ObservationClass::Addressed
+                && window.as_ref() != Some(*answers)
+        });
+        let Some(answers) = late else {
+            return self.publish(value);
+        };
+        // A late answer: the requester's window reopens around it, and then
+        // the window it interrupted, or none when that was closed.
+        let _ = self.publish(HostEvent::IntentStarted(answers.0.clone()));
+        let sent = self.publish(value);
+        let open = window.as_ref().and_then(|open| open.0.clone());
+        let _ = self.publish(HostEvent::IntentStarted(open));
+        sent
+    }
+
+    /// A clone that answers the intent the session is answering now. An
+    /// addressed observation it sends after the session started another
+    /// intent goes out inside the requester's `IntentStarted` window,
+    /// reopened for it, followed by the window it interrupted: for a
+    /// publisher that answers after the host moved on.
+    #[must_use]
+    pub fn answering(&self) -> Self {
+        let answers = self
+            .window
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        Self {
+            answers,
+            ..self.clone()
+        }
+    }
+
+    fn publish(&self, value: HostEvent<P>) -> bool {
         if matches!(value, HostEvent::ClearView | HostEvent::SessionOpening) {
             self.presentations
                 .lock()

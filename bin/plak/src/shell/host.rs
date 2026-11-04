@@ -147,7 +147,8 @@ pub fn spawn_shell_host_with_clear_publication(
     plakous_hosted::runtime::HostWorkerHandle,
 ) {
     let (action_tx, action_rx) = crate::surface_protocol::user_action_channel();
-    let (event_tx, event_rx) = crate::surface_protocol::host_event_channel();
+    let (event_tx, event_rx) = plakous_host_protocol::observation_channel();
+    let (action_tx, event_rx) = plakous_hosted::host_service::face(action_tx, event_rx);
     let event_tx = Sender::over(event_tx);
     let handle = plakous_hosted::runtime::HostWorkerHandle::spawn(move || {
         run_shell_host_loop(config, action_rx, event_tx, clear_publication);

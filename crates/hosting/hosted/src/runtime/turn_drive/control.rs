@@ -69,7 +69,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
             let received =
                 take_next(self.host.deferred, || self.host.actions.try_recv()).map(|delivery| {
                     if let Some(started) = delivery.started() {
-                        command_reply = matches!(&started, ContentEvent::IntentStarted(Some(_)));
+                        command_reply = delivery.correlated();
                         let _ = self.host.events.send(started);
                     }
                     let (action, guard) = delivery.into_parts();

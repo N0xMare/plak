@@ -164,7 +164,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             }
             .map(|delivery| {
                 if let Some(started) = delivery.started() {
-                    command_reply = matches!(&started, ContentEvent::IntentStarted(Some(_)));
+                    command_reply = delivery.correlated();
                     let _ = self.role.events.send(started);
                 }
                 let (action, guard) = delivery.into_parts();

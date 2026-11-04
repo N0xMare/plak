@@ -108,6 +108,48 @@ fn the_last_sender_dropping_runs_the_shutdown_hooks() {
     assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
 }
 
+/// Re-tagging is not a sender leaving: the tagged sender is the last one,
+/// and the hooks run only when it drops. Its tag is the origin of what it
+/// sends, beside the correlation, which alone makes a command reply.
+#[test]
+fn a_tagged_sender_keeps_the_queue_and_names_its_origin() {
+    let (sender, receiver) = intent_channel::<Core>();
+    let shutdowns = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&shutdowns);
+    receiver.on_shutdown(move || {
+        counted.fetch_add(1, Ordering::SeqCst);
+    });
+    let sender = sender.tagged("attachment:3");
+    assert_eq!(shutdowns.load(Ordering::SeqCst), 0);
+    assert!(!(receiver.storage_interrupt_probe())());
+    sender.send(SessionIntent::Recover).unwrap();
+    sender
+        .send_correlated(SessionIntent::RefreshReadiness, Some("c1".into()))
+        .unwrap();
+    sender.send(SessionIntent::Interrupt).unwrap();
+    let interrupt = receiver.try_recv().unwrap();
+    assert_eq!(interrupt, SessionIntent::Interrupt);
+    assert_eq!(interrupt.started(), None);
+    let plain = receiver.try_recv().unwrap();
+    assert!(!plain.correlated());
+    assert_eq!(
+        plain.started(),
+        Some(crate::ContentObservation::IntentStarted(Some(
+            "attachment:3".into()
+        )))
+    );
+    let named = receiver.try_recv().unwrap();
+    assert!(named.correlated());
+    assert_eq!(
+        named.started(),
+        Some(crate::ContentObservation::IntentStarted(Some(
+            "attachment:3:c1".into()
+        )))
+    );
+    drop(sender);
+    assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
+}
+
 #[test]
 fn job_lifecycle_is_not_evicted_at_saturation() {
     let (sender, receiver) = observation_channel::<Core>();

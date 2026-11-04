@@ -158,6 +158,7 @@ struct QueuedIntent<P: ProtocolExtension> {
     action: SessionIntent<P>,
     admission: Option<NonrepeatableAdmission>,
     correlation: Option<String>,
+    origin: Option<Arc<str>>,
 }
 
 #[derive(Clone, Copy)]
@@ -262,7 +263,11 @@ impl<P: ProtocolExtension> IntentSendError<P> {
 }
 
 /// Nonblocking producer for the bounded UI → host control queue.
-pub struct IntentSender<P: ProtocolExtension = Core>(Arc<IntentQueue<P>>);
+///
+/// A sender may carry an origin tag ([`Self::tagged`]) that every intent it
+/// sends carries beside its correlation, so the host's `IntentStarted` names
+/// the attachment that sent it; everything else is the shared queue's.
+pub struct IntentSender<P: ProtocolExtension = Core>(Arc<IntentQueue<P>>, Option<Arc<str>>);
 
 /// Single host consumer for the bounded control queue.
 pub struct IntentReceiver<P: ProtocolExtension = Core>(Arc<IntentQueue<P>>);
@@ -273,6 +278,7 @@ pub struct IntentDelivery<P: ProtocolExtension = Core> {
     action: SessionIntent<P>,
     acknowledgement: IntentAcknowledgement<P>,
     correlation: Option<String>,
+    origin: Option<Arc<str>>,
 }
 
 /// RAII acknowledgement for one exact mailbox delivery.
@@ -298,6 +304,7 @@ impl<P: ProtocolExtension> IntentDelivery<P> {
                 admission: queued.admission,
             },
             correlation: queued.correlation,
+            origin: queued.origin,
         }
     }
 
@@ -308,6 +315,7 @@ impl<P: ProtocolExtension> IntentDelivery<P> {
                 action,
                 admission: None,
                 correlation: None,
+                origin: None,
             },
         )
     }
@@ -318,8 +326,22 @@ impl<P: ProtocolExtension> IntentDelivery<P> {
     /// within whatever is already running.
     #[must_use]
     pub fn started(&self) -> Option<crate::ContentObservation<P>> {
-        (!matches!(self.action, SessionIntent::Interrupt | SessionIntent::Quit))
-            .then(|| crate::ContentObservation::IntentStarted(self.correlation.clone()))
+        (!matches!(self.action, SessionIntent::Interrupt | SessionIntent::Quit)).then(|| {
+            let started = match (&self.origin, &self.correlation) {
+                (Some(origin), Some(correlation)) => Some(format!("{origin}:{correlation}")),
+                (Some(origin), None) => Some(origin.to_string()),
+                (None, correlation) => correlation.clone(),
+            };
+            crate::ContentObservation::IntentStarted(started)
+        })
+    }
+
+    /// Whether the sender gave this action its own correlation: a command
+    /// whose surface attributes the answers to it. A sender's origin tag
+    /// alone is not one.
+    #[must_use]
+    pub fn correlated(&self) -> bool {
+        self.correlation.is_some()
     }
 
     /// Split the action from its acknowledgement guard. Keep the guard alive
@@ -361,7 +383,7 @@ impl<P: ProtocolExtension> Eq for IntentDelivery<P> {}
 impl<P: ProtocolExtension> Clone for IntentSender<P> {
     fn clone(&self) -> Self {
         self.0.senders.fetch_add(1, Ordering::Relaxed);
-        Self(Arc::clone(&self.0))
+        Self(Arc::clone(&self.0), self.1.clone())
     }
 }
 
@@ -420,6 +442,20 @@ impl<P: ProtocolExtension> IntentSender<P> {
     )]
     pub fn send(&self, action: SessionIntent<P>) -> Result<(), IntentSendError<P>> {
         self.send_correlated(action, None)
+    }
+
+    /// This sender, its intents tagged with the origin `tag`: the
+    /// `IntentStarted` of an intent sent with correlation `c` carries
+    /// `<tag>:c`, and of one sent with none `<tag>`. It stays the same
+    /// sender of the same queue.
+    #[must_use]
+    pub fn tagged(self, tag: impl Into<Arc<str>>) -> Self {
+        let queue = Arc::clone(&self.0);
+        // Count the new handle before the old one goes, so the queue never
+        // sees its last sender leave.
+        self.0.senders.fetch_add(1, Ordering::Relaxed);
+        drop(self);
+        Self(queue, Some(tag.into()))
     }
 
     /// [`Self::send`] with an opaque correlation the host echoes in
@@ -487,6 +523,7 @@ impl<P: ProtocolExtension> IntentSender<P> {
             action,
             admission,
             correlation,
+            origin: self.1.clone(),
         });
         self.0.ready.notify_one();
         self.0.wake_waiter();
@@ -758,7 +795,10 @@ pub fn intent_channel<P: ProtocolExtension>() -> (IntentSender<P>, IntentReceive
         waiter: Mutex::new(None),
         shutdown_hooks: Mutex::new(Some(Vec::new())),
     });
-    (IntentSender(Arc::clone(&shared)), IntentReceiver(shared))
+    (
+        IntentSender(Arc::clone(&shared), None),
+        IntentReceiver(shared),
+    )
 }
 
 type Notifier = Arc<dyn Fn() + Send + Sync>;

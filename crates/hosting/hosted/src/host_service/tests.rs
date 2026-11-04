@@ -478,3 +478,66 @@ fn an_attach_that_cannot_ask_for_a_baseline_fails() {
     assert_eq!(service.attach(&root()), Err(RequestRefusal::Disconnected));
     assert_eq!(service.detach(1), Err(RequestRefusal::NotAttached));
 }
+
+/// A face sends through the session's own sender, tagged with its
+/// attachment, and takes everything the session published, in order and in
+/// every scope, with its own correlation back in `IntentStarted`; its
+/// service asks the session nothing.
+#[test]
+fn a_face_takes_everything_in_order_with_its_own_correlation() {
+    let (actions, intents) = intent_channel::<Core>();
+    let (published, events) = plakous_host_protocol::observation_channel::<Core>();
+    let (actions, face) = face(actions, events);
+    actions
+        .send_correlated(SessionIntent::Prompt(Draft::from("hi")), Some("c7".into()))
+        .unwrap();
+    let delivery = intents.try_recv().unwrap();
+    assert!(delivery.correlated());
+    let started = delivery.started().unwrap();
+    assert_eq!(
+        Observation::from(started.clone()),
+        Observation::IntentStarted(Some("attachment:1:c7".into()))
+    );
+    let foreign = Observation::IntentStarted(Some("c9".into()));
+    for observation in [
+        started.into(),
+        stream(TranscriptScope::Agent("c1".into())),
+        Observation::DraftRestored(Draft::from("back")),
+        foreign.clone(),
+        approval("a1"),
+    ] {
+        published.send(observation).unwrap();
+    }
+    assert_eq!(
+        face.try_iter().collect::<Vec<_>>(),
+        [
+            Observation::IntentStarted(Some("c7".into())),
+            stream(TranscriptScope::Agent("c1".into())),
+            Observation::DraftRestored(Draft::from("back")),
+            foreign,
+            approval("a1"),
+        ]
+    );
+    assert!(intents.try_recv().is_err(), "a face's service asks nothing");
+    drop(published);
+    assert_eq!(
+        face.try_recv(),
+        Err(std::sync::mpsc::TryRecvError::Disconnected)
+    );
+}
+
+/// A face's mailbox may carry a correlation that only looks like an
+/// attachment's (an untagged sender, another face on the same mailbox):
+/// its window and the answers in it reach the face as no attachment's,
+/// unchanged.
+#[test]
+fn a_face_passes_a_foreign_attachment_window_through() {
+    let (actions, _intents) = intent_channel::<Core>();
+    let (published, events) = plakous_host_protocol::observation_channel::<Core>();
+    let (_actions, face) = face(actions, events);
+    let foreign = Observation::IntentStarted(Some("attachment:7".into()));
+    let answer = Observation::DraftRestored(Draft::from("back"));
+    published.send(foreign.clone()).unwrap();
+    published.send(answer.clone()).unwrap();
+    assert_eq!(face.try_iter().collect::<Vec<_>>(), [foreign, answer]);
+}

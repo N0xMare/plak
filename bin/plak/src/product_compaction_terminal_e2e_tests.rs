@@ -163,6 +163,7 @@ impl TuiAttacher for CompactionAttacher {
             continuation: None,
             event_renderer: None,
         })
+        .map(crate::surface_protocol::face_of)
         .map_err(|failure| failure.host_failure())
     }
 }

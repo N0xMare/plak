@@ -110,7 +110,7 @@ fn run_agent_stdio_stopping_on(
     let composition = config.resolved_composition_label().to_owned();
 
     let process_started = Instant::now();
-    let (actions, events, worker) = spawn_host_worker(config)?;
+    let (actions, events, worker) = crate::surface_protocol::face_of(spawn_host_worker(config)?);
     // A supervisor's stop, or a closed terminal, must not end the stream
     // without a terminal record, and must not end it on a stale branch head.
     // The stdio drive never polls anything but its event and stdin channels, so

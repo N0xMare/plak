@@ -312,7 +312,9 @@ pub fn try_spawn_hosted_agent(
         &native_models,
     )
     .map_err(|failure| failure.host_failure())?;
-    product_host::spawn_host_worker(config).map_err(|failure| failure.host_failure())
+    product_host::spawn_host_worker(config)
+        .map(crate::surface_protocol::face_of)
+        .map_err(|failure| failure.host_failure())
 }
 
 #[allow(

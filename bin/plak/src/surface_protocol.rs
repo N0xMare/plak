@@ -11,8 +11,7 @@ use std::fmt;
 use plakous_host_protocol::observation::ObservationClass;
 use plakous_host_protocol::{
     CompositionSelection, IntentReceiver, IntentSendError, IntentSender, ObservationExtension,
-    ObservationReceiver, ObservationSender, ProtocolExtension, ProtocolSelection, SessionIntent,
-    SessionObservation, intent_channel, observation_channel,
+    ProtocolExtension, ProtocolSelection, SessionIntent, SessionObservation, intent_channel,
 };
 
 #[cfg(any(feature = "mcp", feature = "tui"))]
@@ -464,9 +463,11 @@ pub type UserActionReceiver = IntentReceiver<PlakExtension>;
 /// Typed refusal of a Plak intent by the bounded mailbox.
 pub type UserActionSendError = IntentSendError<PlakExtension>;
 /// Producer half of Plak's observation mailbox.
-pub type HostEventSender = ObservationSender<PlakExtension>;
-/// Consumer half of Plak's observation mailbox.
-pub type HostEventReceiver = ObservationReceiver<PlakExtension>;
+#[cfg(test)]
+pub type HostEventSender = plakous_host_protocol::ObservationSender<PlakExtension>;
+/// What a Plak face receives: its observation mailbox, taken as an
+/// attachment of the host service.
+pub type HostEventReceiver = plakous_hosted::host_service::FaceReceiver<PlakExtension>;
 
 /// Construct Plak's bounded intent mailbox.
 #[must_use]
@@ -474,8 +475,25 @@ pub fn user_action_channel() -> (UserActionSender, UserActionReceiver) {
     intent_channel()
 }
 
-/// Construct Plak's bounded observation mailbox.
+/// Construct Plak's bounded observation mailbox, received by a face.
+#[cfg(test)]
 #[must_use]
 pub fn host_event_channel() -> (HostEventSender, HostEventReceiver) {
-    observation_channel()
+    let (sender, receiver) = plakous_host_protocol::observation_channel();
+    (sender, HostEventReceiver::new(receiver))
+}
+
+/// The mailbox ends a Plak face holds on a host worker: its intents
+/// tagged with its attachment and its observations taken through the host
+/// service ([`plakous_hosted::host_service::face`]).
+#[must_use]
+pub fn face_of(
+    (actions, events, worker): plakous_hosted::runtime::HostWorker<PlakExtension>,
+) -> (
+    UserActionSender,
+    HostEventReceiver,
+    plakous_hosted::runtime::HostWorkerHandle,
+) {
+    let (actions, events) = plakous_hosted::host_service::face(actions, events);
+    (actions, events, worker)
 }
