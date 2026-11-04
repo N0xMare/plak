@@ -679,3 +679,22 @@ fn every_attach_gets_a_fresh_id_and_a_sequence_from_one() {
     assert_ne!(second, first);
     assert_eq!(seqs(service.take(second)), [1]);
 }
+
+/// An answer window whose attachment detached names no one: the next
+/// addressed answer reaches the attachments that are left, not the gone one.
+#[test]
+fn a_detached_requester_takes_no_more_answers() {
+    let (service, _intents) = service(16);
+    let first = service.attach(&root()).unwrap();
+    service.observe(Observation::IntentStarted(Some(format!(
+        "attachment:{first}"
+    ))));
+    service.detach(first).unwrap();
+    let second = service.attach(&root()).unwrap();
+    service.take(second);
+    service.observe(Observation::DraftRestored(Draft::from("after")));
+    assert_eq!(
+        observations(service.take(second)),
+        [Observation::DraftRestored(Draft::from("after"))]
+    );
+}

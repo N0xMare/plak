@@ -16,7 +16,8 @@ use crate::tui::presentation::ActivityKind;
 use crate::tui::quit_guard::{CtrlCOutcome, classify_ctrl_c};
 use crate::tui::redraw::{FrameWork, RedrawReason, RedrawSchedule, RedrawState, RedrawWait};
 use crate::tui::{
-    HostEvent, QueueDrainState, TuiError, TuiHandoff, TuiLaunch, UserAction, user_action_channel,
+    HostEvent, QueueDrainState, SessionRequest, TuiError, TuiLaunch, UserAction,
+    user_action_channel,
 };
 use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, ModifierKeyCode, MouseButton, MouseEvent,
@@ -386,8 +387,8 @@ fn a_prompt_after_a_not_ready_settle_goes_to_the_host_not_the_local_hold() {
 #[test]
 fn terminal_handoffs_remain_typed_and_quit_the_shell() {
     for handoff in [
-        TuiHandoff::EditConfig,
-        TuiHandoff::ResumeSession { id: "s-1".into() },
+        SessionRequest::EditConfig,
+        SessionRequest::ResumeSession { id: "s-1".into() },
     ] {
         let mut app = App::new(launch_basic(), true);
         request_terminal_handoff(&mut app, None, handoff.clone());

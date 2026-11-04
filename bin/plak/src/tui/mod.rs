@@ -274,7 +274,7 @@ pub fn run_session(launch: TuiLaunch) -> Result<TuiOutcome, TuiError> {
 /// and [`HostEvent`]s from `events` update the UI. Uses `std::sync::mpsc` so
 /// Plak can drive the agent from a worker thread.
 ///
-/// Returns [`TuiOutcome::RetryAttach`] when `/login` (or `/attach`) asks the
+/// Returns a [`SessionRequest::RetryAttach`] request when `/login` (or `/attach`) asks the
 /// product host to re-resolve OAuth and re-open with an agent.
 ///
 /// # Errors
@@ -407,22 +407,12 @@ pub enum TuiOutcome {
         /// the operator was actually in after an in-host `/resume` or `/new`.
         attached_session: Option<String>,
     },
-    /// Auth/binding changed — app should re-resolve credentials and re-open the TUI.
-    RetryAttach {
-        /// Host-authoritative attached product session when the presentation
-        /// released the terminal (see [`TuiOutcome::Handoff`]).
-        attached_session: Option<String>,
-        /// The operator declined the launch resume picker, so this reattach is
-        /// the product attaching the workspace default rather than an explicit
-        /// `/attach`. When no default is attachable the launcher quits cleanly
-        /// with the ordinary exit hint instead of parking in a not-ready shell
-        /// the operator never asked for.
-        declined_resume_picker: bool,
-    },
-    /// Presentation restored the terminal and requests one app-owned workflow.
-    Handoff {
-        /// The workflow the app owns while the terminal is released.
-        handoff: TuiHandoff,
+    /// The terminal is handed back with a request to the session supervisor,
+    /// which answers by opening the session the next round shows (the
+    /// in-process `moved`).
+    Request {
+        /// What the operator asked for.
+        request: SessionRequest,
         /// Host-authoritative attached product session when the presentation
         /// released the terminal.
         ///
@@ -435,24 +425,35 @@ pub enum TuiOutcome {
     },
 }
 
-/// Raw-terminal workflow requested by an emitted UI intent.
+/// A session change the TUI asks the session supervisor for.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum TuiHandoff {
-    /// Open the product configuration editor.
+pub enum SessionRequest {
+    /// Re-resolve the binding (auth or profile changed) and open the session
+    /// again.
+    RetryAttach {
+        /// The operator declined the launch resume picker, so this reattach is
+        /// the product attaching the workspace default rather than an explicit
+        /// `/attach`. When no default is attachable the launcher quits cleanly
+        /// with the ordinary exit hint instead of parking in a not-ready shell
+        /// the operator never asked for.
+        declined_resume_picker: bool,
+    },
+    /// Open the product configuration editor, then attach again. A client
+    /// action: it needs this terminal and the host's own files.
     EditConfig,
     /// Carry the full history into a new session using the current root binding.
     Rebind {
         /// Why exact reopen cannot continue, or the operator's explicit request.
         cause: String,
     },
-    /// Relaunch the exact recorded session binding in the same Plak process.
+    /// Open the exact recorded session in the same Plak process.
     ResumeSession {
         /// Exact durable product session id.
         id: String,
     },
-    /// Release the session, then replace this process with the installed
-    /// `plak` resuming it, so a rebuilt binary takes over the same session.
-    Reload {
+    /// Release the session for a reload, then replace this process with the
+    /// installed `plak` resuming it, so a rebuilt binary takes over.
+    ReloadRelease {
         /// The installed build and its state key, asked before teardown.
         target: Option<crate::carry::ReloadTarget>,
     },

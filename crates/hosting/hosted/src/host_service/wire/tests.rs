@@ -181,14 +181,8 @@ fn the_hello_wait_ends_at_its_deadline_or_a_stop() {
     assert!(stdout.is_empty(), "a stopped wait writes nothing");
 }
 
-/// A connection serves the session its welcome named: a binding that names
-/// that session again changes nothing, and one that names another (the
-/// session switched) ends the connection as a leaving client does, with the
-/// session quit; a process asked to stop does the same.
-#[test]
-fn a_session_switch_or_a_stop_ends_the_connection() {
-    use plakous_host_protocol::Core;
-    let binding = |session: &str| SessionObservation::<Core>::Binding {
+fn binding(session: &str) -> SessionObservation<plakous_host_protocol::Core> {
+    SessionObservation::Binding {
         session_id: Some(session.to_owned()),
         account: None,
         model: None,
@@ -197,31 +191,150 @@ fn a_session_switch_or_a_stop_ends_the_connection() {
         composition: plakous_host_protocol::CompositionSelection::FollowCatalog,
         protocol: plakous_host_protocol::ProtocolSelection::Auto,
         effective_presentation: "direct".to_owned(),
-    };
-    for (observations, stop) in [
-        (vec![binding("s1"), binding("s2")], false),
-        (vec![binding("s1")], true),
-    ] {
-        let (actions, intents) = plakous_host_protocol::intent_channel::<Core>();
-        let (published, events) = plakous_host_protocol::observation_channel::<Core>();
-        let (_client, lines) = mpsc::sync_channel::<Result<String, WireError>>(1);
-        for observation in observations {
-            published.send(observation).unwrap();
-        }
-        let session = std::thread::spawn(move || {
-            let quit = intents
-                .recv()
-                .is_ok_and(|delivery| matches!(*delivery, SessionIntent::Quit));
-            drop(published);
-            quit
-        });
-        let mut stdout = Vec::new();
-        WireConnection::new(root(), &mut stdout, actions)
-            .with_stop(move || stop)
-            .serving("s1")
-            .serve(&lines, &events)
-            .unwrap();
-        assert!(session.join().unwrap(), "the session was quit");
-        assert!(matches!(host_frames(&stdout).last(), Some(HostFrame::Bye)));
     }
+}
+
+fn root_named(tree: &str) -> NodeAddress {
+    NodeAddress {
+        tree_id: tree.into(),
+        agent_id: tree.into(),
+    }
+}
+
+/// A binding that names the served session again changes nothing; one that
+/// names another (the session switched) ends the attachment with `moved`,
+/// naming the new session's root, which the client then attaches fresh. A
+/// switch whose root cannot be found ends the connection.
+#[test]
+fn a_session_switch_moves_the_attachment_to_the_new_root() {
+    use plakous_host_protocol::Core;
+    let (actions, _intents) = plakous_host_protocol::intent_channel::<Core>();
+    let mut stdout = Vec::new();
+    let mut connection = WireConnection::new(root(), &mut stdout, actions).serving("s1", |id| {
+        (id != "lost").then(|| root_named(&format!("tree-{id}")))
+    });
+    assert!(matches!(
+        connection.request(1, Op::Attach { node: root() }),
+        Some(Outcome::Ok(Answer::Attached { attachment: 1 }))
+    ));
+    assert!(connection.observe(binding("s1")).unwrap());
+    assert_eq!(connection.attachment, Some(1), "the same session stays");
+    assert!(connection.observe(binding("s2")).unwrap());
+    assert_eq!(connection.attachment, None);
+    assert!(matches!(
+        connection.request(2, Op::Attach { node: root() }),
+        Some(Outcome::Refused(RequestRefusal::UnknownNode))
+    ));
+    assert!(matches!(
+        connection.request(
+            3,
+            Op::Attach {
+                node: root_named("tree-s2")
+            }
+        ),
+        Some(Outcome::Ok(Answer::Attached { attachment: 2 }))
+    ));
+    assert!(!connection.observe(binding("lost")).unwrap());
+    drop(connection);
+    assert!(host_frames(&stdout).iter().any(|frame| matches!(
+        frame,
+        HostFrame::Moved { attachment: 1, node } if *node == root_named("tree-s2")
+    )));
+}
+
+/// A process asked to stop ends the connection as a leaving client does,
+/// with the session quit.
+#[test]
+fn a_stop_ends_the_connection() {
+    use plakous_host_protocol::Core;
+    let (actions, intents) = plakous_host_protocol::intent_channel::<Core>();
+    let (published, events) = plakous_host_protocol::observation_channel::<Core>();
+    let (_client, lines) = mpsc::sync_channel::<Result<String, WireError>>(1);
+    published.send(binding("s1")).unwrap();
+    let session = std::thread::spawn(move || {
+        let quit = intents
+            .recv()
+            .is_ok_and(|delivery| matches!(*delivery, SessionIntent::Quit));
+        drop(published);
+        quit
+    });
+    let mut stdout = Vec::new();
+    WireConnection::new(root(), &mut stdout, actions)
+        .with_stop(|| true)
+        .serving("s1", |_| None)
+        .serve(&lines, &events)
+        .unwrap();
+    assert!(session.join().unwrap(), "the session was quit");
+    assert!(matches!(host_frames(&stdout).last(), Some(HostFrame::Bye)));
+}
+
+/// A switch's opening comes before the binding that names its session: it
+/// is held, so the old attachment gets none of it, and the new session's
+/// events an attach snapshot does not carry (an open notice, an addressed
+/// answer before the next session's first window) reach the next
+/// attachment after its `attached` answer.
+#[test]
+fn a_switchs_opening_reaches_the_next_attachment_not_the_old_one() {
+    use plakous_host_protocol::Core;
+    use plakous_host_protocol::views::transcript::NoticeScope;
+    let notice = SessionObservation::<Core>::Row(TranscriptRow::info(
+        NoticeScope::Host,
+        "the next session opened",
+    ));
+    let draft = SessionObservation::<Core>::DraftRestored(Draft::from("next draft"));
+    let (actions, _intents) = plakous_host_protocol::intent_channel::<Core>();
+    let mut stdout = Vec::new();
+    let mut connection = WireConnection::new(root(), &mut stdout, actions)
+        .serving("s1", |id| Some(root_named(&format!("tree-{id}"))));
+    connection.request(1, Op::Attach { node: root() });
+    for observation in [
+        SessionObservation::SessionOpening,
+        notice.clone(),
+        draft.clone(),
+        binding("s2"),
+    ] {
+        assert!(connection.observe(observation).unwrap());
+    }
+    connection.flush().unwrap();
+    assert!(matches!(
+        connection.request(
+            2,
+            Op::Attach {
+                node: root_named("tree-s2")
+            }
+        ),
+        Some(Outcome::Ok(Answer::Attached { attachment: 2 }))
+    ));
+    connection.flush().unwrap();
+    drop(connection);
+    let frames = host_frames(&stdout);
+    let moved = frames
+        .iter()
+        .position(|frame| matches!(frame, HostFrame::Moved { attachment: 1, .. }))
+        .expect("moved");
+    let events = |attachment: AttachmentId| -> Vec<&SessionObservation<Core>> {
+        frames
+            .iter()
+            .filter_map(|frame| match frame {
+                HostFrame::Event {
+                    attachment: held,
+                    observation,
+                    ..
+                } if *held == attachment => Some(observation),
+                _ => None,
+            })
+            .collect()
+    };
+    assert!(
+        frames[..moved].iter().all(|frame| !matches!(
+            frame,
+            HostFrame::Event { observation, .. }
+                if *observation == notice || *observation == draft
+                    || matches!(observation, SessionObservation::SessionOpening)
+        )),
+        "{frames:?}"
+    );
+    let next = events(2);
+    assert!(next.contains(&&notice), "{frames:?}");
+    assert!(next.contains(&&draft), "{frames:?}");
 }

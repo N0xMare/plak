@@ -308,6 +308,17 @@ an export.
   intent the service refused for the attachment's role; `plak agent` JSONL
   v1 answers it as that command's `error` record), `HostService` is
   `Clone` (its clones are the same service), and the new types.
+- The interactive launch's round loop is the session supervisor
+  (`tui_launch::supervisor`): it settles each round, applies the TUI's
+  session requests (`SessionRequest`: retry attach, edit config, rebind,
+  resume a session, reload release; `TuiOutcome` is now `Exited` or
+  `Request`) and owns the launcher cells and the abandon. A wire v2
+  connection whose session switches to another now sends `moved
+  {attachment, node}` and keeps the connection for a fresh attach of the
+  new root (`HostFrame::Moved`, `HostService::reroot`,
+  `host_service::wire::session_root_of`; `WireConnection::serving` takes a
+  root resolver). Embedder break: the new frame and the `serving`
+  signature.
 - The TUI's installed-build check and its reload-request channel move to
   the session's host: every five seconds the TUI sends the product
   surface's `check_build`, and the host answers whether a newer build is

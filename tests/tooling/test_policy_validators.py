@@ -1883,7 +1883,7 @@ fn cli_human_output() {
     let _ = std::env::var_os("NO_COLOR");
 }
 """,
-                "src/tui_launch.rs": """
+                "src/tui_launch/supervisor.rs": """
 fn reload(executable: &std::path::Path) {
     let _ = std::process::Command::new(executable);
 }

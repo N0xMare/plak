@@ -231,6 +231,31 @@ fn attachment_of(correlation: &str) -> Option<(AttachmentId, Option<String>)> {
     Some((id.parse().ok()?, client))
 }
 
+/// Whether an attach re-emits `observation` from what the service keeps
+/// (states, the root baseline, approvals, the credential wait), so a
+/// replay must not send it again.
+fn kept_for_attach<P: ProtocolExtension>(observation: &SessionObservation<P>) -> bool {
+    observation.class() == ObservationClass::State
+        || matches!(
+            observation,
+            SessionObservation::ApprovalRequired { .. }
+                | SessionObservation::ApprovalResolved { .. }
+                | SessionObservation::CredentialWait { .. }
+                | SessionObservation::ClearView
+                | SessionObservation::SessionOpening
+                | SessionObservation::SessionOpened { .. }
+        )
+        || matches!(
+            observation,
+            SessionObservation::PresentationSnapshot(snapshot)
+                if snapshot.scope == TranscriptScope::Root
+        )
+        || matches!(
+            observation,
+            SessionObservation::TranscriptPatch(patch) if patch.scope == TranscriptScope::Root
+        )
+}
+
 /// Whether two observations are states of one kind.
 fn same_kind<P: ProtocolExtension>(a: &SessionObservation<P>, b: &SessionObservation<P>) -> bool {
     match (a, b) {
@@ -288,6 +313,17 @@ impl<P: ProtocolExtension> HostService<P> {
                 agent_holders: BTreeMap::new(),
             })),
         }
+    }
+
+    /// Moves this service to the root `root` of the session that replaced
+    /// its own, with that tree's children reached through `nodes`; existing
+    /// attachments are the caller's to end. The root and nodes are this
+    /// handle's own: only the owner of a service no clone of which is
+    /// shared (a wire connection's) reroots it.
+    pub fn reroot(&mut self, root: NodeAddress, nodes: Option<Arc<dyn ChildNodes>>) {
+        self.root = root;
+        self.nodes = nodes;
+        self.lock().requester = None;
     }
 
     /// This service, with the session tree's children attachable through
@@ -756,6 +792,9 @@ impl<P: ProtocolExtension> State<P> {
             {
                 let _ = actions.send(SessionIntent::CloseAgentTranscript);
             }
+        }
+        if self.requester == Some(attachment) {
+            self.requester = None;
         }
         self.attachments.remove(&attachment)
     }

@@ -18,10 +18,10 @@ use crate::commands::host_config::{
 use crate::commands::session::seed_new_session_binding;
 use crate::commands::support::{join_host_worker_bounded, join_tui_host_worker};
 use crate::presentation::credential_locations_text;
-use crate::tui_launch::{
+use crate::tui_launch::supervisor::{
     apply_tui_handoff, apply_tui_handoff_after_host, handle_tui_handoff, restore_former_attachment,
-    tui_presentation_values_with_backend,
 };
+use crate::tui_launch::tui_presentation_values_with_backend;
 use plakous::agent::ReasoningEffort;
 use plakous::subscriptions::NativeLoginMode;
 use std::path::{Path, PathBuf};
@@ -1215,7 +1215,7 @@ fn new_launch_exact_selection_keeps_selected_binding_instead_of_defaults() {
         &mut resume,
         &mut resume_pending,
         &mut former_attachment,
-        tui::TuiHandoff::ResumeSession {
+        tui::SessionRequest::ResumeSession {
             id: selected.id.clone(),
         },
         &mut None,
@@ -1588,7 +1588,7 @@ fn recoverable_selected_attach_failure_restores_former_exact_attachment() {
         &mut resume,
         &mut resume_pending,
         &mut rollback,
-        tui::TuiHandoff::ResumeSession { id: selected.id },
+        tui::SessionRequest::ResumeSession { id: selected.id },
         &mut None,
     )
     .expect("stage exact selected attachment");
@@ -1645,7 +1645,7 @@ fn failed_in_process_resume_switch_keeps_last_attached_rollback_authority() {
         &mut resume,
         &mut resume_pending,
         &mut rollback,
-        tui::TuiHandoff::ResumeSession { id: failed.id },
+        tui::SessionRequest::ResumeSession { id: failed.id },
         &mut None,
     )
     .expect("stage failed selection");
@@ -1658,7 +1658,7 @@ fn failed_in_process_resume_switch_keeps_last_attached_rollback_authority() {
         &mut resume,
         &mut resume_pending,
         &mut rollback,
-        tui::TuiHandoff::ResumeSession {
+        tui::SessionRequest::ResumeSession {
             id: next.id.clone(),
         },
         &mut None,
@@ -1702,7 +1702,7 @@ fn exact_session_selection_preserves_record_and_refuses_workspace_mismatch() {
         &paths,
         &store::session_records::SqliteSessionStore::new(paths.clone()),
         &mut active,
-        tui::TuiHandoff::ResumeSession {
+        tui::SessionRequest::ResumeSession {
             id: selected.id.clone(),
         },
         &mut None,
@@ -1726,7 +1726,7 @@ fn exact_session_selection_preserves_record_and_refuses_workspace_mismatch() {
         &paths,
         &store::session_records::SqliteSessionStore::new(paths.clone()),
         &mut active,
-        tui::TuiHandoff::ResumeSession { id: mismatched.id },
+        tui::SessionRequest::ResumeSession { id: mismatched.id },
         &mut None,
     )
     .expect_err("workspace mismatch refused");

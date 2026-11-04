@@ -526,7 +526,7 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
         ("std::process::Command", (("string", "rundll32"),)),
     ],
     # `/reload` execs the installed `plak` its own argv[0] resolves to.
-    ("plak", "src/tui_launch.rs"): [
+    ("plak", "src/tui_launch/supervisor.rs"): [
         ("std::process::Command", (("identifier", "executable"),)),
     ],
     ("plak", "src/commands/support.rs"): [
@@ -658,7 +658,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plak", "src/commands/session/read_only.rs"): {"json"},
     ("plak", "src/lib.rs"): {"eprint", "info", "join"},
     # `/reload` logs the exec of the installed build before replacing itself.
-    ("plak", "src/tui_launch.rs"): {"info"},
+    ("plak", "src/tui_launch/supervisor.rs"): {"info"},
     # The help pages; see EXPECTED_PRODUCT_GENERATED_MACROS.
     ("plak", "src/cli/render.rs"): {"include_str"},
     ("plak", "src/profiles.rs"): {"include_str"},

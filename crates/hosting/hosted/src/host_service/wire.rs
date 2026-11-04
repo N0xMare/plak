@@ -11,10 +11,10 @@
 //! v2 frame ([`refuse`] with `unavailable`). A client that sends no hello
 //! within [`HELLO_DEADLINE`] is refused, so a silent peer never holds the
 //! opened session. Every attach is a fresh attachment of the connection's
-//! service, answered before any event of it, with its sequence from 1. A
-//! connection serves the session its welcome names: when the session
-//! switches to another (`/new`, `/resume`, a rebind), the connection ends
-//! and the client handshakes again.
+//! service, answered before any event of it, with its sequence from 1. When
+//! the session switches to another (`/new`, `/resume`, a rebind), the
+//! attachment ends with `moved {node}` naming the new session's root, and
+//! the client attaches it fresh.
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -68,12 +68,27 @@ where
 /// tree is its lineage's), and the tree's root is named by the tree id.
 #[must_use]
 pub fn session_root<P: ProtocolExtension>(config: &crate::runtime::HostConfig<P>) -> NodeAddress {
+    root_of(&config.state_roots, &config.session)
+}
+
+/// The root node of the session `session_id` in `roots`' store, or `None`
+/// when it cannot be read.
+#[must_use]
+pub fn session_root_of(
+    roots: &crate::agent::ProductStateRoots,
+    session_id: &str,
+) -> Option<NodeAddress> {
+    let session = roots.session_records().load(session_id).ok()?;
+    Some(root_of(roots, &session))
+}
+
+fn root_of(
+    roots: &crate::agent::ProductStateRoots,
+    session: &crate::sessions::SessionRecord,
+) -> NodeAddress {
     let tree_id = crate::runtime::durable_topology_tree_id(
-        &crate::runtime::HostRows::new(
-            &config.state_roots,
-            config.state_roots.session_records().as_ref(),
-        ),
-        &config.session,
+        &crate::runtime::HostRows::new(roots, roots.session_records().as_ref()),
+        session,
     );
     NodeAddress {
         tree_id: tree_id.clone(),
@@ -203,8 +218,15 @@ pub struct WireConnection<P: ProtocolExtension, W: Write> {
     quit_sent: bool,
     /// Whether the process was asked to stop.
     stopped: Box<dyn Fn() -> bool + Send + Sync>,
-    /// The session the welcome named, when the transport named one.
-    session: Option<String>,
+    /// The session the connection serves and how to find another session's
+    /// root, when the transport named them.
+    session: Option<(String, SessionRoots)>,
+    /// A session opening held until the binding that names its session.
+    held: Option<Vec<SessionObservation<P>>>,
+    /// After a switch, the next session's events an attach snapshot does
+    /// not carry, waiting for the next attachment.
+    replay: Vec<SessionObservation<P>>,
+    awaiting_attach: bool,
     /// A child's mail requests, by the correlation their intents carry,
     /// answered once the mail is written.
     mails: BTreeMap<String, RequestId>,
@@ -214,6 +236,9 @@ pub struct WireConnection<P: ProtocolExtension, W: Write> {
     settled: Vec<(RequestId, Outcome)>,
     next_mail: u64,
 }
+
+/// Finds a session's root node by its id.
+type SessionRoots = Box<dyn Fn(&str) -> Option<NodeAddress> + Send + Sync>;
 
 /// Whether `intent` is tree mail on a child's attachment.
 const fn is_mail<P: ProtocolExtension>(intent: &SessionIntent<P>) -> bool {
@@ -241,6 +266,9 @@ where
             quit_sent: false,
             stopped: Box::new(|| false),
             session: None,
+            held: None,
+            replay: Vec::new(),
+            awaiting_attach: false,
             mails: BTreeMap::new(),
             window: None,
             settled: Vec::new(),
@@ -256,30 +284,141 @@ where
         self
     }
 
-    /// This connection, serving the session `session_id` its welcome named:
-    /// it ends when the session switches to another.
+    /// This connection, serving the session `session_id` its welcome named;
+    /// `roots` finds another session's root. When the session switches to
+    /// another, the attachment ends with `moved` naming that session's root,
+    /// or the connection ends when the root cannot be found.
     #[must_use]
-    pub fn serving(mut self, session_id: impl Into<String>) -> Self {
-        self.session = Some(session_id.into());
+    pub fn serving(
+        mut self,
+        session_id: impl Into<String>,
+        roots: impl Fn(&str) -> Option<NodeAddress> + Send + Sync + 'static,
+    ) -> Self {
+        self.session = Some((session_id.into(), Box::new(roots)));
         self
     }
 
-    /// Takes one observation; whether it switched the session away from
-    /// the one this connection serves.
-    fn observe(&mut self, event: SessionObservation<P>) -> bool {
-        let switched = matches!(
-            &event,
-            SessionObservation::Binding { session_id: Some(next), .. }
-                if self.session.as_ref().is_some_and(|served| served != next)
-        );
-        self.service.observe(event);
-        switched
+    /// Takes one observation, moving the connection to the session it
+    /// switched to; `false` when the switch's root cannot be found and the
+    /// connection must end.
+    fn observe(&mut self, event: SessionObservation<P>) -> CliResult<bool> {
+        if self.session.is_none() {
+            self.service.observe(event);
+            return Ok(true);
+        }
+        if self.awaiting_attach && !super::kept_for_attach(&event) {
+            self.replay.push(event.clone());
+            if self.replay.len() > ATTACHMENT_CAPACITY {
+                // Too far behind to replay: the attach snapshot is all.
+                self.replay.clear();
+            }
+        }
+        // A session's opening comes before the binding that names it, so
+        // what follows an opening is held until that binding says whose it
+        // is: the served session's, or the next one's.
+        let opening = matches!(event, SessionObservation::SessionOpening);
+        let binding = match &event {
+            SessionObservation::Binding { session_id, .. } => Some(session_id.clone()),
+            _ => None,
+        };
+        let Some(held) = self.held.as_mut() else {
+            if opening {
+                self.held = Some(vec![event]);
+                return Ok(true);
+            }
+            if let Some(next) = binding.flatten() {
+                return self.switch(next, vec![event]);
+            }
+            self.service.observe(event);
+            return Ok(true);
+        };
+        held.push(event);
+        if binding.is_none() && held.len() <= ATTACHMENT_CAPACITY {
+            return Ok(true);
+        }
+        let held = self.held.take().unwrap_or_default();
+        if let Some(next) = binding.flatten() {
+            return self.switch(next, held);
+        }
+        for observation in held {
+            self.service.observe(observation);
+        }
+        Ok(true)
+    }
+
+    /// Takes `observations`, the opening of the session `next` names when it
+    /// is not the served one: the attachment ends with `moved` naming its
+    /// root, and the next attachment of that root gets the opening's events
+    /// after its attach snapshot. `false` when that root cannot be found.
+    fn switch(
+        &mut self,
+        next: String,
+        observations: Vec<SessionObservation<P>>,
+    ) -> CliResult<bool> {
+        let node = match &self.session {
+            Some((served, roots)) if *served != next => roots(&next),
+            _ => {
+                for observation in observations {
+                    self.service.observe(observation);
+                }
+                return Ok(true);
+            }
+        };
+        let Some(node) = node else {
+            for observation in observations {
+                self.service.observe(observation);
+            }
+            return Ok(false);
+        };
+        // What the old session's attachment still holds is delivered first;
+        // the switch's observations belong to the new session's attachment.
+        self.flush()?;
+        if let Some(attachment) = self.attachment.take() {
+            let _ = self.service.detach(attachment);
+            self.unanswered();
+            for (id, outcome) in std::mem::take(&mut self.settled) {
+                write_frame(&mut self.stdout, &HostFrame::<P>::Response { id, outcome })?;
+            }
+            write_frame(
+                &mut self.stdout,
+                &HostFrame::<P>::Moved {
+                    attachment,
+                    node: node.clone(),
+                },
+            )?;
+        }
+        let nodes: std::sync::Arc<dyn super::ChildNodes> =
+            std::sync::Arc::new(TreeNodes::new(node.tree_id.clone()));
+        self.service.reroot(node, Some(nodes));
+        if let Some((served, _)) = &mut self.session {
+            *served = next;
+        }
+        // The service keeps what an attach re-emits; the rest of the
+        // opening after its last root snapshot waits for the next attach.
+        let baseline = observations.iter().rposition(|observation| {
+            matches!(observation, SessionObservation::PresentationSnapshot(snapshot)
+                if snapshot.scope == plakous_host_protocol::views::transcript::TranscriptScope::Root)
+        });
+        self.replay = observations
+            .iter()
+            .enumerate()
+            .filter(|(index, observation)| {
+                baseline.is_none_or(|baseline| *index > baseline)
+                    && !super::kept_for_attach(observation)
+            })
+            .map(|(_, observation)| observation.clone())
+            .collect();
+        self.awaiting_attach = true;
+        for observation in observations {
+            self.service.observe(observation);
+        }
+        Ok(true)
     }
 
     /// Serves frames and observations until the session ends. A client that
     /// leaves (bye or end of input) quits the session first; so does a
-    /// process asked to stop, and a connection whose session switched to
-    /// another.
+    /// process asked to stop, and a connection whose session switched to one
+    /// whose root cannot be found.
     ///
     /// # Errors
     ///
@@ -291,12 +430,12 @@ where
     ) -> CliResult<()> {
         let mut reading = true;
         loop {
-            let mut switched = false;
+            let mut lost = false;
             while let Ok(event) = events.try_recv() {
-                switched |= self.observe(event);
+                lost |= !self.observe(event)?;
             }
             self.flush()?;
-            if reading && (switched || (self.stopped)()) {
+            if reading && (lost || (self.stopped)()) {
                 reading = false;
                 self.quit();
             }
@@ -314,10 +453,15 @@ where
             }
             match events.recv_timeout(POLL) {
                 Ok(event) => {
-                    self.observe(event);
+                    self.observe(event)?;
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    // An opening no binding followed (the open failed) is
+                    // the served session's.
+                    for observation in self.held.take().unwrap_or_default() {
+                        self.service.observe(observation);
+                    }
                     self.flush()?;
                     return write_frame(&mut self.stdout, &HostFrame::<P>::Bye);
                 }
@@ -387,6 +531,13 @@ where
                 match self.service.attach(&node) {
                     Ok(attachment) => {
                         self.attachment = Some(attachment);
+                        // The opening a switch left waiting follows the
+                        // attach snapshot, after the `attached` answer.
+                        if std::mem::take(&mut self.awaiting_attach) {
+                            for observation in std::mem::take(&mut self.replay) {
+                                self.service.observe(observation);
+                            }
+                        }
                         Some(Outcome::Ok(Answer::Attached { attachment }))
                     }
                     Err(refusal) => refused(refusal),

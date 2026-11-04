@@ -3705,9 +3705,16 @@ verdicts) are addressed, the session profile and workspace chrome states.
   `malformed` and the opened session is quit and joined, so a silent peer
   never holds it; a terminating signal during the wait, or later, ends the
   connection the same way. A connection serves the session its welcome
-  names: when that session switches to another (`/new`, a resume, a
-  rebind), the connection ends as a leaving client's does and the client
-  connects and handshakes again.
+  names until that session switches to another (`/new`, a resume, a
+  rebind): the host then ends the attachment with `moved {attachment,
+  node}`, naming the new session's root, and the client attaches that node
+  fresh on the same connection. The new session's opening comes before the
+  binding that names it, so the host holds what follows a session opening
+  until that binding: none of it reaches the old attachment, and what the
+  next attach snapshot does not carry (an open notice, an answer before the
+  next session's first window) follows the next attachment's `attached`
+  answer. A switch whose new root cannot be read ends the connection as a
+  leaving client's does.
 - **Requests.** A `request` carries a client-chosen id and an `op`:
   `attach` (a node, by tree and agent id), `detach`, `intent` (an
   attachment and a session intent) or `ping`. It gets exactly one
@@ -3900,7 +3907,14 @@ verdicts) are addressed, the session profile and workspace chrome states.
   abandon-and-release request after the terminal is restored, which is
   this process's exit; and the launcher's `/new` and resume publication
   cells, which hand one launch round to the next and outlive any
-  attachment.
+  attachment. The last two belong to the session supervisor, the product
+  side of an interactive launch that owns its rounds: the TUI hands the
+  terminal back with a session request (retry the attach, resume another
+  session, rebind, release for a reload, or the config editor), and the
+  supervisor settles the round in today's order (the terminal restored
+  before any abandon, a reload's handoff record before its release) and
+  answers by opening the next session for the next round, the in-process
+  form of `moved`.
 - **Serde.** Frames, intents and observations refuse unknown fields;
   intents and observations are tagged objects (`kind`, and `body` when
   they carry one), snake case. A

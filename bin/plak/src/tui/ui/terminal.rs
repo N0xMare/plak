@@ -6,8 +6,8 @@ use super::{
     DisableMouseCapture, Duration, EnableBracketedPaste, EnableFocusChange, EnableMouseCapture,
     EndSynchronizedUpdate, Event, FrameWork, HostEvent, Instant, KeyboardEnhancementFlags,
     MAX_HOST_EVENTS_PER_FRAME, MAX_INPUT_DRAIN_PER_FRAME, Path, PopKeyboardEnhancementFlags,
-    PushKeyboardEnhancementFlags, RedrawSchedule, ScrollBlock, SettingsMenu, ShowCursor, Theme,
-    TuiError, TuiHandoff, TuiLaunch, TuiOutcome, UserAction, event, local_echo_line, stdout,
+    PushKeyboardEnhancementFlags, RedrawSchedule, ScrollBlock, SessionRequest, SettingsMenu,
+    ShowCursor, Theme, TuiError, TuiLaunch, TuiOutcome, UserAction, event, local_echo_line, stdout,
 };
 
 /// The process terminal, with repeated cursor commands suppressed.
@@ -716,7 +716,7 @@ pub(super) fn run_app(
         app.poll_attachments();
         app.poll_usage_decoration();
         if let Some(cause) = app.pending_rebind.take() {
-            request_terminal_handoff(&mut app, actions, TuiHandoff::Rebind { cause });
+            request_terminal_handoff(&mut app, actions, SessionRequest::Rebind { cause });
         }
         app.service_reload_request();
         if let Some(action) = app.new_session_after_stop(Instant::now()) {
@@ -733,7 +733,11 @@ pub(super) fn run_app(
         }
         match app.poll_reload_probe() {
             Some(super::reload::ReloadOutcome::HandOff(target)) => {
-                request_terminal_handoff(&mut app, actions, TuiHandoff::Reload { target });
+                request_terminal_handoff(
+                    &mut app,
+                    actions,
+                    SessionRequest::ReloadRelease { target },
+                );
             }
             Some(super::reload::ReloadOutcome::Refused) | None => {}
         }
@@ -842,15 +846,17 @@ pub(super) fn run_app(
     // `app.session_id` is the last `HostEvent::Binding` the host published, so
     // it is the only identity that survives an in-host session switch.
     let attached_session = app.session_id.clone();
-    if let Some(handoff) = app.terminal_handoff {
-        Ok(TuiOutcome::Handoff {
-            handoff,
+    if let Some(request) = app.terminal_handoff {
+        Ok(TuiOutcome::Request {
+            request,
             attached_session,
         })
     } else if app.request_reattach {
-        Ok(TuiOutcome::RetryAttach {
+        Ok(TuiOutcome::Request {
+            request: SessionRequest::RetryAttach {
+                declined_resume_picker: app.declined_launch_resume_picker,
+            },
             attached_session,
-            declined_resume_picker: app.declined_launch_resume_picker,
         })
     } else {
         Ok(TuiOutcome::Exited { attached_session })
@@ -893,10 +899,14 @@ pub(super) fn dispatch_action(
             }
         }
         UserAction::Extension(SurfaceIntent::OpenConfigFile) => {
-            request_terminal_handoff(app, actions, TuiHandoff::EditConfig);
+            request_terminal_handoff(app, actions, SessionRequest::EditConfig);
         }
         UserAction::ResumeSessionHandoff { id } => {
-            request_terminal_handoff(app, actions, TuiHandoff::ResumeSession { id: id.clone() });
+            request_terminal_handoff(
+                app,
+                actions,
+                SessionRequest::ResumeSession { id: id.clone() },
+            );
         }
         UserAction::RefreshReadiness => {
             send_user_action(app, actions, action.clone());
@@ -935,11 +945,11 @@ pub(super) fn dispatch_action(
 pub(super) fn request_terminal_handoff(
     app: &mut App,
     actions: Option<&crate::tui::FaceActionSender>,
-    handoff: TuiHandoff,
+    handoff: SessionRequest,
 ) {
     if matches!(
         &handoff,
-        TuiHandoff::Reload { .. } | TuiHandoff::Rebind { .. }
+        SessionRequest::ReloadRelease { .. } | SessionRequest::Rebind { .. }
     ) || send_user_action(app, actions, UserAction::Quit)
     {
         crate::tui_timing::quit_requested();

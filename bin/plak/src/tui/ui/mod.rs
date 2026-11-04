@@ -104,8 +104,8 @@ use crate::tui::theme::{Theme, ThemeId};
 use crate::tui::usage_tab;
 use crate::tui::{
     CanvasTree, HostEvent, QueueDrainState, QueueItem, ResumeMenu, ResumePickerOutcome,
-    SettingsMenu, SettingsTheme, SettingsView, TopologyNavigatorKey, TopologyNavigatorOutcome,
-    TreeNavigator, TuiError, TuiHandoff, TuiLaunch, TuiOutcome, UserAction,
+    SessionRequest, SettingsMenu, SettingsTheme, SettingsView, TopologyNavigatorKey,
+    TopologyNavigatorOutcome, TreeNavigator, TuiError, TuiLaunch, TuiOutcome, UserAction,
 };
 
 /// How often the TUI rechecks whether `plak` on `PATH` was replaced.
@@ -534,7 +534,7 @@ pub(crate) struct App {
     /// When quitting, ask the app to re-resolve OAuth and re-attach the agent.
     request_reattach: bool,
     host_disconnected: bool,
-    terminal_handoff: Option<TuiHandoff>,
+    terminal_handoff: Option<SessionRequest>,
     pending_rebind: Option<String>,
     /// `plak` on `PATH` is no longer the file this process runs; the composer
     /// offers `/reload`. Rechecked every [`BUILD_CHECK_INTERVAL`].

@@ -385,6 +385,15 @@ pub enum HostFrame<P: ProtocolExtension> {
         /// The attachment.
         attachment: AttachmentId,
     },
+    /// The session the attachment showed was replaced by another (`/new`,
+    /// a resume, a rebind): the attachment has ended, and the client attaches
+    /// `node`, the new session's root, fresh.
+    Moved {
+        /// The attachment that ended.
+        attachment: AttachmentId,
+        /// The node to attach next.
+        node: NodeAddress,
+    },
     /// The host is closing the connection.
     Bye,
 }
