@@ -263,6 +263,9 @@ an export.
 
 ### Development
 
+- The strict crash sweep runs its shapes on one shared worker pool and
+  refreshes its progress tables every 30 seconds instead of after every cut,
+  which makes it about a third faster; `timings.jsonl` records each task.
 - Development tooling lives under `tools/<area>/` beside the recipe modules
   that run it. Reference configs moved to `docs/reference-config/` and config
   scenarios to `tests/fixtures/config-scenarios/`; CONTRIBUTING and SECURITY
