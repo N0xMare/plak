@@ -90,6 +90,9 @@ fn full_sweep() {
     run(&names, jobs, repeat, strict, "full");
 }
 
+/// How often a running sweep refreshes its progress tables.
+const PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// One shape's prepared run: its seed home, session, converged baseline and
 /// twin-pilot commit list, shared by every cut of that shape. The seed's home
 /// is removed when its last cut drops it.
@@ -125,18 +128,29 @@ struct Work<'a> {
 /// Runs every shape's setup, twin pilot and cuts on one pool of `jobs`
 /// workers. A shape's cuts are queued ahead of the setups still waiting, so a
 /// prepared seed is cut and released before more shapes are prepared, and no
-/// worker sits idle behind a serial setup or pilot. Rows are kept sorted by
-/// shape, repeat, store and ordinal, so the tables do not depend on the order
-/// work finished in.
+/// worker sits idle behind a serial setup or pilot. Rows are written sorted
+/// by shape, repeat, store and ordinal, so the tables do not depend on the
+/// order work finished in. `timings.jsonl` beside them records each task's
+/// start and duration.
 fn run(names: &[&str], jobs: usize, repeat: usize, strict: bool, run: &str) {
     assert!(jobs > 0 && repeat > 0);
     let table = table::Table::new(run);
     let rows = Mutex::new(Vec::<Value>::new());
+    // The progress copy of the tables is rewritten at most once an interval,
+    // by whichever worker finds it due, outside the rows lock: rewriting the
+    // whole multi-megabyte `sweep.jsonl` after every row made each finished
+    // cut wait on the last one's write.
+    let written = Mutex::new(std::time::Instant::now());
     let record = |row: Value| {
-        let mut rows = rows.lock().unwrap();
-        rows.push(row);
-        rows.sort_by_key(row_key);
-        table.write(&rows);
+        rows.lock().unwrap().push(row);
+        if let Ok(mut written) = written.try_lock()
+            && written.elapsed() >= PROGRESS_INTERVAL
+        {
+            let mut snapshot = rows.lock().unwrap().clone();
+            snapshot.sort_by_key(row_key);
+            table.write(&snapshot);
+            *written = std::time::Instant::now();
+        }
     };
     let work = Mutex::new(Work {
         tasks: (1..=repeat)
@@ -150,55 +164,31 @@ fn run(names: &[&str], jobs: usize, repeat: usize, strict: bool, run: &str) {
         aborted: None,
     });
     let changed = Condvar::new();
+    let started = std::time::Instant::now();
+    let timings = Mutex::new(std::fs::File::create(table.directory.join("timings.jsonl")).unwrap());
+    let timed =
+        |kind: &str, shape: &str, iteration: usize, cut: Value, begun: std::time::Instant| {
+            use std::io::Write as _;
+            let line = json!({
+                "kind": kind,
+                "shape": shape,
+                "repeat": iteration,
+                "cut": cut,
+                "start_ms": begun.duration_since(started).as_millis(),
+                "elapsed_ms": begun.elapsed().as_millis(),
+            });
+            writeln!(timings.lock().unwrap(), "{line}").unwrap();
+        };
     std::thread::scope(|scope| {
         for _ in 0..jobs {
-            scope.spawn(|| {
-                loop {
-                    let task = {
-                        let mut work = work.lock().unwrap();
-                        loop {
-                            if work.aborted.is_some() {
-                                return;
-                            }
-                            if let Some(task) = work.tasks.pop_front() {
-                                work.running += 1;
-                                break task;
-                            }
-                            if work.running == 0 {
-                                return;
-                            }
-                            work = changed.wait(work).unwrap();
-                        }
-                    };
-                    let (follow, aborted) = match task {
-                        Task::Prepare { shape, iteration } => {
-                            match prepare(shape, iteration, &record) {
-                                Ok(cuts) => (cuts, None),
-                                Err(error) => (Vec::new(), Some(error)),
-                            }
-                        }
-                        Task::Cut { prepared, index } => {
-                            record(cut_row(&prepared, index));
-                            (Vec::new(), None)
-                        }
-                    };
-                    let mut work = work.lock().unwrap();
-                    for task in follow.into_iter().rev() {
-                        work.tasks.push_front(task);
-                    }
-                    if aborted.is_some() && work.aborted.is_none() {
-                        work.aborted = aborted;
-                    }
-                    work.running -= 1;
-                    changed.notify_all();
-                }
-            });
+            scope.spawn(|| work_on(&work, &changed, &record, &timed));
         }
     });
     if let Some(error) = work.into_inner().unwrap().aborted {
         std::panic::resume_unwind(error);
     }
-    let rows = rows.into_inner().unwrap();
+    let mut rows = rows.into_inner().unwrap();
+    rows.sort_by_key(row_key);
     table.write(&rows);
     eprintln!(
         "crash sweep table: {}",
@@ -217,6 +207,66 @@ fn run(names: &[&str], jobs: usize, repeat: usize, strict: bool, run: &str) {
             rows.iter().all(strict_accepts),
             "strict sweep rejects recovery refusals"
         );
+    }
+}
+
+/// One worker: takes tasks until none is left and none still runs (one
+/// may still queue cuts), or until a setup failed.
+fn work_on<'a>(
+    work: &Mutex<Work<'a>>,
+    changed: &Condvar,
+    record: &(dyn Fn(Value) + Sync),
+    timed: &(dyn Fn(&str, &str, usize, Value, std::time::Instant) + Sync),
+) {
+    loop {
+        let task = {
+            let mut work = work.lock().unwrap();
+            loop {
+                if work.aborted.is_some() {
+                    return;
+                }
+                if let Some(task) = work.tasks.pop_front() {
+                    work.running += 1;
+                    break task;
+                }
+                if work.running == 0 {
+                    return;
+                }
+                work = changed.wait(work).unwrap();
+            }
+        };
+        let begun = std::time::Instant::now();
+        let (follow, aborted) = match task {
+            Task::Prepare { shape, iteration } => {
+                let prepared = prepare(shape, iteration, record);
+                timed("prepare", shape, iteration, Value::Null, begun);
+                match prepared {
+                    Ok(cuts) => (cuts, None),
+                    Err(error) => (Vec::new(), Some(error)),
+                }
+            }
+            Task::Cut { prepared, index } => {
+                let row = cut_row(&prepared, index);
+                timed(
+                    "cut",
+                    prepared.shape,
+                    prepared.iteration,
+                    row["cut"].clone(),
+                    begun,
+                );
+                record(row);
+                (Vec::new(), None)
+            }
+        };
+        let mut work = work.lock().unwrap();
+        for task in follow.into_iter().rev() {
+            work.tasks.push_front(task);
+        }
+        if aborted.is_some() && work.aborted.is_none() {
+            work.aborted = aborted;
+        }
+        work.running -= 1;
+        changed.notify_all();
     }
 }
 
