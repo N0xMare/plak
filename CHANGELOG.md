@@ -243,6 +243,16 @@ an export.
   asks it every workspace question before a writer turn; settle and spawn
   mints run as their own release-owned tasks.
 
+- Live sub-agents run on the same node actor as the root: one main loop and
+  one turn loop serve both roles, the hub's follow-up, restart, release and
+  cancel are messages to the child's actor, and a child's approval is decided
+  once by its own actor (`LiveChildHandle::decide`). Behavior is unchanged.
+- Runner protocol v1 (`plakous-runner-protocol`) and the runner library
+  (`plakous-runner`): framed, versioned host-runner messages with line-keyed
+  owner fences, at-most-once effect calls, process sessions, streams and
+  liveness, behind an unsupported, hidden runner seam. Sessions select the
+  local runner; a non-local runner is reachable only from tests.
+
 ### Security
 
 - pulldown-cmark is 0.13.6 (RUSTSEC-2026-0433, quadratic parsing of nested
