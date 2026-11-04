@@ -448,7 +448,17 @@ define_observations! {
 
 /// The idle pending-work snapshot carried by
 /// [`SessionObservation::PendingContinuation`].
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(
+    serde::Serialize,
+    serde::Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Eq,
+    PartialEq,
+    schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct PendingContinuation {
     /// Undelivered child results addressed to the root.
@@ -462,7 +472,9 @@ pub struct PendingContinuation {
 }
 
 /// Immutable queue row supplied by the authoritative product host.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct QueueItem {
     /// This revision was definitely refused and requires editing or new submission.
@@ -479,7 +491,9 @@ pub struct QueueItem {
 }
 
 /// Host-owned automatic queue delivery state.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum QueueDrainState {
     /// An uninterrupted attached session may deliver FIFO, one item at a time.
@@ -489,7 +503,9 @@ pub enum QueueDrainState {
 }
 
 /// Host-authoritative terminal context-capacity recovery presentation.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ContextCapacityRecovery {
     /// The withheld prompt can be shortened and explicitly sent again.
@@ -504,7 +520,7 @@ pub enum ContextCapacityRecovery {
 ///
 /// Terminal phases are projected from the canonical `TurnResult` only; busy
 /// and usage observations are never completion evidence.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnPhase {
     /// The host admitted the turn; no terminal evidence exists yet.
@@ -540,7 +556,7 @@ impl TurnPhase {
 }
 
 /// Correlated lifecycle evidence for one admitted turn.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 pub struct TurnLifecycle {
     /// Canonical turn identity.
     pub turn_id: String,
@@ -553,7 +569,7 @@ pub struct TurnLifecycle {
 }
 
 /// One announced replay of a turn's model request.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 pub struct ModelRetryNotice {
     /// The 1-based physical request about to be sent.
     pub next_attempt: u32,

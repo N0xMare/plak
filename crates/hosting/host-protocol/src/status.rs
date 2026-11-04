@@ -3,7 +3,17 @@
 use crate::notice_remedy::NoticeRemedy;
 
 /// Latest host phase, not a terminal result or a notice phase.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(
+    serde::Serialize,
+    serde::Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Eq,
+    PartialEq,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum HostPhase {
     #[default]
@@ -55,7 +65,17 @@ impl HostPhase {
 }
 
 /// The restored root queue's admission pause.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(
+    serde::Serialize,
+    serde::Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Eq,
+    PartialEq,
+    schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct HostPause {
     /// Automatic queue drain requires explicit admission.
@@ -63,7 +83,9 @@ pub struct HostPause {
 }
 
 /// Bounded factual diagnostic; never used to route operator remedies.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(from = "String", into = "String")]
 pub struct DiagnosticText(String);
 
@@ -100,7 +122,9 @@ impl DiagnosticText {
 }
 
 /// Typed attach/startup failure; composition retains its remedy separately from prose.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct HostFailure {
     /// Bounded, redaction-safe failure facts.
@@ -116,7 +140,9 @@ pub struct HostFailure {
 }
 
 /// Exact source facts of binding refusals, independent of their diagnostic.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum HostFailureOrigin {
     /// Native binding or credential revalidation.
@@ -160,7 +186,17 @@ impl std::fmt::Display for HostFailure {
 impl std::error::Error for HostFailure {}
 
 /// Typed attach repair distinctions that survive error wrapping.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(
+    serde::Serialize,
+    serde::Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Eq,
+    PartialEq,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum AttachFailure {
     /// The JavaScript runtime artifact is unavailable.
@@ -211,7 +247,9 @@ impl DetachedReason {
 }
 
 /// Why no canonical agent is attached.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum DetachedReason {
     /// No root profile has been selected.
@@ -229,7 +267,9 @@ pub enum DetachedReason {
 }
 
 /// Origin distinguishes the existing direct and queued status spellings.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SteerSource {
     /// A direct steer action.
@@ -239,7 +279,9 @@ pub enum SteerSource {
 }
 
 /// One bounded control failure, never a frontend instruction.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct ControlFailure {
     /// Redaction-safe runtime diagnostic.
@@ -247,7 +289,9 @@ pub struct ControlFailure {
 }
 
 /// Why the runtime has not been observed to settle a cancel request.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum CancelUnsettled {
     /// The runtime refused cancellation.
@@ -279,7 +323,9 @@ impl std::fmt::Display for CancelUnsettled {
 }
 
 /// A stage in a clear or profile-rebind transition.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum HostTransitionStage {
     /// The clear resolve authority stage.
@@ -305,7 +351,9 @@ pub enum HostTransitionStage {
 }
 
 /// Typed status facts; absence of a detail remains distinct from every case here.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum HostStatusDetail {
     /// Product settings location, supplied by the product settings adapter.

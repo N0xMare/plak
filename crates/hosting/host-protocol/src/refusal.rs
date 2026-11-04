@@ -3,7 +3,9 @@
 use crate::notice_remedy::ProductSessionId;
 
 /// The typed credential gate that refused a child template.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ChildCredentialState {
     /// No signed-in Ready login was available.
@@ -13,7 +15,9 @@ pub enum ChildCredentialState {
 }
 
 /// Typed action-refusal data; never persisted as a notice remedy.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(
+    Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RefusalAdvice {
     /// Inspect operator storage health after a preventive admission refusal.
@@ -106,7 +110,7 @@ impl ToolRefusal {
     /// Decode only closed structured error payloads, never rendered prose.
     #[must_use]
     pub fn decode(raw: &str) -> Option<Self> {
-        #[derive(serde::Deserialize)]
+        #[derive(serde::Deserialize, schemars::JsonSchema)]
         #[serde(deny_unknown_fields)]
         struct Topology {
             code: crate::topology::TopologyErrorCode,
@@ -116,26 +120,26 @@ impl ToolRefusal {
             #[serde(default)]
             remedy: Option<crate::notice_remedy::NoticeRemedy>,
         }
-        #[derive(serde::Deserialize)]
+        #[derive(serde::Deserialize, schemars::JsonSchema)]
         #[serde(deny_unknown_fields)]
         struct Authorization {
             message: String,
             server: String,
             scope: String,
         }
-        #[derive(serde::Deserialize)]
+        #[derive(serde::Deserialize, schemars::JsonSchema)]
         #[serde(deny_unknown_fields)]
         struct Mcp {
             mcp_authorization: Authorization,
         }
-        #[derive(serde::Deserialize)]
+        #[derive(serde::Deserialize, schemars::JsonSchema)]
         #[serde(deny_unknown_fields)]
         struct SecretBody {
             message: String,
             server: String,
             name: String,
         }
-        #[derive(serde::Deserialize)]
+        #[derive(serde::Deserialize, schemars::JsonSchema)]
         #[serde(deny_unknown_fields)]
         struct Secret {
             mcp_secret: SecretBody,

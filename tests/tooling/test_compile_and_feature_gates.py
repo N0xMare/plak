@@ -919,7 +919,7 @@ class FeatureGateTests(unittest.TestCase):
         manifests = feature_gate.load_workspace_manifests()
         self.assertNotIn("maintainer", manifests["plakous"]["features"])
         self.assertNotIn("maintainer", manifests["plakous-hosted"]["features"])
-        self.assertEqual(manifests["plak"]["features"]["maintainer"], ["jj"])
+        self.assertEqual(manifests["plak"]["features"]["maintainer"], ["jj", "web"])
         self.assertIn("maintainer", feature_gate.optional_features(manifests["plak"]))
 
 

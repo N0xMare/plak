@@ -3,7 +3,9 @@
 use super::presentation::{ActivityKind, McpCall};
 
 /// Semantic operation derived from the canonical tool name and host activity kind.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolOperation {
     /// The run operation.

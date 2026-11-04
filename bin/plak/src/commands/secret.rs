@@ -66,5 +66,6 @@ const fn noun(shelf: SecretShelf) -> &'static str {
     match shelf {
         SecretShelf::Named => "secret",
         SecretShelf::Runner => "runner secret",
+        SecretShelf::Web => "web secret",
     }
 }

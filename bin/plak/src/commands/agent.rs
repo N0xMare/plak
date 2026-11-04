@@ -202,7 +202,7 @@ pub(crate) fn new_agent_record(
     clippy::too_many_lines,
     reason = "Agent admission carries the explicit binding overrides through capability checks, session selection, and host configuration."
 )]
-fn run_agent_after_admission(
+pub(crate) fn run_agent_after_admission(
     services: &crate::shell::services::Services,
     session_id: Option<String>,
     provider: Option<NativeProvider>,

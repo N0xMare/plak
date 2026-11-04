@@ -73,6 +73,17 @@ toml.workspace = true
 toml_edit.workspace = true
 unicode-width = "0.2.2"
 uuid = { workspace = true, features = ["v4"] }
+# `plak wire schema`: the extension's half of the wire v2 schema.
+schemars.workspace = true
+# `web` only. Serve terminates TLS, so no TLS stack: the WebSocket protocol
+# alone, over hyper's upgraded HTTP/1.1 connection.
+bytes = { workspace = true, optional = true }
+futures-util = { workspace = true, features = ["sink", "std"], optional = true }
+http-body-util = { workspace = true, optional = true }
+hyper = { workspace = true, features = ["http1", "server"], optional = true }
+hyper-util = { workspace = true, features = ["tokio"], optional = true }
+ring = { workspace = true, optional = true }
+tokio-tungstenite = { workspace = true, optional = true }
 opentelemetry = { workspace = true, optional = true }
 opentelemetry-otlp = { workspace = true, optional = true }
 opentelemetry_sdk = { workspace = true, optional = true }
@@ -96,6 +107,7 @@ proptest = { workspace = true, features = ["std"] }
 rusqlite.workspace = true
 tempfile = { workspace = true }
 vt100.workspace = true
+tungstenite.workspace = true
 
 # No benchmark harness dependency in the workspace: the bench is a plain
 # `main` over `std::time::Instant` (named benchmark).
@@ -127,7 +139,18 @@ python = ["js", "plakous/composition-python", "plakous-hosted/python"]
 mcp = ["plakous/mcp", "plakous-hosted/mcp"]
 git-cli = ["plakous-hosted/git-cli", "plakous-recursive-subagents/git-cli", "plakous-recursive-subagents-store/git-cli"]
 jj = ["plakous-hosted/jj-lib", "plakous-recursive-subagents/jj-lib", "plakous-recursive-subagents-store/jj-lib"]
-maintainer = ["jj"]
+maintainer = ["jj", "web"]
+# The maintainer web endpoint (`plak web`): HTTP/1.1 and WebSocket on a
+# private listener, the web UI's static files.
+web = [
+    "dep:bytes",
+    "dep:futures-util",
+    "dep:http-body-util",
+    "dep:hyper",
+    "dep:hyper-util",
+    "dep:ring",
+    "dep:tokio-tungstenite",
+]
 # The product fixtures the binary's own integration contracts drive: an
 # isolated product home and the state roots over Plak's real ports.
 test-support = []

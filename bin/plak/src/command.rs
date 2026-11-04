@@ -7,6 +7,21 @@ use plakous::subscriptions::{NativeLoginMode, NativeProvider};
 
 use crate::{CliFailureKind, product_config};
 
+/// `plak web`'s arguments, parsed by the web module when it starts.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct WebCommand {
+    /// `unix:<path>` or `127.0.0.1:<port>`.
+    pub(crate) listen: String,
+    /// The web UI's build directory; none serves `/wire` only.
+    pub(crate) ui: Option<PathBuf>,
+    /// The session to resume; none opens a new one.
+    pub(crate) session: Option<String>,
+    /// The working directory a new session opens in.
+    pub(crate) cwd: Option<PathBuf>,
+    /// Dev mode on a loopback listener: every request is this login.
+    pub(crate) dev_login: Option<String>,
+}
+
 pub(crate) const NATIVE_RUN_MAX_PROMPT_BYTES: usize = 64 * 1024;
 #[allow(
     dead_code,
@@ -236,6 +251,11 @@ pub(crate) enum Command {
         /// supported).
         wire_v2: bool,
     },
+    /// Hidden `plak web`: one headless session's wire v2 and the web UI on
+    /// a private listener.
+    Web(WebCommand),
+    /// Hidden `plak wire schema`: this build's wire v2 JSON Schema.
+    WireSchema,
 }
 
 /// Operator-selected reasoning effort for subscription runs.
@@ -353,6 +373,7 @@ impl Command {
             | Self::SecretList { shelf } => match shelf {
                 crate::home::paths::SecretShelf::Named => "secret",
                 crate::home::paths::SecretShelf::Runner => "runner",
+                crate::home::paths::SecretShelf::Web => "web",
             },
             Self::Mcp(_) => "mcp",
             Self::Runner(_) => "runner",
@@ -383,6 +404,8 @@ impl Command {
             | Self::RunPlatform { .. }
             | Self::ContinueSession { .. } => "run",
             Self::Agent { .. } => "agent",
+            Self::Web(_) => "web",
+            Self::WireSchema => "wire",
         }
     }
 
@@ -407,6 +430,7 @@ pub(crate) fn command_needs_product_state(command: &Command) -> bool {
             | Command::RunPlatform { .. }
             | Command::ContinueSession { .. }
             | Command::Agent { .. }
+            | Command::Web(_)
             | Command::SessionList
             | Command::SessionRecover { .. }
             | Command::SessionExport { .. }

@@ -18,7 +18,9 @@ use plakous_host_protocol::{
 pub(crate) mod mcp_lines;
 
 /// Checkout facts, not a preformatted border label or session authority.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceChrome {
     pub path: std::path::PathBuf,
@@ -27,7 +29,9 @@ pub struct WorkspaceChrome {
 }
 
 /// Read-only MCP configuration and the session's frozen binding.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct McpOverview {
     pub config_readable: bool,
@@ -37,7 +41,9 @@ pub struct McpOverview {
     pub omitted: Vec<String>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct McpServerView {
     pub id: String,
@@ -45,7 +51,9 @@ pub struct McpServerView {
     pub binding: McpSessionBinding,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct McpServerConfiguration {
     pub transport: String,
@@ -59,7 +67,9 @@ pub struct McpServerConfiguration {
     pub login: Option<String>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum McpSessionBinding {
     NotBound,
@@ -70,7 +80,9 @@ pub enum McpSessionBinding {
 }
 
 /// Product-authoritative editable settings.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct SettingsSnapshot {
     /// Default account for new sessions.
@@ -93,7 +105,9 @@ pub struct SettingsSnapshot {
 }
 
 /// Product settings and the independently owned terminal preferences edited together.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct SettingsView {
     pub product: SettingsSnapshot,
@@ -116,7 +130,9 @@ impl Default for SettingsView {
 }
 
 /// Product-resolved availability for one exact composition choice and default binding.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct SettingsCompositionOption {
     /// Closed selection represented by this option.
@@ -130,7 +146,9 @@ pub struct SettingsCompositionOption {
 pub use crate::tui_preferences::SettingsTheme;
 
 /// One role line in the Agents detail box.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct ProfileRole {
     /// Role (`root`, `worker`, …) or, for a user profile, the template name.
@@ -149,7 +167,9 @@ pub struct ProfileRole {
 }
 
 /// One selectable profile.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct ProfileRow {
     /// Built-in id or `~/.plak/profiles` file stem; for a session's own row,
@@ -168,7 +188,9 @@ pub struct ProfileRow {
 /// How a session differs from its nearest profile: the root's own values
 /// beside the profile's, and card or roster names. Never card bodies or
 /// credentials.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ProfileDifference {
     RootAccount { session: String, profile: String },
@@ -181,7 +203,9 @@ pub enum ProfileDifference {
 }
 
 /// The product's profile list, as the Agents tab shows it.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct ProfilesView {
     /// Built-ins first, then user profiles by name.
@@ -193,7 +217,9 @@ pub struct ProfilesView {
 }
 
 /// Where an applied profile takes effect.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ProfileApply {
     /// Saved as the default profile brand-new sessions bind.
@@ -207,7 +233,9 @@ pub enum ProfileApply {
 }
 
 /// How an applied profile landed.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ProfileOutcome {
     /// Saved as the default profile brand-new sessions bind.
@@ -248,7 +276,17 @@ impl ProtocolExtension for PlakExtension {
 ///
 /// An acknowledgement covers this attempt's attention label and end stamp,
 /// not every later time the same attempt needs the operator.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(
+    serde::Serialize,
+    serde::Deserialize,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct AgentAcknowledgement {
     /// Exact agent id.
@@ -262,7 +300,7 @@ pub struct AgentAcknowledgement {
 }
 
 /// Product-owned intents the protocol carries for Plak's own surfaces.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Eq, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SurfaceIntent {
     /// Open raw `config.toml` in `$EDITOR`.
@@ -363,7 +401,9 @@ impl fmt::Debug for SurfaceIntent {
 }
 
 /// Product-owned observations the protocol carries for Plak's own surfaces.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SurfaceObservation {
     /// Replace and open the typed product settings pane.

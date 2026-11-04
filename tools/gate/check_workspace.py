@@ -667,6 +667,14 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plak", "src/capabilities/grok.rs"): {"include_str"},
     ("plakous-workspace", "src/git_redirect_fence.rs"): {"include_str"},
     ("plak", "src/commands/application.rs"): {"select"},
+    # The web endpoint: logins, connections and refusals (no secret or frame),
+    # and the accept loop and one connection's socket, session and pings.
+    ("plak", "src/web.rs"): {"info"},
+    ("plak", "src/web/auth.rs"): {"info", "warn"},
+    ("plak", "src/web/listen.rs"): {"select"},
+    ("plak", "src/web/socket.rs"): {"info", "select"},
+    # The wire schema document's envelope.
+    ("plak", "src/wire_schema.rs"): {"json"},
     ("plak", "src/commands/secret_input.rs"): {"select"},
     # The SIGTERM/SIGHUP watcher thread waits on two signal streams at once.
     ("plak", "src/signals.rs"): {"select"},
@@ -5420,9 +5428,10 @@ def _check_workspace() -> int:
             "xai-api",
             "anthropic",
             "openrouter",
+            "web",
         }:
             errors.append(
-                "plak may expose only default, maintainer, otel, test-hooks, test-support "
+                "plak may expose only default, maintainer, otel, test-hooks, test-support, web "
                 "workspace backend features and product build capabilities"
             )
         elif set(app_features.get("default", [])) != {
@@ -5443,8 +5452,8 @@ def _check_workspace() -> int:
             "openrouter",
         }:
             errors.append("plak default must enable git-cli and all product capabilities")
-        elif app_features.get("maintainer") != ["jj"]:
-            errors.append("plak maintainer feature must enable jj")
+        elif app_features.get("maintainer") != ["jj", "web"]:
+            errors.append("plak maintainer feature must enable jj and web")
         elif "dep:opentelemetry" not in app_features.get("otel", []):
             errors.append("plak otel feature must enable the opentelemetry dependency")
         elif sorted(app_features.get("test-hooks", [])) != [

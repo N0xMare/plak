@@ -702,6 +702,13 @@ fork   compact   compatibility
 session rehearse <full-session-uuid>  # hidden, offline, read-only
 ```
 
+`maintainer` also enables `web`, the hidden `plak web` endpoint (chapter 02
+§4.5): `hyper` and `hyper-util` (HTTP/1.1 server and upgrades),
+`http-body-util`, `bytes`, `futures-util`, `ring` (the cookie HMAC and the
+WebSocket accept digest) and `tokio-tungstenite`. Without it `plak web`
+parses and refuses with a typed error; the default product links none of the
+endpoint's crates.
+
 `models` is not gated — it is an ordinary product verb alongside `login`,
 `logout`, `status`, `refresh`, `key`, `run`, `agent`, `resume`, `session`,
 `usage`, `doctor`, `config`, `telemetry`, `help`, and `version`.
@@ -1682,6 +1689,26 @@ converts on a thread with its own 32 MiB stack. URL parsing and IDNA use the
 already locked `url` crate. The facade selects it only through `web-fetch`
 (chapter 01 section 12.1), independently of providers, subscriptions, auth
 and MCP; no composition-only closure reaches the converter.
+
+The web endpoint (`plak` feature `web`, maintainer builds only) speaks
+WebSocket with crates.io `tokio-tungstenite =0.29.0` over `tungstenite
+=0.29.0` (both MIT OR Apache-2.0, MSRV 1.63), default features off: no TLS
+(Tailscale Serve terminates it), no client connector and no handshake module,
+so neither `sha1` 0.10, `http`'s handshake glue nor `data-encoding` is linked;
+the upgrade itself is hyper's, and the accept digest is `ring`'s SHA-1. The
+two crates are the only additions to the lock graph (`bytes`, `log`, `rand`
+0.9, `thiserror` and `futures-util` were present). `plak`'s offline
+integration test drives the endpoint with `tungstenite` as a dev-dependency.
+
+`plakous-host-protocol` derives `schemars =1.2.2` `JsonSchema` on every wire
+type unconditionally (default features off, `derive`, `std` and `uuid1`), so
+`plak wire schema` prints the exact build's schema (chapter 02 §4.4). It adds
+no crate to the lock graph (`schemars`, `schemars_derive`, `dyn-clone`,
+`ref-cast` and `serde_derive_internals` were already locked through `rmcp`),
+but it is now in every product closure, the minimal and headless variants
+included, which before reached it only through MCP. A feature-gated derive was
+not taken: each `cfg_attr` is a feature site, and the protocol crate carries
+about 160 wire types.
 
 ### 7.1 Rules
 

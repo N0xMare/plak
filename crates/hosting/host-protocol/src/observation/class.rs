@@ -25,7 +25,17 @@ use crate::intent::{ObservationExtension, ProtocolExtension};
 use crate::views::transcript::TranscriptRow;
 
 /// Whether a broadcast event may be lost.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Delivery {
     /// Never dropped: an attachment that cannot take it is detached.
@@ -35,7 +45,17 @@ pub enum Delivery {
 }
 
 /// Who receives an observation.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ObservationClass {
     /// Broadcast latest value, part of the attach snapshot.

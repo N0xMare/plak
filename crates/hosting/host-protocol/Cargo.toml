@@ -27,6 +27,9 @@ reason = "Existing lint and size debt, frozen at the counts on main; ratchet dow
 base64.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+# `JsonSchema` on every wire type: `plak wire schema` emits the machine-readable
+# wire v2 schema of the exact build.
+schemars.workspace = true
 uuid = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]

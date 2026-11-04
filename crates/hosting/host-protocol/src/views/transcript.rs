@@ -26,7 +26,7 @@ pub use patch::{
 pub use revision::TranscriptRevision;
 
 /// One transcript row.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TranscriptRow {
     /// Muted first row: the session id and, for a carried session, its source.
@@ -223,7 +223,7 @@ impl TranscriptRow {
 }
 
 /// The source of a carried session.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CarriedFrom {
     /// Source product session id, under the source state key.
@@ -233,7 +233,7 @@ pub struct CarriedFrom {
 }
 
 /// A sealed thinking row.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ThinkingRow {
     /// Opaque per-turn reasoning location.
@@ -248,7 +248,7 @@ pub struct ThinkingRow {
 /// One tool call as the transcript shows it. Written in place by call id as
 /// the call progresses; the host sets its activity kind, which the renderer
 /// never re-derives from `name`.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ToolItem {
     /// Stable call id.
@@ -337,7 +337,7 @@ impl ToolItem {
 }
 
 /// What a wait asked for and what ended it.
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WaitFacts {
     /// Requested timeout, when the call named one.
@@ -355,7 +355,7 @@ pub struct WaitFacts {
 }
 
 /// A background process notice, an item inside the group.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ProcessNotice {
     /// Product job id.
@@ -371,7 +371,7 @@ pub struct ProcessNotice {
 }
 
 /// How a background process ended.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ProcessOutcome {
     /// The process exited on its own, with its code when known.
@@ -384,7 +384,7 @@ pub enum ProcessOutcome {
 }
 
 /// One announced model-request replay: `retry 2/4 · cause`.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RetryItem {
     /// The 1-based physical request about to be sent.
@@ -396,7 +396,7 @@ pub struct RetryItem {
 }
 
 /// A child-agent lifecycle row.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AgentMilestone {
     /// Tree-scoped agent id, e.g. `c23`.
@@ -425,7 +425,7 @@ pub struct AgentMilestone {
 }
 
 /// Child lifecycle events that render as rows.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MilestoneEvent {
     /// `◆ spawned c23 · template · brief`.
@@ -447,7 +447,7 @@ pub enum MilestoneEvent {
 }
 
 /// A wake batch an earlier build recorded; never shown.
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AutoContinue {
     /// Children whose settled results woke the root.
@@ -460,7 +460,7 @@ pub struct AutoContinue {
 }
 
 /// A classified operator notice.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct NoticeRow {
     /// What the notice is about; decides where it renders.
@@ -484,7 +484,7 @@ impl NoticeRow {
 
 /// Every host and product notice producer names one scope. The scope alone
 /// decides placement, so a new producer is classified when it is written.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum NoticeScope {
     /// A model-request retry cause or output-limit retry inside a turn.
@@ -560,7 +560,9 @@ impl NoticeScope {
 }
 
 /// Where a notice renders.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum NoticePlacement {
     /// An item inside the current tool group.
@@ -572,7 +574,7 @@ pub enum NoticePlacement {
 }
 
 /// Notice severity.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum NoticeTone {
     /// Informational.

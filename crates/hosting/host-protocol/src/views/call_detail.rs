@@ -4,7 +4,9 @@
 use std::fmt;
 
 /// Where a call detail's text came from.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum CallDetailSource {
     /// The session's committed canonical history: the input and the result
@@ -18,7 +20,7 @@ pub enum CallDetailSource {
 }
 
 /// What the host could read for one call.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Eq, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CallDetailOutcome {
     /// Displayable call text.
@@ -75,7 +77,9 @@ impl fmt::Debug for CallDetailOutcome {
 
 /// The host's answer to one call-detail request, keyed by the requested id
 /// and the session the host resolved against.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct CallDetail {
     /// The exact call id the request named.
@@ -90,7 +94,9 @@ pub struct CallDetail {
 }
 
 /// One source a web search or fetch result names.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct SourceLink {
     /// The source's title; empty when the result named none.

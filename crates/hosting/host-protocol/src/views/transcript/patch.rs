@@ -6,7 +6,9 @@ use super::{RowKey, ToolItem, TranscriptRevision, TranscriptRow};
 
 /// Uncommitted appends between keyed publication boundaries. These are not
 /// revisions: a snapshot contains their accumulated resync baseline.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum TranscriptStreamDelta {
     /// Assistant prose appended to the current output.
@@ -29,7 +31,16 @@ use crate::views::presentation::{
 
 /// The transcript an update belongs to; child content never mutates the root.
 #[derive(
-    serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd,
+    serde::Serialize,
+    serde::Deserialize,
+    Clone,
+    Debug,
+    Default,
+    Eq,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    schemars::JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum TranscriptScope {
@@ -41,7 +52,9 @@ pub enum TranscriptScope {
 }
 
 /// A row and its immutable ordering identity within one transcript scope.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct TranscriptItem {
     /// Ordering identity, not a display label or vector index.
@@ -52,7 +65,9 @@ pub struct TranscriptItem {
 
 /// An atomic update to one exact presentation revision. Missing a revision
 /// requires a scope snapshot; a patch is never recovery or terminal authority.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(try_from = "TranscriptPatchFields")]
 pub struct TranscriptPatch {
     /// The transcript to update.
@@ -68,7 +83,7 @@ pub struct TranscriptPatch {
 }
 
 /// A patch as it arrives, before [`TranscriptPatch::validate`].
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct TranscriptPatchFields {
     scope: TranscriptScope,

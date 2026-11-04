@@ -165,10 +165,10 @@ remain unchanged. Only explicit configuration actions (including Settings and
 profile application) publish configuration changes; an incomplete bind cannot
 silently clear `[root] agent`.
 
-Twelve key sections, in render order: `[root] [roster] [orchestration] [turn]
-[jobs] [api] [tui] [compaction] [skills] [telemetry] [mcp] [host]`, plus three
-families of named tables, `[tools.<name>]` (§3.4), `[mcp_servers.<id>]` (§3.5)
-and `[runners.<name>]` (§3.6), fifteen in all. Any other section is an error.
+Thirteen key sections, in render order: `[root] [roster] [orchestration] [turn]
+[jobs] [api] [tui] [compaction] [skills] [telemetry] [mcp] [host] [web]`, plus
+three families of named tables, `[tools.<name>]` (§3.4), `[mcp_servers.<id>]`
+(§3.5) and `[runners.<name>]` (§3.6), sixteen in all. Any other section is an error.
 The families are not `plak config set` keys: they are authored in the file, a
 save leaves them exactly as written, and `plak config show` prints the
 canonical rendering of the tool and server tables after the keys.
@@ -177,16 +177,18 @@ canonical rendering of the tool and server tables after the keys.
 interrupted holds for the operator's Resume or continues once by itself
 (chapter 03 §14.1); `[mcp_servers.<id>] placement` places a server (§3.5);
 `[runners.<name>]` is read by `plak runner pair`, `plak runner ps` and `plak
-doctor` (§3.6) and by nothing else yet. A 0.0.3 build
-refuses a `config.toml` that sets any of them (unknown section or key), so
-`plak` writes them only when the operator sets them: `plak config init` and a
-fresh save write the `[host]` header commented out, a save of another key
-never adds one, and a save that clears the last key of `[host]` removes the
-empty table. `plak doctor` names each one the home file or a trusted project
-file carries, and a `[host]` or `[runners]` table present even empty
-(chapter 02 §7.3). `[host] resume_after_loss` and `[runners.<name>]` are
-home-scoped: a project file that sets them is loaded with a warning and its
-values are ignored.
+doctor` (§3.6) and by nothing else yet; `[web] allow` and `[web] origin` are
+read by `plak web` (chapter 02 §4.5, chapter 04 §2.10) and by nothing else. A
+0.0.3 build refuses a `config.toml` that sets any of them (unknown section or
+key), so `plak` writes them only when the operator sets them: `plak config
+init` and a fresh save write the `[host]` and `[web]` headers commented out, a
+save of another key never adds one, and a save that clears the last key of
+`[host]` or `[web]` removes the empty table. `plak doctor` names each one the
+home file or a trusted project file carries, and a `[host]`, `[runners]` or
+`[web]` table present even empty (chapter 02 §7.3). `[host]
+resume_after_loss`, `[runners.<name>]` and `[web]` are home-scoped: a project
+file that sets them is loaded with a warning and its values are ignored, so a
+repository can never grant web access.
 
 | key | type | default | constraint | meaning |
 | --- | --- | --- | --- | --- |
@@ -223,6 +225,8 @@ values are ignored.
 | `telemetry.max_age_days` | integer | `90` | greater than 0; zero is refused as ambiguous | Retention cutoff for local analytics rows, in days. |
 | `mcp.client_id_metadata_url` | string | `(unset)` | `https://` URL with a path, no query or fragment; home-scoped | The OAuth Client ID Metadata Document that identifies Plak to an MCP authorization server that supports one (spec 01 §8.5). Unset disables that registration path; the document lists the redirect URI `http://127.0.0.1/callback`, which a server matches on any port. Takes effect at the next `plak mcp login`. |
 | `host.resume_after_loss` | enum | `(unset)` | hold\|continue; unset holds; home-scoped | Whether a sub-agent whose host was lost (a crash, a lease loss) holds for the operator's Resume or continues once by itself with a new instruction turn (chapter 03 §14.1). The root still holds either way; its continuation is not implemented yet. Read when the root opens; a released 0.0.3 build (or older) refuses a config.toml that sets it. |
+| `web.allow` | array of string | `(unset)` | tailnet logins, no duplicates; unset admits no one; home-scoped | The tailnet logins (Tailscale-User-Login) plak web admits through tailscale serve. Read when plak web starts; a 0.0.3 build refuses a config.toml that sets it. |
+| `web.origin` | string | `(unset)` | https://<host>[:port], nothing after it; home-scoped | The exact origin tailscale serve publishes plak web at; every request must name its host and a WebSocket upgrade its origin. Read when plak web starts; a 0.0.3 build refuses a config.toml that sets it. |
 
 OpenRouter input admission uses the discovered context window minus the reserved
 output bound, lowered by eligible endpoint limits. It has no fixed 65,536-token

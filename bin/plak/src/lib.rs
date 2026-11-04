@@ -165,6 +165,12 @@ mod ui_wake {
 mod ui_wake {
     pub(super) fn wake() {}
 }
+#[cfg(feature = "web")]
+mod web;
+#[cfg(not(feature = "web"))]
+#[path = "web_unavailable.rs"]
+mod web;
+mod wire_schema;
 
 /// Runs the repository-only TUI rendering benchmark.
 #[cfg(all(feature = "test-support", feature = "tui"))]
@@ -484,6 +490,8 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             return carry::import_and_resume(&services, &path, handoff.as_deref());
         }
         command @ Command::Agent { .. } => return run_agent_command(&services, command),
+        Command::Web(command) => return web::run_web_command(&services, command),
+        Command::WireSchema => return wire_schema::print(&mut io::stdout().lock()),
         // The runner bridge owns raw stdin and stdout, so it runs before the
         // process takes their locks.
         Command::Runner(command) => {
@@ -1182,6 +1190,8 @@ fn execute_command(
         | Command::Tui { .. }
         | Command::Resume { .. }
         | Command::Agent { .. }
+        | Command::Web(_)
+        | Command::WireSchema
         | Command::Help
         | Command::CommandHelp { .. }
         | Command::Version

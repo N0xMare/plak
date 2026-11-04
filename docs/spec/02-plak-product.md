@@ -3920,6 +3920,99 @@ verdicts) are addressed, the session profile and workspace chrome states.
   they carry one), snake case. A
   snapshot or patch decodes only when it validates; a diagnostic is
   bounded as one made here; image bytes are base64.
+- **Schema.** `plak agent`'s build publishes its own wire v2 schema: the
+  hidden `plak wire schema` prints one JSON Schema (draft 2020-12) document
+  with the build's `wire_version` and binary id, `client_frame` and
+  `host_frame` (Plak's extension traffic included) and their shared
+  `$defs`. It is derived from the serde types themselves (`schemars`), so it
+  is exactly what this build encodes and decodes; a client checks its
+  frames against the build it speaks to, not against a copy.
+
+### 4.5 The web endpoint
+
+The hidden maintainer command `plak web --listen <unix:path|127.0.0.1:port>
+[--ui <dir>] [--session <id> | --cwd <dir>] [--dev-login <login>]` (feature
+`web`, in maintainer builds) hosts one headless session, new or resumed as
+`plak agent` opens it, and serves it to browsers: wire v2 over a WebSocket at
+`/wire`, and the web UI's static build. Its security model is chapter 04
+§2.10; its keys are `[web]` (chapter 07 §3).
+
+- **Deployment.** The listener is a unix socket in a `0700` directory of the
+  user (created so, or refused when it is anything else); `tailscale serve
+  --bg unix:<path>` publishes it on the tailnet over HTTPS (`tailscaled`
+  connects to the socket itself, so it must run with the right to, as root
+  does on Linux), and `[web] origin` names that published origin. The
+  serving node must be **tagged** in the tailnet: Serve stamps no identity on
+  traffic from a tagged source, so a connection from the serving machine
+  itself carries none, and the tailnet ACL must still let the owner's devices
+  reach the node. A socket already at the path is replaced only when nothing
+  accepts on it; a live one is refused, and the process removes only the
+  socket it bound. A `127.0.0.1` listener is dev mode only: it needs
+  `--dev-login`, warns at start, and its origin is
+  `http://127.0.0.1:<port>`. The process binds before it opens the session,
+  prints `plak web: serving on <listener>` once it accepts, and serves until
+  the session ends, `SIGINT` or `SIGTERM`; then it quits the session and
+  removes the socket. The connection's `welcome` names the session, its tree
+  and its root node (§4.4). A stop ends every hello wait and connection as a
+  leaving client does. When the session switches to another (`/new`,
+  `/resume`, a rebind), every connection's attachment ends with `moved`
+  naming the new session's root, as on stdio (§4.4); the first attach after
+  the switch gets what the attach snapshot does not carry, and a connection
+  that arrives later is welcomed to the new session. A switch whose new root
+  cannot be read ends the endpoint as the session's end does; a connection
+  that arrives after the end is refused `unavailable`. Nothing before the gate is refused in a wire frame: it gets
+  the uniform `403`, so no failure text reaches an unauthenticated peer.
+- **What Serve forwards.** Serve proxies to a unix backend as
+  `http://localhost`: a request arrives with `Host: localhost`, the name the
+  browser used in `X-Forwarded-Host`, `X-Forwarded-Proto: https`, the tailnet
+  source address in `X-Forwarded-For`, and the source's login in
+  `Tailscale-User-Login`. Serve deletes any of these a client sent before it
+  sets its own. On the unix listener the endpoint admits only that shape:
+  exactly one `Host: localhost`, exactly one `X-Forwarded-Host` equal to the
+  origin's authority, `X-Forwarded-Proto: https`, and exactly one
+  `X-Forwarded-For` that is not an address of this machine (loopback,
+  unspecified, or any address a local socket can bind; a host that may bind
+  any address refuses everything). In dev mode the exact `Host` is the
+  check. An absolute-form request target is refused.
+- **Connections.** At most 128 HTTP connections are open at once, each with
+  a 64 KiB request buffer and a 10 s head deadline; past the cap a
+  connection is closed at once. One wire v2 frame per text message, an
+  optional trailing newline, at most 16 MiB, enforced while reading; a
+  binary message, a message past the cap, no hello within 10 s, more than 20
+  messages a second (burst 60), a pong 30 s late (the host pings every 15
+  s), or a client more than 8192 frames or 10 s per frame or ping behind ends
+  that connection with a close code and nothing else. `/wire` upgrades a
+  `GET` only. Each connection is a
+  `plakous_hosted::host_service::wire::WireConnection` on the session's one
+  shared service (`WireSession`, fed by one pump that is the session's only
+  observation consumer); a connection that leaves, by `bye`, close, or any
+  of the above, detaches, and the session runs on for the next connection. A
+  `quit` intent on the root attachment still quits the session. A login
+  holds at most 4 connections and opens at most 30 a minute.
+- **Static files.** `--ui <dir>` must hold `csp.json`
+  (`{"header": "...", "report_only_header": "..."}`, the second optional),
+  whose `header` must carry `frame-ancestors 'none'`; without `--ui` only
+  `/wire` answers. The build is read once at start, into memory: every
+  regular file whose path has no component starting with `.` (a symlink only
+  to a file inside the directory), at most 4096 files, 32 MiB a file and 128
+  MiB in all. `GET` and `HEAD` serve exactly those files; any other path
+  that is not under `/_app/` gets `index.html` (the app's own routes), a
+  missing `/_app/` file is `404`. `/_app/immutable/*` is `Cache-Control:
+  public, max-age=31536000, immutable`, everything else `no-cache`. Every
+  response carries the build's `Content-Security-Policy` (and
+  `Content-Security-Policy-Report-Only`), `X-Frame-Options: DENY`,
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
+  `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Resource-Policy:
+  same-origin` and a `Permissions-Policy` that grants nothing; no response
+  carries an `Access-Control-*` header. A request with `Service-Worker:
+  script` for any path that is not the build's own `/service-worker.js` (a
+  build without one included) gets a worker that unregisters itself and
+  reloads its pages, with `Clear-Site-Data: "cache", "storage"`, so a worker
+  registered from a stray path cannot persist.
+- **Logs.** Logins (a cookie issued), connections opened and closed, and
+  refusals with their reason, path and login (the presented one for a login
+  not allowed, bounded and printable), at most 60 refusal lines a minute
+  with a count of the rest; never a cookie, the key, or a frame.
 
 ## 5. The terminal interface
 
@@ -8201,8 +8294,9 @@ remedy `plak login <account>`; the config still loads and only that role's
 spawn is refused); and the three OAuth verticals. One more row,
 `config_compat`, follows the config file only when the home file or a trusted
 project file carries something a 0.0.3 build refuses as unknown (`[host]
-resume_after_loss`, `[mcp_servers.<id>] placement`, `[runners.<name>]`, or a
-`[host]` or `[runners]` table present even empty, chapter 07 §3): a warning
+resume_after_loss`, `[mcp_servers.<id>] placement`, `[runners.<name>]`,
+`[web] allow`, `[web] origin`, or a `[host]`, `[runners]` or `[web]` table
+present even empty, chapter 07 §3): a warning
 `config uses 0.0.4-only keys` naming each (a project file's with its path),
 with the remedy to remove them before running a 0.0.3 build on the home. `plak` itself writes those keys only
 when the operator sets them. The `runner_ssh` rows follow the spawnable

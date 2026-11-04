@@ -77,7 +77,7 @@ pub type RequestId = u64;
 pub type AttachmentId = u64;
 
 /// The node an attachment targets: the root or a child of a tree.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct NodeAddress {
     /// The tree.
@@ -87,7 +87,9 @@ pub struct NodeAddress {
 }
 
 /// Where the client runs, for what only the client's machine can do.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct ClientLocality {
     /// The client reached the host over ssh.
@@ -97,7 +99,7 @@ pub struct ClientLocality {
 }
 
 /// The client's first frame.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Hello {
     /// The client's [`WIRE_VERSION`].
@@ -111,7 +113,7 @@ pub struct Hello {
 }
 
 /// The host's answer to an admitted [`Hello`].
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Welcome {
     /// The host's [`WIRE_VERSION`].
@@ -132,7 +134,7 @@ pub struct Welcome {
 }
 
 /// Why the host refused a handshake.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HandshakeRefusal {
     /// The versions differ; neither side adapts.
@@ -173,7 +175,7 @@ pub fn admit_hello(hello: &Hello, welcome: Welcome) -> Result<Welcome, Handshake
 }
 
 /// One request a client sends.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(
     tag = "op",
     rename_all = "snake_case",
@@ -183,6 +185,7 @@ pub fn admit_hello(hello: &Hello, welcome: Welcome) -> Result<Welcome, Handshake
         deserialize = "P::Intent: DeserializeOwned"
     )
 )]
+#[schemars(rename = "Op", bound = "P::Intent: schemars::JsonSchema")]
 pub enum Op<P: ProtocolExtension> {
     /// Attach to a node.
     Attach {
@@ -208,7 +211,7 @@ pub enum Op<P: ProtocolExtension> {
 }
 
 /// The answer to an admitted request.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "answer", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Answer {
     /// Attached; the attach snapshot follows as events and pages.
@@ -225,7 +228,7 @@ pub enum Answer {
 }
 
 /// Why a request was refused. Nothing it asked for happened.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "refusal", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RequestRefusal {
     /// The node's mailbox is full; try again.
@@ -263,7 +266,7 @@ pub enum RequestRefusal {
 }
 
 /// A request's outcome.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Outcome {
     /// Done.
@@ -273,7 +276,7 @@ pub enum Outcome {
 }
 
 /// One part of a blob.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BlobChunk {
     /// The blob, named by the frame that references it.
@@ -288,7 +291,7 @@ pub struct BlobChunk {
 
 /// One page of an attachment's presentation snapshot. The pages of one
 /// revision arrive in order; the last one completes the snapshot.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SnapshotPage {
     /// The attachment.
@@ -308,7 +311,7 @@ pub struct SnapshotPage {
 }
 
 /// Frames a client sends.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(
     tag = "frame",
     rename_all = "snake_case",
@@ -318,6 +321,7 @@ pub struct SnapshotPage {
         deserialize = "P::Intent: DeserializeOwned"
     )
 )]
+#[schemars(rename = "ClientFrame", bound = "P::Intent: schemars::JsonSchema")]
 pub enum ClientFrame<P: ProtocolExtension> {
     /// The handshake.
     Hello(Hello),
@@ -339,7 +343,7 @@ pub enum ClientFrame<P: ProtocolExtension> {
     clippy::large_enum_variant,
     reason = "an event carries one observation by value"
 )]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(
     tag = "frame",
     rename_all = "snake_case",
@@ -348,6 +352,10 @@ pub enum ClientFrame<P: ProtocolExtension> {
         serialize = "P::Intent: Serialize, P::Observation: Serialize",
         deserialize = "P::Intent: DeserializeOwned, P::Observation: DeserializeOwned"
     )
+)]
+#[schemars(
+    rename = "HostFrame",
+    bound = "P::Intent: schemars::JsonSchema, P::Observation: schemars::JsonSchema"
 )]
 pub enum HostFrame<P: ProtocolExtension> {
     /// The handshake's answer.

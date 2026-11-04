@@ -2,7 +2,9 @@
 //! one offers, plus the credential readiness the Providers view paints.
 
 /// One catalog row from `plak models <account>`.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct ModelEntry {
     /// Exact model id.
@@ -20,7 +22,9 @@ pub struct ModelEntry {
 }
 
 /// One provider section in the picker.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderSection {
     /// Product account id (`codex` | `grok` | …).
@@ -34,7 +38,9 @@ pub struct ProviderSection {
 }
 
 /// Extra option state (for example Codex `priority` / Fast).
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct ExtraState {
     /// Exact option id (`priority`).
@@ -48,7 +54,9 @@ pub struct ExtraState {
 /// The exact Ready catalog the host discovered: one section per account, in
 /// product order. One shape for the picker, the host configuration, and the
 /// JSONL face.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct ReadyCatalog {
     /// Account sections in product order.
@@ -70,7 +78,9 @@ impl From<Vec<ProviderSection>> for ReadyCatalog {
 }
 
 /// How a provider authenticates at the product layer.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthKind {
     /// Subscription OAuth (`plak login`).
@@ -94,7 +104,9 @@ impl AuthKind {
 ///
 /// A vertical that is not [`ProviderState::Ready`] is never painted as
 /// connected.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderState {
     /// Credential is present and revalidated.
@@ -142,7 +154,9 @@ impl ProviderState {
 }
 
 /// One vertical's readiness, as projected by the product host.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderDef {
     /// Product account id (`codex`, `openrouter`, …).

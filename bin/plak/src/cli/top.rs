@@ -1,6 +1,6 @@
 use super::{
-    Command, NativeLoginMode, RunPrompt, StateAction, TopCommand, TreeAction, finish_agent,
-    finish_continue_session, finish_run, parse_oauth_account,
+    Command, NativeLoginMode, RunPrompt, StateAction, TopCommand, TreeAction, WireAction,
+    finish_agent, finish_continue_session, finish_run, parse_oauth_account,
 };
 
 impl TopCommand {
@@ -284,6 +284,22 @@ impl TopCommand {
             Self::Telemetry {
                 action: Some(action),
             } => action.into_command(),
+            Self::Web {
+                listen,
+                ui,
+                session,
+                cwd,
+                dev_login,
+            } => Ok(Command::Web(crate::command::WebCommand {
+                listen,
+                ui,
+                session,
+                cwd,
+                dev_login,
+            })),
+            Self::Wire {
+                action: WireAction::Schema,
+            } => Ok(Command::WireSchema),
             Self::Version {
                 write_binary_manifest: Some(directory),
                 ..

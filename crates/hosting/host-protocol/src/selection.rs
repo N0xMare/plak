@@ -4,7 +4,9 @@
 use serde::{Deserialize, Serialize};
 
 /// How the model may compose the product's tools.
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(
+    Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum CompositionSelection {
     /// Ordinary directly exposed product tools.
@@ -59,7 +61,9 @@ impl CompositionSelection {
 
 /// `OpenRouter` wire selected by the operator. `Auto` is resolved once by the
 /// host; it is not a fallback list.
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(
+    Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ProtocolSelection {
     /// Product default, resolved once to Chat.

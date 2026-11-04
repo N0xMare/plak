@@ -21,3 +21,5 @@ mod reload_rehearsal;
 mod runner_contract;
 #[cfg(feature = "test-support")]
 mod telemetry_contract;
+#[cfg(all(feature = "test-hooks", feature = "web"))]
+mod web_endpoint;

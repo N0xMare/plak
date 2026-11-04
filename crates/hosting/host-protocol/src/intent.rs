@@ -46,7 +46,9 @@ pub trait ObservationExtension: Clone + fmt::Debug + Eq + Send + 'static {
 pub struct Core;
 
 /// Uninhabited: the [`Core`] protocol has no extension payload.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Never {}
 
@@ -75,7 +77,7 @@ impl ProtocolExtension for Core {
 /// The closed protocol is every variant but [`Self::Extension`]; that slot
 /// carries the driver's own product traffic (settings, overlays) through the
 /// same bounded mailbox without the protocol interpreting it.
-#[derive(Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(
     tag = "kind",
     content = "body",
@@ -86,6 +88,7 @@ impl ProtocolExtension for Core {
         deserialize = "P::Intent: serde::de::DeserializeOwned"
     )
 )]
+#[schemars(rename = "SessionIntent", bound = "P::Intent: schemars::JsonSchema")]
 pub enum SessionIntent<P: ProtocolExtension = Core> {
     /// Idle submit — start a new turn.
     Prompt(Draft),
@@ -365,7 +368,9 @@ impl<P: ProtocolExtension> fmt::Debug for SessionIntent<P> {
 ///
 /// A string converts to a text-only draft. The host validates the images
 /// again at admission; the protocol only carries them.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct Draft {
     /// Prompt text as the operator wrote it.
@@ -414,7 +419,7 @@ impl From<&str> for Draft {
 }
 
 /// One image attached to a [`Draft`].
-#[derive(serde::Serialize, serde::Deserialize, Clone, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Eq, PartialEq, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DraftImage {
     /// File name the operator attached, for display only; never sent to the model.
@@ -423,6 +428,7 @@ pub struct DraftImage {
     pub media_type: String,
     /// The encoded image as it is sent; base64 on the wire.
     #[serde(with = "base64_bytes")]
+    #[schemars(with = "String")]
     pub bytes: Vec<u8>,
     /// The attached image's dimensions when Plak downscaled it to fit the
     /// bounds; `None` when it was attached at the dimensions sent. Display
@@ -460,7 +466,9 @@ impl fmt::Debug for DraftImage {
 }
 
 /// Closed operator decision for one pending effect approval.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ApprovalChoice {
     /// Authorize the exact pending invocation once.

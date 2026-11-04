@@ -340,6 +340,34 @@ pub fn set_shelf_secret(
     name: &str,
     value: &str,
 ) -> Result<(), String> {
+    store_shelf_secret(paths, shelf, name, value, true).map(|_| ())
+}
+
+/// Stores one secret on `shelf` only when it has none of that name: `true`
+/// when this call created it, `false` when one was already there (another
+/// process created it first). Never replaces a secret.
+///
+/// # Errors
+///
+/// As [`set_shelf_secret`].
+pub fn create_shelf_secret(
+    paths: &PlakPaths,
+    shelf: SecretShelf,
+    name: &str,
+    value: &str,
+) -> Result<bool, String> {
+    store_shelf_secret(paths, shelf, name, value, false)
+}
+
+/// Writes a private staging file, then renames it over `name` (`replace`)
+/// or links it in only when `name` is absent; `false` when it was present.
+fn store_shelf_secret(
+    paths: &PlakPaths,
+    shelf: SecretShelf,
+    name: &str,
+    value: &str,
+    replace: bool,
+) -> Result<bool, String> {
     validate_secret_name(name)?;
     let value = value.trim();
     if value.is_empty() || value.len() > MAX_NAMED_SECRET_BYTES {
@@ -357,15 +385,36 @@ pub fn set_shelf_secret(
         .join(format!(".{name}.secret.{}.tmp", std::process::id()));
     let _ = fs::remove_file(&staging);
     let written = write_new_private_file(&staging, value.as_bytes()).and_then(|()| {
-        fs::rename(&staging, &path).map_err(|_| "could not store the secret".to_owned())
+        if replace {
+            return fs::rename(&staging, &path)
+                .map(|()| true)
+                .map_err(|_| "could not store the secret".to_owned());
+        }
+        // The rename fails when the name exists, so a concurrent creator's
+        // secret is never replaced.
+        match rustix::fs::renameat_with(
+            rustix::fs::CWD,
+            &staging,
+            rustix::fs::CWD,
+            &path,
+            rustix::fs::RenameFlags::NOREPLACE,
+        ) {
+            Ok(()) => Ok(true),
+            Err(rustix::io::Errno::EXIST) => {
+                let _ = fs::remove_file(&staging);
+                Ok(false)
+            }
+            Err(_) => Err("could not store the secret".to_owned()),
+        }
     });
     if written.is_err() {
         let _ = fs::remove_file(&staging);
     }
-    written?;
+    let created = written?;
     fs::File::open(paths.secret_shelf_dir(shelf))
         .and_then(|dir| dir.sync_all())
-        .map_err(|_| "could not sync the secrets directory".to_owned())
+        .map_err(|_| "could not sync the secrets directory".to_owned())?;
+    Ok(created)
 }
 
 /// Removes one named secret. `false` when there was none.

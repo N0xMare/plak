@@ -232,6 +232,10 @@ pub struct ProductConfig {
     pub resume_after_loss: Option<ResumeAfterLoss>,
     /// `[runners.<name>]`, home-scoped; parsed and validated only.
     pub runners: BTreeMap<String, super::RunnerConfig>,
+    /// `[web] allow`, home-scoped: the logins `plak web` admits.
+    pub web_allow: Vec<String>,
+    /// `[web] origin`, home-scoped: the origin `plak web` is served at.
+    pub web_origin: Option<String>,
     pub(super) forward: super::forward::ForwardPresence,
 }
 
@@ -275,6 +279,8 @@ impl PartialEq for ProductConfig {
             && self.tool_sections == other.tool_sections
             && self.resume_after_loss == other.resume_after_loss
             && self.runners == other.runners
+            && self.web_allow == other.web_allow
+            && self.web_origin == other.web_origin
     }
 }
 
@@ -470,13 +476,11 @@ impl ProductConfig {
         if has_config {
             let overlay = Self::load_config_file(&config_path)
                 .map_err(|error| format!("{error}; edit this file to fix it"))?;
-            if overlay.present.iter().any(|field| {
-                field.is_home_only()
-                    && !matches!(
-                        field,
-                        ConfigField::McpClientIdMetadataUrl | ConfigField::ResumeAfterLoss
-                    )
-            }) {
+            if overlay
+                .present
+                .iter()
+                .any(|field| field.is_home_orchestration())
+            {
                 self.warnings.push(format!(
                     "{}: [orchestration] is home-scoped and ignored here; set it in {}",
                     config_path.display(),
@@ -590,6 +594,8 @@ impl ProductConfig {
                 self.mcp_client_id_metadata_url = source.mcp_client_id_metadata_url.clone();
             }
             ConfigField::ResumeAfterLoss => self.resume_after_loss = source.resume_after_loss,
+            ConfigField::WebAllow => self.web_allow.clone_from(&source.web_allow),
+            ConfigField::WebOrigin => self.web_origin.clone_from(&source.web_origin),
         }
     }
 
@@ -704,6 +710,8 @@ impl ProductConfig {
             tool_sections: ToolSections::default(),
             resume_after_loss: None,
             runners: BTreeMap::new(),
+            web_allow: Vec::new(),
+            web_origin: None,
             forward: super::forward::ForwardPresence::default(),
         }
     }
@@ -1003,6 +1011,8 @@ impl ProductConfig {
                 Value::from(self.mcp_client_id_metadata_url.as_deref()?)
             }
             ConfigField::ResumeAfterLoss => Value::from(self.resume_after_loss?.as_str()),
+            ConfigField::WebAllow => super::web::allow_value(&self.web_allow)?,
+            ConfigField::WebOrigin => Value::from(self.web_origin.as_deref()?),
         })
     }
 
@@ -1516,6 +1526,8 @@ impl ProductConfig {
             ConfigField::ResumeAfterLoss => {
                 self.resume_after_loss = ResumeAfterLoss::assigned(key, value)?;
             }
+            ConfigField::WebAllow => self.web_allow = super::web::assigned_logins(value)?,
+            ConfigField::WebOrigin => self.web_origin = super::web::assigned_origin(key, value)?,
         }
         Ok(())
     }

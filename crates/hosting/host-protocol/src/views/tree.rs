@@ -14,7 +14,9 @@ use crate::topology::{
 };
 
 /// One preorder row of a tree, typed.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct NodeView {
     /// Exact durable agent id.
@@ -97,7 +99,9 @@ pub struct NodeView {
 }
 
 /// Why a node's turn was interrupted.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum InterruptCauseView {
     /// The operator interrupted it.
@@ -115,7 +119,9 @@ pub enum InterruptCauseView {
 }
 
 /// Where a node's continuation after a lost host stands.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum LossContinuationView {
     /// Waiting for the operator's Resume.
@@ -133,7 +139,17 @@ pub enum LossContinuationView {
     clippy::struct_excessive_bools,
     reason = "dormancy facts are independent and several may be true at once"
 )]
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(
+    serde::Serialize,
+    serde::Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Eq,
+    PartialEq,
+    schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct NodeDormancy {
     /// Parked, including a wait that is not named yet.
@@ -168,7 +184,9 @@ impl NodeDormancy {
 }
 
 /// Non-authoritative, bounded observation of one running child's turn.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct ChildProgress {
     /// Exact turn identity; never inferred from a tree revision.
@@ -215,7 +233,9 @@ impl NodeView {
 }
 
 /// A revisioned complete tree, typed. Replace, never patch locally.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct TreeView {
     /// Durable tree id.

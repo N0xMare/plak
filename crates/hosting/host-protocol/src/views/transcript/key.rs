@@ -3,7 +3,19 @@
 use serde::{Deserialize, Serialize};
 
 /// Which writer a row key belongs to.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Lane {
     /// A row the projector derived from a feed record.
@@ -35,7 +47,19 @@ impl Lane {
 
 /// A transcript row's immutable ordering key: (anchor sequence, lane,
 /// ordinal). The transcript is ordered by it.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    schemars::JsonSchema,
+)]
 pub struct RowKey {
     /// The record sequence (lane 0) or the applied cursor (lane 1).
     pub anchor: u64,

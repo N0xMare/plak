@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Account whose native login needs attention; unspecified is an explicit placeholder.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AccountTarget {
     /// Codex native account.
@@ -35,7 +35,7 @@ impl AccountTarget {
 }
 
 /// Why a saved credential cannot be used.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CredentialCondition {
     /// A previous profile/build wrote the login.
@@ -49,7 +49,7 @@ pub enum CredentialCondition {
 }
 
 /// Exact saved product session identity, validated as a UUID on decode.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(transparent)]
 pub struct ProductSessionId(uuid::Uuid);
 
@@ -75,7 +75,7 @@ impl std::fmt::Display for ProductSessionId {
 }
 
 /// One semantic remedy; compound cases name alternatives, never arbitrary command lists.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(tag = "code", rename_all = "snake_case", deny_unknown_fields)]
 pub enum NoticeRemedy {
     /// Recover unresolved child sessions only.

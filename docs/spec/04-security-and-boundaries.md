@@ -689,6 +689,90 @@ widens it.
   owner. The host's leases and commit fencing remain the authority; the
   runner only reduces late effects.
 
+### 2.10 The web endpoint
+
+`plak web` (chapter 02 §4.5) serves one session to browsers on the tailnet.
+Everything a client admitted there can do, an operator at the TUI can do: it
+holds the serving user's shell. The endpoint's whole job is deciding who the
+client is, and its checks stop different attackers.
+
+- **The tailnet identity stops everyone who is not an allowed login.** The
+  endpoint binds only a unix socket in a `0700` directory owned by the
+  effective uid (refused when the directory is anything else, a symlink
+  included), or in dev mode `127.0.0.1`. The tailnet reaches the socket only
+  through `tailscale serve --bg unix:<path>`, which terminates TLS with the
+  node's certificate (so DNS rebinding cannot reach it under the served name)
+  and proxies HTTP/1.1, WebSocket upgrades included. Serve stamps
+  `Tailscale-User-Login` with the source's login, deleting any a client sent;
+  it stamps none for a tagged source, for Funnel, or when it cannot resolve
+  the source. The endpoint trusts the header only on the unix listener and
+  admits a request only with exactly one such header naming a login on
+  `[web] allow` (home-scoped; a project file can never grant access).
+  Everything without one is refused.
+- **The forwarded shape stops the serving machine's other users.** On an
+  untagged serving node Serve stamps the node owner's login on a connection
+  from the node itself, so any local account could pass the identity check by
+  connecting to the node's own `https://` name. The serving node is
+  therefore tagged (its own traffic then carries no identity), and the
+  endpoint also refuses a request whose `X-Forwarded-For`, which Serve sets
+  after deleting the client's, is missing, repeated, or an address of this
+  machine (loopback, link-local, or an address of a local interface). It
+  admits only Serve's forwarded shape: `Host: localhost`, the served
+  authority in `X-Forwarded-Host`, and `X-Forwarded-Proto: https`. A local
+  process that connects to the socket directly is this user already. Under
+  `tailscaled` userspace networking the node's tailnet addresses are on no
+  local interface, so the source check cannot recognize them, and the tag is
+  the only control against the machine's other users.
+- **Origin and cookie stop other web pages, not other programs.** A page
+  load from an admitted login without a valid session cookie gets a fresh
+  one: `__Host-plak`, `HttpOnly; Secure; SameSite=Strict; Path=/`, no
+  `Domain`, 12 hours, its value the login, an expiry and a random nonce under
+  HMAC-SHA256 with the cookie key (§3.1), bound to the served origin, and
+  never readable by script. The upgrade to `/wire` (a `GET`) also needs
+  `Origin` exactly the served origin (a missing one is refused) and a cookie
+  the key verifies for the same login and origin, unexpired. A browser
+  cannot forge `Origin`, so a hostile page another tailnet host serves
+  cannot drive the session through the user's browser. A non-browser client
+  on an allowed login's device forges `Origin` freely and is given a cookie
+  for the asking, so against it these checks add nothing.
+- **No ambient authority in the HTTP surface.** There is no CORS: no
+  `Access-Control-*` header and no preflight. Only `GET` and `HEAD` are
+  served, and no `GET` changes state. Every state change goes over the
+  authenticated WebSocket as a wire v2 intent, under the role rules of the
+  host service. Every response forbids framing (`X-Frame-Options: DENY`,
+  and a build whose CSP lacks `frame-ancestors 'none'` is refused at start).
+- **Dev mode trusts nothing and protects nothing.** On a TCP listener any
+  local user could forge every header, so a loopback listener needs
+  `--dev-login <login>`, warns at start, trusts no header, and treats every
+  local connection as that login: any local uid is that login. It is for a
+  single-user machine and is never exposed.
+
+Every refusal (method aside, which is `405`) is the same `403` with the same
+body; the reason goes only to the log. Within an admitted connection, the
+limits of chapter 02 §4.5 bound what one client can make the host hold: the
+16 MiB frame cap is enforced while reading, before the frame is held whole,
+the outbound queue is bounded and drops a slow client, at most 128 HTTP
+connections are open at once, a login holds at most 4 connections and 30
+upgrades a minute, and messages are rate limited. The logs never hold a
+cookie, the cookie key, or a frame's body.
+
+**Residual risks**, accepted for a maintainer endpoint and stated here:
+- `ts.net` is a public suffix, so every node of a tailnet is one site to the
+  browser; `SameSite=Strict` does not separate them. The exact `Origin`
+  check is what stops another tailnet host's page.
+- Cookies are not scoped by port. Another backend served from the same node
+  name on another port receives `__Host-plak`. The cookie's origin binding
+  keeps it from working at another origin of this endpoint, and the
+  `Origin` check keeps that backend's pages out, but the backend itself
+  sees the value.
+- A cookie is stateless: it cannot be revoked short of rotating the key
+  (§3.1), which logs every client out.
+- An open WebSocket outlives its cookie's expiry and edits to `[web] allow`
+  (read once at start); stopping the process ends it.
+- A tailnet control-plane or identity-provider compromise, or any process
+  on any device of an allowed login, yields the serving user's shell.
+- In dev mode any local uid is the dev login.
+
 ## 3. Credentials
 
 Claude OAuth account UUIDs come only from the authenticated token grant or the
@@ -781,6 +865,14 @@ other, so a host's named secret never reaches a server on a runner. Runner
 secrets bind to no host or server: every paired host may have the runner use
 any of them by name (section 2.9), which grants nothing its processes, running
 as the runner user, could not read anyway.
+
+**The web cookie key** is a third shelf under the same rules:
+`<plak home>/secrets/web/cookie-key.secret`, 32 random bytes as hex, which
+`plak web` makes on its first start and verifies on every read like any
+secret file. It is created without replacing one (two first starts agree on
+the first one's key), and its bytes are zeroized after use. It signs the endpoint's session cookies (§2.10) and nothing else;
+it is never logged, exported or carried by a session. Removing or replacing it
+logs every web client out.
 
 **MCP server logins** (`plak mcp login <id>`) live in the home, not under XDG
 state, one private credential record per server id:

@@ -444,6 +444,33 @@ enum TopCommand {
     Resume {
         session: Option<String>,
     },
+    /// Serves one headless session's wire v2 at `/wire`, and the web UI,
+    /// on a private listener (maintainer builds).
+    #[command(hide = true)]
+    Web {
+        /// `unix:<path>` (the `tailscale serve unix:` deployment) or, in
+        /// dev mode, `127.0.0.1:<port>`.
+        #[arg(long)]
+        listen: String,
+        /// The web UI's build directory, with its `csp.json`.
+        #[arg(long)]
+        ui: Option<std::path::PathBuf>,
+        /// Resume this session instead of opening a new one.
+        #[arg(long, conflicts_with = "cwd")]
+        session: Option<String>,
+        /// Open the new session in this directory.
+        #[arg(long)]
+        cwd: Option<std::path::PathBuf>,
+        /// Dev mode, loopback only: every request is this login.
+        #[arg(long)]
+        dev_login: Option<String>,
+    },
+    /// Wire v2 tools (maintainer builds).
+    #[command(hide = true)]
+    Wire {
+        #[command(subcommand)]
+        action: WireAction,
+    },
     #[cfg(feature = "maintainer")]
     Fork {
         /// Source session uuid. Omit to print usage.
@@ -503,6 +530,12 @@ enum TopCommand {
         export_version: bool,
     },
     Help,
+}
+
+#[derive(Debug, Subcommand)]
+enum WireAction {
+    /// Print this build's wire v2 JSON Schema, with its protocol version.
+    Schema,
 }
 
 #[derive(Debug, Subcommand)]

@@ -37,7 +37,7 @@ use std::ops::Range;
 use toml::Spanned;
 use toml_edit::{DocumentMut, Item, Table, TableLike, Value};
 
-/// `config.toml`: fifteen sections, each optional, nothing else. `[tools]`,
+/// `config.toml`: sixteen sections, each optional, nothing else. `[tools]`,
 /// `[mcp_servers]` and `[runners]` hold one named table per entry.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -57,12 +57,20 @@ struct ConfigFile {
     mcp_servers: Option<BTreeMap<String, McpServerSection>>,
     host: Option<HostSection>,
     runners: Option<BTreeMap<String, RunnerSection>>,
+    web: Option<WebSection>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct HostSection {
     resume_after_loss: Entry,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WebSection {
+    allow: Entry,
+    origin: Entry,
 }
 
 /// Every key is read as a spanned TOML value rather than a Rust type so the
@@ -274,14 +282,32 @@ pub(super) fn parse_config(text: &str) -> Result<ProductConfig, String> {
             &section.client_id_metadata_url,
         )?;
     }
-    if let Some(section) = &file.host {
-        assign("host.resume_after_loss", &section.resume_after_loss)?;
-    }
-    config.forward = ForwardPresence::of(file.host.is_some(), file.runners.is_some());
+    let forward = forward_sections(&file, &mut assign)?;
+    config.forward = forward;
     config.tool_sections =
         tool_sections::parse(text, file.tools.as_ref(), file.mcp_servers.as_ref())?;
     config.runners = runners::parse(text, file.runners.as_ref())?;
     Ok(config)
+}
+
+/// The forward-only sections' keys, through `assign`, and which of those
+/// sections the file spelled.
+fn forward_sections(
+    file: &ConfigFile,
+    assign: &mut impl FnMut(&'static str, &Entry) -> Result<(), String>,
+) -> Result<ForwardPresence, String> {
+    if let Some(section) = &file.host {
+        assign("host.resume_after_loss", &section.resume_after_loss)?;
+    }
+    if let Some(section) = &file.web {
+        assign("web.allow", &section.allow)?;
+        assign("web.origin", &section.origin)?;
+    }
+    Ok(ForwardPresence::of(
+        file.host.is_some(),
+        file.runners.is_some(),
+        file.web.is_some(),
+    ))
 }
 
 /// One template file. The file stem is the template's name; the body carries

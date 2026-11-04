@@ -1,6 +1,6 @@
 //! The keys a 0.0.3 build refuses as unknown (`[host] resume_after_loss`,
-//! `[mcp_servers.<id>] placement`, `[runners.<name>]`): accepted, validated,
-//! and written only when set explicitly.
+//! `[mcp_servers.<id>] placement`, `[runners.<name>]`, `[web]`): accepted,
+//! validated, and written only when set explicitly.
 
 use std::path::Path;
 
@@ -24,18 +24,18 @@ impl ResumeAfterLoss {
 /// and the forward keys of a project file its overlay ignored.
 #[derive(Clone, Debug, Default)]
 pub(super) struct ForwardPresence {
-    /// `host` and `runners`, when the file has the table at all.
+    /// `host`, `runners` and `web`, when the file has the table at all.
     pub(super) sections: std::collections::BTreeSet<&'static str>,
     /// The project file's home-scoped forward keys, with its path.
     pub(super) project: Vec<String>,
 }
 
 impl ForwardPresence {
-    /// The presence a parsed file records: whether it spelled `[host]` and
-    /// `[runners]` at all.
-    pub(super) fn of(host: bool, runners: bool) -> Self {
+    /// The presence a parsed file records: whether it spelled `[host]`,
+    /// `[runners]` and `[web]` at all.
+    pub(super) fn of(host: bool, runners: bool, web: bool) -> Self {
         let mut sections = std::collections::BTreeSet::new();
-        for (name, present) in [("host", host), ("runners", runners)] {
+        for (name, present) in [("host", host), ("runners", runners), ("web", web)] {
             if present {
                 sections.insert(name);
             }
@@ -96,6 +96,16 @@ impl ProductConfig {
             keys.push("[runners]".to_owned());
         }
         keys.extend(self.runners.keys().map(|name| format!("[runners.{name}]")));
+        let web = [
+            (ConfigField::WebAllow, "[web] allow"),
+            (ConfigField::WebOrigin, "[web] origin"),
+        ];
+        let set = web.iter().filter(|(field, _)| self.present.contains(field));
+        let before = keys.len();
+        keys.extend(set.map(|(_, key)| (*key).to_owned()));
+        if keys.len() == before && self.forward.sections.contains("web") {
+            keys.push("[web]".to_owned());
+        }
         keys
     }
 }

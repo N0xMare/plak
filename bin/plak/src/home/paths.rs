@@ -506,6 +506,8 @@ pub enum SecretShelf {
     Named,
     /// `secrets/runner/` (`plak runner secret set`).
     Runner,
+    /// `secrets/web/`: `plak web`'s cookie key, which it makes itself.
+    Web,
 }
 
 impl SecretShelf {
@@ -513,6 +515,7 @@ impl SecretShelf {
         match self {
             Self::Named => "named",
             Self::Runner => "runner",
+            Self::Web => "web",
         }
     }
 
@@ -520,6 +523,7 @@ impl SecretShelf {
         match self {
             Self::Named => "named secrets directory",
             Self::Runner => "runner secrets directory",
+            Self::Web => "web secrets directory",
         }
     }
 }

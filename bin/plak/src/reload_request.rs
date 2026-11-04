@@ -39,7 +39,7 @@ struct Announcement {
 }
 
 /// One request, as a requester writes it and the host reads it.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 pub struct ReloadRequest {
     #[serde(default)]
     version: u32,

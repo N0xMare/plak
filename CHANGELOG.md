@@ -49,7 +49,8 @@ an export.
   command and the `clear` host phase keep their names.
 - Configuration compatibility: `config.toml` accepts `[host]
   resume_after_loss` (`hold` or `continue`, default `hold`), `[mcp_servers.<id>]
-  placement` (`host` or `runner`, default `host`) and `[runners.<name>]`;
+  placement` (`host` or `runner`, default `host`), `[runners.<name>]` and
+  `[web] allow` / `[web] origin` (read by `plak web`, below);
   `resume_after_loss` applies to sub-agents a lost host interrupted. `plak`
   writes them only when you set them, and `plak doctor` warns `config uses
   0.0.4-only keys` while one is set.
@@ -101,6 +102,33 @@ an export.
   another runner is refused (`InvalidInput`, `BindingChange::Runner`).
 
 ### Plak
+
+- `plak web` (hidden, maintainer builds): one headless session's wire v2 over
+  a WebSocket at `/wire`, and a web UI's static build, on a private unix
+  socket that `tailscale serve --bg unix:<path>` publishes on the tailnet,
+  from a tagged node. Access is the tailnet login Serve stamps, checked
+  against the new home-scoped `[web] allow`; Serve's forwarded shape for the
+  exact `[web] origin` from a source that is not the serving machine; and on
+  the upgrade the exact `Origin` and an HttpOnly `__Host-` session cookie,
+  bound to the login and origin and signed with a key in `secrets/web/`. A
+  loopback listener is dev mode and needs `--dev-login`. A session switch
+  (`/new`, `/resume`, a rebind) moves every attached connection to the new
+  session's root with `moved`, and a later connection is welcomed to the new
+  session. Spec 04 §2.10 states
+  which check stops which attacker and the residual risks. A 0.0.3 build refuses a
+  `config.toml` that sets `[web]`, so `plak` writes it only when you set it,
+  and `plak doctor` lists it with the other 0.0.4-only keys.
+- `plak wire schema` (hidden) prints this build's wire v2 JSON Schema with its
+  protocol version.
+- The wire v2 connection moved into `plakous-hosted`
+  (`host_service::wire::WireConnection`), shared by `plak agent --wire v2` and
+  `plak web`; `WireSession` serves one session to many connections. A switch
+  ends every attachment of a shared service (`HostService::move_attachments`,
+  which queues the new `Outbound::Moved`). Embedder break: the new
+  `Outbound` variant.
+- Supply chain: `tokio-tungstenite` and `tungstenite` 0.29.0 (web endpoint,
+  maintainer builds only); `plakous-host-protocol` now depends on `schemars`,
+  which was already locked, so it reaches the minimal and headless closures.
 
 - `/fork` makes a new node in an agent tree of its own. The fork's tree starts
   from the source tree's current epoch and carries none of its children, mail,

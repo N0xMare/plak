@@ -13,6 +13,7 @@ pub(crate) mod settings;
 mod templates;
 mod toml_file;
 mod tool_sections;
+pub(crate) mod web;
 
 pub use tool_sections::runners::{LOCAL_RUNNER_NAME, RunnerConfig, validate_runner_name};
 pub use tool_sections::{

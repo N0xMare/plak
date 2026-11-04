@@ -218,6 +218,16 @@ impl Serialize for TemplateName {
     }
 }
 
+impl schemars::JsonSchema for TemplateName {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "TemplateName".into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        String::json_schema(generator)
+    }
+}
+
 impl<'de> Deserialize<'de> for TemplateName {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = String::deserialize(deserializer)?;
@@ -297,7 +307,9 @@ impl WorkingSet {
 /// Spawn capability ceiling. Checkout is `workspace` on the spawn, not a
 /// side effect of tier: `read_only` refuses Plak file writes, `execute`
 /// allows process tools, `mutate` allows file writes.
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Tier {
     /// Process tools allowed; Plak file writes refused.
@@ -359,7 +371,9 @@ impl Tier {
 }
 
 /// how a template's prompt states when to delegate.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Delegation {
     #[default]
@@ -394,7 +408,7 @@ impl Delegation {
 }
 
 /// Wire spelling is `snake_case`; prompts, JSONL, and docs quote these names.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TopologyErrorCode {
     /// The request object carried a field the schema does not define.
@@ -579,7 +593,7 @@ impl TopologyError {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 /// Lifecycle state of one node as serialized in a `tree` row.
 pub enum NodeStatus {
@@ -613,7 +627,7 @@ pub enum NodeStatus {
 /// place the mapping is stated — so `is_terminal`, `is_finished`, and
 /// `settles_a_wait` cannot drift into three different readings of the same
 /// status, which is what they had done.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeDisposition {
     /// A turn is running, or one will without anybody asking: `Pending`,
@@ -731,7 +745,7 @@ pub fn operator_child_recover_eligible(
 }
 
 /// Status of one attempt of one node (the attempt is the unit).
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AttemptStatus {
     /// Driving now.
@@ -787,7 +801,9 @@ impl AttemptStatus {
 
 /// `<agent_id>-a<seq>`: one attempt of one node. Stays inside `valid_id`'s
 /// alphabet so it can travel anywhere an agent id can.
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(transparent)]
 pub struct AttemptId(String);
 
@@ -824,7 +840,9 @@ impl std::fmt::Display for AttemptId {
 /// it was formatted at the mint site and re-formatted at the ref site, and
 /// nothing said the two had to agree. `#[serde(transparent)]`, so the wire
 /// bytes are the same string they always were.
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(transparent)]
 pub struct CandidateId(String);
 
@@ -863,7 +881,7 @@ impl std::fmt::Display for CandidateId {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 /// Lifecycle of one node's workspace as serialized in a `tree` row.
 pub enum WorkspaceStatus {
@@ -905,7 +923,7 @@ impl WorkspaceStatus {
 
 /// What a tree admits right now. The `state` label on a `tree`
 /// frame, and the fence every mutating tool consults.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TreeAdmissionState {
     /// Ordinary operation.
@@ -937,7 +955,9 @@ impl TreeAdmissionState {
 
 /// `[orchestration] occupancy`. `single_lease` is the only writer mode.
 ///
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum WriterMode {
     #[default]
@@ -968,7 +988,9 @@ impl WriterMode {
 }
 
 /// Workspace shape recorded on the child after spawn.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkspaceMode {
     /// The parent's checkout, live.
@@ -994,7 +1016,9 @@ impl WorkspaceMode {
 
 /// Spawn-time checkout choice. Omit or `inherit` shares the caller's cwd;
 /// `fork` mints an isolated copy (snapshot for non-mutate, worktree for mutate).
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SpawnWorkspace {
     /// Same checkout as the parent.
@@ -1012,7 +1036,9 @@ impl SpawnWorkspace {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 /// Why one node wrote to another; it decides the delivery rules.
 pub enum MessagePurpose {
@@ -1031,7 +1057,9 @@ pub enum MessagePurpose {
     Result,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 /// How soon a delivered message interrupts the recipient.
 pub enum MessagePriority {
@@ -1042,7 +1070,7 @@ pub enum MessagePriority {
     Urgent,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// `spawn_agent` arguments.
 pub struct SpawnAgentRequest {
@@ -1153,7 +1181,7 @@ impl SpawnAgentRequest {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// `send_agent_message` arguments.
 pub struct SendAgentMessageRequest {
@@ -1214,7 +1242,7 @@ impl SendAgentMessageRequest {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// `list_agents` arguments.
 pub struct ListAgentsRequest {
@@ -1227,7 +1255,7 @@ pub struct ListAgentsRequest {
     pub include_completed: Option<bool>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// `wait_agent` arguments.
 pub struct WaitAgentRequest {
@@ -1270,7 +1298,7 @@ impl WaitAgentRequest {
 /// `interrupt_agent` / `close_agent` / `recover_agent`: optionally fenced to
 /// one attempt.
 ///
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AttemptScopedRequest {
     /// The node acted on.
@@ -1280,7 +1308,7 @@ pub struct AttemptScopedRequest {
     pub expected_attempt_id: Option<AttemptId>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// `submit_result` arguments.
 pub struct SubmitResultRequest {
@@ -1343,7 +1371,7 @@ impl SubmitResultRequest {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// `discard_workspace` arguments.
 pub struct WorkspaceIdRequest {
@@ -1352,7 +1380,7 @@ pub struct WorkspaceIdRequest {
 }
 
 /// One path a three-way merge could not resolve, with the VCS conflict kind.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ConflictPath {
     /// Path named by the merge, relative to the checkout.
     pub path: String,
@@ -1361,7 +1389,7 @@ pub struct ConflictPath {
 }
 
 /// Land immutable work into the caller's checkout.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AdoptCandidateRequest {
     /// Undo this adoption's delta, preserving later target edits.
@@ -1382,7 +1410,7 @@ pub struct AdoptCandidateRequest {
 }
 
 /// Successful adoption receipt.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdoptOutcome {
     /// This receipt reversed an adoption rather than landing new work.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

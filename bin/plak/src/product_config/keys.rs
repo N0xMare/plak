@@ -18,7 +18,7 @@ pub(super) enum FieldValue<'a> {
     Cli(&'a str),
 }
 
-/// The one array `config.toml` carries, and the one sentence that names it.
+/// The working set's array, and the one sentence that names it.
 const WORKING_SET_MUST_BE_AN_ARRAY: &str =
     "[roster] working_set must be an array like [\"a\", \"b\"]";
 
@@ -62,25 +62,32 @@ impl<'a> FieldValue<'a> {
     /// shell is easier to type. One key, one meaning, so a copy-paste out of
     /// `config.toml` cannot be the wrong grammar.
     pub(super) fn names(self) -> Result<Vec<String>, String> {
+        self.strings(WORKING_SET_MUST_BE_AN_ARRAY)
+    }
+
+    /// An array of strings, from the file or the command line, with the
+    /// command line's comma- or space-separated shorthand; `must_be` is the
+    /// key's sentence for anything else.
+    pub(super) fn strings(self, must_be: &str) -> Result<Vec<String>, String> {
         let array = |values: &[toml::Value]| {
             values
                 .iter()
                 .map(|value| match value {
                     toml::Value::String(name) => Ok(name.clone()),
-                    _ => Err(WORKING_SET_MUST_BE_AN_ARRAY.to_owned()),
+                    _ => Err(must_be.to_owned()),
                 })
                 .collect()
         };
         match self {
             Self::Toml(toml::Value::Array(values)) => array(values),
-            Self::Toml(_) => Err(WORKING_SET_MUST_BE_AN_ARRAY.to_owned()),
+            Self::Toml(_) => Err(must_be.to_owned()),
             Self::Cli(value) if value.trim().starts_with('[') => {
                 let parsed: toml::Value = toml::from_str(&format!("v = {}", value.trim()))
                     .map(|table: toml::Table| table["v"].clone())
-                    .map_err(|_| WORKING_SET_MUST_BE_AN_ARRAY.to_owned())?;
+                    .map_err(|_| must_be.to_owned())?;
                 match parsed {
                     toml::Value::Array(values) => array(&values),
-                    _ => Err(WORKING_SET_MUST_BE_AN_ARRAY.to_owned()),
+                    _ => Err(must_be.to_owned()),
                 }
             }
             Self::Cli(value) => Ok(value
@@ -169,12 +176,16 @@ pub const CONFIG_SECTION_DOCS: &[(&str, &str)] = &[
         "host",
         "The per-user host: how it treats work a lost host left.",
     ),
+    (
+        "web",
+        "The maintainer web endpoint (plak web): who it admits and where it is served.",
+    ),
 ];
 
 /// Sections an earlier build refuses as unknown. A render writes one live
 /// only when one of its keys is set, so a file `plak` writes stays loadable
 /// by those builds until the operator opts in.
-pub(crate) const FORWARD_ONLY_SECTIONS: &[&str] = &["host"];
+pub(crate) const FORWARD_ONLY_SECTIONS: &[&str] = &["host", "web"];
 
 /// One documented `config.toml` key.
 ///
@@ -284,6 +295,10 @@ pub enum ConfigField {
     McpClientIdMetadataUrl,
     /// `[host] resume_after_loss`.
     ResumeAfterLoss,
+    /// `[web] allow`.
+    WebAllow,
+    /// `[web] origin`.
+    WebOrigin,
 }
 
 impl ConfigField {
@@ -303,7 +318,22 @@ impl ConfigField {
                 | Self::McpClientIdMetadataUrl
                 | Self::ReloadRequests
                 | Self::ResumeAfterLoss
+                | Self::WebAllow
+                | Self::WebOrigin
         )
+    }
+
+    /// The home-only keys a project file names under `[orchestration]`:
+    /// every one but those with their own table and warning.
+    pub(crate) const fn is_home_orchestration(self) -> bool {
+        self.is_home_only()
+            && !matches!(
+                self,
+                Self::McpClientIdMetadataUrl
+                    | Self::ResumeAfterLoss
+                    | Self::WebAllow
+                    | Self::WebOrigin
+            )
     }
 }
 
@@ -651,6 +681,24 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         constraint: "hold|continue; unset holds; home-scoped",
         doc: "Whether a sub-agent whose host was lost (a crash, a lease loss) holds for the operator's Resume or continues once by itself with a new instruction turn (chapter 03 §14.1). The root still holds either way; its continuation is not implemented yet. Read when the root opens; a released 0.0.3 build (or older) refuses a config.toml that sets it.",
         example: "\"continue\"",
+        scope: ConfigScope::Immediate,
+    },
+    ConfigKey {
+        path: "web.allow",
+        field: ConfigField::WebAllow,
+        kind: "array of string",
+        constraint: "tailnet logins, no duplicates; unset admits no one; home-scoped",
+        doc: "The tailnet logins (Tailscale-User-Login) plak web admits through tailscale serve. Read when plak web starts; a 0.0.3 build refuses a config.toml that sets it.",
+        example: "[\"you@example.com\"]",
+        scope: ConfigScope::Immediate,
+    },
+    ConfigKey {
+        path: "web.origin",
+        field: ConfigField::WebOrigin,
+        kind: "string",
+        constraint: "https://<host>[:port], nothing after it; home-scoped",
+        doc: "The exact origin tailscale serve publishes plak web at; every request must name its host and a WebSocket upgrade its origin. Read when plak web starts; a 0.0.3 build refuses a config.toml that sets it.",
+        example: "\"https://host.example.ts.net\"",
         scope: ConfigScope::Immediate,
     },
 ];
