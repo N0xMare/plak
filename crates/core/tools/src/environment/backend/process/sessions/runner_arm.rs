@@ -243,6 +243,14 @@ impl RunnerArm {
         known.or_else(|| self.sessions.session_for_number(number))
     }
 
+    pub(super) fn seed_job_numbers(&self, next: u32) {
+        self.sessions.seed_job_numbers(next);
+    }
+
+    pub(super) fn next_job_number(&self) -> u32 {
+        self.sessions.next_job_number()
+    }
+
     pub(super) fn start(
         &self,
         request: JoinedProcessStartRequest,

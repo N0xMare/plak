@@ -46,11 +46,13 @@ pub struct RunnerSessions {
 }
 
 /// The jobs this handle has seen, by the runner instance that held them and
-/// their number there: a restarted runner numbers its jobs afresh.
+/// their number there, and the lowest number no session of the line has
+/// taken that the host knows of.
 #[derive(Default)]
 struct Mirror {
     /// Each instance's jobs, oldest instance first; the last is current.
     instances: Vec<(String, BTreeMap<u32, JobView>)>,
+    next: u32,
 }
 
 impl Mirror {
@@ -81,6 +83,21 @@ impl Mirror {
             .iter()
             .flat_map(|(_, jobs)| jobs.values().cloned())
             .collect()
+    }
+
+    /// Records that a session took `number`.
+    fn see(&mut self, number: u32) {
+        self.next = self.next.max(number.saturating_add(1));
+    }
+
+    /// The lowest number a new session may take: past every seeded and seen
+    /// number, and never 0.
+    fn next_number(&self) -> u32 {
+        self.instances
+            .iter()
+            .flat_map(|(_, jobs)| jobs.keys())
+            .map(|number| number.saturating_add(1))
+            .fold(self.next.max(1), u32::max)
     }
 }
 
@@ -210,13 +227,31 @@ impl RunnerSessions {
         request: JoinedProcessStartRequest,
         control: OperationContext,
     ) -> Result<JoinedProcessSessionId, ExecutionBackendError> {
-        let payload = wire::envelope(&self.workspace, encode_start(&request)?)?;
+        let next = self.next_job_number();
+        let payload = wire::envelope(&self.workspace, encode_start(&request, next)?)?;
         let started: StartedWire = from_value(
             self.send(RunnerVerb::ProcessStart, payload, &control, None)
                 .await?,
         )?;
-        lock(&self.mirror).observe(&started.instance);
-        decode_session(&started.session)
+        let id = decode_session(&started.session)?;
+        let mut mirror = lock(&self.mirror);
+        mirror.observe(&started.instance);
+        mirror.see(JoinedProcessSessions::job_number(id));
+        Ok(id)
+    }
+
+    /// Never lets a new session of the line take a number below `next`: the
+    /// host's durable counter, which a runner restart does not reset.
+    pub fn seed_job_numbers(&self, next: u32) {
+        let mut mirror = lock(&self.mirror);
+        mirror.next = mirror.next.max(next);
+    }
+
+    /// The lowest number a new session of the line may take, as far as this
+    /// handle knows: past the seed and every number it has seen.
+    #[must_use]
+    pub fn next_job_number(&self) -> u32 {
+        lock(&self.mirror).next_number()
     }
 
     /// Writes to a session's stdin, and closes it when asked.
@@ -533,7 +568,10 @@ fn effect(
 ) -> Result<Value, ExecutionBackendError> {
     match verb {
         RunnerVerb::ProcessStart => {
-            let request = decode_start(wire::open_envelope(environment, payload)?)?;
+            let (request, next) = decode_start(wire::open_envelope(environment, payload)?)?;
+            // The line numbers past every number its host has seen, so a
+            // restarted runner never reuses one.
+            sessions.seed_job_counter(next);
             let id = sessions.start(request, control)?;
             to_value(&StartedWire {
                 session: encode_session(id),

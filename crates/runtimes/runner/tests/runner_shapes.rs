@@ -181,8 +181,8 @@ async fn runner_restart_unknown() {
         )
         .await
         .unwrap_err();
-    // A job of the new instance takes the same number; the old job's
-    // unknown outcome stays beside it.
+    // A job of the new instance takes the next number, never the old
+    // job's; the old job's unknown outcome stays beside it.
     let fresh = sessions
         .start(
             job("sleep 3"),
@@ -195,7 +195,7 @@ async fn runner_restart_unknown() {
     assert_eq!(jobs.len(), 2);
     assert_eq!(jobs[0].number, number);
     assert_eq!(jobs[0].status, JobStatus::OutcomeUnknown);
-    assert_eq!(jobs[1].number, number);
+    assert_eq!(jobs[1].number, number + 1);
     assert_eq!(jobs[1].status, JobStatus::Running);
     sessions
         .stop_jobs(JobStopReason::Model, Duration::from_millis(200))

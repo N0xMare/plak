@@ -5661,12 +5661,15 @@ The at-most-once law across restarts:
   that transfers the line to a newer owner reads the line's jobs, polls them
   from any cursor and stops them; the lost owner is fenced off the line.
 - **Jobs across a runner restart.** The jobs and sessions the old instance
-  held are gone from the new one, which numbers its jobs afresh. The host's
-  handle on the line keeps the jobs it saw per instance and reports each job
-  an earlier instance held that had not ended as of unknown outcome
-  (`JobStatus::OutcomeUnknown`), never as stopped or exited, beside the new
-  instance's jobs of the same numbers; a process the old instance started may
-  still finish.
+  held are gone from the new one. The host's handle on the line keeps the
+  jobs it saw per instance and reports each job an earlier instance held that
+  had not ended as of unknown outcome (`JobStatus::OutcomeUnknown`), never as
+  stopped or exited, beside the new instance's jobs; a process the old
+  instance started may still finish. A new instance never reuses a number the
+  host has seen: every `process.start` carries `next_number`, the lowest
+  number its session may take (past the host's durable job counter and every
+  number the handle has seen on the line), and the runner numbers the line
+  from the larger of it and its own counter.
 
 Every potentially effectful invocation follows one small protocol: validate →
 authorize or approve → record identity → dispatch → observe outcome → commit or
@@ -6117,7 +6120,10 @@ sessions on a runner: start, stdin writes, polls that wait for output or a
 yield, stops, promotion, the line's jobs, stopping them and disowning
 leftovers, each sent under the handle's owner (`RunnerSessions::transfer_to`
 hands the line to a newer head). It mirrors the jobs it has seen, so a
-runner restart reports them as of unknown outcome. `RunnerSessions::watch`
+runner restart reports them as of unknown outcome, and it starts each session
+past every number it has seen and its seed (`seed_job_numbers`,
+`next_job_number`), so a restarted runner reuses none (§8.4).
+`RunnerSessions::watch`
 follows the line's job events (`jobs.watch`) into the same mirror. The runner
 side answers these from one `JoinedProcessSessions` per line (`line_sessions`,
 `serve_sessions`, and `serve_jobs_watch` for the event stream), counted
@@ -6131,8 +6137,9 @@ answer on a thread of their own; its job reads, counts, terminal generation
 and its change watch, `terminal_jobs_since` and `observe_jobs` answer from the
 job events, which a task on the runner runtime follows for as long as the
 service lives, reopening the stream after a lost link. Durable restore stays
-host-side: seeded counters, consumed numbers and restored terminal rows are
-this process's bookkeeping. The agent attaches it as `JoinedSessionsPort::runner`
+host-side: consumed numbers and restored terminal rows are this process's
+bookkeeping, and the seeded job counter also seeds the arm's handle, whose
+seen numbers the service's checkpointed counter includes. The agent attaches it as `JoinedSessionsPort::runner`
 and makes its job restore (`seed_job_counter`, `consume_jobs`,
 `restore_job_terminals`) and the environment's adoption (`adopt_into`) through
 the port, as it does with a local port; capacity and job outputs are the

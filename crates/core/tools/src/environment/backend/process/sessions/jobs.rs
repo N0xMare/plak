@@ -120,6 +120,9 @@ impl JoinedProcessSessions {
 
     /// Seeds the durable per-session number counter without ever moving it back.
     pub(crate) fn seed_job_counter(&self, next_id: u32) {
+        if let Some(arm) = self.runner_arm() {
+            arm.seed_job_numbers(next_id);
+        }
         let mut state = lock(&self.inner.state);
         state.next = state.next.max(u64::from(next_id));
     }
@@ -149,7 +152,11 @@ impl JoinedProcessSessions {
     /// Returns the next number to persist with a checkpoint.
     #[must_use]
     pub(crate) fn next_job_number(&self) -> u32 {
-        u32::try_from(lock(&self.inner.state).next).unwrap_or(u32::MAX)
+        let local = u32::try_from(lock(&self.inner.state).next).unwrap_or(u32::MAX);
+        match self.runner_arm() {
+            Some(arm) => local.max(arm.next_job_number()),
+            None => local,
+        }
     }
 
     /// Binds non-secret agent attribution to this process service.

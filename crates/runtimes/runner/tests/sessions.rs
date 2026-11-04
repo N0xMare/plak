@@ -531,3 +531,54 @@ async fn a_runner_sessions_service_runs_jobs_and_reports_them_from_job_events() 
     assert!(!port.has_unreported_terminal_job());
     drop(loopback);
 }
+
+/// A restarted runner numbers a line's sessions afresh on its own, so the
+/// host carries the lowest number it may use: past every number the handle
+/// has seen and the host's durable seed. No number is reused across a
+/// runner restart, nor across a host restart that seeds from its checkpoint.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_restarted_runner_never_reuses_a_number_the_host_has_seen() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut loopback, environment) = loopback(root.path(), RunnerLimits::default()).await;
+    let number = JoinedProcessSessions::job_number;
+    let sessions = RunnerSessions::new(&loopback.backend(), &environment, owner(1, 1));
+    let first = sessions
+        .start(literal("sleep 2", false), effect(1))
+        .await
+        .unwrap();
+    sessions.promote(first).await.unwrap();
+    assert_eq!(number(first), 1);
+    assert_eq!(sessions.jobs().await.unwrap()[0].number, 1);
+
+    // The runner restarts under the same host handle.
+    loopback
+        .restart(service(root.path(), RunnerLimits::default()))
+        .await
+        .unwrap();
+    let jobs = sessions.jobs().await.unwrap();
+    assert_eq!(jobs[0].status, JobStatus::OutcomeUnknown);
+    let second = sessions
+        .start(literal("sleep 2", false), effect(2))
+        .await
+        .unwrap();
+    assert_eq!(number(second), 2);
+    assert_eq!(sessions.next_job_number(), 3);
+
+    // The host restarts too: a new handle knows only the seed its
+    // checkpoint recorded, and the runner restarts again.
+    loopback
+        .restart(service(root.path(), RunnerLimits::default()))
+        .await
+        .unwrap();
+    let resumed = RunnerSessions::new(&loopback.backend(), &environment, owner(1, 1));
+    resumed.seed_job_numbers(7);
+    let third = resumed
+        .start(literal("sleep 2", false), effect(3))
+        .await
+        .unwrap();
+    assert_eq!(number(third), 7);
+    resumed
+        .stop_jobs(JobStopReason::Model, Duration::from_millis(200))
+        .await
+        .unwrap();
+}

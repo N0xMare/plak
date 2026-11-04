@@ -43,10 +43,14 @@ struct StartWire {
     keep_stdin_open: bool,
     terminal: String,
     output_spool_threshold: Option<usize>,
+    /// The lowest number the session may take: past every number the host
+    /// has seen on the line, so a restarted runner never reuses one.
+    next_number: u32,
 }
 
 pub(super) fn encode_start(
     request: &JoinedProcessStartRequest,
+    next_number: u32,
 ) -> Result<Value, ExecutionBackendError> {
     let command = match &request.command {
         JoinedProcessCommand::Literal {
@@ -73,12 +77,14 @@ pub(super) fn encode_start(
         }
         .to_owned(),
         output_spool_threshold: request.output_spool_threshold,
+        next_number,
     })
 }
 
+/// A start request and the lowest number its session may take.
 pub(super) fn decode_start(
     value: Value,
-) -> Result<JoinedProcessStartRequest, ExecutionBackendError> {
+) -> Result<(JoinedProcessStartRequest, u32), ExecutionBackendError> {
     let wire: StartWire = from_value(value)?;
     let command = match wire.command {
         CommandWire::Literal {
@@ -107,7 +113,7 @@ pub(super) fn decode_start(
         terminal,
     )?;
     request.output_spool_threshold = wire.output_spool_threshold;
-    Ok(request)
+    Ok((request, wire.next_number))
 }
 
 pub(super) fn encode_session(id: JoinedProcessSessionId) -> String {
