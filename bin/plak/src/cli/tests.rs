@@ -1492,3 +1492,28 @@ proptest! {
         let _ = parse(argv);
     }
 }
+
+/// Every path the operator types is made absolute against the launch
+/// directory at the edge; an absolute one is kept, and with no launch
+/// directory a relative one is left as typed.
+#[test]
+fn relative_paths_resolve_against_the_launch_directory() {
+    let launch = std::path::Path::new("/work/repo");
+    let resolved = |values: &[&str]| parse(args(values)).unwrap().resolved_against(Some(launch));
+    assert!(matches!(
+        resolved(&["session", "export", "aaaa", "--out", "x.json"]),
+        Command::SessionExport { out: Some(out), .. } if out == launch.join("x.json")
+    ));
+    assert!(matches!(
+        resolved(&["session", "import", "/tmp/x.json"]),
+        Command::SessionImport { path } if path.as_os_str() == "/tmp/x.json"
+    ));
+    assert!(matches!(
+        resolved(&["session", "import", "in/x.json"]),
+        Command::SessionImport { path } if path == launch.join("in/x.json")
+    ));
+    assert!(matches!(
+        parse(args(&["session", "import", "x.json"])).unwrap().resolved_against(None),
+        Command::SessionImport { path } if path.as_os_str() == "x.json"
+    ));
+}

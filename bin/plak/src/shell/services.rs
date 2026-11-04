@@ -55,8 +55,11 @@ impl Services {
     /// The composition root passes the sink explicitly to every state root.
     /// It is built on first use rather than at CLI
     /// entry, so a command that opens no state root pays nothing for it.
-    pub(crate) fn from_env(telemetry_sink_factory: Option<TelemetrySinkFactory>) -> Self {
-        let home = Home::from_env();
+    pub(crate) fn from_env(
+        telemetry_sink_factory: Option<TelemetrySinkFactory>,
+        launch: Option<&std::path::Path>,
+    ) -> Self {
+        let home = Home::from_env(launch);
         if let Some(paths) = home.paths_if_resolved() {
             crate::build_identity::install_identity_cache_home(paths.home().to_path_buf());
         }

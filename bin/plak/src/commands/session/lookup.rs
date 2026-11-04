@@ -33,9 +33,9 @@ fn load_product_session(
     admit: impl FnOnce(&product_sessions::SessionRecord) -> CliResult<()>,
     for_work: bool,
 ) -> CliResult<product_sessions::SessionRecord> {
-    let cwd = std::env::current_dir().map_err(|_| CliFailure::new("cwd unavailable"))?;
+    let cwd = paths.workspace().map_err(CliFailure::new)?.to_path_buf();
     let record = (|| {
-        let resolved = resolve_workspace_session_id(store, session_id)?;
+        let resolved = resolve_workspace_session_id(store, &cwd, session_id)?;
         store.load(&resolved).map_err(CliFailure::from)
     })()
     .map_err(|error| {
@@ -70,9 +70,10 @@ fn load_product_session(
 /// accepted wherever a session id is, among this workspace's sessions.
 fn resolve_workspace_session_id(
     store: &dyn crate::store::session_records::SessionRecordStore,
+    workspace: &Path,
     requested: &str,
 ) -> CliResult<String> {
-    resolve_session_id(requested, |cwd| {
+    resolve_session_id(requested, workspace, |cwd| {
         store
             .list_for_workspace(cwd)
             .map(|sessions| sessions.into_iter().map(|session| session.id).collect())
@@ -85,7 +86,8 @@ pub(crate) fn resolve_read_only_session_id(
     paths: &crate::home::paths::PlakPaths,
     requested: &str,
 ) -> CliResult<String> {
-    resolve_session_id(requested, |cwd| {
+    let workspace = paths.workspace().map_err(CliFailure::new)?;
+    resolve_session_id(requested, workspace, |cwd| {
         crate::store::ProductStore::session_ids_for_workspace_read_only(paths, cwd)
     })
     .map_err(|error| {
@@ -106,13 +108,13 @@ fn session_absent(message: &str) -> bool {
 
 fn resolve_session_id(
     requested: &str,
+    workspace: &Path,
     workspace_ids: impl FnOnce(&Path) -> Result<Vec<String>, String>,
 ) -> CliResult<String> {
     if uuid::Uuid::parse_str(requested).is_ok_and(|id| id.hyphenated().to_string() == requested) {
         return Ok(requested.to_owned());
     }
-    let cwd = std::env::current_dir().map_err(|_| CliFailure::new("cwd unavailable"))?;
-    let ids = workspace_ids(&cwd).map_err(CliFailure::new)?;
+    let ids = workspace_ids(workspace).map_err(CliFailure::new)?;
     let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
     match_session_id_prefix(requested, &ids)
         .map(str::to_owned)

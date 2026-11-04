@@ -2,7 +2,7 @@
 
 use std::env;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use plakous::subscriptions::NativeProvider;
 
@@ -165,7 +165,7 @@ pub(crate) fn run_doctor(
         version: plakous::VERSION.to_owned(),
         jj_cli: product_doctor::jj_cli::probe(
             path.as_deref(),
-            &env::current_dir().unwrap_or_default(),
+            &paths.workspace().map(Path::to_path_buf).unwrap_or_default(),
         ),
         paths: doctor_paths,
         config,
@@ -180,7 +180,7 @@ pub(crate) fn run_doctor(
         .ok()
         .flatten(),
         telemetry,
-        working_directory: env::current_dir().map_err(|_| "cwd unavailable".to_owned()),
+        working_directory: paths.workspace().map(Path::to_path_buf),
         terminals: product_doctor::TerminalFacts::capture(),
         composition_requirement: if local_composition_required {
             product_doctor::Requirement::Required

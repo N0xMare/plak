@@ -268,7 +268,10 @@ fn terminal_e2e_child() -> Result<(), Box<dyn Error>> {
         .unwrap_or(0);
     let evidence =
         PathBuf::from(std::env::var_os("PLAK_PTY_EVIDENCE").ok_or("PLAK_PTY_EVIDENCE missing")?);
-    let services = crate::shell::services::Services::from_env(None);
+    let services = crate::shell::services::Services::from_env(
+        None,
+        crate::shell::home::launch_directory().as_deref(),
+    );
     let outcome = launch_tui_with_attacher(
         &services,
         resume,

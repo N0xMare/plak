@@ -254,7 +254,7 @@ pub fn key_set(
     stdin: &mut dyn io::BufRead,
     stderr: &mut dyn io::Write,
 ) -> CliResult<ProcessOutcome> {
-    let paths = product_paths::PlakPaths::from_env().map_err(CliFailure::from)?;
+    let paths = product_paths::PlakPaths::home_from_env().map_err(CliFailure::from)?;
     write!(stderr, "API key for {account} (input hidden): ")
         .map_err(|_| CliFailure::new("stderr failed"))?;
     stderr
@@ -273,7 +273,7 @@ pub fn key_set(
 
 /// `plak key clear <account>`.
 pub fn key_clear(account: &str, stdout: &mut dyn io::Write) -> CliResult<ProcessOutcome> {
-    let paths = product_paths::PlakPaths::from_env().map_err(CliFailure::from)?;
+    let paths = product_paths::PlakPaths::home_from_env().map_err(CliFailure::from)?;
     let removed = product_secrets::clear_api_key(&paths, account).map_err(CliFailure::from)?;
     writeln!(
         stdout,
@@ -293,7 +293,7 @@ pub fn key_status(
     account: Option<String>,
     stdout: &mut dyn io::Write,
 ) -> CliResult<ProcessOutcome> {
-    let paths = product_paths::PlakPaths::from_env().map_err(CliFailure::from)?;
+    let paths = product_paths::PlakPaths::home_from_env().map_err(CliFailure::from)?;
     let accounts: Vec<String> = match account {
         Some(a) => vec![a],
         None => ["openai", "xai-api", "anthropic", "openrouter"]

@@ -18,10 +18,7 @@ pub(crate) fn resume_carry(
     orchestration: bool,
     intent: crate::store::sessions::SessionRecord,
 ) -> CliResult<(crate::store::sessions::SessionRecord, String)> {
-    let paths = crate::home::paths::PlakPaths::for_workspace(
-        services.paths()?.home().to_path_buf(),
-        &source.workspace_root,
-    );
+    let paths = services.paths()?.for_workspace(&source.workspace_root);
     ensure_carry_quiescence(&paths, source)?;
     let document = export_session(&paths, source)
         .map_err(|error| CliFailure::new(format!("cannot carry this session: {error}")))?;

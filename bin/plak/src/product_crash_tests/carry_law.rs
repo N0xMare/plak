@@ -97,7 +97,8 @@ async fn setup(layout: &Layout, path: &str) -> TestResult {
     journal.bind_locator(locator)?;
     journal.set_product_binding("codex", "offline-loopback-v1", "medium")?;
     if path == "reload" {
-        let workspace_paths = PlakPaths::for_workspace(layout.home.clone(), &layout.workspace);
+        let workspace_paths =
+            PlakPaths::explicit(layout.home.clone()).for_workspace(&layout.workspace);
         let mut config = crate::product_config::ProductConfig::default_product();
         config.bind_root_tuple("codex", "offline-loopback-v1", Some("medium"));
         config.max_children = 2;
@@ -134,7 +135,8 @@ fn source_id(layout: &Layout) -> TestResult<String> {
 
 /// The real carry; the offline model's `carry-cut` kills the process inside it.
 fn carry(layout: &Layout, path: &str) -> TestResult {
-    let paths = PlakPaths::explicit(layout.home.clone());
+    // The child runs in the workspace, as the product's CLI edge would name it.
+    let paths = PlakPaths::explicit(layout.home.clone()).for_workspace(&layout.workspace);
     let services = crate::shell::services::Services::for_home(paths);
     let mut record = services.session_records()?.load(&source_id(layout)?)?;
     if path == "reload" {
@@ -149,7 +151,8 @@ fn carry(layout: &Layout, path: &str) -> TestResult {
 /// Startup's settlement and the source's open, as a relaunched TUI runs
 /// them; writes where the source's open landed.
 fn relaunch(layout: &Layout) -> TestResult {
-    let paths = PlakPaths::explicit(layout.home.clone());
+    // The child runs in the workspace, as the product's CLI edge would name it.
+    let paths = PlakPaths::explicit(layout.home.clone()).for_workspace(&layout.workspace);
     let services = crate::shell::services::Services::for_home(paths);
     let mut notes = crate::carry::intent::settle_workspace(&services, &layout.workspace);
     let source = services.session_records()?.load(&source_id(layout)?)?;

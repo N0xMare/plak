@@ -344,7 +344,11 @@ fn log_command_start(command: &Command) {
     reason = "The composition root orders read-only shortcuts, signal installation, service construction, product-state admission, and face dispatch."
 )]
 fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcome> {
-    let command = cli::parse(arguments)?;
+    // The launch directory, read once: the CLI's workspace, and what a
+    // relative path on the command line means. Nothing below resolves a
+    // path against the process working directory.
+    let launch = shell::home::launch_directory();
+    let command = cli::parse(arguments)?.resolved_against(launch.as_deref());
     build_features::admit_command(&command)?;
     #[cfg(feature = "test-hooks")]
     test_hooks::install().map_err(CliFailure::new)?;
@@ -384,9 +388,9 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
     // extra telemetry sink are resolved exactly once here, and every command
     // borrows them. Nothing below reads the environment for a path again.
     #[cfg(feature = "otel")]
-    let services = Services::from_env(Some(otel_extra_telemetry_sink));
+    let services = Services::from_env(Some(otel_extra_telemetry_sink), launch.as_deref());
     #[cfg(not(feature = "otel"))]
-    let services = Services::from_env(None);
+    let services = Services::from_env(None, launch.as_deref());
     // Only a command that uses product state records a fresh binary id in the
     // home; inspection commands read the identity cache and never write it.
     if command_needs_product_state(&command)

@@ -15,7 +15,6 @@ use plakous::subscriptions::{NativeProvider, NativeSubscriptionError};
 use plakous_hosted::agent as product_agent;
 use plakous_hosted::error::{CliFailure, CliFailureKind, CliResult, ProcessOutcome};
 use plakous_hosted::runtime as product_host;
-use std::env;
 use std::{io, sync::Arc};
 
 fn require_available_model(model: &crate::presentation::CliModelSummary) -> CliResult<()> {
@@ -59,6 +58,16 @@ fn run_effort(
 }
 
 impl PlakousApplication {
+    /// The CLI's workspace: the launch directory the composition root
+    /// resolved, never re-read here.
+    fn workspace(&self) -> CliResult<std::path::PathBuf> {
+        Ok(self
+            .product_paths()?
+            .workspace()
+            .map_err(|_| CliFailure::new("working directory is unavailable"))?
+            .to_path_buf())
+    }
+
     #[allow(
         clippy::too_many_arguments,
         clippy::too_many_lines,
@@ -93,8 +102,7 @@ impl PlakousApplication {
         // refresh or a catalog row, because there is no provider to admit.
         #[cfg(feature = "test-hooks")]
         if crate::test_hooks::selected().is_some() {
-            let cwd = env::current_dir()
-                .map_err(|_| CliFailure::new("working directory is unavailable"))?;
+            let cwd = self.workspace()?;
             let mut session = product_sessions::SessionRecord::new(cwd);
             session.account = Some(cli_provider_name(provider).to_owned());
             session.model = Some(model.to_owned());
@@ -193,8 +201,7 @@ impl PlakousApplication {
         };
         let resolved = resolved.map_err(|error| self.resolution_failure(error.kind(), provider))?;
         let resolved = Arc::new(resolved);
-        let cwd =
-            env::current_dir().map_err(|_| CliFailure::new("working directory is unavailable"))?;
+        let cwd = self.workspace()?;
         let mut session = product_sessions::SessionRecord::new(cwd);
         session.account = Some(cli_provider_name(provider).to_owned());
         session.model = Some(resolved.selected_model().as_str().to_owned());
@@ -265,8 +272,7 @@ impl PlakousApplication {
         let api = selection
             .api_target()
             .ok_or_else(|| CliFailure::new("API run requires an API target"))?;
-        let cwd =
-            env::current_dir().map_err(|_| CliFailure::new("working directory is unavailable"))?;
+        let cwd = self.workspace()?;
         let session = api_run_record(cwd, model, effort, composition, selection)?;
         self.product_paths()?
             .ensure_layout()
@@ -512,8 +518,7 @@ impl PlakousApplication {
         // itself rather than reaching through the attached builder.
         #[cfg(feature = "test-hooks")]
         if let Some(selection) = crate::test_hooks::selected() {
-            let cwd = env::current_dir()
-                .map_err(|_| CliFailure::new("working directory is unavailable"))?;
+            let cwd = self.workspace()?;
             let config = selection.map_err(CliFailure::new).and_then(|selection| {
                 selection.host_config(
                     crate::test_hooks::OfflineFace::OneShot,
@@ -561,8 +566,7 @@ impl PlakousApplication {
             root_template: policy.root_template,
             attached_one_shot: true,
             interactive: false,
-            cwd: env::current_dir()
-                .map_err(|_| CliFailure::new("working directory is unavailable"))?,
+            cwd: self.workspace()?,
             ready_catalog: plakous_host_protocol::views::ReadyCatalog::default(),
             surface: None,
             resume_publication: None,

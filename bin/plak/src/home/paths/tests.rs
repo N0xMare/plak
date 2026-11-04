@@ -96,18 +96,18 @@ fn workspace_constructor_discovers_parent_overlay_and_excludes_product_home() {
             .project_root()
             .is_none_or(|found| !found.starts_with(&canonical_root))
     };
-    assert!(outside_root(PlakPaths::for_workspace(
-        home.clone(),
-        root.path()
-    )));
-    assert!(outside_root(PlakPaths::for_workspace(
-        home.clone(),
-        &nested
-    )));
+    assert!(outside_root(
+        PlakPaths::explicit(home.clone()).for_workspace(root.path())
+    ));
+    assert!(outside_root(
+        PlakPaths::explicit(home.clone()).for_workspace(&nested)
+    ));
     let project = root.path().join("project");
     fs::create_dir_all(project.join(".plak/agents")).unwrap();
     assert_eq!(
-        PlakPaths::for_workspace(home, &nested).project_root(),
+        PlakPaths::explicit(home)
+            .for_workspace(&nested)
+            .project_root(),
         Some(project.canonicalize().unwrap().as_path())
     );
 }
@@ -121,11 +121,15 @@ fn launch_discovery_never_takes_the_default_home_for_a_project() {
     fs::write(user.join(".plak/config.toml"), "").unwrap();
     fs::create_dir_all(&work).unwrap();
     let private = root.path().join("private-home");
-    let paths = PlakPaths::explicit(private.clone()).discovered_from(Some(user.as_os_str()), &work);
+    let paths = PlakPaths::resolve(Some(private.as_os_str()), Some(user.as_os_str()))
+        .unwrap()
+        .for_workspace(&work);
     assert_eq!(paths.project_root(), None);
     // A real project below `$HOME` is still discovered.
     fs::create_dir_all(work.join(".plak/agents")).unwrap();
-    let paths = PlakPaths::explicit(private).discovered_from(Some(user.as_os_str()), &work);
+    let paths = PlakPaths::resolve(Some(private.as_os_str()), Some(user.as_os_str()))
+        .unwrap()
+        .for_workspace(&work);
     assert_eq!(
         paths.project_root(),
         Some(work.canonicalize().unwrap().as_path())
@@ -263,4 +267,54 @@ fn private_state_home_rejects_symlinked_ancestor() {
     let paths = PlakPaths::explicit(redirected_parent.join("plak"));
     assert!(paths.ensure_private_state_home().is_err());
     assert_eq!(fs::read(&sentinel).unwrap(), b"untouched");
+}
+
+/// A product context names the workspace it was resolved for, and only
+/// that: the launch directory at the CLI edge, an explicit workspace
+/// otherwise, and none for a home-only context.
+#[test]
+fn a_context_names_its_workspace_explicitly() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    let work = root.path().join("work");
+    fs::create_dir_all(work.join(".plak/agents")).unwrap();
+    let context = PlakPaths::explicit(home.clone()).for_workspace(&work);
+    assert_eq!(context.workspace(), Ok(work.as_path()));
+    assert_eq!(
+        context.project_root(),
+        Some(work.canonicalize().unwrap().as_path())
+    );
+    let launched = PlakPaths::explicit(home.clone()).for_workspace(&work);
+    assert_eq!(launched.workspace(), Ok(work.as_path()));
+    assert_eq!(
+        PlakPaths::explicit(home).workspace(),
+        Err("cwd unavailable".to_owned())
+    );
+}
+
+/// Every context of a home comes from one discovery: a session's context
+/// for a workspace equals the CLI edge's for the same launch directory, and
+/// with `PLAK_HOME` elsewhere the default `$HOME/.plak` is never a workspace
+/// under `$HOME`'s project overlay.
+#[test]
+fn every_context_shares_the_cli_edges_discovery() {
+    let root = tempfile::tempdir().unwrap();
+    let user = root.path().join("user");
+    let work = user.join("work/repo");
+    fs::create_dir_all(user.join(".plak/agents")).unwrap();
+    fs::write(user.join(".plak/config.toml"), "").unwrap();
+    fs::create_dir_all(&work).unwrap();
+    let private = root.path().join("private-home");
+    let home = PlakPaths::resolve(Some(private.as_os_str()), Some(user.as_os_str())).unwrap();
+    let launched = home.for_workspace(&work);
+    assert_eq!(launched.project_root(), None);
+    assert_eq!(home.for_workspace(&work), launched);
+    // Re-deriving from any context of the home gives the same answer.
+    assert_eq!(launched.for_workspace(&work), launched);
+    // The environment's own edge agrees, whatever this process's env is.
+    let from_env = PlakPaths::from_env_in(Some(&work)).unwrap();
+    assert_eq!(
+        PlakPaths::from_env_in(None).unwrap().for_workspace(&work),
+        from_env
+    );
 }

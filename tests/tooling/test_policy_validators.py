@@ -954,6 +954,43 @@ class LayerPolicyTests(unittest.TestCase):
         errors = workspace_policy.validate_cli_security_sources("plakous-hosted", sources)
         self.assertTrue(any("NotApproved" in error for error in errors), errors)
 
+    def test_the_working_directory_is_read_only_at_the_cli_edge(self) -> None:
+        reads = {"src/run.rs": "fn f() { let cwd = std::env::current_dir(); }"}
+        errors = workspace_policy.validate_cli_security_sources("plakous-hosted", reads)
+        self.assertTrue(any("working-directory calls ['current_dir']" in e for e in errors), errors)
+        changes = {"src/web.rs": "use std::env;\nfn f() { env::set_current_dir(dir); }"}
+        errors = workspace_policy.validate_cli_security_sources("plakous-hosted", changes)
+        self.assertTrue(any("['set_current_dir']" in e for e in errors), errors)
+        builder = {"src/spawn.rs": "fn f(c: &mut C) { c.current_dir(dir); }"}
+        self.assertEqual(
+            workspace_policy.validate_cli_security_sources("plakous-hosted", builder), []
+        )
+        for aliased in (
+            "use std::env as e;\nfn f() { e::current_dir(); }",
+            "use std::env::{current_dir as cd};\nfn f() { cd(); }",
+        ):
+            errors = workspace_policy.validate_cli_security_sources(
+                "plakous-hosted", {"src/alias.rs": aliased}
+            )
+            self.assertTrue(any("working-directory calls" in e for e in errors), errors)
+        indirect = {"src/probe.rs": "fn f() { let s = Services::from_env(None); }"}
+        errors = workspace_policy.validate_cli_security_sources("plakous-hosted", indirect)
+        self.assertTrue(any("launch-directory readers" in e for e in errors), errors)
+        launch = {"src/probe.rs": "fn f() { let l = crate::shell::home::launch_directory(); }"}
+        errors = workspace_policy.validate_cli_security_sources("plak", launch)
+        self.assertTrue(
+            any("launch-directory readers ['launch_directory']" in e for e in errors), errors
+        )
+        for renamed in (
+            "use crate::shell::services::Services as ZzS;\nfn f() { ZzS::from_env(None, None); }",
+            "use crate::shell::home::{Home as H};\nfn f() { H::from_env(None); }",
+            "use crate::shell::home::launch_directory as here;\nfn f() { here(); }",
+        ):
+            errors = workspace_policy.validate_cli_security_sources(
+                "plak", {"src/renamed.rs": renamed}
+            )
+            self.assertTrue(any("imported under another name" in e for e in errors), errors)
+
     def test_non_facade_globs_do_not_trigger_facade_symbol_checks(self) -> None:
         sources = {
             "src/globs.rs": """
@@ -1412,10 +1449,7 @@ class RepositoryPolicyTests(unittest.TestCase):
                     offenders.append(f"{package.name}:{path}")
         self.assertEqual(
             sorted(offenders),
-            [
-                "plak:src/commands/login.rs",
-                "plak:src/shell/home.rs",
-            ],
+            ["plak:src/shell/home.rs"],
             "the product home may be discovered only in the composition root, "
             "which since 3.4 step A holds the CLI too",
         )
@@ -1534,6 +1568,8 @@ class RepositoryPolicyTests(unittest.TestCase):
             | set(workspace_policy.ALLOWED_CLI_MACROS_BY_SOURCE)
             | set(workspace_policy.EXPECTED_PRODUCT_GENERATED_MACROS)
             | set(workspace_policy.EXPECTED_COMPILE_TIME_ENVIRONMENT)
+            | set(workspace_policy.EXPECTED_WORKING_DIRECTORY_CALLS)
+            | set(workspace_policy.EXPECTED_LAUNCH_DIRECTORY_READERS)
         )
         for package_name, relative in sorted(keys):
             with self.subTest(pin=f"{package_name}:{relative}"):
@@ -1870,6 +1906,11 @@ fn production() {}
             "plak": {
                 "src/lib.rs": f"""
 use std::process::ExitCode;
+fn run(launch: Option<&std::path::Path>) {{
+    let launch = shell::home::launch_directory();
+    let _ = Services::from_env(Some(sink), launch);
+    let _ = Services::from_env(None, launch);
+}}
 {main_extra}
 """,
                 "src/commands/doctor.rs": """
@@ -1946,6 +1987,7 @@ fn mint() {}
             "plakous-workspace": {
                 "src/git_redirect_fence.rs": """
 fn discover_real_git() {
+    let _ = std::env::current_dir();
     let _ = std::env::var_os("PATH");
     let _ = std::env::var_os("PLAK_TEST_JJ");
     let _ = std::env::var_os("PATH");

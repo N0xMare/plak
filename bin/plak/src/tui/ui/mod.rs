@@ -429,6 +429,11 @@ pub(crate) struct App {
     pub(crate) workspace: String,
     /// Bottom-right label `~/path · branch`.
     pub(crate) workspace_chrome: crate::tui::WorkspaceChrome,
+    /// The launch directory, where a typed or dropped relative image path
+    /// resolves.
+    launch_directory: std::path::PathBuf,
+    /// The session's product context, for the `/reload` probe.
+    reload_context: Option<crate::home::paths::PlakPaths>,
     #[allow(
         dead_code,
         reason = "resume note already injected into blocks at launch"
@@ -854,6 +859,8 @@ impl App {
             after_draw: None,
             session_id: launch.session_id,
             workspace: display_workspace(&launch.workspace),
+            launch_directory: launch.workspace.clone(),
+            reload_context: launch.reload_home.clone(),
             workspace_chrome,
             account: launch.account,
             model: launch.model,

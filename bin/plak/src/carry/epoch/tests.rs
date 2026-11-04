@@ -5,7 +5,7 @@ use plakous_hosted::topology_runtime::test_support::bootstrap;
 #[test]
 fn build_rendering_and_hint_changes_keep_exact_resume_across_two_hops() {
     let root = tempfile::tempdir().unwrap();
-    let paths = PlakPaths::for_workspace(root.path().join("home"), root.path());
+    let paths = PlakPaths::explicit(root.path().join("home")).for_workspace(root.path());
     paths.ensure_layout().unwrap();
     let config = crate::product_config::ProductConfig::default_product();
     config.save(&paths).unwrap();
@@ -121,7 +121,7 @@ fn bounds_are_compared_after_the_same_clamping_as_genesis() {
 fn changed_spawn_cap_carries_to_fresh_genesis_but_unchanged_settings_do_not()
 -> Result<(), Box<dyn std::error::Error>> {
     let root = tempfile::tempdir()?;
-    let paths = PlakPaths::for_workspace(root.path().join("home"), root.path());
+    let paths = PlakPaths::explicit(root.path().join("home")).for_workspace(root.path());
     paths.ensure_layout()?;
     let mut config = crate::product_config::ProductConfig::default_product();
     config.bind_root_tuple("claude", "claude-opus-5", Some("high"));
@@ -174,7 +174,7 @@ fn changed_spawn_cap_carries_to_fresh_genesis_but_unchanged_settings_do_not()
 #[test]
 fn persisted_children_refuse_carry_even_without_a_root_attachment() {
     let root = tempfile::tempdir().unwrap();
-    let paths = PlakPaths::for_workspace(root.path().join("home"), root.path());
+    let paths = PlakPaths::explicit(root.path().join("home")).for_workspace(root.path());
     paths.ensure_layout().unwrap();
     let record = SessionRecord::new(root.path().to_path_buf());
     let mut tree = bootstrap(&record.id, root.path().to_path_buf());
@@ -204,7 +204,7 @@ fn persisted_children_refuse_carry_even_without_a_root_attachment() {
 fn epoch_inspection_failures_skip_apply_and_keep_normal_reload() {
     for corrupt_tree in [false, true] {
         let root = tempfile::tempdir().unwrap();
-        let paths = PlakPaths::for_workspace(root.path().join("home"), root.path());
+        let paths = PlakPaths::explicit(root.path().join("home")).for_workspace(root.path());
         paths.ensure_layout().unwrap();
         let mut record = SessionRecord::new(root.path().to_path_buf());
         let id = record.id.clone();
@@ -229,7 +229,7 @@ fn epoch_inspection_failures_skip_apply_and_keep_normal_reload() {
 #[test]
 fn a_session_keeps_its_own_profile_and_takes_only_its_own_template_edits() {
     let root = tempfile::tempdir().unwrap();
-    let paths = PlakPaths::for_workspace(root.path().join("home"), root.path());
+    let paths = PlakPaths::explicit(root.path().join("home")).for_workspace(root.path());
     paths.ensure_layout().unwrap();
     let template = |name: &str, description: &str| {
         std::fs::write(

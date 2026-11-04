@@ -320,9 +320,8 @@ impl App {
                 "explicit /rebind requested under the current configuration and login".to_owned(),
             ),
             SlashEffect::AttachImage(argument) => {
-                let paths = super::image_paths::PathBase::current()
-                    .map(|base| base.named_files(&argument))
-                    .unwrap_or_default();
+                let paths =
+                    super::image_paths::PathBase::at(&self.launch_directory).named_files(&argument);
                 for path in paths {
                     self.attach_image(&path);
                 }
@@ -506,7 +505,7 @@ impl App {
         // Dropped or pasted paths that all name existing image files attach
         // the images instead of typing the paths.
         if let Some(paths) =
-            super::image_paths::PathBase::current().and_then(|base| base.dropped_images(text))
+            super::image_paths::PathBase::at(&self.launch_directory).dropped_images(text)
         {
             for path in paths {
                 self.attach_image(&path);

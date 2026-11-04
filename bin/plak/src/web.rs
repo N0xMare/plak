@@ -146,12 +146,20 @@ fn open_session(
     services: &Services,
     command: &WebCommand,
 ) -> CliResult<plakous_hosted::runtime::HostConfig<PlakExtension>> {
-    if let Some(cwd) = &command.cwd {
-        std::env::set_current_dir(cwd)
-            .map_err(|_| CliFailure::new(format!("plak web: cannot enter {}", cwd.display())))?;
-    }
+    // The session's workspace is explicit: `--cwd`, or the launch directory.
+    // The process working directory is never changed.
+    let context = match &command.cwd {
+        Some(cwd) => {
+            let workspace = std::fs::canonicalize(cwd).map_err(|_| {
+                CliFailure::new(format!("plak web: no workspace {}", cwd.display()))
+            })?;
+            Some(services.paths()?.for_workspace(&workspace))
+        }
+        None => None,
+    };
     crate::commands::agent::run_agent_after_admission(
         services,
+        context.as_ref(),
         command.session.clone(),
         None,
         None,

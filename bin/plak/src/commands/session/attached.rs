@@ -136,12 +136,13 @@ fn build_attached_host_config(
 ) -> Result<product_host::HostConfig<crate::surface_protocol::PlakExtension>, AttachedConfigError> {
     let classify_rebind_fallback = purpose == AttachedPurpose::Rebind;
     crate::build_features::admit_session(&record)?;
-    let paths = &crate::home::paths::PlakPaths::for_workspace(
-        services.paths()?.home().to_path_buf(),
-        &record.workspace_root,
-    );
+    let paths = &services.paths()?.for_workspace(&record.workspace_root);
     product_config::SessionPolicy::load(paths).map_err(CliFailure::new)?;
-    let cwd = std::env::current_dir().map_err(|_| CliFailure::new("cwd unavailable"))?;
+    let cwd = services
+        .paths()?
+        .workspace()
+        .map_err(CliFailure::new)?
+        .to_path_buf();
     // The repository gate's offline model; see `crate::test_hooks`.
     #[cfg(feature = "test-hooks")]
     if let Some(selection) = crate::test_hooks::selected() {

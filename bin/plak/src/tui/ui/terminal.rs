@@ -727,8 +727,13 @@ pub(super) fn run_app(
             // starts there is nothing left to show a slow answer on.
             let workspace = std::path::PathBuf::from(&app.workspace);
             let session_id = app.session_id.clone();
+            let context = app.reload_context.clone();
             app.start_reload_probe(move || {
-                crate::carry::reload_target_for_session(&workspace, session_id.as_deref())
+                crate::carry::reload_target_for_session(
+                    context.as_ref()?,
+                    &workspace,
+                    session_id.as_deref(),
+                )
             });
         }
         match app.poll_reload_probe() {

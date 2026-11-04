@@ -4,7 +4,6 @@
 
 pub(crate) mod supervisor;
 
-use std::env;
 use std::io::{self, IsTerminal as _, Write as _};
 use std::path::Path;
 use std::time::Instant;
@@ -177,7 +176,7 @@ fn prepare_tui_launch(
     let store = services.session_records()?;
     home::state::ensure_usable_state(&paths, &mut io::stderr().lock()).map_err(CliFailure::new)?;
     let state_roots = services.state_roots()?;
-    let cwd = env::current_dir().map_err(|_| CliFailure::new("cwd unavailable"))?;
+    let cwd = paths.workspace().map_err(CliFailure::new)?.to_path_buf();
     // No-id resume enters the ordinary TUI first. The existing host-owned
     // `/resume` action supplies the cwd-scoped snapshot to the one picker UI;
     // there is no second cooked-terminal selector and no implicit choice.

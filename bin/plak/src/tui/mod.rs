@@ -176,8 +176,9 @@ pub struct TuiLaunch {
     /// default, and the operator must read why the session they are looking at
     /// is not the one they were choosing between.
     pub opening_note: Option<String>,
-    /// The product home, where a requested reload's refusal is recorded
-    /// when no session host is left to record it; `None` records none.
+    /// The session's product context: `/reload`'s probe reads the session
+    /// from it, and a requested reload's refusal is recorded at its home
+    /// when no session host is left to record it; `None` does neither.
     pub(crate) reload_home: Option<crate::home::paths::PlakPaths>,
 }
 

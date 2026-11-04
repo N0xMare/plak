@@ -307,10 +307,17 @@ fn write_document_with_directory_sync(
     let bytes = serde_json::to_vec(document)
         .map_err(|error| format!("the export document could not be encoded: {error}"))?;
     validate_size("document", bytes.len(), MAX_DOCUMENT_BYTES).map_err(|e| e.to_string())?;
+    // The CLI edge made every operator path absolute; a relative one here
+    // would resolve against the process working directory.
+    if path.is_relative() {
+        return Err(format!(
+            "the export path {} is not absolute",
+            path.display()
+        ));
+    }
     let parent = path
         .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
+        .ok_or_else(|| format!("the export path {} names no directory", path.display()))?;
     let mut file = tempfile::NamedTempFile::new_in(parent)
         .map_err(|error| format!("could not create export temporary file: {error}"))?;
     file.write_all(&bytes)

@@ -383,7 +383,7 @@ pub(crate) fn open_switch_source_with_actual_host(
     workspace: &Path,
     source_id: &str,
 ) -> ProductResult<(String, Option<String>)> {
-    let paths = PlakPaths::explicit(home.to_path_buf());
+    let paths = PlakPaths::explicit(home.to_path_buf()).for_workspace(workspace);
     let services = crate::shell::services::Services::for_home(paths.clone());
     let source = crate::product_sessions::load_session(&paths, source_id)?;
     let (resolved, note) = crate::carry::intent::resolve_open(&services, source)

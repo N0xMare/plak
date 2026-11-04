@@ -244,7 +244,7 @@ pub(super) fn execute_session_list(
     stdout: &mut dyn io::Write,
 ) -> CliResult<ProcessOutcome> {
     let paths = services.paths()?;
-    let cwd = std::env::current_dir().map_err(|_| CliFailure::new("cwd unavailable"))?;
+    let cwd = paths.workspace().map_err(CliFailure::new)?.to_path_buf();
     let sessions = services
         .session_records()?
         .list_for_workspace(&cwd)

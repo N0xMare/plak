@@ -1,6 +1,5 @@
 //! `plak agent`: one hosted agent bound to stdio.
 
-use std::env;
 use std::io;
 use std::time::Instant;
 
@@ -68,6 +67,7 @@ pub(crate) fn run_agent(
     crate::signals::count_interrupts();
     let outcome = run_agent_after_admission(
         services,
+        None,
         session_id,
         provider,
         platform,
@@ -204,6 +204,7 @@ pub(crate) fn new_agent_record(
 )]
 pub(crate) fn run_agent_after_admission(
     services: &crate::shell::services::Services,
+    context: Option<&crate::home::paths::PlakPaths>,
     session_id: Option<String>,
     provider: Option<NativeProvider>,
     platform: Option<plakous_hosted::binding::PlatformProvider>,
@@ -225,12 +226,17 @@ pub(crate) fn run_agent_after_admission(
     if let Some(composition) = composition {
         crate::build_features::require_composition(composition)?;
     }
-    let paths = services.paths()?;
+    // The session's product context: the CLI's launch directory unless the
+    // caller names another workspace's.
+    let paths = match context {
+        Some(context) => context,
+        None => services.paths()?,
+    };
     let cfg = super::support::admit_product_config(paths, &mut io::stderr().lock())?;
     let store = services.session_records()?;
     crate::home::state::ensure_usable_state(paths, &mut io::stderr().lock())
         .map_err(CliFailure::new)?;
-    let cwd = env::current_dir().map_err(|_| CliFailure::new("cwd unavailable"))?;
+    let cwd = paths.workspace().map_err(CliFailure::new)?.to_path_buf();
     let record = if let Some(session_id) = session_id {
         crate::carry::load_for_work(
             services,

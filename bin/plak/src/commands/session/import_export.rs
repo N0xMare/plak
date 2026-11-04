@@ -185,10 +185,7 @@ pub(super) fn import_prepared_with_fallback(
     if let Some(intent) = resumed {
         resume_identity(&mut record, &mut note, intent);
     }
-    let paths = crate::home::paths::PlakPaths::for_workspace(
-        services.paths()?.home().to_path_buf(),
-        &record.workspace_root,
-    );
+    let paths = services.paths()?.for_workspace(&record.workspace_root);
     product_config::SessionPolicy::load(&paths).map_err(CliFailure::new)?;
     let (source_id, source_key) = record
         .carried_forward_from()
@@ -465,8 +462,8 @@ mod rebind_tests {
     #[test]
     fn a_successor_without_its_sources_profile_says_the_home_default_applies() {
         let root = tempfile::tempdir().unwrap();
-        let paths =
-            crate::home::paths::PlakPaths::for_workspace(root.path().join("home"), root.path());
+        let paths = crate::home::paths::PlakPaths::explicit(root.path().join("home"))
+            .for_workspace(root.path());
         paths.ensure_layout().unwrap();
         let none = successor_profile(&paths, None).err().unwrap();
         assert_eq!(
@@ -489,8 +486,8 @@ mod rebind_tests {
     fn rebind_root_fallback_is_limited_to_an_unresolvable_source_selection() {
         for invalid_policy in [false, true] {
             let root = tempfile::tempdir().unwrap();
-            let paths =
-                crate::home::paths::PlakPaths::for_workspace(root.path().join("home"), root.path());
+            let paths = crate::home::paths::PlakPaths::explicit(root.path().join("home"))
+                .for_workspace(root.path());
             paths.ensure_layout().unwrap();
             if invalid_policy {
                 std::fs::write(

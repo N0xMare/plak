@@ -274,7 +274,19 @@ they reach the loop as data and ports, never as a loop of their own.
 
 `PLAK_HOME` names the home and MUST be absolute; otherwise the home is
 `$HOME/.plak` and `HOME` must be absolute too. The workspace root is the
-launch directory — the cwd of the process, resolved once.
+launch directory — the cwd of the process, resolved once at the CLI edge.
+Everything the product derives from a workspace (the project root and its
+`.plak/` overlay, project templates, the session lookup's workspace, a new
+session's workspace root) is a product context resolved from an explicit
+workspace path: the launch directory for the CLI's own faces, or the
+workspace a command names (`plak web --cwd`). Every context of the home the
+environment resolved comes from one discovery, so a workspace's project root
+is the same whichever path built its context: neither the product home nor
+the default `$HOME/.plak` is ever a project overlay. Nothing below the CLI edge reads or changes the
+process working directory, so one process can hold the contexts of several
+workspaces, and nothing a face sends is resolved against it: a relative path
+on the command line (an export's `--out`, an import, `--ui`, `--cwd`) is made
+absolute against the launch directory at the edge.
 
 ```text
 ~/.plak/

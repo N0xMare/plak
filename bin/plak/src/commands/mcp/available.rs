@@ -511,8 +511,10 @@ fn probe_inputs(paths: &PlakPaths, id: &str) -> CliResult<(String, std::path::Pa
     let config = load(paths)?;
     server(&config, id)?;
     let rendered = config.tool_sections.render_server(id).unwrap_or_default();
-    let workspace =
-        std::env::current_dir().map_err(|_| CliFailure::new("working directory is unavailable"))?;
+    let workspace = paths
+        .workspace()
+        .map_err(|_| CliFailure::new("working directory is unavailable"))?
+        .to_path_buf();
     Ok((rendered, workspace))
 }
 

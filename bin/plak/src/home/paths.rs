@@ -40,27 +40,59 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Well-known product paths under the Plak home directory, plus the project
-/// root whose `.plak/agents/` may override user templates.
+/// root whose `.plak/agents/` may override user templates: the product
+/// context of one workspace. The workspace is always explicit. The CLI edge
+/// resolves the launch directory once (`shell::home`); below it nothing reads
+/// the process working directory, so one process can hold contexts for many
+/// workspaces. Every context of a home is derived from it through one
+/// discovery ([`Self::for_workspace`]), so a workspace's project root never
+/// depends on which path built its context. A home the environment resolved
+/// ([`Self::resolve`]) knows the default `$HOME/.plak` too; an
+/// [`Self::explicit`] home (a test's, doctor's file listing) knows only
+/// itself.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PlakPaths {
     home: PathBuf,
+    /// The default `$HOME/.plak` when the environment named a `HOME`: a
+    /// product home even when `PLAK_HOME` points elsewhere, so never a
+    /// project overlay.
+    default_home: Option<PathBuf>,
     project_root: Option<PathBuf>,
+    /// The workspace this context was resolved for, when it has one: the
+    /// launch directory at the CLI edge, or a session's workspace.
+    workspace: Option<PathBuf>,
 }
 
 impl PlakPaths {
+    /// The context of `home` alone, outside the environment: it knows no
+    /// default `$HOME/.plak`, so its [`Self::for_workspace`] excludes only
+    /// `home` from discovery.
     #[must_use]
     pub fn explicit(home: PathBuf) -> Self {
         Self {
             home,
+            default_home: None,
             project_root: None,
+            workspace: None,
         }
     }
 
-    /// Resolve the nearest project configuration home from a workspace.
+    /// The same home's context for `workspace`: the nearest ancestor carrying
+    /// a project `.plak` home is its project override root. An ancestor is
+    /// not a project home merely because `.plak` exists: it must hold
+    /// `config.toml` or an `agents` directory, and this product home is
+    /// never one, nor, for a home the environment resolved, the default
+    /// `$HOME/.plak`.
     #[must_use]
-    pub fn for_workspace(home: PathBuf, workspace: &Path) -> Self {
-        let project_root = discover_project_root(workspace, &[home.as_path()], None);
-        Self { home, project_root }
+    pub fn for_workspace(&self, workspace: &Path) -> Self {
+        let mut product_homes = vec![self.home.as_path()];
+        product_homes.extend(self.default_home.as_deref());
+        Self {
+            home: self.home.clone(),
+            default_home: self.default_home.clone(),
+            project_root: discover_project_root(workspace, &product_homes, None),
+            workspace: Some(workspace.to_path_buf()),
+        }
     }
 
     /// The same home with `root` as the project whose `.plak/agents/` is read.
@@ -75,6 +107,11 @@ impl PlakPaths {
         plak_home: Option<&std::ffi::OsStr>,
         home: Option<&std::ffi::OsStr>,
     ) -> Result<Self, String> {
+        let user_home = home.filter(|v| !v.is_empty()).map(PathBuf::from);
+        let default_home = user_home
+            .as_deref()
+            .filter(|home| home.is_absolute())
+            .map(|home| home.join(".plak"));
         if let Some(explicit) = plak_home.filter(|v| !v.is_empty()) {
             let path = PathBuf::from(explicit);
             if !path.is_absolute() {
@@ -82,50 +119,40 @@ impl PlakPaths {
             }
             return Ok(Self {
                 home: path,
+                default_home,
                 project_root: None,
+                workspace: None,
             });
         }
-        let home = home
-            .filter(|v| !v.is_empty())
-            .ok_or_else(|| "HOME is unavailable".to_owned())?;
-        let home_path = PathBuf::from(home);
+        let home_path = user_home.ok_or_else(|| "HOME is unavailable".to_owned())?;
         if !home_path.is_absolute() {
             return Err("HOME must be an absolute path".to_owned());
         }
         Ok(Self {
             home: home_path.join(".plak"),
+            default_home,
             project_root: None,
+            workspace: None,
         })
     }
 
-    /// `$PLAK_HOME` or `$HOME/.plak`, with the nearest ancestor carrying a
-    /// project `.plak` home as the project override root. An ancestor is not a
-    /// project home merely because `.plak` exists: it must hold `config.toml`
-    /// or an `agents` directory.
-    pub fn from_env() -> Result<Self, String> {
+    /// `$PLAK_HOME` or `$HOME/.plak`, with no workspace: for the commands
+    /// that touch only the home (keys, secrets).
+    pub fn home_from_env() -> Result<Self, String> {
+        Self::from_env_in(None)
+    }
+
+    /// `$PLAK_HOME` or `$HOME/.plak`, as the context of the workspace
+    /// `launch` (the CLI edge's launch directory; `None` when it is
+    /// unavailable gives a context with no workspace).
+    pub fn from_env_in(launch: Option<&Path>) -> Result<Self, String> {
         let plak_home = std::env::var_os("PLAK_HOME");
         let home = std::env::var_os("HOME");
         let paths = Self::resolve(plak_home.as_deref(), home.as_deref())?;
-        Ok(match std::env::current_dir() {
-            Ok(cwd) => paths.discovered_from(home.as_deref(), &cwd),
-            Err(_) => paths,
+        Ok(match launch {
+            Some(cwd) => paths.for_workspace(cwd),
+            None => paths,
         })
-    }
-
-    /// Discovery from the launch directory. The default `$HOME/.plak` is a
-    /// product home even when `PLAK_HOME` points elsewhere, so it is never
-    /// taken as the project override of everything below `$HOME`.
-    fn discovered_from(self, home: Option<&std::ffi::OsStr>, cwd: &Path) -> Self {
-        let default_home = home
-            .filter(|home| !home.is_empty())
-            .map(|home| PathBuf::from(home).join(".plak"));
-        let mut product_homes = vec![self.home.as_path()];
-        product_homes.extend(default_home.as_deref());
-        let project_root = discover_project_root(cwd, &product_homes, None);
-        Self {
-            project_root,
-            ..self
-        }
     }
 
     #[must_use]
@@ -135,10 +162,19 @@ impl PlakPaths {
 
     #[must_use]
     pub fn from_home(home: PathBuf) -> Self {
-        Self {
-            home,
-            project_root: None,
-        }
+        Self::explicit(home)
+    }
+
+    /// The workspace this context was resolved for.
+    ///
+    /// # Errors
+    ///
+    /// `cwd unavailable` when it has none: the launch directory could not
+    /// be read, or the context names only the home.
+    pub fn workspace(&self) -> Result<&Path, String> {
+        self.workspace
+            .as_deref()
+            .ok_or_else(|| "cwd unavailable".to_owned())
     }
 
     #[must_use]

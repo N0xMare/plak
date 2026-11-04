@@ -369,6 +369,25 @@ EXPECTED_COMPILE_TIME_ENVIRONMENT: dict[SourceKey, list[tuple[str, str]]] = {
     ("plak", "src/build_identity.rs"): [("option_env", "PLAK_SOURCE_REVISION")],
 }
 
+# The only reads of the process working directory in a host/bin package
+# (spec 02 sec. 1): a workspace is explicit below the CLI edge, so one host
+# process can hold the product contexts of many workspaces. Nothing changes it.
+EXPECTED_WORKING_DIRECTORY_CALLS: dict[SourceKey, list[str]] = {
+    # The CLI edge: the launch directory, read once into the product context.
+    ("plak", "src/shell/home.rs"): ["current_dir"],
+    # The running executable's own path for a relative argv[0], not a workspace.
+    ("plak", "src/build_identity.rs"): ["current_dir"],
+    # Normalizes a relative fence path; every caller passes an absolute one.
+    ("plakous-workspace", "src/git_redirect_fence.rs"): ["current_dir"],
+}
+# The launch directory and the constructors that read it (through
+# `Home::from_env`) are reached only from the composition root; everything
+# below takes a context. None of the three may be imported under another name.
+EXPECTED_LAUNCH_DIRECTORY_READERS: dict[SourceKey, list[str]] = {
+    ("plak", "src/lib.rs"): ["launch_directory", "Services::from_env", "Services::from_env"],
+    ("plak", "src/shell/services.rs"): ["Home::from_env"],
+}
+LAUNCH_DIRECTORY_NAMES = frozenset({"Services", "Home", "launch_directory"})
 EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
     SourceKey, list[tuple[str, tuple[tuple[str, str], ...]]]
 ] = {
@@ -2825,6 +2844,68 @@ def validate_cli_security_sources(package: str, sources: dict[str, str]) -> list
         if actual != expected:
             errors.append(
                 f"{package}:{path}: environment reader calls {actual!r}, expected {expected!r}"
+            )
+
+        # Any mention but a method call (`Command::current_dir` sets a child's
+        # directory): a path call, an import, an alias or a re-export.
+        working_directory = [
+            tokens[index].value
+            for index in range(len(tokens))
+            if tokens[index].kind == "identifier"
+            and tokens[index].value in {"current_dir", "set_current_dir"}
+            and (index == 0 or tokens[index - 1].value != ".")
+        ]
+        expected_working_directory = EXPECTED_WORKING_DIRECTORY_CALLS.get((package, path), [])
+        if working_directory != expected_working_directory:
+            errors.append(
+                f"{package}:{path}: working-directory calls {working_directory!r}, expected "
+                f"{expected_working_directory!r}; below the CLI edge a workspace is explicit"
+            )
+        # Every call or path to `launch_directory` (not a field of that
+        # name), and every `Home::from_env` / `Services::from_env`, in
+        # source order.
+        launch_readers = [
+            "launch_directory"
+            if tokens[index].value == "launch_directory"
+            else f"{tokens[index - 2].value}::from_env"
+            for index in range(len(tokens))
+            if tokens[index].kind == "identifier"
+            and (
+                (
+                    tokens[index].value == "launch_directory"
+                    and (index == 0 or tokens[index - 1].value not in {"fn", "."})
+                    and (
+                        (index > 0 and tokens[index - 1].value == "::")
+                        or (index + 1 < len(tokens) and tokens[index + 1].value == "(")
+                    )
+                )
+                or (
+                    tokens[index].value == "from_env"
+                    and index >= 2
+                    and tokens[index - 1].value == "::"
+                    and tokens[index - 2].value in {"Home", "Services"}
+                )
+            )
+        ]
+        renamed = sorted(
+            {
+                tokens[index].value
+                for index in range(len(tokens) - 1)
+                if tokens[index].kind == "identifier"
+                and tokens[index].value in LAUNCH_DIRECTORY_NAMES
+                and tokens[index + 1] == RustToken("identifier", "as")
+            }
+        )
+        if renamed:
+            errors.append(
+                f"{package}:{path}: {renamed!r} imported under another name; the "
+                "launch-directory readers keep their names so the composition-root pin sees them"
+            )
+        expected_launch_readers = EXPECTED_LAUNCH_DIRECTORY_READERS.get((package, path), [])
+        if launch_readers != expected_launch_readers:
+            errors.append(
+                f"{package}:{path}: launch-directory readers {launch_readers!r}, expected "
+                f"{expected_launch_readers!r}; only the composition root builds them"
             )
 
         allowed_macros = ALLOWED_CLI_MACROS | ALLOWED_CLI_MACROS_BY_SOURCE.get(

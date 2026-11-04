@@ -191,7 +191,10 @@ fn compaction_terminal_e2e_child() -> TestResult {
         maximum_projected_input: std::env::var("PLAK_COMPACT_PTY_MAXIMUM")?.parse()?,
     };
     let resume = std::env::var("PLAK_COMPACT_PTY_RESUME").ok();
-    let services = crate::shell::services::Services::from_env(None);
+    let services = crate::shell::services::Services::from_env(
+        None,
+        crate::shell::home::launch_directory().as_deref(),
+    );
     let outcome = launch_tui_with_attacher(&services, resume, false, None, &attacher)
         .map_err(|failure| failure.host_failure())?;
     if outcome != ProcessOutcome::Success {

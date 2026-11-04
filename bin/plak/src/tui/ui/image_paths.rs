@@ -16,14 +16,14 @@ pub(super) struct PathBase {
 }
 
 impl PathBase {
-    /// The process working directory and `$HOME`.
-    pub(super) fn current() -> Option<Self> {
-        Some(Self {
-            cwd: std::env::current_dir().ok()?,
+    /// The launch directory `cwd` and `$HOME`.
+    pub(super) fn at(cwd: &Path) -> Self {
+        Self {
+            cwd: cwd.to_path_buf(),
             home: std::env::var_os("HOME")
                 .map(PathBuf::from)
                 .filter(|home| home.is_absolute()),
-        })
+        }
     }
 
     /// The image files a paste names when every word of it is one; `None`

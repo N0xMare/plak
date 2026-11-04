@@ -151,8 +151,10 @@ fn probe_reload_target_with_timeout(
     }
 }
 
-/// Resolves carry capacity while the old session is still attached.
+/// Resolves carry capacity while the old session is still attached, from
+/// the session's product context `paths`.
 pub(crate) fn reload_target_for_session(
+    paths: &PlakPaths,
     workspace: &Path,
     session_id: Option<&str>,
 ) -> Option<ReloadTarget> {
@@ -172,11 +174,8 @@ pub(crate) fn reload_target_for_session(
         }
     }
     let inspect = || -> Result<CarryCapacityProbe, String> {
-        let services = Services::from_env(None);
-        let paths = services.paths().map_err(|e| e.message().to_owned())?;
-        let record = services
-            .session_records()
-            .map_err(|e| e.message().to_owned())?
+        let record = crate::store::ProductStore::open(paths)
+            .map_err(|error| error.to_string())?
             .load(id)?;
         let document = export_session(paths, &record).map_err(|e| e.to_string())?;
         let path = new_carry_file(paths, id)?;
@@ -505,7 +504,7 @@ pub(crate) fn carry_foreign_session(
     else {
         return Ok(None);
     };
-    let workspace_paths = PlakPaths::for_workspace(paths.home().to_path_buf(), cwd);
+    let workspace_paths = paths.for_workspace(cwd);
     crate::product_config::SessionPolicy::load(&workspace_paths).map_err(|error| {
         CliFailure::new(format!(
             "could not carry session {id} forward: {error}; fix the config and retry the same command"
@@ -633,7 +632,7 @@ impl super::handoff::ReloadHandoff {
     ) {
         self.cause = binding_change.map(|change| binding_carry_cause(change, finished_subagents));
         self.profile = crate::profiles::session_selection(
-            &PlakPaths::for_workspace(paths.home().to_path_buf(), &record.workspace_root),
+            &paths.for_workspace(&record.workspace_root),
             record,
         );
     }
@@ -681,10 +680,7 @@ pub(crate) fn rebind_session(
     super::rebind::ensure_carry_quiescence(services.paths()?, record)?;
     let document = export_session(services.paths()?, record)
         .map_err(|error| CliFailure::new(format!("cannot carry this session: {error}")))?;
-    let paths = PlakPaths::for_workspace(
-        services.paths()?.home().to_path_buf(),
-        &record.workspace_root,
-    );
+    let paths = services.paths()?.for_workspace(&record.workspace_root);
     commands::session::rebind::rebind_document(
         services,
         document,

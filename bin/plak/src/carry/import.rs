@@ -2,7 +2,6 @@ use super::document::privately_owned;
 use super::document::{
     CarryBinding, CarryDocument, CarrySource, ImportError, ProducerBuild, read_document,
 };
-use crate::home::paths::PlakPaths;
 use crate::shell::services::Services;
 use crate::store::sessions::{ProductTranscript, QueueDrainState, QueueItem, SessionRecord};
 use crate::{CliFailure, CliFailureKind, CliResult, ProcessOutcome, commands};
@@ -205,10 +204,7 @@ pub(crate) fn import_and_resume(
         ))
     })?;
     let source_id = document.source().0.to_owned();
-    let paths = PlakPaths::for_workspace(
-        services.paths()?.home().to_path_buf(),
-        document.workspace_root(),
-    );
+    let paths = services.paths()?.for_workspace(document.workspace_root());
     crate::product_config::SessionPolicy::load(&paths).map_err(CliFailure::new)?;
     if !rustix::termios::isatty(std::io::stdin()) || !std::io::stdout().is_terminal() {
         return Err(CliFailure::classified(
@@ -216,7 +212,11 @@ pub(crate) fn import_and_resume(
             "the interactive TUI needs a terminal; import was refused before creating a successor",
         ));
     }
-    let cwd = std::env::current_dir().map_err(|_| CliFailure::new("cwd unavailable"))?;
+    let cwd = services
+        .paths()?
+        .workspace()
+        .map_err(CliFailure::new)?
+        .to_path_buf();
     let requested = fs::canonicalize(&cwd).unwrap_or(cwd);
     let recorded = fs::canonicalize(document.workspace_root())
         .unwrap_or_else(|_| document.workspace_root().to_path_buf());

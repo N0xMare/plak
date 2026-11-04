@@ -22,6 +22,53 @@ pub(crate) struct WebCommand {
     pub(crate) dev_login: Option<String>,
 }
 
+/// `path` against `launch` when it is relative and the launch directory is
+/// known; otherwise as given.
+fn against(path: PathBuf, launch: Option<&std::path::Path>) -> PathBuf {
+    match launch {
+        Some(launch) if path.is_relative() => launch.join(path),
+        _ => path,
+    }
+}
+
+impl Command {
+    /// This command with every path the operator typed made absolute against
+    /// the launch directory, so nothing below the CLI edge resolves one
+    /// against the process working directory.
+    #[must_use]
+    pub(crate) fn resolved_against(self, launch: Option<&std::path::Path>) -> Self {
+        let at = |path: PathBuf| against(path, launch);
+        match self {
+            Self::Resume {
+                session_id,
+                handoff,
+            } => Self::Resume {
+                session_id,
+                handoff: handoff.map(at),
+            },
+            Self::SessionExport { id, out } => Self::SessionExport {
+                id,
+                out: out.map(at),
+            },
+            Self::SessionImport { path } => Self::SessionImport { path: at(path) },
+            Self::ImportResume { path, handoff } => Self::ImportResume {
+                path: at(path),
+                handoff: handoff.map(at),
+            },
+            Self::WriteBinaryManifest { directory } => Self::WriteBinaryManifest {
+                directory: at(directory),
+            },
+            Self::CarryProbe { path } => Self::CarryProbe { path: at(path) },
+            Self::Web(mut web) => {
+                web.ui = web.ui.map(at);
+                web.cwd = web.cwd.map(at);
+                Self::Web(web)
+            }
+            other => other,
+        }
+    }
+}
+
 pub(crate) const NATIVE_RUN_MAX_PROMPT_BYTES: usize = 64 * 1024;
 #[allow(
     dead_code,

@@ -320,7 +320,16 @@ Those three `test-hooks` features are hidden from the 2n+3 closure witnesses,
 the same way `test-clock` is. `plak/test-hooks` and
 `plakous-py-worker/test-hooks` stay in their package witnesses.
 Imported environment readers, including aliases and
-function items, are inventoried as well as direct calls.
+function items, are inventoried as well as direct calls. The process working
+directory is pinned the same way: `std::env::current_dir` is read only at
+the CLI edge (`shell/home.rs`, where the launch directory becomes the product
+context, and `build_identity.rs`, for a relative `argv[0]`) and in
+`plakous-workspace`'s fence-path normalization, and `set_current_dir` is never
+called in a host/bin package (chapter 02 §2.1). Any mention of either that is
+not a method call counts, so an import, an alias or a braced rename is pinned
+too, and the constructors that read the launch directory are pinned to the
+composition root: `Services::from_env` is called only in `lib.rs` and
+`Home::from_env` only by `Services`.
 
 Test-seam features (`test-support`, `test-hooks`, `commit-trace`,
 `fault-injection`, `perf-instrumentation`, `scripted-code-mode-enrolment`)

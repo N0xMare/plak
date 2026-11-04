@@ -2071,7 +2071,7 @@ fn invoke(
     let mut stdin = Cursor::new(input);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
-    let services = Services::from_env(None);
+    let services = Services::from_env(None, shell::home::launch_directory().as_deref());
     let result = execute_command(
         command,
         &services,
@@ -2288,7 +2288,8 @@ fn child_wake_config_set_is_immediate_even_with_a_non_quiescent_tree() {
 #[test]
 fn command_and_attach_workers_share_one_lazy_product_store() {
     let home = tempfile::tempdir().unwrap();
-    let paths = product_paths::PlakPaths::explicit(home.path().join("product"));
+    let paths = product_paths::PlakPaths::explicit(home.path().join("product"))
+        .for_workspace(&env::current_dir().unwrap());
     let services = Services::for_home(paths.clone());
     let first_roots = services.state_roots().unwrap();
     let second_roots = services.state_roots().unwrap();
@@ -2367,10 +2368,11 @@ fn command_and_attach_workers_share_one_lazy_product_store() {
 #[test]
 fn command_store_reopens_after_product_home_replacement() {
     let home = tempfile::tempdir().unwrap();
-    let paths = product_paths::PlakPaths::explicit(home.path().join("product"));
+    let workspace = env::current_dir().unwrap();
+    let paths =
+        product_paths::PlakPaths::explicit(home.path().join("product")).for_workspace(&workspace);
     let services = Services::for_home(paths.clone());
     let records = services.session_records().unwrap();
-    let workspace = env::current_dir().unwrap();
     let mut original = product_sessions::SessionRecord::new(workspace.clone());
     records.save(&mut original).unwrap();
     std::fs::rename(paths.home(), home.path().join("retired-product")).unwrap();

@@ -15,10 +15,7 @@ pub(crate) fn apply_on_reload(
     record: &mut SessionRecord,
 ) -> Option<String> {
     let apply = || -> crate::CliResult<Option<(SessionRecord, String)>> {
-        let paths = PlakPaths::for_workspace(
-            services.paths()?.home().to_path_buf(),
-            &record.workspace_root,
-        );
+        let paths = services.paths()?.for_workspace(&record.workspace_root);
         if !orchestration_changed(&paths, record).map_err(crate::CliFailure::new)? {
             return Ok(None);
         }
