@@ -1,9 +1,9 @@
 //! `plak agent --wire v2` (hidden): wire v2 on stdio (spec 02 §4.4) over
-//! the session this process opens. Until the host's attachments exist, it
-//! is an adapter over today's session mailbox: one connection, one
-//! attachment at a time, on the session's root node only. Every
-//! observation goes to that attachment with its class; a presentation
-//! snapshot goes as pages and image bytes as blobs.
+//! the session this process opens, through its host service
+//! ([`HostService`]): one connection, one attachment at a time, on the
+//! session's root node. Every observation reaches the attachment as the
+//! service routes it, with its class; a presentation snapshot goes as pages
+//! and image bytes as blobs.
 
 use std::io::{Read, Write};
 use std::sync::mpsc;
@@ -15,11 +15,12 @@ use plakous_host_protocol::wire::{
     NodeAddress, Op, Outcome, RequestRefusal, WIRE_VERSION, Welcome, WireError, admit_hello,
     decode_line, encode_line, page_snapshot, take_observation_images,
 };
-use plakous_host_protocol::{IntentSendError, SessionIntent, SessionObservation};
+use plakous_host_protocol::{SessionIntent, SessionObservation};
 use plakous_hosted::error::{CliFailure, CliResult, ProcessOutcome};
+use plakous_hosted::host_service::{HostService, Outbound};
 use plakous_hosted::runtime::{HostConfig, spawn_host_worker};
 
-use crate::surface_protocol::{HostEvent, HostEventReceiver, PlakExtension, UserActionSender};
+use crate::surface_protocol::{HostEventReceiver, PlakExtension, UserActionSender};
 
 type Client = ClientFrame<PlakExtension>;
 type Host = HostFrame<PlakExtension>;
@@ -27,7 +28,8 @@ type Host = HostFrame<PlakExtension>;
 const POLL: Duration = Duration::from_millis(20);
 const JOIN_TIMEOUT: Duration = Duration::from_secs(30);
 /// The only attachment this adapter makes.
-const ROOT_ATTACHMENT: AttachmentId = 1;
+/// How far an attachment may fall behind before it is dropped.
+const ATTACHMENT_CAPACITY: usize = 4096;
 
 /// Runs wire v2 on `input` and `stdout` over the session `config` opens.
 ///
@@ -57,7 +59,7 @@ pub(crate) fn run_agent_wire(
         agent_id: tree_id,
     };
     let (actions, events, worker) = spawn_host_worker(config)?;
-    let served = Adapter::new(root, stdout).serve(&lines, &actions, &events);
+    let served = Adapter::new(root, stdout, actions.clone()).serve(&lines, &events);
     // A connection that failed still ends its session.
     let _ = actions.send(SessionIntent::Quit);
     let deadline = Instant::now() + JOIN_TIMEOUT;
@@ -143,23 +145,28 @@ pub(crate) fn handshake(
     Ok(false)
 }
 
-/// The connection's state after the handshake.
+/// The connection's state after the handshake: one attachment at a time
+/// on the session's host service.
 pub(crate) struct Adapter<'a> {
-    root: NodeAddress,
     stdout: &'a mut dyn Write,
-    attached: bool,
-    seq: u64,
+    actions: UserActionSender,
+    service: HostService<PlakExtension>,
+    attachment: Option<AttachmentId>,
     blobs: BlobAssembler,
     quit_sent: bool,
 }
 
 impl<'a> Adapter<'a> {
-    pub(crate) fn new(root: NodeAddress, stdout: &'a mut dyn Write) -> Self {
+    pub(crate) fn new(
+        root: NodeAddress,
+        stdout: &'a mut dyn Write,
+        actions: UserActionSender,
+    ) -> Self {
         Self {
-            root,
             stdout,
-            attached: false,
-            seq: 0,
+            service: HostService::new(actions.clone(), root, ATTACHMENT_CAPACITY),
+            actions,
+            attachment: None,
             blobs: BlobAssembler::default(),
             quit_sent: false,
         }
@@ -170,54 +177,52 @@ impl<'a> Adapter<'a> {
     pub(crate) fn serve(
         mut self,
         lines: &mpsc::Receiver<Result<String, WireError>>,
-        actions: &UserActionSender,
         events: &HostEventReceiver,
     ) -> CliResult<()> {
         let mut reading = true;
         loop {
             while let Ok(event) = events.try_recv() {
-                self.observe(event)?;
+                self.service.observe(event);
             }
+            self.flush()?;
             if reading {
                 match lines.recv_timeout(POLL) {
-                    Ok(line) => reading = self.frame(line, actions)?,
+                    Ok(line) => reading = self.frame(line)?,
                     Err(mpsc::RecvTimeoutError::Timeout) => continue,
                     Err(mpsc::RecvTimeoutError::Disconnected) => {
                         reading = false;
-                        self.quit(actions);
+                        self.quit();
                     }
                 }
+                self.flush()?;
                 continue;
             }
             match events.recv_timeout(POLL) {
-                Ok(event) => self.observe(event)?,
+                Ok(event) => self.service.observe(event),
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    self.flush()?;
                     return write_frame(self.stdout, &Host::Bye);
                 }
             }
         }
     }
 
-    fn quit(&mut self, actions: &UserActionSender) {
+    fn quit(&mut self) {
         if !self.quit_sent {
             self.quit_sent = true;
-            let _ = actions.send(SessionIntent::Quit);
+            let _ = self.actions.send(SessionIntent::Quit);
         }
     }
 
     /// Answers one client line; `false` once the client has left.
-    fn frame(
-        &mut self,
-        line: Result<String, WireError>,
-        actions: &UserActionSender,
-    ) -> CliResult<bool> {
+    fn frame(&mut self, line: Result<String, WireError>) -> CliResult<bool> {
         let frame = match line.and_then(|line| decode_line::<Client>(&line)) {
             // A second hello, or a line that is not a frame, names no
             // request to refuse: the connection ends, as a client that
             // broke the protocol.
             Ok(Client::Hello(_)) | Err(_) => {
-                self.quit(actions);
+                self.quit();
                 return Ok(false);
             }
             Ok(frame) => frame,
@@ -225,19 +230,19 @@ impl<'a> Adapter<'a> {
         match frame {
             Client::Hello(_) => Ok(false),
             Client::Bye => {
-                self.quit(actions);
+                self.quit();
                 Ok(false)
             }
             Client::Blob(chunk) => {
                 if self.blobs.push(chunk).is_err() {
-                    self.quit(actions);
+                    self.quit();
                     return Ok(false);
                 }
                 Ok(true)
             }
             Client::Request { id, op } => {
                 let named = matches!(op, Op::Intent { .. });
-                let outcome = self.request(op, actions);
+                let outcome = self.request(op);
                 // Blobs precede the request that names them: any left are
                 // no one's.
                 if !named {
@@ -249,93 +254,99 @@ impl<'a> Adapter<'a> {
         }
     }
 
-    fn request(&mut self, op: Op<PlakExtension>, actions: &UserActionSender) -> Outcome {
+    fn request(&mut self, op: Op<PlakExtension>) -> Outcome {
+        let refused = Outcome::Refused;
         match op {
             Op::Ping => Outcome::Ok(Answer::Pong),
             Op::Attach { node } => {
-                if node != self.root {
-                    // Child attach comes with the host's attachments.
-                    return Outcome::Refused(RequestRefusal::UnknownNode);
+                if let Some(held) = self.attachment.take() {
+                    let _ = self.service.detach(held);
                 }
-                self.attached = true;
-                self.seq = 0;
-                // The attachment's baseline: a fresh root snapshot.
-                let _ = actions.send(SessionIntent::ResyncTranscript {
-                    scope: plakous_host_protocol::views::transcript::TranscriptScope::Root,
-                });
-                Outcome::Ok(Answer::Attached {
-                    attachment: ROOT_ATTACHMENT,
-                })
+                match self.service.attach(&node) {
+                    Ok(attachment) => {
+                        self.attachment = Some(attachment);
+                        Outcome::Ok(Answer::Attached { attachment })
+                    }
+                    Err(refusal) => refused(refusal),
+                }
             }
             Op::Detach { attachment } => {
-                if !self.holds(attachment) {
-                    return Outcome::Refused(RequestRefusal::NotAttached);
+                if self.attachment != Some(attachment) {
+                    return refused(RequestRefusal::NotAttached);
                 }
-                self.attached = false;
-                Outcome::Ok(Answer::Detached)
+                self.attachment = None;
+                match self.service.detach(attachment) {
+                    Ok(()) => Outcome::Ok(Answer::Detached),
+                    Err(refusal) => refused(refusal),
+                }
             }
             Op::Intent {
                 attachment,
                 mut intent,
                 blobs,
             } => {
-                if !self.holds(attachment) {
-                    return Outcome::Refused(RequestRefusal::NotAttached);
+                if self.attachment != Some(attachment) {
+                    return refused(RequestRefusal::NotAttached);
                 }
                 if let Err(error) = self.blobs.restore_images(&mut intent, &blobs) {
-                    return Outcome::Refused(RequestRefusal::Malformed {
+                    return refused(RequestRefusal::Malformed {
                         detail: error.to_string(),
                     });
                 }
-                match actions.send(intent) {
+                match self.service.intent(attachment, intent) {
                     Ok(()) => Outcome::Ok(Answer::Accepted),
-                    Err(IntentSendError::Saturated(_)) => {
-                        Outcome::Refused(RequestRefusal::Backpressure)
-                    }
-                    Err(IntentSendError::Duplicate(_)) => {
-                        Outcome::Refused(RequestRefusal::OneInFlight)
-                    }
-                    Err(IntentSendError::Disconnected(_)) => {
-                        Outcome::Refused(RequestRefusal::Disconnected)
-                    }
+                    Err(refusal) => refused(refusal),
                 }
             }
         }
     }
 
-    fn holds(&self, attachment: AttachmentId) -> bool {
-        self.attached && attachment == ROOT_ATTACHMENT
-    }
-
-    /// Sends one observation to the attachment, if there is one: a
-    /// snapshot as pages, anything else as an event after its image blobs.
-    fn observe(&mut self, mut event: HostEvent) -> CliResult<()> {
-        if !self.attached {
+    /// Writes what the service queued for the attachment: a snapshot as
+    /// pages, anything else as an event after its image blobs, and a
+    /// resync-required that ends the attachment.
+    fn flush(&mut self) -> CliResult<()> {
+        let Some(attachment) = self.attachment else {
             return Ok(());
-        }
-        if let SessionObservation::PresentationSnapshot(snapshot) = event {
-            let pages = page_snapshot(snapshot, ROOT_ATTACHMENT)
-                .map_err(|error| CliFailure::new(error.to_string()))?;
-            for page in pages {
-                write_frame(self.stdout, &Host::Snapshot(page))?;
+        };
+        for item in self.service.take(attachment) {
+            match item {
+                Outbound::ResyncRequired => {
+                    self.attachment = None;
+                    write_frame(self.stdout, &Host::ResyncRequired { attachment })?;
+                }
+                Outbound::Event {
+                    observation: SessionObservation::PresentationSnapshot(snapshot),
+                    ..
+                } => {
+                    let pages = page_snapshot(snapshot, attachment)
+                        .map_err(|error| CliFailure::new(error.to_string()))?;
+                    for page in pages {
+                        write_frame(self.stdout, &Host::Snapshot(page))?;
+                    }
+                }
+                Outbound::Event {
+                    seq,
+                    class,
+                    mut observation,
+                } => {
+                    let taken = take_observation_images(&mut observation, &format!("e{seq}"));
+                    for chunk in taken.chunks {
+                        write_frame(self.stdout, &Host::Blob(chunk))?;
+                    }
+                    write_frame(
+                        self.stdout,
+                        &Host::Event {
+                            attachment,
+                            seq,
+                            class,
+                            observation,
+                            blobs: taken.ids,
+                        },
+                    )?;
+                }
             }
-            return Ok(());
         }
-        let taken = take_observation_images(&mut event, &format!("e{}", self.seq + 1));
-        for chunk in taken.chunks {
-            write_frame(self.stdout, &Host::Blob(chunk))?;
-        }
-        self.seq += 1;
-        write_frame(
-            self.stdout,
-            &Host::Event {
-                attachment: ROOT_ATTACHMENT,
-                seq: self.seq,
-                class: event.class(),
-                observation: event,
-                blobs: taken.ids,
-            },
-        )
+        Ok(())
     }
 }
 

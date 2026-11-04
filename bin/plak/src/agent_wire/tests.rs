@@ -6,6 +6,9 @@ use plakous_host_protocol::wire::{ClientFrame, HostFrame, take_images};
 use plakous_host_protocol::{SessionIntent, SessionObservation};
 
 use super::*;
+
+/// The first attachment the service makes.
+const ROOT_ATTACHMENT: AttachmentId = 1;
 use crate::surface_protocol::{
     PlakExtension, SettingsView, SurfaceIntent, SurfaceObservation, host_event_channel,
     user_action_channel,
@@ -112,8 +115,8 @@ fn the_adapter_attaches_the_root_and_carries_intents_and_events() {
     }
     let host = thread::spawn(move || fake_session(&intents, observations));
     let mut output = Vec::new();
-    Adapter::new(root(), &mut output)
-        .serve(&lines, &actions, &events)
+    Adapter::new(root(), &mut output, actions)
+        .serve(&lines, &events)
         .unwrap();
     let taken = host.join().unwrap();
     assert!(matches!(taken[0], SessionIntent::ResyncTranscript { .. }));
