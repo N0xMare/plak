@@ -267,7 +267,7 @@ impl ProductTopologyRuntime {
             .await
             .map_err(|error| error.message)??;
         let startup = ChildStartup::new(self.driver.clone(), agent_id.to_owned());
-        live.starting.insert(agent_id.to_owned(), startup.clone());
+        live.open(agent_id.to_owned(), startup.clone());
         Ok(startup)
     }
 }
@@ -307,8 +307,7 @@ impl ProductTopologyRuntime {
         if self.is_closed()
             || startup.is_cancelled()
             || !live
-                .starting
-                .get(&agent_id)
+                .opening(&agent_id)
                 .is_some_and(|entry| entry.same_owner(startup))
         {
             return Err(child);
@@ -327,8 +326,7 @@ impl ProductTopologyRuntime {
             .transferred_turn
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(turn);
-        live.starting.remove(&agent_id);
-        live.children.insert(agent_id, child);
+        live.reside(agent_id, child);
         startup.completion.send_replace(Some(Ok(())));
         Ok(turn)
     }
@@ -344,8 +342,7 @@ impl ProductTopologyRuntime {
         {
             let live = self.live.lock().await;
             if !live
-                .starting
-                .get(agent_id)
+                .opening(agent_id)
                 .is_some_and(|entry| entry.same_owner(startup))
             {
                 return;
@@ -368,11 +365,10 @@ impl ProductTopologyRuntime {
         let recovery = {
             let mut live = self.live.lock().await;
             if live
-                .starting
-                .get(agent_id)
+                .opening(agent_id)
                 .is_some_and(|entry| entry.same_owner(startup))
             {
-                live.starting.remove(agent_id);
+                live.vacate(agent_id);
                 live.quiet.notify_one();
                 let (writer, agent, released) =
                     (self.driver.clone(), agent_id.to_owned(), result.is_ok());

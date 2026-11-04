@@ -628,9 +628,7 @@ fn the_closed_flag_is_read_under_the_lock_the_insert_takes() {
         lock_at < decide_at,
         "the decision must be taken with the live lock held"
     );
-    let insert_at = occupy
-        .find("live.children.insert(")
-        .expect("the admission inserts");
+    let insert_at = occupy.find("live.reside(").expect("the admission inserts");
     assert!(
         decide_at < insert_at,
         "the decision must precede the insert it guards"
@@ -1113,7 +1111,13 @@ async fn joiner_deadline_does_not_refault_a_settled_release() {
         assert!(joiner.as_mut().unwrap().as_mut().poll(&mut cx).is_pending());
     }
     entered.notified().await;
-    let completion = runtime.live.lock().await.retiring[&id].completion.clone();
+    let completion = runtime
+        .live
+        .lock()
+        .await
+        .releasing_for_test(&id)
+        .completion
+        .clone();
     tokio::time::advance(HOST_RETIRE_JOIN_TIMEOUT).await;
     // The joiner's fault is one tree writer on a blocking worker.
     while runtime
@@ -1562,7 +1566,11 @@ async fn late_retirement(failure: Option<String>) {
     let owner = runtime.clone();
     let caller = tokio::spawn(async move { owner.cancel_live("root").await });
     entered.notified().await;
-    let completion = runtime.live.lock().await.retiring["root"]
+    let completion = runtime
+        .live
+        .lock()
+        .await
+        .releasing_for_test("root")
         .completion
         .clone();
     tokio::time::advance(HOST_RETIRE_JOIN_TIMEOUT + Duration::from_secs(1)).await;
@@ -1734,9 +1742,7 @@ async fn abandoned_caller_still_records_panicking_release_fault() {
         .live
         .lock()
         .await
-        .retiring
-        .get("c1")
-        .unwrap()
+        .releasing_for_test("c1")
         .completion
         .clone();
     finish.notify_one();
@@ -1885,7 +1891,11 @@ async fn shutdown_deadline_bounds_joiners_but_keeps_release_owner() {
     let owner = runtime.clone();
     let cancel = tokio::spawn(async move { owner.cancel_live("root").await });
     entered.notified().await;
-    let completion = runtime.live.lock().await.retiring["root"]
+    let completion = runtime
+        .live
+        .lock()
+        .await
+        .releasing_for_test("root")
         .completion
         .clone();
     let result = shutdown_runtime(runtime.clone()).await.unwrap_err();
@@ -1929,7 +1939,11 @@ async fn last_lease_shutdown_joins_tree_work_but_keeps_a_stuck_release_owner() {
     let owner = runtime.clone();
     let cancel = tokio::spawn(async move { owner.cancel_live("root").await });
     entered.notified().await;
-    let completion = runtime.live.lock().await.retiring["root"]
+    let completion = runtime
+        .live
+        .lock()
+        .await
+        .releasing_for_test("root")
         .completion
         .clone();
 
@@ -1977,7 +1991,11 @@ async fn process_exit_abandonment_aborts_a_stuck_release_owner() {
     let owner = runtime.clone();
     let cancel = tokio::spawn(async move { owner.cancel_live("root").await });
     entered.notified().await;
-    let completion = runtime.live.lock().await.retiring["root"]
+    let completion = runtime
+        .live
+        .lock()
+        .await
+        .releasing_for_test("root")
         .completion
         .clone();
 

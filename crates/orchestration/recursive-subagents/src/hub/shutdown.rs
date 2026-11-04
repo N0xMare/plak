@@ -64,19 +64,17 @@ pub async fn abandon_live_agents(tree_id: &str) -> Vec<Agent> {
         let _ = task.await;
     }
     let live = runtime.live.lock().await;
-    for startup in live.starting.values() {
+    for (_, startup) in live.openings() {
         startup.request_cancel();
     }
-    for retirement in live.retiring.values() {
+    for (_, retirement) in live.releasings() {
         retirement.abort.abort();
     }
-    live.children
-        .values()
-        .filter_map(|child| child.agent())
+    live.residents()
+        .filter_map(|(_, child)| child.agent())
         .chain(
-            live.retiring
-                .values()
-                .filter_map(|retirement| retirement.agent.clone()),
+            live.releasings()
+                .filter_map(|(_, retirement)| retirement.agent.clone()),
         )
         .collect()
 }
@@ -185,8 +183,7 @@ async fn join_runtime_children(
 ) {
     let startups = {
         let live = runtime.live.lock().await;
-        live.starting
-            .iter()
+        live.openings()
             .map(|(id, startup)| {
                 startup.request_cancel();
                 (id.clone(), startup.clone())
@@ -200,7 +197,7 @@ async fn join_runtime_children(
     let startup_abort = startup_task.abort_handle();
     let retirements = {
         let mut live = runtime.live.lock().await;
-        let ids: Vec<_> = live.children.keys().cloned().collect();
+        let ids: Vec<_> = live.residents().map(|(id, _)| id.clone()).collect();
         for id in ids {
             live.start_retire(
                 runtime.live.clone(),
@@ -210,8 +207,7 @@ async fn join_runtime_children(
                 true,
             );
         }
-        live.retiring
-            .iter()
+        live.releasings()
             .map(|(id, retirement)| (id.clone(), retirement.clone()))
             .collect::<Vec<_>>()
     };

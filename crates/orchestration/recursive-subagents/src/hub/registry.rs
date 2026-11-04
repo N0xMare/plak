@@ -1,38 +1,96 @@
 use super::{
-    Arc, FutureExt, HOST_RETIRE_JOIN_TIMEOUT, LiveChildHandle, LiveChildTable, RETIRE_JOIN_EXPIRED,
-    Retirement, RetirementFaultSource, TreeDriver, TurnId, publish_release,
-    record_retirement_fault, retirement_needs_recovery,
+    Arc, ChildStartup, FutureExt, HOST_RETIRE_JOIN_TIMEOUT, LiveChildHandle, LiveChildTable,
+    RETIRE_JOIN_EXPIRED, Residency, Retirement, RetirementFaultSource, TreeDriver, TurnId,
+    publish_release, record_retirement_fault, retirement_needs_recovery,
 };
 
 impl LiveChildTable {
-    /// An active child; retiring children cannot accept new work.
+    /// A resident child; an opening or releasing one takes no new work.
     pub fn get(&self, agent_id: &str) -> Option<&(dyn LiveChildHandle + 'static)> {
-        self.children.get(agent_id).map(Box::as_ref)
+        match self.nodes.get(agent_id)? {
+            Residency::Resident(child) => Some(child.as_ref()),
+            Residency::Opening(_) | Residency::Releasing(_) => None,
+        }
     }
 
-    /// The active child under its admission lock.
+    /// The resident child under its admission lock.
     pub fn get_mut(&mut self, agent_id: &str) -> Option<&mut (dyn LiveChildHandle + 'static)> {
-        self.children.get_mut(agent_id).map(Box::as_mut)
+        match self.nodes.get_mut(agent_id)? {
+            Residency::Resident(child) => Some(child.as_mut()),
+            Residency::Opening(_) | Residency::Releasing(_) => None,
+        }
     }
 
-    /// Whether an active or retiring child owns this agent slot.
+    /// Whether this agent's node is not dormant: opening, resident or
+    /// releasing.
     pub fn contains_key(&self, agent_id: &str) -> bool {
-        self.children.contains_key(agent_id)
-            || self.retiring.contains_key(agent_id)
-            || self.starting.contains_key(agent_id)
+        self.nodes.contains_key(agent_id)
     }
 
-    /// All active and retiring agent slots.
+    /// Every node that is not dormant.
     pub fn keys(&self) -> impl Iterator<Item = &String> {
-        self.children
-            .keys()
-            .chain(self.retiring.keys())
-            .chain(self.starting.keys())
+        self.nodes.keys()
     }
 
-    /// Whether every active and retiring slot is vacant.
+    /// Whether every child node is dormant.
     pub fn is_empty(&self) -> bool {
-        self.children.is_empty() && self.retiring.is_empty() && self.starting.is_empty()
+        self.nodes.is_empty()
+    }
+
+    /// The resident children.
+    pub(super) fn residents(&self) -> impl Iterator<Item = (&String, &dyn LiveChildHandle)> {
+        self.nodes.iter().filter_map(|(id, node)| match node {
+            Residency::Resident(child) => Some((id, child.as_ref())),
+            Residency::Opening(_) | Residency::Releasing(_) => None,
+        })
+    }
+
+    /// The opening children's startups.
+    pub(super) fn openings(&self) -> impl Iterator<Item = (&String, &ChildStartup)> {
+        self.nodes.iter().filter_map(|(id, node)| match node {
+            Residency::Opening(startup) => Some((id, &**startup)),
+            Residency::Resident(_) | Residency::Releasing(_) => None,
+        })
+    }
+
+    /// The releasing children's retirements.
+    pub(super) fn releasings(&self) -> impl Iterator<Item = (&String, &Retirement)> {
+        self.nodes.iter().filter_map(|(id, node)| match node {
+            Residency::Releasing(retirement) => Some((id, &**retirement)),
+            Residency::Opening(_) | Residency::Resident(_) => None,
+        })
+    }
+
+    /// The startup that owns this agent's opening node.
+    pub(super) fn opening(&self, agent_id: &str) -> Option<&ChildStartup> {
+        match self.nodes.get(agent_id)? {
+            Residency::Opening(startup) => Some(&**startup),
+            Residency::Resident(_) | Residency::Releasing(_) => None,
+        }
+    }
+
+    /// The retirement of this agent's releasing node.
+    pub(super) fn releasing(&self, agent_id: &str) -> Option<&Retirement> {
+        match self.nodes.get(agent_id)? {
+            Residency::Releasing(retirement) => Some(&**retirement),
+            Residency::Opening(_) | Residency::Resident(_) => None,
+        }
+    }
+
+    /// The node opens under `startup`.
+    pub(super) fn open(&mut self, agent_id: String, startup: ChildStartup) {
+        self.nodes
+            .insert(agent_id, Residency::Opening(Box::new(startup)));
+    }
+
+    /// The node is resident with `child`'s turn, whatever it was.
+    pub(super) fn reside(&mut self, agent_id: String, child: Box<dyn LiveChildHandle>) {
+        self.nodes.insert(agent_id, Residency::Resident(child));
+    }
+
+    /// The node goes dormant.
+    pub(super) fn vacate(&mut self, agent_id: &str) {
+        self.nodes.remove(agent_id);
     }
 
     #[allow(
@@ -47,16 +105,18 @@ impl LiveChildTable {
         expected: Option<TurnId>,
         cancel: bool,
     ) -> Option<Retirement> {
-        if let Some(retirement) = self.retiring.get(agent_id) {
+        if let Some(retirement) = self.releasing(agent_id) {
             return expected
                 .is_none_or(|turn| turn == retirement.turn)
                 .then(|| retirement.clone());
         }
-        let turn = self.children.get(agent_id)?.turn_id();
+        let turn = self.get(agent_id)?.turn_id();
         if expected.is_some_and(|expected| expected != turn) {
             return None;
         }
-        let child = self.children.remove(agent_id)?;
+        let Some(Residency::Resident(child)) = self.nodes.remove(agent_id) else {
+            unreachable!("a resident node was just read");
+        };
         let agent = child.agent();
         let agent_id = agent_id.to_owned();
         let worker_id = agent_id.clone();
@@ -126,11 +186,10 @@ impl LiveChildTable {
             {
                 let mut live = live.lock().await;
                 if live
-                    .retiring
-                    .get(&worker_id)
+                    .releasing(&worker_id)
                     .is_some_and(|retirement| retirement.turn == turn)
                 {
-                    live.retiring.remove(&worker_id);
+                    live.vacate(&worker_id);
                     live.quiet.notify_one();
                     let (writer, agent, released) =
                         (driver.clone(), worker_id.clone(), result.is_ok());
@@ -184,13 +243,22 @@ impl LiveChildTable {
                 .boxed()
                 .shared(),
         };
-        self.retiring.insert(agent_id, retirement.clone());
+        self.nodes
+            .insert(agent_id, Residency::Releasing(Box::new(retirement.clone())));
         Some(retirement)
     }
 
     #[cfg(any(test, feature = "test-support"))]
     /// Installs a test child without runtime admission.
     pub fn insert_for_test(&mut self, agent_id: String, child: Box<dyn LiveChildHandle>) {
-        self.children.insert(agent_id, child);
+        self.reside(agent_id, child);
+    }
+
+    /// The retirement of a releasing node, for tests that join it.
+    #[cfg(test)]
+    pub(super) fn releasing_for_test(&self, agent_id: &str) -> Retirement {
+        self.releasing(agent_id)
+            .expect("the node is releasing")
+            .clone()
     }
 }

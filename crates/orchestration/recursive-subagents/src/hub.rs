@@ -169,14 +169,25 @@ pub trait LiveChildHandle: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = LiveRelease> + Send>>;
 }
 
-/// One tree's live child turns. The map and its lock are the hub's, because
-/// the admission decision and the shutdown drain must be one lock; what the
-/// map holds is the product's.
+/// One child node's residency on this tree (design section 4.3): a node
+/// with no entry is dormant.
+enum Residency {
+    /// A startup owns the slot until its turn is acknowledged or released.
+    Opening(Box<ChildStartup>),
+    /// A live turn; only a resident child takes new work.
+    Resident(Box<dyn LiveChildHandle>),
+    /// The turn's release is in flight; the slot stays taken until it
+    /// returns.
+    Releasing(Box<Retirement>),
+}
+
+/// One tree's child nodes that are not dormant, one residency each. The
+/// map and its lock are the hub's, because the admission decision and the
+/// shutdown drain must be one lock; what a resident entry holds is the
+/// product's.
 #[derive(Default)]
 pub struct LiveChildTable {
-    children: HashMap<String, Box<dyn LiveChildHandle>>,
-    retiring: HashMap<String, Retirement>,
-    starting: HashMap<String, ChildStartup>,
+    nodes: HashMap<String, Residency>,
     retirement_recovery: Option<Arc<dyn Fn() + Send + Sync>>,
     /// Signalled whenever a child leaves the table or a resident root goes:
     /// the hub then checks whether the whole tree is dormant.
@@ -184,9 +195,9 @@ pub struct LiveChildTable {
 }
 
 impl LiveChildTable {
-    /// Whether no child turn is live, starting or retiring.
+    /// Whether every child node is dormant.
     fn is_quiet(&self) -> bool {
-        self.children.is_empty() && self.retiring.is_empty() && self.starting.is_empty()
+        self.nodes.is_empty()
     }
 }
 
@@ -212,9 +223,8 @@ pub async fn decide_live(
 ) -> Option<Result<(), String>> {
     let answer = {
         let live = live.lock().await;
-        live.children
-            .values()
-            .find_map(|child| child.decide(decision, allow))
+        live.residents()
+            .find_map(|(_, child)| child.decide(decision, allow))
     };
     Some(answer?.await)
 }
@@ -255,7 +265,7 @@ async fn begin_retire_live(
         let live = live.lock().await;
         let startup = expected
             .is_none()
-            .then(|| live.starting.get(agent_id).cloned())
+            .then(|| live.opening(agent_id).cloned())
             .flatten();
         if let Some(startup) = &startup {
             startup.request_cancel();

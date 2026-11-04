@@ -490,7 +490,7 @@ impl ProductTopologyRuntime {
         {
             return Err((child, Some(error.message)));
         }
-        live.children.insert(agent_id, child);
+        live.reside(agent_id, child);
         Ok(turn_id)
     }
 
