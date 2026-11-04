@@ -3,8 +3,8 @@ use std::sync::mpsc;
 use plakous_host_protocol::intent::{Draft, DraftImage};
 use plakous_host_protocol::observation::ObservationClass;
 use plakous_host_protocol::wire::{
-    Answer, AttachmentId, ClientFrame, HostFrame, Op, Outcome, RequestRefusal, encode_line,
-    take_images,
+    Answer, AttachmentId, ClientFrame, HostFrame, NodeAddress, Op, Outcome, RequestRefusal,
+    WIRE_VERSION, encode_line, take_images,
 };
 use plakous_host_protocol::{SessionIntent, SessionObservation};
 use plakous_hosted::host_service::HostService;
@@ -171,12 +171,7 @@ fn the_adapter_attaches_the_root_and_carries_intents_and_events() {
 /// The handshake admits this version and refuses another, typed.
 #[test]
 fn the_handshake_refuses_another_version() {
-    let welcome = || Welcome {
-        proto: WIRE_VERSION,
-        binary_id: "b".into(),
-        host_generation: 1,
-        caps: Vec::new(),
-    };
+    let welcome = || session_welcome("b".into(), 1, "s1".into(), root());
     for (proto, admitted) in [(WIRE_VERSION, true), (WIRE_VERSION + 1, false)] {
         let (client, lines) = mpsc::sync_channel(1);
         client
@@ -191,7 +186,7 @@ fn the_handshake_refuses_another_version() {
             .unwrap();
         let mut output = Vec::new();
         assert_eq!(
-            handshake::<PlakExtension>(&lines, welcome(), &mut output).unwrap(),
+            handshake::<PlakExtension>(&lines, welcome(), &mut output, &|| false).unwrap(),
             admitted
         );
         let frame: Host =
@@ -296,4 +291,23 @@ fn a_child_face_reads_its_nodes_usage() {
             row: "templates".into()
         })
     );
+}
+
+/// A failure before dispatch is a v2 `refused` frame naming why, never the
+/// JSONL `error` record.
+#[test]
+fn a_failure_before_dispatch_is_a_v2_refusal() {
+    let mut output = Vec::new();
+    refuse_unavailable(&mut output, &CliFailure::new("no login for claude")).unwrap();
+    let text = String::from_utf8(output).unwrap();
+    let frame: Host = plakous_host_protocol::wire::decode_host_line(text.trim_end()).unwrap();
+    assert!(
+        matches!(
+            frame,
+            HostFrame::Refused(HandshakeRefusal::Unavailable { ref detail })
+                if detail == "no login for claude"
+        ),
+        "{text}"
+    );
+    assert!(!text.contains("\"v\":1"), "{text}");
 }

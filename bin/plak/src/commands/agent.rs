@@ -82,6 +82,12 @@ pub(crate) fn run_agent(
     // including on a panic, so this must not also write one.
     let config = match outcome {
         Ok(config) => config,
+        // Wire v2 frames own stdout from the start: a failure before
+        // dispatch is a v2 refusal, never a JSONL record.
+        Err(failure) if wire_v2 => {
+            let _ = crate::agent_wire::refuse_unavailable(&mut io::stdout(), &failure);
+            return Err(failure);
+        }
         Err(failure) => {
             return Err(report_pre_dispatch_rejection(&mut io::stdout(), failure));
         }

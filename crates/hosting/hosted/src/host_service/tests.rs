@@ -656,3 +656,26 @@ fn a_faces_service_passes_a_foreign_attachment_window_through() {
     published.send(answer.clone()).unwrap();
     assert_eq!(face.try_iter().collect::<Vec<_>>(), [foreign, answer]);
 }
+
+/// Every attach is a fresh attachment: its id is never one an earlier
+/// attachment of the service had, and its sequence starts at 1.
+#[test]
+fn every_attach_gets_a_fresh_id_and_a_sequence_from_one() {
+    let (service, _intents) = service(16);
+    service.observe(Observation::SetBusy(true));
+    let seqs = |taken: Vec<Outbound<Core>>| -> Vec<u64> {
+        taken
+            .into_iter()
+            .map(|item| match item {
+                Outbound::Event { seq, .. } => seq,
+                Outbound::ResyncRequired => panic!("dropped"),
+            })
+            .collect()
+    };
+    let first = service.attach(&root()).unwrap();
+    assert_eq!(seqs(service.take(first)), [1]);
+    service.detach(first).unwrap();
+    let second = service.attach(&root()).unwrap();
+    assert_ne!(second, first);
+    assert_eq!(seqs(service.take(second)), [1]);
+}

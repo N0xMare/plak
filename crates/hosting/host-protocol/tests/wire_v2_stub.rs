@@ -72,6 +72,12 @@ fn stub_host(stream: UnixStream) {
         binary_id: "host".into(),
         host_generation: 1,
         caps: Vec::new(),
+        session_id: "s1".into(),
+        tree_id: "t1".into(),
+        root: NodeAddress {
+            tree_id: "t1".into(),
+            agent_id: "t1".into(),
+        },
     };
     match admit_hello(&hello, welcome) {
         Ok(welcome) => end.send(&Host::Welcome(welcome)),

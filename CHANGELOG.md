@@ -308,6 +308,20 @@ an export.
   intent the service refused for the attachment's role; `plak agent` JSONL
   v1 answers it as that command's `error` record), `HostService` is
   `Clone` (its clones are the same service), and the new types.
+- Wire v2 handshake: `welcome` names the session id, tree id and root node,
+  and the session opens before it is sent, so a failure before dispatch
+  (`plak agent --wire v2` included) is a `refused` frame with the new
+  `unavailable` refusal, never a JSONL record. A host service never reuses
+  an attachment id, each attachment's sequence starts at 1, and no event
+  precedes its `attached` answer. A client that sends no hello within 10
+  seconds is refused, a terminating signal quits and joins the session, and
+  a connection ends when its session switches to another. The shared
+  connection code gains `host_service::wire::{session_root,
+  session_welcome, refuse}`, `HELLO_DEADLINE`, `UNAVAILABLE_UNAUTHENTICATED`
+  and `WireConnection::{with_stop, serving}`; `handshake` takes a stop
+  probe. Embedder
+  break: `Welcome` gains `session_id`, `tree_id` and `root`, and
+  `HandshakeRefusal` gains `Unavailable`.
 - Version control on a runner (unsupported; only the test route selects a
   runner): an orchestration tree on a selected runner drives its copies
   through `RemoteVcs` over the runner link instead of refusing every effect.

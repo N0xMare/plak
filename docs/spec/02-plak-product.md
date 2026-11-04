@@ -3690,8 +3690,24 @@ verdicts) are addressed, the session profile and workspace chrome states.
 - **Handshake.** The client's first frame is `hello` (protocol version,
   binary id, capabilities, and its locality: reached over ssh, can open a
   browser). The host answers `welcome` (version, binary id, host
-  generation, capabilities) or `refused` with `version_mismatch`,
-  `malformed` or `busy`, and closes. The version must match exactly.
+  generation, capabilities, and the session it serves: its id, its tree id
+  and its root node's address, which an attach to the root names; the tree
+  id is the session's durable tree, not always the session id) or
+  `refused` with `version_mismatch`, `malformed`, `busy` or `unavailable`
+  (the session could not be opened, with why), and closes. The version must
+  match exactly. The session opens before the welcome is sent, so any
+  failure before dispatch, `plak agent --wire v2` included, is that
+  `unavailable` frame and never a JSONL record. Its detail is the failure's
+  own text only for an authenticated peer (stdio's parent process, a web
+  client past its gate); before authentication it is the fixed `the session
+  could not be opened`, since a failure can name state paths, accounts and
+  sessions. A client that sends no `hello` within 10 seconds is refused
+  `malformed` and the opened session is quit and joined, so a silent peer
+  never holds it; a terminating signal during the wait, or later, ends the
+  connection the same way. A connection serves the session its welcome
+  names: when that session switches to another (`/new`, a resume, a
+  rebind), the connection ends as a leaving client's does and the client
+  connects and handshakes again.
 - **Requests.** A `request` carries a client-chosen id and an `op`:
   `attach` (a node, by tree and agent id), `detach`, `intent` (an
   attachment and a session intent) or `ping`. It gets exactly one
@@ -3718,7 +3734,12 @@ verdicts) are addressed, the session profile and workspace chrome states.
   a required event, except the navigator's answers, which are addressed.
 - **Events and reconnect.** An `event` carries its attachment, the
   attachment's sequence number (for gap detection only), its class and the
-  observation. A reconnect is a fresh attach: nothing is replayed, and the
+  observation. Every attach is a fresh attachment: a host service never
+  reuses an attachment id, and each attachment's sequence starts at 1, so
+  a client that reconnects to a new connection (whose service may number
+  its attachments from 1 again) resets its sequence on every `attached`
+  answer. No event of an attachment is sent before its `attached` answer.
+  A reconnect is a fresh attach: nothing is replayed, and the
   attach snapshot carries every state and re-emits, as its event, every
   approval still pending and the credential wait that holds, so a client
   attaching after either sees what it must answer. A receiver derives an

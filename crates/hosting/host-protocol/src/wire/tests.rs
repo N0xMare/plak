@@ -23,6 +23,12 @@ fn welcome() -> Welcome {
         binary_id: "b1".into(),
         host_generation: 7,
         caps: Vec::new(),
+        session_id: "s1".into(),
+        tree_id: "t1".into(),
+        root: NodeAddress {
+            tree_id: "t1".into(),
+            agent_id: "t1".into(),
+        },
     }
 }
 

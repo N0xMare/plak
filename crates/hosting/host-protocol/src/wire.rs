@@ -122,6 +122,13 @@ pub struct Welcome {
     pub host_generation: u64,
     /// Optional functions the host supports.
     pub caps: Vec<String>,
+    /// The session this connection serves.
+    pub session_id: String,
+    /// The session's agent tree; not always the session id (a rebound
+    /// session's tree is its lineage's).
+    pub tree_id: String,
+    /// The session's root node, the address an attach to the root names.
+    pub root: NodeAddress,
 }
 
 /// Why the host refused a handshake.
@@ -142,6 +149,11 @@ pub enum HandshakeRefusal {
     },
     /// The host takes no more connections now.
     Busy,
+    /// The session the connection would serve could not be opened.
+    Unavailable {
+        /// Why.
+        detail: String,
+    },
 }
 
 /// The host's answer to `hello`: [`Welcome`], or the refusal.

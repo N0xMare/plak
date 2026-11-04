@@ -5,17 +5,27 @@
 //! snapshot goes as pages and image bytes as blobs. The transport only
 //! carries lines: stdio's `plak agent --wire v2` and the web endpoint's
 //! WebSocket both drive this connection.
+//!
+//! The session opens before the handshake is answered, so the welcome names
+//! it ([`session_welcome`]) and a session that does not open is refused in a
+//! v2 frame ([`refuse`] with `unavailable`). A client that sends no hello
+//! within [`HELLO_DEADLINE`] is refused, so a silent peer never holds the
+//! opened session. Every attach is a fresh attachment of the connection's
+//! service, answered before any event of it, with its sequence from 1. A
+//! connection serves the session its welcome names: when the session
+//! switches to another (`/new`, `/resume`, a rebind), the connection ends
+//! and the client handshakes again.
 
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use plakous_host_protocol::views::transcript::{NoticeTone, TranscriptRow};
 use plakous_host_protocol::wire::{
     Answer, AttachmentId, BlobAssembler, ClientFrame, HandshakeRefusal, HostFrame, NodeAddress, Op,
-    Outcome, RequestId, RequestRefusal, Welcome, WireError, admit_hello, decode_line, encode_line,
-    page_snapshot, take_observation_images,
+    Outcome, RequestId, RequestRefusal, WIRE_VERSION, Welcome, WireError, admit_hello, decode_line,
+    encode_line, page_snapshot, take_observation_images,
 };
 use plakous_host_protocol::{
     IntentSender, ObservationReceiver, ProtocolExtension, SessionIntent, SessionObservation,
@@ -30,6 +40,12 @@ use crate::error::{CliFailure, CliResult};
 const POLL: Duration = Duration::from_millis(20);
 /// How far an attachment may fall behind before it is dropped.
 const ATTACHMENT_CAPACITY: usize = 4096;
+/// How long the host waits for a client's hello before it refuses the
+/// connection.
+pub const HELLO_DEADLINE: Duration = Duration::from_secs(10);
+/// The `unavailable` detail a transport sends before it authenticated its
+/// peer: a failure's own text can name state paths, accounts and sessions.
+pub const UNAVAILABLE_UNAUTHENTICATED: &str = "the session could not be opened";
 
 /// Writes `frame` as one line and flushes it.
 ///
@@ -47,8 +63,68 @@ where
         .map_err(|_| CliFailure::new("stdout failed"))
 }
 
-/// Reads the client's hello and answers it; `false` when it was refused
-/// or never came.
+/// The root node of the session `config` opens: its tree is the session's
+/// durable topology tree (not always the session id: a rebound session's
+/// tree is its lineage's), and the tree's root is named by the tree id.
+#[must_use]
+pub fn session_root<P: ProtocolExtension>(config: &crate::runtime::HostConfig<P>) -> NodeAddress {
+    let tree_id = crate::runtime::durable_topology_tree_id(
+        &crate::runtime::HostRows::new(
+            &config.state_roots,
+            config.state_roots.session_records().as_ref(),
+        ),
+        &config.session,
+    );
+    NodeAddress {
+        tree_id: tree_id.clone(),
+        agent_id: tree_id,
+    }
+}
+
+/// The welcome of a connection to the session `session_id` whose root is
+/// `root`, from the host binary `binary_id` in its process generation
+/// `host_generation`.
+#[must_use]
+pub fn session_welcome(
+    binary_id: String,
+    host_generation: u64,
+    session_id: String,
+    root: NodeAddress,
+) -> Welcome {
+    Welcome {
+        proto: WIRE_VERSION,
+        binary_id,
+        host_generation,
+        caps: Vec::new(),
+        session_id,
+        tree_id: root.tree_id.clone(),
+        root,
+    }
+}
+
+/// Refuses the connection with `refusal` in a v2 frame; a failure before
+/// the session opened is `unavailable`, never a JSONL record. An
+/// `unavailable` refusal carries the failure's own text only to an
+/// authenticated peer (stdio's parent process, a web client past its
+/// gate); before authentication its detail is
+/// [`UNAVAILABLE_UNAUTHENTICATED`].
+///
+/// # Errors
+///
+/// A lost output.
+pub fn refuse<P: ProtocolExtension>(
+    stdout: &mut dyn Write,
+    refusal: HandshakeRefusal,
+) -> CliResult<()>
+where
+    HostFrame<P>: Serialize,
+{
+    write_frame(stdout, &HostFrame::<P>::Refused(refusal))
+}
+
+/// Reads the client's hello and answers it; `false` when it was refused,
+/// never came within [`HELLO_DEADLINE`] (refused `malformed`), the input
+/// ended, or `stopped` turned true (the process was asked to stop).
 ///
 /// # Errors
 ///
@@ -57,13 +133,45 @@ pub fn handshake<P: ProtocolExtension>(
     lines: &mpsc::Receiver<Result<String, WireError>>,
     welcome: Welcome,
     stdout: &mut dyn Write,
+    stopped: &dyn Fn() -> bool,
 ) -> CliResult<bool>
 where
     HostFrame<P>: Serialize,
     ClientFrame<P>: DeserializeOwned,
 {
-    let Ok(first) = lines.recv() else {
-        return Ok(false);
+    handshake_within::<P>(lines, welcome, stdout, stopped, HELLO_DEADLINE)
+}
+
+/// [`handshake`] with the hello due within `wait`.
+fn handshake_within<P: ProtocolExtension>(
+    lines: &mpsc::Receiver<Result<String, WireError>>,
+    welcome: Welcome,
+    stdout: &mut dyn Write,
+    stopped: &dyn Fn() -> bool,
+    wait: Duration,
+) -> CliResult<bool>
+where
+    HostFrame<P>: Serialize,
+    ClientFrame<P>: DeserializeOwned,
+{
+    let deadline = Instant::now() + wait;
+    let first = loop {
+        if stopped() {
+            return Ok(false);
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            let refusal = HandshakeRefusal::Malformed {
+                detail: format!("no hello within {} ms", wait.as_millis()),
+            };
+            write_frame(stdout, &HostFrame::<P>::Refused(refusal))?;
+            return Ok(false);
+        }
+        match lines.recv_timeout(remaining.min(POLL)) {
+            Ok(line) => break line,
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(false),
+        }
     };
     let refusal = match first.and_then(|line| decode_line::<ClientFrame<P>>(&line)) {
         Ok(ClientFrame::Hello(hello)) => match admit_hello(&hello, welcome) {
@@ -93,6 +201,10 @@ pub struct WireConnection<P: ProtocolExtension, W: Write> {
     attachment: Option<AttachmentId>,
     blobs: BlobAssembler,
     quit_sent: bool,
+    /// Whether the process was asked to stop.
+    stopped: Box<dyn Fn() -> bool + Send + Sync>,
+    /// The session the welcome named, when the transport named one.
+    session: Option<String>,
     /// A child's mail requests, by the correlation their intents carry,
     /// answered once the mail is written.
     mails: BTreeMap<String, RequestId>,
@@ -127,6 +239,8 @@ where
             attachment: None,
             blobs: BlobAssembler::default(),
             quit_sent: false,
+            stopped: Box::new(|| false),
+            session: None,
             mails: BTreeMap::new(),
             window: None,
             settled: Vec::new(),
@@ -134,8 +248,38 @@ where
         }
     }
 
+    /// This connection, ending as a leaving client does once `stopped`
+    /// turns true (the process was asked to stop).
+    #[must_use]
+    pub fn with_stop(mut self, stopped: impl Fn() -> bool + Send + Sync + 'static) -> Self {
+        self.stopped = Box::new(stopped);
+        self
+    }
+
+    /// This connection, serving the session `session_id` its welcome named:
+    /// it ends when the session switches to another.
+    #[must_use]
+    pub fn serving(mut self, session_id: impl Into<String>) -> Self {
+        self.session = Some(session_id.into());
+        self
+    }
+
+    /// Takes one observation; whether it switched the session away from
+    /// the one this connection serves.
+    fn observe(&mut self, event: SessionObservation<P>) -> bool {
+        let switched = matches!(
+            &event,
+            SessionObservation::Binding { session_id: Some(next), .. }
+                if self.session.as_ref().is_some_and(|served| served != next)
+        );
+        self.service.observe(event);
+        switched
+    }
+
     /// Serves frames and observations until the session ends. A client that
-    /// leaves (bye or end of input) quits the session first.
+    /// leaves (bye or end of input) quits the session first; so does a
+    /// process asked to stop, and a connection whose session switched to
+    /// another.
     ///
     /// # Errors
     ///
@@ -147,10 +291,15 @@ where
     ) -> CliResult<()> {
         let mut reading = true;
         loop {
+            let mut switched = false;
             while let Ok(event) = events.try_recv() {
-                self.service.observe(event);
+                switched |= self.observe(event);
             }
             self.flush()?;
+            if reading && (switched || (self.stopped)()) {
+                reading = false;
+                self.quit();
+            }
             if reading {
                 match lines.recv_timeout(POLL) {
                     Ok(line) => reading = self.frame(line)?,
@@ -164,7 +313,9 @@ where
                 continue;
             }
             match events.recv_timeout(POLL) {
-                Ok(event) => self.service.observe(event),
+                Ok(event) => {
+                    self.observe(event);
+                }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
                     self.flush()?;

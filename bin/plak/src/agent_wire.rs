@@ -11,9 +11,11 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use plakous_host_protocol::SessionIntent;
-use plakous_host_protocol::wire::{LineReader, NodeAddress, WIRE_VERSION, Welcome, WireError};
+use plakous_host_protocol::wire::{HandshakeRefusal, LineReader, WireError};
 use plakous_hosted::error::{CliFailure, CliResult, ProcessOutcome};
-use plakous_hosted::host_service::wire::{WireConnection, handshake};
+use plakous_hosted::host_service::wire::{
+    WireConnection, handshake, refuse, session_root, session_welcome,
+};
 use plakous_hosted::runtime::{HostConfig, spawn_host_worker};
 
 use crate::surface_protocol::PlakExtension;
@@ -22,33 +24,43 @@ const JOIN_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Runs wire v2 on `input` and `stdout` over the session `config` opens.
 ///
+/// The session opens before the handshake is answered, so the welcome names
+/// it and a session that does not open is refused in a v2 frame. A
+/// terminating signal ends the hello wait or the connection as a leaving
+/// client does: the session is quit and joined.
+///
 /// # Errors
 ///
-/// A refused handshake, a session that does not open, or a lost stdout.
+/// A session that does not open, or a lost stdout.
 pub(crate) fn run_agent_wire(
     config: HostConfig<PlakExtension>,
     input: impl Read + Send + 'static,
     stdout: &mut dyn Write,
 ) -> CliResult<ProcessOutcome> {
     let lines = read_lines(input);
-    let welcome = Welcome {
-        proto: WIRE_VERSION,
-        binary_id: crate::build_identity::known_binary_id().unwrap_or_else(|| "unknown".into()),
-        host_generation: host_generation(),
-        caps: Vec::new(),
+    let session_id = config.session.id.clone();
+    let root = session_root(&config);
+    let (actions, events, worker) = match spawn_host_worker(config) {
+        Ok(worker) => worker,
+        Err(failure) => {
+            refuse_unavailable(stdout, &failure)?;
+            return Err(failure);
+        }
     };
-    if !handshake::<PlakExtension>(&lines, welcome, stdout)? {
-        return Ok(ProcessOutcome::Success);
-    }
-    let tree_id =
-        crate::topology_product::durable_topology_tree_id(&config.state_roots, &config.session);
-    // The root node of a session's tree is named by the tree id.
-    let root = NodeAddress {
-        tree_id: tree_id.clone(),
-        agent_id: tree_id,
+    let welcome = session_welcome(
+        crate::build_identity::known_binary_id().unwrap_or_else(|| "unknown".into()),
+        host_generation(),
+        session_id.clone(),
+        root.clone(),
+    );
+    let served = match handshake::<PlakExtension>(&lines, welcome, stdout, &signalled) {
+        Ok(true) => Adapter::new(root, stdout, actions.clone())
+            .with_stop(signalled)
+            .serving(session_id)
+            .serve(&lines, &events),
+        Ok(false) => Ok(()),
+        Err(failure) => Err(failure),
     };
-    let (actions, events, worker) = spawn_host_worker(config)?;
-    let served = Adapter::new(root, stdout, actions.clone()).serve(&lines, &events);
     // A connection that failed still ends its session.
     let _ = actions.send(SessionIntent::Quit);
     let deadline = Instant::now() + JOIN_TIMEOUT;
@@ -63,7 +75,33 @@ pub(crate) fn run_agent_wire(
     worker
         .join()
         .map_err(|_| CliFailure::new("plak agent host worker failed"))??;
-    served.map(|()| ProcessOutcome::Success)
+    served.map(|()| {
+        if signalled() {
+            ProcessOutcome::Interrupted
+        } else {
+            ProcessOutcome::Success
+        }
+    })
+}
+
+/// Whether a terminating signal asked this process to stop.
+fn signalled() -> bool {
+    crate::signals::signalled_stops() > 0
+}
+
+/// Refuses the connection, in a v2 frame, for a session that did not open:
+/// a `plak agent --wire v2` failure before dispatch is never a JSONL record.
+///
+/// # Errors
+///
+/// A lost stdout.
+pub(crate) fn refuse_unavailable(stdout: &mut dyn Write, failure: &CliFailure) -> CliResult<()> {
+    refuse::<PlakExtension>(
+        stdout,
+        HandshakeRefusal::Unavailable {
+            detail: failure.message().to_owned(),
+        },
+    )
 }
 
 /// This process's generation: it differs on every start.
