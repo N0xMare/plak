@@ -17,8 +17,9 @@ mod trace;
 mod workflow_recovery;
 
 use serde_json::{Value, json};
+use std::collections::VecDeque;
 use std::sync::{
-    Mutex,
+    Arc, Condvar, Mutex,
     atomic::{AtomicUsize, Ordering},
 };
 
@@ -89,46 +90,113 @@ fn full_sweep() {
     run(&names, jobs, repeat, strict, "full");
 }
 
+/// One shape's prepared run: its seed home, session, converged baseline and
+/// twin-pilot commit list, shared by every cut of that shape. The seed's home
+/// is removed when its last cut drops it.
+struct Prepared<'a> {
+    shape: &'a str,
+    iteration: usize,
+    seed: super::offline_support::Fixture,
+    session: String,
+    baseline: summary::Summary,
+    pilot: Vec<trace::Commit>,
+}
+
+/// One unit of sweep work: a shape's setup and twin pilot, or one of its cuts.
+enum Task<'a> {
+    Prepare {
+        shape: &'a str,
+        iteration: usize,
+    },
+    Cut {
+        prepared: Arc<Prepared<'a>>,
+        index: usize,
+    },
+}
+
+/// The work every worker takes from: tasks not started, how many run, and a
+/// setup panic that ends the sweep.
+struct Work<'a> {
+    tasks: VecDeque<Task<'a>>,
+    running: usize,
+    aborted: Option<Box<dyn std::any::Any + Send>>,
+}
+
+/// Runs every shape's setup, twin pilot and cuts on one pool of `jobs`
+/// workers. A shape's cuts are queued ahead of the setups still waiting, so a
+/// prepared seed is cut and released before more shapes are prepared, and no
+/// worker sits idle behind a serial setup or pilot. Rows are kept sorted by
+/// shape, repeat, store and ordinal, so the tables do not depend on the order
+/// work finished in.
 fn run(names: &[&str], jobs: usize, repeat: usize, strict: bool, run: &str) {
     assert!(jobs > 0 && repeat > 0);
     let table = table::Table::new(run);
     let rows = Mutex::new(Vec::<Value>::new());
-    for iteration in 1..=repeat {
-        for shape in names {
-            let (seed, session) = driver::setup(shape);
-            let baseline = summary::read_converged(&seed);
-            let pilot = match std::panic::catch_unwind(|| driver::pilot(&seed, &session, shape)) {
-                Ok(pilot) => pilot,
-                Err(error) => {
-                    rows.lock().unwrap().push(json!({"shape": shape, "repeat": iteration, "cut": "pilot", "store": "pilot", "store_ordinal": 0, "commit": "pilot", "outcome": "DIVERGENT", "invariants": false, "finding": panic_text(&error)}));
-                    table.write(&rows.lock().unwrap());
-                    continue;
-                }
-            };
-            let next = AtomicUsize::new(1);
-            std::thread::scope(|scope| {
-                for _ in 0..jobs.min(pilot.len()) {
-                    scope.spawn(|| loop {
-                        let k = next.fetch_add(1, Ordering::Relaxed);
-                        if k > pilot.len() { break; }
-                        let mut row = match std::panic::catch_unwind(|| driver::cut(&seed, &session, shape, &baseline, &pilot, &pilot[k - 1])) {
-                            Ok(row) => row,
-                            Err(error) => json!({"outcome": "UNCLASSIFIED", "invariants": false, "finding": panic_text(&error)}),
-                        };
-                        row["shape"] = json!(shape);
-                        row["repeat"] = json!(iteration);
-                        row["cut"] = json!(format!("{}:{}", pilot[k - 1].store, pilot[k - 1].store_ordinal));
-                        row["store"] = json!(pilot[k - 1].store);
-                        row["store_ordinal"] = json!(pilot[k - 1].store_ordinal);
-                        row["commit"] = json!(pilot[k - 1].signature());
-                        let mut rows = rows.lock().unwrap();
-                        rows.push(row);
-                        rows.sort_by_key(|row| (row["shape"].as_str().unwrap().to_owned(), row["repeat"].as_u64().unwrap(), row["store"].as_str().unwrap().to_owned(), row["store_ordinal"].as_u64().unwrap()));
-                        table.write(&rows);
-                    });
+    let record = |row: Value| {
+        let mut rows = rows.lock().unwrap();
+        rows.push(row);
+        rows.sort_by_key(row_key);
+        table.write(&rows);
+    };
+    let work = Mutex::new(Work {
+        tasks: (1..=repeat)
+            .flat_map(|iteration| {
+                names
+                    .iter()
+                    .map(move |&shape| Task::Prepare { shape, iteration })
+            })
+            .collect(),
+        running: 0,
+        aborted: None,
+    });
+    let changed = Condvar::new();
+    std::thread::scope(|scope| {
+        for _ in 0..jobs {
+            scope.spawn(|| {
+                loop {
+                    let task = {
+                        let mut work = work.lock().unwrap();
+                        loop {
+                            if work.aborted.is_some() {
+                                return;
+                            }
+                            if let Some(task) = work.tasks.pop_front() {
+                                work.running += 1;
+                                break task;
+                            }
+                            if work.running == 0 {
+                                return;
+                            }
+                            work = changed.wait(work).unwrap();
+                        }
+                    };
+                    let (follow, aborted) = match task {
+                        Task::Prepare { shape, iteration } => {
+                            match prepare(shape, iteration, &record) {
+                                Ok(cuts) => (cuts, None),
+                                Err(error) => (Vec::new(), Some(error)),
+                            }
+                        }
+                        Task::Cut { prepared, index } => {
+                            record(cut_row(&prepared, index));
+                            (Vec::new(), None)
+                        }
+                    };
+                    let mut work = work.lock().unwrap();
+                    for task in follow.into_iter().rev() {
+                        work.tasks.push_front(task);
+                    }
+                    if aborted.is_some() && work.aborted.is_none() {
+                        work.aborted = aborted;
+                    }
+                    work.running -= 1;
+                    changed.notify_all();
                 }
             });
         }
+    });
+    if let Some(error) = work.into_inner().unwrap().aborted {
+        std::panic::resume_unwind(error);
     }
     let rows = rows.into_inner().unwrap();
     table.write(&rows);
@@ -150,6 +218,77 @@ fn run(names: &[&str], jobs: usize, repeat: usize, strict: bool, run: &str) {
             "strict sweep rejects recovery refusals"
         );
     }
+}
+
+/// Sets up one shape and runs its twin pilot, returning its cuts. A divergent
+/// or failed pilot is recorded as the shape's one row; a failed setup ends
+/// the sweep, as a setup the harness cannot build is not a cut finding.
+fn prepare<'a>(
+    shape: &'a str,
+    iteration: usize,
+    record: &(dyn Fn(Value) + Sync),
+) -> Result<Vec<Task<'a>>, Box<dyn std::any::Any + Send>> {
+    let (seed, session) = std::panic::catch_unwind(|| driver::setup(shape))?;
+    let baseline = summary::read_converged(&seed);
+    let pilot = match std::panic::catch_unwind(|| driver::pilot(&seed, &session, shape)) {
+        Ok(pilot) => pilot,
+        Err(error) => {
+            record(
+                json!({"shape": shape, "repeat": iteration, "cut": "pilot", "store": "pilot", "store_ordinal": 0, "commit": "pilot", "outcome": "DIVERGENT", "invariants": false, "finding": panic_text(&error)}),
+            );
+            return Ok(Vec::new());
+        }
+    };
+    let prepared = Arc::new(Prepared {
+        shape,
+        iteration,
+        seed,
+        session,
+        baseline,
+        pilot,
+    });
+    Ok((0..prepared.pilot.len())
+        .map(|index| Task::Cut {
+            prepared: Arc::clone(&prepared),
+            index,
+        })
+        .collect())
+}
+
+/// One cut of a prepared shape, as its table row.
+fn cut_row(prepared: &Prepared<'_>, index: usize) -> Value {
+    let target = &prepared.pilot[index];
+    let mut row = match std::panic::catch_unwind(|| {
+        driver::cut(
+            &prepared.seed,
+            &prepared.session,
+            prepared.shape,
+            &prepared.baseline,
+            &prepared.pilot,
+            target,
+        )
+    }) {
+        Ok(row) => row,
+        Err(error) => {
+            json!({"outcome": "UNCLASSIFIED", "invariants": false, "finding": panic_text(&error)})
+        }
+    };
+    row["shape"] = json!(prepared.shape);
+    row["repeat"] = json!(prepared.iteration);
+    row["cut"] = json!(format!("{}:{}", target.store, target.store_ordinal));
+    row["store"] = json!(target.store);
+    row["store_ordinal"] = json!(target.store_ordinal);
+    row["commit"] = json!(target.signature());
+    row
+}
+
+fn row_key(row: &Value) -> (String, u64, String, u64) {
+    (
+        row["shape"].as_str().unwrap().to_owned(),
+        row["repeat"].as_u64().unwrap(),
+        row["store"].as_str().unwrap().to_owned(),
+        row["store_ordinal"].as_u64().unwrap(),
+    )
 }
 
 fn strict_accepts(row: &Value) -> bool {

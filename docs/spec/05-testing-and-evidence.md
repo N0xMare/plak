@@ -1879,6 +1879,11 @@ uses the quick `final_only,direct_tool_then_final` selection. An explicit
 `--shapes` selection applies in either mode. The wrapper overrides any inherited
 `PLAK_CRASH_SWEEP_SHAPES`, leaving it unset for the strict all-shapes default so
 the Rust registry supplies the complete inventory.
+One pool of `--jobs` workers runs every shape's setup, twin pilot and cuts:
+shapes run concurrently, each fixture in its own home, and a shape's cuts are
+queued ahead of the setups still waiting, so its seed is cut and removed before
+more shapes are prepared. Rows stay sorted by shape, repeat, store and ordinal,
+so `sweep.jsonl` and `table.md` do not depend on which work finished first.
 The residency corpus includes `image_residency_admission`,
 `image_residency_tool_batch` and `image_residency_continue`. Each seeds protected
 image history, crosses a mandatory aggregate-image fence with optional scheduled
