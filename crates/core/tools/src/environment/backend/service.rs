@@ -11,8 +11,11 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
 use zeroize::Zeroizing;
 
+#[cfg(unix)]
 mod host;
+#[cfg(unix)]
 use host::HostService;
+#[cfg(unix)]
 pub(super) use host::spawn_host_service;
 
 use super::deterministic::FakeProcessGuard;
@@ -32,7 +35,13 @@ pub const SERVICE_PROCESS_TERMINATE_GRACE: Duration = Duration::from_secs(2);
 /// One secret environment value for a service process.
 ///
 /// Not cloneable, not serializable, redacted in `Debug`, and zeroized on drop.
-pub struct ServiceSecretValue(Zeroizing<String>);
+pub struct ServiceSecretValue(
+    #[cfg_attr(
+        not(unix),
+        expect(dead_code, reason = "read only by the unix host backend")
+    )]
+    Zeroizing<String>,
+);
 
 impl ServiceSecretValue {
     /// Takes ownership of one resolved secret value.
@@ -48,6 +57,10 @@ impl ServiceSecretValue {
         Ok(Self(value))
     }
 
+    #[cfg_attr(
+        not(unix),
+        expect(dead_code, reason = "read only by the unix host backend")
+    )]
     fn expose(&self) -> &str {
         &self.0
     }
@@ -387,6 +400,7 @@ pub struct ServiceHandle {
 }
 
 pub(super) enum ServiceOwner {
+    #[cfg(unix)]
     Host(HostService),
     /// A service on a runner, terminated through its link.
     Runner(super::runner::RunnerServiceOwner),
@@ -421,6 +435,7 @@ impl ServiceHandle {
     /// within the bound, or an I/O error when the child cannot be waited.
     pub async fn terminate(self, grace: Duration) -> Result<(), ExecutionBackendError> {
         match self.owner {
+            #[cfg(unix)]
             ServiceOwner::Host(host) => host.terminate(grace).await,
             ServiceOwner::Runner(runner) => runner.terminate(grace, &self.stderr_tail).await,
             ServiceOwner::Fake(guard) => {
@@ -434,6 +449,7 @@ impl ServiceHandle {
 impl fmt::Debug for ServiceHandle {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let owner = match &self.owner {
+            #[cfg(unix)]
             ServiceOwner::Host(_) => "host",
             ServiceOwner::Runner(_) => "runner",
             ServiceOwner::Fake(_) => "deterministic",

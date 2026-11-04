@@ -21,6 +21,7 @@ mod backend;
 mod config;
 mod identity;
 mod limits;
+mod metadata;
 mod process_options;
 mod read_observations;
 

@@ -1796,12 +1796,26 @@ the external `monty-proto` / `monty-types` / `monty-alloc` at
 
 `PORTABLE_CRATES` in `tools/gate/check_workspace.py` is the only portable-crate
 list: `plakous-model` and `plakous-runner-protocol`, whose closure is `serde`
-and `serde_json` and whose defaults are portable. A crate joins that tuple only in the change
-that makes its normal dependency closure pass the fence below and its library
+and `serde_json`, and `plakous-tools`. All three have portable defaults. A
+crate joins that tuple only in the change that makes its normal dependency
+closure pass the fence below and its library
 check clean for `wasm32-unknown-unknown`. Joining is not a supported-platform
 claim: `wasm32-unknown-unknown` stays an unsupported product target (section 2).
 `check_workspace.py --portable-crates` prints the list, one name per line, and
 does nothing else.
+
+`plakous-tools` declares its host process and descriptor dependencies
+(`filedescriptor`, `portable-pty`, `rustix` and Tokio's `process` feature) as
+`cfg(unix)` target dependencies. Its library refuses to compile on any target
+that is neither unix nor `wasm32-unknown-unknown`. On `wasm32-unknown-unknown`
+the crate keeps its public paths except `HostExecutionBackend`, which is
+unix-only, and has no host. Constructing a host environment refuses: there is
+no workspace filesystem to canonicalize, and host process capture refuses.
+Workspace operations of the deterministic backend return `Unsupported` with no
+effect, and `JobOutputRoot::open` returns `Unsupported`. Joined process
+sessions run only on a runner there. The unix code is unchanged: the split
+moves host items into `cfg(unix)` modules and puts uninhabited or refusing
+stand-ins beside them for the other target.
 
 The `static` group runs the fence inside `check_workspace.py`. For each listed
 crate it runs `cargo tree --offline --locked --target wasm32-unknown-unknown`
@@ -1863,6 +1877,10 @@ are known and accepted for now; their APIs do not change with this check:
   wasm host injects its own `Clock` and `SubscriptionGateClock`.
 - `ReachabilityProbe` takes a `std::time::Instant` deadline in its signature,
   so a wasm caller cannot construct one without a substitute clock.
+- `plakous-tools` reads `std::time::Instant` and `SystemTime` for operation
+  deadlines, job timestamps and supervision, and runs its blocking lane on
+  `tokio::task::spawn_blocking`; neither works on `wasm32-unknown-unknown`
+  without a host-supplied substitute.
 - `uuid`'s `js` feature calls `globalThis.crypto.getRandomValues` through
   `wasm-bindgen`. A v7 identifier generated in a host without the generated
   JavaScript glue or without `globalThis.crypto` fails at run time.

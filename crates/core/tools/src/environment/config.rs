@@ -11,8 +11,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::IsolationLevel;
 
 use super::backend::{
-    DeterministicExecutionBackend, ExecutionBackend, HostExecutionBackend, HostProcessContext,
-    JoinedProcessServiceCache, LineOwner,
+    DeterministicExecutionBackend, ExecutionBackend, HostProcessContext, JoinedProcessServiceCache,
+    LineOwner, host_execution_backend,
 };
 use super::{
     Arc, ExecutionBackendDescriptor, ExecutionBackendIdentity, ExecutionEnvironmentError,
@@ -260,6 +260,10 @@ impl EnvironmentDelegation {
         self.source_revision
     }
 
+    #[cfg_attr(
+        not(unix),
+        expect(dead_code, reason = "read only by the unix host backend")
+    )]
     pub(super) fn is_host_snapshot(&self) -> bool {
         self.source_authority_id.as_str() == HOST_SNAPSHOT_SOURCE_AUTHORITY
             && self.source_revision.get() == HOST_SNAPSHOT_SOURCE_REVISION
@@ -736,8 +740,7 @@ impl ExecutionEnvironment {
             .clone_from(&options.required_path_prefix);
         config.discovery_ceiling = options.discovery_ceiling;
         let process = Arc::new(HostProcessContext::capture(&workspace, options)?);
-        let backend: Arc<dyn ExecutionBackend> =
-            Arc::new(HostExecutionBackend::new(&config, Arc::clone(&process))?);
+        let backend = host_execution_backend(&config, &process)?;
         let mut environment = Self::from_workspace_and_backend(scope, workspace, config, backend)?;
         environment.host_process = Some(process);
         Ok(environment)

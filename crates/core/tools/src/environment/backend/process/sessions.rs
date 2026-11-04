@@ -28,6 +28,10 @@ use super::{
     write_joined_session_input,
 };
 
+#[cfg_attr(
+    not(unix),
+    expect(dead_code, reason = "read only by the unix host backend")
+)]
 #[derive(Default)]
 pub(super) struct JoinedSessionOutput {
     pub(super) records: VecDeque<JoinedProcessOutputRecord>,
@@ -58,6 +62,10 @@ pub(super) struct LeftoverJob {
     pub(super) processes: usize,
 }
 
+#[cfg_attr(
+    not(unix),
+    expect(dead_code, reason = "read only by the unix host backend")
+)]
 pub(super) struct PendingJobOutput {
     pub(super) service: Weak<JoinedProcessServiceInner>,
     pub(super) id: JoinedProcessSessionId,
@@ -84,6 +92,10 @@ impl PendingJobOutput {
         }
     }
 
+    #[cfg_attr(
+        not(unix),
+        expect(dead_code, reason = "read only by the unix host backend")
+    )]
     pub(super) fn observe(&mut self, bytes: &[u8], terminal: bool) -> bool {
         self.utf8.extend_from_slice(bytes);
         let mut consumed = 0;
@@ -116,6 +128,10 @@ impl PendingJobOutput {
 }
 
 impl JoinedSessionShared {
+    #[cfg_attr(
+        not(unix),
+        expect(dead_code, reason = "read only by the unix host backend")
+    )]
     pub(super) fn terminal_changed(&mut self) {
         self.maybe_spool(&[], true);
         self.changes
@@ -126,6 +142,10 @@ impl JoinedSessionShared {
         }
     }
 
+    #[cfg_attr(
+        not(unix),
+        expect(dead_code, reason = "read only by the unix host backend")
+    )]
     pub(super) fn maybe_spool(&mut self, bytes: &[u8], terminal: bool) {
         let needed = self.pending_spool.as_mut().is_some_and(|pending| {
             pending.observe(bytes, terminal) || self.output.next_cursor > pending.threshold
@@ -781,6 +801,10 @@ impl JoinedProcessSessions {
     }
 }
 
+#[cfg_attr(
+    not(unix),
+    expect(dead_code, reason = "read only by the unix host backend")
+)]
 pub(super) fn displayed_command(command: &JoinedProcessCommand) -> String {
     let text = match command {
         JoinedProcessCommand::Shell { command, .. } => command.to_string(),

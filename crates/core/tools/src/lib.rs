@@ -7,8 +7,10 @@
 
 #![forbid(unsafe_code)]
 
-#[cfg(not(unix))]
-compile_error!("plakous-tools requires a unix target (spec 06 supported platforms)");
+#[cfg(not(any(unix, all(target_arch = "wasm32", target_os = "unknown"))))]
+compile_error!(
+    "plakous-tools requires a unix target or wasm32-unknown-unknown (spec 06 supported platforms)"
+);
 
 mod jobs;
 pub use jobs::{

@@ -562,6 +562,10 @@ pub struct ExecutionBackendIdentity {
 }
 
 impl ExecutionBackendIdentity {
+    #[cfg_attr(
+        not(unix),
+        expect(dead_code, reason = "read only by the unix host backend")
+    )]
     pub(super) fn local_runner() -> Result<Self, ExecutionEnvironmentError> {
         Ok(Self {
             descriptor: ExecutionBackendDescriptor::local_runner(),
@@ -742,7 +746,7 @@ pub(super) fn path_identity_bytes(path: &Path) -> Result<Vec<u8>, ExecutionEnvir
 pub(super) fn filesystem_object_identity(
     path: &Path,
 ) -> Result<HostFilesystemObjectIdentity, ExecutionEnvironmentError> {
-    use std::os::unix::fs::MetadataExt;
+    use super::metadata::MetadataExt;
 
     let metadata = std::fs::metadata(path).map_err(|_| {
         ExecutionEnvironmentError::new(

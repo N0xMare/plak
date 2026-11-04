@@ -11,7 +11,7 @@ use super::{
     ToolExecutorBindingIdentity, invalid_request, resource_error, validate_absolute_program,
     validate_literal, validate_process_value, validate_process_values, validate_relative_path,
 };
-use std::os::unix::fs::MetadataExt;
+use crate::environment::metadata::MetadataExt;
 
 /// Opaque, allocation-local process-session identity. It is never an OS PID.
 #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -213,6 +213,10 @@ impl JoinedProcessShellProfile {
         &self.identity
     }
 
+    #[cfg_attr(
+        not(unix),
+        expect(dead_code, reason = "read only by the unix host backend")
+    )]
     pub(super) fn revalidated_executable(&self) -> Result<&Path, ExecutionBackendError> {
         let canonical = fs::canonicalize(self.executable.as_ref())
             .map_err(|_| invalid_request("joined process shell could not be revalidated"))?;

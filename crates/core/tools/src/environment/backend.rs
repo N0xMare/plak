@@ -30,32 +30,48 @@ mod text_search;
 pub use text_search::{
     AdmittedTextQuery, AdmittedTextScan, AdmittedTextSearch, search_admitted_text,
 };
+#[cfg(unix)]
 mod workspace;
+#[cfg(not(unix))]
+mod workspace_unsupported;
 use workspace::{
     WorkspaceSnapshotCache, mutate_workspace_sync, query_repository_sync, read_workspace_sync,
 };
+#[cfg(not(unix))]
+use workspace_unsupported as workspace;
+#[cfg(unix)]
 mod job_output;
+#[cfg(not(unix))]
+mod job_output_unsupported;
 pub use job_output::JobOutputRoot;
+#[cfg(not(unix))]
+use job_output_unsupported as job_output;
 mod job_output_types;
 pub use job_output_types::{
     JOB_OUTPUT_RETENTION, JOB_OUTPUT_ROOT_BUDGET_BYTES, JOB_OUTPUT_STALE_AGE,
     JOB_OUTPUT_TRUNCATED_LINE, JobOutputFile, JobOutputSlice, MAX_JOB_OUTPUT_FILE_BYTES,
     job_output_file_lost, job_output_incomplete_line,
 };
+#[cfg(unix)]
 mod host;
+#[cfg(unix)]
 pub use host::HostExecutionBackend;
+#[cfg(unix)]
+pub(super) use host::host_execution_backend;
+#[cfg(not(unix))]
+pub(super) use process::host_execution_backend;
 mod process;
+#[cfg(unix)]
+use process::execute_host_literal_process;
 pub(super) use process::{HostProcessContext, JoinedProcessServiceCache};
 pub use process::{JoinedProcessHostCapacity, JoinedProcessSessions};
-use process::{
-    execute_host_literal_process, validate_absolute_program, validate_process_value,
-    validate_process_values,
-};
+use process::{validate_absolute_program, validate_process_value, validate_process_values};
 use workspace::resolve_existing_no_symlink;
 mod operation;
 pub use operation::{LineOwner, OperationClass, OperationContext};
 pub(crate) mod runner;
 mod service;
+#[cfg(unix)]
 use service::spawn_host_service;
 pub use service::{
     MAX_SERVICE_ENVIRONMENT_ENTRIES, MAX_SERVICE_STDERR_TAIL_BYTES, PreparedServiceProcess,
@@ -317,7 +333,15 @@ impl fmt::Debug for EnvironmentVariableValue {
 pub struct ExecutionWorkspace {
     root: Arc<PathBuf>,
     cwd: Arc<PathBuf>,
+    #[cfg_attr(
+        not(unix),
+        expect(dead_code, reason = "read only by the unix host backend")
+    )]
     root_device: u64,
+    #[cfg_attr(
+        not(unix),
+        expect(dead_code, reason = "read only by the unix host backend")
+    )]
     root_inode: u64,
 }
 

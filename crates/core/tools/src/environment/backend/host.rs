@@ -31,7 +31,7 @@ pub struct HostExecutionBackend {
 }
 
 impl HostExecutionBackend {
-    pub(in crate::environment) fn new(
+    fn new(
         config: &ExecutionEnvironmentConfig,
         process: Arc<HostProcessContext>,
     ) -> Result<Self, ExecutionEnvironmentError> {
@@ -142,4 +142,15 @@ impl ExecutionBackend for HostExecutionBackend {
         }
         spawn_host_service(workspace, request, control, Arc::clone(&self.process))
     }
+}
+
+/// The host backend over one captured host process context.
+pub(in crate::environment) fn host_execution_backend(
+    config: &ExecutionEnvironmentConfig,
+    process: &Arc<HostProcessContext>,
+) -> Result<Arc<dyn ExecutionBackend>, ExecutionEnvironmentError> {
+    Ok(Arc::new(HostExecutionBackend::new(
+        config,
+        Arc::clone(process),
+    )?))
 }

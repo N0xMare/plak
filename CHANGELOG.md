@@ -325,6 +325,10 @@ an export.
 - A portability fence keeps `plakous-model`'s dependency closure free of
   native-only crates for `wasm32-unknown-unknown`, and the builds group
   compiles it for that target. `just dev-tools install` adds the target.
+- `plakous-tools` joins the portable set. Its process, PTY and descriptor
+  dependencies are `cfg(unix)` target dependencies; on `wasm32-unknown-unknown`
+  (not a supported target) the library compiles without a host, so host
+  environments, workspace files and job output files refuse there.
 - One test-environment helper and one build entry point serve every recipe;
   `just nextest` runs cargo-nextest under the gate's environment.
 

@@ -42,6 +42,10 @@ pub(super) struct HostProcessOwner {
 }
 
 impl HostProcessOwner {
+    pub(super) fn request_stop(&self) {
+        self.stop.store(true, Ordering::Release);
+    }
+
     pub(super) fn join_until(&mut self, deadline: Instant) -> Result<bool, ExecutionBackendError> {
         let Some(thread) = self.thread.as_ref() else {
             // An owner is removed after a successful join. A retained owner

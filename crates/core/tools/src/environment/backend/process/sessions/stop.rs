@@ -197,7 +197,7 @@ impl JoinedProcessSessions {
         lock(&session.input).take();
         let mut owner = lock(&session.owner);
         let joined = if let Some(owner) = owner.as_mut() {
-            owner.stop.store(true, Ordering::Release);
+            owner.request_stop();
             owner.join_until(deadline)?
         } else {
             true
@@ -297,7 +297,7 @@ impl JoinedProcessSessions {
         lock(&session.input).take();
         let mut owner = lock(&session.owner);
         if let Some(owner) = owner.as_mut() {
-            owner.stop.store(true, Ordering::Release);
+            owner.request_stop();
             if !owner.join_until(deadline)? {
                 return Err(cleanup_unresolved_error());
             }
