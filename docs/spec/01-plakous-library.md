@@ -6150,15 +6150,31 @@ hook, refresh application, pin or cache trim) as `vcs.effect` steps of a tree
 operation (`RunnerCall::tree`, protocol class `TreeOperation`), keyed by the
 tree and the stage the tree recorded before the effect ran (chapter 03 §14).
 The runner answers both through its registered extension
-(`remote_vcs::vcs_runner_extension`), which runs the system port over the
-runner's filesystem for the paths its embedder admits and answers any other
+(`remote_vcs::vcs_runner_extension`, given the admission and the copies
+root), which runs the system port over the runner's filesystem for the paths
+its embedder admits and answers any other
 path unavailable, with no effect; a relative path, or one with a `..`
 component, is unavailable before the embedder's admission sees it. A step the
 link refused is unavailable, with no effect; one whose outcome it lost, or
 whose key the runner reports spent (it ran and its answer was already taken,
 `RunnerFailure::Spent`), marks its stage unknown and is `RecoveryRequired`. A presentation read the runner cannot answer reads nothing.
 The port reports its runner (`VcsOps::stage_runner`); an in-process port
-reports none and records no stages. `UnavailableVcs` remains the port that
+reports none and records no stages. Copies that cross runners (chapter 03
+§14) use the port's transfer calls: `transfer_port` (another runner's port
+the tree's port reaches), `transfer_root` (the tree's mirror on a runner,
+`<copies root>/<runner id>/<tree id>`, from the extension's copies root; a
+runner without
+one takes no copies), `snapshot_base`, `bundle_create`, `bundle_read` (a
+question, at most `BUNDLE_CHUNK_BYTES`, 1 MiB, hex on the link),
+`bundle_write`, `bundle_drop`, `bundle_apply` (digest-checked, then `git
+bundle verify` and fetch into private staging refs or objects alone; its pins
+are created only where none is, and its upload is removed whatever the
+outcome), `ref_commit` (a question) and `sweep_transfers` (transfer files
+older than an age). Bundles and uploads
+live owner-only in the repository's `plak-transfer` directory, named by their
+SHA-256, and only from a git checkout. `routed_vcs::RoutedVcs` is the tree's
+port over the launch runner's port and other runners' ports, routing each
+call by the mirror its path lies under. `UnavailableVcs` remains the port that
 refuses every effect.
 The run-stable workspace facts that plan compilation and the runtime
 environment component bind (`plakous-agent/workspace-environment-v2`) name the

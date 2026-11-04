@@ -15,8 +15,8 @@ use std::sync::Arc;
 use plakous_workspace::occupancy_vcs::stage::VcsStage;
 
 use super::{
-    AttemptId, Effects, MintTicket, ProductAgentTree, TopologyError, VcsStageClass, VcsStageIntent,
-    VcsStageKind,
+    AttemptId, CandidateId, Effects, MintTicket, ProductAgentTree, TopologyError, VcsStageClass,
+    VcsStageIntent, VcsStageKind,
 };
 
 /// What settles a stage found unfinished.
@@ -25,8 +25,8 @@ pub(crate) enum StageOutcome {
     /// Run it again under the same key: the effect's own workflow records it
     /// failed, and its rerun takes the stage's operation id again.
     Rerun,
-    /// Check the recorded outcome. No stage of a single runner records one
-    /// today, so this settles as a fault until node recovery checks it.
+    /// Check the recorded outcome: its rerun asks whether the expected
+    /// reference already names the expected commit, and runs only if not.
     Check,
     /// Not provable either way: a `vcs_fault` for the stage's node.
     Fault,
@@ -41,6 +41,9 @@ pub(crate) fn stage_outcome(intent: &VcsStageIntent) -> StageOutcome {
         VcsStageClass::Ambiguous => StageOutcome::Fault,
     }
 }
+
+/// The most ancestors [`ProductAgentTree::tree_runner_ancestors`] names.
+pub const MAX_RUNNER_ANCESTORS: usize = 8;
 
 /// The `agent_operations` key of a new stage.
 fn stage_operation_id() -> String {
@@ -107,6 +110,29 @@ impl ProductAgentTree {
         }) {
             return Ok(VcsStage::new(left.operation_id.clone()));
         }
+        // A verifiable stage left unfinished checked its expected outcome
+        // before this one was recorded, so this one replaces it.
+        if intent.class == VcsStageClass::Verifiable {
+            let replaced: Vec<String> = self
+                .operations
+                .values()
+                .filter(|recorded| {
+                    VcsStageIntent::from_operation(recorded)
+                        .ok()
+                        .flatten()
+                        .is_some_and(|left| {
+                            left.stage == intent.stage
+                                && left.agent_id == intent.agent_id
+                                && left.candidate_id == intent.candidate_id
+                                && left.expected == intent.expected
+                        })
+                })
+                .map(|recorded| recorded.operation_id.clone())
+                .collect();
+            for id in replaced {
+                self.operations.remove(&id);
+            }
+        }
         let id = stage_operation_id();
         let row = intent.to_operation(id.clone(), &intent.agent_id, None)?;
         self.operations.insert(id.clone(), row);
@@ -122,6 +148,33 @@ impl ProductAgentTree {
         } else if self.operations.remove(stage.operation_id()).is_some() {
             self.bump();
         }
+    }
+
+    /// Settles the verifiable carry back of `candidate_id` once the seal it
+    /// served is recorded: a lost run's check is moot then.
+    pub(crate) fn settle_carried_seal(&mut self, agent_id: &str, candidate_id: &CandidateId) {
+        let carried: Vec<String> = self
+            .operations
+            .values()
+            .filter(|row| {
+                VcsStageIntent::from_operation(row)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|intent| {
+                        intent.class == VcsStageClass::Verifiable
+                            && intent.agent_id == agent_id
+                            && intent.candidate_id.as_ref() == Some(candidate_id)
+                    })
+            })
+            .map(|row| row.operation_id.clone())
+            .collect();
+        if carried.is_empty() {
+            return;
+        }
+        for id in carried {
+            self.operations.remove(&id);
+        }
+        self.bump();
     }
 
     /// Settles every stage a crashed or lost process left recorded.
@@ -143,9 +196,10 @@ impl ProductAgentTree {
         };
         let intent = VcsStageIntent::from_operation(row).ok().flatten();
         let outcome = intent.as_ref().map(stage_outcome);
-        // A reproducible stage stays for its rerun while its node can still
-        // run it; a node that is gone or closed reruns nothing.
-        if outcome == Some(StageOutcome::Rerun)
+        // A reproducible or verifiable stage stays for its rerun while its
+        // node can still run it; a node that is gone or closed reruns nothing.
+        let reruns = matches!(outcome, Some(StageOutcome::Rerun | StageOutcome::Check));
+        if reruns
             && intent.as_ref().is_some_and(|intent| {
                 self.nodes
                     .get(&intent.agent_id)
@@ -157,7 +211,7 @@ impl ProductAgentTree {
         let caller = row.caller_agent_id.clone();
         self.operations.remove(id);
         self.bump();
-        if outcome != Some(StageOutcome::Rerun) {
+        if !reruns {
             let (agent_id, attempt_id) = intent.map_or_else(
                 || (caller, None),
                 |intent| (intent.agent_id, intent.attempt_id),
@@ -176,13 +230,17 @@ impl ProductAgentTree {
     ) -> Result<EffectStages, TopologyError> {
         let reproducible = VcsStageClass::Reproducible;
         let mut stages = EffectStages::default();
+        // Each effect runs on the runner of the node it serves.
+        let placed = |tree: &Self, agent: &str| {
+            tree.nodes
+                .get(agent)
+                .and_then(|node| node.placement.runner_id.clone())
+                .unwrap_or_else(|| runner.to_owned())
+        };
         for ticket in &effects.base_pins {
-            let mut intent = local_stage(
-                VcsStageKind::Refresh,
-                reproducible,
-                ticket.agent_id(),
-                runner,
-            );
+            let on = placed(self, ticket.agent_id());
+            let mut intent =
+                local_stage(VcsStageKind::Refresh, reproducible, ticket.agent_id(), &on);
             intent.base_commit = Some(ticket.base().to_owned());
             stages.base_pins.push(self.record_vcs_stage(&intent)?);
         }
@@ -192,39 +250,33 @@ impl ProductAgentTree {
                 .push(self.record_vcs_stage(&ticket.stage(runner))?);
         }
         for ticket in &effects.seals {
-            let mut intent =
-                local_stage(VcsStageKind::Seal, reproducible, &ticket.agent_id, runner);
+            let on = placed(self, &ticket.agent_id);
+            let mut intent = local_stage(VcsStageKind::Seal, reproducible, &ticket.agent_id, &on);
             intent.attempt_id.clone_from(&ticket.attempt_id);
             intent.candidate_id = Some(ticket.candidate_id.clone());
             intent.base_commit = Some(ticket.base_commit.clone());
             stages.seals.push(self.record_vcs_stage(&intent)?);
         }
         for ticket in &effects.dormancy {
-            let intent = local_stage(
-                VcsStageKind::Unmint,
-                reproducible,
-                ticket.agent_id(),
-                runner,
-            );
+            let on = placed(self, ticket.agent_id());
+            let intent = local_stage(VcsStageKind::Unmint, reproducible, ticket.agent_id(), &on);
             stages.dormancy.push(self.record_vcs_stage(&intent)?);
         }
         for ticket in &effects.adopts {
             let (agent_id, candidate_id) = ticket.stage_identity();
-            let mut intent = local_stage(
-                VcsStageKind::Adopt,
-                VcsStageClass::Ambiguous,
-                agent_id,
-                runner,
-            );
+            let on = placed(self, agent_id);
+            let mut intent =
+                local_stage(VcsStageKind::Adopt, VcsStageClass::Ambiguous, agent_id, &on);
             intent.candidate_id = Some(candidate_id.clone());
             stages.adopts.push(self.record_vcs_stage(&intent)?);
         }
         for hook in &effects.hooks {
+            let on = placed(self, &hook.agent_id);
             let intent = local_stage(
                 VcsStageKind::Mint,
                 VcsStageClass::Ambiguous,
                 &hook.agent_id,
-                runner,
+                &on,
             );
             stages.hooks.push(self.record_vcs_stage(&intent)?);
         }
@@ -237,10 +289,42 @@ impl ProductAgentTree {
                     || self.root_agent_id.clone(),
                     |row| row.owner_agent_id.clone(),
                 );
-            let intent = local_stage(VcsStageKind::Unmint, reproducible, &agent_id, runner);
+            let on = placed(self, &agent_id);
+            let intent = local_stage(VcsStageKind::Unmint, reproducible, &agent_id, &on);
             stages.unmints.push(self.record_vcs_stage(&intent)?);
         }
         Ok(stages)
+    }
+
+    /// The commits runner `runner` already holds for this tree, at most
+    /// [`MAX_RUNNER_ANCESTORS`]: each was the tip of a bundle applied
+    /// there. A bundle to it leaves out each one the runner still holds.
+    #[must_use]
+    pub fn tree_runner_ancestors(&self, runner: &str) -> Vec<String> {
+        self.runner_ancestors()
+            .get(runner)
+            .map(|commits| commits.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Records that `runner` holds `commit`, the tip of a bundle applied
+    /// there. A full set gives up its first commit for it.
+    pub(crate) fn record_runner_ancestor(&mut self, runner: &str, commit: &str) {
+        let commits = self
+            .lineage
+            .runner_ancestors
+            .entry(runner.to_owned())
+            .or_default();
+        if !commits.insert(commit.to_owned()) {
+            return;
+        }
+        while commits.len() > MAX_RUNNER_ANCESTORS {
+            let Some(first) = commits.iter().find(|held| *held != commit).cloned() else {
+                break;
+            };
+            commits.remove(&first);
+        }
+        self.bump();
     }
 
     /// Records the stage `ticket`'s mint runs as on `runner`: a fresh copy
@@ -255,7 +339,7 @@ impl ProductAgentTree {
             VcsStageKind::Mint,
             VcsStageClass::Reproducible,
             ticket.agent_id(),
-            runner,
+            ticket.target_runner().unwrap_or(runner),
         );
         intent.attempt_id = attempt_id.cloned();
         intent.base_commit = ticket.input_commit().map(str::to_owned);

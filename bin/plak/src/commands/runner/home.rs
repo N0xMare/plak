@@ -22,6 +22,9 @@ pub(crate) struct RunnerToml {
     /// workspace outside every root is refused.
     #[serde(default)]
     pub(crate) roots: Vec<PathBuf>,
+    /// Where copies carried from another runner are kept, one mirror per
+    /// tree; unset, this runner takes none.
+    pub(crate) copies: Option<PathBuf>,
     /// The `PATH` the runner's processes start with; unset, a login shell
     /// is asked once when the daemon starts.
     pub(crate) path: Option<String>,

@@ -257,6 +257,7 @@ impl ProductAgentTree {
             base_content,
             base_change_id,
             prior_status,
+            carry: self.seal_carry(agent_id),
         };
         if let Some(node) = self.nodes.get_mut(agent_id) {
             node.status = NodeStatus::Sealing;
@@ -286,6 +287,7 @@ impl ProductAgentTree {
             return None;
         }
         self.outstanding_seals.remove(&ticket.agent_id);
+        self.settle_carried_seal(&ticket.agent_id, &ticket.candidate_id);
         let SealTicket {
             agent_id,
             attempt_id,

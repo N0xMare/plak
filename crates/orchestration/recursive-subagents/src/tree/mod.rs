@@ -405,6 +405,9 @@ pub struct SealTicket {
     /// What the termination path had already set; `finish_seal` restores it
     /// rather than declaring `Completed` on every path.
     pub prior_status: NodeStatus,
+    /// The runners a candidate sealed on another runner than its parent's
+    /// is carried back between, into the parent's checkout.
+    pub(crate) carry: Option<cross_runner::SealCarry>,
 }
 
 /// Whether a sealed snapshot carries anything beyond the copy's base:
@@ -454,6 +457,9 @@ pub struct MintTicket {
     mode: WorkspaceMode,
     input_base: Option<VcsSnapshot>,
     merge_base: Option<VcsSnapshot>,
+    /// The runners a copy on another runner than its parent's is carried
+    /// between; `None` mints on the parent's runner.
+    carry: Option<Box<cross_runner::Carry>>,
 }
 
 /// What `bind_workspace` planned for one reserved spawn: either the caller's
@@ -498,6 +504,8 @@ pub struct SpawnReservation {
     bound: Option<BoundWorkspace>,
     /// The spawning parent's composition, frozen on the child's node.
     parent_composition: Option<plakous_host_protocol::selection::CompositionSelection>,
+    /// The runner the child is placed on when it is not its parent's.
+    runner: Option<String>,
 }
 
 impl SpawnReservation {
@@ -557,6 +565,11 @@ impl MintTicket {
     /// The commit the copy is minted over, when an input names one.
     pub(crate) fn input_commit(&self) -> Option<&str> {
         self.input_base.as_ref().map(|base| base.commit.as_str())
+    }
+
+    /// The runner the copy is minted on when it is not its parent's.
+    pub(crate) fn target_runner(&self) -> Option<&str> {
+        self.carry.as_ref().map(|carry| carry.target.as_str())
     }
 }
 
@@ -849,6 +862,7 @@ mod await_output;
 mod candidates;
 mod commands;
 mod conflicts;
+pub mod cross_runner;
 mod custody;
 mod dormancy;
 mod effect_outcomes;

@@ -624,6 +624,10 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-hosted", "src/runtime/projection/transcript.rs"): {"debug_assert"},
     ("plakous-hosted", "src/sessions/transcript.rs"): {"debug_assert"},
     # Fold integrity refusals: fixed diagnostics and the affected agent id only.
+    # An effect run as neither a stage nor an unstaged scope is a defect.
+    ("plakous-recursive-subagents", "src/remote_vcs.rs"): {"debug", "debug_assert"},
+    # The ledger a cross-runner carry records its stages through.
+    ("plakous-recursive-subagents", "src/tree/cross_runner.rs"): {"task_local"},
     ("plakous-recursive-subagents", "src/tree/candidates.rs"): {"error"},
     ("plakous-recursive-subagents", "src/tree/workspaces.rs"): {"error"},
     # Private capture diagnostics use closed metadata, never request bodies.

@@ -200,6 +200,9 @@ impl SealTicket {
                 .await?;
             return Ok(None);
         }
+        if let Some(carry) = &self.carry {
+            Box::pin(super::cross_runner::seal_back(vcs, self, carry, &sealed)).await?;
+        }
         Ok(Some(sealed))
     }
 }
@@ -255,6 +258,10 @@ impl MintTicket {
     /// The subprocess half of the mint. Holds no tree reference so it can
     /// run with the tree mutex released.
     pub async fn mint(&self, vcs: &dyn VcsOps) -> Result<MintedCopy, VcsError> {
+        if let Some(carry) = &self.carry {
+            // Boxed: the carry is rare and its future large.
+            return Box::pin(super::cross_runner::mint_across(vcs, self, carry)).await;
+        }
         let mut minted = vcs
             .mint_from(&MintRequest {
                 launch: &self.launch_checkout,

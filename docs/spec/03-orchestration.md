@@ -339,8 +339,14 @@ VCS port runs on (the local runner, recorded as none, unless a runner is
 selected). The tree admits a spawn placed elsewhere only by the rules of the
 runner split: an `inherit` child shares its parent's checkout, so another
 runner is `runner_mismatch`; a `fork` or `snapshot` copy on another runner is
-`cross_runner_copy_unavailable` until copies cross runners as bundles. Both
-refusals reserve nothing. No spawn names another runner yet.
+carried there as a git bundle of its parent's live state (§14) and the child
+is placed on that runner. Such a copy is `cross_runner_copy_unavailable` when
+the tree's VCS port reaches no such runner (`VcsOps::transfer_port`), the
+parent is on the local runner, or the spawn names candidate inputs. Both
+refusals reserve nothing. The library's `spawn_reserve_on` names the runner;
+no spawn tool argument or card field does yet, and the product's port
+reaches only the selected runner, so the product never places a child
+elsewhere.
 
 Workspace process-shim requirements follow the actual workspace identity, not
 the tool tier. An inherited ordinary checkout needs no copy shim; an inherited
@@ -3927,7 +3933,7 @@ tree asked for, what it derived from its sessions' change feeds (chapter 01
 | Node line, epoch number, runner placement, workspace root and cwd, parent composition | intent | the spawn: the caller's epoch, composition and runner; the root's runner is the one the tree's VCS port runs on (none for the local runner); written today as no line and no workspace override |
 | Successor epochs, current epoch | intent | an epoch append: a profile switch's settlement of its pending epoch, or a roster apply (§1.2) |
 | Tree provenance (`forked_from`) | intent | the fork or import that created the tree: a `/fork` genesis writes `node` (source tree, root agent, line, branch, source epoch); none for an import yet |
-| Runner ancestors | external-effect record | completed bundle stages; none today |
+| Runner ancestors | external-effect record | each bundle apply that completes adds its tip to its target runner's set, at most 8, a full set giving up its first commit; a lost record only makes a later bundle carry more |
 | Custody | ownership record, never tree content | the custody steps above |
 | Interrupt cause | intent | an optional `cause` field (`operator`, `parent`, `cascade`, `owner_lost`, `handoff`, `stopped`) of the anchored `interrupt` intent, omitted when the writer records none, which every interrupt does today; such a row keeps its earlier bytes |
 | Root and child continuation decisions | intent | `agent_operations` of kind `continuation`, keyed `plak:continuation:<agent>:<attempt or root>:<cause>:<host generation>:<round>:<turn or command>:<anchor id>`, so root decisions in different turns and decisions after another host loss never collide; with cause `transient`, `owner_lost` or `handoff`, a one-based 32-bit round, the anchoring stopped turn or unfacted command, the decision stamp, and a decision: `new_turn` (its command id and the unfacted commands it replaces), `resubmit` (the one unfacted command) or `withdrawn` (at least one command); none today, where child transient decisions remain `child_finalization` `Resume` intents and root decisions are process-local |
@@ -4787,13 +4793,47 @@ answer, so a rerun never runs beside the step it repeats; a step whose
 answer was already taken ran to its end and runs again under a key of its
 own. An ambiguous stage records a `vcs_fault` for its node, as an in-flight
 effect at reopen does; one of the root records it for the root, naming its
-checkout, since nothing recovers the root itself. A verifiable stage settles
-as ambiguous until node recovery checks its expected outcome. That reading is
-one function, which node recovery replaces. Effects run outside a settle or a
+checkout, since nothing recovers the root itself. A verifiable stage stays
+recorded like a reproducible one, and its rerun checks its expected outcome
+first. That reading is one function, which node recovery replaces. Effects run outside a settle or a
 spawn (attachment refreshes and base pins, a candidate's unpin, a failed
 worktree's rescue seal) each declare an unstaged scope and go under a key of
 their own: each is re-derived by its next attach or settle. A runner port
 treats an effect in neither a stage nor an unstaged scope as a defect.
+A copy on another runner than its parent's crosses as git bundles, each step
+a stage recorded through the stage ledger the driver runs the spawn's mint
+and each settle's batch under (`cross_runner::with_ledger`). The mint runs a
+base snapshot on the parent's runner (the parent's HEAD and its non-secret
+uncommitted work, pinned under `refs/plak/<ns16>/transfers/<agent>`), a bundle
+create of that ref leaving out each of `tree_runner_ancestors` the target
+still holds, the host's relay of the bundle in chunks of at most 1 MiB into
+an upload named by its SHA-256 (the host stores none of it), and a bundle
+apply that checks the digest and fetches the ref into the tree's mirror on
+the target, `<copies root>/<runner id>/<tree id>` (keyed by runner, so runners
+sharing a copies root keep apart mirrors); each is reproducible. The mint itself,
+the spawn's own stage, then mints the copy from the mirror over the
+snapshot, so the copy lives under the mirror's `.plak/worktrees`. The tree's
+port for several runners (`RoutedVcs`) answers every later call about a path
+under a runner's mirror from that runner's port, with the mirror as its
+launch checkout (two runners whose mirrors nest are both left out); a copy there is not refreshed, and its ahead/behind against
+a parent on another runner is unknown. Its seal runs on its runner by the
+usual rules and is carried back the same way: bundle create of its candidate
+reference less the copy's base, relay, and a verifiable bundle apply into the
+parent's checkout that fetches the objects and creates the candidate
+reference and its base pin, only where neither is, whose intent records that
+reference and the sealed commit. A seal-back first reads the parent's
+reference: naming the expected commit, it carries nothing; naming another
+commit, it moves nothing and records a `vcs_fault` for the node; absent, it
+carries. An apply whose answer was lost is checked the same way. An apply
+removes its upload whatever its outcome, and the reclamation pass removes
+transfer files older than a day from the launch checkout and every mirror. A
+verifiable stage left unfinished stays recorded while its node is open, the
+next one for the same node, candidate and outcome replaces it, and the
+revision that records the seal settles it. Adoption runs on the parent's
+runner as before. A copy crosses only from a git checkout. A crash at any
+stage boundary leaves a reproducible or verifiable record and no fault: the
+reopened tree reruns the spawn or the seal, and both converge
+(`cross_runner_fork_stages`).
 A mutation retains the store-acknowledged revision from its explicit publish;
 settling an empty effect batch does not itself publish a mutation. Every queued
 effect is drained after the tree mutex is released, including when the initial

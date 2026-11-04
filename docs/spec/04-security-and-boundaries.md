@@ -647,7 +647,11 @@ widens it.
   with a root in or around it, and its default workspace passes the same check
   as every other. A workspace probe answers only about an absolute path
   without `..` that lies under a root and outside the product home, resolved
-  as far as it exists. A shell there still
+  as far as it exists; the tree's version control answers by the same rule,
+  with the `copies` root admitted beside the roots. Copies carried from
+  another runner hold only committed work and non-secret uncommitted work,
+  never secret dirt or ignored caches, and the host relays their bundles
+  without keeping them. A shell there still
   has the runner user's whole authority (section 1.1).
 - **Fresh authority.** The daemon's `PATH` and `HOME` come from `runner.toml`
   or the user's login shell when `connect` starts it, with every other

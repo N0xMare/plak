@@ -99,6 +99,116 @@ pub trait VcsOps: Send + Sync {
         None
     }
 
+    /// The port of `runner`, another runner this tree's port reaches for a
+    /// copy that crosses runners; `None` when it reaches no such runner.
+    fn transfer_port(&self, runner: &str) -> Option<std::sync::Arc<dyn VcsOps>> {
+        let _ = runner;
+        None
+    }
+
+    /// The tree's mirror repository on this port's runner, where copies
+    /// that crossed runners are minted from.
+    fn transfer_root<'a>(&'a self, tree_id: &'a str) -> VcsFuture<'a, Result<PathBuf, VcsError>> {
+        let _ = tree_id;
+        ready(Err(VcsError::mint_unavailable(
+            "this runner keeps no copies from other runners",
+        )))
+    }
+
+    /// Pins the parent's state as a base snapshot to carry (see
+    /// [`super::transfer`]).
+    fn snapshot_base<'a>(
+        &'a self,
+        parent_cwd: &'a Path,
+        namespace: &'a str,
+        agent: &'a str,
+    ) -> VcsFuture<'a, Result<VcsSnapshot, VcsError>> {
+        let _ = (parent_cwd, namespace, agent);
+        ready(Err(transfer_unavailable()))
+    }
+
+    /// Bundles `reference` of `repo` without what `exclude` names.
+    fn bundle_create<'a>(
+        &'a self,
+        repo: &'a Path,
+        reference: &'a str,
+        exclude: &'a [String],
+    ) -> VcsFuture<'a, Result<super::BundleFacts, VcsError>> {
+        let _ = (repo, reference, exclude);
+        ready(Err(transfer_unavailable()))
+    }
+
+    /// Up to `len` bytes of bundle `id` from `offset`.
+    fn bundle_read<'a>(
+        &'a self,
+        repo: &'a Path,
+        id: &'a str,
+        offset: u64,
+        len: u64,
+    ) -> VcsFuture<'a, Result<Vec<u8>, VcsError>> {
+        let _ = (repo, id, offset, len);
+        ready(Err(transfer_unavailable()))
+    }
+
+    /// Removes bundle `id`.
+    fn bundle_drop<'a>(
+        &'a self,
+        repo: &'a Path,
+        id: &'a str,
+    ) -> VcsFuture<'a, Result<(), VcsError>> {
+        let _ = (repo, id);
+        ready(Err(transfer_unavailable()))
+    }
+
+    /// Writes one chunk of upload `id` into `repo` at `offset`.
+    fn bundle_write<'a>(
+        &'a self,
+        repo: &'a Path,
+        id: &'a str,
+        offset: u64,
+        bytes: &'a [u8],
+    ) -> VcsFuture<'a, Result<(), VcsError>> {
+        let _ = (repo, id, offset, bytes);
+        ready(Err(transfer_unavailable()))
+    }
+
+    /// Applies upload `id` to `repo` once it hashes to `digest`: the
+    /// `fetch` refs from the bundle, then the `pins` under `namespace`.
+    fn bundle_apply<'a>(
+        &'a self,
+        repo: &'a Path,
+        id: &'a str,
+        digest: &'a str,
+        namespace: &'a str,
+        fetch: &'a [(String, String)],
+        pins: &'a [(String, String)],
+    ) -> VcsFuture<'a, Result<(), VcsError>> {
+        let _ = (repo, id, digest, namespace, fetch, pins);
+        ready(Err(transfer_unavailable()))
+    }
+
+    /// The commit `reference` names in `repo`, if any.
+    fn ref_commit<'a>(
+        &'a self,
+        repo: &'a Path,
+        reference: &'a str,
+    ) -> VcsFuture<'a, Result<Option<String>, VcsError>> {
+        let _ = (repo, reference);
+        ready(Err(transfer_unavailable()))
+    }
+
+    /// Removes the transfer files under `repo` older than `max_age_secs`
+    /// that no carry finished; how many it removed. A port that carries no
+    /// copies has none.
+    fn sweep_transfers<'a>(
+        &'a self,
+        repo: &'a Path,
+        max_age_secs: u64,
+    ) -> VcsFuture<'a, Result<u32, VcsError>> {
+        let _ = (repo, max_age_secs);
+        ready(Ok(0))
+    }
+
     /// Computes a clean live-fork catch-up using object writes only.
     fn prepare_refresh<'a>(
         &'a self,
@@ -246,6 +356,10 @@ pub trait VcsOps: Send + Sync {
         copy_id: &'a str,
         candidate: &'a VcsSnapshot,
     ) -> VcsFuture<'a, Result<bool, VcsError>>;
+}
+
+fn transfer_unavailable() -> VcsError {
+    VcsError::mint_unavailable("this port does not carry copies between runners")
 }
 
 /// The optional Git CLI / native JJ / shell hook implementation of [`VcsOps`]: the only one that ships.
@@ -597,6 +711,123 @@ impl SystemVcs {
 }
 
 impl VcsOps for SystemVcs {
+    fn snapshot_base<'a>(
+        &'a self,
+        parent_cwd: &'a Path,
+        namespace: &'a str,
+        agent: &'a str,
+    ) -> VcsFuture<'a, Result<VcsSnapshot, VcsError>> {
+        let (cwd, namespace, agent) = (
+            parent_cwd.to_owned(),
+            namespace.to_owned(),
+            agent.to_owned(),
+        );
+        blocking(
+            move || super::transfer::snapshot_base(&cwd, &namespace, &agent),
+            || Err(lost_worker()),
+        )
+    }
+
+    fn bundle_create<'a>(
+        &'a self,
+        repo: &'a Path,
+        reference: &'a str,
+        exclude: &'a [String],
+    ) -> VcsFuture<'a, Result<super::BundleFacts, VcsError>> {
+        let (repo, reference, exclude) = (repo.to_owned(), reference.to_owned(), exclude.to_vec());
+        blocking(
+            move || super::transfer::bundle_create(&repo, &reference, &exclude),
+            || Err(lost_worker()),
+        )
+    }
+
+    fn bundle_read<'a>(
+        &'a self,
+        repo: &'a Path,
+        id: &'a str,
+        offset: u64,
+        len: u64,
+    ) -> VcsFuture<'a, Result<Vec<u8>, VcsError>> {
+        let (repo, id) = (repo.to_owned(), id.to_owned());
+        blocking(
+            move || super::transfer::bundle_read(&repo, &id, offset, len),
+            || Err(lost_worker()),
+        )
+    }
+
+    fn bundle_drop<'a>(
+        &'a self,
+        repo: &'a Path,
+        id: &'a str,
+    ) -> VcsFuture<'a, Result<(), VcsError>> {
+        let (repo, id) = (repo.to_owned(), id.to_owned());
+        blocking(
+            move || super::transfer::bundle_drop(&repo, &id),
+            || Err(lost_worker()),
+        )
+    }
+
+    fn bundle_write<'a>(
+        &'a self,
+        repo: &'a Path,
+        id: &'a str,
+        offset: u64,
+        bytes: &'a [u8],
+    ) -> VcsFuture<'a, Result<(), VcsError>> {
+        let (repo, id, bytes) = (repo.to_owned(), id.to_owned(), bytes.to_vec());
+        blocking(
+            move || super::transfer::bundle_write(&repo, &id, offset, &bytes),
+            || Err(lost_worker()),
+        )
+    }
+
+    fn bundle_apply<'a>(
+        &'a self,
+        repo: &'a Path,
+        id: &'a str,
+        digest: &'a str,
+        namespace: &'a str,
+        fetch: &'a [(String, String)],
+        pins: &'a [(String, String)],
+    ) -> VcsFuture<'a, Result<(), VcsError>> {
+        let (repo, id, digest, namespace, fetch, pins) = (
+            repo.to_owned(),
+            id.to_owned(),
+            digest.to_owned(),
+            namespace.to_owned(),
+            fetch.to_vec(),
+            pins.to_vec(),
+        );
+        blocking(
+            move || super::transfer::bundle_apply(&repo, &id, &digest, &namespace, &fetch, &pins),
+            || Err(lost_worker()),
+        )
+    }
+
+    fn ref_commit<'a>(
+        &'a self,
+        repo: &'a Path,
+        reference: &'a str,
+    ) -> VcsFuture<'a, Result<Option<String>, VcsError>> {
+        let (repo, reference) = (repo.to_owned(), reference.to_owned());
+        blocking(
+            move || super::transfer::ref_commit(&repo, &reference),
+            || Err(lost_worker()),
+        )
+    }
+
+    fn sweep_transfers<'a>(
+        &'a self,
+        repo: &'a Path,
+        max_age_secs: u64,
+    ) -> VcsFuture<'a, Result<u32, VcsError>> {
+        let repo = repo.to_owned();
+        blocking(
+            move || super::transfer::sweep(&repo, std::time::Duration::from_secs(max_age_secs)),
+            || Err(lost_worker()),
+        )
+    }
+
     fn prepare_refresh<'a>(
         &'a self,
         request: &'a super::RefreshRequest,

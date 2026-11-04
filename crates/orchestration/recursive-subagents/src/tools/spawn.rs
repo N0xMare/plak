@@ -374,10 +374,10 @@ impl TopologyTool {
             .owned(async move {
                 let port = driver.vcs();
                 let staged = stage.clone();
-                let minted = tokio::spawn(async move {
+                let minted = tokio::spawn(driver.with_stage_ledger(async move {
                     plakous_workspace::occupancy_vcs::stage::run(staged, ticket.mint(port.as_ref()))
                         .await
-                })
+                }))
                 .await
                 .unwrap_or_else(|error| {
                     Err(VcsError::mint_failed(format!("mint task failed: {error}")))

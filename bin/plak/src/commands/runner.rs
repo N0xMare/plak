@@ -77,20 +77,8 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
         )));
     };
     home::private_directory(home.root())?;
-    // A root in or around the product home would hand a host this machine's
-    // own files: the runner's allowlist and floors, and every secret and
-    // credential the home holds.
     let excluded = paths.home().to_path_buf();
-    for root in &config.roots {
-        if home::overlaps_home(root, &excluded) {
-            return Err(CliFailure::new(format!(
-                "{}: root {} lies inside or around the product home {}; list workspace roots apart from it",
-                home.config_path().display(),
-                root.display(),
-                excluded.display()
-            )));
-        }
-    }
+    refuse_unsafe_roots(&home, &config, &excluded)?;
     if !home::admitted_workspace(&config.roots, &excluded, first) {
         return Err(CliFailure::new(format!(
             "runner root {} cannot be served: it does not resolve to a directory under the runner's roots",
@@ -114,8 +102,11 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
         ExecutionEnvironment::host(scope, root, cwd, ExecutionEnvironmentConfig::default())
     });
     let roots = config.roots.clone();
-    let probe_paths =
-        Arc::new(move |candidate: &Path| home::admitted_probe_path(&roots, &excluded, candidate));
+    let probe_excluded = excluded.clone();
+    let probe_paths = Arc::new(move |candidate: &Path| {
+        home::admitted_probe_path(&roots, &probe_excluded, candidate)
+    });
+    let extension = vcs_extension(&config, excluded);
     let allowlist_home = home.clone();
     let hosts = Arc::new(move |host_id: &str| {
         // Read at every bind, so a pairing made while the daemon runs holds.
@@ -142,7 +133,7 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
         RunnerOptions {
             limits: RunnerLimits::default(),
             workspaces: Some(workspaces),
-            extension: None,
+            extension: Some(extension),
             hosts: Some(hosts),
             probe_paths: Some(probe_paths),
             local_host: Some(home::host_id(paths)?),
@@ -160,6 +151,64 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
         Err(daemon::DaemonError::AlreadyServing(_)) => Ok(()),
         Err(error) => Err(CliFailure::new(error.to_string())),
     }
+}
+
+/// Refuses a root or copies root that is relative, or lies inside or
+/// around the product home: it would hand a host this machine's own files,
+/// the runner's allowlist and floors, and every secret and credential the
+/// home holds.
+fn refuse_unsafe_roots(
+    home: &RunnerHome,
+    config: &home::RunnerToml,
+    excluded: &Path,
+) -> CliResult<()> {
+    for root in config.roots.iter().chain(&config.copies) {
+        if !root.is_absolute() {
+            return Err(CliFailure::new(format!(
+                "{}: {} is not an absolute path",
+                home.config_path().display(),
+                root.display()
+            )));
+        }
+        if home::overlaps_home(root, excluded) {
+            return Err(CliFailure::new(format!(
+                "{}: root {} lies inside or around the product home {}; list workspace roots apart from it",
+                home.config_path().display(),
+                root.display(),
+                excluded.display()
+            )));
+        }
+    }
+    // Mirrors kept inside a workspace would sit in its tree, and a
+    // workspace inside the copies root would be served as a copy.
+    if let Some(copies) = &config.copies
+        && let Some(root) = config
+            .roots
+            .iter()
+            .find(|root| home::overlaps_home(copies, root))
+    {
+        return Err(CliFailure::new(format!(
+            "{}: copies {} lies inside or around the root {}; keep copies apart from the roots",
+            home.config_path().display(),
+            copies.display(),
+            root.display()
+        )));
+    }
+    Ok(())
+}
+
+/// The tree's version control, answering under the roots and the copies
+/// root and never inside the product home, and taking copies carried from
+/// other runners under the copies root.
+fn vcs_extension(
+    config: &home::RunnerToml,
+    excluded: std::path::PathBuf,
+) -> Arc<dyn plakous::tools::runner::RunnerExtension> {
+    let roots: Vec<_> = config.roots.iter().chain(&config.copies).cloned().collect();
+    plakous_recursive_subagents::remote_vcs::vcs_runner_extension(
+        Arc::new(move |candidate: &Path| home::admitted_probe_path(&roots, &excluded, candidate)),
+        config.copies.clone(),
+    )
 }
 
 /// How the daemon reads a runner secret a service names: from this home's

@@ -20,9 +20,9 @@ use plakous::tools::runner::{
     RunnerCall, RunnerExtension, RunnerFailure, RunnerLink, RunnerVerb, ServeFailure, ServeFuture,
 };
 use plakous_workspace::occupancy_vcs::{
-    AdoptFailure, AdoptLanding, AdoptRequest, MintRequest, MintedCopy, OwnedAdopt, OwnedMint,
-    RefreshApplied, RefreshPlan, RefreshPreparation, RefreshRequest, SystemVcs, VcsError,
-    VcsErrorKind, VcsFuture, VcsOps, VcsSnapshot, stage,
+    AdoptFailure, AdoptLanding, AdoptRequest, BundleFacts, MintRequest, MintedCopy, OwnedAdopt,
+    OwnedMint, RefreshApplied, RefreshPlan, RefreshPreparation, RefreshRequest, SystemVcs,
+    VcsError, VcsErrorKind, VcsFuture, VcsOps, VcsSnapshot, stage,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -111,6 +111,53 @@ enum VcsCall {
     TrimDisposableTarget {
         path: PathBuf,
     },
+    TransferRoot {
+        runner_id: String,
+        tree_id: String,
+    },
+    SweepTransfers {
+        repo: PathBuf,
+        max_age_secs: u64,
+    },
+    SnapshotBase {
+        parent_cwd: PathBuf,
+        namespace: String,
+        agent: String,
+    },
+    BundleCreate {
+        repo: PathBuf,
+        reference: String,
+        exclude: Vec<String>,
+    },
+    BundleRead {
+        repo: PathBuf,
+        id: String,
+        offset: u64,
+        len: u64,
+    },
+    BundleDrop {
+        repo: PathBuf,
+        id: String,
+    },
+    BundleWrite {
+        repo: PathBuf,
+        id: String,
+        offset: u64,
+        /// The chunk, lowercase hex.
+        bytes: String,
+    },
+    BundleApply {
+        repo: PathBuf,
+        id: String,
+        digest: String,
+        namespace: String,
+        fetch: Vec<(String, String)>,
+        pins: Vec<(String, String)>,
+    },
+    RefCommit {
+        repo: PathBuf,
+        reference: String,
+    },
 }
 
 impl VcsCall {
@@ -125,6 +172,15 @@ impl VcsCall {
             | Self::CheckReclaimable { path, .. }
             | Self::RestoreCopyBase { path, .. }
             | Self::TrimDisposableTarget { path } => vec![path],
+            Self::TransferRoot { .. } => Vec::new(),
+            Self::SnapshotBase { parent_cwd, .. } => vec![parent_cwd],
+            Self::BundleCreate { repo, .. }
+            | Self::BundleRead { repo, .. }
+            | Self::BundleDrop { repo, .. }
+            | Self::BundleWrite { repo, .. }
+            | Self::BundleApply { repo, .. }
+            | Self::RefCommit { repo, .. }
+            | Self::SweepTransfers { repo, .. } => vec![repo],
             Self::JjCopyDirs { launch } | Self::CopyIsOverCandidate { launch, .. } => {
                 vec![launch]
             }
@@ -219,6 +275,25 @@ impl RemoteVcs {
         .map_err(|failure| link_error(&failure, stage.as_deref()))?;
         decode(answer)?
     }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let mut text = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        let _ = write!(text, "{byte:02x}");
+    }
+    text
+}
+
+fn unhex(text: &str) -> Option<Vec<u8>> {
+    if !text.len().is_multiple_of(2) {
+        return None;
+    }
+    (0..text.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(text.get(index..index + 2)?, 16).ok())
+        .collect()
 }
 
 fn encode(call: &VcsCall) -> Result<Value, VcsError> {
@@ -446,6 +521,128 @@ impl VcsOps for RemoteVcs {
         }))
     }
 
+    fn transfer_root<'a>(&'a self, tree_id: &'a str) -> VcsFuture<'a, Result<PathBuf, VcsError>> {
+        Box::pin(self.read(VcsCall::TransferRoot {
+            runner_id: self.runner_id.clone(),
+            tree_id: tree_id.to_owned(),
+        }))
+    }
+
+    fn sweep_transfers<'a>(
+        &'a self,
+        repo: &'a Path,
+        max_age_secs: u64,
+    ) -> VcsFuture<'a, Result<u32, VcsError>> {
+        Box::pin(self.effect(VcsCall::SweepTransfers {
+            repo: repo.to_owned(),
+            max_age_secs,
+        }))
+    }
+
+    fn snapshot_base<'a>(
+        &'a self,
+        parent_cwd: &'a Path,
+        namespace: &'a str,
+        agent: &'a str,
+    ) -> VcsFuture<'a, Result<VcsSnapshot, VcsError>> {
+        Box::pin(self.effect(VcsCall::SnapshotBase {
+            parent_cwd: parent_cwd.to_owned(),
+            namespace: namespace.to_owned(),
+            agent: agent.to_owned(),
+        }))
+    }
+
+    fn bundle_create<'a>(
+        &'a self,
+        repo: &'a Path,
+        reference: &'a str,
+        exclude: &'a [String],
+    ) -> VcsFuture<'a, Result<BundleFacts, VcsError>> {
+        Box::pin(self.effect(VcsCall::BundleCreate {
+            repo: repo.to_owned(),
+            reference: reference.to_owned(),
+            exclude: exclude.to_vec(),
+        }))
+    }
+
+    fn bundle_read<'a>(
+        &'a self,
+        repo: &'a Path,
+        id: &'a str,
+        offset: u64,
+        len: u64,
+    ) -> VcsFuture<'a, Result<Vec<u8>, VcsError>> {
+        Box::pin(async move {
+            let hex: String = self
+                .read(VcsCall::BundleRead {
+                    repo: repo.to_owned(),
+                    id: id.to_owned(),
+                    offset,
+                    len,
+                })
+                .await?;
+            unhex(&hex).ok_or_else(|| {
+                VcsError::mint_unavailable("the runner's bundle chunk was malformed")
+            })
+        })
+    }
+
+    fn bundle_drop<'a>(
+        &'a self,
+        repo: &'a Path,
+        id: &'a str,
+    ) -> VcsFuture<'a, Result<(), VcsError>> {
+        Box::pin(self.effect(VcsCall::BundleDrop {
+            repo: repo.to_owned(),
+            id: id.to_owned(),
+        }))
+    }
+
+    fn bundle_write<'a>(
+        &'a self,
+        repo: &'a Path,
+        id: &'a str,
+        offset: u64,
+        bytes: &'a [u8],
+    ) -> VcsFuture<'a, Result<(), VcsError>> {
+        Box::pin(self.effect(VcsCall::BundleWrite {
+            repo: repo.to_owned(),
+            id: id.to_owned(),
+            offset,
+            bytes: hex(bytes),
+        }))
+    }
+
+    fn bundle_apply<'a>(
+        &'a self,
+        repo: &'a Path,
+        id: &'a str,
+        digest: &'a str,
+        namespace: &'a str,
+        fetch: &'a [(String, String)],
+        pins: &'a [(String, String)],
+    ) -> VcsFuture<'a, Result<(), VcsError>> {
+        Box::pin(self.effect(VcsCall::BundleApply {
+            repo: repo.to_owned(),
+            id: id.to_owned(),
+            digest: digest.to_owned(),
+            namespace: namespace.to_owned(),
+            fetch: fetch.to_vec(),
+            pins: pins.to_vec(),
+        }))
+    }
+
+    fn ref_commit<'a>(
+        &'a self,
+        repo: &'a Path,
+        reference: &'a str,
+    ) -> VcsFuture<'a, Result<Option<String>, VcsError>> {
+        Box::pin(self.read(VcsCall::RefCommit {
+            repo: repo.to_owned(),
+            reference: reference.to_owned(),
+        }))
+    }
+
     fn dirty<'a>(&'a self, path: &'a Path) -> VcsFuture<'a, bool> {
         Box::pin(async move {
             self.read(VcsCall::Dirty {
@@ -517,14 +714,23 @@ pub type VcsPathAdmission = dyn Fn(&Path) -> bool + Send + Sync;
 
 /// The runner side: answers `vcs.read` and `vcs.effect` with the system
 /// port over this machine's filesystem, for paths `admits` accepts. A call
-/// naming any other path is refused unavailable, with no effect.
+/// naming any other path is refused unavailable, with no effect. Copies
+/// that cross from another runner are minted from each tree's mirror under
+/// `copies_root`; without one, this runner takes none.
 #[must_use]
-pub fn vcs_runner_extension(admits: Arc<VcsPathAdmission>) -> Arc<dyn RunnerExtension> {
-    Arc::new(VcsExtension { admits })
+pub fn vcs_runner_extension(
+    admits: Arc<VcsPathAdmission>,
+    copies_root: Option<PathBuf>,
+) -> Arc<dyn RunnerExtension> {
+    Arc::new(VcsExtension {
+        admits,
+        copies_root,
+    })
 }
 
 struct VcsExtension {
     admits: Arc<VcsPathAdmission>,
+    copies_root: Option<PathBuf>,
 }
 
 impl RunnerExtension for VcsExtension {
@@ -533,6 +739,7 @@ impl RunnerExtension for VcsExtension {
             return Box::pin(std::future::ready(Err(ServeFailure::Unsupported)));
         }
         let admits = Arc::clone(&self.admits);
+        let copies_root = self.copies_root.clone();
         Box::pin(async move {
             let Ok(call) = serde_json::from_value::<VcsCall>(payload) else {
                 return Err(ServeFailure::Unsupported);
@@ -559,6 +766,9 @@ impl RunnerExtension for VcsExtension {
                     "the runner does not serve this workspace",
                 )));
             }
+            if let VcsCall::TransferRoot { runner_id, tree_id } = &call {
+                return answer(transfer_root(copies_root.as_deref(), runner_id, tree_id));
+            }
             serve(call).await
         })
     }
@@ -577,12 +787,40 @@ impl VcsCall {
                 | Self::Unmint { .. }
                 | Self::ApplyRefresh { .. }
                 | Self::TrimDisposableTarget { .. }
+                | Self::SnapshotBase { .. }
+                | Self::BundleCreate { .. }
+                | Self::BundleDrop { .. }
+                | Self::BundleWrite { .. }
+                | Self::BundleApply { .. }
+                | Self::SweepTransfers { .. }
         )
     }
 }
 
 fn answer<T: Serialize>(result: Result<T, VcsError>) -> Result<Value, ServeFailure> {
     serde_json::to_value(result).map_err(|_| ServeFailure::Unsupported)
+}
+
+/// The mirror of tree `tree_id` under `copies_root`, keyed by the runner
+/// that keeps it, so runners sharing a copies root keep apart mirrors.
+fn transfer_root(
+    copies_root: Option<&Path>,
+    runner_id: &str,
+    tree_id: &str,
+) -> Result<PathBuf, VcsError> {
+    let copies_root = copies_root.ok_or_else(|| {
+        VcsError::mint_unavailable("this runner takes no copies from other runners")
+    })?;
+    let plain = |id: &str| {
+        !id.is_empty()
+            && id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    };
+    if !plain(runner_id) || !plain(tree_id) {
+        return Err(VcsError::mint_unavailable("invalid runner or tree id"));
+    }
+    Ok(copies_root.join(runner_id).join(tree_id))
 }
 
 /// Runs one admitted call through the system port.
@@ -660,6 +898,63 @@ async fn serve(call: VcsCall) -> Result<Value, ServeFailure> {
         } => answer(vcs.unmint(&launch, &path, &namespace).await),
         VcsCall::ApplyRefresh { plan, recover } => answer(vcs.apply_refresh(&plan, recover).await),
         VcsCall::TrimDisposableTarget { path } => answer(vcs.trim_disposable_target(&path).await),
+        transfer => serve_transfer(transfer).await,
+    }
+}
+
+/// [`serve`] for the calls that carry copies between runners.
+async fn serve_transfer(call: VcsCall) -> Result<Value, ServeFailure> {
+    let vcs = SystemVcs;
+    match call {
+        VcsCall::TransferRoot { .. } => answer::<PathBuf>(Err(VcsError::mint_unavailable(
+            "this runner takes no copies from other runners",
+        ))),
+        VcsCall::SnapshotBase {
+            parent_cwd,
+            namespace,
+            agent,
+        } => answer(vcs.snapshot_base(&parent_cwd, &namespace, &agent).await),
+        VcsCall::BundleCreate {
+            repo,
+            reference,
+            exclude,
+        } => answer(vcs.bundle_create(&repo, &reference, &exclude).await),
+        VcsCall::BundleRead {
+            repo,
+            id,
+            offset,
+            len,
+        } => answer(
+            vcs.bundle_read(&repo, &id, offset, len)
+                .await
+                .map(|bytes| hex(&bytes)),
+        ),
+        VcsCall::BundleDrop { repo, id } => answer(vcs.bundle_drop(&repo, &id).await),
+        VcsCall::BundleWrite {
+            repo,
+            id,
+            offset,
+            bytes,
+        } => match unhex(&bytes) {
+            Some(bytes) => answer(vcs.bundle_write(&repo, &id, offset, &bytes).await),
+            None => Err(ServeFailure::Unsupported),
+        },
+        VcsCall::BundleApply {
+            repo,
+            id,
+            digest,
+            namespace,
+            fetch,
+            pins,
+        } => answer(
+            vcs.bundle_apply(&repo, &id, &digest, &namespace, &fetch, &pins)
+                .await,
+        ),
+        VcsCall::RefCommit { repo, reference } => answer(vcs.ref_commit(&repo, &reference).await),
+        VcsCall::SweepTransfers { repo, max_age_secs } => {
+            answer(vcs.sweep_transfers(&repo, max_age_secs).await)
+        }
+        _ => Err(ServeFailure::Unsupported),
     }
 }
 

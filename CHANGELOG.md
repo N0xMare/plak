@@ -216,6 +216,24 @@ an export.
   under its first keys, so a rerun never runs beside the step it repeats;
   the extension refuses a relative path or one with `..` before admission;
   a root stage of unknown outcome records a `vcs_fault`.
+- Copies that cross runners (library only; no spawn argument names a runner
+  yet): `spawn_reserve_on` places a `fork` or `snapshot` child on another
+  runner the tree's port reaches (`routed_vcs::RoutedVcs`). Its parent's live
+  state is pinned as a base snapshot, bundled leaving out what the target
+  holds (`tree_runner_ancestors`, persisted per runner), relayed by the host
+  in 1 MiB chunks it does not keep, and applied into the tree's mirror on the
+  target, where the copy is minted; its candidate comes back by the same
+  stages into the parent's checkout, the apply recorded as verifiable with
+  the candidate reference and commit it leaves. `VcsOps` gains the transfer
+  calls; `vcs_runner_extension` takes a copies root. Embedder break:
+  `vcs_runner_extension` takes a second argument and `StageLedger` adds the
+  stage record a carry runs through. `plak runner serve` registers the
+  extension, admitting paths under `roots` and the new `runner.toml` `copies`
+  root and never the product home; `copies` may not lie inside or around a
+  root. Mirrors are keyed by runner (`<copies>/<runner id>/<tree id>`). A
+  seal-back never moves a candidate reference that names another commit: it
+  records a `vcs_fault` instead. A failed apply leaves no upload, and the
+  reclamation pass sweeps transfer files older than a day.
 - A Messages `model_context_window_exceeded` stop fails the stream and takes
   the context-limit overflow fold when nothing hosted ran, on Anthropic and
   OpenRouter.

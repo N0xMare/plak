@@ -31,7 +31,7 @@ fn runner(
             binary_id: None,
         },
         RunnerOptions {
-            extension: Some(vcs_runner_extension(admits)),
+            extension: Some(vcs_runner_extension(admits, None)),
             ..RunnerOptions::default()
         },
     )

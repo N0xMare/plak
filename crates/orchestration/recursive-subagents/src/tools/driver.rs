@@ -233,6 +233,7 @@ impl TreeDriver {
             }
             *next = now.saturating_add(u64::from(delay.min(30)) * 1000);
         }
+        self.sweep_transfers().await;
         let inventory = self.read(ProductAgentTree::checkout_size_probes)?;
         let cache = Arc::clone(&self.checkout_sizes);
         let probe = plakous::tools::runner::workspace_probe();
@@ -1085,15 +1086,14 @@ impl TreeDriver {
             // dispatched it runs every port call to its end even if this
             // release owner is aborted. It ends with the Tokio runtime
             // (spec 03 §16), between two port calls.
-            let mut completed =
-                tokio::spawn(async move { admitted.run_staged(vcs.as_ref(), stages).await })
-                    .await
-                    .map_err(|_| {
-                        TopologyError::new(
-                            TopologyErrorCode::OperationRecoveryRequired,
-                            "effects task failed",
-                        )
-                    })?;
+            let run = self
+                .with_stage_ledger(async move { admitted.run_staged(vcs.as_ref(), stages).await });
+            let mut completed = tokio::spawn(run).await.map_err(|_| {
+                TopologyError::new(
+                    TopologyErrorCode::OperationRecoveryRequired,
+                    "effects task failed",
+                )
+            })?;
             completed.refuse_unpublished_unmints(refused);
             let driver = self.clone();
             // Recorded whenever the turn comes: only the publication below
@@ -1502,6 +1502,7 @@ pub(super) fn driver_for_tree(
 }
 
 mod attach;
+mod stage_ledger;
 #[cfg(any(test, feature = "test-support"))]
 mod test_support;
 

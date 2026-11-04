@@ -59,6 +59,12 @@ impl VcsStage {
         self.unknown.store(true, Ordering::Release);
     }
 
+    /// Records that the stage's outcome, once unknown, was checked and is
+    /// the one it expected.
+    pub fn mark_confirmed(&self) {
+        self.unknown.store(false, Ordering::Release);
+    }
+
     /// Whether a step ended without its outcome.
     #[must_use]
     pub fn outcome_unknown(&self) -> bool {

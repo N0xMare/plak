@@ -281,7 +281,10 @@ impl InstructionSourceReader for RunnerInstructionSourceReader {
 #[must_use]
 pub fn test_runner_extension() -> Arc<dyn RunnerExtension> {
     Arc::new(TestRunnerExtension {
-        vcs: plakous_recursive_subagents::remote_vcs::vcs_runner_extension(Arc::new(|_| true)),
+        vcs: plakous_recursive_subagents::remote_vcs::vcs_runner_extension(
+            Arc::new(|_| true),
+            None,
+        ),
     })
 }
 

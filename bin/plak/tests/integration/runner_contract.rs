@@ -112,6 +112,43 @@ async fn probes_stay_under_the_roots(paired: &RunnerClient, home: &Path, work: &
     }
 }
 
+fn vcs_read(call: serde_json::Value) -> RunnerCall {
+    RunnerCall::unkeyed(RunnerVerb::VcsRead, call)
+}
+
+/// The tree's version control answers under the roots and the copies root,
+/// and refuses the runner home and every other path with no effect.
+async fn vcs_reads_stay_under_the_roots(paired: &RunnerClient, home: &Path, work: &Path) {
+    let exists = |path: &Path| vcs_read(serde_json::json!({ "op": "path_exists", "path": path }));
+    assert_eq!(
+        paired.call(exists(work)).await.unwrap(),
+        serde_json::json!({ "Ok": true })
+    );
+    let copies = work.parent().unwrap().join("copies");
+    assert_eq!(
+        paired
+            .call(vcs_read(
+                serde_json::json!({ "op": "transfer_root", "runner_id": "r1", "tree_id": "tree1" })
+            ))
+            .await
+            .unwrap(),
+        serde_json::json!({ "Ok": copies.join("r1").join("tree1") })
+    );
+    for outside in [
+        Path::new("/etc").to_path_buf(),
+        home.join("runner"),
+        work.join("../home/runner"),
+        Path::new("relative").to_path_buf(),
+    ] {
+        let answer = paired.call(exists(&outside)).await.unwrap();
+        assert!(
+            answer.get("Err").is_some(),
+            "{}: {answer}",
+            outside.display()
+        );
+    }
+}
+
 /// An unpaired host is refused before any request, and its calls fail at
 /// once rather than waiting out their window.
 async fn an_unpaired_host_fails_at_once(home: &Path, work: &Path, runner: VersionTriple) {
@@ -150,8 +187,9 @@ fn a_runner_daemon_pairs_bridges_lists_and_exits_idle() {
     std::fs::write(
         home.join("runner/runner.toml"),
         format!(
-            "roots = [{:?}]\npath = \"/usr/bin:/bin\"\nidle_exit_seconds = 1\n",
-            work.display().to_string()
+            "roots = [{:?}]\ncopies = {:?}\npath = \"/usr/bin:/bin\"\nidle_exit_seconds = 1\n",
+            work.display().to_string(),
+            guard.path().join("copies").display().to_string()
         ),
     )
     .unwrap();
@@ -192,6 +230,7 @@ fn a_runner_daemon_pairs_bridges_lists_and_exits_idle() {
         assert_eq!(paired.lines().await.unwrap(), Vec::new());
 
         probes_stay_under_the_roots(&paired, &home, &work).await;
+        vcs_reads_stay_under_the_roots(&paired, &home, &work).await;
         an_unpaired_host_fails_at_once(&home, &work, runner).await;
     });
 
@@ -236,7 +275,7 @@ fn a_runner_daemon_pairs_bridges_lists_and_exits_idle() {
 /// and credentials, through a workspace.
 #[test]
 fn a_runner_refuses_a_root_in_or_around_its_home() {
-    let (_guard, home) = isolated_home();
+    let (guard, home) = isolated_home();
     let runner_home = home.join("runner");
     std::fs::create_dir(&runner_home).unwrap();
     for roots in [
@@ -260,6 +299,31 @@ fn a_runner_refuses_a_root_in_or_around_its_home() {
         assert!(
             stderr.contains("inside or around the product home"),
             "{roots}: {stderr}"
+        );
+    }
+    // A copies root inside or around a workspace root is refused too.
+    let work = guard.path().join("work");
+    std::fs::create_dir(&work).unwrap();
+    for copies in [work.join("copies"), guard.path().to_path_buf()] {
+        std::fs::write(
+            runner_home.join("runner.toml"),
+            format!(
+                "roots = [{:?}]\ncopies = {:?}\npath = \"/usr/bin:/bin\"\nidle_exit_seconds = 1\n",
+                work.display().to_string(),
+                copies.display().to_string()
+            ),
+        )
+        .unwrap();
+        let served = plak_command(&home)
+            .args(["runner", "serve"])
+            .output()
+            .unwrap();
+        assert!(!served.status.success(), "{}", copies.display());
+        let stderr = String::from_utf8_lossy(&served.stderr);
+        assert!(
+            stderr.contains("inside or around"),
+            "{}: {stderr}",
+            copies.display()
         );
     }
     // Serving never started, so no socket was made.

@@ -1494,6 +1494,7 @@ they run per platform (`just platform` and `just full`), not in `just check`.
 | Crash-matrix completion control | `complete_run_is_one_exact_new_state_and_probe_is_inert` — the same harness child and evidence probe, without SIGKILL; the bounded child lifetime is the load sensitivity |
 | SQLite paid-compaction SIGKILL | `sqlite_paid_compaction_sigkill_reopens_exactly_once`, `sqlite_no_locator_paid_compaction_sigkill_is_never_redispatched` |
 | SQLite SIGKILL commit campaign | `bounded_async_sigkill_campaign_accepts_only_exact_old_or_new_commit` |
+| Cross-runner fork stages | `cross_runner_fork_stages` — over two loopback runners, the process ends once each mint and seal-back stage (chapter 03 §14) is published and again once each has run before its answer is recorded; the reopened tree settles without a fault and the rerun converges. It is in process rather than a crash-sweep shape because the sweep drives one product process, whose port reaches only its selected runner |
 
 `durability::` stays in the serial lane, as that lane's table says.
 `unsupported_runtime_schemas_refuse_without_changing_files` and

@@ -32,6 +32,7 @@ mod ops;
 mod pins;
 mod refresh;
 pub mod stage;
+mod transfer;
 
 pub(crate) use git::git_query;
 #[cfg(test)]
@@ -59,6 +60,7 @@ pub use ops::{
     VcsFuture, VcsOps,
 };
 pub use refresh::{RefreshApplied, RefreshPlan, RefreshPreparation, RefreshRequest};
+pub use transfer::{BUNDLE_CHUNK_BYTES, BundleFacts, transfer_ref};
 
 use plakous_host_protocol::topology::WorkspaceMode;
 

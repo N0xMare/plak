@@ -412,6 +412,32 @@ impl ProductAgentTree {
         );
     }
 
+    /// Records that a carry back into `agent_id`'s parent found the
+    /// candidate reference `source_id` already naming another commit: a
+    /// decision, never an overwrite.
+    pub(crate) fn fault_carried_candidate(
+        &mut self,
+        agent_id: &str,
+        source_id: &str,
+        attempt_id: Option<super::AttemptId>,
+    ) {
+        if !self.nodes.contains_key(agent_id) {
+            return;
+        }
+        let anchor = self.vcs_fault_anchor(agent_id);
+        self.record_vcs_fault(
+            agent_id,
+            VcsFault {
+                refresh_prior_status: None,
+                source_id: source_id.to_owned(),
+                workspace_id: None,
+                attempt_id,
+                reason: "the parent's checkout already names another commit under this candidate's reference; it was not moved".to_owned(),
+            },
+            anchor,
+        );
+    }
+
     pub(super) fn join_vcs_fault(&mut self, agent_id: &str, id: &str) -> Result<(), TopologyError> {
         let fault: VcsFault = serde_json::from_str(&self.operations[id].canonical_request)
             .map_err(|_| {
@@ -1347,6 +1373,7 @@ impl ProductAgentTree {
                     change_id: candidate.base_change_id.clone(),
                     ..VcsSnapshot::default()
                 }),
+            carry: None,
         }))
     }
 

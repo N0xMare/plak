@@ -213,6 +213,7 @@ not (
   | test(host_killed_mid_call_is_recovered_and_readopted_by_its_host_id)
   | test(a_returning_host_readopts_its_line_under_a_lease_only_head)
   | test(a_runner_daemon_pairs_bridges_lists_and_exits_idle)
+  | test(cross_runner_fork_stages)
   | test(mcp_on_a_runner_runs_there_and_restarts_after_the_runner_does)
   | test(mcp_on_a_runner_ends_with_its_host)
 )
@@ -376,6 +377,7 @@ default-filter = '''
   | test(host_killed_mid_call_is_recovered_and_readopted_by_its_host_id)
   | test(a_returning_host_readopts_its_line_under_a_lease_only_head)
   | test(a_runner_daemon_pairs_bridges_lists_and_exits_idle)
+  | test(cross_runner_fork_stages)
   | test(mcp_on_a_runner_runs_there_and_restarts_after_the_runner_does)
   | test(mcp_on_a_runner_ends_with_its_host)
 '''

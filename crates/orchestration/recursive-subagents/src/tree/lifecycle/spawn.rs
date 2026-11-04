@@ -32,9 +32,12 @@ impl ProductAgentTree {
 
     /// [`Self::spawn_reserve`] of a child placed on `runner` (`None` is the
     /// parent's own; the local runner has no id). An `inherit` child shares
-    /// its parent's checkout, so another runner is `runner_mismatch`; a copy
-    /// on another runner is `cross_runner_copy_unavailable` until copies
-    /// cross runners.
+    /// its parent's checkout, so another runner is `runner_mismatch`. A
+    /// `fork` or `snapshot` copy on another runner is carried there from the
+    /// parent's live state (chapter 03 §14); it is
+    /// `cross_runner_copy_unavailable` when the tree's port reaches no such
+    /// runner, the parent is on the local runner, or the spawn names
+    /// candidate inputs.
     ///
     /// # Errors
     ///
@@ -67,21 +70,7 @@ impl ProductAgentTree {
                  inputs holds at most 8 non-empty ids, and inherit takes no inputs",
             )
         })?;
-        if let Some(runner) = runner
-            && self.node(caller_id)?.placement.runner_id.as_deref() != Some(runner)
-        {
-            return Err(if request.workspace.is_inherit() {
-                TopologyError::new(
-                    TopologyErrorCode::RunnerMismatch,
-                    "an inherit child works in its parent's checkout, so it runs on its parent's runner",
-                )
-            } else {
-                TopologyError::new(
-                    TopologyErrorCode::CrossRunnerCopyUnavailable,
-                    "a fork or snapshot copy on another runner than its parent's is not carried yet",
-                )
-            });
-        }
+        let carry = self.spawn_carry(caller_id, request, runner)?;
         self.bound_text(&request.description)?;
         self.bound_text(&request.prompt)?;
         self.bound_text(&request.output_schema_json)?;
@@ -265,12 +254,20 @@ impl ProductAgentTree {
         child_grant.visible_ids = vec![caller_id.to_owned(), agent_id.clone()];
         let attempt_id = AttemptId::new(&agent_id, 1);
         let (bound, ticket, mode, caller_path) = match plan {
+            WorkspacePlan::Inherit(bound) if carry.is_some() => {
+                drop(bound);
+                self.release_spawn_slot(caller_id);
+                return Err(crate::tree::cross_runner::copy_unavailable(
+                    "a read-only child shares its parent's checkout, so it runs on its parent's runner",
+                ));
+            }
             WorkspacePlan::Inherit(bound) => {
                 let mode = bound.mode;
                 let caller_path = bound.path.clone();
                 (Some(bound), None, mode, caller_path)
             }
-            WorkspacePlan::Mint(ticket) => {
+            WorkspacePlan::Mint(mut ticket) => {
+                ticket.carry = carry.clone().map(Box::new);
                 let mode = ticket.mode();
                 let caller_path = ticket.caller_path.clone();
                 self.minting.insert(agent_id.clone());
@@ -299,6 +296,7 @@ impl ProductAgentTree {
                 child_grant,
                 bound,
                 parent_composition: None,
+                runner: carry.map(|carry| carry.target),
             }),
             ticket,
         ))
@@ -337,6 +335,7 @@ impl ProductAgentTree {
             child_grant,
             bound,
             parent_composition,
+            runner,
         } = reservation;
         self.minting.remove(&agent_id);
         let bound = match (bound, minted) {
@@ -388,12 +387,14 @@ impl ProductAgentTree {
             active_turn: false,
             line_id: None,
             epoch_no,
-            // A child runs on its parent's runner (spec 03 §2).
+            // A child runs on its parent's runner unless its copy was
+            // carried to another (spec 03 §2).
             placement: NodePlacement {
-                runner_id: self
-                    .nodes
-                    .get(&caller_id)
-                    .and_then(|parent| parent.placement.runner_id.clone()),
+                runner_id: runner.or_else(|| {
+                    self.nodes
+                        .get(&caller_id)
+                        .and_then(|parent| parent.placement.runner_id.clone())
+                }),
                 workspace: None,
             },
             parent_composition,

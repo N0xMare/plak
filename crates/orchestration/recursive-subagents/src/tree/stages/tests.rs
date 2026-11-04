@@ -39,7 +39,10 @@ fn loopback_runner(root: &Path) -> Runner {
             binary_id: None,
         },
         RunnerOptions {
-            extension: Some(crate::remote_vcs::vcs_runner_extension(Arc::new(|_| true))),
+            extension: Some(crate::remote_vcs::vcs_runner_extension(
+                Arc::new(|_| true),
+                None,
+            )),
             ..RunnerOptions::default()
         },
     )

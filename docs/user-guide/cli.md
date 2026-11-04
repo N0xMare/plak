@@ -305,6 +305,7 @@ roots a host may use (never `~/.plak` itself or anything inside it, which
 
 ```toml
 roots = ["/home/me/src"]
+copies = "/home/me/plak-copies"   # optional: where copies from other runners go
 ```
 
 On the host, name the machine in `config.toml` and pair with it:
