@@ -120,6 +120,13 @@ mod frozen_tables;
 pub mod mcp_binding;
 mod node;
 mod process_environment;
+#[cfg(feature = "test-support")]
+mod test_diagnostics;
+/// Without the gate's build, nothing is reported.
+#[cfg(not(feature = "test-support"))]
+mod test_diagnostics {
+    pub(crate) const fn credential_wait_refused(_: bool) {}
+}
 pub mod runner_adoption;
 #[doc(hidden)]
 pub mod runner_reader;

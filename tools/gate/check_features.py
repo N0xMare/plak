@@ -628,6 +628,7 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES = {
     ("plakous", "test-clock", "plakous-openai?/test-clock"),
     ("plakous", "test-clock", "plakous-openrouter?/test-clock"),
     ("plakous", "test-hooks", "plakous-cell?/test-hooks"),
+    ("plakous", "test-hooks", "plakous-agent/test-hooks"),
     ("plak", "test-hooks", "plakous/test-clock"),
     ("plak", "test-hooks", "plakous/test-hooks"),
     ("plakous", "claude", "plakous-anthropic/native-auth"),
@@ -705,8 +706,8 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES.update(
 EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-py-worker": "12692a8c10a6033ffd8c99be9fd192fb9d76cbd41de571b36aabdc8720bebce5",
     "plakous-js-runtime": "fd22d2bf42bb470f5ed7ec3a852aa0472c1fdafa2ced4641a4a4f42c0a4bdd2a",
-    "plakous": "06d75838a05ab84618d2060d45e7e9bd1f7e2f70d04de24a3d0a5859e8f8c352",
-    "plakous-agent": "a3575595b6e3a90a1479335d3c0f6ec0f618354dc5831bc48fe31b28d9bb3e90",
+    "plakous": "82da620e466e97098aa79a04fa4c2296cbb5c2954bd7f1656abf1e76e9551060",
+    "plakous-agent": "a08f1fe9e0622b8276460d6f99833416fb027ad75743f6ae9253509a5f96efdf",
     "plakous-anthropic": "1b02db17b7b8447f9f0abd665616ffbf380c1a6c1e41c192cdc0f075e3cf1c5f",
     "plakous-attempt": "87a0bece47ad17a768ac1eb58a4e6ff9712e6f53008fd524fae3fd4055282f6b",
     "plakous-auth": "b69237dd11b3b34ed0c5d47ced22fb6a1d22cfad9833a9175bd28c9efc8a6042",
@@ -817,6 +818,7 @@ TEST_ONLY_DEPENDENCY_FEATURES = {
         ("plakous-http", "fault-injection"),
         ("plakous", "test-clock"),
         ("plakous", "test-hooks"),
+        ("plakous-agent", "test-hooks"),
         ("plakous-openai", "test-clock"),
         ("plakous-openrouter", "test-clock"),
         ("plakous-store", "commit-trace"),
@@ -873,8 +875,9 @@ def validate_test_only_dependency_features() -> list[str]:
     for profile in ((), ("full",)):
         if "test-hooks" in resolved_dependency_features("plakous", profile, "plakous"):
             errors.append(f"plakous [{','.join(profile) or 'default'}]: test-hooks is test-only")
-    if "test-hooks" in resolved_dependency_features("plakous-cell", (), "plakous-cell"):
-        errors.append("plakous-cell [default]: test-hooks is test-only")
+    for package in ("plakous-cell", "plakous-agent"):
+        if "test-hooks" in resolved_dependency_features(package, (), package):
+            errors.append(f"{package} [default]: test-hooks is test-only")
     # The Grok and Claude review-anchored clocks reach only offline test
     # builds (facade dev-dependencies): no plak build, `test-hooks` live
     # smoke builds included, may resolve them.
@@ -1186,11 +1189,12 @@ def optional_features(manifest: dict[str, object]) -> list[str]:
     if not isinstance(features, dict):
         return []
     hidden = {"default", "full", "test-clock"}
-    # The facade and cell deadline seams are hidden the same way as test-clock.
+    # The facade and cell deadline seams, and the agent's gate diagnostics, are
+    # hidden the same way as test-clock.
     # plak and plakous-py-worker keep a public test-hooks feature.
     package = manifest.get("package")
     name = package.get("name") if isinstance(package, dict) else None
-    if name in {"plakous", "plakous-cell"}:
+    if name in {"plakous", "plakous-cell", "plakous-agent"}:
         hidden.add("test-hooks")
     return sorted(feature for feature in features if feature not in hidden)
 

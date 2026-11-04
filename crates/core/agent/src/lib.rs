@@ -81,6 +81,13 @@ mod runtime;
 mod session;
 mod state;
 mod telemetry;
+#[cfg(feature = "test-hooks")]
+mod test_hooks;
+/// Without the gate's build, nothing is reported.
+#[cfg(not(feature = "test-hooks"))]
+mod test_hooks {
+    pub(crate) fn credential_wait_clear_refused(_: &dyn std::fmt::Debug) {}
+}
 #[cfg(not(target_arch = "wasm32"))]
 mod tokio_runtime;
 mod tool_runtime;

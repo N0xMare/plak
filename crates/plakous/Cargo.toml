@@ -26,7 +26,7 @@ reason = "Existing lint and size debt, frozen at the counts on main; ratchet dow
 [features]
 test-clock = ["plakous-openai?/test-clock", "plakous-openrouter?/test-clock"]
 # Deadline overrides for the repository gate. Not in `default` or `full`.
-test-hooks = ["plakous-cell?/test-hooks"]
+test-hooks = ["plakous-cell?/test-hooks", "plakous-agent/test-hooks"]
 default = []
 # Provider protocol crates on the facade are provider internals (not TUI surface).
 # Enabling openai/xai/openrouter/anthropic re-exports those crates as plakous::*.

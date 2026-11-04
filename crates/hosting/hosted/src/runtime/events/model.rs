@@ -265,7 +265,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
                 ),
             );
         }
-        let _ = self.events.send(ContentEvent::CredentialWait { account });
+        let waiting = account.is_some();
+        if !self.events.send(ContentEvent::CredentialWait { account }) {
+            // The face never sees a credential wait the mailbox refused; the
+            // gate's build names it.
+            crate::test_diagnostics::credential_wait_refused(waiting);
+        }
     }
 
     /// The turn spent its model-operation budget.

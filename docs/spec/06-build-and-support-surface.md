@@ -311,9 +311,12 @@ exception: `plakous` reads `PLAK_TEST_SESSION_LEASE_SECONDS` only in
 `test_session_lease.rs`, and `plakous-cell` reads `PLAK_TEST_CELL_HELLO_MS`
 only in `test_hooks.rs`. Only `test-hooks` builds compile those modules.
 `plak/test-hooks` enables `plakous/test-hooks`, which enables
-`plakous-cell/test-hooks` when the cell client is already linked. The hello
+`plakous-cell/test-hooks` when the cell client is already linked, and
+`plakous-agent/test-hooks`, whose `test_hooks.rs` names on stderr a
+credential-wait clear the event hub refused (a production build drops it
+silently, as before). The hello
 override accepts 1 through 30 000 milliseconds and no more.
-Those two `test-hooks` features are hidden from the 2n+3 closure witnesses,
+Those three `test-hooks` features are hidden from the 2n+3 closure witnesses,
 the same way `test-clock` is. `plak/test-hooks` and
 `plakous-py-worker/test-hooks` stay in their package witnesses.
 Imported environment readers, including aliases and

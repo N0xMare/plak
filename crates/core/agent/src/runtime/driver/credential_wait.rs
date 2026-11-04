@@ -21,11 +21,15 @@ impl Drop for Waiting {
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
-        if let Some(context) = self.context {
-            let _ = self.events.publish(
+        if let Some(context) = self.context
+            && let Err(error) = self.events.publish(
                 context,
                 AgentEventKind::ModelCredentialWait { waiting: false },
-            );
+            )
+        {
+            // The host never sees a clear the hub refused; the gate's build
+            // names it.
+            crate::test_hooks::credential_wait_clear_refused(&error);
         }
     }
 }
