@@ -43,6 +43,7 @@ pub(crate) async fn dispatch_topology_navigator_action<
     rows: &dyn crate::runtime::TopologyRows,
     session: &SessionRecord,
     events: &crate::runtime::Sender<P>,
+    jobs: &crate::jobs::JobRegistry,
     action: &UserAction<P>,
 ) {
     let send = |event| {
@@ -99,6 +100,22 @@ pub(crate) async fn dispatch_topology_navigator_action<
             message,
             urgent,
         } => spawn_operator_mail(&runtime, &tree_id, events, agent_id, message, *urgent),
+        UserAction::BackgroundTopologyNode { agent_id } => {
+            if let Err(error) = background_node(&runtime, agent_id).await {
+                answer(refusal("background failed", &error));
+            }
+        }
+        UserAction::StopTopologyNodeProcesses { agent_id, id } => {
+            if let Err(error) = jobs.stop_node(&tree_id, agent_id, id.as_deref()) {
+                answer(refusal("stop failed", &error));
+            }
+        }
+        UserAction::ReadTopologyNodeUsage { agent_id } => {
+            match node_usage(&runtime, events, agent_id) {
+                Ok(usage) => answer(ContentEvent::UsageLimits(usage)),
+                Err(error) => answer(refusal("usage unavailable", &error)),
+            }
+        }
         UserAction::StopAllTopology => stop_all(session, &runtime, &send).await,
         UserAction::RecoverTopologyNode {
             tree_id,
@@ -125,6 +142,61 @@ pub(crate) async fn dispatch_topology_navigator_action<
         }
         _ => {}
     }
+}
+
+fn refusal<P: plakous_host_protocol::ProtocolExtension>(
+    what: &str,
+    error: &str,
+) -> ContentEvent<P> {
+    ContentEvent::Row(TranscriptRow::error(
+        NoticeScope::Tree,
+        format!("{what}: {error}"),
+    ))
+}
+
+/// Backgrounds the top-level process calls already in flight in the
+/// node's running turn, through that turn's own control.
+pub(crate) async fn background_node(
+    runtime: &ProductTopologyRuntime,
+    agent_id: &str,
+) -> Result<(), String> {
+    let control = {
+        let live = runtime.live.lock().await;
+        let Some(handle) = live.get(agent_id) else {
+            return Err("the node has no running turn".to_owned());
+        };
+        handle.turn_control()
+    };
+    control
+        .background()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// The usage view with the node's own session ledger: the allowances are
+/// its account's, as the session last read them.
+pub(crate) fn node_usage<P: plakous_host_protocol::ProtocolExtension>(
+    runtime: &ProductTopologyRuntime,
+    events: &crate::runtime::Sender<P>,
+    agent_id: &str,
+) -> Result<plakous_host_protocol::views::presentation::UsageLimitsView, String> {
+    let locator = runtime
+        .read(|tree| tree.node(agent_id).map(|node| node.session_locator.clone()))
+        .map_err(|error| error.message)?
+        .map_err(|error| error.message)?
+        .ok_or_else(|| "the node has no session yet".to_owned())?;
+    let locator: SessionLocator = locator
+        .parse()
+        .map_err(|_| "the node's session locator is invalid".to_owned())?;
+    let mut usage = events.usage().unwrap_or_else(|| {
+        plakous_host_protocol::views::presentation::UsageLimitsView {
+            verticals: Vec::new(),
+            session: plakous_host_protocol::views::presentation::SessionLedgerView::default(),
+            stale_age_seconds: None,
+        }
+    });
+    usage.session = crate::node_usage::ledger(locator.session_id());
+    Ok(usage)
 }
 
 /// Starts one operator mail on the tree's tasks and returns. The mail is

@@ -68,7 +68,8 @@ pub(crate) enum Row {
     Steer,
     /// `Interrupt`.
     Interrupt,
-    /// `StopProcesses`, `Background`.
+    /// `StopProcesses`, `Background`, and both by node address
+    /// (`StopTopologyNodeProcesses`, `BackgroundTopologyNode`).
     Processes,
     /// `DropQueued`, `SendQueuedNow`, `DeleteQueued`, `EditQueued`,
     /// `MoveQueued`, `ResumeQueueDrain`.
@@ -95,7 +96,8 @@ pub(crate) enum Row {
     InvokeTool,
     /// `RequestCallDetail`.
     CallDetail,
-    /// `RefreshTemplates`, `Extension`.
+    /// `RefreshTemplates`, `Extension`, and the usage view by node address
+    /// (`ReadTopologyNodeUsage`).
     Templates,
     /// Spawn, mail and wake Starts, nudges, transient resume,
     /// `submit_result`, result effects, close reservations, retirement,
@@ -194,19 +196,16 @@ pub(crate) const fn today(row: Row, column: Column) -> Cell {
         (Row::Prompt | Row::Steer | Row::Transcript | Row::CallDetail, Column::Child) => {
             Cell::Classes(&[B])
         }
-        // A user stop reaches the child's jobs; `Background` has no child route.
-        (Row::Processes, Column::Child) => Cell::Classes(&[B, R]),
+        // The node's own jobs, by node address: a stop and `Background`.
+        (Row::Processes, Column::Child) => Cell::Classes(&[B]),
+        // The usage view by node address; the rest are the root's.
+        (Row::Templates, Column::Child) => Cell::Classes(&[R, B]),
         // The intent names a child as its caller and runs idle.
         (Row::InvokeTool, Column::Child) => Cell::Classes(&[I]),
         // The child's actor is the single decider for its own decisions.
         (Row::Approval, Column::Child) => Cell::Classes(&[B]),
         (
-            Row::Queue
-            | Row::Workflow
-            | Row::Readiness
-            | Row::Recover
-            | Row::Navigator
-            | Row::Templates,
+            Row::Queue | Row::Workflow | Row::Readiness | Row::Recover | Row::Navigator,
             Column::Child,
         ) => Cell::Classes(&[R]),
     }
@@ -215,14 +214,10 @@ pub(crate) const fn today(row: Row, column: Column) -> Cell {
 /// Every cell where today differs from the design and M closes it.
 pub(crate) const DIVERGENT: [(Row, Column); 0] = [];
 
-/// Every cell whose design letters need a node address on the wire:
-/// `Background` and the usage extension name no node until B1 (wire v2
-/// node attach), so until then they stay the root's and a child refuses
-/// them. B1 closes these.
-pub(crate) const AT_B1: [(Row, Column); 2] = [
-    (Row::Processes, Column::Child),
-    (Row::Templates, Column::Child),
-];
+/// Every cell whose design letters needed a node address on the wire: B1
+/// closed them (`BackgroundTopologyNode`, `StopTopologyNodeProcesses`,
+/// `ReadTopologyNodeUsage`).
+pub(crate) const AT_B1: [(Row, Column); 0] = [];
 
 /// The row an intent belongs to. Exhaustive: a new intent must be placed.
 pub(crate) fn row_of(action: &UserAction) -> Row {
@@ -230,7 +225,10 @@ pub(crate) fn row_of(action: &UserAction) -> Row {
         UserAction::Prompt(_) | UserAction::FollowUp(_) => Row::Prompt,
         UserAction::Steer(_) => Row::Steer,
         UserAction::Interrupt => Row::Interrupt,
-        UserAction::StopProcesses { .. } | UserAction::Background => Row::Processes,
+        UserAction::StopProcesses { .. }
+        | UserAction::Background
+        | UserAction::BackgroundTopologyNode { .. }
+        | UserAction::StopTopologyNodeProcesses { .. } => Row::Processes,
         UserAction::DropQueued
         | UserAction::SendQueuedNow { .. }
         | UserAction::DeleteQueued { .. }
@@ -258,7 +256,9 @@ pub(crate) fn row_of(action: &UserAction) -> Row {
         | UserAction::ResyncTranscript { .. } => Row::Transcript,
         UserAction::InvokeTool { .. } => Row::InvokeTool,
         UserAction::RequestCallDetail { .. } => Row::CallDetail,
-        UserAction::RefreshTemplates | UserAction::Extension(_) => Row::Templates,
+        UserAction::RefreshTemplates
+        | UserAction::Extension(_)
+        | UserAction::ReadTopologyNodeUsage { .. } => Row::Templates,
     }
 }
 
@@ -271,6 +271,9 @@ pub(crate) fn child_address(action: &UserAction) -> Option<&str> {
         | UserAction::InterruptTopologyNode { agent_id }
         | UserAction::CloseTopologyNode { agent_id }
         | UserAction::MailTopologyNode { agent_id, .. }
+        | UserAction::BackgroundTopologyNode { agent_id }
+        | UserAction::StopTopologyNodeProcesses { agent_id, .. }
+        | UserAction::ReadTopologyNodeUsage { agent_id }
         | UserAction::RecoverTopologyNode { agent_id, .. } => Some(agent_id),
         UserAction::InvokeTool { agent_id, .. }
         | UserAction::RequestCallDetail { agent_id, .. } => agent_id.as_deref(),
@@ -282,7 +285,7 @@ pub(crate) fn child_address(action: &UserAction) -> Option<&str> {
 }
 
 /// The number of intent variants [`row_of`] places.
-const INTENT_VARIANTS: usize = 36;
+const INTENT_VARIANTS: usize = 39;
 
 /// One intent of every variant, child-addressed wherever the intent can be.
 pub(crate) fn every_intent() -> Vec<UserAction> {
@@ -342,6 +345,12 @@ pub(crate) fn every_intent() -> Vec<UserAction> {
         UserAction::RefreshTopologyTree,
         UserAction::InterruptTopologyNode { agent_id: id() },
         UserAction::CloseTopologyNode { agent_id: id() },
+        UserAction::BackgroundTopologyNode { agent_id: id() },
+        UserAction::StopTopologyNodeProcesses {
+            agent_id: id(),
+            id: None,
+        },
+        UserAction::ReadTopologyNodeUsage { agent_id: id() },
         UserAction::MailTopologyNode {
             agent_id: id(),
             message: id(),

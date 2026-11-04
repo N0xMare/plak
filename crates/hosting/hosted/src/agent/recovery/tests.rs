@@ -4011,7 +4011,11 @@ async fn navigator_notes(
     let (wire, receiver) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let events = crate::runtime::Sender::over(wire);
     crate::topology_navigator::dispatch_topology_navigator_action(
-        &rows, &session, &events, &action,
+        &rows,
+        &session,
+        &events,
+        &crate::jobs::JobRegistry::default(),
+        &action,
     )
     .await;
     let mut notes = Vec::new();

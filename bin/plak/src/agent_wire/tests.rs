@@ -298,3 +298,41 @@ fn a_childs_mail_request_is_answered_once_the_mail_is_written() {
         ]
     );
 }
+
+/// A child attachment's usage overlay reads its node's usage; Plak's other
+/// extensions stay the root's.
+#[test]
+fn a_child_face_reads_its_nodes_usage() {
+    struct Open;
+    impl plakous_hosted::host_service::ChildNodes for Open {
+        fn state(&self, _agent_id: &str) -> plakous_hosted::host_service::NodeState {
+            plakous_hosted::host_service::NodeState::Open
+        }
+    }
+    let (actions, intents) = user_action_channel();
+    let service = HostService::new(actions, root(), 16).with_nodes(std::sync::Arc::new(Open));
+    let child = service
+        .attach(&NodeAddress {
+            tree_id: "t1".into(),
+            agent_id: "c1".into(),
+        })
+        .unwrap();
+    while intents.try_recv().is_ok() {}
+    for usage in [SurfaceIntent::OpenUsage, SurfaceIntent::RereadUsage] {
+        service
+            .intent(child, SessionIntent::Extension(usage))
+            .unwrap();
+        assert_eq!(
+            intents.try_recv().unwrap().into_parts().0,
+            SessionIntent::ReadTopologyNodeUsage {
+                agent_id: "c1".into()
+            }
+        );
+    }
+    assert_eq!(
+        service.intent(child, SessionIntent::Extension(SurfaceIntent::OpenSettings)),
+        Err(RequestRefusal::RefusedForRole {
+            row: "templates".into()
+        })
+    );
+}

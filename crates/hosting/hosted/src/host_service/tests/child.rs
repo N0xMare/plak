@@ -173,6 +173,22 @@ fn controls() -> Vec<(SessionIntent<Core>, SessionIntent<Core>)> {
             },
         ),
         (
+            SessionIntent::Background,
+            SessionIntent::BackgroundTopologyNode {
+                agent_id: "c1".into(),
+            },
+        ),
+        (
+            SessionIntent::StopProcesses {
+                id: Some("p1".into()),
+                interrupt: true,
+            },
+            SessionIntent::StopTopologyNodeProcesses {
+                agent_id: "c1".into(),
+                id: Some("p1".into()),
+            },
+        ),
+        (
             SessionIntent::CloseTopologyNode {
                 agent_id: "c1".into(),
             },
@@ -205,7 +221,8 @@ fn controls() -> Vec<(SessionIntent<Core>, SessionIntent<Core>)> {
 
 /// A child attachment's intents are its node's controls, sent tagged with
 /// the attachment: mail (follow-up or steer), its interrupt, its close,
-/// call detail as the node, and its transcript's resync. The rest is
+/// its background and process stop, call detail as the node, and its
+/// transcript's resync. The rest is
 /// refused for its row, approvals and tool calls included, and a quit
 /// detaches it and, as the last holder, closes the node's view.
 #[test]
@@ -243,7 +260,7 @@ fn a_child_attachments_intents_are_its_nodes_controls() {
             },
             "transcript",
         ),
-        (SessionIntent::Background, "processes"),
+        (SessionIntent::RefreshTemplates, "templates"),
         (
             SessionIntent::ResolveApproval {
                 approval_id: "a1".into(),

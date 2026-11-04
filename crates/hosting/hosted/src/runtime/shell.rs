@@ -299,6 +299,9 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
         | UserAction::InterruptTopologyNode { .. }
         | UserAction::CloseTopologyNode { .. }
         | UserAction::MailTopologyNode { .. }
+        | UserAction::BackgroundTopologyNode { .. }
+        | UserAction::StopTopologyNodeProcesses { .. }
+        | UserAction::ReadTopologyNodeUsage { .. }
         | UserAction::StopAllTopology
         | UserAction::RecoverTopologyNode { .. } => {
             // The intent's own answer, which a node's face waits for.

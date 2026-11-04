@@ -235,6 +235,13 @@ pub struct PlakExtension;
 impl ProtocolExtension for PlakExtension {
     type Intent = SurfaceIntent;
     type Observation = SurfaceObservation;
+
+    fn reads_usage(intent: &SurfaceIntent) -> bool {
+        matches!(
+            intent,
+            SurfaceIntent::OpenUsage | SurfaceIntent::RereadUsage
+        )
+    }
 }
 
 /// One acknowledged attention occurrence.

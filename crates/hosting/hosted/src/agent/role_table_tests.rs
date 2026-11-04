@@ -37,7 +37,7 @@ pub(crate) const COVERED: &[Covered] = &[
     Covered {
         row: Row::Processes,
         column: Column::Child,
-        test: child_process_stop_reaches_its_job_and_background_has_no_route,
+        test: child_processes_are_reached_by_node_address,
     },
     Covered {
         row: Row::Approval,
@@ -213,15 +213,22 @@ async fn child_interrupt_ends_the_turn_and_keeps_the_attempt() {
         .expect("an interrupted child still takes mail");
 }
 
-/// B: the user stop the root's `StopProcesses` runs reaches a child's own
-/// job, and its end wakes the parked child.
+/// B, by node address: a stop of the node's own processes reaches its job,
+/// and its end wakes the parked child; a stop addressed to another node
+/// does not; `Background` reaches the node's running turn through its own
+/// control.
 #[tokio::test]
-async fn child_process_stop_reaches_its_job_and_background_has_no_route() {
-    assert_today(
-        Row::Processes,
-        Column::Child,
-        Cell::Classes(&[Class::B, Class::R]),
-    );
+async fn child_processes_are_reached_by_node_address() {
+    assert_today(Row::Processes, Column::Child, Cell::Classes(&[Class::B]));
+    for action in crate::role_table::intents_of(Row::Processes) {
+        match action {
+            UserAction::BackgroundTopologyNode { .. }
+            | UserAction::StopTopologyNodeProcesses { .. } => {
+                assert_eq!(crate::role_table::child_address(&action), Some("c1"));
+            }
+            _ => assert_eq!(crate::role_table::child_address(&action), None),
+        }
+    }
     let fixture = fixture(
         json!([start_job("read line"), {"output": {"text": "started"}}, held("woke")]),
         leaf,
@@ -230,14 +237,27 @@ async fn child_process_stop_reaches_its_job_and_background_has_no_route() {
     fixture.until("the park", parked).await;
     let rows = fixture.registry.snapshot();
     assert_eq!(rows.len(), 1, "{rows:?}");
-    fixture.registry.stop_user(Some(&rows[0].id)).unwrap();
-    fixture.until("the wake turn", turns(2)).await;
-    // B1: expects B (`Background` moves the child's own foreground call).
-    // Today `Background` names no node and only the root turn takes it.
-    assert_eq!(
-        crate::role_table::child_address(&UserAction::Background),
-        None
+    assert!(
+        fixture
+            .registry
+            .stop_node("park-wake", "another-node", Some(&rows[0].id))
+            .is_err(),
+        "another node's stop does not reach the job"
     );
+    assert!(
+        crate::topology_navigator::background_node(&fixture.runtime, &fixture.child)
+            .await
+            .is_err(),
+        "a parked child has no active turn to background"
+    );
+    fixture
+        .registry
+        .stop_node("park-wake", &fixture.child, Some(&rows[0].id))
+        .unwrap();
+    fixture.until("the wake turn", turns(2)).await;
+    crate::topology_navigator::background_node(&fixture.runtime, &fixture.child)
+        .await
+        .expect("the running turn takes its background");
     finish(&fixture).await;
 }
 
@@ -456,4 +476,67 @@ async fn child_only_events_start_submit_and_report_the_result() {
         .await
         .unwrap_err();
     assert_eq!(refused.code, TopologyErrorCode::RecipientAttemptTerminal);
+}
+
+/// A child's usage view is the session's usage view with the child's own
+/// ledger: the turns this process projected for the child's session.
+#[tokio::test]
+async fn a_childs_usage_view_carries_its_own_ledger() {
+    use plakous::sessions::SessionLocator;
+    use plakous_host_protocol::views::presentation::{SessionLedgerView, UsageLimitsView};
+
+    let fixture = fixture(json!([held("working")]), leaf).await;
+    let locator: SessionLocator = fixture
+        .runtime
+        .read(|tree| tree.node(&fixture.child).unwrap().session_locator.clone())
+        .unwrap()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let turn = fixture
+        .runtime
+        .live
+        .lock()
+        .await
+        .get(&fixture.child)
+        .unwrap()
+        .turn_id();
+    let observer = crate::node_usage::LedgerObserver(None);
+    let usage = plakous::agent::TurnUsage::new(plakous::model::Usage::new(10, 4, 1, 2, 0), 2, 2, 0)
+        .unwrap();
+    observer.turn_usage(crate::agent_tree::ProjectedChildTurnUsage {
+        session_id: locator.session_id(),
+        branch_id: locator.branch_id(),
+        turn_id: turn,
+        committed_at_ms: 0,
+        usage,
+    });
+    let (channel, _received) =
+        crate::surface_protocol::host_event_channel::<crate::runtime::test_kit::TestExtension>();
+    let events = crate::runtime::Sender::over(channel);
+    let root_view = UsageLimitsView {
+        verticals: Vec::new(),
+        session: SessionLedgerView {
+            input_tokens: 999,
+            ..SessionLedgerView::default()
+        },
+        stale_age_seconds: None,
+    };
+    let _ = events.send(crate::surface_protocol::ContentEvent::UsageLimits(
+        root_view.clone(),
+    ));
+    let view =
+        crate::topology_navigator::node_usage(&fixture.runtime, &events, &fixture.child).unwrap();
+    assert_eq!(view.verticals, root_view.verticals);
+    assert_eq!(
+        (
+            view.session.input_tokens,
+            view.session.output_tokens,
+            view.session.cached_input_tokens,
+            view.session.model_calls,
+            view.session.turn_wall_time,
+        ),
+        (10, 4, 2, 2, None)
+    );
+    finish(&fixture).await;
 }

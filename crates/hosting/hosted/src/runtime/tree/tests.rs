@@ -81,7 +81,11 @@ async fn navigator_retirement_failures_reach_the_transcript_once_from_the_owner(
                 .unwrap();
         } else {
             crate::topology_navigator::dispatch_topology_navigator_action(
-                &paths, &session, &events, &intent,
+                &paths,
+                &session,
+                &events,
+                &crate::jobs::JobRegistry::default(),
+                &intent,
             )
             .await;
         }

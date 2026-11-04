@@ -216,6 +216,8 @@ async fn fixture_with(
     );
     let binding = {
         let (path, registry) = (root.path().to_owned(), registry.clone());
+        // The child's own processes, as production attributes them.
+        let jobs = registry.for_agent(child.clone(), "park-wake");
         let cursor = probe
             .as_ref()
             .map(|_| Arc::new(std::sync::atomic::AtomicU64::new(1)));
@@ -230,7 +232,7 @@ async fn fixture_with(
             } else {
                 scripted_runtime_binding(&path, controller.clone(), plan.clone())
             };
-            binding.unwrap().with_job_host(registry.clone())
+            binding.unwrap().with_job_host(jobs.clone())
         }
     };
     let CreateSessionOutcome::Created { session, .. } = sessions

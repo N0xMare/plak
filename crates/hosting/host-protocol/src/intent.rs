@@ -13,6 +13,13 @@ pub trait ProtocolExtension: Clone + fmt::Debug + Eq + Send + Sync + 'static {
     type Intent: Clone + fmt::Debug + Eq + Send + 'static;
     /// Driver-owned observation payload.
     type Observation: ObservationExtension;
+
+    /// Whether `intent` asks for the usage view, which a node's attachment
+    /// reads as that node's ([`SessionIntent::ReadTopologyNodeUsage`]).
+    fn reads_usage(intent: &Self::Intent) -> bool {
+        let _ = intent;
+        false
+    }
 }
 
 /// Mailbox classification the observation channel applies to an extension.
@@ -214,6 +221,25 @@ pub enum SessionIntent<P: ProtocolExtension = Core> {
         /// Exact agent id.
         agent_id: String,
     },
+    /// Background one exact node's top-level process calls already in
+    /// flight in its running turn: [`Self::Background`] by node address.
+    BackgroundTopologyNode {
+        /// Exact agent id.
+        agent_id: String,
+    },
+    /// Stop one of one exact node's background processes, or all of them
+    /// when `id` is `None`: [`Self::StopProcesses`] by node address.
+    StopTopologyNodeProcesses {
+        /// Exact agent id.
+        agent_id: String,
+        /// Host-local identity from the process snapshot.
+        id: Option<String>,
+    },
+    /// The usage view, with the session ledger of one exact node.
+    ReadTopologyNodeUsage {
+        /// Exact agent id.
+        agent_id: String,
+    },
     /// Tree mail from the operator to one exact node: a steer into its
     /// running turn (`urgent`) or a deferred follow-up.
     MailTopologyNode {
@@ -313,6 +339,9 @@ impl<P: ProtocolExtension> fmt::Debug for SessionIntent<P> {
             Self::InterruptTopologyNode { .. } => "InterruptTopologyNode(..)",
             Self::CloseTopologyNode { .. } => "CloseTopologyNode(..)",
             Self::MailTopologyNode { .. } => "MailTopologyNode(..)",
+            Self::BackgroundTopologyNode { .. } => "BackgroundTopologyNode(..)",
+            Self::StopTopologyNodeProcesses { .. } => "StopTopologyNodeProcesses(..)",
+            Self::ReadTopologyNodeUsage { .. } => "ReadTopologyNodeUsage(..)",
             Self::StopAllTopology => "StopAllTopology",
             Self::RecoverTopologyNode { .. } => "RecoverTopologyNode(..)",
             Self::RefreshTemplates => "RefreshTemplates",

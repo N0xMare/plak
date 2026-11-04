@@ -95,6 +95,9 @@ impl IntentClass {
             | UserAction::InterruptTopologyNode { .. }
             | UserAction::CloseTopologyNode { .. }
             | UserAction::MailTopologyNode { .. }
+            | UserAction::BackgroundTopologyNode { .. }
+            | UserAction::StopTopologyNodeProcesses { .. }
+            | UserAction::ReadTopologyNodeUsage { .. }
             | UserAction::StopAllTopology
             | UserAction::RecoverTopologyNode { .. }
             | UserAction::RefreshTemplates

@@ -24,7 +24,7 @@ use crate::interrupt::{InterruptWatch, InterruptWatchState};
 use crate::role_table::{
     Cell, Class, Column, Covered, Row, UserAction, assert_today, child_address, intents_of,
 };
-use crate::runtime::test_kit::{RecordingSurface, TestExtension};
+use crate::runtime::test_kit::{ProbeIntent, RecordingSurface, TestExtension};
 use crate::runtime::{HostWorkerHandle, spawn_host_worker};
 
 use Class::{B, I, R, U, W};
@@ -145,7 +145,7 @@ pub(crate) const COVERED: &[Covered] = &[
     Covered {
         row: Row::Templates,
         column: Column::Child,
-        test: child_templates_and_extensions_name_no_child,
+        test: child_templates_and_extensions_name_no_child_but_usage_does,
     },
 ];
 
@@ -720,11 +720,24 @@ fn child_recover_names_no_child() {
     assert_names_no_child(Row::Recover);
 }
 
+/// R, and B for the usage view: templates and extensions name no child,
+/// but a child's usage is read by its node's address, and a child face's
+/// usage extension is that read.
 #[test]
-fn child_templates_and_extensions_name_no_child() {
-    // B1: expects B for the usage extension; the rest stay R.
-    assert_today(Row::Templates, Column::Child, Cell::Classes(&[R]));
-    assert_names_no_child(Row::Templates);
+fn child_templates_and_extensions_name_no_child_but_usage_does() {
+    assert_today(Row::Templates, Column::Child, Cell::Classes(&[R, B]));
+    for action in intents_of(Row::Templates) {
+        let named = child_address(&action);
+        match action {
+            UserAction::ReadTopologyNodeUsage { .. } => assert_eq!(named, Some("c1")),
+            _ => assert_eq!(named, None, "{action:?}"),
+        }
+    }
+    assert!(
+        <TestExtension as plakous_host_protocol::ProtocolExtension>::reads_usage(
+            &ProbeIntent::InspectUsage
+        )
+    );
 }
 
 /// B, scoped: a busy root opens a child's transcript, answered in that

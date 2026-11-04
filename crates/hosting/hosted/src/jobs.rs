@@ -417,6 +417,22 @@ impl JobRegistry {
     /// between SIGTERM and SIGKILL; its row reads `Stopping` meanwhile.
     /// Failures surface through [`Self::take_user_stop_failures`].
     pub(crate) fn stop_user(&self, id: Option<&str>) -> Result<(), String> {
+        self.stop_owned(None, id)
+    }
+
+    /// [`Self::stop_user`] over one node's own jobs only: the services its
+    /// lines' heads attached as the node `agent` of the tree `tree`. A
+    /// child's id names it only within its tree.
+    pub(crate) fn stop_node(
+        &self,
+        tree: &str,
+        agent: &str,
+        id: Option<&str>,
+    ) -> Result<(), String> {
+        self.stop_owned(Some((tree, agent)), id)
+    }
+
+    fn stop_owned(&self, node: Option<(&str, &str)>, id: Option<&str>) -> Result<(), String> {
         // Only rows the current snapshot shows. A hidden other-tree job is
         // not stopped by this session's stop-one or stop-all.
         let services = {
@@ -430,7 +446,16 @@ impl JobRegistry {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             services
                 .values()
-                .filter(|entry| owners.visible(entry.key()))
+                .filter(|entry| {
+                    let key = entry.key();
+                    match node {
+                        None => owners.visible(key),
+                        Some((tree, agent)) => {
+                            owners.trees.get(&key).map(String::as_str) == Some(tree)
+                                && owners.labels.get(&key).map(String::as_str) == Some(agent)
+                        }
+                    }
+                })
                 .map(|entry| (entry.key(), entry.service.clone()))
                 .collect::<Vec<_>>()
         };

@@ -483,8 +483,17 @@ impl<P: ProtocolExtension> HostService<P> {
         {
             let mut state = self.lock();
             let class = observation.class();
+            // Inside a child's answer window everything but a transcript is
+            // that child's answer, and none of it is the root's to keep.
+            let child_answer = state.requester.filter(|owner| {
+                !matches!(observation, SessionObservation::IntentStarted(_))
+                    && state
+                        .attachments
+                        .get(owner)
+                        .is_some_and(|held| held.node.is_some())
+            });
             // A face's service takes no later attachment to keep anything for.
-            if self.actions.is_some() {
+            if self.actions.is_some() && child_answer.is_none() {
                 state.remember(&observation, class);
             }
             let mut observation = observation;
@@ -495,6 +504,7 @@ impl<P: ProtocolExtension> HostService<P> {
                     .filter(|(_, held)| held.scopes.contains(scope))
                     .map(|(id, _)| *id)
                     .collect(),
+                _ if child_answer.is_some() => child_answer.into_iter().collect(),
                 (ObservationClass::Addressed, None) => {
                     if let SessionObservation::IntentStarted(started) = &observation {
                         let (answer, named) = match started.as_deref() {
@@ -536,20 +546,7 @@ impl<P: ProtocolExtension> HostService<P> {
                         }
                     }
                 }
-                // An error row in a child's answer window refuses that
-                // child's control and is the child's alone.
-                _ => match state.requester {
-                    Some(owner)
-                        if matches!(&observation, SessionObservation::Row(row) if row.is_error())
-                            && state
-                                .attachments
-                                .get(&owner)
-                                .is_some_and(|held| held.node.is_some()) =>
-                    {
-                        vec![owner]
-                    }
-                    _ => state.root_attachments(),
-                },
+                _ => state.root_attachments(),
             };
             if let Some((last, others)) = targets.split_last() {
                 for id in others {

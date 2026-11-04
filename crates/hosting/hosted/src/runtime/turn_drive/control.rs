@@ -631,6 +631,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                     | UserAction::InterruptTopologyNode { .. }
                     | UserAction::CloseTopologyNode { .. }
                     | UserAction::MailTopologyNode { .. }
+                    | UserAction::BackgroundTopologyNode { .. }
+                    | UserAction::StopTopologyNodeProcesses { .. }
+                    | UserAction::ReadTopologyNodeUsage { .. }
                     | UserAction::StopAllTopology
                     | UserAction::RecoverTopologyNode { .. }),
                 ) => {
@@ -638,6 +641,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                         self.host.rows,
                         self.host.session,
                         self.host.events,
+                        self.host.roots.job_registry(),
                         &action,
                     )
                     .await;

@@ -47,6 +47,9 @@ fn expected_class(action: &UserAction) -> IntentClass {
         | UserAction::InterruptTopologyNode { .. }
         | UserAction::CloseTopologyNode { .. }
         | UserAction::MailTopologyNode { .. }
+        | UserAction::BackgroundTopologyNode { .. }
+        | UserAction::StopTopologyNodeProcesses { .. }
+        | UserAction::ReadTopologyNodeUsage { .. }
         | UserAction::StopAllTopology
         | UserAction::RecoverTopologyNode { .. }
         | UserAction::RefreshTemplates
@@ -113,6 +116,12 @@ fn every_intent() -> Vec<UserAction> {
         UserAction::RefreshTopologyTree,
         UserAction::InterruptTopologyNode { agent_id: id() },
         UserAction::CloseTopologyNode { agent_id: id() },
+        UserAction::BackgroundTopologyNode { agent_id: id() },
+        UserAction::StopTopologyNodeProcesses {
+            agent_id: id(),
+            id: None,
+        },
+        UserAction::ReadTopologyNodeUsage { agent_id: id() },
         UserAction::MailTopologyNode {
             agent_id: id(),
             message: id(),
@@ -142,7 +151,7 @@ fn every_intent() -> Vec<UserAction> {
 }
 
 /// The number of `SessionIntent` variants `expected_class` matches.
-const INTENT_VARIANTS: usize = 36;
+const INTENT_VARIANTS: usize = 39;
 
 #[test]
 fn every_intent_has_its_class_and_disposition() {

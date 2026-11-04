@@ -772,8 +772,14 @@ pub(super) async fn dispatch_topology_navigator<P: plakous_host_protocol::Protoc
         push.child_live.close_agent_transcript(events);
         return;
     }
-    crate::topology_navigator::dispatch_topology_navigator_action(rows, session, events, action)
-        .await;
+    crate::topology_navigator::dispatch_topology_navigator_action(
+        rows,
+        session,
+        events,
+        roots.job_registry(),
+        action,
+    )
+    .await;
     if let Some(runtime) = push.runtime(rows, session) {
         push.child_live
             .set_jobs(std::sync::Arc::clone(roots.job_registry()));

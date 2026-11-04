@@ -1161,3 +1161,40 @@ fn child_owned_terminal_yields_no_process_row_and_root_lineage_yields_one() -> T
     ));
     Ok(())
 }
+
+/// A node's stop reaches that node of that tree only: child ids are
+/// tree-scoped, so tree S2's `c1` never stops tree S1's `c1`, whether or
+/// not a root has attached.
+#[test]
+fn stop_node_reaches_only_its_own_trees_node() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let registry = Arc::new(JobRegistry::default());
+    let first = registry
+        .for_agent("c1", S1)
+        .attach(keyed(C1S, C1B)?, sessions(root.path())?)?;
+    let second = registry
+        .for_agent("c1", S2)
+        .attach(keyed(C1S, B)?, sessions(root.path())?)?;
+    let first_job = start(first.local())?;
+    plakous_tools::internal::promote(first.local(), first_job)?;
+    let second_job = start(second.local())?;
+    plakous_tools::internal::promote(second.local(), second_job)?;
+    assert_eq!(registry.running_count(), 2);
+    // No root attached: every row is visible, and only the tree tells the
+    // two `c1`s apart.
+    assert!(
+        registry.stop_node(S2, "c2", None).is_ok(),
+        "a node with no jobs stops nothing"
+    );
+    registry.stop_node(S2, "c1", None)?;
+    registry.settle_user_stops();
+    assert_eq!(registry.running_count(), 1, "only S2's c1 stopped");
+    let left = registry.snapshot();
+    assert!(
+        left.iter()
+            .all(|row| row.id.contains(C1B) || row.status != ProcessStatus::Running),
+        "{left:?}"
+    );
+    first.local().stop(first_job, JobStopReason::AttemptEnded)?;
+    Ok(())
+}

@@ -25,7 +25,14 @@ async fn dispatch_captured_action(
 ) {
     let (wire, receiver) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let events = crate::runtime::Sender::over(wire);
-    dispatch_topology_navigator_action(rows, session, &events, action).await;
+    dispatch_topology_navigator_action(
+        rows,
+        session,
+        &events,
+        &crate::jobs::JobRegistry::default(),
+        action,
+    )
+    .await;
     for event in receiver.try_iter() {
         send(event);
     }

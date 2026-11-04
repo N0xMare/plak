@@ -78,6 +78,7 @@ pub mod agent;
 pub mod agent_tree_protocol;
 mod driver;
 pub(crate) mod jobs;
+mod node_usage;
 // The hosted driver composes the tree runtime through its public vocabulary.
 pub(crate) use plakous_recursive_subagents::task_set::{TaskHandle, TaskSet};
 pub use plakous_recursive_subagents::{

@@ -11,10 +11,12 @@
 //! (`Sender::answering`). Mail is tree mail from the operator, which reaches
 //! the nodes the tree's root may write to; an interrupt is the tree's
 //! interrupt with the operator as its cause, and a close of the attached
-//! node is the tree's close. A `Quit` is the attachment's detach; the node
-//! runs on. Approvals and tool calls are refused until their answers are
-//! routed to the node's attachment. Every control is refused, with its own
-//! refusal, when the node is closed, retiring, out of reach or unknown.
+//! node is the tree's close; `background`, a process stop and the usage view
+//! are the node's own, by node address. A `Quit` is the attachment's
+//! detach; the node runs on. Approvals and tool calls are refused until
+//! their answers are routed to the node's attachment. Every control is
+//! refused, with its own refusal, when the node is closed, retiring, out
+//! of reach or unknown.
 
 use std::collections::{BTreeSet, VecDeque};
 
@@ -62,7 +64,10 @@ const fn row<P: ProtocolExtension>(intent: &SessionIntent<P>) -> &'static str {
         SessionIntent::Prompt(_) | SessionIntent::FollowUp(_) => "prompt",
         SessionIntent::Steer(_) => "steer",
         SessionIntent::Interrupt => "interrupt",
-        SessionIntent::StopProcesses { .. } | SessionIntent::Background => "processes",
+        SessionIntent::StopProcesses { .. }
+        | SessionIntent::Background
+        | SessionIntent::BackgroundTopologyNode { .. }
+        | SessionIntent::StopTopologyNodeProcesses { .. } => "processes",
         SessionIntent::DropQueued
         | SessionIntent::SendQueuedNow { .. }
         | SessionIntent::DeleteQueued { .. }
@@ -90,7 +95,9 @@ const fn row<P: ProtocolExtension>(intent: &SessionIntent<P>) -> &'static str {
         | SessionIntent::ResyncTranscript { .. } => "transcript",
         SessionIntent::InvokeTool { .. } => "invoke_tool",
         SessionIntent::RequestCallDetail { .. } => "call_detail",
-        SessionIntent::RefreshTemplates | SessionIntent::Extension(_) => "templates",
+        SessionIntent::RefreshTemplates
+        | SessionIntent::Extension(_)
+        | SessionIntent::ReadTopologyNodeUsage { .. } => "templates",
     }
 }
 
@@ -129,6 +136,14 @@ fn route<P: ProtocolExtension>(
             });
         }
         SessionIntent::Interrupt => SessionIntent::InterruptTopologyNode { agent_id: node() },
+        SessionIntent::Background => SessionIntent::BackgroundTopologyNode { agent_id: node() },
+        SessionIntent::StopProcesses { id, .. } => SessionIntent::StopTopologyNodeProcesses {
+            agent_id: node(),
+            id,
+        },
+        SessionIntent::Extension(intent) if P::reads_usage(&intent) => {
+            SessionIntent::ReadTopologyNodeUsage { agent_id: node() }
+        }
         SessionIntent::InterruptTopologyNode { agent_id } if own(&agent_id) => {
             SessionIntent::InterruptTopologyNode { agent_id }
         }

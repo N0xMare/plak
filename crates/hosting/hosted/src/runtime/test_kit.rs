@@ -112,6 +112,10 @@ pub enum ProbeObservation {
 impl plakous_host_protocol::ProtocolExtension for TestExtension {
     type Intent = ProbeIntent;
     type Observation = ProbeObservation;
+
+    fn reads_usage(intent: &ProbeIntent) -> bool {
+        matches!(intent, ProbeIntent::InspectUsage)
+    }
 }
 impl plakous_host_protocol::ObservationExtension for ProbeObservation {
     fn latest_state(&self) -> bool {

@@ -51,12 +51,11 @@ fn a_late_answer_reopens_its_requesters_window_then_the_open_one() {
     );
 }
 
-/// An answer inside its own window is marked as that intent's too, so no
-/// other observation in the window is taken for it; anything not addressed
-/// goes as it is, and a sender bound before any window answers as an
-/// unbound one.
+/// Whatever a bound sender sends is marked as its intent's answer, inside
+/// that intent's own window too, so no other observation in the window is
+/// taken for it; a sender bound before any window answers as an unbound one.
 #[test]
-fn an_answer_in_its_own_window_is_marked_and_the_rest_goes_as_it_is() {
+fn whatever_a_bound_sender_sends_is_marked() {
     let (channel, received) = observation_channel::<Core>();
     let events = Sender::over(channel);
     let early = events.answering();
@@ -75,7 +74,9 @@ fn an_answer_in_its_own_window_is_marked_and_the_rest_goes_as_it_is() {
             restored("in time"),
             started("a"),
             started("b"),
+            answers("a"),
             ContentObservation::AssistantDone,
+            started("b"),
             restored("unbound"),
         ]
         .map(Observation::from)
@@ -166,4 +167,24 @@ fn a_late_answer_after_a_reset_restores_no_window() {
         ]
         .map(Observation::from)
     );
+}
+
+/// The session's last usage view is kept whoever sent it, an answering
+/// sender included.
+#[test]
+fn a_marked_usage_view_is_still_the_sessions_last() {
+    let (channel, _received) = observation_channel::<Core>();
+    let events = Sender::over(channel);
+    assert!(events.send(started("a")));
+    let view = plakous_host_protocol::views::presentation::UsageLimitsView {
+        verticals: Vec::new(),
+        session: plakous_host_protocol::views::presentation::SessionLedgerView::default(),
+        stale_age_seconds: Some(3),
+    };
+    assert!(
+        events
+            .answering()
+            .send(ContentObservation::UsageLimits(view.clone()))
+    );
+    assert_eq!(events.usage(), Some(view));
 }

@@ -271,6 +271,9 @@ pub struct Sender<P: plakous_host_protocol::ProtocolExtension = plakous_host_pro
     window: Arc<std::sync::Mutex<Option<Started>>>,
     /// The window this sender answers in ([`Self::answering`]).
     answers: Option<Started>,
+    /// The last usage view the session published, shared by every clone.
+    usage:
+        Arc<std::sync::Mutex<Option<plakous_host_protocol::views::presentation::UsageLimitsView>>>,
     /// Unit laws inspect publication order before latest-state coalescing.
     #[cfg(test)]
     recorded: Option<Arc<std::sync::Mutex<Vec<ContentEvent<P>>>>>,
@@ -307,6 +310,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             quit_receipt: worker::QuitReceipt::default(),
             window: Arc::default(),
             answers: None,
+            usage: Arc::default(),
             #[cfg(test)]
             recorded: None,
         }
@@ -324,6 +328,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             quit_receipt: self.quit_receipt.clone(),
             window: Arc::clone(&self.window),
             answers: self.answers.clone(),
+            usage: Arc::clone(&self.usage),
             #[cfg(test)]
             recorded: self.recorded.clone(),
         }
@@ -381,10 +386,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             }
             _ => {}
         }
-        let addressed = value.class()
-            == plakous_host_protocol::observation::ObservationClass::Addressed
-            || matches!(&value, HostEvent::Row(row) if row.is_error());
-        let Some(answers) = self.answers.as_ref().filter(|_| addressed) else {
+        if let HostEvent::UsageLimits(view) = &value {
+            *self
+                .usage
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(view.clone());
+        }
+        let Some(answers) = self.answers.as_ref() else {
             return self.publish(value);
         };
         // An answer to a named intent goes out marked as that intent's
@@ -405,8 +413,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
     }
 
     /// A clone that answers the intent the session is answering now: every
-    /// addressed observation or error row it sends goes out in a window of
-    /// its own, marked as that intent's answer, followed by the window it
+    /// observation it sends goes out in a window of its own, marked as that intent's answer, followed by the window it
     /// interrupted. For any publisher of an intent's answer, and one that
     /// answers after the host moved on in particular.
     #[must_use]
@@ -420,6 +427,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             answers,
             ..self.clone()
         }
+    }
+
+    /// The last usage view the session published, if any.
+    pub(crate) fn usage(
+        &self,
+    ) -> Option<plakous_host_protocol::views::presentation::UsageLimitsView> {
+        self.usage
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     fn publish(&self, value: HostEvent<P>) -> bool {

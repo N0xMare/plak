@@ -255,6 +255,15 @@ an export.
   `mail_refused`). The navigator's interrupt now records the operator as
   its cause (`interrupt_agent_for`). Embedder break: the new intent and
   refusals, and an answering sender's marked windows.
+- Child processes and usage by node address: a child attachment's
+  `background`, process stop and usage read become
+  `SessionIntent::BackgroundTopologyNode`, `StopTopologyNodeProcesses` and
+  `ReadTopologyNodeUsage`. Background reaches the node's running turn
+  through its own control; a stop reaches only the processes the node's
+  lines attached as that node; the usage view carries the node's own
+  session ledger, kept from the child turn usage the tree projects. The
+  intent x role table's B1 cells close. Embedder break: the new intents
+  and `ProtocolExtension::reads_usage` (defaults to false).
 - Version control on a runner (unsupported; only the test route selects a
   runner): an orchestration tree on a selected runner drives its copies
   through `RemoteVcs` over the runner link instead of refusing every effect.

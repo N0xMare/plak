@@ -976,6 +976,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     | UserAction::InterruptTopologyNode { .. }
                     | UserAction::CloseTopologyNode { .. }
                     | UserAction::MailTopologyNode { .. }
+                    | UserAction::BackgroundTopologyNode { .. }
+                    | UserAction::StopTopologyNodeProcesses { .. }
+                    | UserAction::ReadTopologyNodeUsage { .. }
                     | UserAction::StopAllTopology
                     | UserAction::RecoverTopologyNode { .. }),
                 ) => {

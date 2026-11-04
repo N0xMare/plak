@@ -3780,9 +3780,10 @@ verdicts) are addressed, the session profile and workspace chrome states.
   in that window only the answers the control's publisher marks as that
   control's: such an answer goes out in a window of its own, opened by an
   `IntentStarted` whose correlation is the requester's prefixed `answer:`
-  and closed by the window it interrupted. Everything else in a child's
-  window, addressed answers and error rows included, is the root
-  attachments'. `prompt` and `follow_up` are deferred tree mail from the
+  and closed by the window it interrupted, and everything in it but a
+  transcript observation is the child's, kept for no later attach.
+  Everything else in a child's window, addressed answers and error rows
+  included, is the root attachments'. `prompt` and `follow_up` are deferred tree mail from the
   operator to the node and `steer` urgent tree mail (the
   `mail_topology_node` intent; text only, images are `malformed`). The
   operator writes as the tree's root, so its mail reads as the root's and
@@ -3798,13 +3799,22 @@ verdicts) are addressed, the session profile and workspace chrome states.
   run. `interrupt` is the tree's interrupt of the node with the operator as
   its cause, which takes effect on an owed child too. A face's stop is that
   interrupt or the node's close (`close_topology_node` naming the attached
-  node); a `quit` detaches the attachment and the node runs on. Call detail
-  names the node; opening or resyncing the node's own transcript resyncs it
-  and closing it does nothing. Every other intent is `refused_for_role`
-  with its row (`queue`, `workflow`, `readiness`, `recover`, `navigator`,
-  `transcript`, `processes`, `templates`), approvals (`approval`) and tool
-  calls (`invoke_tool`) included until their answers are routed to the
-  node's attachment. An attach to, or a control of, a closed node is
+  node); a `quit` detaches the attachment and the node runs on.
+  `background` backgrounds the top-level process calls in flight in the
+  node's running turn, through that turn's own control
+  (`background_topology_node`), and a process stop stops the node's own
+  processes only, those its lines attached as that node
+  (`stop_topology_node_processes`; a stop that also interrupts is the
+  node's stop alone). The extension a face reads the usage view with is
+  that view with the node's own session ledger (`read_topology_node_usage`):
+  the allowances the session last read, and the usage of the turns this
+  host process projected for the node's session; a child's turn time is
+  not the host's to measure. Call detail names the node; opening or
+  resyncing the node's own transcript resyncs it and closing it does
+  nothing. Every other intent is `refused_for_role` with its row (`queue`,
+  `workflow`, `readiness`, `recover`, `navigator`, `transcript`,
+  `templates`), approvals (`approval`) and tool calls (`invoke_tool`)
+  included until their answers are routed to the node's attachment. An attach to, or a control of, a closed node is
   `node_closed`, of a node whose hub is shutting down `node_retiring`, of a
   node outside the operator's reach `out_of_reach`, and of a node the tree
   does not hold `unknown_node`; a `quit` still detaches. Mail and the stop

@@ -734,9 +734,12 @@ impl ProductStateRoots {
         self.open_telemetry_cache().emit(observation);
     }
 
-    /// The topology observer this process publishes tree transitions through.
+    /// The topology observer this process publishes tree transitions through:
+    /// the product's, behind the children's usage ledgers.
     pub(crate) fn topology_observer(&self) -> Option<Arc<dyn crate::agent_tree::TopologyObserver>> {
-        self.open_telemetry_cache().topology_observer()
+        Some(Arc::new(crate::node_usage::LedgerObserver(
+            self.open_telemetry_cache().topology_observer(),
+        )))
     }
 
     /// This process's opened telemetry, for the product's own emitters.
