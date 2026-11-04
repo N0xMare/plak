@@ -3786,7 +3786,11 @@ Settlement has three triggers:
   including the Agents list's confirmed `u` (`RecoverTopologyNode`), which
   uses that port and no other;
 
-- the tree's background pass. One is started per root open, per `ResumeTree`
+- the tree's background pass. One is started by the tree's custody-attach
+  scan, which runs once per custody take: the first root attach after this
+  process takes the tree's custody rejoins the tree's in-flight children, and
+  the first root open after it starts the pass; a later open of a tree
+  already in custody starts none. One is also started per `ResumeTree`
   (from the idle loop or during a running turn), per returned child startup or
   retirement release with recorded fault or remaining recovery need (including
   release/publication failure), per next-prompt or `/recover`

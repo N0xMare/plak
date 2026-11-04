@@ -534,7 +534,17 @@ pub struct ProductTopologyRuntime {
     residents: std::sync::atomic::AtomicUsize,
     /// The live table's dormancy signal.
     quiet: Arc<tokio::sync::Notify>,
+    /// Where this custody take's custody-attach scan stands.
+    attach_scan: std::sync::atomic::AtomicU8,
 }
+
+/// The custody-attach scan (design section 6.6) is owed: no root has
+/// attached since this process took the tree's custody.
+const ATTACH_SCAN_DUE: u8 = 0;
+/// The scan's rejoin ran; its recovery pass is owed to the root's open.
+const ATTACH_SCAN_PASS_OWED: u8 = 1;
+/// The scan ran.
+const ATTACH_SCAN_DONE: u8 = 2;
 
 /// A root runtime's residency in its tree's hub: while it lives the tree is
 /// not dormant, so its custody and children outlive the release of every

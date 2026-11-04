@@ -40,7 +40,32 @@ impl ProductTopologyRuntime {
             observer,
             residents: std::sync::atomic::AtomicUsize::new(0),
             quiet,
+            attach_scan: std::sync::atomic::AtomicU8::new(super::ATTACH_SCAN_DUE),
         }
+    }
+
+    /// Begins this custody take's custody-attach scan: whether this root
+    /// attach is the first since the process took the tree's custody, and
+    /// so rejoins the tree's in-flight children. Later attaches return
+    /// false.
+    pub fn begin_attach_scan(&self) -> bool {
+        self.attach_scan
+            .compare_exchange(
+                super::ATTACH_SCAN_DUE,
+                super::ATTACH_SCAN_PASS_OWED,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+    }
+
+    /// Finishes the custody-attach scan: whether the root actor opening now
+    /// starts the scan's recovery pass. Only the first open after the
+    /// custody take does, whether or not its attach began the scan.
+    pub fn finish_attach_scan(&self) -> bool {
+        self.attach_scan
+            .swap(super::ATTACH_SCAN_DONE, Ordering::AcqRel)
+            != super::ATTACH_SCAN_DONE
     }
 
     /// Makes a root runtime built against this tree without a session

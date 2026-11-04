@@ -987,7 +987,10 @@ async fn attach_native_source(
         }
         return result;
     }
-    if is_root && let Some(topology) = crate::topology_runtime::lookup(&tree_id) {
+    if is_root
+        && let Some(topology) = crate::topology_runtime::lookup(&tree_id)
+        && topology.begin_attach_scan()
+    {
         reattach_inflight_children(&reattach_parent, &topology).await;
     }
     result
@@ -1210,6 +1213,7 @@ async fn attach_api_source(
     if is_root
         && topology_attach == crate::topology_runtime::TopologyHubAttach::AttachRoot
         && let Some(topology) = crate::topology_runtime::lookup(&tree_id)
+        && topology.begin_attach_scan()
     {
         reattach_inflight_children(&reattach_parent, &topology).await;
     }

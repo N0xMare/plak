@@ -551,7 +551,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
         );
         host.publish_pending_continuation();
         host.publish_projected_usage();
-        host.spawn_tree_recovery();
+        host.finish_attach_scan();
         Ok(host)
     }
 }

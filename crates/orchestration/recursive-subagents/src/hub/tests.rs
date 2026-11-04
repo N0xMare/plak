@@ -2898,3 +2898,33 @@ async fn an_abandoned_startup_slot_keeps_a_detached_tree_until_the_hosts_quit() 
     let _ = hub.shut_down_handed_off().await;
     assert!(hub.lookup(&tree_id).is_none(), "the host's quit ends it");
 }
+
+/// The custody-attach scan runs once per custody take: the first root
+/// attach rejoins and the first open starts the recovery pass; later
+/// attaches and opens of the same custody take do neither, and a new
+/// custody take owes the scan again.
+#[test]
+fn the_custody_attach_scan_runs_once_per_custody_take() {
+    let root = tempfile::tempdir().unwrap();
+    let runtime = |name: &str| {
+        ProductTopologyRuntime::new(
+            bootstrap(name, root.path().to_path_buf()),
+            memory_store(),
+            Arc::new(plakous_workspace::occupancy_vcs::fake::FakeVcs::new()),
+            None,
+        )
+    };
+    let first = runtime("attach-scan");
+    assert!(first.begin_attach_scan(), "the first root attach rejoins");
+    assert!(!first.begin_attach_scan(), "a later attach does not");
+    assert!(first.finish_attach_scan(), "the first open starts the pass");
+    assert!(!first.finish_attach_scan(), "a later open does not");
+    assert!(!first.begin_attach_scan());
+    let unattached = runtime("attach-scan-open");
+    assert!(
+        unattached.finish_attach_scan(),
+        "an open whose attach did not begin the scan still starts its pass"
+    );
+    assert!(!unattached.begin_attach_scan());
+    assert!(runtime("attach-scan-again").begin_attach_scan());
+}

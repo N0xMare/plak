@@ -175,6 +175,21 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         Ok(HostStep::Continue)
     }
 
+    /// Finishes the tree's custody-attach scan (design section 6.6): the
+    /// first root open since this process took the tree's custody starts
+    /// the background recovery pass, after the attach rejoined the tree's
+    /// in-flight children. A later open of a tree already in custody starts
+    /// none; `/recover`, `ResumeTree` and a recovery of the root start their
+    /// own.
+    pub(super) fn finish_attach_scan(&self) {
+        let tree_id = durable_tree_id(&self.role.config.topology_rows(), &self.role.config.session);
+        if crate::topology_runtime::lookup(&tree_id)
+            .is_none_or(|runtime| runtime.finish_attach_scan())
+        {
+            self.spawn_tree_recovery();
+        }
+    }
+
     /// Starts this tree's one child recovery pass in the background. It never
     /// waits on a lease, and what it settled or refused reaches the user as
     /// one system note when it finishes.
