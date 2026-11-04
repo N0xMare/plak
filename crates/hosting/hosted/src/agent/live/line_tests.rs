@@ -119,6 +119,12 @@ impl Fixture {
     }
 }
 
+/// The job budget an abandoning release is given here. Neither test is about
+/// the budget: the release returns once its jobs are stopped and their
+/// terminals recorded, and this bound only ends a hang. A short budget made
+/// the result depend on how fast a loaded host ran the stop and the store.
+const JOB_SETTLEMENT_LIVENESS: Duration = Duration::from_secs(30);
+
 /// Starts one promoted job with the scripted first round, then cancels the
 /// turn so the job keeps running with no turn.
 async fn start_job(fixture: &Fixture, session: &OpenedSession) -> u32 {
@@ -452,7 +458,7 @@ async fn a_carry_is_refused_while_the_head_is_held_or_mid_turn() {
     .await
     .unwrap();
     let working = carried
-        .abandon_and_release(&[], Duration::from_millis(250))
+        .abandon_and_release(&[], JOB_SETTLEMENT_LIVENESS)
         .await
         .unwrap();
     assert_ne!(working, carried_locator);
@@ -780,7 +786,7 @@ async fn a_working_head_answers_its_recorded_job_terminal_on_open() {
     .unwrap();
     let number = agent.jobs()[0].number;
     let working = session
-        .abandon_and_release(&[], Duration::from_millis(250))
+        .abandon_and_release(&[], JOB_SETTLEMENT_LIVENESS)
         .await
         .unwrap();
     registry.stop_all(Duration::from_millis(250)).await.unwrap();
