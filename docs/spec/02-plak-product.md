@@ -3730,7 +3730,11 @@ verdicts) are addressed, the session profile and workspace chrome states.
 - **Host service.** `plakous_hosted::host_service::HostService` is one
   session's side of the wire, the only consumer of its observations and the
   only sender of its attachments' intents; `plak agent --wire v2` speaks
-  through it, and the TUI and JSONL v1 are its faces (below). An attachment
+  through it, and the TUI and JSONL v1 are its faces (below). One wire
+  connection's side (the handshake, its one attachment, the answers to a
+  child's mail, the frames it writes) is
+  `plakous_hosted::host_service::wire::WireConnection`, which carries
+  lines over any transport; `plak agent --wire v2` drives it on stdio. An attachment
   targets the session's root or a child of its tree (node attach, below);
   any other node is `unknown_node`.
   Every intent carries its attachment as its origin beside the client's own

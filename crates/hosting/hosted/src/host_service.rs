@@ -47,6 +47,7 @@
 mod child;
 mod face;
 mod tree_nodes;
+pub mod wire;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex, PoisonError};
