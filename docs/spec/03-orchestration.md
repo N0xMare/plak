@@ -4964,6 +4964,17 @@ drives the child's turn waiter beside its mailbox, so a waiter that restarts
 or retires its own child is answered by the actor it runs in. The actor ends
 once its waiter has ended and its session is gone: released, or dropped
 with its last handle when the hub drops that handle without a release.
+Each child node has one residency in its tree's live table: opening (a
+startup owns the slot), resident (a live turn, the only state that takes
+new work) or releasing (its release is in flight, and the slot stays taken
+until the release returns). A node with no entry is dormant; the tree is
+dormant when no child node has an entry and no root runtime is resident.
+Leaving opening classifies what arrived meanwhile in one order: a close or
+interrupt cancels the startup before it can become resident; mail is taken
+by the turn it starts, or answered `SlotBusy` and retried once the slot is
+vacant; a wake starts a turn only from a park, after the turn ends. No
+trigger is queued in process memory: each one is tree mail or a wake, or
+joins the startup or retirement it found.
 Admission checks active and retiring slots under the same mutex as the closed
 flag. Batch cancellation starts and joins siblings concurrently; its report retains
 input order, while independent retirement workers may publish in completion order.

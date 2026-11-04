@@ -291,7 +291,10 @@ fn reserve(
 }
 
 impl ProductTopologyRuntime {
-    /// Atomically transfers a startup reservation to its acknowledged live turn.
+    /// Atomically transfers a startup reservation to its acknowledged live turn:
+    /// the node's one step from opening to resident. A close or interrupt
+    /// that arrived while it opened has cancelled the reservation, so it wins
+    /// here; mail and wakes are tree state the resident turn takes later.
     /// A cancelled reservation always returns the child to its startup owner.
     ///
     /// # Errors
