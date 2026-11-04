@@ -133,9 +133,10 @@ the role then decides what follows. Each admitted turn has one private
 `TurnDrive`: a biased loop that takes the turn's result first, then the
 role's urgent wake, then its events, then the role's other wakes. The root's
 port owns its control handle, observed live projection (including pending
-approvals), cancel settlement, and terminal result. A child's port is the
-reducer that folds the child turn's events into the observation every face
-reads; the child's waiter takes its result. Queue
+approvals), cancel settlement, and terminal result. A child's port takes the
+turn's result and folds the turn's events into the observation every face
+reads; the child's turn waiter, which its actor runs, drives it, so one drive
+owns a child turn's events and its result. Queue
 editing and intent writes belong to the session domain and share the record's
 one revision CAS; views are written only by the projector. Ending a host drive
 attempts canonical release even when the drive failed, and preserves both
@@ -3796,8 +3797,15 @@ verdicts) are addressed, the session profile and workspace chrome states.
   `queued` otherwise) or the send's refusal as an error row. Mail to a
   child owed its `recover_node` is refused by the child's slot and stays
   durable; its delivery settles, and is answered, once that recovery has
-  run. `interrupt` is the tree's interrupt of the node with the operator as
-  its cause, which takes effect on an owed child too. A face's stop is that
+  run. `interrupt` (or `interrupt_topology_node` naming the attached node)
+  is the tree's interrupt of the node with the operator as its cause, run on
+  the tree itself rather than through the root session's mailbox, so it is
+  taken whatever the root runs and takes effect on an owed child too; the
+  node's own actor cancels its turn, and a refusal is the attachment's
+  answer as an error row. It runs on the executor of the root session that
+  took the tree's first root lease; an interrupt that executor drops
+  unrun (it stopped) is answered as refused (`the agent tree's executor
+  stopped`). A face's stop is that
   interrupt or the node's close (`close_topology_node` naming the attached
   node); a `quit` detaches the attachment and the node runs on.
   `background` backgrounds the top-level process calls in flight in the
@@ -3817,9 +3825,9 @@ verdicts) are addressed, the session profile and workspace chrome states.
   included until their answers are routed to the node's attachment. An attach to, or a control of, a closed node is
   `node_closed`, of a node whose hub is shutting down `node_retiring`, of a
   node outside the operator's reach `out_of_reach`, and of a node the tree
-  does not hold `unknown_node`; a `quit` still detaches. Mail and the stop
-  controls go through the root session's mailbox, so they are taken while
-  the root runs a turn and wait while it runs a workflow.
+  does not hold `unknown_node`; a `quit` still detaches. Every control but
+  the interrupt goes through the root session's mailbox, so it is taken
+  while the root runs a turn and waits while it runs a workflow.
 - **Faces.** The TUI, `plak agent` JSONL v1, an attached session command
   and the shell host are in-process attachments of their session's service
   (`plakous_hosted::host_service::face`). A face sends its intents itself,

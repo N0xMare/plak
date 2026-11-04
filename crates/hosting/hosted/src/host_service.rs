@@ -56,7 +56,7 @@ use plakous_host_protocol::{
     SessionObservation,
 };
 
-pub use child::{ChildNodes, NodeState};
+pub use child::{ChildNodes, ControlDone, NodeState};
 pub use face::{FaceReceiver, face};
 pub use tree_nodes::TreeNodes;
 

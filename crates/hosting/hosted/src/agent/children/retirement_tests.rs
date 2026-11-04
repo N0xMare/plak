@@ -846,7 +846,6 @@ async fn submitted_child_uses_authoritative_failed_terminal_instead_of_channel_s
                 session: locator.session_id(),
             };
             let live_child = super::super::live::ChildActorHandle::new(
-                &crate::TaskSet::new(),
                 &runtime.driver().release_owners(),
                 AttachedCodingSession {
                     output_bound_rederived: None,
@@ -1262,7 +1261,6 @@ async fn submit_harness_receives_results_and_supports_followup_attempts() {
         .try_occupy_live(
             parent.agent_id.clone(),
             Box::new(crate::agent::live::ChildActorHandle::new(
-                &crate::TaskSet::new(),
                 &crate::TaskSet::new(),
                 AttachedCodingSession {
                     output_bound_rederived: None,

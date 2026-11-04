@@ -239,7 +239,19 @@ impl crate::node::TurnRole<()> for ChildTurns {
             attempt: self.attempt.clone(),
             turn: completed_turn,
         };
-        let terminal = handle.result().await;
+        // The turn's one drive: its events into the read model every face
+        // reads, beside its result.
+        let observation = self
+            .live
+            .lock()
+            .await
+            .get(&self.agent_id)
+            .and_then(crate::runtime::child_projection::of)
+            .filter(|observation| observation.turn() == completed_turn);
+        let terminal = match observation {
+            Some(observation) => observation.drive(handle.result()).await,
+            None => handle.result().await,
+        };
         ChildTerminal {
             completed_turn,
             identity,

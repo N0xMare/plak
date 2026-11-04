@@ -10,7 +10,8 @@
 //! only the answers its control's publisher marks as that control's
 //! (`Sender::answering`). Mail is tree mail from the operator, which reaches
 //! the nodes the tree's root may write to; an interrupt is the tree's
-//! interrupt with the operator as its cause, and a close of the attached
+//! interrupt with the operator as its cause, run on the tree itself so it
+//! is urgent whatever the root runs, and a close of the attached
 //! node is the tree's close; `background`, a process stop and the usage view
 //! are the node's own, by node address. A `Quit` is the attachment's
 //! detach; the node runs on. Approvals and tool calls are refused until
@@ -19,10 +20,11 @@
 //! of reach or unknown.
 
 use std::collections::{BTreeSet, VecDeque};
+use std::sync::{Arc, PoisonError};
 
-use plakous_host_protocol::views::transcript::TranscriptScope;
+use plakous_host_protocol::views::transcript::{NoticeScope, TranscriptRow, TranscriptScope};
 use plakous_host_protocol::wire::{AttachmentId, RequestRefusal};
-use plakous_host_protocol::{IntentSender, ProtocolExtension, SessionIntent};
+use plakous_host_protocol::{IntentSender, ProtocolExtension, SessionIntent, SessionObservation};
 
 use super::{Attachment, HostService, Scopes, origin, refusal_of};
 
@@ -41,10 +43,18 @@ pub enum NodeState {
     Unknown,
 }
 
-/// The session tree's children, as its host service looks them up.
+/// How a node control the service starts ended.
+pub type ControlDone = Box<dyn FnOnce(Result<(), String>) + Send>;
+
+/// The session tree's children, as its host service reaches them.
 pub trait ChildNodes: Send + Sync {
     /// Where the child `agent_id` stands; the tree's root is no child.
     fn state(&self, agent_id: &str) -> NodeState;
+
+    /// Starts the operator's interrupt of the child `agent_id` on the tree
+    /// itself, not behind the root session's mailbox, and returns at once;
+    /// `done` takes how it ended.
+    fn interrupt(&self, agent_id: &str, done: ControlDone);
 }
 
 /// The refusal for a node that does not take an attachment or control.
@@ -105,6 +115,8 @@ const fn row<P: ProtocolExtension>(intent: &SessionIntent<P>) -> &'static str {
 /// nothing more to send.
 enum Routed<P: ProtocolExtension> {
     Send(SessionIntent<P>),
+    /// The node's own interrupt.
+    Interrupt,
     Done,
 }
 
@@ -135,7 +147,9 @@ fn route<P: ProtocolExtension>(
                 detail: "tree mail carries text only".to_owned(),
             });
         }
-        SessionIntent::Interrupt => SessionIntent::InterruptTopologyNode { agent_id: node() },
+        // The node's interrupt is urgent: it runs on the tree, not behind
+        // the root session's mailbox.
+        SessionIntent::Interrupt => return Ok(Routed::Interrupt),
         SessionIntent::Background => SessionIntent::BackgroundTopologyNode { agent_id: node() },
         SessionIntent::StopProcesses { id, .. } => SessionIntent::StopTopologyNodeProcesses {
             agent_id: node(),
@@ -145,7 +159,7 @@ fn route<P: ProtocolExtension>(
             SessionIntent::ReadTopologyNodeUsage { agent_id: node() }
         }
         SessionIntent::InterruptTopologyNode { agent_id } if own(&agent_id) => {
-            SessionIntent::InterruptTopologyNode { agent_id }
+            return Ok(Routed::Interrupt);
         }
         SessionIntent::CloseTopologyNode { agent_id } if own(&agent_id) => {
             SessionIntent::CloseTopologyNode { agent_id }
@@ -250,6 +264,34 @@ impl<P: ProtocolExtension> HostService<P> {
             Routed::Send(routed) => sender
                 .send_correlated(routed, client.map(str::to_owned))
                 .map_err(|error| refusal_of(&error)),
+            Routed::Interrupt => {
+                // Its refusal is the attachment's answer, in a window of its
+                // own.
+                let (state, capacity) = (Arc::clone(&self.state), self.capacity);
+                let client = client.map(str::to_owned);
+                nodes.interrupt(
+                    agent,
+                    Box::new(move |interrupted| {
+                        let Err(error) = interrupted else {
+                            return;
+                        };
+                        let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
+                        if let Some(held) = state.attachments.get_mut(&attachment) {
+                            for answer in [
+                                SessionObservation::IntentStarted(client),
+                                SessionObservation::Row(TranscriptRow::error(
+                                    NoticeScope::Tree,
+                                    format!("interrupt failed: {error}"),
+                                )),
+                            ] {
+                                let class = answer.class();
+                                held.offer(answer, class, capacity);
+                            }
+                        }
+                    }),
+                );
+                Ok(())
+            }
             Routed::Done => Ok(()),
         }
     }

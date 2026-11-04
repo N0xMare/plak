@@ -404,7 +404,6 @@ impl Fixture {
             .unwrap();
         let live = ChildActorHandle::new(
             &crate::TaskSet::new(),
-            &crate::TaskSet::new(),
             AttachedCodingSession {
                 output_bound_rederived: None,
                 reachability_probe: None,

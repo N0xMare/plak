@@ -403,6 +403,44 @@ async fn overlapping_root_leases_keep_the_hub() {
     assert!(lookup(&tree_id).is_none());
 }
 
+/// The executor a caller outside the tree starts work on is the first root
+/// lease's: a lease taken beside it on a short-lived executor does not
+/// replace it.
+#[tokio::test]
+async fn the_trees_executor_is_its_first_root_leases() {
+    let tree_id = unique_tree_id();
+    let root = tempfile::tempdir().unwrap();
+    insert_root(
+        tree_id.clone(),
+        bootstrap(&tree_id, root.path().to_path_buf()),
+        None,
+    )
+    .await
+    .unwrap();
+    let runtime = lookup(&tree_id).unwrap();
+    process_hub().acquire_root_lease(&tree_id).unwrap();
+    std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                let brief = tokio::runtime::Builder::new_current_thread()
+                    .build()
+                    .unwrap();
+                brief.block_on(async { process_hub().acquire_root_lease(&tree_id).unwrap() });
+            })
+            .join()
+            .unwrap();
+    });
+    let held = runtime.executor().unwrap();
+    assert_eq!(
+        held.spawn(async { 7 }).await.unwrap(),
+        7,
+        "the first lease's executor is still the tree's"
+    );
+    release_root_lease(&tree_id).await.unwrap();
+    release_root_lease(&tree_id).await.unwrap();
+    assert!(lookup(&tree_id).is_none());
+}
+
 /// The tree's task set ends with the tree, not with a root: releasing one
 /// root lease (as a rebind predecessor does once its successor holds one)
 /// leaves the tree's child tasks running, and the last lease's shutdown

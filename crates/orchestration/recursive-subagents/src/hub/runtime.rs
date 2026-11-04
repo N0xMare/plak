@@ -40,7 +40,28 @@ impl ProductTopologyRuntime {
             residents: std::sync::atomic::AtomicUsize::new(0),
             quiet,
             attach_scan: std::sync::atomic::AtomicU8::new(super::ATTACH_SCAN_DUE),
+            executor: Mutex::new(tokio::runtime::Handle::try_current().ok()),
         }
+    }
+
+    /// The executor of the root session that took the tree's first root
+    /// lease, or the one the tree was opened on before any, for a caller
+    /// outside it (a wire connection's thread) that starts work on the
+    /// tree. It may have stopped since; work spawned on it is then dropped.
+    #[must_use]
+    pub fn executor(&self) -> Option<tokio::runtime::Handle> {
+        self.executor
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Sets the executor [`Self::executor`] names.
+    pub(super) fn host_on(&self, executor: tokio::runtime::Handle) {
+        *self
+            .executor
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(executor);
     }
 
     /// Begins this custody take's custody-attach scan: whether this root

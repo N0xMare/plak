@@ -625,7 +625,6 @@ async fn rejoin_turn(
     let session_id = attached.locator().session_id();
     let feed = super::children::ChildFeedSource::of(&attached);
     let actor = super::live::ChildActorHandle::new(
-        &runtime.driver().tasks(),
         &runtime.driver().release_owners(),
         attached,
         turn,

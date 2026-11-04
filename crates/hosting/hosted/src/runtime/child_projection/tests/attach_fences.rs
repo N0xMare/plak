@@ -36,11 +36,11 @@ fn fixture() -> (
         turn,
         sender,
         ChildTurnProjection::start(
-            &crate::TaskSet::new(),
             turn,
             None,
             std::future::ready(Some(Source::Fixture(receiver))),
-        ),
+        )
+        .drive_in(&crate::TaskSet::new()),
     )
 }
 

@@ -531,6 +531,10 @@ pub struct ProductTopologyRuntime {
     quiet: Arc<tokio::sync::Notify>,
     /// Where this custody take's custody-attach scan stands.
     attach_scan: std::sync::atomic::AtomicU8,
+    /// The executor of the root session whose lease brought the tree into
+    /// use (the host's own, which outlives a short-lived build that leases
+    /// the tree beside it), or the one the tree was opened on before any.
+    executor: Mutex<Option<tokio::runtime::Handle>>,
 }
 
 /// The custody-attach scan (design section 6.6) is owed: no root has
@@ -783,6 +787,12 @@ impl TopologyHub {
         let entry = entries.get_mut(tree_id).ok_or_else(|| {
             TreeRuntimeError::new("topology hub is not attached; cannot acquire a root lease")
         })?;
+        if entry.attachments == 0 {
+            // The first lease is taken on the attaching root's executor.
+            if let Ok(executor) = tokio::runtime::Handle::try_current() {
+                entry.runtime.host_on(executor);
+            }
+        }
         entry.attachments = entry.attachments.saturating_add(1);
         Ok(())
     }

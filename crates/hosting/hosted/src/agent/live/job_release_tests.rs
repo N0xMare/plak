@@ -77,7 +77,6 @@ async fn slow_follow_up_allows_list_steer_and_close_without_losing_or_duplicatin
         let turn = session.agent().prompt("start").await.unwrap();
         let child = ChildActorHandle::new(
             &crate::TaskSet::new(),
-            &crate::TaskSet::new(),
             AttachedCodingSession {
                 output_bound_rederived: None,
                 reachability_probe: None,
@@ -263,7 +262,6 @@ async fn terminal_release_fixture(child: bool) {
     };
     let locator = if child {
         let released = Box::new(ChildActorHandle::new(
-            &crate::TaskSet::new(),
             &crate::TaskSet::new(),
             attached,
             result.turn_id(),

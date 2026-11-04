@@ -388,11 +388,7 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
         }
     };
     let mut submission = match agent.command(command).await {
-        Ok(submission) => crate::runtime::child_projection::ChildAdmission::new(
-            &runtime.driver().tasks(),
-            submission,
-            agent,
-        ),
+        Ok(submission) => crate::runtime::child_projection::ChildAdmission::new(submission, agent),
         Err(error) => {
             let message = format!("child turn start was refused: {error}");
             release_startup(runtime, agent_id, startup, attached).await;
@@ -545,13 +541,11 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
     let feed = ChildFeedSource::of(&attached);
     let projection = submission.projection.take().unwrap_or_else(|| {
         crate::runtime::child_projection::ChildTurnProjection::recovered(
-            &runtime.driver().tasks(),
             Some(agent.clone()),
             turn_id,
         )
     });
     let actor = crate::agent::live::ChildActorHandle::admitted(
-        &runtime.driver().tasks(),
         &runtime.driver().release_owners(),
         attached,
         turn_id,

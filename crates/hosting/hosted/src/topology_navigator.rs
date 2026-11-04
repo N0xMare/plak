@@ -559,18 +559,30 @@ async fn interrupt_node<P: plakous_host_protocol::ProtocolExtension>(
     answer: impl Fn(ContentEvent<P>) + Copy,
     agent_id: &str,
 ) {
-    let operation_id = uuid::Uuid::new_v4().to_string();
-    let agent = agent_id.to_owned();
-    if mutate_tree(runtime, answer, "interrupt failed", move |tree| {
-        operator_interrupt(tree, &agent, &operation_id).map(|_| ())
-    })
-    .await
-    .is_none()
-    {
+    if let Err(error) = interrupt_child(runtime, agent_id).await {
+        answer(refusal("interrupt failed", &error));
         return;
     }
-    signal_retirement(runtime, &[agent_id.to_owned()]).await;
     emit_snapshot(runtime, session, send, false);
+}
+
+/// The operator's interrupt of one node: the tree records it, with the
+/// operator as its cause, and the node's own actor cancels its turn. A face
+/// attached to the node runs it on the tree's executor, so it is taken
+/// whatever the root session is doing.
+pub(crate) async fn interrupt_child(
+    runtime: &ProductTopologyRuntime,
+    agent_id: &str,
+) -> Result<(), String> {
+    let operation_id = uuid::Uuid::new_v4().to_string();
+    let agent = agent_id.to_owned();
+    runtime
+        .mutate_then_emit(false, move |tree| {
+            operator_interrupt(tree, &agent, &operation_id).map(|_| ())
+        })
+        .await?;
+    signal_retirement(runtime, &[agent_id.to_owned()]).await;
+    Ok(())
 }
 
 /// The operator's interrupt of one node: the root's grant, the operator as

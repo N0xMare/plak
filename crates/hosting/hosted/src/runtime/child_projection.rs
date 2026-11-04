@@ -1,6 +1,11 @@
-//! One admission-owned child reducer, shared by every host face.
+//! One child turn's read model, shared by every host face, and the one
+//! drive that reduces the turn's events into it beside the turn's result
+//! (design §3.1): the child's actor runs it from its turn waiter, so a
+//! turn's events and its result have one owner, and a follow-up admitted
+//! mid-turn waits for that drive rather than running a reducer of its own.
 
 use super::{HostEvent, TurnProjection};
+#[cfg(test)]
 use crate::TaskHandle;
 use crate::node::Flow;
 use plakous::agent::{
@@ -23,14 +28,14 @@ pub(crate) struct ChildAdmission {
 }
 
 impl ChildAdmission {
-    pub(crate) fn new(tasks: &crate::TaskSet, submission: TurnSubmission, agent: &Agent) -> Self {
+    pub(crate) fn new(submission: TurnSubmission, agent: &Agent) -> Self {
         let acknowledgement = submission.acknowledgement().clone();
         let result = submission.result().cloned();
         let mut turn = submission.into_turn();
         let control = turn.as_ref().map(Turn::control);
         let projection = turn
             .as_mut()
-            .map(|turn| ChildTurnProjection::admitted(tasks, turn, agent));
+            .map(|turn| ChildTurnProjection::admitted(turn, agent));
         Self {
             acknowledgement,
             result,
@@ -42,14 +47,30 @@ impl ChildAdmission {
 
 pub(crate) struct ChildTurnProjection {
     pub(crate) observation: Arc<ChildObservation>,
-    task: TaskHandle<()>,
+    /// A test's own drive of the turn, which no waiter takes.
+    #[cfg(test)]
+    task: Option<TaskHandle<()>>,
 }
 
 impl Drop for ChildTurnProjection {
     fn drop(&mut self) {
         self.observation.close();
-        self.task.abort();
+        #[cfg(test)]
+        if let Some(task) = &self.task {
+            task.abort();
+        }
     }
+}
+
+/// Where a turn's events will come from, until its drive takes them.
+type PendingSource = std::pin::Pin<Box<dyn Future<Output = Option<Source>> + Send>>;
+
+/// A turn's events not yet driven: where they come from, the agent that
+/// recovers them, and whether an earlier drive ended before them.
+struct Pending {
+    source: PendingSource,
+    agent: Option<Agent>,
+    gap: bool,
 }
 
 enum Source {
@@ -120,27 +141,25 @@ mod perf;
 mod tests;
 
 impl ChildTurnProjection {
-    pub(crate) fn admitted(tasks: &crate::TaskSet, turn: &mut Turn, agent: &Agent) -> Self {
+    pub(crate) fn admitted(turn: &mut Turn, agent: &Agent) -> Self {
         match turn.take_events() {
             Ok(events) => Self::start(
-                tasks,
                 turn.id(),
                 Some(agent.clone()),
                 std::future::ready(Some(Source::Admission(events))),
             ),
-            Err(_) => Self::recovered(tasks, Some(agent.clone()), turn.id()),
+            Err(_) => Self::recovered(Some(agent.clone()), turn.id()),
         }
     }
 
-    pub(crate) fn recovered(tasks: &crate::TaskSet, agent: Option<Agent>, turn: TurnId) -> Self {
+    pub(crate) fn recovered(agent: Option<Agent>, turn: TurnId) -> Self {
         let initial_agent = agent.clone();
-        Self::start(tasks, turn, agent, async move {
+        Self::start(turn, agent, async move {
             recover(initial_agent.as_ref(), turn).await
         })
     }
 
     fn start(
-        tasks: &crate::TaskSet,
         turn: TurnId,
         agent: Option<Agent>,
         source: impl Future<Output = Option<Source>> + Send + 'static,
@@ -152,6 +171,11 @@ impl ChildTurnProjection {
         let observation = Arc::new(ChildObservation {
             turn,
             changed,
+            source: Mutex::new(Some(Pending {
+                source: Box::pin(source),
+                agent,
+                gap: false,
+            })),
             state: Mutex::new(State {
                 projection: Some(projection),
                 progress,
@@ -161,26 +185,22 @@ impl ChildTurnProjection {
                 closed: false,
             }),
         });
-        let observed = Arc::clone(&observation);
-        let task = tasks.spawn(async move {
-            if let Some(source) = source.await {
-                let mut events = ChildEvents {
-                    source,
-                    agent,
-                    turn,
-                };
-                let mut drive = crate::node::TurnDrive {
-                    port: ChildPort {
-                        observed: Arc::clone(&observed),
-                        turn,
-                        gap: false,
-                    },
-                };
-                drive.run(&mut events, std::future::pending::<()>()).await;
-            }
-            observed.close();
-        });
-        Self { observation, task }
+        Self {
+            observation,
+            #[cfg(test)]
+            task: None,
+        }
+    }
+
+    /// Runs this turn's drive on `tasks` with no result to take, as a test
+    /// does whose turn no waiter drives.
+    #[cfg(test)]
+    pub(crate) fn drive_in(mut self, tasks: &crate::TaskSet) -> Self {
+        let observation = Arc::clone(&self.observation);
+        self.task = Some(tasks.spawn(async move {
+            observation.drive(std::future::pending::<()>()).await;
+        }));
+        self
     }
 }
 
@@ -220,31 +240,38 @@ impl crate::node::EventSource for ChildEvents {
     }
 }
 
-/// The child's port on its turn's drive: the reducer that folds the
-/// turn's events into the observation every face reads. The waiter, not
-/// this drive, takes the turn's result.
-struct ChildPort {
+/// The child's port on its turn's drive: the turn's result, and the
+/// reducer that folds the turn's events into the observation every face
+/// reads.
+struct ChildPort<T> {
     observed: Arc<ChildObservation>,
     turn: TurnId,
     /// Events were lost since the last one reduced.
     gap: bool,
+    /// The turn's result, once it came.
+    result: Option<T>,
+    /// The reducer is done: the turn's terminal or the stream's end.
+    reduced: bool,
 }
 
-impl crate::node::TurnPort for ChildPort {
-    type Result = ();
+/// The drive's own wake: the result came and no event is ready.
+struct Drained;
+
+impl<T> crate::node::TurnPort for ChildPort<T> {
+    type Result = T;
     type Event = ChildEvent;
-    type Wake = std::convert::Infallible;
+    type Wake = Drained;
 
     fn pass(&mut self) -> impl Future<Output = crate::node::Pass> {
         std::future::ready(crate::node::Pass::Wait)
     }
 
     fn awaits_result(&self) -> bool {
-        false
+        self.result.is_none()
     }
 
     fn awaits_events(&self) -> bool {
-        true
+        !self.reduced
     }
 
     fn urgent_armed(&self) -> bool {
@@ -255,46 +282,74 @@ impl crate::node::TurnPort for ChildPort {
         std::future::pending()
     }
 
+    /// Once the result came, the events already delivered are reduced and
+    /// then the drive ends: events outrank this wake, so it comes only when
+    /// none is ready.
     fn ready(&self) -> impl Future<Output = Self::Wake> {
-        std::future::pending()
+        let drained = self.result.is_some();
+        async move {
+            if !drained {
+                std::future::pending::<()>().await;
+            }
+            Drained
+        }
     }
 
     fn on_wake(
         &mut self,
-        wake: crate::node::TurnWake<(), ChildEvent, Self::Wake>,
+        wake: crate::node::TurnWake<T, ChildEvent, Self::Wake>,
     ) -> impl Future<Output = Flow> {
-        std::future::ready(self.reduce(wake))
+        let flow = match wake {
+            crate::node::TurnWake::Result(result) => {
+                self.result = Some(result);
+                if self.reduced {
+                    Flow::Done
+                } else {
+                    Flow::Continue
+                }
+            }
+            crate::node::TurnWake::Event(event) => {
+                if self.reduce(event) == Flow::Done {
+                    // The read model closes with its reducer, as faces
+                    // expect, whether or not the result came yet.
+                    self.reduced = true;
+                    self.observed.close();
+                }
+                if self.reduced && self.result.is_some() {
+                    Flow::Done
+                } else {
+                    Flow::Continue
+                }
+            }
+            crate::node::TurnWake::Urgent(Drained) | crate::node::TurnWake::Ready(Drained) => {
+                Flow::Done
+            }
+        };
+        std::future::ready(flow)
     }
 }
 
-impl ChildPort {
-    /// Folds one wake into the observation.
+impl<T> ChildPort<T> {
+    /// Folds one event into the observation; `Done` once the reducer is.
     #[allow(
         clippy::too_many_lines,
-        reason = "Child projection coordinates the bounded face stream, committed history catch-up, and cancellation lifetime in one task."
+        reason = "Child projection coordinates the bounded face stream, committed history catch-up, and cancellation lifetime in one reducer."
     )]
-    fn reduce(
-        &mut self,
-        wake: crate::node::TurnWake<(), ChildEvent, std::convert::Infallible>,
-    ) -> Flow {
-        let event = match wake {
-            crate::node::TurnWake::Event(ChildEvent::Event(event)) => event,
-            crate::node::TurnWake::Event(ChildEvent::Lost) => {
+    fn reduce(&mut self, event: ChildEvent) -> Flow {
+        let event = match event {
+            ChildEvent::Event(event) => event,
+            ChildEvent::Lost => {
                 self.gap = true;
                 return Flow::Continue;
             }
-            crate::node::TurnWake::Event(ChildEvent::Recovered) => {
+            ChildEvent::Recovered => {
                 self.gap = true;
                 if let Some(projection) = self.observed.lock().projection.as_mut() {
                     projection.gap_observed = true;
                 }
                 return Flow::Continue;
             }
-            crate::node::TurnWake::Event(ChildEvent::Closed) => return Flow::Done,
-            crate::node::TurnWake::Result(()) => return Flow::Continue,
-            crate::node::TurnWake::Urgent(never) | crate::node::TurnWake::Ready(never) => {
-                match never {}
-            }
+            ChildEvent::Closed => return Flow::Done,
         };
         if matches!(event.kind(), plakous::agent::AgentEventKind::AgentClosed) {
             return Flow::Done;
@@ -368,6 +423,9 @@ pub(crate) struct ChildObservation {
     turn: TurnId,
     state: Mutex<State>,
     changed: watch::Sender<u64>,
+    /// The turn's events and the agent that recovers them, until the
+    /// turn's one drive takes them.
+    source: Mutex<Option<Pending>>,
 }
 
 struct State {
@@ -512,12 +570,101 @@ impl ChildObservation {
         Ok(())
     }
 
+    /// The turn this read model is of.
+    pub(crate) const fn turn(&self) -> TurnId {
+        self.turn
+    }
+
+    /// The turn's one drive: reduces the turn's events into this read model
+    /// while it waits for `result`, then reduces what was already delivered
+    /// and closes the read model. A turn is driven once; a later drive of
+    /// it only waits for its result. A drive dropped before it closed the
+    /// read model leaves the next drive a recovery of the turn's events,
+    /// with a gap marked (or, with no agent to recover from, the close).
+    pub(crate) async fn drive<T>(self: Arc<Self>, result: impl Future<Output = T>) -> T {
+        let taken = self
+            .source
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        let Some(Pending { source, agent, gap }) = taken else {
+            return result.await;
+        };
+        let _undriven = Undriven {
+            observed: Arc::clone(&self),
+            agent: agent.clone(),
+        };
+        tokio::pin!(result);
+        // A source at hand is taken even when the result already came, so a
+        // turn that ended before its drive still has its delivered events
+        // reduced; a recovery that cannot attach yields to the result.
+        let source = tokio::select! {
+            biased;
+            source = source => source,
+            result = &mut result => {
+                self.close();
+                return result;
+            }
+        };
+        let Some(source) = source else {
+            self.close();
+            return result.await;
+        };
+        let mut events = ChildEvents {
+            source,
+            agent,
+            turn: self.turn,
+        };
+        let mut drive = crate::node::TurnDrive {
+            port: ChildPort {
+                observed: Arc::clone(&self),
+                turn: self.turn,
+                gap,
+                result: None,
+                reduced: false,
+            },
+        };
+        drive.run(&mut events, &mut result).await;
+        self.close();
+        match drive.port.result.take() {
+            Some(result) => result,
+            // The reducer ended the drive before the result came.
+            None => result.await,
+        }
+    }
+
     fn close(&self) {
         let mut state = self.lock();
         state.closed = true;
         // Faces may retain the closed read model, but never its live reducer.
         drop(state.projection.take());
         self.changed.send_replace(state.cursor);
+    }
+}
+
+/// Held by a drive until it ends: a drive dropped before the read model
+/// closed hands the turn's events back as a recovery.
+struct Undriven {
+    observed: Arc<ChildObservation>,
+    agent: Option<Agent>,
+}
+
+impl Drop for Undriven {
+    fn drop(&mut self) {
+        if self.observed.lock().closed {
+            return;
+        }
+        let (agent, turn) = (self.agent.take(), self.observed.turn);
+        let recovering = agent.clone();
+        *self
+            .observed
+            .source
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Pending {
+            source: Box::pin(async move { recover(recovering.as_ref(), turn).await }),
+            agent,
+            gap: true,
+        });
     }
 }
 

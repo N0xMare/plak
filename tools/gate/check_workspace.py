@@ -680,6 +680,8 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-hosted", "src/agent/live.rs"): {"pin", "select"},
     # One turn's drive selects its result, events and role wakes, for every role.
     ("plakous-hosted", "src/node.rs"): {"pin", "select"},
+    # A child turn's drive takes its event source or its result, whichever first.
+    ("plakous-hosted", "src/runtime/child_projection.rs"): {"pin", "select"},
     # The product half of the session record keeps the one-entry store cache.
     ("plak", "src/store/sessions.rs"): {"thread_local"},
     # The highlighter cache is thread-local because syntect parse/highlight

@@ -171,26 +171,34 @@ async fn a_face_steer_to_an_owed_child_stays_durable_until_recover_node() {
     crate::topology_runtime::force_release(&fixture.tree_id).await;
 }
 
-/// The face's interrupt of an owed child takes effect at once: the child
-/// reads interrupted, its attempt stays open, and the tree records the
-/// operator as the cause. Once the node is closed, it takes no attachment
-/// and no control.
+/// The face's interrupt of an owed child takes effect at once, on the tree
+/// itself and not through the root session's mailbox: the child reads
+/// interrupted, its attempt stays open, and the tree records the operator
+/// as the cause. Once the node is closed, it takes no attachment and no
+/// control.
 #[tokio::test]
 async fn a_face_interrupt_of_an_owed_child_takes_effect() {
     let (fixture, id) = owed_child("face-owed-interrupt").await;
-    let status = fixture
-        .runtime
-        .mutate_then_emit(false, {
-            let id = id.clone();
-            move |tree| crate::topology_navigator::operator_interrupt(tree, &id, "face-interrupt")
-        })
-        .await
-        .unwrap();
-    assert_eq!(status, NodeStatus::Interrupted);
+    let (service, intents, node) = face_service(&fixture, &id);
+    let child = service.attach(&node).expect("an owed child is open");
+    let _transcript = intents.try_recv().unwrap();
+    service.intent(child, SessionIntent::Interrupt).unwrap();
+    assert!(
+        intents.try_recv().is_err(),
+        "the root session's mailbox takes no node interrupt"
+    );
+    let interrupted = |fixture: &Fixture| {
+        fixture
+            .runtime
+            .read(|tree| tree.node(&id).unwrap().status == NodeStatus::Interrupted)
+            .unwrap()
+    };
+    while !interrupted(&fixture) {
+        tokio::task::yield_now().await;
+    }
     let runtime = Arc::clone(&fixture.runtime);
     runtime
         .read(|tree| {
-            assert_eq!(tree.node(&id).unwrap().status, NodeStatus::Interrupted);
             assert_eq!(tree.attempt(&id).unwrap().status, AttemptStatus::Running);
             let causes: Vec<_> = tree
                 .operations()
@@ -203,8 +211,6 @@ async fn a_face_interrupt_of_an_owed_child_takes_effect() {
             );
         })
         .unwrap();
-    let (service, _intents, node) = face_service(&fixture, &id);
-    let child = service.attach(&node).expect("an interrupted child is open");
 
     // A closed node takes no attachment and no control.
     fixture

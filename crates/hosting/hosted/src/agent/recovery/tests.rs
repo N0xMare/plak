@@ -744,7 +744,6 @@ async fn interactive_exit_batches_real_root_and_child_leases_without_settling() 
                     id,
                     Box::new(crate::agent::live::ChildActorHandle::new(
                         &crate::TaskSet::new(),
-                        &crate::TaskSet::new(),
                         AttachedCodingSession {
                             output_bound_rederived: None,
                             reachability_probe: None,
@@ -1476,7 +1475,6 @@ impl Fixture {
         let locator = session.locator();
         self.bind_turn(&id, &locator, turn);
         let live = crate::agent::live::ChildActorHandle::new(
-            &crate::TaskSet::new(),
             &self.runtime.driver().release_owners(),
             AttachedCodingSession {
                 output_bound_rederived: None,
@@ -3134,7 +3132,6 @@ async fn a_recycling_waiter_is_an_owner_that_recovery_never_waits_on() {
     held.release().await.unwrap();
     reinstate_released_lease(&fixture.database());
     let live = crate::agent::live::ChildActorHandle::new(
-        &crate::TaskSet::new(),
         &fixture.runtime.driver().release_owners(),
         AttachedCodingSession {
             output_bound_rederived: None,
@@ -3241,7 +3238,6 @@ async fn fenced_waiter_recycle_of_quiescent_head_settles_as_failed() {
     assert!(fixture.sessions().head_is_quiescent(locator).await.unwrap());
     fixture.bind_turn(&id, &locator, turn);
     let live = crate::agent::live::ChildActorHandle::new(
-        &crate::TaskSet::new(),
         &fixture.runtime.driver().release_owners(),
         AttachedCodingSession {
             output_bound_rederived: None,

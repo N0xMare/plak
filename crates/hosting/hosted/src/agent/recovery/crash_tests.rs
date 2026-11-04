@@ -408,7 +408,6 @@ impl Fixture {
         let live: Box<dyn crate::topology_runtime::LiveChildHandle> =
             Box::new(crate::agent::live::ChildActorHandle::new(
                 &crate::TaskSet::new(),
-                &crate::TaskSet::new(),
                 attached,
                 turn,
                 control,

@@ -632,7 +632,6 @@ fn run_bounds_and_interrupt_join_a_real_child_and_allow_reopen() {
                                     child.clone(),
                                     Box::new(crate::agent::live::ChildActorHandle::new(
                                         &crate::TaskSet::new(),
-                                        &crate::TaskSet::new(),
                                         attached,
                                         turn_id,
                                         turn.control(),

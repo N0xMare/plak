@@ -4554,13 +4554,23 @@ over the same executor, not a second control plane.
 
 ## 16. Hosted tree access and child retirement
 
-The host reduces each child turn from admission through one `TurnProjection`,
-using the admission-created event receiver before acknowledgement delivery.
-Its live child handle owns that projection, independent of attached faces.
-Queued follow-ups own their projections from admission; taking the follow-up
-and restarting a fresh turn rebind the handle to the correct projection.
-The projection dies with its owning handle. This is process-local presentation,
-not persistence or reload authority.
+The host reduces each child turn through one `TurnProjection`, which the
+admission creates with the turn's admission-created event receiver before
+acknowledgement delivery. The child's turn waiter, which the child's actor
+runs, drives it beside the turn's result: one drive per turn takes the turn's
+events and its result (chapter 02 §1). When the result comes the drive
+reduces the events already delivered and closes the read model; a reducer
+that reaches the turn's terminal first closes it then. Its live child handle
+owns the read model, independent of attached faces. A follow-up admitted
+mid-turn holds its receiver unreduced until the waiter takes it, so there is
+never a second reducer; taking the follow-up and restarting a fresh turn
+rebind the handle to the correct read model. A drive dropped before it
+closed the read model (its waiter retired or rebound) hands the turn's
+events back as a recovery with a gap marked, so the turn's next drive
+reattaches; with no agent to recover them from, that drive closes the read
+model. The read model dies with its
+owning handle. This is process-local presentation, not persistence or reload
+authority.
 
 Observation delivery cannot reject an admitted child turn: if taking its
 admission receiver fails, hosted recovers through a fresh atomic attachment

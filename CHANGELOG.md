@@ -254,7 +254,9 @@ an export.
   `unknown_node` (`RequestRefusal` gains all but the last, and
   `mail_refused`). The navigator's interrupt now records the operator as
   its cause (`interrupt_agent_for`). Embedder break: the new intent and
-  refusals, and an answering sender's marked windows.
+  refusals, an answering sender's marked windows, the required
+  `ChildNodes::interrupt` with its `ControlDone` answer, and
+  `ProductTopologyRuntime::executor`.
 - Child processes and usage by node address: a child attachment's
   `background`, process stop and usage read become
   `SessionIntent::BackgroundTopologyNode`, `StopTopologyNodeProcesses` and
@@ -281,6 +283,12 @@ an export.
   `plakous::runtime::TokioRuntime`, and runs it on Tokio's blocking pool. The
   tool runtime keeps its Tokio-backed `ToolTimer` and `ToolTaskOwner`
   defaults.
+- One drive per child turn: the child's turn waiter, run by its actor,
+  reduces the turn's events into the read model every face reads beside the
+  turn's result, so a follow-up admitted mid-turn no longer runs a reducer
+  of its own. A wire v2 child attachment's interrupt now runs on the tree
+  (`ProductTopologyRuntime::executor`), not behind the root session's
+  mailbox, and is taken whatever the root runs.
 - Version control on a runner (unsupported; only the test route selects a
   runner): an orchestration tree on a selected runner drives its copies
   through `RemoteVcs` over the runner link instead of refusing every effect.

@@ -112,10 +112,9 @@ struct ChildShared {
     sessions: Arc<plakous::sessions::AgentSessions>,
     locator: plakous::sessions::SessionLocator,
     turn: std::sync::Mutex<LiveTurn>,
-    /// Follow-up turns admitted behind the running turn, in admission order.
+    /// Follow-up turns admitted behind the running turn, in admission order;
+    /// each turn's projection waits for the turn waiter's drive of it.
     follow_ups: Arc<FollowUpQueue>,
-    /// The tree's task set, which this child's projections run in.
-    tasks: crate::TaskSet,
     delivery: Arc<tokio::sync::RwLock<()>>,
     /// Orders each delivery reservation with its message, so the actor never
     /// waits for a reservation whose message is queued behind it.
@@ -432,8 +431,7 @@ async fn follow_up(
                 error.to_string()
             }
         })?;
-    let mut submission =
-        crate::runtime::child_projection::ChildAdmission::new(&shared.tasks, submission, &agent);
+    let mut submission = crate::runtime::child_projection::ChildAdmission::new(submission, &agent);
     #[cfg(test)]
     super::park::hooks::after_follow_up_admission(&agent.id().to_string()).await;
     acknowledged.await;
@@ -474,8 +472,7 @@ async fn restart(
         })
         .await
         .map_err(|error| error.to_string())?;
-    let mut submission =
-        crate::runtime::child_projection::ChildAdmission::new(&shared.tasks, submission, agent);
+    let mut submission = crate::runtime::child_projection::ChildAdmission::new(submission, agent);
     acknowledged.await;
     if crate::agent::ledger::consumed_below_retention(
         driver,
@@ -528,7 +525,6 @@ async fn restart(
     } else if turn.turn_id != turn_id {
         turn.observation = Some(
             crate::runtime::child_projection::ChildTurnProjection::recovered(
-                &shared.tasks,
                 Some(agent.clone()),
                 turn_id,
             ),
@@ -617,47 +613,43 @@ const ACTOR_GONE: &str = "the child's actor stopped before it answered";
 
 impl ChildActorHandle {
     /// One live child on its running turn, with no follow-up queued. The
-    /// actor runs on `owners`; the turn's projections run on `tasks`.
+    /// actor runs on `owners`, and its turn waiter drives each turn's
+    /// projection.
     #[must_use]
     pub fn new(
-        tasks: &crate::TaskSet,
         owners: &crate::TaskSet,
         attached: AttachedCodingSession,
         turn_id: TurnId,
         control: TurnControl,
     ) -> Self {
         let observation = crate::runtime::child_projection::ChildTurnProjection::recovered(
-            tasks,
             attached.agent().cloned(),
             turn_id,
         );
-        Self::admitted(tasks, owners, attached, turn_id, control, observation)
+        Self::admitted(owners, attached, turn_id, control, observation)
     }
 
     pub(crate) fn admitted(
-        tasks: &crate::TaskSet,
         owners: &crate::TaskSet,
         attached: AttachedCodingSession,
         turn_id: TurnId,
         control: TurnControl,
         observation: crate::runtime::child_projection::ChildTurnProjection,
     ) -> Self {
-        Self::with_observation(tasks, owners, attached, turn_id, control, Some(observation))
+        Self::with_observation(owners, attached, turn_id, control, Some(observation))
     }
 
     /// A throwaway cancellation/release owner, without presentation.
     pub(crate) fn without_observation(
-        tasks: &crate::TaskSet,
         owners: &crate::TaskSet,
         attached: AttachedCodingSession,
         turn_id: TurnId,
         control: TurnControl,
     ) -> Self {
-        Self::with_observation(tasks, owners, attached, turn_id, control, None)
+        Self::with_observation(owners, attached, turn_id, control, None)
     }
 
     fn with_observation(
-        tasks: &crate::TaskSet,
         owners: &crate::TaskSet,
         attached: AttachedCodingSession,
         turn_id: TurnId,
@@ -675,7 +667,6 @@ impl ChildActorHandle {
                 observation,
             }),
             follow_ups: Arc::default(),
-            tasks: tasks.clone(),
             delivery: Arc::default(),
             reserve: std::sync::Mutex::new(()),
         });

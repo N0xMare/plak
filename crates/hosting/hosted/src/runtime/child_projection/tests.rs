@@ -50,11 +50,11 @@ async fn credential_wait_labels_snapshot_without_rewriting_retained_updates() {
     let turn = TurnId::try_from(uuid::Uuid::from_u128(0xc8)).unwrap();
     let (sender, receiver) = tokio::sync::mpsc::channel(1);
     let owner = ChildTurnProjection::start(
-        &crate::TaskSet::new(),
         turn,
         None,
         std::future::ready(Some(Source::Fixture(receiver))),
-    );
+    )
+    .drive_in(&crate::TaskSet::new());
     let observation = &owner.observation;
     publish(
         &sender,
@@ -104,11 +104,11 @@ async fn a_late_in_flight_face_keeps_exact_counters_after_the_event_prefix_is_ev
     let turn = TurnId::try_from(uuid::Uuid::from_u128(7)).unwrap();
     let (sender, receiver) = tokio::sync::mpsc::channel(1);
     let owner = ChildTurnProjection::start(
-        &crate::TaskSet::new(),
         turn,
         None,
         std::future::ready(Some(Source::Fixture(receiver))),
-    );
+    )
+    .drive_in(&crate::TaskSet::new());
     let observation = &owner.observation;
     let (_, mut stale) = observation.attach();
     publish(
@@ -214,11 +214,11 @@ async fn faces_do_not_keep_a_retired_child_projection_alive() {
     let turn = TurnId::try_from(uuid::Uuid::from_u128(7)).unwrap();
     let (_sender, receiver) = tokio::sync::mpsc::channel(1);
     let owner = ChildTurnProjection::start(
-        &crate::TaskSet::new(),
         turn,
         None,
         std::future::ready(Some(Source::Fixture(receiver))),
-    );
+    )
+    .drive_in(&crate::TaskSet::new());
     let observation = owner.observation.clone();
     let (_, mut tail) = observation.attach();
     drop(owner);
@@ -246,11 +246,11 @@ async fn late_attach_keeps_a_running_call_after_its_event_prefix_is_evicted() {
     let turn = TurnId::try_from(uuid::Uuid::from_u128(0xc9)).unwrap();
     let (sender, receiver) = tokio::sync::mpsc::channel(1);
     let owner = ChildTurnProjection::start(
-        &crate::TaskSet::new(),
         turn,
         None,
         std::future::ready(Some(Source::Fixture(receiver))),
-    );
+    )
+    .drive_in(&crate::TaskSet::new());
     let observation = &owner.observation;
     let started = tool_lifecycle_event(
         "read_file",
@@ -306,8 +306,12 @@ async fn queued_follow_up_has_no_branch_sequence_gap_or_gap_qualified_rows() {
         .await
         .unwrap();
     let mut expected_events = submission.turn().unwrap().subscribe().unwrap();
-    let mut admitted = ChildAdmission::new(&crate::TaskSet::new(), submission, agent);
-    let owner = admitted.projection.take().unwrap();
+    let mut admitted = ChildAdmission::new(submission, agent);
+    let owner = admitted
+        .projection
+        .take()
+        .unwrap()
+        .drive_in(&crate::TaskSet::new());
     first.release();
     next.entered().await;
     let mut expected_projection = TurnProjection::<Core>::default();
@@ -374,11 +378,11 @@ async fn structural_source_lag_reattaches_without_closing_the_observation() {
     gate.release();
     next.entered().await;
     let owner = ChildTurnProjection::start(
-        &crate::TaskSet::new(),
         turn.id(),
         Some(attached.agent().clone()),
         std::future::ready(Some(Source::Recovered(initial))),
-    );
+    )
+    .drive_in(&crate::TaskSet::new());
     // A successful reattach registers a fresh subscription after the backoff.
     observed(&owner.observation, |state| {
         state
@@ -439,8 +443,8 @@ async fn recovered_terminal_turn_closes_without_waiting_for_another_event() {
     .await;
     let id = turn.id();
     turn.result().await.unwrap();
-    let owner =
-        ChildTurnProjection::recovered(&crate::TaskSet::new(), Some(attached.agent().clone()), id);
+    let owner = ChildTurnProjection::recovered(Some(attached.agent().clone()), id)
+        .drive_in(&crate::TaskSet::new());
     observed(&owner.observation, |state| state.closed).await;
     assert!(owner.observation.snapshot().terminal);
     attached.release().await.unwrap();
@@ -466,11 +470,11 @@ async fn a_reduced_commit_between_the_two_attaches_is_delivered_once_without_a_g
     // actual canonical rows still come from the live agent's history attachment.
     let (sender, receiver) = tokio::sync::mpsc::channel(1);
     let owner = ChildTurnProjection::start(
-        &crate::TaskSet::new(),
         turn.id(),
         None,
         std::future::ready(Some(Source::Fixture(receiver))),
-    );
+    )
+    .drive_in(&crate::TaskSet::new());
     publish(
         &sender,
         &owner.observation,
@@ -566,11 +570,11 @@ async fn explicit_droppable_loss_marks_one_gap_without_retiring_the_child() {
     let turn = TurnId::try_from(uuid::Uuid::from_u128(7)).unwrap();
     let (sender, receiver) = tokio::sync::mpsc::channel(1);
     let owner = ChildTurnProjection::start(
-        &crate::TaskSet::new(),
         turn,
         None,
         std::future::ready(Some(Source::Fixture(receiver))),
-    );
+    )
+    .drive_in(&crate::TaskSet::new());
     sender.send(Received::Lost).await.unwrap();
     sender.send(Received::Lost).await.unwrap();
     publish(
@@ -641,7 +645,7 @@ async fn failed_admission_receiver_recovers_without_losing_the_admitted_result()
     // The original receiver was taken by the first owner; a second take must
     // now fail subscriber admission. Presentation still cannot reject the turn.
     let fallback =
-        ChildTurnProjection::admitted(&crate::TaskSet::new(), &mut turn, attached.agent());
+        ChildTurnProjection::admitted(&mut turn, attached.agent()).drive_in(&crate::TaskSet::new());
     assert!(!fallback.observation.snapshot().terminal);
     drop(held);
     gate.release();
@@ -663,11 +667,11 @@ async fn fixed_burst_face_lag_resyncs_once_and_follows_the_terminal() {
     let turn = TurnId::try_from(uuid::Uuid::from_u128(7)).unwrap();
     let (sender, receiver) = tokio::sync::mpsc::channel(1);
     let owner = ChildTurnProjection::start(
-        &crate::TaskSet::new(),
         turn,
         None,
         std::future::ready(Some(Source::Fixture(receiver))),
-    );
+    )
+    .drive_in(&crate::TaskSet::new());
     let observation = owner.observation.clone();
     let (_, mut tail) = observation.attach();
     for _ in 0..8 {
@@ -757,4 +761,149 @@ async fn fixed_burst_face_lag_resyncs_once_and_follows_the_terminal() {
         |op| matches!(op, HostEvent::Row(row) if row.text() == Some(super::super::child_live::GAP))
     ));
     assert!(observation.snapshot().terminal);
+}
+
+/// One drive owns a turn's events and its result: a read model nobody
+/// drives (a follow-up queued behind the running turn) reduces nothing, so
+/// there is no second reducer; its drive reduces what was delivered, takes
+/// the result, and closes the read model.
+#[tokio::test]
+async fn a_queued_turn_is_reduced_only_by_its_drive() {
+    let turn = TurnId::try_from(uuid::Uuid::from_u128(0xd7)).unwrap();
+    let (sender, receiver) = tokio::sync::mpsc::channel(8);
+    let queued = ChildTurnProjection::start(
+        turn,
+        None,
+        std::future::ready(Some(Source::Fixture(receiver))),
+    );
+    sender
+        .send(Received::Event(event(
+            turn,
+            AgentEventKind::ModelCredentialWait { waiting: true },
+        )))
+        .await
+        .unwrap();
+    for _ in 0..8 {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(
+        queued.observation.snapshot().cursor,
+        0,
+        "nothing reduces a turn its waiter has not taken"
+    );
+    let observation = Arc::clone(&queued.observation);
+    let result = observation.drive(std::future::ready("terminal")).await;
+    assert_eq!(result, "terminal");
+    let snapshot = queued.observation.snapshot();
+    assert_eq!(snapshot.cursor, 1, "the drive reduced the delivered event");
+    assert!(snapshot.terminal, "and closed the read model");
+    assert_eq!(
+        Arc::clone(&queued.observation)
+            .drive(std::future::ready("again"))
+            .await,
+        "again",
+        "a turn is driven once; a later drive only waits for its result"
+    );
+}
+
+/// A drive dropped mid-turn hands the turn's events back as a recovery:
+/// with no agent to recover them from, the next drive closes the read
+/// model instead of leaving it frozen open.
+#[tokio::test]
+async fn a_cancelled_drive_leaves_the_next_drive_to_close_the_read_model() {
+    let turn = TurnId::try_from(uuid::Uuid::from_u128(0xd8)).unwrap();
+    let (sender, receiver) = tokio::sync::mpsc::channel(8);
+    let projection = ChildTurnProjection::start(
+        turn,
+        None,
+        std::future::ready(Some(Source::Fixture(receiver))),
+    );
+    let first =
+        tokio::spawn(Arc::clone(&projection.observation).drive(std::future::pending::<()>()));
+    publish(
+        &sender,
+        &projection.observation,
+        event(turn, AgentEventKind::ModelCredentialWait { waiting: true }),
+    )
+    .await;
+    first.abort();
+    assert!(first.await.unwrap_err().is_cancelled());
+    assert!(!projection.observation.lock().closed);
+    assert_eq!(
+        Arc::clone(&projection.observation)
+            .drive(std::future::ready("next"))
+            .await,
+        "next"
+    );
+    assert!(
+        projection.observation.lock().closed,
+        "the next drive closed it"
+    );
+}
+
+/// A drive dropped mid-turn hands the turn's events back as a recovery
+/// with a gap: the next drive reattaches to the running child, so the read
+/// model follows the turn to its end instead of freezing, and whatever it
+/// reduces after the drop comes behind one gap row.
+#[tokio::test]
+async fn a_cancelled_drive_leaves_the_next_drive_a_recovery_with_a_gap() {
+    use crate::runtime::child_live::tests::fixture_with;
+    use plakous_offline_crash_harness::gate::GateHandle;
+    let gate = GateHandle::new();
+    let (_root, _sessions, attached, turn, _live) = fixture_with(serde_json::json!([
+        {"output":{"text":"prefix"}},
+        {"stream":[{"text":"before"},{"gate":gate.script()},{"text":"after"}]}
+    ]))
+    .await;
+    gate.entered().await;
+    let projection = ChildTurnProjection::recovered(Some(attached.agent().clone()), turn.id());
+    let first =
+        tokio::spawn(Arc::clone(&projection.observation).drive(std::future::pending::<()>()));
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while projection.observation.source.lock().unwrap().is_some() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    first.abort();
+    assert!(first.await.unwrap_err().is_cancelled());
+    let reduced_before = projection.observation.snapshot().cursor;
+    assert!(
+        projection
+            .observation
+            .source
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|pending| pending.gap),
+        "the dropped drive left a recovery"
+    );
+    let second =
+        tokio::spawn(Arc::clone(&projection.observation).drive(std::future::pending::<()>()));
+    gate.release();
+    turn.result().await.unwrap();
+    observed(&projection.observation, |state| state.closed).await;
+    {
+        let state = projection.observation.lock();
+        let after_drop: Vec<_> = state
+            .updates
+            .iter()
+            .filter(|update| update.cursor > reduced_before)
+            .flat_map(|update| update.ops.iter())
+            .collect();
+        if let Some(first_op) = after_drop.first() {
+            assert!(
+                matches!(first_op, HostEvent::Row(row) if row.text() == Some(super::super::child_live::GAP)),
+                "{after_drop:?}"
+            );
+            let gaps = after_drop
+                .iter()
+                .filter(|op| matches!(op, HostEvent::Row(row) if row.text() == Some(super::super::child_live::GAP)))
+                .count();
+            assert_eq!(gaps, 1);
+        }
+    }
+    second.abort();
+    attached.release().await.unwrap();
 }

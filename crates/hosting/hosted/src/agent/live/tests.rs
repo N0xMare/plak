@@ -71,7 +71,6 @@ fn throwaway_release_owner_has_no_observation_task() {
         .block_on(async {
             let child = ChildActorHandle::without_observation(
                 &crate::TaskSet::new(),
-                &crate::TaskSet::new(),
                 attached,
                 turn,
                 control,
@@ -162,7 +161,6 @@ async fn restart_control_fixture(below_retention: bool, reclaimed: bool) {
     let control = first.turn().unwrap().control();
     first.result().unwrap().clone().result().await.unwrap();
     let mut child = ChildActorHandle::new(
-        &crate::TaskSet::new(),
         &crate::TaskSet::new(),
         AttachedCodingSession {
             output_bound_rederived: None,
@@ -288,7 +286,6 @@ async fn restart_control_fixture(below_retention: bool, reclaimed: bool) {
             panic!("pruned session must reopen");
         };
         child = ChildActorHandle::new(
-            &crate::TaskSet::new(),
             &crate::TaskSet::new(),
             AttachedCodingSession {
                 output_bound_rederived: None,

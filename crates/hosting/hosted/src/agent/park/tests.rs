@@ -297,13 +297,7 @@ async fn fixture_with(
         topology_owner: None,
     };
     let feed = super::super::children::ChildFeedSource::of(&attached);
-    let live = ChildActorHandle::new(
-        &crate::TaskSet::new(),
-        &runtime.driver().release_owners(),
-        attached,
-        turn,
-        control,
-    );
+    let live = ChildActorHandle::new(&runtime.driver().release_owners(), attached, turn, control);
     let watcher = live.watcher();
     runtime
         .try_occupy_live(child.clone(), Box::new(live))

@@ -45,7 +45,6 @@ pub(in crate::agent) async fn rejoin_recovered_start(
         Ok(admitted) => admitted,
         Err(error) => {
             let _ = Box::new(crate::agent::live::ChildActorHandle::without_observation(
-                &runtime.driver().tasks(),
                 &runtime.driver().release_owners(),
                 attached,
                 turn,
@@ -86,7 +85,6 @@ pub(in crate::agent) async fn rejoin_recovered_start(
         Ok(registration) => registration,
         Err(error) => {
             let _ = Box::new(crate::agent::live::ChildActorHandle::without_observation(
-                &runtime.driver().tasks(),
                 &runtime.driver().release_owners(),
                 attached,
                 turn,
@@ -154,7 +152,6 @@ async fn occupy_recovered_turn(
 ) -> Result<TurnId, String> {
     let feed = ChildFeedSource::of(&attached);
     let actor = crate::agent::live::ChildActorHandle::new(
-        &runtime.driver().tasks(),
         &runtime.driver().release_owners(),
         attached,
         turn,
@@ -1067,7 +1064,6 @@ pub(super) async fn reconcile_reopened_child_results(
         let session_id = session.locator().session_id();
         let release = if let Some(recovered) = recovered {
             Box::new(crate::agent::live::ChildActorHandle::new(
-                &runtime.driver().tasks(),
                 &runtime.driver().release_owners(),
                 *session,
                 recovered.turn_id(),

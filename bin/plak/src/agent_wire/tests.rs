@@ -308,6 +308,10 @@ fn a_child_face_reads_its_nodes_usage() {
         fn state(&self, _agent_id: &str) -> plakous_hosted::host_service::NodeState {
             plakous_hosted::host_service::NodeState::Open
         }
+
+        fn interrupt(&self, _agent_id: &str, done: plakous_hosted::host_service::ControlDone) {
+            done(Ok(()));
+        }
     }
     let (actions, intents) = user_action_channel();
     let service = HostService::new(actions, root(), 16).with_nodes(std::sync::Arc::new(Open));

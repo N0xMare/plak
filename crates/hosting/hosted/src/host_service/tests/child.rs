@@ -13,24 +13,34 @@ use plakous_host_protocol::{Core, Draft, IntentReceiver, intent_channel};
 use super::super::*;
 use super::{Observation, approval, observations, root, stream};
 
-/// A tree whose children stand where the test puts them.
+/// A tree whose children stand where the test puts them, and that ends
+/// each interrupt as the test says.
 #[derive(Default)]
-struct Nodes(Mutex<BTreeMap<String, NodeState>>);
+struct Nodes {
+    states: Mutex<BTreeMap<String, NodeState>>,
+    interrupted: Mutex<Vec<String>>,
+    refuse: Mutex<Option<String>>,
+}
 
 impl Nodes {
     fn set(&self, agent: &str, state: NodeState) {
-        self.0.lock().unwrap().insert(agent.to_owned(), state);
+        self.states.lock().unwrap().insert(agent.to_owned(), state);
     }
 }
 
 impl ChildNodes for Nodes {
     fn state(&self, agent_id: &str) -> NodeState {
-        self.0
+        self.states
             .lock()
             .unwrap()
             .get(agent_id)
             .copied()
             .unwrap_or(NodeState::Unknown)
+    }
+
+    fn interrupt(&self, agent_id: &str, done: ControlDone) {
+        self.interrupted.lock().unwrap().push(agent_id.to_owned());
+        done(self.refuse.lock().unwrap().clone().map_or(Ok(()), Err));
     }
 }
 
@@ -164,12 +174,6 @@ fn controls() -> Vec<(SessionIntent<Core>, SessionIntent<Core>)> {
                 agent_id: "c1".into(),
                 message: "then the docs".into(),
                 urgent: false,
-            },
-        ),
-        (
-            SessionIntent::Interrupt,
-            SessionIntent::InterruptTopologyNode {
-                agent_id: "c1".into(),
             },
         ),
         (
@@ -468,4 +472,47 @@ fn a_second_agent_view_is_refused_while_one_is_held() {
     );
     service.detach(other).unwrap();
     assert_eq!(next(&intents).0, SessionIntent::CloseAgentTranscript);
+}
+
+/// A child attachment's interrupt, or the navigator's interrupt naming its
+/// node, is the node's own: it runs on the tree, not through the root
+/// session's mailbox, and a refusal comes back to the attachment alone.
+#[test]
+fn a_childs_interrupt_runs_on_its_node_not_the_root_mailbox() {
+    let (service, intents, nodes) = child_service();
+    let face = service.attach(&root()).unwrap();
+    let child = service.attach(&node("c1")).unwrap();
+    while intents.try_recv().is_ok() {}
+    service.take(face);
+    service.take(child);
+    service.intent(child, SessionIntent::Interrupt).unwrap();
+    service
+        .intent(
+            child,
+            SessionIntent::InterruptTopologyNode {
+                agent_id: "c1".into(),
+            },
+        )
+        .unwrap();
+    assert_eq!(*nodes.interrupted.lock().unwrap(), ["c1", "c1"]);
+    assert!(
+        intents.try_recv().is_err(),
+        "the root session's mailbox takes no node interrupt"
+    );
+    assert_eq!(observations(service.take(child)), []);
+    *nodes.refuse.lock().unwrap() = Some("tree publish refused".into());
+    service
+        .intent_correlated(child, SessionIntent::Interrupt, Some("r9"))
+        .unwrap();
+    assert_eq!(
+        observations(service.take(child)),
+        [
+            Observation::IntentStarted(Some("r9".into())),
+            Observation::Row(TranscriptRow::error(
+                NoticeScope::Tree,
+                "interrupt failed: tree publish refused"
+            )),
+        ]
+    );
+    assert_eq!(observations(service.take(face)), []);
 }

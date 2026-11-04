@@ -861,11 +861,8 @@ pub(in crate::runtime) async fn fixture_with(
         .unwrap()
         .into_parts();
     let mut turn = agent.prompt("live").await.unwrap();
-    let owner = super::super::child_projection::ChildTurnProjection::admitted(
-        &crate::TaskSet::new(),
-        &mut turn,
-        &agent,
-    );
+    let owner = super::super::child_projection::ChildTurnProjection::admitted(&mut turn, &agent)
+        .drive_in(&crate::TaskSet::new());
     (
         root,
         sessions,
@@ -1095,11 +1092,9 @@ async fn agent_view_streams_its_live_turn_and_follows_the_next_one() {
     assert!(received.try_recv().is_err(), "the turn's end re-sends once");
 
     let mut follow_up = agent.prompt("again").await.unwrap();
-    let next_projection = super::super::child_projection::ChildTurnProjection::admitted(
-        &crate::TaskSet::new(),
-        &mut follow_up,
-        &agent,
-    );
+    let next_projection =
+        super::super::child_projection::ChildTurnProjection::admitted(&mut follow_up, &agent)
+            .drive_in(&crate::TaskSet::new());
     observations.sync_children(vec![(
         "c1".to_owned(),
         follow_up.id(),
@@ -1601,11 +1596,9 @@ async fn an_in_flight_call_attaches_running_and_settles_before_turn_end() {
     };
     let agent = attached.agent().clone();
     let mut turn = agent.prompt("live").await.unwrap();
-    let projection = super::super::child_projection::ChildTurnProjection::admitted(
-        &crate::TaskSet::new(),
-        &mut turn,
-        &agent,
-    );
+    let projection =
+        super::super::child_projection::ChildTurnProjection::admitted(&mut turn, &agent)
+            .drive_in(&crate::TaskSet::new());
     tokio::time::timeout(Duration::from_secs(10), started.notified())
         .await
         .expect("the tool starts");
