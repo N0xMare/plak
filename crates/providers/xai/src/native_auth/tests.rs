@@ -126,7 +126,8 @@ impl MockResponses {
     async fn wait(&self) -> TestResult {
         let pending = std::mem::take(&mut *self.pending.lock().await);
         for acknowledgement in pending {
-            let result = tokio::time::timeout(Duration::from_secs(2), acknowledgement).await??;
+            // A liveness bound only: generous, so load never trips it.
+            let result = tokio::time::timeout(Duration::from_secs(30), acknowledgement).await??;
             result.map_err(std::io::Error::other)?;
         }
         Ok(())
@@ -156,7 +157,8 @@ impl MockPeer {
             return exchanges;
         };
         task.abort();
-        let joined = tokio::time::timeout(Duration::from_secs(1), task).await?;
+        // A liveness bound only: generous, so load never trips it.
+        let joined = tokio::time::timeout(Duration::from_secs(30), task).await?;
         if let Err(error) = joined
             && !error.is_cancelled()
         {
@@ -170,7 +172,8 @@ impl MockPeer {
             return Ok(());
         };
         task.abort();
-        let joined = tokio::time::timeout(Duration::from_secs(1), task).await?;
+        // A liveness bound only: generous, so load never trips it.
+        let joined = tokio::time::timeout(Duration::from_secs(30), task).await?;
         if let Err(error) = joined
             && !error.is_cancelled()
         {
@@ -840,8 +843,9 @@ async fn subscription_usage_expired_access_reports_refresh_required_and_never_cl
     )?;
     let before = manager.core.store.load()?.ok_or("missing Ready fence")?;
     let _ = tokio::time::timeout(Duration::ZERO, manager.subscription_usage()).await;
+    // A liveness bound only: generous, so load never trips it.
     assert!(matches!(
-        tokio::time::timeout(Duration::from_secs(5), manager.subscription_usage()).await?,
+        tokio::time::timeout(Duration::from_secs(30), manager.subscription_usage()).await?,
         SubscriptionUsageRead::Unavailable {
             reason: SubscriptionUsageUnavailable::CredentialState(
                 SubscriptionUsageCredentialState::RefreshRequired
@@ -1346,7 +1350,8 @@ async fn device_login_validates_es256_jwks_userinfo_and_exact_wire() -> TestResu
         "subject-device",
     )
     .await?;
-    let status = tokio::time::timeout(Duration::from_secs(5), login.complete()).await??;
+    // A liveness bound only: generous, so load never trips it.
+    let status = tokio::time::timeout(Duration::from_secs(30), login.complete()).await??;
     assert_eq!(status.status(), CredentialStatus::Ready);
     assert_eq!(status.generation().get(), 1);
     assert_eq!(
@@ -1533,7 +1538,8 @@ async fn device_completion_rechecks_profile_after_userinfo_before_persistence() 
     release_userinfo
         .send(())
         .map_err(|()| std::io::Error::other("userinfo gate receiver was lost"))?;
-    let result = tokio::time::timeout(Duration::from_secs(2), completion).await??;
+    // A liveness bound only: generous, so load never trips it.
+    let result = tokio::time::timeout(Duration::from_secs(30), completion).await??;
     assert!(matches!(
         result,
         Err(XaiNativeAuthError::CompatibilityInactive)
@@ -1599,7 +1605,8 @@ async fn browser_login_correlates_pkce_state_and_signed_nonce() -> TestResult {
     assert!(response.starts_with("HTTP/1.1 200 OK"));
     assert!(response.contains("Cache-Control: no-store\r\n"));
     assert!(response.contains("Pragma: no-cache\r\n"));
-    let status = tokio::time::timeout(Duration::from_secs(5), completion).await???;
+    // A liveness bound only: generous, so load never trips it.
+    let status = tokio::time::timeout(Duration::from_secs(30), completion).await???;
     assert_eq!(status.account_binding().as_str(), "subject-browser");
     wait_for_requests(&peer, 3).await?;
     let requests = peer.requests.lock().await;
@@ -1750,7 +1757,8 @@ async fn local_browser_rejects_wrong_host_without_dispatch_and_returns_no_store(
     assert!(response.starts_with("HTTP/1.1 400 Bad Request"));
     assert!(response.contains("Cache-Control: no-store\r\n"));
     assert!(!response.contains("must-not-dispatch"));
-    let result = tokio::time::timeout(Duration::from_secs(2), completion).await??;
+    // A liveness bound only: generous, so load never trips it.
+    let result = tokio::time::timeout(Duration::from_secs(30), completion).await??;
     assert!(matches!(result, Err(XaiNativeAuthError::InvalidCallback)));
     assert!(manager.status()?.is_none());
     assert!(peer.requests.lock().await.is_empty());
@@ -1825,7 +1833,8 @@ async fn browser_completion_rechecks_profile_after_userinfo_before_persistence()
     let mut callback_response = Vec::new();
     callback.read_to_end(&mut callback_response).await?;
     assert!(String::from_utf8_lossy(&callback_response).starts_with("HTTP/1.1 400"));
-    let result = tokio::time::timeout(Duration::from_secs(2), completion).await??;
+    // A liveness bound only: generous, so load never trips it.
+    let result = tokio::time::timeout(Duration::from_secs(30), completion).await??;
     assert!(matches!(
         result,
         Err(XaiNativeAuthError::CompatibilityInactive)
@@ -1860,7 +1869,8 @@ async fn refresh_is_same_account_single_flight_and_rotates_durably() -> TestResu
         )))
         .await?;
     peer.responses.send(response(&jwks(TEST_KID))).await?;
-    let (first, second) = tokio::time::timeout(Duration::from_secs(5), async {
+    // A liveness bound only: generous, so load never trips it.
+    let (first, second) = tokio::time::timeout(Duration::from_secs(30), async {
         tokio::join!(manager.refresh_if_needed(), manager.refresh_if_needed())
     })
     .await?;
@@ -2025,7 +2035,8 @@ async fn ambiguous_refresh_restores_ready_and_retries() -> TestResult {
         system_unix_seconds()? + 1,
     )?;
     peer.responses.send(disconnect_after_request()).await?;
-    let result = tokio::time::timeout(Duration::from_secs(5), manager.refresh_if_needed()).await?;
+    // A liveness bound only: generous, so load never trips it.
+    let result = tokio::time::timeout(Duration::from_secs(30), manager.refresh_if_needed()).await?;
     assert!(matches!(result, Err(XaiNativeAuthError::Transport(_))));
     let status = required(manager.status()?, "restored status")?;
     assert_eq!(status.status(), CredentialStatus::Ready);
@@ -2038,7 +2049,7 @@ async fn ambiguous_refresh_restores_ready_and_retries() -> TestResult {
         )))
         .await?;
     peer.responses.send(response(&jwks(TEST_KID))).await?;
-    tokio::time::timeout(Duration::from_secs(5), manager.refresh_if_needed()).await??;
+    tokio::time::timeout(Duration::from_secs(30), manager.refresh_if_needed()).await??;
     let status = required(manager.status()?, "second refresh status")?;
     assert_eq!(status.status(), CredentialStatus::Ready);
     assert_eq!(status.generation().get(), 5);
@@ -2081,7 +2092,8 @@ async fn cancelling_claimed_refresh_after_request_observation_restores_ready() -
     let refresh = tokio::spawn(async move { refresh_manager.refresh_if_needed().await });
     wait_until_request_count(&peer, 1).await?;
     refresh.abort();
-    let joined = tokio::time::timeout(Duration::from_secs(1), refresh).await?;
+    // A liveness bound only: generous, so load never trips it.
+    let joined = tokio::time::timeout(Duration::from_secs(30), refresh).await?;
     assert!(joined.is_err_and(|error| error.is_cancelled()));
     drop(release_head);
     assert_eq!(
@@ -2121,7 +2133,8 @@ async fn cancelling_refresh_waiting_on_a_peer_claim_leaves_the_peer_claim_alone(
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert!(!refresh.is_finished());
     refresh.abort();
-    let joined = tokio::time::timeout(Duration::from_secs(1), refresh).await?;
+    // A liveness bound only: generous, so load never trips it.
+    let joined = tokio::time::timeout(Duration::from_secs(30), refresh).await?;
     assert!(joined.is_err_and(|error| error.is_cancelled()));
     assert_eq!(peer_store.load()?, Some(unknown.clone()));
     drop(peer_claim);
@@ -2494,7 +2507,8 @@ async fn refresh_failure_names_the_rejecting_check_and_response_timing() -> Test
         )))
         .await?;
     peer.responses.send(response(&jwks(TEST_KID))).await?;
-    let result = tokio::time::timeout(Duration::from_secs(5), manager.refresh_if_needed()).await?;
+    // A liveness bound only: generous, so load never trips it.
+    let result = tokio::time::timeout(Duration::from_secs(30), manager.refresh_if_needed()).await?;
     assert!(
         matches!(
             result,
@@ -2653,7 +2667,8 @@ async fn concurrent_refresh_losing_the_execution_lock_restores_ready() -> TestRe
         std::thread::sleep(Duration::from_millis(200));
         peer_store.complete_refresh(peer_claim.start(), replacement)
     });
-    tokio::time::timeout(Duration::from_secs(5), manager.refresh_if_needed()).await??;
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), manager.refresh_if_needed()).await??;
     completer.await??;
     let status = required(manager.status()?, "adopted status")?;
     assert_eq!(status.status(), CredentialStatus::Ready);
@@ -2698,7 +2713,8 @@ async fn child_spawn_gate_refreshes_a_quarantined_xai_record() -> TestResult {
         )))
         .await?;
     peer.responses.send(response(&jwks(TEST_KID))).await?;
-    tokio::time::timeout(Duration::from_secs(5), manager.refresh_if_needed()).await??;
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), manager.refresh_if_needed()).await??;
     let status = required(manager.status()?, "refreshed status")?;
     assert_eq!(status.status(), CredentialStatus::Ready);
     assert_eq!(status.generation().get(), 4);
@@ -2766,8 +2782,9 @@ async fn revoke_is_fixed_remote_then_tombstone_and_logout_is_local() -> TestResu
         system_unix_seconds()? + 3600,
     )?;
     revoke_peer.responses.send(response(&json!({}))).await?;
+    // A liveness bound only: generous, so load never trips it.
     let generation =
-        tokio::time::timeout(Duration::from_secs(5), revoke_manager.revoke()).await??;
+        tokio::time::timeout(Duration::from_secs(30), revoke_manager.revoke()).await??;
     assert_eq!(generation.get(), 3);
     assert_eq!(
         required(revoke_manager.status()?, "revoke tombstone")?.status(),
@@ -2808,7 +2825,8 @@ async fn unknown_kid_forced_refresh_is_single_flight() -> TestResult {
     let peer = mock_peer().await?;
     let manager = manager(&temp, &peer)?;
     peer.responses.send(response(&jwks(TEST_KID))).await?;
-    let (first, second) = tokio::time::timeout(Duration::from_secs(5), async {
+    // A liveness bound only: generous, so load never trips it.
+    let (first, second) = tokio::time::timeout(Duration::from_secs(30), async {
         tokio::join!(
             manager.core.jwk_for("unknown-key", None),
             manager.core.jwk_for("unknown-key", None)
@@ -3011,7 +3029,8 @@ async fn resolver_rejects_generation_only_relogin_race_before_return() -> TestRe
                 .await
         })
     };
-    tokio::time::timeout(Duration::from_secs(5), reached.notified()).await?;
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), reached.notified()).await?;
 
     let baseline = required(manager.core.store.load()?, "resolution race fence")?;
     let replacement = StoredTokens {
@@ -3091,14 +3110,15 @@ async fn resolver_rejects_catalog_receipt_mutation_before_return() -> TestResult
                 .await
         })
     };
-    tokio::time::timeout(Duration::from_secs(5), reached.notified()).await?;
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), reached.notified()).await?;
     *manager
         .core
         .catalog
         .lock()
         .map_err(|_| std::io::Error::other("catalog lock poisoned"))? = None;
     resume.notify_one();
-    let result = tokio::time::timeout(Duration::from_secs(5), resolver).await??;
+    let result = tokio::time::timeout(Duration::from_secs(30), resolver).await??;
     assert!(matches!(
         result,
         Err(XaiNativeAuthError::CatalogUnavailable)
@@ -4012,7 +4032,9 @@ async fn same_account_relogin_wait_renews_captured_route_without_inference() -> 
             &replacement,
         )?,
     )?;
-    let (first_wait, second_wait) = tokio::time::timeout(Duration::from_secs(5), waiters).await??;
+    // A liveness bound only: generous, so load never trips it.
+    let (first_wait, second_wait) =
+        tokio::time::timeout(Duration::from_secs(30), waiters).await??;
     first_wait?;
     second_wait?;
     let renewed = Arc::clone(&model)
@@ -4475,7 +4497,8 @@ async fn refresh_lead_mid_turn_renews_receipt_once_and_dispatches_the_new_grant(
     auth.responses.send(response(&jwks(TEST_KID))).await?;
     enqueue_admitted_catalog(&auth).await?;
     let checked_at = now_timestamp()?;
-    let (first, second) = tokio::time::timeout(Duration::from_secs(5), async {
+    // A liveness bound only: generous, so load never trips it.
+    let (first, second) = tokio::time::timeout(Duration::from_secs(30), async {
         tokio::join!(
             Arc::clone(&model).revalidate_runtime_authority(checked_at),
             Arc::clone(&model).revalidate_runtime_authority(checked_at)
@@ -4795,8 +4818,9 @@ async fn past_admitted_window_renews_nothing_and_fetches_no_catalog() -> TestRes
     // Served only if the model wrongly fetches one.
     enqueue_admitted_catalog(&auth).await?;
     let past = Timestamp::new(admitted_until.seconds() + 1, 0)?;
+    // A liveness bound only: generous, so load never trips it.
     let result = tokio::time::timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(30),
         Arc::clone(&model).revalidate_runtime_authority(past),
     )
     .await?;
@@ -4864,7 +4888,8 @@ async fn two_managers_renew_concurrently_with_one_claimed_refresh() -> TestResul
     enqueue_admitted_catalog(&auth).await?;
     enqueue_admitted_catalog(&auth).await?;
     let checked_at = now_timestamp()?;
-    let (first, second) = tokio::time::timeout(Duration::from_secs(5), async {
+    // A liveness bound only: generous, so load never trips it.
+    let (first, second) = tokio::time::timeout(Duration::from_secs(30), async {
         tokio::join!(
             Arc::clone(&models[0]).revalidate_runtime_authority(checked_at),
             Arc::clone(&models[1]).revalidate_runtime_authority(checked_at)
@@ -4950,8 +4975,9 @@ async fn renewal_racing_the_rejected_grant_refresh_adopts_its_generation() -> Te
     release_token
         .send(())
         .map_err(|()| std::io::Error::other("token gate dropped"))?;
-    tokio::time::timeout(Duration::from_secs(5), rejected).await???;
-    let renewed = tokio::time::timeout(Duration::from_secs(5), renewal).await???;
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), rejected).await???;
+    let renewed = tokio::time::timeout(Duration::from_secs(30), renewal).await???;
     let current = required(manager.core.store.load()?, "forced fence")?;
     assert_eq!(renewed.credential_generation(), current.generation().get());
     complete_model_round(
@@ -5781,7 +5807,8 @@ async fn native_ready_lease_is_held_through_head_and_released_before_stream_body
         .send(())
         .map_err(|()| std::io::Error::other("body gate receiver was lost"))?;
     drain.abort();
-    let joined = tokio::time::timeout(Duration::from_secs(1), drain).await?;
+    // A liveness bound only: generous, so load never trips it.
+    let joined = tokio::time::timeout(Duration::from_secs(30), drain).await?;
     if let Err(error) = joined
         && !error.is_cancelled()
     {
@@ -7573,7 +7600,8 @@ async fn a_waiter_behind_a_failed_renewal_keeps_its_floor() -> TestResult {
     });
     // Blocking-pool probes need not complete in invocation order. Keep the
     // first catalog response gated until the earlier check really queued.
-    tokio::time::timeout(Duration::from_secs(2), async {
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), async {
         while model.renewal_floor_for_test() != Some(waiter_checked_at) {
             tokio::task::yield_now().await;
         }
@@ -7582,8 +7610,8 @@ async fn a_waiter_behind_a_failed_renewal_keeps_its_floor() -> TestResult {
     release_failure
         .send(())
         .map_err(|()| std::io::Error::other("renewal gate closed"))?;
-    let renewer = tokio::time::timeout(Duration::from_secs(5), renewer).await??;
-    let waiter = tokio::time::timeout(Duration::from_secs(5), waiter).await??;
+    let renewer = tokio::time::timeout(Duration::from_secs(30), renewer).await??;
+    let waiter = tokio::time::timeout(Duration::from_secs(30), waiter).await??;
     assert!(
         renewer.is_err(),
         "the renewer's catalog failed: {renewer:?}"

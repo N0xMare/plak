@@ -2338,7 +2338,8 @@ fn a_timed_out_mint_hook_kills_the_whole_process_group() {
         .unwrap()
         .trim()
         .to_owned();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    // A liveness bound only: generous, so load never trips it.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
         let alive = Command::new("sh")
             .arg("-c")

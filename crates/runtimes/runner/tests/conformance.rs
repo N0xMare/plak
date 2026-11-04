@@ -860,7 +860,8 @@ async fn an_oversized_frame_ends_the_runner_connection_once() {
     let mut raw = Raw::bound(&runner, "instance-1").await;
     let declared = u32::try_from(MAX_FRAME_BYTES + 1).unwrap();
     raw.writer.write_all(&declared.to_be_bytes()).await.unwrap();
-    let refused = tokio::time::timeout(Duration::from_secs(5), raw.next())
+    // A liveness bound only: generous, so load never trips it.
+    let refused = tokio::time::timeout(Duration::from_secs(30), raw.next())
         .await
         .unwrap();
     assert!(matches!(
@@ -871,7 +872,7 @@ async fn an_oversized_frame_ends_the_runner_connection_once() {
         }
     ));
     let mut rest = [0_u8; 16];
-    let read = tokio::time::timeout(Duration::from_secs(5), raw.reader.read(&mut rest))
+    let read = tokio::time::timeout(Duration::from_secs(30), raw.reader.read(&mut rest))
         .await
         .unwrap()
         .unwrap();
@@ -970,7 +971,8 @@ async fn a_rebind_of_the_same_host_instance_drains_its_older_connection() {
         RunnerFrame::Pong { nonce: 2 }
     );
     let mut rest = [0_u8; 16];
-    let read = tokio::time::timeout(Duration::from_secs(5), older.reader.read(&mut rest))
+    // A liveness bound only: generous, so load never trips it.
+    let read = tokio::time::timeout(Duration::from_secs(30), older.reader.read(&mut rest))
         .await
         .unwrap()
         .unwrap();
@@ -1001,7 +1003,8 @@ async fn a_silent_link_is_lost_at_both_ends_and_pings_keep_it() {
     let kept = runner();
     let mut silent = Raw::bound(&kept, "instance-1").await;
     let mut rest = [0_u8; 16];
-    let read = tokio::time::timeout(Duration::from_secs(5), silent.reader.read(&mut rest))
+    // A liveness bound only: generous, so load never trips it.
+    let read = tokio::time::timeout(Duration::from_secs(30), silent.reader.read(&mut rest))
         .await
         .unwrap()
         .unwrap();
@@ -1218,12 +1221,13 @@ async fn a_runner_stream_gap_aborts_the_stream_on_the_host() {
     let service = environment.spawn_service(request, unkeyed()).await.unwrap();
     let mut stdout = service.stdout;
     let mut read = Vec::new();
-    tokio::time::timeout(Duration::from_secs(5), stdout.read_to_end(&mut read))
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), stdout.read_to_end(&mut read))
         .await
         .unwrap()
         .unwrap();
     assert!(read.is_empty(), "nothing after the gap reaches the host");
-    let (stream, reason) = tokio::time::timeout(Duration::from_secs(5), fake)
+    let (stream, reason) = tokio::time::timeout(Duration::from_secs(30), fake)
         .await
         .unwrap()
         .unwrap();

@@ -1420,6 +1420,21 @@ to detect waiting on an unfinished supervisor. The retirement checks
 thirty-second hang watchdogs: they prove eventual retirement without observer
 polling and monitor exit after owner drop, not subsecond latency.
 
+A test's wall-clock wait that only guards against something never happening
+(a `tokio::time::timeout`, `recv_timeout` or deadline loop whose expiry fails
+the test) is a liveness bound, not a timing assertion: it is thirty seconds,
+so load cannot trip it, and a hang still fails well inside the lane's
+allowance. A bound that distinguishes returning promptly from waiting out a
+longer grace or window is a timing assertion: it runs in the serial lane, on
+a paused clock, or event-driven. A retry window (a short attempt that is
+repeated) is neither and keeps its length. An absence check (nothing happens
+within a window) keeps its window, and so does any wait whose result the test
+inspects rather than fails on (`is_ok`, `is_err`, `if`, `match`, `while let`).
+A bound in a test that pauses or advances Tokio time is virtual time and
+keeps its value, and a wait in a test that also sets a product-side window
+or grace at least as long keeps its value, since that window's expiry could
+satisfy the same assertions.
+
 CPU-time redaction checks also stay parallel:
 they measure process CPU, not scheduler delay. Real-clock lower-bound-only
 assertions (wake consumption, retry delay and progressing streams) do not fail
@@ -1445,6 +1460,7 @@ assertions do not measure elapsed time and need no budget lane.
 | Detached writer cleanup | `host_future_drop_is_bounded_with_a_detached_continuous_writer` |
 | Auth deadlines | `cancelling_claimed_refresh_after_request_observation_restores_ready`, `local_browser_rejects_wrong_host_without_dispatch_and_returns_no_store` |
 | Host quit, compaction and session round trips | `interactive_observation_timeout_releases_gate_and_joins_without_masking_failure`, `interrupt_then_quit_publishes_the_cancelled_terminal`, `quit_during_active_turn_waits_for_cancelled_terminal_projection`, `scheduled_compaction_failure_keeps_host_worker_alive`, `product_session_facade_create_turn_shutdown_and_reopen`, `retiring_a_live_child_advances_its_session_locator`, `real_session_late_start_ack_releases_after_deadline_without_redispatch` |
+| Wall-clock promptness bounds | `shutdown_aborts_a_recovery_pass_that_overruns`, `the_idle_wait_wakes_on_an_intent_and_not_before`, `host_service_ignoring_sigterm_is_killed_after_the_grace`, `an_exited_session_reports_its_joined_status_while_active_and_after_retirement`, `codex_observations_accumulate_one_bound_and_resume_exactly`, `the_whole_fetch_deadline_bounds_a_stalled_peer`, `deadline_bounds_the_wait_behind_an_in_flight_fetch`, the eight quit-grace scenarios (`disconnected_control_plane_*`, `ordinary_quit_*`, `process_exit_quit_with_settled_cancel_reports_a_stuck_child_release`, `quit_grace_*`), `a_recycling_waiter_is_an_owner_that_recovery_never_waits_on`, `user_stop_grants_the_term_grace_without_blocking_the_caller`, `jj_cli_doctor_bounds_output_wait_after_leader_exit`, `pending_wakes_return_the_wait_and_are_consumed` — each asserts that something returns within one to five real seconds instead of waiting out a longer grace or window, a real timing assertion that parallel load could trip |
 | A real race, listed not hidden | `completed_terminal_outcome_remains_authoritative_when_exit_was_requested` |
 | Product durability scenarios | `durability::` — quit, resume and failure-wave tests. Not crash matrices; they stay in this lane |
 

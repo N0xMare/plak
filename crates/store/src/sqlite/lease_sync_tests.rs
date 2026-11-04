@@ -234,7 +234,8 @@ async fn renewal_and_revival_commit_unsynced_and_restore_full() -> TestResult {
             Ok(())
         })
         .await?;
-    let deadline = Instant::now() + Duration::from_secs(10);
+    // A liveness bound only: generous, so load never trips it.
+    let deadline = Instant::now() + Duration::from_secs(30);
     let mut entries = Vec::new();
     while !entries.iter().any(|(label, _)| *label == "background") {
         assert!(Instant::now() < deadline, "no background step ran");

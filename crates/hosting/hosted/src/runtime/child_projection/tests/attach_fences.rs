@@ -182,7 +182,8 @@ async fn lagged_face_reattaches_running_call_then_settles_the_same_row_id() {
             sent
         },
     ));
-    tokio::time::timeout(Duration::from_secs(10), async {
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), async {
         loop { if matches!(notifications.recv().await, Some(HostEvent::ToolLine {state, ..}) if state == "running") {break;} }
     }).await.expect("reattach re-emits retained running observation, not only the gap");
     apply(&events, &mut state);

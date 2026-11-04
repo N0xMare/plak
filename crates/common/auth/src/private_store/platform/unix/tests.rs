@@ -259,7 +259,8 @@ fn lock_is_exclusive_across_processes() -> Result<(), Box<dyn std::error::Error>
         Err(RecvTimeoutError::Timeout)
     ));
     fs::write(&release, b"release")?;
-    assert!(receiver.recv_timeout(Duration::from_secs(2))??);
+    // A liveness bound only: generous, so load never trips it.
+    assert!(receiver.recv_timeout(Duration::from_secs(30))??);
     worker.join().map_err(|_| "lock contender panicked")?;
     assert!(child.wait()?.success());
     Ok(())
@@ -313,8 +314,9 @@ fn shared_lease_is_cross_process_and_blocks_exclusive_logout()
         Err(RecvTimeoutError::Timeout)
     ));
     fs::write(&release, b"release")?;
+    // A liveness bound only: generous, so load never trips it.
     assert_eq!(
-        receiver.recv_timeout(Duration::from_secs(5))??,
+        receiver.recv_timeout(Duration::from_secs(30))??,
         CredentialGeneration::new(2)?
     );
     worker

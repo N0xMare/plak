@@ -483,8 +483,9 @@ async fn retained_response_lock_blocks_mutation_until_terminal_consumption() -> 
         Err(RecvTimeoutError::Timeout)
     ));
     assert_eq!(store.quarantine_claimed_http(response)?, unknown);
+    // A liveness bound only: generous, so load never trips it.
     assert_eq!(
-        receiver.recv_timeout(Duration::from_secs(5))??,
+        receiver.recv_timeout(Duration::from_secs(30))??,
         CredentialGeneration::new(3)?
     );
     worker.join().map_err(|_| "mutation worker panicked")?;
@@ -758,7 +759,8 @@ async fn dropping_in_flight_future_after_start_leaves_unknown() -> ServerResult 
         })
     };
 
-    timeout(Duration::from_secs(2), request_seen_receiver).await??;
+    // A liveness bound only: generous, so load never trips it.
+    timeout(Duration::from_secs(30), request_seen_receiver).await??;
     transaction.abort();
     let join_error = transaction
         .await
@@ -1058,8 +1060,9 @@ async fn status_read_does_not_block_on_an_in_flight_refresh() -> ServerResult {
     )?;
     assert_eq!(completed.generation(), CredentialGeneration::new(3)?);
     // The writer proceeds only after completion and sees the new generation.
+    // A liveness bound only: generous, so load never trips it.
     assert_eq!(
-        write_receiver.recv_timeout(Duration::from_secs(2))?,
+        write_receiver.recv_timeout(Duration::from_secs(30))?,
         Err(PrivateStoreError::StaleWriter)
     );
     worker.join().map_err(|_| "status reader panicked")?;

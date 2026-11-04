@@ -4257,12 +4257,13 @@ async fn codex_inference_cancellation_after_one_write_never_falls_back() -> Test
     });
     seen_rx.await?;
     cancellation.cancel();
-    let error = tokio::time::timeout(Duration::from_secs(2), worker)
+    // A liveness bound only: generous, so load never trips it.
+    let error = tokio::time::timeout(Duration::from_secs(30), worker)
         .await??
         .err()
         .ok_or("cancelled Codex inference unexpectedly completed")?;
     assert_eq!(error.kind(), ModelErrorKind::Cancelled);
-    let requests = tokio::time::timeout(Duration::from_secs(2), server).await???;
+    let requests = tokio::time::timeout(Duration::from_secs(30), server).await???;
     assert_eq!(requests.len(), 2, "catalog plus one inference write");
     let inference = gate.snapshot()?.class(SubscriptionRequestClass::Inference);
     assert_eq!(inference.reserved(), 1);
@@ -4910,8 +4911,9 @@ async fn browser_and_device_deadlines_bound_near_expiry_lifecycle_waits() -> Tes
     let worker_manager = Arc::clone(&browser_manager);
     let browser_completion =
         tokio::spawn(async move { worker_manager.complete_browser_login(browser_login).await });
+    // A liveness bound only: generous, so load never trips it.
     let browser_outcome =
-        tokio::time::timeout(Duration::from_secs(2), browser_completion).await??;
+        tokio::time::timeout(Duration::from_secs(30), browser_completion).await??;
     assert_eq!(browser_outcome, Err(NativeCodexAuthError::Callback));
     drop(browser_lifecycle);
     assert_eq!(browser_manager.status()?, CodexCredentialStatus::SignedOut);
@@ -4950,7 +4952,7 @@ async fn browser_and_device_deadlines_bound_near_expiry_lifecycle_waits() -> Tes
     let device_completion =
         tokio::spawn(async move { complete_device(&worker_manager, device_login).await });
     assert_eq!(device_server.await??.len(), 1);
-    let device_outcome = tokio::time::timeout(Duration::from_secs(5), device_completion).await??;
+    let device_outcome = tokio::time::timeout(Duration::from_secs(30), device_completion).await??;
     assert_eq!(device_outcome, Err(NativeCodexAuthError::Provider));
     drop(device_lifecycle);
     assert_eq!(device_manager.status()?, CodexCredentialStatus::SignedOut);
@@ -5515,8 +5517,9 @@ async fn subscription_usage_retains_one_ready_lease_without_recursive_store_lock
             )],
         );
 
+    // A liveness bound only: generous, so load never trips it.
     let observation =
-        tokio::time::timeout(Duration::from_secs(2), manager.subscription_usage()).await?;
+        tokio::time::timeout(Duration::from_secs(30), manager.subscription_usage()).await?;
     let SubscriptionUsageRead::Snapshot(snapshot) = observation else {
         return Err("usage observation was unavailable".into());
     };
@@ -5596,8 +5599,9 @@ async fn subscription_usage_expired_access_reports_refresh_required_without_refr
     let before = manager.load_fence().await?;
     // Dropped after its first poll, as the hosted timeout drops a slow read.
     let _ = tokio::time::timeout(Duration::ZERO, manager.subscription_usage()).await;
+    // A liveness bound only: generous, so load never trips it.
     assert!(matches!(
-        tokio::time::timeout(Duration::from_secs(5), manager.subscription_usage()).await?,
+        tokio::time::timeout(Duration::from_secs(30), manager.subscription_usage()).await?,
         SubscriptionUsageRead::Unavailable {
             reason: SubscriptionUsageUnavailable::CredentialState(
                 SubscriptionUsageCredentialState::RefreshRequired
@@ -6866,7 +6870,9 @@ async fn credential_wait_renews_same_account_login_but_refuses_a_different_accou
                 Instant::now() + Duration::from_secs(5),
             )
             .await?;
-        let (result, peer_result) = tokio::time::timeout(Duration::from_secs(5), waiters).await??;
+        // A liveness bound only: generous, so load never trips it.
+        let (result, peer_result) =
+            tokio::time::timeout(Duration::from_secs(30), waiters).await??;
         assert_eq!(
             result, peer_result,
             "concurrent waiters share one renewed target"

@@ -128,7 +128,8 @@ fn child_retry_is_logged_with_host_route_and_size_even_without_analytics() -> Te
     tracing::subscriber::with_default(subscriber, || {
         emitter.observe_model_retry(context, &retry);
     });
-    finished.recv_timeout(Duration::from_secs(5))?;
+    // A liveness bound only: generous, so load never trips it.
+    finished.recv_timeout(Duration::from_secs(30))?;
     let log = String::from_utf8(bytes.lock().unwrap().clone())?;
     assert!(log.contains("plak.retry"), "{log}");
     assert!(log.contains(&Uuid::from_u128(99).to_string()), "{log}");

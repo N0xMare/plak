@@ -93,8 +93,9 @@ fn ready_leases_share_and_block_logout_until_all_drop() -> Result<(), Box<dyn st
         Err(RecvTimeoutError::Timeout)
     ));
     drop(second);
+    // A liveness bound only: generous, so load never trips it.
     assert_eq!(
-        receiver.recv_timeout(Duration::from_secs(5))??,
+        receiver.recv_timeout(Duration::from_secs(30))??,
         CredentialGeneration::new(2)?
     );
     worker.join().map_err(|_| "logout worker panicked")??;

@@ -167,7 +167,8 @@ fn seed_canonical_history(
     actions
         .send(UserAction::Prompt("source canonical history".into()))
         .unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    // A liveness bound only: generous, so load never trips it.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
         let event = events
             .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))

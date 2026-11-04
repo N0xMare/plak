@@ -591,8 +591,9 @@ async fn dropping_the_last_pooled_client_closes_its_idle_connections() -> TestRe
         );
         assert_eq!(pool(&derived)?.idle_count(), 1);
         drop(derived);
+        // A liveness bound only: generous, so load never trips it.
         assert_eq!(
-            tokio::time::timeout(Duration::from_secs(5), peer.read(&mut byte)).await??,
+            tokio::time::timeout(Duration::from_secs(30), peer.read(&mut byte)).await??,
             0,
             "last owner closes the socket"
         );

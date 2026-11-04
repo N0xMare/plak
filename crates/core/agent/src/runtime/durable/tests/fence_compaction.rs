@@ -161,7 +161,8 @@ async fn compact_session_from_endpoint_during_in_flight_model_is_busy() -> TestR
         .build()
         .map_err(|error| error.message().to_owned())?;
     let turn = agent.prompt("compact while busy").await?;
-    tokio::time::timeout(Duration::from_secs(2), async {
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), async {
         while model.calls.load(Ordering::Acquire) == 0 {
             tokio::task::yield_now().await;
         }

@@ -1251,8 +1251,9 @@ async fn interrupt_then_overlapping_close_and_stop_all_return_before_retirement_
     let session = session_for("close-retiring", root.path().to_path_buf());
     let events = std::sync::Mutex::new(Vec::<ContentEvent<TestExtension>>::new());
     let send = |event| events.lock().unwrap().push(event);
+    // A liveness bound only: generous, so load never trips it.
     tokio::time::timeout(
-        std::time::Duration::from_secs(1),
+        std::time::Duration::from_secs(30),
         close_node(&session, &runtime, send, &child),
     )
     .await

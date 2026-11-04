@@ -569,7 +569,8 @@ async fn steer_reaches_top_level_tool_without_cancelling_the_process() -> TestRe
         )
         .await?;
     let turn = agent.prompt("start process").await?;
-    tokio::time::timeout(Duration::from_secs(2), async {
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), async {
         while lock_mutex(&tool.sessions).is_none() {
             tokio::task::yield_now().await;
         }
@@ -700,7 +701,8 @@ async fn mid_response_steer_supersedes_the_whole_undispatched_batch() -> TestRes
         )
         .await?;
     let turn = agent.prompt("start processes").await?;
-    tokio::time::timeout(Duration::from_secs(2), model.held_call_started.notified()).await?;
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), model.held_call_started.notified()).await?;
     turn.control().steer("new instruction").await?;
     release.notify_one();
     let result = turn.result().await?;

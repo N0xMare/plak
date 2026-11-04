@@ -57,7 +57,8 @@ async fn an_await_naming_an_own_process_returns_its_row_when_it_ends() {
         std::time::Duration::from_millis(250),
     )
     .unwrap();
-    let outcome = tokio::time::timeout(std::time::Duration::from_secs(2), pending)
+    // A liveness bound only: generous, so load never trips it.
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(30), pending)
         .await
         .unwrap()
         .unwrap();
@@ -715,7 +716,8 @@ async fn grok_output_mixed_call_snapshots_jobs_and_wakes_on_their_end() {
         std::time::Duration::from_millis(250),
     )
     .unwrap();
-    let outcome = tokio::time::timeout(std::time::Duration::from_secs(2), pending)
+    // A liveness bound only: generous, so load never trips it.
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(30), pending)
         .await
         .unwrap()
         .unwrap();

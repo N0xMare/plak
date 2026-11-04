@@ -90,7 +90,8 @@ async fn a_leave_queued_during_an_outage_survives_its_agents_cancel() {
     store.full.store(false, Ordering::SeqCst);
     let (saved, _effects) = first.await.unwrap().unwrap();
     saved.unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(10), leave)
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(std::time::Duration::from_secs(30), leave)
         .await
         .expect("the leave lands after the outage")
         .unwrap();

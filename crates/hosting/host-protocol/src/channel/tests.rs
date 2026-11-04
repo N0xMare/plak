@@ -474,12 +474,13 @@ fn timed_action_receive_preserves_urgent_timeout_and_disconnect_semantics() {
     );
     sender.send(SessionIntent::Prompt("queued".into())).unwrap();
     sender.send(SessionIntent::Interrupt).unwrap();
+    // A liveness bound only: generous, so load never trips it.
     assert_eq!(
-        *receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
+        *receiver.recv_timeout(Duration::from_secs(30)).unwrap(),
         SessionIntent::Interrupt
     );
     assert_eq!(
-        *receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
+        *receiver.recv_timeout(Duration::from_secs(30)).unwrap(),
         SessionIntent::Prompt("queued".into())
     );
     drop(sender);

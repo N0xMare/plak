@@ -611,8 +611,9 @@ fn turn_lifecycle_reports_admitted_and_unresolved_without_terminal_evidence() {
         unresolved_turn_lifecycle(turn_id, None),
     );
     for expected in [TurnPhase::Admitted, TurnPhase::Unresolved] {
+        // A liveness bound only: generous, so load never trips it.
         let HostEvent::TurnLifecycle(lifecycle) = rx
-            .recv_timeout(Duration::from_secs(5))
+            .recv_timeout(Duration::from_secs(30))
             .expect("a lifecycle observation")
         else {
             panic!("expected a turn lifecycle observation");

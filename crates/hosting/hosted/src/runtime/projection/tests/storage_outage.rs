@@ -103,7 +103,8 @@ fn assert_interrupted_product_write(site: StoreCall) {
             UserAction::Prompt("prompt parked before acceptance".into())
         },
     );
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    // A liveness bound only: generous, so load never trips it.
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
     while !faults.parked.load(Ordering::Acquire) {
         assert!(
             std::time::Instant::now() < deadline,

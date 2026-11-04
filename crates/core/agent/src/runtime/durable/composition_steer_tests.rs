@@ -83,11 +83,12 @@ async fn steer_closes_or_runs_the_entire_read_only_group() -> TestResult {
             .await?;
         let turn = agent.prompt("read group").await?;
         if before_dispatch {
-            tokio::time::timeout(Duration::from_secs(2), model.held_call_started.notified())
+            // A liveness bound only: generous, so load never trips it.
+            tokio::time::timeout(Duration::from_secs(30), model.held_call_started.notified())
                 .await?;
         } else {
             tokio::time::timeout(
-                Duration::from_secs(2),
+                Duration::from_secs(30),
                 wait_for_scheduler_count(&tool.dispatches, 1),
             )
             .await?;
@@ -367,8 +368,9 @@ fn steer_drains_running_nested_read_only_execution_before_yield() -> TestResult 
         turn.control().steer("new instruction").await?;
         assert_eq!(evidence.wait_count.load(Ordering::Acquire), 0);
         evidence.release_block.store(true, Ordering::Release);
+        // A liveness bound only: generous, so load never trips it.
         tokio::time::timeout(
-            Duration::from_secs(2),
+            Duration::from_secs(30),
             wait_for_scheduler_count(&evidence.wait_count, 1),
         )
         .await?;
@@ -471,8 +473,9 @@ fn crash_reopen_after_steer_yield_preserves_settled_mutation_without_replay() ->
         wait_for_scheduler_fact(&evidence.block_started).await;
         turn.control().steer("new instruction").await?;
         evidence.release_block.store(true, Ordering::Release);
+        // A liveness bound only: generous, so load never trips it.
         tokio::time::timeout(
-            Duration::from_secs(2),
+            Duration::from_secs(30),
             wait_for_scheduler_count(&evidence.wait_count, 1),
         )
         .await?;

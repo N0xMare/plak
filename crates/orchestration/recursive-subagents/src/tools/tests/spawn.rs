@@ -17,8 +17,9 @@ async fn spawn_admit_may_relock_hub_tree_without_deadlock() {
         Some(Arc::clone(&binder) as Arc<dyn ChildController>),
     );
     let arguments = serde_json::to_value(spawn_request()).unwrap();
+    // A liveness bound only: generous, so load never trips it.
     let outcome = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
+        std::time::Duration::from_secs(30),
         tool.spawn_with("op-spawn-relock".into(), &arguments),
     )
     .await

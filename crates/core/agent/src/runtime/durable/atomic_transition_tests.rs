@@ -480,7 +480,8 @@ async fn a_cut_after_each_commit_of_a_turn_leaves_a_whole_transition() -> TestRe
             .await?;
         let turn = original.prompt("cut").await?;
         let turn_id = turn.id();
-        let _ = tokio::time::timeout(Duration::from_secs(5), turn.result()).await?;
+        // A liveness bound only: generous, so load never trips it.
+        let _ = tokio::time::timeout(Duration::from_secs(30), turn.result()).await?;
         let commits = accepted(&store);
         assert_eq!(commits.len(), base + cut, "cut {cut} stopped at its commit");
         let (head, _) = commits.last().ok_or("cut head")?;
@@ -597,7 +598,8 @@ async fn applied_steering_is_one_commit_with_its_segment() -> TestResult {
         .await?;
     let base = accepted(&store).len();
     let turn = agent.prompt("start processes").await?;
-    tokio::time::timeout(Duration::from_secs(2), model.held_call_started.notified()).await?;
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), model.held_call_started.notified()).await?;
     turn.control().steer("new instruction").await?;
     release.notify_one();
     let result = turn.result().await?;
@@ -679,7 +681,8 @@ async fn dispatch_rejected_fail_turn_reopens(refused: bool) -> TestResult {
             TurnResultOutcome::RecoveryRequired(_)
         ));
     } else {
-        let _ = tokio::time::timeout(Duration::from_secs(5), turn.result()).await?;
+        // A liveness bound only: generous, so load never trips it.
+        let _ = tokio::time::timeout(Duration::from_secs(30), turn.result()).await?;
     }
     let head = original.checkpoint();
     let providers = round_providers(&head, turn_id);

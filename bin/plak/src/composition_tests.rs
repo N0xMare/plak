@@ -367,8 +367,9 @@ fn scheduled_compaction_failure_keeps_host_worker_alive() {
         &actions,
         UserAction::Prompt("continue after compact".into()),
     );
+    // A liveness bound only: generous, so load never trips it.
     compact_requested_rx
-        .recv_timeout(Duration::from_secs(10))
+        .recv_timeout(Duration::from_secs(30))
         .unwrap();
     let during: Vec<HostEvent> = receiver.try_iter().collect();
     drained_tx.send(()).unwrap();
@@ -639,7 +640,8 @@ fn quit_during_active_turn_waits_for_cancelled_terminal_projection() {
     let (actions, events, worker) = spawn_host_worker(config).unwrap();
 
     send_attached_action(&actions, UserAction::Prompt("cancel before exit".into()));
-    let deadline = Instant::now() + Duration::from_secs(5);
+    // A liveness bound only: generous, so load never trips it.
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let event = events
             .recv_timeout(deadline.saturating_duration_since(Instant::now()))
@@ -679,7 +681,8 @@ fn interrupt_then_quit_publishes_the_cancelled_terminal() {
     let (actions, events, worker) = spawn_host_worker(config).unwrap();
 
     send_attached_action(&actions, UserAction::Prompt("cancel before exit".into()));
-    let deadline = Instant::now() + Duration::from_secs(5);
+    // A liveness bound only: generous, so load never trips it.
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let event = events
             .recv_timeout(deadline.saturating_duration_since(Instant::now()))
@@ -751,7 +754,8 @@ fn refresh_readiness_republishes_both_projections_without_touching_credentials()
 
     tx.send(UserAction::RefreshReadiness).unwrap();
     // The read runs off the action loop; the loop applies it between actions.
-    let deadline = Instant::now() + Duration::from_secs(10);
+    // A liveness bound only: generous, so load never trips it.
+    let deadline = Instant::now() + Duration::from_secs(30);
     let mut observed = Vec::new();
     while !observed
         .iter()

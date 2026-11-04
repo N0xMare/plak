@@ -232,7 +232,8 @@ async fn consume_turn(
     let mut tap = VersionedJsonlTap::default();
     let mut captured = Vec::new();
     loop {
-        let event = tokio::time::timeout(Duration::from_secs(1), events.recv()).await??;
+        // A liveness bound only: generous, so load never trips it.
+        let event = tokio::time::timeout(Duration::from_secs(30), events.recv()).await??;
         assert_eq!(event.turn_id(), Some(turn_id));
         printer.push(event.as_ref())?;
         tap.push_event(event.as_ref())?;

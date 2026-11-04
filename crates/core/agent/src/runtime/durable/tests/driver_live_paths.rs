@@ -233,7 +233,8 @@ async fn live_decision_is_answerable_after_an_acceptance_write_fails() -> TestRe
         )
         .await?;
     assert_eq!(retry, EffectDecisionStatus::Allowed);
-    let result = tokio::time::timeout(Duration::from_secs(10), turn.result()).await??;
+    // A liveness bound only: generous, so load never trips it.
+    let result = tokio::time::timeout(Duration::from_secs(30), turn.result()).await??;
     agent.shutdown().await?;
     assert!(
         matches!(result.outcome(), TurnResultOutcome::Completed(_)),

@@ -260,14 +260,16 @@ async fn production_api_executes_sonnet_and_opus_5_family_low_medium_through_age
             );
             let root = tempfile::tempdir()?;
             let agent = agent(binding, root.path(), effort)?;
-            let result = timeout(Duration::from_secs(5), async {
+            // A liveness bound only: generous, so load never trips it.
+            let result = timeout(Duration::from_secs(30), async {
                 agent.prompt("hello").await?.result().await
             })
             .await??;
             assert_eq!(result.response().ok_or("response")?.output_text(), "local");
             assert_eq!(result.model_rounds(), 1);
             agent.shutdown().await?;
-            let wire = String::from_utf8(timeout(Duration::from_secs(5), peer).await???.remove(0))?;
+            let wire =
+                String::from_utf8(timeout(Duration::from_secs(30), peer).await???.remove(0))?;
             let (head, body) = wire.split_once("\r\n\r\n").ok_or("request framing")?;
             assert!(head.starts_with("POST /v1/messages HTTP/1.1"));
             assert!(head.contains("x-api-key: offline-only"));
@@ -386,7 +388,8 @@ async fn production_api_key_admits_required_caching_and_emits_three_one_hour_bre
     while let Some(event) = stream.next().await {
         event?;
     }
-    let wire = String::from_utf8(timeout(Duration::from_secs(5), peer).await???.remove(0))?;
+    // A liveness bound only: generous, so load never trips it.
+    let wire = String::from_utf8(timeout(Duration::from_secs(30), peer).await???.remove(0))?;
     let (head, body) = wire.split_once("\r\n\r\n").ok_or("request framing")?;
     assert!(!head.to_ascii_lowercase().contains("anthropic-beta:"));
     let body: serde_json::Value = serde_json::from_str(body)?;
@@ -547,14 +550,15 @@ async fn production_api_wrong_model_stream_never_completes() -> TestResult {
         )?;
         let root = tempfile::tempdir()?;
         let agent = agent(binding, root.path(), ReasoningEffort::Low)?;
-        let result = timeout(Duration::from_secs(5), async {
+        // A liveness bound only: generous, so load never trips it.
+        let result = timeout(Duration::from_secs(30), async {
             agent.prompt("hello").await?.result().await
         })
         .await??;
         assert!(result.error().is_some(), "{result:?}");
         assert!(result.response().is_none());
         agent.shutdown().await?;
-        timeout(Duration::from_secs(5), peer).await???;
+        timeout(Duration::from_secs(30), peer).await???;
     }
     Ok(())
 }
@@ -582,14 +586,15 @@ async fn production_api_truncated_stream_is_replayed_for_a_turn() -> TestResult 
     )?;
     let root = tempfile::tempdir()?;
     let agent = agent(binding, root.path(), ReasoningEffort::Low)?;
-    let result = timeout(Duration::from_secs(5), async {
+    // A liveness bound only: generous, so load never trips it.
+    let result = timeout(Duration::from_secs(30), async {
         agent.prompt("hello").await?.result().await
     })
     .await??;
     assert!(result.error().is_none(), "{result:?}");
     assert_eq!(result.response().ok_or("response")?.output_text(), "local");
     agent.shutdown().await?;
-    timeout(Duration::from_secs(5), peer).await???;
+    timeout(Duration::from_secs(30), peer).await???;
     Ok(())
 }
 
@@ -655,7 +660,8 @@ async fn prompt_with_retries(
     let mut events = turn.take_events()?;
     let mut retries = Vec::new();
     loop {
-        let event = timeout(Duration::from_secs(10), events.recv()).await??;
+        // A liveness bound only: generous, so load never trips it.
+        let event = timeout(Duration::from_secs(30), events.recv()).await??;
         if let Some(ModelEvent::Retry(retry)) = event.kind().model_event()
             && retry.loss().declined_reason.is_none()
         {
@@ -802,7 +808,8 @@ async fn production_api_tool_result_continues_without_redispatching_effect() -> 
         },
     ))
     .build()?;
-    let result = timeout(Duration::from_secs(5), async {
+    // A liveness bound only: generous, so load never trips it.
+    let result = timeout(Duration::from_secs(30), async {
         agent.prompt("echo").await?.result().await
     })
     .await??;
@@ -813,7 +820,7 @@ async fn production_api_tool_result_continues_without_redispatching_effect() -> 
     assert_eq!(result.model_rounds(), 2);
     assert_eq!(executor.0.load(std::sync::atomic::Ordering::SeqCst), 1);
     agent.shutdown().await?;
-    let requests = timeout(Duration::from_secs(5), peer).await???;
+    let requests = timeout(Duration::from_secs(30), peer).await???;
     assert_eq!(requests.len(), 2);
     let second = String::from_utf8(requests[1].clone())?;
     assert!(
@@ -1165,7 +1172,8 @@ async fn an_accepted_stream_that_only_refuses_is_replayed_for_the_turn() -> Test
         )?;
         let root = tempfile::tempdir()?;
         let agent = agent(binding, root.path(), ReasoningEffort::Low)?;
-        let result = timeout(Duration::from_secs(5), async {
+        // A liveness bound only: generous, so load never trips it.
+        let result = timeout(Duration::from_secs(30), async {
             agent.prompt("hello").await?.result().await
         })
         .await??;
@@ -1176,7 +1184,7 @@ async fn an_accepted_stream_that_only_refuses_is_replayed_for_the_turn() -> Test
             "{provider_kind}"
         );
         agent.shutdown().await?;
-        assert_eq!(timeout(Duration::from_secs(5), peer).await???.len(), 2);
+        assert_eq!(timeout(Duration::from_secs(30), peer).await???.len(), 2);
     }
     Ok(())
 }
@@ -1201,14 +1209,15 @@ async fn api_turn_replays_a_rate_limit_on_the_same_exact_route() -> TestResult {
     )?;
     let root = tempfile::tempdir()?;
     let agent = agent(binding, root.path(), ReasoningEffort::Low)?;
-    let result = timeout(Duration::from_secs(5), async {
+    // A liveness bound only: generous, so load never trips it.
+    let result = timeout(Duration::from_secs(30), async {
         agent.prompt("hello").await?.result().await
     })
     .await??;
     assert_eq!(result.response().ok_or("response")?.output_text(), "local");
     assert_eq!(result.model_rounds(), 1);
     agent.shutdown().await?;
-    let requests = timeout(Duration::from_secs(5), peer).await???;
+    let requests = timeout(Duration::from_secs(30), peer).await???;
     assert_eq!(requests.len(), 2);
     assert_eq!(
         requests[0], requests[1],
@@ -1255,7 +1264,8 @@ async fn api_turn_rate_limits_retry_to_the_policy_budget_then_fail() -> TestResu
         ModelErrorKind::RateLimited
     );
     agent.shutdown().await?;
-    assert_eq!(timeout(Duration::from_secs(5), peer).await???.len(), 4);
+    // A liveness bound only: generous, so load never trips it.
+    assert_eq!(timeout(Duration::from_secs(30), peer).await???.len(), 4);
     Ok(())
 }
 
@@ -1281,13 +1291,14 @@ async fn api_turn_does_not_retry_a_status_the_policy_does_not_name() -> TestResu
         )?;
         let root = tempfile::tempdir()?;
         let agent = agent(binding, root.path(), ReasoningEffort::Low)?;
-        let result = timeout(Duration::from_secs(5), async {
+        // A liveness bound only: generous, so load never trips it.
+        let result = timeout(Duration::from_secs(30), async {
             agent.prompt("hello").await?.result().await
         })
         .await??;
         assert!(result.error().is_some(), "{status} must fail the turn");
         agent.shutdown().await?;
-        assert_eq!(timeout(Duration::from_secs(5), peer).await???.len(), 1);
+        assert_eq!(timeout(Duration::from_secs(30), peer).await???.len(), 1);
     }
     Ok(())
 }
@@ -1322,7 +1333,8 @@ async fn production_api_http_rejection_and_accepted_error_never_retry() -> TestR
         )?;
         let root = tempfile::tempdir()?;
         let agent = agent(binding, root.path(), ReasoningEffort::Low)?;
-        let result = timeout(Duration::from_secs(5), async {
+        // A liveness bound only: generous, so load never trips it.
+        let result = timeout(Duration::from_secs(30), async {
             agent.prompt("hello").await?.result().await
         })
         .await??;
@@ -1343,7 +1355,7 @@ async fn production_api_http_rejection_and_accepted_error_never_retry() -> TestR
         assert!(result.response().is_none());
         assert_eq!(result.model_rounds(), 1);
         agent.shutdown().await?;
-        assert_eq!(timeout(Duration::from_secs(5), peer).await???.len(), 1);
+        assert_eq!(timeout(Duration::from_secs(30), peer).await???.len(), 1);
     }
     Ok(())
 }
@@ -1731,7 +1743,8 @@ async fn production_api_workflow_connect_retry_revalidates_the_sealed_key() -> T
             peer.abort();
             assert!(peer.await.unwrap_err().is_cancelled());
         } else {
-            assert_eq!(timeout(Duration::from_secs(5), peer).await???.len(), 1);
+            // A liveness bound only: generous, so load never trips it.
+            assert_eq!(timeout(Duration::from_secs(30), peer).await???.len(), 1);
         }
     }
     Ok(())

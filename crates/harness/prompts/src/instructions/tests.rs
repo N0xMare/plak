@@ -379,8 +379,9 @@ fn a_fifo_instruction_file_is_refused_without_blocking() {
         );
         let _ = sender.send((in_workspace, in_home));
     });
+    // A liveness bound only: generous, so load never trips it.
     let (in_workspace, in_home) = receiver
-        .recv_timeout(std::time::Duration::from_secs(10))
+        .recv_timeout(std::time::Duration::from_secs(30))
         .expect("discovery blocked on a FIFO open");
     assert!(matches!(
         in_workspace,

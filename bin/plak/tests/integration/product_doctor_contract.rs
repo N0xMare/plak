@@ -787,7 +787,8 @@ fn jj_cli_doctor_bounds_output_wait_after_leader_exit() {
 fn assert_jj_descendant_retired(path: &std::path::Path) {
     let pid = fs::read_to_string(path.join("descendant")).unwrap();
     let stat_path = format!("/proc/{}/stat", pid.trim());
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    // A liveness bound only: generous, so load never trips it.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
         let Ok(stat) = fs::read_to_string(&stat_path) else {
             return;

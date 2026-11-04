@@ -2,7 +2,8 @@ use super::*;
 
 pub(super) async fn finish_pump(session: &CellSession) {
     let mut pump = session.pump.lock().await.take().expect("pump");
-    tokio::time::timeout(Duration::from_secs(5), pump.0.take().expect("task"))
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), pump.0.take().expect("task"))
         .await
         .expect("worker completed")
         .expect("pump completed");

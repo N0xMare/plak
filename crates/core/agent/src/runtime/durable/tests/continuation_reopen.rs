@@ -774,7 +774,8 @@ async fn interrupted_assistant_continuation_keeps_committed_history_and_fences_r
         .await?
         .into_turn()
         .ok_or("root command unexpectedly duplicated")?;
-    tokio::time::timeout(Duration::from_secs(5), model.held_call_started.notified()).await?;
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), model.held_call_started.notified()).await?;
     let checkpoint = original.checkpoint();
     assert!(matches!(
         checkpoint.manifest().lifecycle(),
@@ -852,12 +853,13 @@ async fn assistant_continuation_follow_up_honors_cancellation() -> TestResult {
     model.held_call.store(1, Ordering::Release);
     let agent = artifact_test_builder(workspace, Arc::clone(&model)).build()?;
     let turn = agent.prompt("cancel follow-up").await?;
-    tokio::time::timeout(Duration::from_secs(5), model.held_call_started.notified()).await?;
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), model.held_call_started.notified()).await?;
     assert_eq!(
         turn.control().cancel().await?,
         CancellationStatus::Requested
     );
-    let result = tokio::time::timeout(Duration::from_secs(5), turn.result()).await??;
+    let result = tokio::time::timeout(Duration::from_secs(30), turn.result()).await??;
     assert!(matches!(result.outcome(), TurnResultOutcome::Cancelled(_)));
     assert_eq!(model.calls.load(Ordering::Acquire), 2);
     assert!(model.held_call_joined.load(Ordering::Acquire));

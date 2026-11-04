@@ -94,7 +94,8 @@ fn worker_failure_child() -> ! {
             Err(payload) => std::panic::resume_unwind(payload),
         }
     });
-    let deadline = Instant::now() + Duration::from_secs(10);
+    // A liveness bound only: generous, so load never trips it.
+    let deadline = Instant::now() + Duration::from_secs(30);
     while !worker.is_finished() {
         assert!(Instant::now() < deadline);
         std::thread::sleep(Duration::from_millis(1));

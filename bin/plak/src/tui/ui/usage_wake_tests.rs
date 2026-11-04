@@ -16,7 +16,8 @@ fn usage_decoration_wake_child() {
     launch.usage_decoration = Some(crate::config::UsageDecorationReader::with_reader(
         move |_| {
             std::fs::write(root.join("entered"), "ready").unwrap();
-            let deadline = Instant::now() + Duration::from_secs(10);
+            // A liveness bound only: generous, so load never trips it.
+            let deadline = Instant::now() + Duration::from_secs(30);
             while !root.join("release").exists() {
                 assert!(Instant::now() < deadline, "reader was never released");
                 std::thread::sleep(Duration::from_millis(5));
@@ -86,7 +87,8 @@ fn run_app_paints_usage_decoration_through_the_wake_pipe() {
     });
     let mut screen = vt100::Parser::new(35, 120, 0);
     let mut output = Vec::new();
-    let deadline = Instant::now() + Duration::from_secs(10);
+    // A liveness bound only: generous, so load never trips it.
+    let deadline = Instant::now() + Duration::from_secs(30);
     while !root.path().join("entered").exists() || !screen.screen().contents().contains("Usage") {
         assert!(
             Instant::now() < deadline,

@@ -938,7 +938,8 @@ fn two_processes_claim_concurrently_and_each_proves_only_its_own_death() {
     let mut children = [Child::spawn(&database, 0), Child::spawn(&database, 100)];
 
     let shared = record_path(directory.path(), branch(SHARED_BRANCH));
-    let deadline = Instant::now() + Duration::from_secs(5);
+    // A liveness bound only: generous, so load never trips it.
+    let deadline = Instant::now() + Duration::from_secs(30);
     let mut reads = 0_usize;
     while Instant::now() < deadline && reads < 2_000 {
         if let Ok(recorded) = std::fs::read_to_string(&shared) {

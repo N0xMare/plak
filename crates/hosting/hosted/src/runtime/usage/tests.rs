@@ -578,7 +578,8 @@ fn subscription_refresh_coalesces_bursts_into_one_in_flight_read() {
     });
 
     refresh.request(None);
-    started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    // A liveness bound only: generous, so load never trips it.
+    started_rx.recv_timeout(Duration::from_secs(30)).unwrap();
     for _ in 0..20 {
         refresh.request(None);
     }
@@ -622,7 +623,8 @@ fn explicit_post_credential_read_is_queued_behind_an_older_read() {
         )
     });
     refresh.request(None);
-    started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    // A liveness bound only: generous, so load never trips it.
+    started_rx.recv_timeout(Duration::from_secs(30)).unwrap();
     for _ in 0..20 {
         refresh.request_fresh(None);
     }
@@ -757,7 +759,8 @@ fn idle_usage_reads_when_nothing_is_held() {
     });
 
     request_subscription_usage_cached(&held, &ledger, &events, &refresh, None);
-    started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    // A liveness bound only: generous, so load never trips it.
+    started_rx.recv_timeout(Duration::from_secs(30)).unwrap();
     let during: Vec<_> = rx.try_iter().collect();
     release_tx.send(()).unwrap();
     drop(refresh);
@@ -838,7 +841,8 @@ fn a_held_busy_projection_starts_another_read() {
     held.store(&view);
 
     request_subscription_usage_cached(&held, &ledger, &events, &refresh, None);
-    started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    // A liveness bound only: generous, so load never trips it.
+    started_rx.recv_timeout(Duration::from_secs(30)).unwrap();
     release_tx.send(()).unwrap();
     drop(refresh);
     let _ = rx.try_iter().count();

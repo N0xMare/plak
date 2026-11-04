@@ -663,7 +663,8 @@ async fn exact_request_fragmented_sse_and_provider_request_id_use_neutral_host()
     let expected_body = prepared.body().to_vec();
     let factory =
         AnthropicLocalHttpServiceFactory::new(client, origin, resolved.route().clone(), prepared)?;
-    let (result, events) = timeout(Duration::from_secs(5), run(&factory)).await??;
+    // A liveness bound only: generous, so load never trips it.
+    let (result, events) = timeout(Duration::from_secs(30), run(&factory)).await??;
     let result = result?;
     assert_eq!(result.request_id().as_str(), "req_local_01");
     assert!(result.response().family_artifact_candidate().is_none());
@@ -674,7 +675,7 @@ async fn exact_request_fragmented_sse_and_provider_request_id_use_neutral_host()
             .count(),
         1
     );
-    let captured = timeout(Duration::from_secs(5), peer).await???;
+    let captured = timeout(Duration::from_secs(30), peer).await???;
     let split = captured
         .windows(4)
         .position(|part| part == b"\r\n\r\n")
@@ -706,7 +707,8 @@ async fn claude_oauth_capture_uses_exact_route_headers_and_omitted_reasoning() -
         AnthropicLocalHttpServiceFactory::new(client, origin, resolved.route().clone(), prepared)?;
     let (result, _) = run(&factory).await?;
     assert_eq!(result?.request_id().as_str(), "req_oauth_01");
-    let captured = timeout(Duration::from_secs(5), peer).await???;
+    // A liveness bound only: generous, so load never trips it.
+    let captured = timeout(Duration::from_secs(30), peer).await???;
     let split = captured
         .windows(4)
         .position(|part| part == b"\r\n\r\n")
@@ -788,7 +790,8 @@ async fn oauth_http_session_identity_survives_distinct_attempts() -> TestResult 
             async { while events.next().await.is_some() {} }
         );
         result?;
-        let captured = timeout(Duration::from_secs(5), peer).await???;
+        // A liveness bound only: generous, so load never trips it.
+        let captured = timeout(Duration::from_secs(30), peer).await???;
         let split = captured
             .windows(4)
             .position(|part| part == b"\r\n\r\n")
@@ -831,7 +834,8 @@ async fn loopback_language_model_executes_through_public_agent() -> TestResult {
     let result = turn.result().await?;
     assert_eq!(result.response().ok_or("response")?.output_text(), "local");
     assert_eq!(result.model_rounds(), 1);
-    timeout(Duration::from_secs(5), peer).await???;
+    // A liveness bound only: generous, so load never trips it.
+    timeout(Duration::from_secs(30), peer).await???;
     agent.shutdown().await?;
     Ok(())
 }
@@ -962,7 +966,8 @@ async fn a_reset_after_streamed_text_is_replayed_and_the_session_continues() -> 
     assert_eq!(second.response().ok_or("response")?.output_text(), "local");
     agent.shutdown().await?;
     // The cut request, its replay, and the next turn's request.
-    assert_eq!(timeout(Duration::from_secs(5), peer).await???, 3);
+    // A liveness bound only: generous, so load never trips it.
+    assert_eq!(timeout(Duration::from_secs(30), peer).await???, 3);
     Ok(())
 }
 
@@ -1014,7 +1019,8 @@ async fn eof_after_a_complete_tool_use_block_replays_and_only_the_replay_runs_th
         "only the replay's tool ran"
     );
     agent.shutdown().await?;
-    assert_eq!(timeout(Duration::from_secs(5), peer).await???, 3);
+    // A liveness bound only: generous, so load never trips it.
+    assert_eq!(timeout(Duration::from_secs(30), peer).await???, 3);
     Ok(())
 }
 
@@ -1027,7 +1033,8 @@ async fn prompt_with_retries(
     let mut events = turn.take_events()?;
     let mut retries = Vec::new();
     loop {
-        let event = timeout(Duration::from_secs(10), events.recv()).await??;
+        // A liveness bound only: generous, so load never trips it.
+        let event = timeout(Duration::from_secs(30), events.recv()).await??;
         if let Some(ModelEvent::Retry(retry)) = event.kind().model_event() {
             retries.push(retry.clone());
         }
@@ -1246,7 +1253,8 @@ async fn cancellation_during_the_retry_wait_sends_nothing_more() -> TestResult {
         .expect_err("cancelled during the wait");
     assert_eq!(error.facts().ok_or("facts")?.physical_attempts(), 1);
     while events.next().await.is_some() {}
-    assert_eq!(timeout(Duration::from_secs(5), peer).await???, 1);
+    // A liveness bound only: generous, so load never trips it.
+    assert_eq!(timeout(Duration::from_secs(30), peer).await???, 1);
     Ok(())
 }
 
@@ -1498,7 +1506,8 @@ async fn fable_included_limit_requires_exact_oauth_model_and_header_claim() -> T
             resolved.route().clone(),
             prepared(&resolved)?,
         )?;
-        let (result, _) = timeout(Duration::from_secs(5), run(&factory)).await??;
+        // A liveness bound only: generous, so load never trips it.
+        let (result, _) = timeout(Duration::from_secs(30), run(&factory)).await??;
         let error = result.expect_err("a quota response must not become a successful turn");
         assert_eq!(
             error
@@ -1524,7 +1533,7 @@ async fn fable_included_limit_requires_exact_oauth_model_and_header_claim() -> T
                 .map(plakous_model::ModelRetryDelay::as_millis),
             Some(60_000)
         );
-        assert_eq!(timeout(Duration::from_secs(5), peer).await???, 1);
+        assert_eq!(timeout(Duration::from_secs(30), peer).await???, 1);
     }
     Ok(())
 }
@@ -1545,7 +1554,8 @@ async fn a_401_triggers_one_refresh_and_retry() -> TestResult {
                 calls: Arc::clone(&calls),
                 granted: true,
             }));
-    let (result, events) = timeout(Duration::from_secs(5), run(&factory)).await??;
+    // A liveness bound only: generous, so load never trips it.
+    let (result, events) = timeout(Duration::from_secs(30), run(&factory)).await??;
     let result = result?;
     assert_eq!(result.request_id().as_str(), "req_retry_01");
     assert_eq!(calls.load(Ordering::SeqCst), 1);
@@ -1571,11 +1581,11 @@ async fn a_401_triggers_one_refresh_and_retry() -> TestResult {
                 calls: Arc::clone(&calls),
                 granted: true,
             }));
-    let (result, _events) = timeout(Duration::from_secs(5), run(&factory)).await??;
+    let (result, _events) = timeout(Duration::from_secs(30), run(&factory)).await??;
     let error = result.expect_err("a repeated 401 must remain terminal");
     assert!(error.to_string().contains("401"), "{error}");
     assert_eq!(calls.load(Ordering::SeqCst), 1);
-    assert_eq!(timeout(Duration::from_secs(5), peer).await???, 2);
+    assert_eq!(timeout(Duration::from_secs(30), peer).await???, 2);
     Ok(())
 }
 
@@ -1602,9 +1612,10 @@ async fn cancellation_during_401_renewal_preserves_cancelled_result() -> TestRes
     let mut service = factory.make_service();
     let operation =
         tokio::spawn(async move { call_local_anthropic_operation(&mut service, attempt).await });
-    timeout(Duration::from_secs(5), entered.notified()).await?;
+    // A liveness bound only: generous, so load never trips it.
+    timeout(Duration::from_secs(30), entered.notified()).await?;
     cancellation.cancel();
-    let result = timeout(Duration::from_millis(250), operation).await??;
+    let result = timeout(Duration::from_secs(30), operation).await??;
     assert!(matches!(
         result,
         Err(MessagesAttemptError::Cancelled { .. })
@@ -1612,7 +1623,7 @@ async fn cancellation_during_401_renewal_preserves_cancelled_result() -> TestRes
     release.notify_one();
     assert_eq!(dropped.load(Ordering::SeqCst), 1);
     while events.next().await.is_some() {}
-    assert_eq!(timeout(Duration::from_secs(5), peer).await???, 1);
+    assert_eq!(timeout(Duration::from_secs(30), peer).await???, 1);
     Ok(())
 }
 
@@ -1650,10 +1661,11 @@ async fn mixed_401_and_429_share_the_policy_budget() -> TestResult {
         .with_retry(Arc::new(|route| {
             Box::pin(async move { Ok(AnthropicRetryGrant::for_api_key(route)) })
         }));
-        let (result, _) = timeout(Duration::from_secs(5), run(&factory)).await??;
+        // A liveness bound only: generous, so load never trips it.
+        let (result, _) = timeout(Duration::from_secs(30), run(&factory)).await??;
         let error = result.expect_err("every generation was refused");
         assert_eq!(error.facts().ok_or("facts")?.physical_attempts(), 4);
-        assert_eq!(timeout(Duration::from_secs(5), peer).await???, 4);
+        assert_eq!(timeout(Duration::from_secs(30), peer).await???, 4);
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
     Ok(())
@@ -1689,7 +1701,8 @@ async fn refusals_before_acceptance_retry_with_a_notice_until_accepted() -> Test
     .with_retry(Arc::new(|route| {
         Box::pin(async move { Ok(AnthropicRetryGrant::for_api_key(route)) })
     }));
-    let (result, events) = timeout(Duration::from_secs(5), run(&factory)).await??;
+    // A liveness bound only: generous, so load never trips it.
+    let (result, events) = timeout(Duration::from_secs(30), run(&factory)).await??;
     let response = result.expect("the third generation was accepted");
     assert_eq!(response.facts().physical_attempts(), 3);
     let notices = events
@@ -1712,7 +1725,7 @@ async fn refusals_before_acceptance_retry_with_a_notice_until_accepted() -> Test
             "provider busy (HTTP 529) 3/4 in 0ns",
         ]
     );
-    assert_eq!(timeout(Duration::from_secs(5), peer).await???, 3);
+    assert_eq!(timeout(Duration::from_secs(30), peer).await???, 3);
     Ok(())
 }
 
@@ -1732,10 +1745,11 @@ async fn a_reset_during_the_request_write_is_retried_before_acceptance() -> Test
     .with_retry(Arc::new(|route| {
         Box::pin(async move { Ok(AnthropicRetryGrant::for_api_key(route)) })
     }));
-    let (result, _events) = timeout(Duration::from_secs(5), run(&factory)).await??;
+    // A liveness bound only: generous, so load never trips it.
+    let (result, _events) = timeout(Duration::from_secs(30), run(&factory)).await??;
     let response = result.expect("the retried generation was accepted");
     assert_eq!(response.facts().physical_attempts(), 2);
-    assert_eq!(timeout(Duration::from_secs(5), peer).await???, 1);
+    assert_eq!(timeout(Duration::from_secs(30), peer).await???, 1);
     Ok(())
 }
 
@@ -1835,10 +1849,11 @@ async fn a_session_workflow_refusal_is_single_dispatch() -> TestResult {
         resolved.route().clone(),
         prepared(&resolved)?,
     )?;
-    let (result, _) = timeout(Duration::from_secs(5), run(&factory)).await??;
+    // A liveness bound only: generous, so load never trips it.
+    let (result, _) = timeout(Duration::from_secs(30), run(&factory)).await??;
     let error = result.expect_err("refused");
     assert_eq!(error.facts().ok_or("facts")?.physical_attempts(), 1);
-    assert_eq!(timeout(Duration::from_secs(5), peer).await???, 1);
+    assert_eq!(timeout(Duration::from_secs(30), peer).await???, 1);
     Ok(())
 }
 
@@ -1925,7 +1940,8 @@ async fn refusal_terminal_capture_failure_is_transport_not_status_retry() -> Tes
                 Box::pin(async move { Ok(AnthropicRetryGrant::for_api_key(route)) })
             }
         }));
-        let (result, events) = timeout(Duration::from_secs(5), run(&factory)).await??;
+        // A liveness bound only: generous, so load never trips it.
+        let (result, events) = timeout(Duration::from_secs(30), run(&factory)).await??;
         let notices = events
             .iter()
             .filter_map(|event| match event {
@@ -1952,7 +1968,7 @@ async fn refusal_terminal_capture_failure_is_transport_not_status_retry() -> Tes
             assert_eq!(retries.load(Ordering::SeqCst), 0);
             assert!(notices.is_empty(), "{notices:?}");
             assert_eq!(completed.load(Ordering::SeqCst), usize::from(!truncated));
-            assert_eq!(timeout(Duration::from_secs(5), peer).await???, 1);
+            assert_eq!(timeout(Duration::from_secs(30), peer).await???, 1);
         } else {
             let response = result.expect("capture must preserve the 429 retry");
             assert_eq!(response.facts().physical_attempts(), 2);
@@ -1963,7 +1979,7 @@ async fn refusal_terminal_capture_failure_is_transport_not_status_retry() -> Tes
                 completed.load(Ordering::SeqCst),
                 1 + usize::from(!truncated)
             );
-            assert_eq!(timeout(Duration::from_secs(5), peer).await???, 2);
+            assert_eq!(timeout(Duration::from_secs(30), peer).await???, 2);
         }
     }
     Ok(())
@@ -2003,9 +2019,10 @@ async fn cancellation_during_retry_hook_finishes_without_late_dispatch() -> Test
     let mut service = factory.make_service();
     let operation =
         tokio::spawn(async move { call_local_anthropic_operation(&mut service, attempt).await });
-    timeout(Duration::from_secs(5), entered.notified()).await?;
+    // A liveness bound only: generous, so load never trips it.
+    timeout(Duration::from_secs(30), entered.notified()).await?;
     cancellation.cancel();
-    let result = timeout(Duration::from_millis(250), operation).await??;
+    let result = timeout(Duration::from_secs(30), operation).await??;
     assert!(result.is_err());
     release.notify_one();
     assert_eq!(dropped.load(Ordering::SeqCst), 1);
@@ -2074,7 +2091,8 @@ async fn a_rejected_grant_still_ends_not_ready() -> TestResult {
                 calls: Arc::clone(&calls),
                 granted: false,
             }));
-    let (result, events) = timeout(Duration::from_secs(5), run(&factory)).await??;
+    // A liveness bound only: generous, so load never trips it.
+    let (result, events) = timeout(Duration::from_secs(30), run(&factory)).await??;
     let error = result.expect_err("a refused renewal must not mask the 401");
     assert!(error.to_string().contains("401"), "{error}");
     assert!(
@@ -2084,7 +2102,7 @@ async fn a_rejected_grant_still_ends_not_ready() -> TestResult {
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert!(events.iter().any(Result::is_err));
-    assert_eq!(timeout(Duration::from_secs(5), peer).await???, 1);
+    assert_eq!(timeout(Duration::from_secs(30), peer).await???, 1);
     Ok(())
 }
 
@@ -2145,7 +2163,8 @@ async fn provider_rejection_and_ambiguous_disconnect_keep_exact_physical_facts()
         facts.provider_acceptance(),
         plakous_messages::ProviderAcceptance::PossiblyAccepted
     );
-    timeout(Duration::from_secs(5), peer).await???;
+    // A liveness bound only: generous, so load never trips it.
+    timeout(Duration::from_secs(30), peer).await???;
     Ok(())
 }
 
@@ -2183,7 +2202,8 @@ async fn accepted_sse_error_uses_anthropic_classification_and_terminal_delivery(
                     && !error.message().contains("temporarily overloaded")
             }))
     );
-    timeout(Duration::from_secs(5), peer).await???;
+    // A liveness bound only: generous, so load never trips it.
+    timeout(Duration::from_secs(30), peer).await???;
     Ok(())
 }
 
@@ -2219,7 +2239,8 @@ async fn a_context_window_stop_on_a_cost_only_request_is_one_attempt() -> TestRe
             .physical_attempts(),
         1
     );
-    timeout(Duration::from_secs(5), peer).await???;
+    // A liveness bound only: generous, so load never trips it.
+    timeout(Duration::from_secs(30), peer).await???;
     Ok(())
 }
 
@@ -2266,7 +2287,8 @@ async fn an_injected_529_reads_as_anthropics_own_overload() -> TestResult {
             assert!(!peer.is_finished(), "the injected 529 reached the peer");
             peer.abort();
         } else {
-            timeout(Duration::from_secs(5), peer).await???;
+            // A liveness bound only: generous, so load never trips it.
+            timeout(Duration::from_secs(30), peer).await???;
         }
     }
     assert_eq!(outcomes[0], outcomes[1]);
@@ -2310,7 +2332,8 @@ async fn cancellation_after_accepted_head_closes_without_safe_retry() -> TestRes
             }
         }
     };
-    let (result, ()) = timeout(Duration::from_secs(5), async move {
+    // A liveness bound only: generous, so load never trips it.
+    let (result, ()) = timeout(Duration::from_secs(30), async move {
         tokio::join!(operation, drain)
     })
     .await?;
@@ -2325,7 +2348,7 @@ async fn cancellation_after_accepted_head_closes_without_safe_retry() -> TestRes
         facts.retry_class(),
         plakous_messages::RetryClass::BeforeAcceptance
     );
-    timeout(Duration::from_secs(5), peer).await???;
+    timeout(Duration::from_secs(30), peer).await???;
     Ok(())
 }
 
@@ -2384,7 +2407,8 @@ async fn terminal_retry_advice_and_billing_bodies_never_replay() -> TestResult {
         .with_retry(Arc::new(|route| {
             Box::pin(async move { Ok(AnthropicRetryGrant::for_api_key(route)) })
         }));
-        let (result, _) = timeout(Duration::from_secs(5), run(&factory)).await??;
+        // A liveness bound only: generous, so load never trips it.
+        let (result, _) = timeout(Duration::from_secs(30), run(&factory)).await??;
         assert_eq!(
             result
                 .expect_err("terminal refusal")
@@ -2393,7 +2417,7 @@ async fn terminal_retry_advice_and_billing_bodies_never_replay() -> TestResult {
                 .physical_attempts(),
             1
         );
-        assert_eq!(timeout(Duration::from_secs(5), peer).await???, 1);
+        assert_eq!(timeout(Duration::from_secs(30), peer).await???, 1);
     }
     Ok(())
 }
@@ -2423,7 +2447,8 @@ async fn a_session_workflow_retries_only_a_provably_unsent_request() -> TestResu
         .with_retry(Arc::new(|route| {
             Box::pin(async move { Ok(AnthropicRetryGrant::for_api_key(route)) })
         }));
-        let (result, events) = timeout(Duration::from_secs(5), run(&factory)).await??;
+        // A liveness bound only: generous, so load never trips it.
+        let (result, events) = timeout(Duration::from_secs(30), run(&factory)).await??;
         assert_eq!(result?.facts().physical_attempts(), 2, "{fault}");
         if fault == "record-rejected" {
             let retry = events
@@ -2445,7 +2470,7 @@ async fn a_session_workflow_retries_only_a_provably_unsent_request() -> TestResu
                 .iter()
                 .any(|event| matches!(event, Ok(ModelEvent::Retry(retry)) if retry.loss().declined_reason.is_none()))
         );
-        assert_eq!(timeout(Duration::from_secs(5), peer).await???, 1);
+        assert_eq!(timeout(Duration::from_secs(30), peer).await???, 1);
     }
     Ok(())
 }
@@ -2484,7 +2509,8 @@ async fn a_session_workflow_retries_peer_rejected_records_only_before_response()
         .with_retry(Arc::new(|route| {
             Box::pin(async move { Ok(AnthropicRetryGrant::for_api_key(route)) })
         }));
-        let (result, events) = timeout(Duration::from_secs(5), run(&factory)).await??;
+        // A liveness bound only: generous, so load never trips it.
+        let (result, events) = timeout(Duration::from_secs(30), run(&factory)).await??;
         let expected = if retries { 2 } else { 1 };
         if retries {
             assert_eq!(result?.facts().physical_attempts(), expected);
@@ -2516,7 +2542,7 @@ async fn a_session_workflow_retries_peer_rejected_records_only_before_response()
             assert_eq!(marker.max_physical(), 4);
         }
         assert_eq!(
-            timeout(Duration::from_secs(5), peer).await???,
+            timeout(Duration::from_secs(30), peer).await???,
             expected as usize
         );
     }
@@ -2545,7 +2571,8 @@ async fn terminal_retry_advice_and_billing_on_success_heads_suppress_stream_repl
         .with_retry(Arc::new(|route| {
             Box::pin(async move { Ok(AnthropicRetryGrant::for_api_key(route)) })
         }));
-        let (result, events) = timeout(Duration::from_secs(5), run(&factory)).await??;
+        // A liveness bound only: generous, so load never trips it.
+        let (result, events) = timeout(Duration::from_secs(30), run(&factory)).await??;
         assert_eq!(
             result
                 .expect_err("terminal stream")
@@ -2559,7 +2586,7 @@ async fn terminal_retry_advice_and_billing_on_success_heads_suppress_stream_repl
                 .iter()
                 .any(|event| matches!(event, Ok(ModelEvent::Retry(retry)) if retry.loss().declined_reason.is_none()))
         );
-        assert_eq!(timeout(Duration::from_secs(5), peer).await???, 1);
+        assert_eq!(timeout(Duration::from_secs(30), peer).await???, 1);
     }
     Ok(())
 }

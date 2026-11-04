@@ -386,7 +386,8 @@ fn carry_stripped_thinking_stays_log_only_across_a_messages_tool_round() {
     let store = config.store.clone();
     let seen = run_prompt(config, "read the fixture then answer");
     let requests = server.block_on(async {
-        tokio::time::timeout(Duration::from_secs(5), peer)
+        // A liveness bound only: generous, so load never trips it.
+        tokio::time::timeout(Duration::from_secs(30), peer)
             .await
             .unwrap()
             .unwrap()

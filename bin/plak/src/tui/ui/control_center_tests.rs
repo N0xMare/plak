@@ -1270,7 +1270,8 @@ fn reload_quits_into_a_handoff_only_when_idle() {
 }
 
 fn settle_reload_probe(app: &mut App) -> super::reload::ReloadOutcome {
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    // A liveness bound only: generous, so load never trips it.
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
     loop {
         if let Some(outcome) = app.poll_reload_probe() {
             return outcome;

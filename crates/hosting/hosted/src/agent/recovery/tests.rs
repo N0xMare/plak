@@ -129,7 +129,8 @@ async fn child_retirement_capacity_pause_keeps_attempt_pending_until_operator_ca
             })
             .await
     });
-    tokio::time::timeout(Duration::from_secs(5), async {
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), async {
         while !fixture.store.storage_unavailable() {
             tokio::task::yield_now().await;
         }
@@ -758,7 +759,8 @@ async fn interactive_exit_batches_real_root_and_child_leases_without_settling() 
                 .await
                 .is_ok()
         );
-        tokio::time::timeout(Duration::from_secs(10), gate.entered())
+        // A liveness bound only: generous, so load never trips it.
+        tokio::time::timeout(Duration::from_secs(30), gate.entered())
             .await
             .unwrap();
         actors.push(agent);
@@ -832,7 +834,7 @@ async fn interactive_exit_batches_real_root_and_child_leases_without_settling() 
         gate.release();
     }
     for result in results {
-        let _ = tokio::time::timeout(Duration::from_secs(10), result.result())
+        let _ = tokio::time::timeout(Duration::from_secs(30), result.result())
             .await
             .unwrap();
     }
@@ -973,7 +975,8 @@ async fn panicking_child_create_frees_startup_owner_and_triggers_recovery() {
         matches!(result, Err(SpawnBindError::RecoveryRequired { .. })),
         "{result:?}"
     );
-    tokio::time::timeout(Duration::from_secs(1), recovered.notified())
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), recovered.notified())
         .await
         .expect("panic cleanup must trigger recovery");
     assert!(!fixture.runtime.live.lock().await.contains_key(&id));

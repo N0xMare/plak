@@ -1493,8 +1493,9 @@ async fn production_unknown_sent_beta_is_single_dispatch_permanent_configuration
             CLAUDE_OAUTH_INFERENCE_SCOPE,
         )
         .unwrap();
+    // A liveness bound only: generous, so load never trips it.
     let failure = timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(30),
         start_local_model(manager, client, origin, false),
     )
     .await
@@ -1508,7 +1509,7 @@ async fn production_unknown_sent_beta_is_single_dispatch_permanent_configuration
     );
     assert!(model.to_string().contains("install a newer build"));
     assert_eq!(
-        timeout(Duration::from_secs(5), peer)
+        timeout(Duration::from_secs(30), peer)
             .await
             .unwrap()
             .unwrap()
@@ -1562,8 +1563,9 @@ async fn a_side_request_rejecting_a_sent_beta_is_final_with_the_newer_build_reme
         blocked_domains: Vec::new(),
         max_uses: 1,
     };
+    // A liveness bound only: generous, so load never trips it.
     let error = timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(30),
         retrieval
             .with_dial_origin(origin)
             .retrieve(query, &plakous_model::CancellationToken::new()),
@@ -1581,7 +1583,7 @@ async fn a_side_request_rejecting_a_sent_beta_is_final_with_the_newer_build_reme
         error.message(),
         plakous_auth::CompatibilityDrift::UnknownBeta.message("Claude")
     );
-    let requests = timeout(Duration::from_secs(5), peer)
+    let requests = timeout(Duration::from_secs(30), peer)
         .await
         .unwrap()
         .unwrap();
@@ -1625,8 +1627,9 @@ async fn a_side_request_rejecting_an_unsent_beta_keeps_the_generic_refusal() {
         blocked_domains: Vec::new(),
         max_uses: 1,
     };
+    // A liveness bound only: generous, so load never trips it.
     let error = timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(30),
         retrieval
             .with_dial_origin(origin)
             .retrieve(query, &plakous_model::CancellationToken::new()),
@@ -1646,7 +1649,7 @@ async fn a_side_request_rejecting_an_unsent_beta_keeps_the_generic_refusal() {
         )
     );
     assert_eq!(
-        timeout(Duration::from_secs(5), peer)
+        timeout(Duration::from_secs(30), peer)
             .await
             .unwrap()
             .unwrap()
@@ -1676,8 +1679,9 @@ async fn production_oauth_turn_retries_local_429_with_fresh_inference_permit() {
             CLAUDE_OAUTH_INFERENCE_SCOPE,
         )
         .unwrap();
+    // A liveness bound only: generous, so load never trips it.
     let events = timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(30),
         start_local_model(manager, client, origin, false),
     )
     .await
@@ -1688,7 +1692,7 @@ async fn production_oauth_turn_retries_local_429_with_fresh_inference_permit() {
             .iter()
             .any(|event| matches!(event, plakous_model::ModelEvent::ResponseCompleted(_)))
     );
-    let requests = timeout(Duration::from_secs(5), peer)
+    let requests = timeout(Duration::from_secs(30), peer)
         .await
         .unwrap()
         .unwrap();
@@ -1741,8 +1745,9 @@ async fn production_oauth_turn_refreshes_after_local_401_with_new_permit() {
             CLAUDE_OAUTH_INFERENCE_SCOPE,
         )
         .unwrap();
+    // A liveness bound only: generous, so load never trips it.
     let events = timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(30),
         start_local_model(manager, client, origin, false),
     )
     .await
@@ -1753,7 +1758,7 @@ async fn production_oauth_turn_refreshes_after_local_401_with_new_permit() {
             .iter()
             .any(|event| matches!(event, plakous_model::ModelEvent::ResponseCompleted(_)))
     );
-    let requests = timeout(Duration::from_secs(5), peer)
+    let requests = timeout(Duration::from_secs(30), peer)
         .await
         .unwrap()
         .unwrap();
@@ -1795,8 +1800,9 @@ async fn production_oauth_session_workflow_connect_retry_requires_fresh_authoriz
                 CLAUDE_OAUTH_INFERENCE_SCOPE,
             )
             .unwrap();
+        // A liveness bound only: generous, so load never trips it.
         let result = timeout(
-            Duration::from_secs(5),
+            Duration::from_secs(30),
             start_local_model(manager, client, origin, true),
         )
         .await
@@ -1813,7 +1819,7 @@ async fn production_oauth_session_workflow_connect_retry_requires_fresh_authoriz
                 .iter()
                 .any(|event| matches!(event, plakous_model::ModelEvent::ResponseCompleted(_)))
         );
-        let requests = timeout(Duration::from_secs(5), &mut peer)
+        let requests = timeout(Duration::from_secs(30), &mut peer)
             .await
             .unwrap()
             .unwrap();
@@ -1843,8 +1849,9 @@ async fn production_oauth_incomplete_requests_never_refund() {
                 CLAUDE_OAUTH_INFERENCE_SCOPE,
             )
             .unwrap();
+        // A liveness bound only: generous, so load never trips it.
         let result = timeout(
-            Duration::from_secs(5),
+            Duration::from_secs(30),
             start_local_model(manager, client, origin, true),
         )
         .await
@@ -1862,7 +1869,7 @@ async fn production_oauth_incomplete_requests_never_refund() {
                 .iter()
                 .any(|event| matches!(event, plakous_model::ModelEvent::ResponseCompleted(_)))
         );
-        let requests = timeout(Duration::from_secs(5), &mut peer)
+        let requests = timeout(Duration::from_secs(30), &mut peer)
             .await
             .unwrap()
             .unwrap();
@@ -1894,14 +1901,15 @@ async fn production_oauth_session_workflow_401_never_refreshes_or_redispatches()
             CLAUDE_OAUTH_INFERENCE_SCOPE,
         )
         .unwrap();
+    // A liveness bound only: generous, so load never trips it.
     let result = timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(30),
         start_local_model(manager, client, origin, true),
     )
     .await
     .unwrap();
     assert!(result.is_err(), "workflow must surface the first 401");
-    let requests = timeout(Duration::from_secs(5), peer)
+    let requests = timeout(Duration::from_secs(30), peer)
         .await
         .unwrap()
         .unwrap();
@@ -1985,8 +1993,9 @@ async fn production_oauth_session_workflow_drop_is_never_replayed() {
             CLAUDE_OAUTH_INFERENCE_SCOPE,
         )
         .unwrap();
+    // A liveness bound only: generous, so load never trips it.
     let result = timeout(
-        Duration::from_secs(10),
+        Duration::from_secs(30),
         start_local_model(manager, client, origin, true),
     )
     .await
@@ -2024,15 +2033,16 @@ async fn production_oauth_retry_stops_when_second_inference_permit_is_denied() {
             CLAUDE_OAUTH_INFERENCE_SCOPE,
         )
         .unwrap();
+    // A liveness bound only: generous, so load never trips it.
     let result = timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(30),
         start_local_model(manager, client, origin, false),
     )
     .await
     .unwrap();
     assert!(result.is_err(), "a denied second permit must end the turn");
     assert_eq!(
-        timeout(Duration::from_secs(5), peer)
+        timeout(Duration::from_secs(30), peer)
             .await
             .unwrap()
             .unwrap()

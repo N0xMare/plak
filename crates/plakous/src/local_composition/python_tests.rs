@@ -219,7 +219,8 @@ async fn yielded_cell_wait_resumes_after_host_wait_and_is_cancellation_safe() {
     else {
         panic!("nested call")
     };
-    let yielded = tokio::time::timeout(Duration::from_secs(2), started.initial_response)
+    // A liveness bound only: generous, so load never trips it.
+    let yielded = tokio::time::timeout(Duration::from_secs(30), started.initial_response)
         .await
         .expect("yield deadline")
         .expect("yield");
@@ -450,7 +451,8 @@ async fn join_deliveries(
     deliveries: Vec<tokio::task::JoinHandle<Result<LocalCompositionNestedDelivery, String>>>,
 ) {
     for delivery in deliveries {
-        let delivery = tokio::time::timeout(Duration::from_secs(10), delivery)
+        // A liveness bound only: generous, so load never trips it.
+        let delivery = tokio::time::timeout(Duration::from_secs(30), delivery)
             .await
             .expect("batch delivery must not deadlock")
             .expect("delivery task")

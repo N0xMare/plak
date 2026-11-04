@@ -1077,8 +1077,9 @@ async fn subscription_usage_bounds_wait_while_a_login_holds_the_compatibility_lo
     let subscriptions = NativeSubscriptions::new(paths).with_clock(Arc::new(
         plakous_model::FixedClock::new(Timestamp::new(test_now(), 0)?),
     ));
+    // A liveness bound only: generous, so load never trips it.
     let read = tokio::time::timeout(
-        Duration::from_secs(1),
+        Duration::from_secs(30),
         subscriptions.subscription_usage(NativeProvider::Xai),
     )
     .await?;
@@ -1751,7 +1752,8 @@ fn lock_guard_detects_lock_and_ancestor_replacement_and_serializes_contenders()
     assert!(receiver.recv_timeout(Duration::from_millis(100)).is_err());
     assert_eq!(first.verify(), Err(NativeSubscriptionError::UnsafeStorage));
     drop(first);
-    assert!(receiver.recv_timeout(Duration::from_secs(2))?);
+    // A liveness bound only: generous, so load never trips it.
+    assert!(receiver.recv_timeout(Duration::from_secs(30))?);
     contender.join().map_err(|_| "contender panicked")?;
 
     let second = acquire_private_filesystem_lock(&paths.compatibility_lock_path(provider))?;

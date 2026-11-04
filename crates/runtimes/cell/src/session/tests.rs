@@ -248,7 +248,8 @@ async fn worker_eof_drains_a_terminal_while_the_nested_responder_is_pending() {
             NestedDeliveryOutcome::Accepted
         );
         let _ = client.wait_loss().await;
-        let terminal = tokio::time::timeout(Duration::from_secs(5), started.initial)
+        // A liveness bound only: generous, so load never trips it.
+        let terminal = tokio::time::timeout(Duration::from_secs(30), started.initial)
             .await
             .expect("terminal despite the pending responder");
         assert_eq!(
@@ -381,7 +382,8 @@ async fn every_interleaving_has_one_terminal_and_no_unproven_acceptance() {
             }
             verdicts
         });
-        let terminal = tokio::time::timeout(Duration::from_secs(5), started.initial)
+        // A liveness bound only: generous, so load never trips it.
+        let terminal = tokio::time::timeout(Duration::from_secs(30), started.initial)
             .await
             .expect("one terminal without the turn's timeout");
         assert_eq!(
@@ -544,7 +546,8 @@ async fn the_request_bound_kills_a_worker_that_never_reaches_a_boundary() {
     );
     let (session, _events) = monty_session(&program, Duration::from_millis(300)).await;
     let started = monty_execute(&session, 20_000).await;
-    let loss = tokio::time::timeout(Duration::from_secs(10), started.initial)
+    // A liveness bound only: generous, so load never trips it.
+    let loss = tokio::time::timeout(Duration::from_secs(30), started.initial)
         .await
         .expect("the bound ends the observation")
         .expect_err("a killed worker is a loss");

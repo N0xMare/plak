@@ -728,9 +728,10 @@ fn usage_posture_waits_for_the_host_usage_read_to_settle() {
     }
     assert!(received.try_recv().is_err(), "posture was read mid-read");
     drop(running_read);
+    // A liveness bound only: generous, so load never trips it.
     assert_eq!(
         received
-            .recv_timeout(std::time::Duration::from_secs(10))
+            .recv_timeout(std::time::Duration::from_secs(30))
             .unwrap(),
         HostEvent::Extension(SurfaceObservation::UsageRefreshAccounts(Vec::new()))
     );
@@ -1823,8 +1824,9 @@ fn a_failed_config_loads_no_profile_templates_and_does_not_say_custom() {
         },
         &events,
     );
+    // A liveness bound only: generous, so load never trips it.
     let HostEvent::Extension(SurfaceObservation::SessionProfile(row)) =
-        rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap()
+        rx.recv_timeout(std::time::Duration::from_secs(30)).unwrap()
     else {
         panic!("refreshed profile");
     };

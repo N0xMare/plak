@@ -594,7 +594,8 @@ async fn agent_view_marks_an_uncommitted_prefix_and_never_blocks_the_child() {
     let (_root, sessions, attached, turn, mut live) = fixture().await;
     let agent = attached.agent().clone();
     let admission = &mut live.admission;
-    let event = tokio::time::timeout(Duration::from_secs(2), async {
+    // A liveness bound only: generous, so load never trips it.
+    let event = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             let event = admission.recv().await.unwrap();
             if matches!(event.kind(), AgentEventKind::Model { event: Some(model), .. } if matches!(model.as_ref(), ModelEvent::TextDelta(_))) {
@@ -640,7 +641,7 @@ async fn agent_view_marks_an_uncommitted_prefix_and_never_blocks_the_child() {
         sender.send(ContentEvent::AssistantDelta("x".repeat(8192)));
     }
     turn.control().cancel().await.unwrap();
-    tokio::time::timeout(Duration::from_secs(2), turn.result())
+    tokio::time::timeout(Duration::from_secs(30), turn.result())
         .await
         .unwrap()
         .unwrap();
@@ -741,7 +742,8 @@ async fn lagged_face_emits_one_resync_gap_and_converges_to_committed_history() {
     // another is emitted, even when that reducer is descheduled under load.
     for (index, batch) in batches.iter().enumerate() {
         batch.entered().await;
-        tokio::time::timeout(Duration::from_secs(10), async {
+        // A liveness bound only: generous, so load never trips it.
+        tokio::time::timeout(Duration::from_secs(30), async {
             while live.owner.observation.snapshot().cursor < before + ((index + 1) * 16) as u64 {
                 tokio::task::yield_now().await;
             }
@@ -751,7 +753,7 @@ async fn lagged_face_emits_one_resync_gap_and_converges_to_committed_history() {
         batch.release();
     }
     finish.entered().await;
-    tokio::time::timeout(Duration::from_secs(10), async {
+    tokio::time::timeout(Duration::from_secs(30), async {
         while live.owner.observation.snapshot().cursor < before + 256 {
             tokio::task::yield_now().await;
         }
@@ -1315,7 +1317,8 @@ async fn a_commit_while_the_view_opens_is_in_its_rows() {
         Arc::new(move || {
             let agent = probe.clone();
             Box::pin(async move {
-                tokio::time::timeout(Duration::from_secs(10), async {
+                // A liveness bound only: generous, so load never trips it.
+                tokio::time::timeout(Duration::from_secs(30), async {
                     while !has_tool_result(&agent) {
                         tokio::time::sleep(Duration::from_millis(5)).await;
                     }

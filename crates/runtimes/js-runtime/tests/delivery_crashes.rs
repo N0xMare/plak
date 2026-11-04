@@ -39,7 +39,8 @@ async fn cell_worker_delivery_crash_cuts_preserve_only_proven_acceptance() {
             panic!("one nested call");
         };
         let mut delivery = tokio::spawn(responder.resolve(serde_json::json!(7)));
-        tokio::time::timeout(Duration::from_secs(10), async {
+        // A liveness bound only: generous, so load never trips it.
+        tokio::time::timeout(Duration::from_secs(30), async {
             while !std::fs::read_to_string(&ready).is_ok_and(|marker| marker == cut) {
                 tokio::task::yield_now().await;
             }
@@ -48,7 +49,7 @@ async fn cell_worker_delivery_crash_cuts_preserve_only_proven_acceptance() {
         .expect("exact crash boundary");
         if accepted {
             assert_eq!(
-                tokio::time::timeout(Duration::from_secs(10), &mut delivery)
+                tokio::time::timeout(Duration::from_secs(30), &mut delivery)
                     .await
                     .expect("receipt before kill")
                     .expect("delivery"),

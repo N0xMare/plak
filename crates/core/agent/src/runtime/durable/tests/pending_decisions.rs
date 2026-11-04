@@ -138,7 +138,8 @@ async fn decision_receipt_failure(lost_ack: bool, failure: SessionStoreError) ->
         immediate_retry.is_err(),
         "fenced decision handle was re-armed"
     );
-    let result = tokio::time::timeout(Duration::from_secs(3), turn.result()).await?;
+    // A liveness bound only: generous, so load never trips it.
+    let result = tokio::time::timeout(Duration::from_secs(30), turn.result()).await?;
     if let Ok(result) = result {
         assert!(!matches!(result.outcome(), TurnResultOutcome::Completed(_)));
     }

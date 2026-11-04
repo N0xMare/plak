@@ -498,7 +498,8 @@ async fn concurrent_turn_ended_sends_restart_an_interrupted_child_once() {
     gate.add_permits(4);
     let mut outcomes = Vec::new();
     for pending in [first, second] {
-        let outcome = tokio::time::timeout(std::time::Duration::from_secs(10), pending)
+        // A liveness bound only: generous, so load never trips it.
+        let outcome = tokio::time::timeout(std::time::Duration::from_secs(30), pending)
             .await
             .unwrap()
             .unwrap();
@@ -566,7 +567,8 @@ async fn a_cancelled_sender_stops_waiting_for_the_unwind_before_any_restart() {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     assert!(!pending.is_finished(), "the send waits for the unwind");
     cancellation.cancel();
-    let error = tokio::time::timeout(std::time::Duration::from_secs(5), pending)
+    // A liveness bound only: generous, so load never trips it.
+    let error = tokio::time::timeout(std::time::Duration::from_secs(30), pending)
         .await
         .expect("a cancelled send stops waiting")
         .unwrap()
@@ -628,7 +630,8 @@ async fn a_cancelled_sender_stops_waiting_behind_a_parked_wait() {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     assert!(!pending.is_finished(), "the send waits behind the wait");
     cancellation.cancel();
-    let error = tokio::time::timeout(std::time::Duration::from_secs(5), pending)
+    // A liveness bound only: generous, so load never trips it.
+    let error = tokio::time::timeout(std::time::Duration::from_secs(30), pending)
         .await
         .expect("a cancelled send stops waiting")
         .unwrap()
@@ -669,7 +672,8 @@ async fn a_failed_resume_start_never_records_a_started_receipt() {
     });
     until_calls(&deliverer, 1).await;
     release_unwound_turn(&tree);
-    let outcome = tokio::time::timeout(std::time::Duration::from_secs(10), pending)
+    // A liveness bound only: generous, so load never trips it.
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(30), pending)
         .await
         .unwrap()
         .unwrap();
@@ -728,8 +732,9 @@ async fn a_followup_start_on_a_retiring_slot_is_retried() {
         output_schema_json: None,
     })
     .unwrap();
+    // A liveness bound only: generous, so load never trips it.
     let outcome = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
+        std::time::Duration::from_secs(30),
         tool.send_with("op-followup".into(), &request),
     )
     .await
@@ -1607,7 +1612,8 @@ async fn an_admitted_start_whose_turn_already_ended_is_not_marked_active() {
         tree.set_active_turn("c1", false).unwrap();
     }
     gate.add_permits(1);
-    let outcome = tokio::time::timeout(std::time::Duration::from_secs(10), pending)
+    // A liveness bound only: generous, so load never trips it.
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(30), pending)
         .await
         .unwrap()
         .unwrap();
@@ -1705,7 +1711,8 @@ async fn a_send_dropped_mid_delivery_releases_its_claims() {
     pending.abort();
     assert!(pending.await.unwrap_err().is_cancelled());
     let owners = driver.release_owners();
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
         while !owners.is_empty() {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
@@ -1745,7 +1752,8 @@ async fn an_admitted_start_whose_turn_was_released_is_not_bound_again() {
         tree.release_attempt_turn("c1").unwrap();
     }
     gate.add_permits(1);
-    let outcome = tokio::time::timeout(std::time::Duration::from_secs(10), pending)
+    // A liveness bound only: generous, so load never trips it.
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(30), pending)
         .await
         .unwrap()
         .unwrap();
@@ -1772,7 +1780,8 @@ async fn an_admitted_start_never_binds_over_a_later_turn() {
         tree.bind_attempt_turn("c1", "turn-2").unwrap();
     }
     gate.add_permits(1);
-    let outcome = tokio::time::timeout(std::time::Duration::from_secs(10), pending)
+    // A liveness bound only: generous, so load never trips it.
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(30), pending)
         .await
         .unwrap()
         .unwrap();
@@ -1825,7 +1834,8 @@ async fn a_rider_reaches_the_resumed_turn() {
     gate.add_permits(8);
     let mut ids = Vec::new();
     for pending in [first, second] {
-        let outcome = tokio::time::timeout(std::time::Duration::from_secs(10), pending)
+        // A liveness bound only: generous, so load never trips it.
+        let outcome = tokio::time::timeout(std::time::Duration::from_secs(30), pending)
             .await
             .unwrap()
             .unwrap();

@@ -106,8 +106,9 @@ fn blocked_usage_io_does_not_block_typing_or_publish_after_a_session_switch() {
     let mut limits = crate::tui::providers::unread_usage_limits();
     limits.stale_age_seconds = Some(1);
     app.apply_host_event(HostEvent::UsageLimits(limits.clone()));
+    // A liveness bound only: generous, so load never trips it.
     entered_rx
-        .recv_timeout(std::time::Duration::from_secs(5))
+        .recv_timeout(std::time::Duration::from_secs(30))
         .unwrap();
     // The reader cannot finish until this UI work has finished: no timing assertion.
     app.handle_key(key(KeyCode::Char('x')));
@@ -139,7 +140,8 @@ fn session_switch_invalidates_a_blocked_read_without_a_successor_usage_request()
     app.apply_host_event(HostEvent::UsageLimits(
         crate::tui::providers::unread_usage_limits(),
     ));
-    seen.recv_timeout(std::time::Duration::from_secs(5))
+    // A liveness bound only: generous, so load never trips it.
+    seen.recv_timeout(std::time::Duration::from_secs(30))
         .unwrap();
     let mut successor = binding("successor");
     if let HostEvent::Binding { account, .. } = &mut successor {

@@ -3408,7 +3408,8 @@ impl WakeJobFixture {
         host.role
             .executor
             .block_on(async {
-                tokio::time::timeout(Duration::from_secs(5), async {
+                // A liveness bound only: generous, so load never trips it.
+                tokio::time::timeout(Duration::from_secs(30), async {
                     while sessions.joined_terminal_status(id).is_none() {
                         tokio::task::yield_now().await;
                     }

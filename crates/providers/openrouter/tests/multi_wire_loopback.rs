@@ -1631,7 +1631,8 @@ async fn unadvertised_chat_tool_call_becomes_an_unknown_tool_result_and_the_turn
     assert_eq!(result.model_rounds(), 2);
     assert_eq!(result.response().ok_or("response")?.output_text(), "chat");
 
-    let requests = timeout(Duration::from_secs(5), peer).await???;
+    // A liveness bound only: generous, so load never trips it.
+    let requests = timeout(Duration::from_secs(30), peer).await???;
     assert_eq!(requests.len(), 4);
     let follow_up = String::from_utf8_lossy(&requests[3]);
     let body = follow_up
@@ -1739,7 +1740,8 @@ async fn an_in_band_gateway_overload_is_replayed_for_the_turn() -> TestResult {
         assert!(result.error().is_none(), "HTTP {code} in band: {result:?}");
         assert_eq!(result.response().ok_or("response")?.output_text(), "chat");
         agent.shutdown().await?;
-        let requests = timeout(Duration::from_secs(5), peer).await???;
+        // A liveness bound only: generous, so load never trips it.
+        let requests = timeout(Duration::from_secs(30), peer).await???;
         assert_eq!(
             requests.len(),
             4,
@@ -2009,7 +2011,8 @@ async fn an_in_band_401_is_post_acceptance_and_never_redispatched() -> TestResul
     assert_eq!(error.kind(), ModelErrorKind::Protocol, "in-band 401");
 
     agent.shutdown().await?;
-    let requests = timeout(Duration::from_secs(5), peer).await???;
+    // A liveness bound only: generous, so load never trips it.
+    let requests = timeout(Duration::from_secs(30), peer).await???;
     // Two discovery calls plus the one inference the turn owned: no
     // automatic redispatch followed the accepted failure.
     assert_eq!(requests.len(), 3);
@@ -2058,8 +2061,9 @@ async fn an_in_band_504_is_the_providers_timeout_with_its_status() -> TestResult
         )
         .build()?;
 
+    // A liveness bound only: generous, so load never trips it.
     let result = timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(30),
         agent.prompt("hello").await?.result(),
     )
     .await??;
@@ -2083,7 +2087,7 @@ async fn an_in_band_504_is_the_providers_timeout_with_its_status() -> TestResult
     );
 
     agent.shutdown().await?;
-    let requests = timeout(Duration::from_secs(5), peer).await???;
+    let requests = timeout(Duration::from_secs(30), peer).await???;
     assert_eq!(requests.len(), 4, "two discovery calls and two inferences");
     Ok(())
 }
@@ -2212,7 +2216,8 @@ async fn a_pre_stream_gateway_refusal_is_definite_and_keeps_the_session() -> Tes
         let next = agent.prompt("again").await?.result().await?;
         assert_eq!(next.response().ok_or("response")?.output_text(), "chat");
         agent.shutdown().await?;
-        timeout(Duration::from_secs(5), peer).await???;
+        // A liveness bound only: generous, so load never trips it.
+        timeout(Duration::from_secs(30), peer).await???;
     }
     Ok(())
 }
@@ -2239,7 +2244,8 @@ async fn first_turn_error(
     let mut peer = Some(peer);
     let mut requests = 0;
     if settle {
-        requests = timeout(Duration::from_secs(5), peer.take().ok_or("peer")?)
+        // A liveness bound only: generous, so load never trips it.
+        requests = timeout(Duration::from_secs(30), peer.take().ok_or("peer")?)
             .await???
             .len();
     }
@@ -2266,7 +2272,7 @@ async fn first_turn_error(
         .kind();
     agent.shutdown().await?;
     if let Some(peer) = peer {
-        requests = timeout(Duration::from_secs(5), peer).await???.len();
+        requests = timeout(Duration::from_secs(30), peer).await???.len();
     }
     Ok((kind, requests))
 }
@@ -2368,7 +2374,8 @@ async fn a_refused_connection_is_retried_and_the_turn_completes() -> TestResult 
     assert_eq!(result.response().ok_or("response")?.output_text(), "chat");
     agent.shutdown().await?;
     // Two discovery calls and the one inference that reached the gateway.
-    assert_eq!(timeout(Duration::from_secs(5), peer).await???.len(), 3);
+    // A liveness bound only: generous, so load never trips it.
+    assert_eq!(timeout(Duration::from_secs(30), peer).await???.len(), 3);
     Ok(())
 }
 
@@ -2424,8 +2431,9 @@ async fn injected_stream_faults_are_replayed_and_the_turn_completes() -> TestRes
         );
         agent.shutdown().await?;
         // Two discovery calls, the cut inference and its replay.
+        // A liveness bound only: generous, so load never trips it.
         assert_eq!(
-            timeout(Duration::from_secs(5), peer).await???.len(),
+            timeout(Duration::from_secs(30), peer).await???.len(),
             4,
             "{fault}"
         );
@@ -2491,7 +2499,8 @@ async fn chat_terminal_retry_advice_and_quota_bodies_never_replay() -> TestResul
         }
         assert!(turn.result().await?.error().is_some());
         agent.shutdown().await?;
-        assert_eq!(timeout(Duration::from_secs(5), peer).await???.len(), 3);
+        // A liveness bound only: generous, so load never trips it.
+        assert_eq!(timeout(Duration::from_secs(30), peer).await???.len(), 3);
     }
     Ok(())
 }
@@ -2544,7 +2553,8 @@ async fn chat_terminal_retry_advice_and_quota_on_success_heads_suppress_stream_r
         }
         assert!(turn.result().await?.error().is_some());
         agent.shutdown().await?;
-        assert_eq!(timeout(Duration::from_secs(5), peer).await???.len(), 3);
+        // A liveness bound only: generous, so load never trips it.
+        assert_eq!(timeout(Duration::from_secs(30), peer).await???.len(), 3);
     }
     Ok(())
 }

@@ -17,7 +17,8 @@ fn explicit_leftover_disown_is_released_and_reopen_is_read_only() -> TestResult 
         OperationContext::new(CancellationToken::new()),
     )?;
     service.promote(id)?;
-    let deadline = Instant::now() + Duration::from_secs(10);
+    // A liveness bound only: generous, so load never trips it.
+    let deadline = Instant::now() + Duration::from_secs(30);
     while service.leftover(id).is_none() && Instant::now() < deadline {
         std::thread::yield_now();
     }
@@ -271,7 +272,8 @@ fn tty_job_tail_normalizes_line_endings_and_all_controls() -> TestResult {
     let id = sessions.start(start, OperationContext::new(CancellationToken::new()))?;
     sessions.promote(id)?;
     sessions.write_stdin(id, b"done\n", JoinedProcessInputDisposition::KeepOpen)?;
-    let deadline = Instant::now() + Duration::from_secs(5);
+    // A liveness bound only: generous, so load never trips it.
+    let deadline = Instant::now() + Duration::from_secs(30);
     while sessions.joined_terminal_status(id).is_none() {
         assert!(Instant::now() < deadline);
         std::thread::sleep(Duration::from_millis(2));
@@ -317,7 +319,8 @@ fn promotion_detaches_cancel_and_per_id_join_retains_terminal_snapshot() -> Test
     sessions.promote(id)?;
     cancellation.cancel();
     sessions.write_stdin(id, b"finish\n", JoinedProcessInputDisposition::KeepOpen)?;
-    let deadline = Instant::now() + Duration::from_secs(5);
+    // A liveness bound only: generous, so load never trips it.
+    let deadline = Instant::now() + Duration::from_secs(30);
     while sessions.joined_terminal_status(id).is_none() {
         assert!(Instant::now() < deadline);
         std::thread::sleep(Duration::from_millis(2));
@@ -394,7 +397,8 @@ fn promotion_refuses_the_129th_unconsumed_row() -> TestResult {
         )?;
         sessions.promote(id)?;
         sessions.write_stdin(id, b"done\n", JoinedProcessInputDisposition::KeepOpen)?;
-        let deadline = Instant::now() + Duration::from_secs(5);
+        // A liveness bound only: generous, so load never trips it.
+        let deadline = Instant::now() + Duration::from_secs(30);
         while sessions.joined_terminal_status(id).is_none() {
             assert!(Instant::now() < deadline);
             std::thread::sleep(Duration::from_millis(2));

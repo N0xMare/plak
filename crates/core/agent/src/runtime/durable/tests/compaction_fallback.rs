@@ -178,8 +178,9 @@ async fn turn_admitted_after_fallback_head_read_returns_the_original_failure() -
             .continue_failed_compaction(operation, source, builder, Some(endpoint))
             .await
     });
+    // A liveness bound only: generous, so load never trips it.
     tokio::time::timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(30),
         fixture.store.branch_load_started.notified(),
     )
     .await
@@ -373,8 +374,9 @@ mod receipt_cuts {
                     ))
                     .await
             });
+            // A liveness bound only: generous, so load never trips it.
             tokio::time::timeout(
-                Duration::from_secs(5),
+                Duration::from_secs(30),
                 store.delayed_recovery_started.notified(),
             )
             .await

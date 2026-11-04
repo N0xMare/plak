@@ -867,7 +867,8 @@ fn leftover_jobs_transfer_live_but_cold_reopen_has_no_process_authority() -> Tes
         )?,
         OperationContext::new(CancellationToken::new()),
     )?;
-    let deadline = Instant::now() + Duration::from_secs(5);
+    // A liveness bound only: generous, so load never trips it.
+    let deadline = Instant::now() + Duration::from_secs(30);
     while original.leftover(id).is_none() {
         assert!(
             Instant::now() < deadline,

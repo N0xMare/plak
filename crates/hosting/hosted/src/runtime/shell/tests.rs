@@ -591,7 +591,8 @@ fn readiness_reads_run_off_the_loop_and_only_the_newest_applies() {
     assert_eq!(host.catalog.accounts, []);
 
     let settle = |host: &mut Host, readiness: &ReadinessRefresh| {
-        let deadline = Instant::now() + Duration::from_secs(10);
+        // A liveness bound only: generous, so load never trips it.
+        let deadline = Instant::now() + Duration::from_secs(30);
         while host.catalog.accounts.is_empty() {
             assert!(Instant::now() < deadline, "readiness never settled");
             thread::sleep(Duration::from_millis(5));

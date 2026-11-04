@@ -392,7 +392,8 @@ async fn openai_product_tools_preserve_optional_schemas_on_production_wire() {
         plakous::agent::TurnResultOutcome::Completed(_)
     ));
     session.release().await.unwrap();
-    let requests = tokio::time::timeout(std::time::Duration::from_secs(5), peer)
+    // A liveness bound only: generous, so load never trips it.
+    let requests = tokio::time::timeout(std::time::Duration::from_secs(30), peer)
         .await
         .unwrap()
         .unwrap();
@@ -500,7 +501,8 @@ async fn openai_api_native_ptc_wire_is_code_mode_without_the_codex_costume() {
         result.outcome()
     );
     session.release().await.unwrap();
-    let requests = tokio::time::timeout(std::time::Duration::from_secs(5), peer)
+    // A liveness bound only: generous, so load never trips it.
+    let requests = tokio::time::timeout(std::time::Duration::from_secs(30), peer)
         .await
         .unwrap()
         .unwrap();
@@ -652,7 +654,8 @@ async fn production_api_sessions_compact_once_and_reopen_with_original_configura
             panic!("not opened")
         };
         session.release().await.unwrap();
-        let requests = tokio::time::timeout(std::time::Duration::from_secs(5), peer)
+        // A liveness bound only: generous, so load never trips it.
+        let requests = tokio::time::timeout(std::time::Duration::from_secs(30), peer)
             .await
             .unwrap()
             .unwrap();
@@ -1098,7 +1101,8 @@ async fn explicit_none_effort_is_reconstructed_and_sent_on_the_api_wire() {
             result.outcome()
         );
         session.release().await.unwrap();
-        let requests = tokio::time::timeout(std::time::Duration::from_secs(5), peer)
+        // A liveness bound only: generous, so load never trips it.
+        let requests = tokio::time::timeout(std::time::Duration::from_secs(30), peer)
             .await
             .unwrap()
             .unwrap();

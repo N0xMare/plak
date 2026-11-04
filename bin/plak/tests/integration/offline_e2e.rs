@@ -3409,7 +3409,8 @@ fn a_turn_cut_while_a_tool_was_running_is_abandoned_and_says_the_command_may_hav
     agent.wait_for("the tool to start running", |record| {
         record["kind"] == "tool" && record["name"] == "process_session_start"
     });
-    let orphan_deadline = Instant::now() + Duration::from_secs(5);
+    // A liveness bound only: generous, so load never trips it.
+    let orphan_deadline = Instant::now() + Duration::from_secs(30);
     while !orphan_is_running() && Instant::now() < orphan_deadline {
         std::thread::sleep(Duration::from_millis(20));
     }

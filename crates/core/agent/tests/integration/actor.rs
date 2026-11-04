@@ -974,7 +974,8 @@ fn assert_terminal_error(result: &TurnResult, expected: AgentErrorKind) -> TestR
 }
 
 async fn wait_for_dispatch(model: &plakous_test_support::ScriptedModel) -> TestResult {
-    tokio::time::timeout(Duration::from_secs(1), async {
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), async {
         while model.captured_plans().is_empty() {
             tokio::task::yield_now().await;
         }

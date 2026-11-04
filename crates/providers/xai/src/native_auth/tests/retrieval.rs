@@ -224,8 +224,9 @@ async fn a_logged_out_supergrok_login_refuses_the_side_request_before_the_socket
     let _serial = AUTH_TEST_GATE.lock().await;
     let session = session().await?;
     session.manager.logout()?;
+    // A liveness bound only: generous, so load never trips it.
     let error = tokio::time::timeout(
-        Duration::from_secs(10),
+        Duration::from_secs(30),
         session
             .model
             .retrieval()

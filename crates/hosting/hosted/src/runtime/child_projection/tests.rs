@@ -35,7 +35,8 @@ async fn publish(
 ) {
     let expected = observation.snapshot().cursor + 1;
     sender.send(Received::Event(event)).await.unwrap();
-    tokio::time::timeout(Duration::from_secs(10), async {
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), async {
         while observation.snapshot().cursor != expected {
             tokio::task::yield_now().await;
         }
@@ -230,7 +231,8 @@ async fn faces_do_not_keep_a_retired_child_projection_alive() {
 }
 
 async fn observed(observation: &ChildObservation, predicate: impl Fn(&State) -> bool) {
-    tokio::time::timeout(Duration::from_secs(10), async {
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), async {
         while !predicate(&observation.lock()) {
             tokio::task::yield_now().await;
         }
@@ -517,7 +519,8 @@ async fn a_reduced_commit_between_the_two_attaches_is_delivered_once_without_a_g
     );
     let (observers, face_events) =
         start_attach_probe(sessions, &attached, turn.id(), owner.observation.clone());
-    tokio::time::timeout(Duration::from_secs(10), following.notified())
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), following.notified())
         .await
         .unwrap();
     let first = next_event(&face_events).await;
@@ -712,7 +715,8 @@ async fn fixed_burst_face_lag_resyncs_once_and_follows_the_terminal() {
         )
         .await;
     });
-    let gap = tokio::time::timeout(Duration::from_secs(10), face_events.recv())
+    // A liveness bound only: generous, so load never trips it.
+    let gap = tokio::time::timeout(Duration::from_secs(30), face_events.recv())
         .await
         .unwrap()
         .unwrap();

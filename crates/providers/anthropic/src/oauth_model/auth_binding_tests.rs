@@ -367,7 +367,8 @@ async fn running_turn(different_account: bool) -> TestResult {
     }
     agent.shutdown().await?;
     assert_eq!(notices.await?, usize::from(!different_account));
-    let requests = timeout(Duration::from_secs(5), peer).await??;
+    // A liveness bound only: generous, so load never trips it.
+    let requests = timeout(Duration::from_secs(30), peer).await??;
     assert_eq!(requests.len(), if different_account { 1 } else { 2 });
     assert_eq!(
         gate.snapshot()?

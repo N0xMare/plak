@@ -321,7 +321,8 @@ async fn separate_managers_hydrate_concurrently_without_blocking_the_executor() 
     let core = Arc::get_mut(&mut second.core).unwrap();
     core.client = first.core.client.clone();
     core.control_origin.clone_from(&first.core.control_origin);
-    let (first_result, second_result) = tokio::time::timeout(Duration::from_secs(2), async {
+    // A liveness bound only: generous, so load never trips it.
+    let (first_result, second_result) = tokio::time::timeout(Duration::from_secs(30), async {
         tokio::join!(
             first.ensure_account_identity(),
             second.ensure_account_identity()

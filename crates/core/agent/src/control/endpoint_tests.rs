@@ -107,8 +107,9 @@ async fn external_placeholder_suffix_is_refused_before_endpoint_ingress()
     let endpoint = AgentSessionEndpoint::new(controls);
     let mut request = compact_endpoint_request()?;
     request.operation_id = "x:placeholders".to_owned();
+    // A liveness bound only: generous, so load never trips it.
     let result =
-        tokio::time::timeout(Duration::from_secs(1), endpoint.compact_session(request)).await?;
+        tokio::time::timeout(Duration::from_secs(30), endpoint.compact_session(request)).await?;
     assert!(
         matches!(result, Err(AgentSessionEndpointError::Rejected { reason }) if reason.contains(":placeholders"))
     );

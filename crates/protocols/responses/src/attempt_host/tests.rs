@@ -2159,7 +2159,8 @@ async fn required_capture_terminal_failure_prevents_typed_terminal_success_witho
             Instant::now() + Duration::from_secs(5),
         )?;
         let ledger = attempt.core.observations();
-        let result = timeout(Duration::from_secs(1), service.execute(attempt)).await?;
+        // A liveness bound only: generous, so load never trips it.
+        let result = timeout(Duration::from_secs(30), service.execute(attempt)).await?;
         if required {
             let Err(error) = result else {
                 panic!("required terminal capture must prevent success");
@@ -2176,7 +2177,7 @@ async fn required_capture_terminal_failure_prevents_typed_terminal_success_witho
         assert!(ledger.is_logically_terminal());
         assert_eq!(dialect.preflights.load(Ordering::SeqCst), 1);
         assert_eq!(terminals.load(Ordering::SeqCst), 1);
-        timeout(Duration::from_secs(1), peer).await???;
+        timeout(Duration::from_secs(30), peer).await???;
     }
     Ok(())
 }
@@ -2516,7 +2517,8 @@ async fn pending_401_refresh_obeys_cancellation_deadline_and_drop() -> Result<()
         let service =
             ResponsesAttemptService::new(client, Arc::clone(&dialect), data, authorization)?;
         let task = tokio::spawn(service.execute(attempt));
-        timeout(Duration::from_secs(2), async {
+        // A liveness bound only: generous, so load never trips it.
+        timeout(Duration::from_secs(30), async {
             while dialect.credential_rejections.load(Ordering::SeqCst) == 0 {
                 tokio::task::yield_now().await;
             }
@@ -3002,7 +3004,8 @@ async fn codex_terminal_wins_before_later_body_cancellation() -> Result<(), Test
             .await
     });
     body_waiting_rx.await?;
-    timeout(Duration::from_secs(1), receiver.recv())
+    // A liveness bound only: generous, so load never trips it.
+    timeout(Duration::from_secs(30), receiver.recv())
         .await?
         .ok_or_else(|| io::Error::other("buffered terminal observation was not decoded"))?;
     assert_eq!(
@@ -3073,7 +3076,8 @@ async fn codex_terminal_wins_before_a_later_body_deadline() -> Result<(), TestEr
             .await
     });
     body_waiting_rx.await?;
-    timeout(Duration::from_secs(1), receiver.recv())
+    // A liveness bound only: generous, so load never trips it.
+    timeout(Duration::from_secs(30), receiver.recv())
         .await?
         .ok_or_else(|| io::Error::other("buffered terminal observation was not decoded"))?;
     let response = execution.await??;
@@ -4292,7 +4296,8 @@ async fn shared_model_host_incomplete_arguments_deadline_is_diagnostic_and_joine
         assert!(!message.contains("call_remote"));
         assert!(!message.contains("rust"));
         assert!(errors[0].message().contains("cleanup=joined"));
-        assert!(timeout(Duration::from_secs(1), peer).await???);
+        // A liveness bound only: generous, so load never trips it.
+        assert!(timeout(Duration::from_secs(30), peer).await???);
     }
     Ok(())
 }

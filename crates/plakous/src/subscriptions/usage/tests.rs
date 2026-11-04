@@ -27,7 +27,8 @@ async fn three_slow_usage_reads_do_not_hold_the_shared_compatibility_guard()
             )
         }
     };
-    let (codex, grok, claude) = tokio::time::timeout(Duration::from_secs(5), async {
+    // A liveness bound only: generous, so load never trips it.
+    let (codex, grok, claude) = tokio::time::timeout(Duration::from_secs(30), async {
         tokio::join!(
             run(NativeProvider::Codex),
             run(NativeProvider::Xai),

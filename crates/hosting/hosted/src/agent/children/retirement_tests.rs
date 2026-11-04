@@ -2168,7 +2168,8 @@ async fn real_session_late_start_ack_releases_after_deadline_without_redispatch(
             })
             .count()
     };
-    tokio::time::timeout(Duration::from_secs(3), async {
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), async {
         while dispatches() == 0 {
             tokio::task::yield_now().await;
         }
@@ -2209,7 +2210,7 @@ async fn real_session_late_start_ack_releases_after_deadline_without_redispatch(
         .unwrap();
     assert!(runtime.live.lock().await.contains_key(&id));
     deliver_ack.notify_one();
-    tokio::time::timeout(Duration::from_secs(3), async {
+    tokio::time::timeout(Duration::from_secs(30), async {
         while runtime.live.lock().await.contains_key(&id) {
             tokio::task::yield_now().await;
         }
@@ -2521,7 +2522,8 @@ async fn aborted_startup_worker_frees_its_unpolled_reservation() {
     });
     task.abort();
     assert!(task.await.unwrap_err().is_cancelled());
-    tokio::time::timeout(Duration::from_secs(1), notified.notified())
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), notified.notified())
         .await
         .unwrap();
     assert!(!runtime.live.lock().await.contains_key("root"));

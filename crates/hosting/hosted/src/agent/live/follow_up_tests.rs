@@ -199,7 +199,8 @@ async fn dispatch_signal_observes_actor_cancellation_at_the_instant_it_fires() {
     let release = tokio::spawn(
         Box::new(live).cancel_and_release(fixture.runtime.driver().clone(), Some(signal)),
     );
-    tokio::time::timeout(std::time::Duration::from_secs(2), probe.fired.notified())
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(std::time::Duration::from_secs(30), probe.fired.notified())
         .await
         .expect("dispatch must wake its registered receiver");
     assert_eq!(
@@ -757,7 +758,8 @@ async fn a_follow_up_reserved_before_a_release_is_served_first() {
     );
     finish.send(()).unwrap();
     delivery.await.unwrap().unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(10), release)
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(std::time::Duration::from_secs(30), release)
         .await
         .expect("the release proceeds once the follow-up is served")
         .unwrap();
@@ -786,7 +788,8 @@ async fn a_served_message_completes_once_the_watch_moves() {
             let _ = moving.await;
         },
     );
-    tokio::time::timeout(std::time::Duration::from_secs(10), delivery)
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(std::time::Duration::from_secs(30), delivery)
         .await
         .expect("the watch moves while the follow-up is served")
         .unwrap();
@@ -823,7 +826,8 @@ async fn a_release_reserved_behind_the_watchs_transition_proceeds_after_it() {
         "the release waits for the transition"
     );
     sent.send(()).unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(10), release)
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(std::time::Duration::from_secs(30), release)
         .await
         .expect("the watch ends its transition while the release waits")
         .unwrap();

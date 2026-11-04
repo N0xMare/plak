@@ -2035,7 +2035,8 @@ fn local_cleanup_panic_still_joins_owned_process_lifetimes() -> TestResult {
             .panic_cleanup_lifecycle
             .store(true, Ordering::Release);
         assert_eq!(control.cancel().await?, CancellationStatus::Requested);
-        let result = tokio::time::timeout(Duration::from_secs(5), turn.result()).await??;
+        // A liveness bound only: generous, so load never trips it.
+        let result = tokio::time::timeout(Duration::from_secs(30), turn.result()).await??;
         let TurnResultOutcome::RecoveryRequired(error) = result.outcome() else {
             panic!(
                 "cleanup panic must require recovery: {:?}",

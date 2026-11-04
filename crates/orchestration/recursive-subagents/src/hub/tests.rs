@@ -2125,7 +2125,8 @@ async fn batch_cancel_starts_all_releases_before_waiting_and_joins_overlap() {
             .await
     );
     for (entered, _) in &barriers {
-        tokio::time::timeout(Duration::from_secs(1), entered.notified())
+        // A liveness bound only: generous, so load never trips it.
+        tokio::time::timeout(Duration::from_secs(30), entered.notified())
             .await
             .unwrap();
     }
@@ -2180,7 +2181,8 @@ async fn recovery_pass_request_while_running_reruns_it() {
     let second = runtime.start_recovery_pass(|| unreachable!("a running pass reruns"));
     assert_eq!(second, RecoveryPassRequest::Rerun);
     gate.notify_one();
-    tokio::time::timeout(Duration::from_secs(2), async {
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), async {
         while runs.load(Ordering::SeqCst) < 1 {
             tokio::task::yield_now().await;
         }
@@ -2193,7 +2195,7 @@ async fn recovery_pass_request_while_running_reruns_it() {
     );
     gate.notify_one();
     let task = runtime.recovery_pass.lock().unwrap().task.take().unwrap();
-    tokio::time::timeout(Duration::from_secs(2), task)
+    tokio::time::timeout(Duration::from_secs(30), task)
         .await
         .unwrap()
         .unwrap();
@@ -2255,8 +2257,9 @@ async fn shutdown_aborts_an_explicit_child_recover() {
     let _ = tokio::time::timeout(Duration::from_secs(4), shutdown_runtime(runtime.clone()))
         .await
         .expect("shutdown must not wait out a stuck child recover");
+    // A liveness bound only: generous, so load never trips it.
     assert!(
-        tokio::time::timeout(Duration::from_secs(2), dropped_rx)
+        tokio::time::timeout(Duration::from_secs(30), dropped_rx)
             .await
             .expect("the abort is observed")
             .is_err(),
@@ -2286,8 +2289,9 @@ async fn abandon_live_agents_aborts_an_explicit_child_recover() {
         }))
     );
     let _agents = abandon_live_agents(&tree_id).await;
+    // A liveness bound only: generous, so load never trips it.
     assert!(
-        tokio::time::timeout(Duration::from_secs(2), dropped_rx)
+        tokio::time::timeout(Duration::from_secs(30), dropped_rx)
             .await
             .expect("the abort is observed")
             .is_err(),

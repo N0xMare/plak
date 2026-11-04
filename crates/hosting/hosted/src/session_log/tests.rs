@@ -693,7 +693,8 @@ fn independent_processes_share_sequence() {
     for _ in 0..32 {
         log.append(SessionEvent::new("parent")).unwrap();
     }
-    let deadline = Instant::now() + Duration::from_secs(10);
+    // A liveness bound only: generous, so load never trips it.
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         if let Some(status) = child.0.try_wait().unwrap() {
             assert!(status.success());

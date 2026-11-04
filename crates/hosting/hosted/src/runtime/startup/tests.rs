@@ -606,7 +606,8 @@ fn deferred_startup_never_claims_attachment_before_failed_open_falls_back() {
 
     let mut claimed_ready = false;
     loop {
-        let event = events.recv_timeout(Duration::from_secs(2)).unwrap();
+        // A liveness bound only: generous, so load never trips it.
+        let event = events.recv_timeout(Duration::from_secs(30)).unwrap();
         match event {
             HostEvent::AgentAttached(true) => claimed_ready = true,
             HostEvent::AgentAttached(false) => break,

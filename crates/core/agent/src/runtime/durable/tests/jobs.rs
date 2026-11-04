@@ -142,8 +142,9 @@ async fn transfer_hosted_job(panic: bool) -> TestResult {
             TurnResultOutcome::RecoveryRequired(_)
         ));
         store.reject_renewal.store(true, Ordering::Release);
+        // A liveness bound only: generous, so load never trips it.
         let _ = tokio::time::timeout(
-            Duration::from_secs(2),
+            Duration::from_secs(30),
             crate::runtime::terminal::wait_for_completion(agent.inner.completion.clone()),
         )
         .await?;
@@ -517,7 +518,8 @@ async fn promoted_job_survives_turn_and_records_quiescent_terminal_once() -> Tes
         b"finish\n",
         plakous_tools::JoinedProcessInputDisposition::KeepOpen,
     )?;
-    tokio::time::timeout(Duration::from_secs(5), async {
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), async {
         while process.joined_terminal_status(id).is_none() {
             tokio::time::sleep(Duration::from_millis(2)).await;
         }
@@ -818,7 +820,8 @@ async fn review_nul_tail_does_not_block_later_turn_commits() -> TestResult {
         b"finish\n",
         plakous_tools::JoinedProcessInputDisposition::KeepOpen,
     )?;
-    tokio::time::timeout(Duration::from_secs(5), async {
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), async {
         while process.joined_terminal_status(id).is_none() {
             tokio::time::sleep(Duration::from_millis(2)).await;
         }

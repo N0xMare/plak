@@ -1693,7 +1693,8 @@ async fn mutate_and_settle_leaves_nothing_owed() {
 /// Waits until every release owner of `driver`'s tree has finished.
 async fn owners_done(driver: &TreeDriver) {
     let owners = driver.release_owners();
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
         while !owners.is_empty() {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }

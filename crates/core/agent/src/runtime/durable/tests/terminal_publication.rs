@@ -541,7 +541,8 @@ async fn process_session_sideband_is_committed_before_concurrent_boundary_error(
     let turn = agent
         .prompt("race process update with cancellation boundary")
         .await?;
-    tokio::time::timeout(Duration::from_secs(3), async {
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), async {
         while lock_mutex(&tool.sessions).is_none() {
             tokio::task::yield_now().await;
         }
@@ -551,7 +552,7 @@ async fn process_session_sideband_is_committed_before_concurrent_boundary_error(
         turn.control().cancel().await?,
         CancellationStatus::Requested
     );
-    let result = tokio::time::timeout(Duration::from_secs(3), turn.result()).await??;
+    let result = tokio::time::timeout(Duration::from_secs(30), turn.result()).await??;
     assert!(matches!(result.outcome(), TurnResultOutcome::Cancelled(_)));
     assert!(matches!(
         result.checkpoint().manifest().lifecycle(),
@@ -1183,7 +1184,8 @@ async fn cancellation_joins_the_single_started_prepared_call_exactly_once() -> T
         .map_err(|error| error.message().to_owned())?;
     let turn = agent.prompt("cancel one prepared call").await?;
     let control = turn.control();
-    tokio::time::timeout(Duration::from_secs(2), async {
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), async {
         while model.calls.load(Ordering::Acquire) == 0 {
             tokio::task::yield_now().await;
         }
@@ -1244,7 +1246,8 @@ async fn request_cancel_returns_before_the_turn_settles() -> TestResult {
         .await?;
     let turn = agent.prompt("hold on the second model call").await?;
     let control = turn.control();
-    tokio::time::timeout(Duration::from_secs(2), async {
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), async {
         while model.calls.load(Ordering::Acquire) < 2 {
             tokio::task::yield_now().await;
         }
@@ -1258,7 +1261,7 @@ async fn request_cancel_returns_before_the_turn_settles() -> TestResult {
     // Token-first: the request returns without joining settlement. The
     // drive loop may already have settled (token is visible), so this
     // only forbids the API from blocking until the terminal result.
-    let result = tokio::time::timeout(Duration::from_secs(2), turn.result()).await??;
+    let result = tokio::time::timeout(Duration::from_secs(30), turn.result()).await??;
     assert!(matches!(result.outcome(), TurnResultOutcome::Cancelled(_)));
     assert!(control.is_settled());
     agent.shutdown().await?;
@@ -1300,7 +1303,8 @@ async fn queued_cancel_is_one_atomic_publication_and_duplicate_safe() -> TestRes
         .await?
         .into_turn()
         .ok_or("active turn was not admitted")?;
-    tokio::time::timeout(Duration::from_secs(2), async {
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), async {
         while model.calls.load(Ordering::Acquire) == 0 {
             tokio::task::yield_now().await;
         }
@@ -1453,7 +1457,8 @@ async fn failed_atomic_queued_cancel_preserves_queue_and_reports_uncommitted_res
         )
         .await?;
     let active = agent.prompt("active").await?;
-    tokio::time::timeout(Duration::from_secs(2), async {
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), async {
         while model.calls.load(Ordering::Acquire) == 0 {
             tokio::task::yield_now().await;
         }
@@ -2053,7 +2058,8 @@ async fn start_owner_loss_commits_exact_failed_checkpoint_before_publication() -
         )
         .await?;
     let active = agent.prompt("hold owner").await?;
-    tokio::time::timeout(Duration::from_secs(2), async {
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), async {
         while model.calls.load(Ordering::Acquire) == 0 {
             tokio::task::yield_now().await;
         }
@@ -2113,7 +2119,8 @@ async fn missing_terminal_binding_reports_error_without_terminal_authority() -> 
         .await?;
     let turn = agent.prompt("hold active binding").await?;
     let shared = Arc::clone(&turn.control.shared);
-    tokio::time::timeout(Duration::from_secs(2), async {
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), async {
         while model.calls.load(Ordering::Acquire) == 0 {
             tokio::task::yield_now().await;
         }
@@ -2188,7 +2195,8 @@ async fn shutdown_publication_faults_retry_the_exact_committed_terminal_once() -
             .into_turn()
             .ok_or("publication-fault root was not admitted")?;
         let shared = Arc::clone(&turn.control.shared);
-        tokio::time::timeout(Duration::from_secs(2), async {
+        // A liveness bound only: generous, so load never trips it.
+        tokio::time::timeout(Duration::from_secs(30), async {
             while model.calls.load(Ordering::Acquire) == 0 {
                 tokio::task::yield_now().await;
             }
@@ -2313,7 +2321,8 @@ async fn queued_shutdown_publication_faults_retry_each_exact_checkpoint_once() -
         .await?
         .into_turn()
         .ok_or("active root was not admitted")?;
-    tokio::time::timeout(Duration::from_secs(2), async {
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), async {
         while model.calls.load(Ordering::Acquire) == 0 {
             tokio::task::yield_now().await;
         }

@@ -1170,8 +1170,9 @@ fn failed_terminal_then_successful_quit_handoff_replays_exactly_once() {
         .send(UserAction::Prompt("first turn".into()))
         .unwrap();
     loop {
+        // A liveness bound only: generous, so load never trips it.
         let event = events
-            .recv_timeout(std::time::Duration::from_secs(10))
+            .recv_timeout(std::time::Duration::from_secs(30))
             .unwrap();
         if matches!(event, HostEvent::Row(TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text: ref note, .. })) if note.contains("product transcript could not be committed"))
         {

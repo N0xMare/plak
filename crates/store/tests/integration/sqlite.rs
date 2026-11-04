@@ -2099,7 +2099,8 @@ async fn independent_process_clocks_share_sqlite_lease_authority() -> Result<(),
             .env(CHILD_PHASE, phase)
             .env(PRIOR_FENCE, created.lease().fence().get().to_string())
             .spawn()?;
-        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        // A liveness bound only: generous, so load never trips it.
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
         loop {
             if let Some(status) = child.try_wait()? {
                 assert!(

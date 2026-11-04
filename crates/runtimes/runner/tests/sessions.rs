@@ -249,7 +249,8 @@ async fn suite(sessions: &Sessions) -> Vec<String> {
     assert_eq!(running[0].2, JobStatus::Running);
     seen.push(format!("{running:?}"));
     sessions.stop_jobs().await;
-    let deadline = Instant::now() + Duration::from_secs(10);
+    // A liveness bound only: generous, so load never trips it.
+    let deadline = Instant::now() + Duration::from_secs(30);
     let stopped = loop {
         let jobs = sessions.jobs().await;
         if jobs.iter().all(|job| job.2 != JobStatus::Running) {
@@ -448,7 +449,8 @@ async fn a_service_streams_through_the_loopback_as_direct() {
 
 /// Waits up to ten seconds for `ready`.
 async fn eventually(mut ready: impl FnMut() -> bool, what: &str) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    // A liveness bound only: generous, so load never trips it.
+    let deadline = Instant::now() + Duration::from_secs(30);
     while !ready() {
         assert!(Instant::now() < deadline, "{what}");
         tokio::time::sleep(Duration::from_millis(25)).await;

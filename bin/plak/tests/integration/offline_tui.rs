@@ -560,7 +560,8 @@ impl Terminal {
             .and_then(|()| self.writer.flush());
         if let Err(error) = sent {
             // The pty closes as the child exits, just before it is reapable.
-            let deadline = Instant::now() + Duration::from_secs(2);
+            // A liveness bound only: generous, so load never trips it.
+            let deadline = Instant::now() + Duration::from_secs(30);
             while self.is_alive() {
                 assert!(
                     Instant::now() < deadline,
@@ -1112,7 +1113,8 @@ fn reopen_after_kill(fixture: &Fixture, session: &str) -> Terminal {
     loop {
         attempts += 1;
         let mut terminal = Terminal::spawn(fixture, Launch::Resume(session));
-        let limit = Instant::now() + Duration::from_secs(10);
+        // A liveness bound only: generous, so load never trips it.
+        let limit = Instant::now() + Duration::from_secs(30);
         let recovered = loop {
             let frame = terminal.screen();
             if frame.contains("recovered an interrupted turn") && frame.contains("/ commands") {

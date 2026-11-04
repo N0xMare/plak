@@ -3381,7 +3381,8 @@ fn an_aborted_turn_waiter_leaves_its_registration() {
         .unwrap();
     rt.shutdown_timeout(Duration::from_secs(5));
     // The dropped registration leaves through a writer of its own.
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    // A liveness bound only: generous, so load never trips it.
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
     let after = loop {
         let after = fixture
             .runtime

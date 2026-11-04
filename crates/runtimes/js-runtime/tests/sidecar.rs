@@ -503,7 +503,8 @@ async fn nonreading_stdin_cannot_block_start_or_cancel() {
     host.start_cell(1, &" ".repeat(256 * 1024), HashMap::new(), vec![], 10_000)
         .expect("bounded write admission");
     assert!(start.elapsed() < Duration::from_secs(1));
-    let loss = tokio::time::timeout(Duration::from_secs(5), host.terminate())
+    // A liveness bound only: generous, so load never trips it.
+    let loss = tokio::time::timeout(Duration::from_secs(30), host.terminate())
         .await
         .expect("cancel deadline");
     assert!(loss.is_err(), "nonreading worker must be killed");

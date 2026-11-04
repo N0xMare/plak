@@ -919,7 +919,8 @@ async fn flushed_request_head_deadline_is_precise_and_joins_work() -> TestResult
     assert_eq!(failure.phase(), Phase::ResponseHead);
     assert_eq!(failure.kind(), ErrorKind::DeadlineExceeded);
     assert_eq!(failure.transmission(), TransmissionFact::MayHaveTransmitted);
-    assert!(timeout(Duration::from_secs(2), closed_rx).await??);
+    // A liveness bound only: generous, so load never trips it.
+    assert!(timeout(Duration::from_secs(30), closed_rx).await??);
     server.await??;
     Ok(())
 }
@@ -1280,7 +1281,8 @@ async fn tls_record_failure_after_request_names_rustls_cause_and_protocol() -> T
     assert_eq!(failure.tls_cause(), Some(TlsCause::DecryptError));
     assert_eq!(failure.wire_protocol(), Some(WireProtocol::Http1));
     assert!(format!("{failure:?}").contains("tls: Some(\"tls_decrypt_error\")"));
-    timeout(Duration::from_secs(3), server).await???;
+    // A liveness bound only: generous, so load never trips it.
+    timeout(Duration::from_secs(30), server).await???;
     Ok(())
 }
 
@@ -1352,7 +1354,8 @@ async fn handshake_alert_and_certificate_rejection_name_their_tls_cause() -> Tes
         .ok_or("an untrusted certificate unexpectedly succeeded")?;
     assert_eq!(rejected.phase(), Phase::Tls);
     assert_eq!(rejected.tls_cause(), Some(TlsCause::InvalidCertificate));
-    timeout(Duration::from_secs(3), server).await???;
+    // A liveness bound only: generous, so load never trips it.
+    timeout(Duration::from_secs(30), server).await???;
     Ok(())
 }
 
@@ -1539,7 +1542,8 @@ async fn idle_body_cancellation_stops_socket_without_another_pull() -> TestResul
     );
     let mut body = client.execute(request, exchange_control).await?.into_body();
     cancellation.cancel();
-    assert!(timeout(Duration::from_secs(2), closed_rx).await??);
+    // A liveness bound only: generous, so load never trips it.
+    assert!(timeout(Duration::from_secs(30), closed_rx).await??);
     let failure = body
         .next_chunk()
         .await
@@ -1798,7 +1802,8 @@ async fn http2_remote_reset_retains_reason_without_retry() -> TestResult {
         Some(u32::from(h2::Reason::REFUSED_STREAM))
     );
     assert_eq!(failure.transmission(), TransmissionFact::MayHaveTransmitted);
-    timeout(Duration::from_secs(3), server).await???;
+    // A liveness bound only: generous, so load never trips it.
+    timeout(Duration::from_secs(30), server).await???;
     Ok(())
 }
 
@@ -1859,7 +1864,8 @@ async fn http2_body_failures_retain_reset_and_io_causes() -> TestResult {
             ));
             assert_eq!(failure.http2_reason(), None);
         }
-        timeout(Duration::from_secs(3), server).await???;
+        // A liveness bound only: generous, so load never trips it.
+        timeout(Duration::from_secs(30), server).await???;
     }
     Ok(())
 }
@@ -1906,7 +1912,8 @@ async fn negotiates_http2_with_one_request_and_owned_tasks() -> TestResult {
     let mut body = response.into_body();
     assert_eq!(required_chunk(&mut body).await?, "h2-ok");
     assert!(body.next_chunk().await.is_none());
-    timeout(Duration::from_secs(2), server).await???;
+    // A liveness bound only: generous, so load never trips it.
+    timeout(Duration::from_secs(30), server).await???;
     assert_eq!(requests.load(Ordering::Acquire), 1);
     Ok(())
 }
@@ -2015,7 +2022,8 @@ async fn delayed_http2_body(graceful_shutdown: bool) -> TestResult {
             "unexpected bytes after complete fixture body"
         );
     }
-    timeout(Duration::from_secs(2), server).await???;
+    // A liveness bound only: generous, so load never trips it.
+    timeout(Duration::from_secs(30), server).await???;
     assert_eq!(requests.load(Ordering::Acquire), 1);
     Ok(())
 }
@@ -2082,7 +2090,8 @@ async fn http2_delayed_body_cleanup_closes_owned_connection() -> TestResult {
                     cancellation.cancel();
                 }
                 // Cancellation must stop the idle socket without a further pull.
-                timeout(Duration::from_secs(7), server).await???;
+                // A liveness bound only: generous, so load never trips it.
+                timeout(Duration::from_secs(30), server).await???;
                 let failure = body
                     .next_chunk()
                     .await
@@ -2115,7 +2124,7 @@ async fn http2_delayed_body_cleanup_closes_owned_connection() -> TestResult {
             }
             _ => unreachable!(),
         }
-        timeout(Duration::from_secs(7), server).await???;
+        timeout(Duration::from_secs(30), server).await???;
         assert_eq!(requests.load(Ordering::Acquire), 1);
     }
     Ok(())

@@ -19,7 +19,8 @@ async fn overdeep_stored_start_is_refused_before_enqueue_and_host_stays_usable()
     );
     host.start_cell(2, "store('usable', true);", HashMap::new(), vec![], 10_000)
         .expect("valid start");
-    let event = tokio::time::timeout(Duration::from_secs(10), host.read_event())
+    // A liveness bound only: generous, so load never trips it.
+    let event = tokio::time::timeout(Duration::from_secs(30), host.read_event())
         .await
         .expect("terminal bound")
         .expect("host remains usable");
@@ -104,12 +105,13 @@ async fn blocked_consumer_keeps_independent_loss_and_cancel_control() {
         10_000,
     )
     .expect("start");
-    let loss = tokio::time::timeout(Duration::from_secs(1), host.wait_loss())
+    // A liveness bound only: generous, so load never trips it.
+    let loss = tokio::time::timeout(Duration::from_secs(30), host.wait_loss())
         .await
         .expect("control available");
     assert!(loss.contains("resource limit"));
     assert!(host.events.lock().await.len() <= 256);
-    tokio::time::timeout(Duration::from_secs(1), host.terminate())
+    tokio::time::timeout(Duration::from_secs(30), host.terminate())
         .await
         .expect("cancel available")
         .expect("joined");

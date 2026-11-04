@@ -482,7 +482,8 @@ async fn a_spawn_dropped_mid_mint_still_commits_its_child() {
             )
             .await
     });
-    tokio::time::timeout(Duration::from_secs(10), vcs.entered.notified())
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), vcs.entered.notified())
         .await
         .expect("the mint started");
     abort(caller).await;

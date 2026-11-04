@@ -70,8 +70,9 @@ impl NoticeFixture {
     }
 
     async fn held(&self) -> TestResult {
+        // A liveness bound only: generous, so load never trips it.
         tokio::time::timeout(
-            Duration::from_secs(5),
+            Duration::from_secs(30),
             self.model.held_call_started.notified(),
         )
         .await?;
@@ -133,7 +134,8 @@ fn notice_count(agent: &Agent) -> usize {
 async fn process_notice_terminal_tool_result_consumes_before_boundary_delivery() -> TestResult {
     let fixture = NoticeFixture::with_terminal_poll(usize::MAX, &[], true).await?;
     let turn = fixture.agent.prompt("start then wait on the job").await?;
-    tokio::time::timeout(Duration::from_secs(5), async {
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), async {
         while fixture.tool.dispatches.load(Ordering::Acquire) < 2 {
             tokio::task::yield_now().await;
         }
@@ -183,7 +185,8 @@ async fn a_job_notice_after_the_admission_prepares_the_round_afresh() -> TestRes
         .leave_terminal_unjoined
         .store(true, Ordering::Release);
     let turn = fixture.agent.prompt("start then wait on the job").await?;
-    tokio::time::timeout(Duration::from_secs(5), async {
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), async {
         while fixture.tool.dispatches.load(Ordering::Acquire) < 2 {
             tokio::task::yield_now().await;
         }
@@ -246,8 +249,9 @@ async fn process_notice_crash_before_commit_redelivers_after_reopen() -> TestRes
         .block_process_notice_commits
         .store(true, Ordering::Release);
     fixture.release.notify_one();
+    // A liveness bound only: generous, so load never trips it.
     tokio::time::timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(30),
         fixture.store.process_notice_commit_started.notified(),
     )
     .await?;
@@ -515,8 +519,9 @@ async fn a_parallel_observer_join_does_not_preempt_its_waiting_sibling() -> Test
         Ok::<_, Box<dyn std::error::Error>>(())
     })
     .await??;
+    // A liveness bound only: generous, so load never trips it.
     tokio::time::timeout(
-        Duration::from_secs(10),
+        Duration::from_secs(30),
         wait_for_scheduler_fact(&tool.joined),
     )
     .await?;

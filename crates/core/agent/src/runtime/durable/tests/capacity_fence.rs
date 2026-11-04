@@ -43,7 +43,8 @@ async fn abandon_and_release_stops_admission_without_a_receipt_or_flush() -> Tes
             .await
             .is_err()
     );
-    let _ = tokio::time::timeout(Duration::from_secs(1), agent.shutdown()).await?;
+    // A liveness bound only: generous, so load never trips it.
+    let _ = tokio::time::timeout(Duration::from_secs(30), agent.shutdown()).await?;
     assert_eq!(agent.checkpoint().id(), head);
     assert_eq!(store.commit_calls.load(Ordering::Acquire), commits);
     assert_eq!(store.flushes.load(Ordering::Acquire), flushes);

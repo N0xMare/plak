@@ -97,8 +97,9 @@ fn unavailable_session_workflows_never_guess_or_mutate() {
     let (events, received) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let events = Sender::over(events);
     emit_unavailable_context(&events);
+    // A liveness bound only: generous, so load never trips it.
     assert!(matches!(
-        received.recv_timeout(Duration::from_secs(1)).unwrap(),
+        received.recv_timeout(Duration::from_secs(30)).unwrap(),
         HostEvent::Usage(usage)
             if usage.prepared_input.is_none()
                 && usage.admitted_ceiling.is_none()

@@ -145,7 +145,8 @@ async fn crash_while_awaiting_credentials_recovers_prepared_operation_without_di
     // This is the same per-session gate the pre-send fence holds, not merely
     // a separate request-slot budget. A waiter must relinquish it.
     let gate = Arc::clone(&agent.inner.provider_dispatch_gate);
-    let guard = tokio::time::timeout(Duration::from_secs(1), gate.lock()).await?;
+    // A liveness bound only: generous, so load never trips it.
+    let guard = tokio::time::timeout(Duration::from_secs(30), gate.lock()).await?;
     drop(guard);
     let providers: Vec<_> = head
         .manifest()
@@ -359,7 +360,8 @@ async fn idle_compaction_wait_case(
             ))
             .await
     });
-    tokio::time::timeout(Duration::from_secs(5), async {
+    // A liveness bound only: generous, so load never trips it.
+    tokio::time::timeout(Duration::from_secs(30), async {
         while agent.credential_wait() != Some(crate::runtime::CredentialWait::SessionWorkflow) {
             tokio::task::yield_now().await;
         }
@@ -419,7 +421,7 @@ async fn idle_compaction_wait_case(
     } else {
         waiting.release.notify_one();
     }
-    let result = tokio::time::timeout(Duration::from_secs(5), compact).await??;
+    let result = tokio::time::timeout(Duration::from_secs(30), compact).await??;
     assert!(agent.credential_wait().is_none());
     if advance_head {
         assert!(

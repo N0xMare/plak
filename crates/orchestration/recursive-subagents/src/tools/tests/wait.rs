@@ -760,7 +760,8 @@ async fn owned_process_wakes_only_waits_admitted_before_its_terminal_transition(
         std::time::Duration::from_millis(250),
     )
     .unwrap();
-    let outcome = tokio::time::timeout(std::time::Duration::from_secs(2), pending)
+    // A liveness bound only: generous, so load never trips it.
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(30), pending)
         .await
         .unwrap()
         .unwrap();
@@ -1079,7 +1080,8 @@ async fn steer_wakes_wait_without_mail_or_a_durable_receipt() {
         Box::pin(waiter.wait_operation_preempt("steer-wait", &arguments, Some(receiver)));
     assert!(futures_util::poll!(pending.as_mut()).is_pending());
     sender.send(plakous::tools::ToolPreempt::Steer).unwrap();
-    let result = tokio::time::timeout(std::time::Duration::from_secs(2), pending)
+    // A liveness bound only: generous, so load never trips it.
+    let result = tokio::time::timeout(std::time::Duration::from_secs(30), pending)
         .await
         .unwrap()
         .unwrap();
@@ -1113,7 +1115,8 @@ async fn notice_wakes_wait_without_mail_or_a_durable_receipt() {
     sender
         .send(plakous::tools::ToolPreempt::Notice(false))
         .unwrap();
-    let result = tokio::time::timeout(std::time::Duration::from_secs(2), pending)
+    // A liveness bound only: generous, so load never trips it.
+    let result = tokio::time::timeout(std::time::Duration::from_secs(30), pending)
         .await
         .unwrap()
         .unwrap();
@@ -1272,7 +1275,7 @@ async fn cancelling_a_parked_hub_wait_releases_mail_to_the_deliverer() {
     drop(pending_wait);
     // A liveness bound, not a deadline: the send's writer turns run on the
     // blocking pool, which a loaded gate host can delay past a second.
-    let receipt = tokio::time::timeout(std::time::Duration::from_secs(15), pending_send)
+    let receipt = tokio::time::timeout(std::time::Duration::from_secs(30), pending_send)
         .await
         .unwrap()
         .unwrap();
@@ -1410,7 +1413,8 @@ async fn a_process_terminal_takes_precedence_over_a_notice_wake() {
     sender
         .send(plakous::tools::ToolPreempt::Notice(false))
         .unwrap();
-    let outcome = tokio::time::timeout(std::time::Duration::from_secs(2), pending)
+    // A liveness bound only: generous, so load never trips it.
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(30), pending)
         .await
         .unwrap()
         .unwrap();

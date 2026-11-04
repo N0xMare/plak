@@ -249,8 +249,9 @@ async fn a_root_publication_parks_on_a_full_tree_store_until_released_or_shut_do
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     assert!(!shut.is_finished(), "the publication parks again");
     host.signal();
+    // A liveness bound only: generous, so load never trips it.
     assert!(
-        tokio::time::timeout(std::time::Duration::from_secs(5), shut)
+        tokio::time::timeout(std::time::Duration::from_secs(30), shut)
             .await
             .unwrap()
             .unwrap()

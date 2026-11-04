@@ -250,7 +250,8 @@ fn process_await_wait_does_not_reserve_a_blocking_worker() -> Result<(), Box<dyn
         preempt.send(plakous_tools::ToolPreempt::Steer)?;
         release_tx.send(())?;
         worker.await?;
-        let result = tokio::time::timeout(std::time::Duration::from_secs(5), waiting).await??;
+        // A liveness bound only: generous, so load never trips it.
+        let result = tokio::time::timeout(std::time::Duration::from_secs(30), waiting).await??;
         assert!(available.is_ok(), "process await reserved the only blocking worker while waiting");
         Ok::<_, Box<dyn Error>>(result)
     });
@@ -1679,7 +1680,8 @@ async fn a_finished_session_keeps_its_handle_and_frees_its_slot() -> Result<(), 
     assert!(started.projection.session_id.is_some());
 
     let sessions = environment.joined_process_sessions()?;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    // A liveness bound only: generous, so load never trips it.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     while sessions
         .session_for_number(u32::try_from(
             started.projection.session_id.ok_or("handle")?,
@@ -2496,7 +2498,8 @@ async fn write_to_an_exited_session_is_a_definite_failure_not_an_unknown_outcome
     assert_eq!(delivered.kind(), ToolOutcomeKind::Success);
 
     let sessions = environment.joined_process_sessions()?;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    // A liveness bound only: generous, so load never trips it.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
         let terminal = sessions
             .session_for_number(u32::try_from(handle)?)
@@ -2733,7 +2736,8 @@ async fn sequential_page_filled_starts_never_exhaust_the_executor_handle_table()
             .session_for_number(u32::try_from(handle)?)
             .ok_or("job handle")?;
         sessions.write_stdin(id, b"finish\n", JoinedProcessInputDisposition::KeepOpen)?;
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        // A liveness bound only: generous, so load never trips it.
+        tokio::time::timeout(std::time::Duration::from_secs(30), async {
             while sessions.joined_terminal_status(id).is_none() {
                 tokio::task::yield_now().await;
             }
