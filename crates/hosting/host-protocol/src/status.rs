@@ -3,7 +3,8 @@
 use crate::notice_remedy::NoticeRemedy;
 
 /// Latest host phase, not a terminal result or a notice phase.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum HostPhase {
     #[default]
     /// The idle phase.
@@ -54,7 +55,8 @@ impl HostPhase {
 }
 
 /// Independent tree/queue admission pauses.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct HostPause {
     /// The restored tree requires explicit admission.
     pub tree: bool,
@@ -63,8 +65,22 @@ pub struct HostPause {
 }
 
 /// Bounded factual diagnostic; never used to route operator remedies.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(from = "String", into = "String")]
 pub struct DiagnosticText(String);
+
+/// A received diagnostic is bounded as one made here.
+impl From<String> for DiagnosticText {
+    fn from(value: String) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<DiagnosticText> for String {
+    fn from(value: DiagnosticText) -> Self {
+        value.0
+    }
+}
 
 impl DiagnosticText {
     /// Bound an already redaction-safe diagnostic at a UTF-8 boundary.
@@ -86,7 +102,8 @@ impl DiagnosticText {
 }
 
 /// Typed attach/startup failure; composition retains its remedy separately from prose.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct HostFailure {
     /// Bounded, redaction-safe failure facts.
     pub diagnostic: DiagnosticText,
@@ -101,7 +118,8 @@ pub struct HostFailure {
 }
 
 /// Exact source facts of binding refusals, independent of their diagnostic.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum HostFailureOrigin {
     /// Native binding or credential revalidation.
     NativeBinding {
@@ -144,7 +162,8 @@ impl std::fmt::Display for HostFailure {
 impl std::error::Error for HostFailure {}
 
 /// Typed attach repair distinctions that survive error wrapping.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum AttachFailure {
     /// The JavaScript runtime artifact is unavailable.
     JavaScriptHostUnavailable,
@@ -194,7 +213,8 @@ impl DetachedReason {
 }
 
 /// Why no canonical agent is attached.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum DetachedReason {
     /// No root profile has been selected.
     MissingDefaults,
@@ -211,7 +231,8 @@ pub enum DetachedReason {
 }
 
 /// Origin distinguishes the existing direct and queued status spellings.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum SteerSource {
     /// A direct steer action.
     Direct,
@@ -220,14 +241,16 @@ pub enum SteerSource {
 }
 
 /// One bounded control failure, never a frontend instruction.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ControlFailure {
     /// Redaction-safe runtime diagnostic.
     pub diagnostic: DiagnosticText,
 }
 
 /// Why the runtime has not been observed to settle a cancel request.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum CancelUnsettled {
     /// The runtime refused cancellation.
     RuntimeRefused {
@@ -258,7 +281,8 @@ impl std::fmt::Display for CancelUnsettled {
 }
 
 /// A stage in a clear or profile-rebind transition.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum HostTransitionStage {
     /// The clear resolve authority stage.
     ClearResolveAuthority,
@@ -283,7 +307,8 @@ pub enum HostTransitionStage {
 }
 
 /// Typed status facts; absence of a detail remains distinct from every case here.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum HostStatusDetail {
     /// Product settings location, supplied by the product settings adapter.
     ConfigurationPath {

@@ -9,7 +9,17 @@ macro_rules! define_observations {
         /// and activity deltas, immutable snapshots, admission receipts and
         /// binding/usage projections. Every variant but `Extension` is closed.
         #[allow(clippy::large_enum_variant, reason = "bounded typed observation vocabulary")]
-        #[derive(Clone, Debug, Eq, PartialEq)]
+        #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+        #[serde(
+            tag = "kind",
+            content = "body",
+            rename_all = "snake_case",
+            deny_unknown_fields,
+            bound(
+                serialize = "P::Intent: serde::Serialize, P::Observation: serde::Serialize",
+                deserialize = "P::Intent: serde::de::DeserializeOwned, P::Observation: serde::de::DeserializeOwned"
+            )
+        )]
         pub enum SessionObservation<$p: crate::intent::ProtocolExtension = crate::intent::Core> {
             $($all)*
         }

@@ -114,7 +114,8 @@ pub const MAX_PRESENTATION_BYTES: usize = 18 * 1024 * 1024;
 
 /// A complete replaceable transcript presentation: the typed rows a restore
 /// renders, oldest first. The same rows the host emits live.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(try_from = "PresentationSnapshotFields")]
 pub struct PresentationSnapshot {
     /// Wire/read-model schema, independent of semantic runtime revisions.
     pub schema: u32,
@@ -124,6 +125,34 @@ pub struct PresentationSnapshot {
     pub revision: u64,
     /// Ordered transcript rows.
     pub items: Vec<TranscriptItem>,
+}
+
+/// A snapshot as it arrives, before [`PresentationSnapshot::validate`].
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PresentationSnapshotFields {
+    schema: u32,
+    scope: TranscriptScope,
+    revision: u64,
+    items: Vec<TranscriptItem>,
+}
+
+/// A peer cannot hand over a snapshot the host would refuse to emit.
+impl TryFrom<PresentationSnapshotFields> for PresentationSnapshot {
+    type Error = String;
+
+    fn try_from(fields: PresentationSnapshotFields) -> Result<Self, String> {
+        let snapshot = Self {
+            schema: fields.schema,
+            scope: fields.scope,
+            revision: fields.revision,
+            items: fields.items,
+        };
+        snapshot
+            .validate()
+            .map_err(|error| format!("invalid presentation snapshot: {error:?}"))?;
+        Ok(snapshot)
+    }
 }
 
 impl PresentationSnapshot {
@@ -177,7 +206,8 @@ pub enum PresentationError {
 }
 
 /// One collapsed Tact-like activity row.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ActivityItem {
     /// Stable product/call identity, never a display label.
     pub id: String,
@@ -241,7 +271,8 @@ pub enum ActivityKind {
 }
 
 /// Honest activity lifecycle state.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum ActivityState {
     Pending,
     Running,
@@ -251,13 +282,15 @@ pub enum ActivityState {
 }
 
 /// Context and terminal usage remain observations with their qualifications.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct UsageView {
     pub context: Option<ContextUsage>,
     pub turn: Option<TurnUsage>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ContextUsage {
     /// Host-owned categorical breakdown backing the Context section's
     /// 100-cell grid. `None` when the projection carries no breakdown; the
@@ -283,7 +316,8 @@ pub struct ContextUsage {
 /// Everything here is host-projected from the Plakous context projection. A
 /// value the projection does not carry is absent, never a zero: the renderer
 /// prints `not reported` instead of a fabricated share.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ContextBreakdownView {
     /// Occupying tokens for the chrome meter and Context board: the Plakous
     /// context measure (last provider `input_tokens` of a sent request plus
@@ -314,7 +348,8 @@ pub struct ContextBreakdownView {
 }
 
 /// One occupying category on the Context board.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ContextCategoryView {
     /// Operator-facing label, e.g. `System`.
     pub label: String,
@@ -324,7 +359,8 @@ pub struct ContextCategoryView {
 
 /// One `◈` informational row. It reports its own token cost and is never a
 /// bar category (spec 02 §5.6).
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ContextInfoRowView {
     /// Operator-facing label, e.g. `Tool definitions`.
     pub label: String,
@@ -334,13 +370,15 @@ pub struct ContextInfoRowView {
     pub detail: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum ContextCeilingExcess {
     ExactOverflow(u64),
     UpperBoundExcess(u64),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum PreparedInputUsage {
     Exact(u64),
     UpperBound(u64),
@@ -360,13 +398,15 @@ impl PreparedInputUsage {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct AdmittedContextCeiling {
     pub tokens: u64,
     pub basis: String,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct TurnUsage {
     pub input_tokens: u64,
     pub output_tokens: u64,
@@ -387,7 +427,8 @@ pub struct TurnUsage {
 /// with a reason, or has landed. It carried a full provider/meter/window
 /// payload that every consumer discarded, rebuilt on a worker thread at every
 /// refresh; the payload is gone.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum SubscriptionUsageView {
     /// The product host has begun a read but has not supplied a terminal observation.
     #[default]
@@ -407,7 +448,10 @@ pub enum SubscriptionUsageView {
 /// account identifier it logs in with and the operator-facing label for it,
 /// and the protocol only carries the pair. A host with three verticals, or
 /// twelve, needs no change here.
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd,
+)]
+#[serde(deny_unknown_fields)]
 pub struct UsageVertical {
     account: String,
     label: String,
@@ -441,7 +485,8 @@ impl UsageVertical {
 /// `verticals` always carries every vertical of the host's roster, in the
 /// host's order: a vertical with no data is listed with its reason, never
 /// omitted.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct UsageLimitsView {
     /// Every vertical of the host's roster, in the host's order.
     pub verticals: Vec<VerticalUsageView>,
@@ -453,7 +498,8 @@ pub struct UsageLimitsView {
 }
 
 /// One vertical's allowance block.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct VerticalUsageView {
     /// Semantic repair selected at the read source, never inferred from its reason text.
     pub repair: Option<super::UsageRepair>,
@@ -477,7 +523,8 @@ pub struct VerticalUsageView {
 }
 
 /// One provider-reported monetary balance line under a vertical's meters.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct UsageBalanceView {
     /// Operator-facing balance name, e.g. `Credits` or `Pay as you go`.
     pub label: String,
@@ -487,7 +534,8 @@ pub struct UsageBalanceView {
 }
 
 /// Terminal state of one vertical's allowance read.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum VerticalUsageState {
     /// An authenticated endpoint supplied these meters.
     Ready {
@@ -504,7 +552,8 @@ pub enum VerticalUsageState {
 }
 
 /// One allowance meter inside a Ready vertical.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct UsageMeterView {
     /// Operator-facing meter name, e.g. `Weekly limit` or `Key usage`.
     pub label: String,
@@ -523,7 +572,8 @@ pub struct UsageMeterView {
 pub const USAGE_NOT_REPORTED: &str = "usage not reported by the provider";
 
 /// A provider-reported meter reading.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum UsageMeterReading {
     /// A percentage consumed. `floored_percent` is the whole percent consumed,
     /// truncated the way the provider truncates; `exact_percent` keeps the
@@ -551,7 +601,8 @@ pub enum UsageMeterReading {
 }
 
 /// One labelled currency amount.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct UsageAmountView {
     /// Operator-facing amount label, e.g. `today`.
     pub label: String,
@@ -560,7 +611,8 @@ pub struct UsageAmountView {
 }
 
 /// Session token/call ledger for the Limits and Session surfaces.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct SessionLedgerView {
     /// Input tokens summed over reporting model operations.
     pub input_tokens: u64,
@@ -583,7 +635,8 @@ pub struct SessionLedgerView {
 }
 
 /// Session cost, which is never printed as `$0` when it is unknown.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum UsageCostView {
     /// No provider reported a cost. Renders `not available` with this reason.
     NotAvailable {
@@ -618,7 +671,8 @@ impl Default for UsageLimitsView {
 }
 
 /// Product-volume health for idle chrome, never recovery authority.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum StorageLevel {
     /// No capacity warning.
     #[default]
@@ -633,7 +687,8 @@ pub enum StorageLevel {
 ///
 /// Each field is typed host data. The renderer formats it; it never re-parses
 /// a rendered string, and an absent field prints `not reported`.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct SessionInfoView {
     /// Product-home capacity level, with no operator paths or rendered prose.
     /// In-process chrome only; not persisted or projected on JSONL v1.
@@ -674,7 +729,8 @@ pub struct SessionInfoView {
 }
 
 /// The bound model's admitted context envelope (spec 02 §5.6), as typed data.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct SessionContextView {
     /// Raw context window the evidence reports, when it reports one.
     pub reported_window: Option<u64>,
@@ -686,7 +742,8 @@ pub struct SessionContextView {
 }
 
 /// Exact chrome labels for the currently attached product branch.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct BindingView {
     pub session_id: Option<String>,
     pub account: Option<String>,
@@ -698,7 +755,8 @@ pub struct BindingView {
 }
 
 /// A binding replacement plus an optional truthful transition for inline UI.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct BindingUpdate {
     pub current: BindingView,
     pub transition: Option<BindingTransition>,
@@ -728,7 +786,8 @@ impl BindingUpdate {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum BindingTransition {
     Rebound {
         previous: Box<BindingView>,

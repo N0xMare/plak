@@ -1,7 +1,8 @@
 //! Typed allowance-read repair facts, independent of product command grammar.
 
 /// Credential condition that prevented an allowance read.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum UsageCredentialState {
     /// A token refresh is required.
     RefreshRequired,
@@ -16,7 +17,8 @@ pub enum UsageCredentialState {
 }
 
 /// Which key source the operator must repair.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum KeySource {
     /// An explicitly selected environment key overrides the key file.
     Environment,
@@ -25,7 +27,8 @@ pub enum KeySource {
 }
 
 /// One semantic repair for an unavailable allowance read.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum UsageRepair {
     /// Native credential condition, with the account supplied by the vertical.
     Credential(UsageCredentialState),

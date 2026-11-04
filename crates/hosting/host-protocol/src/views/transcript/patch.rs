@@ -6,7 +6,8 @@ use super::{RowKey, ToolItem, TranscriptRevision, TranscriptRow};
 
 /// Uncommitted appends between keyed publication boundaries. These are not
 /// revisions: a snapshot contains their accumulated resync baseline.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum TranscriptStreamDelta {
     /// Assistant prose appended to the current output.
     Assistant(String),
@@ -27,7 +28,10 @@ use crate::views::presentation::{
 };
 
 /// The transcript an update belongs to; child content never mutates the root.
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum TranscriptScope {
     /// The attached product session.
     #[default]
@@ -37,7 +41,8 @@ pub enum TranscriptScope {
 }
 
 /// A row and its immutable ordering identity within one transcript scope.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct TranscriptItem {
     /// Ordering identity, not a display label or vector index.
     pub key: RowKey,
@@ -47,7 +52,8 @@ pub struct TranscriptItem {
 
 /// An atomic update to one exact presentation revision. Missing a revision
 /// requires a scope snapshot; a patch is never recovery or terminal authority.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(try_from = "TranscriptPatchFields")]
 pub struct TranscriptPatch {
     /// The transcript to update.
     pub scope: TranscriptScope,
@@ -59,6 +65,36 @@ pub struct TranscriptPatch {
     pub upserts: Vec<TranscriptItem>,
     /// Removed keys, in strictly increasing order and disjoint from upserts.
     pub deletes: Vec<RowKey>,
+}
+
+/// A patch as it arrives, before [`TranscriptPatch::validate`].
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TranscriptPatchFields {
+    scope: TranscriptScope,
+    from_revision: u64,
+    to_revision: u64,
+    upserts: Vec<TranscriptItem>,
+    deletes: Vec<RowKey>,
+}
+
+/// A peer cannot hand over a patch the host would refuse to emit.
+impl TryFrom<TranscriptPatchFields> for TranscriptPatch {
+    type Error = String;
+
+    fn try_from(fields: TranscriptPatchFields) -> Result<Self, String> {
+        let patch = Self {
+            scope: fields.scope,
+            from_revision: fields.from_revision,
+            to_revision: fields.to_revision,
+            upserts: fields.upserts,
+            deletes: fields.deletes,
+        };
+        patch
+            .validate()
+            .map_err(|error| format!("invalid transcript patch: {error:?}"))?;
+        Ok(patch)
+    }
 }
 
 impl TranscriptPatch {

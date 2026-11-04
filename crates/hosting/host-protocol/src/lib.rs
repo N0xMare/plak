@@ -92,6 +92,7 @@ pub mod selection;
 pub mod status;
 pub mod topology;
 pub mod views;
+pub mod wire;
 
 pub use channel::{
     IntentAcknowledgement, IntentDelivery, IntentReceiver, IntentSendError, IntentSender,
@@ -114,6 +115,9 @@ mod wire_identity_goldens;
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]
 mod round_trip_tests;
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]
+mod wire_serde_tests;
 
 /// Host facts that determine a node's prompt completion channel, not its tool grants.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

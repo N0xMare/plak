@@ -560,7 +560,8 @@ impl NoticeScope {
 }
 
 /// Where a notice renders.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum NoticePlacement {
     /// An item inside the current tool group.
     GroupItem,

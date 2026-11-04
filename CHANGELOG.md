@@ -234,6 +234,18 @@ an export.
   seal-back never moves a candidate reference that names another commit: it
   records a `vcs_fault` instead. A failed apply leaves no upload, and the
   reclamation pass sweeps transfer files older than a day.
+- Wire v2 types in `plakous-host-protocol` (no frontend speaks it yet;
+  JSONL v1 is unchanged): every observation has a class
+  (`SessionObservation::class`: broadcast state, required or droppable
+  event, or addressed to one attachment); intents and observations
+  serialize as tagged objects that refuse unknown fields, decoding a
+  snapshot or patch only when it validates and image bytes as base64; and
+  the `wire` module holds the NDJSON frames (16 MiB lines), the
+  exact-version handshake, requests with one typed response each, blob
+  chunks for images and paged snapshots, with bounded blob and snapshot
+  assembly and the event class derived at the receiver. Embedder break:
+  `ObservationExtension` gains `wire_class` (with a default) and the
+  protocol's view types serialize.
 - A Messages `model_context_window_exceeded` stop fails the stream and takes
   the context-limit overflow fold when nothing hosted ran, on Anthropic and
   OpenRouter.

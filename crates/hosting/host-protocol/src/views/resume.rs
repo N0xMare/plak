@@ -2,7 +2,8 @@
 //! already filtered to the current workspace, newest first.
 
 /// One host-authoritative session row eligible for exact resume.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ResumeSessionEntry {
     /// Exact durable product session id.
     pub id: String,

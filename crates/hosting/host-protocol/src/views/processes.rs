@@ -1,7 +1,8 @@
 //! Observational background-process rows; identifiers are not process authority.
 
 /// A live or recently finished background process.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ProcessView {
     /// Host-local opaque identity, stable across same-branch reopen.
     pub id: String,
@@ -20,7 +21,8 @@ pub struct ProcessView {
 }
 
 /// Process-local outcome, never durable runtime authority.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum ProcessStatus {
     /// Still running.
     Running,

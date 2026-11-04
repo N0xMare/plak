@@ -24,6 +24,14 @@ pub trait ObservationExtension: Clone + fmt::Debug + Eq + Send + 'static {
     fn same_kind(&self, other: &Self) -> bool;
     /// Content-free kind label for diagnostics.
     fn kind_label(&self) -> &'static str;
+    /// Who receives it once several attachments share a node; by default
+    /// [`crate::observation::default_extension_class`].
+    fn wire_class(&self) -> crate::observation::ObservationClass
+    where
+        Self: Sized,
+    {
+        crate::observation::default_extension_class(self)
+    }
 }
 
 /// The closed protocol with no extension traffic.
@@ -31,7 +39,8 @@ pub trait ObservationExtension: Clone + fmt::Debug + Eq + Send + 'static {
 pub struct Core;
 
 /// Uninhabited: the [`Core`] protocol has no extension payload.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum Never {}
 
 impl ObservationExtension for Never {
@@ -59,7 +68,17 @@ impl ProtocolExtension for Core {
 /// The closed protocol is every variant but [`Self::Extension`]; that slot
 /// carries the driver's own product traffic (settings, overlays) through the
 /// same bounded mailbox without the protocol interpreting it.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(
+    tag = "kind",
+    content = "body",
+    rename_all = "snake_case",
+    deny_unknown_fields,
+    bound(
+        serialize = "P::Intent: serde::Serialize",
+        deserialize = "P::Intent: serde::de::DeserializeOwned"
+    )
+)]
 pub enum SessionIntent<P: ProtocolExtension = Core> {
     /// Idle submit — start a new turn.
     Prompt(Draft),
@@ -300,7 +319,8 @@ impl<P: ProtocolExtension> fmt::Debug for SessionIntent<P> {
 ///
 /// A string converts to a text-only draft. The host validates the images
 /// again at admission; the protocol only carries them.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct Draft {
     /// Prompt text as the operator wrote it.
     pub text: String,
@@ -348,18 +368,38 @@ impl From<&str> for Draft {
 }
 
 /// One image attached to a [`Draft`].
-#[derive(Clone, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct DraftImage {
     /// File name the operator attached, for display only; never sent to the model.
     pub name: String,
     /// `image/png`, `image/jpeg`, `image/gif` or `image/webp`.
     pub media_type: String,
-    /// The encoded image as it is sent.
+    /// The encoded image as it is sent; base64 on the wire.
+    #[serde(with = "base64_bytes")]
     pub bytes: Vec<u8>,
     /// The attached image's dimensions when Plak downscaled it to fit the
     /// bounds; `None` when it was attached at the dimensions sent. Display
     /// only: history keeps the sent image's facts alone.
     pub source_dimensions: Option<(u32, u32)>,
+}
+
+/// Image bytes as standard base64 text.
+mod base64_bytes {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::STANDARD;
+    use serde::{Deserialize as _, Deserializer, Serializer};
+
+    pub(super) fn serialize<S: Serializer>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&STANDARD.encode(bytes))
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<u8>, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        STANDARD.decode(text).map_err(serde::de::Error::custom)
+    }
 }
 
 impl fmt::Debug for DraftImage {
@@ -374,7 +414,8 @@ impl fmt::Debug for DraftImage {
 }
 
 /// Closed operator decision for one pending effect approval.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum ApprovalChoice {
     /// Authorize the exact pending invocation once.
     Allow,

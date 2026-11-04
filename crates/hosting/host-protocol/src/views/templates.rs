@@ -3,7 +3,8 @@
 /// One agent template, as the host projected it with its readiness.
 /// The host owns where templates live and which copy wins
 /// a name collision; it computes readiness, and the TUI only renders it.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct TemplateRow {
     /// Template name, the `<name>` in `agents/<name>.toml`.
     pub name: String,

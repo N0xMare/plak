@@ -3667,6 +3667,66 @@ Diagnostic spans and the telemetry rows for this surface are content-free: a
 command records its `kind` and the session id and the admitted-to-completed
 latency, and nothing else. Prompt text never reaches a span.
 
+### 4.4 Wire v2
+
+Wire v2 is the framed protocol every frontend will speak to a host; it
+replaces the JSONL host of §4.3, which stays byte-identical until it is
+removed. Its types live in `plakous-host-protocol` (`wire`, the observation
+classes, and serde on every intent and observation). No frontend speaks it
+yet: the host side (attachments, node attach) follows.
+
+- **Framing.** One JSON object per line in both directions, each carrying
+  `frame`, at most 16 MiB including the newline. A longer line is refused
+  without being held whole and skipped to its newline. Image bytes travel as
+  `blob` frames of at most 1 MiB raw (base64), sent before the intent or
+  event that names them in its `blobs` list, in image order; one blob holds
+  at most 8 MiB. A presentation snapshot travels as `snapshot` pages of one
+  revision and scope, in order, the last one completing it; the receiver
+  validates the reassembled snapshot as the host does before it emits one.
+- **Handshake.** The client's first frame is `hello` (protocol version,
+  binary id, capabilities, and its locality: reached over ssh, can open a
+  browser). The host answers `welcome` (version, binary id, host
+  generation, capabilities) or `refused` with `version_mismatch`,
+  `malformed` or `busy`, and closes. The version must match exactly.
+- **Requests.** A `request` carries a client-chosen id and an `op`:
+  `attach` (a node, by tree and agent id), `detach`, `intent` (an
+  attachment and a session intent) or `ping`. It gets exactly one
+  `response` with that id: `attached`, `detached`, `accepted` (the intent
+  entered the node's mailbox; what it does arrives as observations) or
+  `pong`, or a refusal: `backpressure`, `one_in_flight`, `disconnected`,
+  `refused_for_role` (with its role-table row), `unknown_node`,
+  `not_attached` or `malformed`. A refused request did nothing.
+- **Observation classes.** Every observation is one class. A **state** is
+  broadcast as the latest value of its kind and is part of the attach
+  snapshot. An **event** is broadcast as it happens; a *required* event is
+  never dropped (an attachment that cannot take one gets
+  `resync_required` and is detached), a *droppable* one may be coalesced or
+  evicted and is repaired by a resnapshot. An **addressed** observation
+  goes to one attachment only: the answer to its own request (draft and
+  queue-edit verdicts, steer acknowledgements, call detail, the navigator
+  and resume lists, tool-invocation origins and correlation resets, and the
+  storage refusal of its own action) or its own presentation baseline
+  (snapshots and keyed patches). An extension
+  observation is a state when it is latest-state and a droppable event
+  otherwise, unless the extension says. Every v1 required kind is a state or
+  a required event, except the navigator's answers, which are addressed.
+- **Events and reconnect.** An `event` carries its attachment, the
+  attachment's sequence number (for gap detection only), its class and the
+  observation. A reconnect is a fresh attach: nothing is replayed, and the
+  attach snapshot carries every state and re-emits, as its event, every
+  approval still pending and the credential wait that holds, so a client
+  attaching after either sees what it must answer. A receiver derives an
+  event's class from its observation and refuses one sent with another.
+- **Bounds.** A connection holds at most 10 blobs and 40 MiB of blob bytes
+  before the frame that names them; the next request or event drops any
+  it does not name. A snapshot takes at most 64 pages and twice the
+  presentation byte bound.
+- **Serde.** Frames, intents and observations refuse unknown fields;
+  intents and observations are tagged objects (`kind`, and `body` when
+  they carry one), snake case. A
+  snapshot or patch decodes only when it validates; a diagnostic is
+  bounded as one made here; image bytes are base64.
+
 ## 5. The terminal interface
 
 The hosted launch API is frontend-neutral: `HostLaunchPreparation`,

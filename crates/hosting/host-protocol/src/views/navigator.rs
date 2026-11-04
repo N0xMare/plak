@@ -7,7 +7,8 @@
 /// Per-attempt usage the host projects for one node.
 ///
 /// Model-visible counters only: cost and quota balances never reach a row.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct AttemptUsage {
     /// Wall time the attempt has been running, as the host measured it.
     pub elapsed_ms: u64,
@@ -24,7 +25,7 @@ pub struct AttemptUsage {
 }
 
 /// Disposable per-attempt compaction projection; absent until the child feed is observed.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AttemptCompaction {
     /// Semantic replacements committed.
     pub committed: u64,
@@ -44,7 +45,8 @@ pub struct AttemptCompaction {
 ///
 /// A blocked attempt leaves the *node* `Failed`; the reset time lives on the
 /// attempt, which is why the TUI reads it from here and not from the status.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct BlockedObservation {
     /// Provider-named quota that refused.
     pub quota: String,

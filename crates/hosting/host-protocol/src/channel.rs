@@ -849,7 +849,7 @@ pub fn observation_channel<P: ProtocolExtension>() -> (ObservationSender<P>, Obs
     )
 }
 
-fn latest_state_event<P: ProtocolExtension>(event: &SessionObservation<P>) -> bool {
+pub(crate) fn latest_state_event<P: ProtocolExtension>(event: &SessionObservation<P>) -> bool {
     if let SessionObservation::Extension(extension) = event {
         return extension.latest_state();
     }

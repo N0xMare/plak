@@ -14,7 +14,8 @@ use crate::topology::{
 };
 
 /// One preorder row of a tree, typed.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct NodeView {
     /// Exact durable agent id.
     pub agent_id: String,
@@ -96,7 +97,8 @@ pub struct NodeView {
     clippy::struct_excessive_bools,
     reason = "dormancy facts are independent and several may be true at once"
 )]
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct NodeDormancy {
     /// Parked, including a wait that is not named yet.
     pub parked: bool,
@@ -130,7 +132,8 @@ impl NodeDormancy {
 }
 
 /// Non-authoritative, bounded observation of one running child's turn.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ChildProgress {
     /// Exact turn identity; never inferred from a tree revision.
     pub turn_id: String,
@@ -176,7 +179,8 @@ impl NodeView {
 }
 
 /// A revisioned complete tree, typed. Replace, never patch locally.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct TreeView {
     /// Durable tree id.
     pub tree_id: String,

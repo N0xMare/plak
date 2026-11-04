@@ -1189,6 +1189,7 @@ dependencies = [
 name = "plakous-host-protocol"
 version = "0.0.3"
 dependencies = [
+ "base64 0.22.1",
  "serde",
  "serde_json",
  "uuid",

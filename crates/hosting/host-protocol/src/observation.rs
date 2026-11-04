@@ -12,6 +12,13 @@ use crate::views::{
 
 #[macro_use]
 mod vocabulary;
+mod class;
+#[cfg(test)]
+mod samples;
+#[cfg(test)]
+pub(crate) use samples::class_samples;
+
+pub use class::{Delivery, ObservationClass, default_extension_class};
 
 define_observations! {
     P;
@@ -443,7 +450,8 @@ define_observations! {
 
 /// The idle pending-work snapshot carried by
 /// [`SessionObservation::PendingContinuation`].
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct PendingContinuation {
     /// Undelivered child results addressed to the root.
     pub results: u32,
@@ -458,7 +466,8 @@ pub struct PendingContinuation {
 }
 
 /// Immutable queue row supplied by the authoritative product host.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct QueueItem {
     /// This revision was definitely refused and requires editing or new submission.
     pub rejected: bool,
@@ -474,7 +483,8 @@ pub struct QueueItem {
 }
 
 /// Host-owned automatic queue delivery state.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum QueueDrainState {
     /// An uninterrupted attached session may deliver FIFO, one item at a time.
     LiveAutoDrain,
@@ -483,7 +493,8 @@ pub enum QueueDrainState {
 }
 
 /// Host-authoritative terminal context-capacity recovery presentation.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum ContextCapacityRecovery {
     /// The withheld prompt can be shortened and explicitly sent again.
     ResendShorter,
