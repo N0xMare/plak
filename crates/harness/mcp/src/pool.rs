@@ -60,6 +60,8 @@ struct PoolInner {
 struct EntryKey {
     server: McpServerName,
     definition: Digest,
+    /// The runner the server runs on: one entry per runner and root.
+    runner: Option<String>,
     root: PathBuf,
 }
 
@@ -124,6 +126,10 @@ impl McpPool {
         let key = EntryKey {
             server: spec.name().clone(),
             definition: spec.definition_digest()?,
+            runner: environment
+                .backend()
+                .runner_id()
+                .map(|runner| runner.as_str().to_owned()),
             root: environment.workspace().root().to_path_buf(),
         };
         let entry = {

@@ -25,9 +25,24 @@ pub use process::{ProcessRunner, process_runner, select_process_runner, workspac
 use serde_json::Value;
 pub(super) use service::RunnerServiceOwner;
 pub use service::{
-    ServeServiceFuture, serve_service_spawn, serve_service_terminate, service_spawned,
-    terminated_service,
+    RunnerSecretResolver, ServeServiceFuture, serve_service_spawn, serve_service_terminate,
+    service_spawned, terminated_service,
 };
+
+/// `request` naming `secrets` (variable, secret name) for the runner that
+/// spawns it to resolve from its own store. A local backend refuses such a
+/// request.
+///
+/// # Errors
+///
+/// Rejects an invalid secret name, a variable named twice, and too many
+/// environment entries.
+pub fn with_runner_secrets(
+    request: crate::ServiceProcessRequest,
+    secrets: Vec<(crate::EnvironmentVariableName, String)>,
+) -> Result<crate::ServiceProcessRequest, ExecutionBackendError> {
+    request.with_runner_secrets(secrets)
+}
 pub use sessions::{
     RunnerSessions, decode_jobs_snapshot, job_capacity, line_sessions, serve_jobs_watch,
     serve_sessions,

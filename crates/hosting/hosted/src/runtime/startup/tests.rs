@@ -152,7 +152,8 @@ fn creation_freezes_listed_mcp_tools_and_records_the_omission_notice() {
         .collect::<Vec<_>>();
     assert!(names.contains(&"echo".to_owned()), "{names:?}");
     assert!(!names.contains(&"tangled".to_owned()), "{names:?}");
-    // Every server runs on the host today, and each record freezes so.
+    // A server without a placement runs on the host, and each record
+    // freezes so.
     let stored = config.session.frozen_tools.as_ref().unwrap();
     assert_eq!(
         stored.mcp_placements(),

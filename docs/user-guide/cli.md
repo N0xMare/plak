@@ -294,7 +294,7 @@ plak mcp remove github
 
 ---
 
-### `plak runner serve|connect|allow|ps|pair`
+### `plak runner serve|connect|allow|ps|pair|secret`
 
 Runners run tools on another machine you can ssh to. No session runs on a
 runner yet; these commands set one up and show what it holds.
@@ -328,7 +328,9 @@ once with plain `ssh` to accept it). On the runner machine,
 running, `plak runner serve` runs it in the foreground, `plak runner allow
 <host-id>` pairs a host by hand and `plak runner ps` lists every host's lines,
 `held` or `orphaned`; a host's `plak runner ps <name>` sees only its own. The daemon exits after `idle_exit_seconds` (default
-300) with nothing to keep.
+300) with nothing to keep. `plak runner secret set|rm <name>` and `plak runner
+secret list` manage the runner machine's own secrets, which an MCP server with
+`placement = "runner"` reads; they work like `plak secret`, on a separate store.
 
 ---
 

@@ -13,8 +13,8 @@ use serde_json::{Value, json};
 use super::super::service::{ServiceOwner, ServiceStderrTail};
 use super::super::{
     ExecutionBackendError, ExecutionBackendErrorKind, ExecutionBackendFuture, ExecutionWorkspace,
-    OperationContext, ServiceHandle, ServiceProcess, ServiceProcessRequest, backend_error,
-    ready_error,
+    OperationContext, ServiceHandle, ServiceProcess, ServiceProcessRequest, ServiceSecretValue,
+    backend_error, ready_error,
 };
 use super::wire::{self, from_value, to_value};
 use super::{
@@ -29,8 +29,16 @@ struct ServiceRequestWire {
     program: String,
     arguments: Vec<String>,
     environment: Vec<(String, String)>,
+    /// Secret names the runner resolves from its own store, by variable;
+    /// never a value.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    runner_secrets: Vec<(String, String)>,
     stderr_tail_bytes: usize,
 }
+
+/// How a runner resolves a secret a service names: its value from the
+/// runner's own store, or `None` when the store has none by that name.
+pub type RunnerSecretResolver = dyn Fn(&str) -> Result<Option<String>, String> + Send + Sync;
 
 /// One spawned service, as the runner names it: the id of the stream that
 /// carries its stdio, which the link reads from this field.
@@ -108,7 +116,8 @@ fn terminate_call(service: u64, grace: Duration) -> Result<RunnerCall, Execution
 }
 
 /// Spawns a service on the runner behind `link`. Secret environment values
-/// stay on the host: a request that names one is refused with no effect.
+/// stay on the host: a request that carries one is refused with no effect.
+/// Runner secrets travel by name, and the runner resolves them.
 pub(super) fn spawn(
     link: &Arc<dyn RunnerLink>,
     workspace: &ExecutionWorkspace,
@@ -127,6 +136,11 @@ pub(super) fn spawn(
         environment: request
             .environment_entries()
             .map(|(name, value)| (name.as_str().to_owned(), value.to_owned()))
+            .collect(),
+        runner_secrets: request
+            .runner_secrets()
+            .iter()
+            .map(|(name, secret)| (name.as_str().to_owned(), secret.clone()))
             .collect(),
         stderr_tail_bytes: request.stderr_tail_bytes(),
     })
@@ -165,15 +179,19 @@ pub type ServeServiceFuture =
 
 /// Spawns the service `payload` asks for from `environment`, as the runner
 /// side of a link; the caller carries its stdio as stream `service` and
-/// answers [`service_spawned`].
+/// answers [`service_spawned`]. The runner secrets the request names are
+/// read through `secrets` now; one that is not stored refuses the spawn with
+/// no effect, and without `secrets` any named one does.
 pub fn serve_service_spawn(
     environment: &ExecutionEnvironment,
     payload: Value,
     control: OperationContext,
+    secrets: Option<&RunnerSecretResolver>,
 ) -> ServeServiceFuture {
     let request = wire::open_envelope(environment, payload)
         .and_then(from_value::<ServiceRequestWire>)
         .and_then(|wire| {
+            let resolved = resolve_runner_secrets(&wire.runner_secrets, secrets)?;
             let environment = wire
                 .environment
                 .into_iter()
@@ -187,7 +205,7 @@ pub fn serve_service_spawn(
                 wire.program,
                 wire.arguments,
                 environment,
-                Vec::new(),
+                resolved,
                 wire.stderr_tail_bytes,
             )
         });
@@ -236,4 +254,34 @@ pub fn serve_service_terminate(handle: Option<ServiceHandle>, payload: Value) ->
             .map_err(|error| backend_failure(&error))?;
         to_value(&TerminatedWire { stderr_tail: tail }).map_err(|error| backend_failure(&error))
     })
+}
+
+/// The values of the runner secrets a service names, read from the runner's
+/// own store. A name the store does not hold, refuses to read or holds an
+/// unusable value for, and any name on a runner without a store, all answer
+/// alike, so the answer says nothing about which names exist.
+fn resolve_runner_secrets(
+    names: &[(String, String)],
+    secrets: Option<&RunnerSecretResolver>,
+) -> Result<Vec<(EnvironmentVariableName, ServiceSecretValue)>, ExecutionBackendError> {
+    names
+        .iter()
+        .map(|(variable, secret)| {
+            let variable =
+                EnvironmentVariableName::new(variable.clone()).map_err(|_| wire::malformed())?;
+            let value = secrets
+                .and_then(|resolve| resolve(secret).ok().flatten())
+                .and_then(|value| ServiceSecretValue::new(value).ok())
+                .ok_or_else(|| {
+                    backend_error(
+                        ExecutionBackendErrorKind::InvalidRequest,
+                        format!(
+                            "runner secret {secret:?} is not available on the runner; set it there with `plak runner secret set {secret}`"
+                        ),
+                    )
+                    .with_proven_no_effect(true)
+                })?;
+            Ok((variable, value))
+        })
+        .collect()
 }

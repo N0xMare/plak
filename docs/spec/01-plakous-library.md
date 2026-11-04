@@ -5611,7 +5611,8 @@ runner for a session yet.
   with a reason ends both directions, and on the runner it ends the service. A service lives as long
   as the connection that spawned it: a spawn that completes after that
   connection ended terminates the service at once. Its secret environment
-  values never cross the link.
+  values never cross the link; runner secrets cross by name only
+  (`runner_secrets` in the spawn payload) and are resolved on the runner.
 - **Owners.** The runner keeps, per host and line, the newest owner it has
   accepted, ordered by `(generation, fence)`. The host sends `TransferOwner {
   from, to }` after the new owner's lease is granted and before that owner's
@@ -6178,8 +6179,15 @@ limits. `spawn_service` spawns the service on the runner and carries its
 stdin and stdout as one stream of the link (`RunnerLink::open`); terminating
 the handle terminates the runner's process group and returns its stderr tail,
 and dropping it unterminated kills it. A request with secret environment
-values is refused `Unsupported` with no effect: runner-local secrets come with
-runner pairing. `RunnerSessions` is the host handle on one line's process
+values is refused `Unsupported` with no effect: no secret value crosses the
+link. A request may instead name runner secrets
+(`plakous::tools::runner::with_runner_secrets`: variable and secret name,
+never a value); the runner side (`serve_service_spawn`) resolves each name
+from the runner's own store (`RunnerOptions::secrets`) when it spawns, and a
+name it does not store, or a runner with no store, refuses the spawn
+(`InvalidRequest`, proven no effect). A local backend refuses a request that
+names runner secrets (`Unsupported`, no effect): the embedder resolves them
+itself there. `RunnerSessions` is the host handle on one line's process
 sessions on a runner: start, stdin writes, polls that wait for output or a
 yield, stops, promotion, the line's jobs, stopping them and disowning
 leftovers, each sent under the handle's owner (`RunnerSessions::transfer_to`
@@ -6904,16 +6912,24 @@ values, and counts live services in its drain status.
 **MCP client.** `plakous-mcp` (harness layer; facade feature `mcp`) is the
 local MCP client over `rmcp` (chapter 06 §7). An `McpServerSpec` is a frozen
 definition of a stdio server (program and arguments, declared environment,
-secret environment names with a resolver called at every spawn) or of a
-streamable HTTP server (below); secret values are never retained by the pool
-or in its digest. Either carries a startup bound (30 s default) over spawn or
+secret environment names with a resolver called at every spawn, and runner
+secrets: variables a runner fills from its own store by secret name,
+`with_runner_secret_environment`) or of a streamable HTTP server (below);
+secret values are never retained by the pool or in its digest, and runner
+secret names enter the digest only when a definition declares any. Either carries a startup bound (30 s default) over spawn or
 connection, handshake and the first `tools/list`, a per-call bound (300 s
 default), an optional allowlist of MCP tool names, and the resources opt-in
 (`with_resources`, off by default; MCP resources, below): a server that
 advertises the resources capability never changes the tool surface on its
 own. One `McpPool` per process keys
-entries by (server id, definition digest, workspace root): an edited
-definition is a new entry, never a mutation of a live one. An entry starts at
+entries by (server id, definition digest, runner, workspace root), the runner
+being the leasing environment's runner id (none for a local backend): an
+edited definition is a new entry, never a mutation of a live one, and one
+server on two runners is two entries. On a runner the service lives as long
+as the link connection that spawned it, so the pool's entry is its owner's
+lease there: a lost link or a runner restart ends the server, the entry
+records the exit as a crash, and the next lease starts it again once the link
+is back (a lease while it is down fails at once, with nothing started). An entry starts at
 its first lease through `spawn_service`, negotiates the newest protocol
 revision the server accepts (2026-07-28 without `initialize`, else falling
 back to the `initialize` handshake at 2025-11-25 or older), and is shared by

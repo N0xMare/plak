@@ -1637,7 +1637,7 @@ fn a_rebind_keeps_the_sessions_frozen_mcp_tools_without_listing_again() {
         None,
     )
     .unwrap()
-    .records;
+    .placed_records();
     let frozen = unlisted.with_mcp_tools(records);
     let (mut config, mut opened) =
         actual_api_topology_host_with(root.path(), &executor, Some(frozen.clone()));

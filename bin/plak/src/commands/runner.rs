@@ -26,7 +26,7 @@ use plakous::tools::{
 };
 use plakous_hosted::error::{CliFailure, CliResult, ProcessOutcome};
 
-use crate::home::paths::PlakPaths;
+use crate::home::paths::{PlakPaths, SecretShelf};
 use dial::{ssh_command, version};
 use home::RunnerHome;
 
@@ -145,6 +145,7 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
             hosts: Some(hosts),
             probe_paths: Some(probe_paths),
             local_host: Some(home::host_id(paths)?),
+            secrets: Some(Arc::new(runner_secret(paths.clone()))),
             floors: Some(Arc::new(floors)),
             path: crate::environment::inherited_path(),
             home: crate::environment::inherited_home(),
@@ -157,6 +158,17 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
         // One daemon per user and build is enough.
         Err(daemon::DaemonError::AlreadyServing(_)) => Ok(()),
         Err(error) => Err(CliFailure::new(error.to_string())),
+    }
+}
+
+/// How the daemon reads a runner secret a service names: from this home's
+/// runner shelf (`plak runner secret set`), never its named secrets.
+fn runner_secret(
+    paths: PlakPaths,
+) -> impl Fn(&str) -> Result<Option<String>, String> + Send + Sync + 'static {
+    move |name| {
+        crate::home::secrets::read_shelf_secret(&paths, SecretShelf::Runner, name)
+            .map(|secret| secret.map(|secret| secret.expose_secret().to_owned()))
     }
 }
 

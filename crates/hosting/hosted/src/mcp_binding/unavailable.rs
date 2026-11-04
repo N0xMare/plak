@@ -12,6 +12,23 @@ pub(crate) struct BoundMcpTools {
     pub(crate) registrations: Vec<ToolRegistration>,
     pub(crate) notices: Vec<String>,
     pub(crate) records: Vec<McpToolRecord>,
+    pub(crate) placements: BTreeMap<McpServerName, crate::frozen_tools::McpPlacement>,
+}
+
+impl BoundMcpTools {
+    pub(crate) fn placed_records(&self) -> Vec<(McpToolRecord, crate::frozen_tools::McpPlacement)> {
+        self.records
+            .iter()
+            .map(|record| {
+                let placement = self
+                    .placements
+                    .get(record.server())
+                    .copied()
+                    .unwrap_or_default();
+                (record.clone(), placement)
+            })
+            .collect()
+    }
 }
 
 pub(crate) fn bind_mcp_tools(
@@ -27,6 +44,7 @@ pub(crate) fn bind_mcp_tools(
         registrations: Vec::new(),
         notices: Vec::new(),
         records: Vec::new(),
+        placements: BTreeMap::new(),
     })
 }
 

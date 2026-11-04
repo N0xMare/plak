@@ -203,7 +203,13 @@ impl PlakPaths {
     /// `secrets/named/`: the operator's named secrets (`plak secret set`).
     #[must_use]
     pub fn named_secrets_dir(&self) -> PathBuf {
-        self.secrets_dir().join("named")
+        self.secret_shelf_dir(SecretShelf::Named)
+    }
+
+    /// The directory of one shelf of named secrets.
+    #[must_use]
+    pub fn secret_shelf_dir(&self, kind: SecretShelf) -> PathBuf {
+        self.secrets_dir().join(kind.directory())
     }
 
     /// `secrets/mcp-oauth/<id>/credential.json`: the OAuth login of MCP
@@ -220,15 +226,21 @@ impl PlakPaths {
     /// One named secret's file. The caller has validated `name`.
     #[must_use]
     pub fn named_secret_file(&self, name: &str) -> PathBuf {
-        self.named_secrets_dir().join(format!("{name}.secret"))
+        self.secret_shelf_file(SecretShelf::Named, name)
     }
 
-    /// Creates `secrets/named/` 0700 under the private layout, and refuses
-    /// one that exists but is not private, exactly as the layout refuses the
-    /// secrets directory itself.
-    pub fn ensure_named_secrets_dir(&self) -> Result<(), String> {
+    /// One secret's file on `shelf`. The caller has validated `name`.
+    #[must_use]
+    pub fn secret_shelf_file(&self, kind: SecretShelf, name: &str) -> PathBuf {
+        self.secret_shelf_dir(kind).join(format!("{name}.secret"))
+    }
+
+    /// Creates the shelf's directory 0700 under the private layout, and
+    /// refuses one that exists but is not private, exactly as the layout
+    /// refuses the secrets directory itself.
+    pub fn ensure_secret_shelf_dir(&self, kind: SecretShelf) -> Result<(), String> {
         self.ensure_layout()?;
-        ensure_private_child(&self.named_secrets_dir(), "named secrets directory")
+        ensure_private_child(&self.secret_shelf_dir(kind), kind.label())
     }
 
     /// Creates the directory of MCP server `server`'s login record,
@@ -248,17 +260,17 @@ impl PlakPaths {
         ensure_private_child(dir, "MCP login directory")
     }
 
-    /// Whether `secrets/named/` exists, verified private along with the
+    /// Whether the shelf's directory exists, verified private along with the
     /// secrets directory above it. Creates nothing.
-    pub fn verify_named_secrets_dir(&self) -> Result<bool, String> {
-        let dir = self.named_secrets_dir();
+    pub fn verify_secret_shelf_dir(&self, kind: SecretShelf) -> Result<bool, String> {
+        let dir = self.secret_shelf_dir(kind);
         match fs::symlink_metadata(&dir) {
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-            Err(_) => return Err("could not inspect the named secrets directory".to_owned()),
+            Err(_) => return Err(format!("could not inspect the {}", kind.label())),
         }
         require_private_directory(&self.secrets_dir(), "Plak secrets directory")?;
-        require_private_directory(&dir, "Plak named secrets directory")?;
+        require_private_directory(&dir, &format!("Plak {}", kind.label()))?;
         Ok(true)
     }
 
@@ -485,6 +497,33 @@ fn discover_project_root(
 }
 
 /// Creates `dir` 0700 when it is missing, then refuses it unless private.
+/// One shelf of named secrets: the host's, which `[mcp_servers.<id>]` names
+/// for a server on the host, and the runner's, which a runner reads for a
+/// server placed on it. A name on one shelf never resolves from the other.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SecretShelf {
+    /// `secrets/named/` (`plak secret set`).
+    Named,
+    /// `secrets/runner/` (`plak runner secret set`).
+    Runner,
+}
+
+impl SecretShelf {
+    const fn directory(self) -> &'static str {
+        match self {
+            Self::Named => "named",
+            Self::Runner => "runner",
+        }
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Named => "named secrets directory",
+            Self::Runner => "runner secrets directory",
+        }
+    }
+}
+
 fn ensure_private_child(dir: &Path, label: &str) -> Result<(), String> {
     match fs::symlink_metadata(dir) {
         Ok(_) => {}

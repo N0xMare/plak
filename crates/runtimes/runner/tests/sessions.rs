@@ -583,3 +583,120 @@ async fn a_restarted_runner_never_reuses_a_number_the_host_has_seen() {
         .await
         .unwrap();
 }
+
+/// A service that prints `TOKEN`, named as runner secret `secret`.
+fn token_printer(secret: &str) -> ServiceProcessRequest {
+    let request = ServiceProcessRequest::new(
+        "/bin/sh",
+        ["-c".to_owned(), "printf %s \"$TOKEN\"".to_owned()],
+        Vec::new(),
+        Vec::new(),
+        1024,
+    )
+    .unwrap();
+    plakous_tools::internal::runner::with_runner_secrets(
+        request,
+        vec![(
+            plakous_tools::EnvironmentVariableName::new("TOKEN").unwrap(),
+            secret.to_owned(),
+        )],
+    )
+    .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_service_reads_its_runner_secrets_on_the_runner_and_nowhere_else() {
+    let root = tempfile::tempdir().unwrap();
+    let store = |name: &str| -> Result<Option<String>, String> {
+        match name {
+            "locked" => Err("not a private file".to_owned()),
+            _ => Ok((name == "tok").then(|| "runner-value".to_owned())),
+        }
+    };
+    let runner = RunnerService::with_options(
+        host(root.path()),
+        RunnerIdentity {
+            runner_id: RunnerId::new("loopback").unwrap(),
+            version: VersionTriple::current("conformance", "debug"),
+            boot_id: "boot-1".into(),
+            binary_id: None,
+        },
+        plakous_runner::RunnerOptions {
+            secrets: Some(std::sync::Arc::new(store)),
+            ..plakous_runner::RunnerOptions::default()
+        },
+    )
+    .unwrap();
+    let joined = Loopback::join(runner, bind(), windows()).await.unwrap();
+    let environment =
+        runner_environment(scope(), root.path(), ".", config(), joined.backend()).unwrap();
+
+    // The runner fills the variable from its own store.
+    let service = environment
+        .spawn_service(
+            token_printer("tok"),
+            OperationContext::new(CancellationToken::new()),
+        )
+        .await
+        .unwrap();
+    let mut stdout = service.stdout;
+    let mut printed = String::new();
+    tokio::time::timeout(Duration::from_secs(20), stdout.read_to_string(&mut printed))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(printed, "runner-value");
+    let _ = service.handle.terminate(Duration::from_millis(200)).await;
+
+    // A name the runner does not store refuses the spawn with no effect,
+    // and one its store refuses to read answers exactly alike.
+    let refusal = |name: &'static str| {
+        let environment = environment.clone();
+        async move {
+            let refused = environment
+                .spawn_service(
+                    token_printer(name),
+                    OperationContext::new(CancellationToken::new()),
+                )
+                .await
+                .unwrap_err();
+            assert!(refused.proven_no_effect());
+            (refused.kind(), refused.to_string().replace(name, "<name>"))
+        }
+    };
+    let absent = refusal("absent").await;
+    assert!(
+        absent.1.contains("plak runner secret set <name>"),
+        "{absent:?}"
+    );
+    assert_eq!(refusal("locked").await, absent);
+
+    // A local spawn has no runner secrets to read.
+    let refused = host(root.path())
+        .spawn_service(
+            token_printer("tok"),
+            OperationContext::new(CancellationToken::new()),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(refused.kind(), ExecutionBackendErrorKind::Unsupported);
+    assert!(refused.proven_no_effect());
+
+    // Neither does a runner without a store.
+    let (_bare, bare) = loopback(root.path(), RunnerLimits::default()).await;
+    let refused = bare
+        .spawn_service(
+            token_printer("absent"),
+            OperationContext::new(CancellationToken::new()),
+        )
+        .await
+        .unwrap_err();
+    assert!(refused.proven_no_effect());
+    assert_eq!(
+        (
+            refused.kind(),
+            refused.to_string().replace("absent", "<name>")
+        ),
+        absent
+    );
+}

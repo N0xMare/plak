@@ -63,7 +63,7 @@ impl TopCommand {
             }),
             Self::Secret {
                 action: Some(action),
-            } => action.into_command(),
+            } => action.into_command(crate::home::paths::SecretShelf::Named, "secret"),
             Self::Runner { action: None } => Ok(Command::CommandHelp {
                 command: "runner".to_owned(),
             }),

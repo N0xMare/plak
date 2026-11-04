@@ -10,10 +10,12 @@ use plakous::mcp::McpOAuthStatus;
 use plakous_hosted::error::{CliFailure, CliResult, ProcessOutcome};
 
 use crate::commands::mcp_text::shown;
-use crate::home::paths::PlakPaths;
+use crate::home::paths::{PlakPaths, SecretShelf};
 use crate::home::secrets;
 use crate::product_config::mcp_edit::{self, TemplateMcpEdit, TemplateReach};
 use crate::product_config::{McpServerConfig, McpTransport, ProductConfig};
+use crate::surface_protocol::mcp_lines::set_command;
+use plakous_hosted::frozen_tools::McpPlacement;
 
 use super::McpCommand;
 
@@ -63,7 +65,8 @@ pub(crate) fn run(
                 Ok(missing) => {
                     for name in missing {
                         out.push_str(&format!(
-                            "secret {name} is not set; run `plak secret set {name}`\n"
+                            "secret {name} is not set; run `{} {name}`\n",
+                            set_command(on_runner(&server))
                         ));
                     }
                 }
@@ -162,12 +165,23 @@ fn server<'a>(config: &'a ProductConfig, id: &str) -> CliResult<&'a McpServerCon
     })
 }
 
+/// The secrets `server` names that are not stored on the shelf it reads: the
+/// runner secrets of this machine for a server placed on its runner.
 fn missing_secrets(paths: &PlakPaths, server: &McpServerConfig) -> CliResult<Vec<String>> {
-    let stored = secrets::list_named_secrets(paths).map_err(CliFailure::new)?;
+    let shelf = if on_runner(server) {
+        SecretShelf::Runner
+    } else {
+        SecretShelf::Named
+    };
+    let stored = secrets::list_shelf_secrets(paths, shelf).map_err(CliFailure::new)?;
     Ok(mcp_edit::secret_names(server)
         .into_iter()
         .filter(|name| !stored.contains(name))
         .collect())
+}
+
+fn on_runner(server: &McpServerConfig) -> bool {
+    server.placement == Some(McpPlacement::Runner)
 }
 
 fn transport_line(server: &McpServerConfig) -> (&'static str, String) {
@@ -230,6 +244,7 @@ fn server_configuration(
             .map(|reach| reach_text(std::slice::from_ref(reach)))
             .collect(),
         missing_secrets: missing_secrets(paths, server)?,
+        on_runner: on_runner(server),
         resources: server.resources,
         login: login_line(paths, config, id),
     })
@@ -328,7 +343,10 @@ fn show(paths: &PlakPaths, id: &str) -> CliResult<String> {
     let missing = missing_secrets(paths, definition)?;
     for name in mcp_edit::secret_names(definition) {
         let state = if missing.contains(&name) {
-            format!("not set; run `plak secret set {name}`")
+            format!(
+                "not set; run `{} {name}`",
+                set_command(on_runner(definition))
+            )
         } else {
             "set".to_owned()
         };

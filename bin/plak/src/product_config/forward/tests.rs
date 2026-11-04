@@ -56,6 +56,11 @@ fn malformed_forward_keys_are_named_load_errors() {
             &format!("{SERVER}placement = \"remote\"\n"),
             "placement must be",
         ),
+        (
+            "[mcp_servers.notes]\ntransport = \"http\"\nurl = \"https://mcp.example/mcp\"\n\
+             placement = \"runner\"\n",
+            "needs transport = \"stdio\"",
+        ),
         ("[runners.buildbox]\n", "needs ssh"),
         (
             "[runners.buildbox]\nssh = \"-oProxyCommand=x\"\n",

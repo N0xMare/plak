@@ -72,13 +72,19 @@ pub(crate) enum Command {
     KeyStatus {
         account: Option<String>,
     },
+    /// `plak secret set` (the host's named secrets) or `plak runner secret
+    /// set` (this machine's runner secrets).
     SecretSet {
+        shelf: crate::home::paths::SecretShelf,
         name: String,
     },
     SecretRm {
+        shelf: crate::home::paths::SecretShelf,
         name: String,
     },
-    SecretList,
+    SecretList {
+        shelf: crate::home::paths::SecretShelf,
+    },
     Mcp(crate::commands::mcp::McpCommand),
     Runner(crate::commands::runner::RunnerCommand),
     Usage {
@@ -311,7 +317,12 @@ impl Command {
             | Self::ConfigTrust
             | Self::ConfigUntrust => "config",
             Self::KeySet { .. } | Self::KeyClear { .. } | Self::KeyStatus { .. } => "key",
-            Self::SecretSet { .. } | Self::SecretRm { .. } | Self::SecretList => "secret",
+            Self::SecretSet { shelf, .. }
+            | Self::SecretRm { shelf, .. }
+            | Self::SecretList { shelf } => match shelf {
+                crate::home::paths::SecretShelf::Named => "secret",
+                crate::home::paths::SecretShelf::Runner => "runner",
+            },
             Self::Mcp(_) => "mcp",
             Self::Runner(_) => "runner",
             Self::Usage { .. } => "usage",
@@ -388,7 +399,7 @@ pub(crate) fn command_is_read_only(command: &Command) -> bool {
             | Command::AuthStatus(_)
             | Command::Doctor
             | Command::KeyStatus { .. }
-            | Command::SecretList
+            | Command::SecretList { .. }
             | Command::Mcp(
                 crate::commands::mcp::McpCommand::List
                     | crate::commands::mcp::McpCommand::Show { .. }

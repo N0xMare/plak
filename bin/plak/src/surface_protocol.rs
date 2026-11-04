@@ -15,7 +15,7 @@ use plakous_host_protocol::{
 };
 
 #[cfg(any(feature = "mcp", feature = "tui"))]
-mod mcp_lines;
+pub(crate) mod mcp_lines;
 
 /// Checkout facts, not a preformatted border label or session authority.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -49,6 +49,8 @@ pub struct McpServerConfiguration {
     pub scope: String,
     pub templates: Vec<String>,
     pub missing_secrets: Vec<String>,
+    /// `true` for `placement = "runner"`: its secrets are runner secrets.
+    pub on_runner: bool,
     pub resources: bool,
     pub login: Option<String>,
 }

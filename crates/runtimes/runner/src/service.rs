@@ -16,9 +16,9 @@ use plakous_runner_protocol::{
     StreamFrame, VersionTriple, WireError, capabilities,
 };
 use plakous_tools::internal::runner::{
-    RunnerExtension, RunnerVerb, RunnerVerbFamily, ServeFailure, ServeFuture, decode_preempt,
-    environment_failure, job_capacity, line_sessions, requested_workspace, runner_descriptor,
-    serve, serve_failure, serve_jobs_watch, serve_probe, serve_service_spawn,
+    RunnerExtension, RunnerSecretResolver, RunnerVerb, RunnerVerbFamily, ServeFailure, ServeFuture,
+    decode_preempt, environment_failure, job_capacity, line_sessions, requested_workspace,
+    runner_descriptor, serve, serve_failure, serve_jobs_watch, serve_probe, serve_service_spawn,
     serve_service_terminate, serve_sessions, service_spawned, terminated_service,
 };
 use plakous_tools::{
@@ -51,6 +51,7 @@ struct Inner {
     /// by root and cwd as requests name them.
     registered: Mutex<HashMap<(PathBuf, PathBuf), ExecutionEnvironment>>,
     extension: Option<Arc<dyn RunnerExtension>>,
+    secrets: Option<Arc<RunnerSecretResolver>>,
     hello: Hello,
     dead: Duration,
     owner_lease: Duration,
@@ -189,6 +190,10 @@ pub struct RunnerOptions {
     pub path: Option<String>,
     /// See [`Self::path`].
     pub home: Option<String>,
+    /// The runner's own secret store, which a service's named runner
+    /// secrets are read from; without it a service that names one is
+    /// refused.
+    pub secrets: Option<Arc<RunnerSecretResolver>>,
 }
 
 impl RunnerService {
@@ -261,6 +266,7 @@ impl RunnerService {
                 workspaces: options.workspaces,
                 registered: Mutex::default(),
                 extension: options.extension,
+                secrets: options.secrets,
                 hello,
                 dead: limits.dead,
                 owner_lease: limits.owner_lease,
@@ -849,7 +855,12 @@ impl RunnerService {
             Ok(environment) => environment,
             Err(failure) => return Box::pin(std::future::ready(Err(failure))),
         };
-        let spawned = serve_service_spawn(&environment, payload, control);
+        let spawned = serve_service_spawn(
+            &environment,
+            payload,
+            control,
+            self.inner.secrets.as_deref(),
+        );
         let service = self.clone();
         let host = host.to_owned();
         Box::pin(async move {

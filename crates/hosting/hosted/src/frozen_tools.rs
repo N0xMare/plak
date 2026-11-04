@@ -26,8 +26,7 @@ pub struct FrozenRootTools {
 }
 
 /// Where an MCP server's process runs: on the host beside the agent, or on
-/// the node's runner. Frozen per tool record; every server runs on the host
-/// today.
+/// the node's runner. Frozen per tool record.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum McpPlacement {
@@ -94,16 +93,16 @@ impl FrozenRootTools {
     }
 
     /// The same freeze with the MCP tools listed at creation, each frozen
-    /// with its server's placement: the host, where every server runs today.
+    /// with the placement its server ran under.
     #[must_use]
-    pub fn with_mcp_tools(mut self, records: Vec<McpToolRecord>) -> Self {
+    pub fn with_mcp_tools(
+        mut self,
+        records: impl IntoIterator<Item = (McpToolRecord, McpPlacement)>,
+    ) -> Self {
         self.mcp_tools = Some(
             records
                 .into_iter()
-                .map(|record| FrozenMcpTool {
-                    record,
-                    placement: McpPlacement::Host,
-                })
+                .map(|(record, placement)| FrozenMcpTool { record, placement })
                 .collect(),
         );
         self

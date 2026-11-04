@@ -4,7 +4,7 @@ use std::fs;
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
-use crate::home::paths::PlakPaths;
+use crate::home::paths::{PlakPaths, SecretShelf};
 
 const MAX_API_KEY_BYTES: usize = 16 * 1024;
 
@@ -289,6 +289,19 @@ impl plakous_hosted::mcp_binding::NamedSecrets for ProductNamedSecrets {
         }))
     }
 
+    fn read_runner(
+        &self,
+        name: &str,
+    ) -> Result<Option<plakous_hosted::mcp_binding::NamedSecretValue>, String> {
+        Ok(
+            read_shelf_secret(&self.paths, SecretShelf::Runner, name)?.map(|secret| {
+                plakous_hosted::mcp_binding::NamedSecretValue::new(
+                    secret.expose_secret().to_owned(),
+                )
+            }),
+        )
+    }
+
     fn mcp_login_file(&self, server: &str) -> Option<PathBuf> {
         Some(self.paths.mcp_login_file(server))
     }
@@ -317,6 +330,16 @@ pub fn validate_secret_name(name: &str) -> Result<(), String> {
 /// Stores `value` as `<home>/secrets/named/<name>.secret`, mode 0600, by an
 /// exclusive temporary file renamed over any previous value.
 pub fn set_named_secret(paths: &PlakPaths, name: &str, value: &str) -> Result<(), String> {
+    set_shelf_secret(paths, SecretShelf::Named, name, value)
+}
+
+/// Stores `value` on `shelf`, as [`set_named_secret`] does on its own.
+pub fn set_shelf_secret(
+    paths: &PlakPaths,
+    shelf: SecretShelf,
+    name: &str,
+    value: &str,
+) -> Result<(), String> {
     validate_secret_name(name)?;
     let value = value.trim();
     if value.is_empty() || value.len() > MAX_NAMED_SECRET_BYTES {
@@ -327,10 +350,10 @@ pub fn set_named_secret(paths: &PlakPaths, name: &str, value: &str) -> Result<()
     if value.chars().any(char::is_control) {
         return Err("secret value has a control character".to_owned());
     }
-    paths.ensure_named_secrets_dir()?;
-    let path = paths.named_secret_file(name);
+    paths.ensure_secret_shelf_dir(shelf)?;
+    let path = paths.secret_shelf_file(shelf, name);
     let staging = paths
-        .named_secrets_dir()
+        .secret_shelf_dir(shelf)
         .join(format!(".{name}.secret.{}.tmp", std::process::id()));
     let _ = fs::remove_file(&staging);
     let written = write_new_private_file(&staging, value.as_bytes()).and_then(|()| {
@@ -340,18 +363,27 @@ pub fn set_named_secret(paths: &PlakPaths, name: &str, value: &str) -> Result<()
         let _ = fs::remove_file(&staging);
     }
     written?;
-    fs::File::open(paths.named_secrets_dir())
+    fs::File::open(paths.secret_shelf_dir(shelf))
         .and_then(|dir| dir.sync_all())
-        .map_err(|_| "could not sync the named secrets directory".to_owned())
+        .map_err(|_| "could not sync the secrets directory".to_owned())
 }
 
 /// Removes one named secret. `false` when there was none.
 pub fn remove_named_secret(paths: &PlakPaths, name: &str) -> Result<bool, String> {
+    remove_shelf_secret(paths, SecretShelf::Named, name)
+}
+
+/// Removes one secret from `shelf`. `false` when there was none.
+pub fn remove_shelf_secret(
+    paths: &PlakPaths,
+    shelf: SecretShelf,
+    name: &str,
+) -> Result<bool, String> {
     validate_secret_name(name)?;
-    if !paths.verify_named_secrets_dir()? {
+    if !paths.verify_secret_shelf_dir(shelf)? {
         return Ok(false);
     }
-    match fs::remove_file(paths.named_secret_file(name)) {
+    match fs::remove_file(paths.secret_shelf_file(shelf, name)) {
         Ok(()) => Ok(true),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(_) => Err("could not remove the secret".to_owned()),
@@ -360,14 +392,19 @@ pub fn remove_named_secret(paths: &PlakPaths, name: &str) -> Result<bool, String
 
 /// The stored secret names, sorted. Never a value.
 pub fn list_named_secrets(paths: &PlakPaths) -> Result<Vec<String>, String> {
-    if !paths.verify_named_secrets_dir()? {
+    list_shelf_secrets(paths, SecretShelf::Named)
+}
+
+/// The names stored on `shelf`, sorted. Never a value.
+pub fn list_shelf_secrets(paths: &PlakPaths, shelf: SecretShelf) -> Result<Vec<String>, String> {
+    if !paths.verify_secret_shelf_dir(shelf)? {
         return Ok(Vec::new());
     }
-    let entries = fs::read_dir(paths.named_secrets_dir())
-        .map_err(|_| "could not read the named secrets directory".to_owned())?;
+    let entries = fs::read_dir(paths.secret_shelf_dir(shelf))
+        .map_err(|_| "could not read the secrets directory".to_owned())?;
     let mut names = Vec::new();
     for entry in entries {
-        let entry = entry.map_err(|_| "could not read the named secrets directory".to_owned())?;
+        let entry = entry.map_err(|_| "could not read the secrets directory".to_owned())?;
         let file_name = entry.file_name();
         let Some(name) = file_name
             .to_str()
@@ -387,11 +424,20 @@ pub fn list_named_secrets(paths: &PlakPaths) -> Result<Vec<String>, String> {
 /// the file must be private to the current user: a file other users could
 /// read is refused, never used.
 pub fn read_named_secret(paths: &PlakPaths, name: &str) -> Result<Option<NamedSecret>, String> {
+    read_shelf_secret(paths, SecretShelf::Named, name)
+}
+
+/// One secret from `shelf`, under [`read_named_secret`]'s rules.
+pub fn read_shelf_secret(
+    paths: &PlakPaths,
+    shelf: SecretShelf,
+    name: &str,
+) -> Result<Option<NamedSecret>, String> {
     validate_secret_name(name)?;
-    if !paths.verify_named_secrets_dir()? {
+    if !paths.verify_secret_shelf_dir(shelf)? {
         return Ok(None);
     }
-    let path = paths.named_secret_file(name);
+    let path = paths.secret_shelf_file(shelf, name);
     let metadata = match fs::symlink_metadata(&path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),

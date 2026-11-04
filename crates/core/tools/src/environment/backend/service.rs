@@ -73,6 +73,9 @@ pub struct ServiceProcessRequest {
     arguments: Arc<[String]>,
     environment: Vec<(EnvironmentVariableName, EnvironmentVariableValue)>,
     secret_environment: Vec<(EnvironmentVariableName, ServiceSecretValue)>,
+    /// Secrets the runner that spawns the service resolves from its own
+    /// store, by variable and secret name: no value is on the host.
+    runner_secrets: Vec<(EnvironmentVariableName, String)>,
     stderr_tail_bytes: usize,
 }
 
@@ -161,8 +164,51 @@ impl ServiceProcessRequest {
             arguments: arguments.into(),
             environment,
             secret_environment,
+            runner_secrets: Vec::new(),
             stderr_tail_bytes,
         })
+    }
+
+    /// The same request naming `secrets` (variable, secret name) for the
+    /// spawning runner to resolve from its own store.
+    pub(crate) fn with_runner_secrets(
+        mut self,
+        secrets: Vec<(EnvironmentVariableName, String)>,
+    ) -> Result<Self, ExecutionBackendError> {
+        if self.environment.len() + self.secret_environment.len() + secrets.len()
+            > MAX_SERVICE_ENVIRONMENT_ENTRIES
+        {
+            return Err(invalid_request(
+                "service process has too many environment entries",
+            ));
+        }
+        if secrets.iter().any(|(_, secret)| {
+            secret.is_empty() || secret.len() > MAX_EXECUTION_VALUE_BYTES || secret.contains('\0')
+        }) {
+            return Err(invalid_request(
+                "service process runner secret name is invalid",
+            ));
+        }
+        let mut names = self
+            .environment
+            .iter()
+            .map(|(name, _)| name)
+            .chain(self.secret_environment.iter().map(|(name, _)| name))
+            .chain(secrets.iter().map(|(name, _)| name))
+            .collect::<Vec<_>>();
+        names.sort();
+        if names.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(invalid_request(
+                "service process environment names a variable twice",
+            ));
+        }
+        self.runner_secrets = secrets;
+        Ok(self)
+    }
+
+    /// The secrets the spawning runner resolves, by variable and name.
+    pub(crate) fn runner_secrets(&self) -> &[(EnvironmentVariableName, String)] {
+        &self.runner_secrets
     }
 
     /// Returns the exact program text.
@@ -211,6 +257,7 @@ impl fmt::Debug for ServiceProcessRequest {
             .field("argument_count", &self.arguments.len())
             .field("environment_count", &self.environment.len())
             .field("secret_environment_count", &self.secret_environment.len())
+            .field("runner_secret_count", &self.runner_secrets.len())
             .field("stderr_tail_bytes", &self.stderr_tail_bytes)
             .finish()
     }

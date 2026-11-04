@@ -570,6 +570,12 @@ enum RunnerAction {
     Pair {
         name: Option<String>,
     },
+    /// This machine's runner secrets, which an MCP server placed on this
+    /// runner reads.
+    Secret {
+        #[command(subcommand)]
+        action: Option<SecretAction>,
+    },
 }
 
 impl RunnerAction {
@@ -580,7 +586,12 @@ impl RunnerAction {
                 command: "runner".to_owned(),
             })
         };
+        let runner_secret = crate::home::paths::SecretShelf::Runner;
         Ok(Command::Runner(match self {
+            Self::Secret {
+                action: Some(action),
+            } => return action.into_command(runner_secret, "runner"),
+            Self::Secret { action: None } => return help(),
             Self::Serve => RunnerCommand::Serve,
             Self::Connect { stdio: true } => RunnerCommand::Connect,
             // A bare leaf routes to the parent group's help.
@@ -614,21 +625,25 @@ enum SecretAction {
 }
 
 impl SecretAction {
-    fn into_command(self) -> Result<Command, String> {
+    /// The command on `kind`; a bare leaf routes to `group`'s help.
+    fn into_command(
+        self,
+        kind: crate::home::paths::SecretShelf,
+        group: &str,
+    ) -> Result<Command, String> {
         match self {
-            // A bare leaf routes to the parent group's help.
             Self::Set { name: None } | Self::Rm { name: None } => Ok(Command::CommandHelp {
-                command: "secret".to_owned(),
+                command: group.to_owned(),
             }),
             Self::Set { name: Some(name) } => {
                 crate::product_secrets::validate_secret_name(&name)?;
-                Ok(Command::SecretSet { name })
+                Ok(Command::SecretSet { shelf: kind, name })
             }
             Self::Rm { name: Some(name) } => {
                 crate::product_secrets::validate_secret_name(&name)?;
-                Ok(Command::SecretRm { name })
+                Ok(Command::SecretRm { shelf: kind, name })
             }
-            Self::List => Ok(Command::SecretList),
+            Self::List => Ok(Command::SecretList { shelf: kind }),
         }
     }
 }

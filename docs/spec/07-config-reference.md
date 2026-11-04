@@ -173,10 +173,10 @@ The families are not `plak config set` keys: they are authored in the file, a
 save leaves them exactly as written, and `plak config show` prints the
 canonical rendering of the tool and server tables after the keys.
 
-`[host] resume_after_loss` and `[mcp_servers.<id>] placement` are accepted,
-validated and inert until their steps (node recovery for the first, runner
-placement for the second); `[runners.<name>]` is read by `plak runner pair` and
-`plak runner ps` (§3.6) and by nothing else yet. A 0.0.3 build
+`[host] resume_after_loss` is accepted, validated and inert until node
+recovery lands; `[mcp_servers.<id>] placement` places a server (§3.5);
+`[runners.<name>]` is read by `plak runner pair`, `plak runner ps` and `plak
+doctor` (§3.6) and by nothing else yet. A 0.0.3 build
 refuses a `config.toml` that sets any of them (unknown section or key), so
 `plak` writes them only when the operator sets them: `plak config init` and a
 fresh save write the `[host]` header commented out, a save of another key
@@ -382,7 +382,7 @@ reach the server; it starts nothing until a template that lists it binds.
 | `oauth_callback_port` | integer | `(ephemeral)` | 1024..=65535; requires `auth = "oauth"` | Fixed loopback port of the login callback `http://127.0.0.1:<port>/callback`, for a client registered with that exact redirect. |
 | `tools` | array of string | `(every listed tool)` | MCP tool names, 1 to 128 bytes without whitespace, none twice | Server-level allowlist; `mcp:<id>` means exactly these. |
 | `resources` | bool | `false` | either transport | Give templates that list the server its `mcp__<id>__read_resource` tool (spec 01 §8.5); the server must advertise resources. Without it a server's resources never reach a model. |
-| `placement` | string | `(unset)` | host\|runner; either transport; unset is host | Where the server's process runs: on the host beside the agent, or on the node's runner with runner-local secrets. Accepted and inert until runner placement lands: every server runs on the host, and a session freezes `host` in its MCP tool records. |
+| `placement` | string | `(unset)` | host\|runner; `runner` needs `transport = "stdio"`; unset is host | Where the server's process runs: on the host beside the agent, or on the node's runner. A runner-placed server runs on the runner the process selected, as that runner's user, in the workspace as the runner names it, with its `secret_env` names resolved there from the runner's own secrets (`plak runner secret set`); no host secret value crosses. With no runner selected the host is the node's runner: the server runs here and its `secret_env` names resolve from this home's runner secrets, never its named secrets. A session freezes the placement each server ran under in its MCP tool records. |
 | `startup_seconds` | integer | `20` | 1..=120 | Budget to start the server and list its tools. |
 | `call_seconds` | integer | `120` | 1..=3600 | Hard per-call ceiling; progress does not extend it. |
 
@@ -398,8 +398,9 @@ rendering a session freezes spells out `auth`, the `oauth_*` keys and
 and digests exactly as before they existed; `placement` is spelled the same
 way. Secrets are never values in
 TOML: a secret name matches `[a-z][a-z0-9-]{0,31}` and resolves from the home
-(spec 04 §3.1) when the server is started; whether it exists is a bind check,
-not a load check. `plak mcp add` writes a table into the home or (with
+(spec 04 §3.1) when the server is started, from the runner's secrets for a
+server placed on a runner; whether it exists is a bind check (for a server on
+a selected runner, the runner's spawn check), not a load check. `plak mcp add` writes a table into the home or (with
 `--scope project`) the trusted project's `config.toml` in place, keeping the
 rest of the file and spelling out only the keys given; `--replace` keeps the
 old table's place and comments. Every `plak mcp` edit (`add`, `remove`,

@@ -1620,7 +1620,8 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     ("plakous-hosted", "src/agent/build/tools.rs"): {"tools": {"ToolOwnerClass"}},
     ("plakous-hosted", "src/agent/build/api.rs"): {"tools": {"RegisteredToolIdentity"}},
     # MCP binding: the facade's MCP client, a host environment for the pool's
-    # service processes, and the named-secret value type.
+    # service processes or the selected runner's for a server placed there,
+    # and the named-secret value type.
     ("plakous-hosted", "src/mcp_binding/available.rs"): {
         "mcp": {
             "HeaderName",
@@ -1653,6 +1654,10 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "ExecutionEnvironment",
             "ExecutionEnvironmentConfig",
             "ExecutionEnvironmentScope",
+            "runner::ProcessRunner",
+            "runner::RunnerBackend",
+            "runner::process_runner",
+            "runner::runner_environment",
         },
     },
     # `plak mcp list|show` report an OAuth server's stored login.

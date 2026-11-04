@@ -654,7 +654,18 @@ widens it.
   variable cleared; its processes start from those (chapter 01 §8.5).
 - **Secrets never cross.** No credential or secret value travels to a runner:
   a service whose environment holds a secret is refused before it is sent,
-  and the wire has no field for one.
+  and the wire has no field for one. A server placed on a runner names its
+  secrets, and the runner resolves the names from its own runner secrets
+  (section 3.1) when it spawns the server; a name it cannot resolve refuses
+  the spawn with no effect. An HTTP server is never placed on a runner.
+- **Runner secrets are the runner user's, for any paired host.** The runner
+  resolves any runner secret a paired host names, for any service it spawns:
+  names are not bound to a host or a server. This adds no authority: a paired
+  host's processes already run as the runner user (consent, not containment),
+  so they can read the runner secret files directly. A name the runner does
+  not hold, one its store refuses to read and any name on a runner without a
+  store all answer the same refusal, so an answer reveals no more about which
+  names exist than the file system already does.
 - **Owners are fenced on the runner too.** A runner refuses work from an
   owner of a line older than the newest it accepted, and records that floor
   before accepting it, so a restart does not reopen the line to an older
@@ -741,6 +752,18 @@ uses a file that fails; the value is held in a zeroizing type that is neither
 cloned nor serialized and whose `Debug` is redacted. A trusted project may
 name secrets but never supplies one: secrets resolve only from the home.
 `oauth_client_secret` names a secret the same way.
+
+**Runner secrets** are a second shelf under the same rules, for MCP servers
+placed on a runner (`placement = "runner"`, chapter 07 §3.5): `plak runner
+secret set|rm|list <name>` on the runner machine stores
+`<plak home>/secrets/runner/<name>.secret`. A runner-placed server's
+`secret_env` names resolve only from this shelf, on the machine the server
+runs on: the runner daemon reads it at each spawn, and a host whose node has
+no remote runner reads its own. A name on one shelf never resolves from the
+other, so a host's named secret never reaches a server on a runner. Runner
+secrets bind to no host or server: every paired host may have the runner use
+any of them by name (section 2.9), which grants nothing its processes, running
+as the runner user, could not read anyway.
 
 **MCP server logins** (`plak mcp login <id>`) live in the home, not under XDG
 state, one private credential record per server id:

@@ -216,3 +216,35 @@ proptest! {
         }
     }
 }
+
+#[test]
+fn runner_secrets_are_a_shelf_apart_from_named_secrets() {
+    use plakous_hosted::mcp_binding::NamedSecrets as _;
+    let dir = tempdir().unwrap();
+    let paths = PlakPaths::explicit(dir.path().join("home"));
+    set_shelf_secret(&paths, SecretShelf::Runner, "github", "runner-value").unwrap();
+    assert_eq!(
+        paths.secret_shelf_file(SecretShelf::Runner, "github"),
+        paths.secrets_dir().join("runner/github.secret")
+    );
+    assert_eq!(list_named_secrets(&paths).unwrap(), Vec::<String>::new());
+    assert_eq!(
+        list_shelf_secrets(&paths, SecretShelf::Runner).unwrap(),
+        ["github"]
+    );
+    // Hosting reads each shelf by its own port method only.
+    let product = ProductNamedSecrets::shared(&paths);
+    assert!(product.read("github").unwrap().is_none());
+    assert!(product.read_runner("github").unwrap().is_some());
+    set_named_secret(&paths, "github", "host-value").unwrap();
+    assert_eq!(
+        read_shelf_secret(&paths, SecretShelf::Runner, "github")
+            .unwrap()
+            .unwrap()
+            .expose_secret(),
+        "runner-value"
+    );
+    assert!(remove_shelf_secret(&paths, SecretShelf::Runner, "github").unwrap());
+    assert!(product.read_runner("github").unwrap().is_none());
+    assert!(product.read("github").unwrap().is_some());
+}

@@ -927,6 +927,7 @@ fn wrappers_and_mcp_tools_share_one_plan() -> TestResult {
             registrations: Vec::new(),
             notices: vec!["omitted".to_owned()],
             records: Vec::new(),
+            placements: BTreeMap::new(),
         },
     );
     assert!(plan.retrieval().is_some());

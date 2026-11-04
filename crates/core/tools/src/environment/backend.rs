@@ -567,6 +567,16 @@ impl ExecutionBackend for HostExecutionBackend {
         request: PreparedServiceProcess,
         control: OperationContext,
     ) -> ExecutionBackendFuture<ServiceProcess> {
+        // Runner secrets live on a runner; this backend has none to read.
+        if !request.request().runner_secrets().is_empty() {
+            return ready_error(
+                backend_error(
+                    ExecutionBackendErrorKind::Unsupported,
+                    "a local service has no runner secrets; resolve them before the spawn",
+                )
+                .with_proven_no_effect(true),
+            );
+        }
         spawn_host_service(workspace, request, control, Arc::clone(&self.process))
     }
 }

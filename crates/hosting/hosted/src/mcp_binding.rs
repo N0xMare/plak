@@ -55,6 +55,19 @@ pub trait NamedSecrets: Send + Sync + 'static {
     /// Returns a one-line reason when the store refuses the read.
     fn read(&self, name: &str) -> Result<Option<NamedSecretValue>, String>;
 
+    /// The value of this machine's runner secret `name` (`plak runner
+    /// secret set`), which only a server placed on the runner reads: a
+    /// shelf apart from [`Self::read`]'s. `None`, the default, is a product
+    /// that stores no runner secrets.
+    ///
+    /// # Errors
+    ///
+    /// Returns a one-line reason when the store refuses the read.
+    fn read_runner(&self, name: &str) -> Result<Option<NamedSecretValue>, String> {
+        let _ = name;
+        Ok(None)
+    }
+
     /// Where the OAuth login of MCP server `server` is stored: a private
     /// credential record in a directory of its own. `None`, the default, is
     /// a product that stores no MCP logins, where `auth = "oauth"` refuses.

@@ -386,6 +386,27 @@ plak secret list           # names only
 plak secret rm github
 ```
 
+A stdio server can run on the node's runner instead of beside the agent with
+`placement = "runner"`. Its `secret_env` names then come from that runner's
+own secrets, which you store on the runner machine; your `plak secret` values
+never leave this machine:
+
+```toml
+[mcp_servers.github]
+transport = "stdio"
+command = "github-mcp-server"
+args = ["stdio"]
+secret_env = { GITHUB_PERSONAL_ACCESS_TOKEN = "github" }
+placement = "runner"
+```
+
+```sh
+plak runner secret set github   # on the runner machine
+```
+
+Until sessions run on a remote runner, this machine is the node's runner, so
+the server runs here and reads `plak runner secret set` values from this home.
+
 A stdio MCP server starts when the first session that names it binds, is
 shared by every session in the same workspace, and stops five minutes after
 the last one ends. Its tool list is frozen when the session is created; a

@@ -156,9 +156,8 @@ pub struct McpServerConfig {
     pub startup_seconds: u16,
     /// Hard per-call ceiling, in seconds.
     pub call_seconds: u16,
-    /// `placement`, when the table sets it: where the server's process is to
-    /// run. Accepted and inert until runner placement lands; every server
-    /// runs on the host and its records freeze `host`.
+    /// `placement`, when the table sets it: where the server's process
+    /// runs, on the host or on the node's runner (stdio only).
     pub placement: Option<McpPlacement>,
 }
 
@@ -732,6 +731,12 @@ fn parse_mcp_server(
             })
         })
         .transpose()?;
+    if placement == Some(McpPlacement::Runner) && matches!(transport, McpTransport::Http { .. }) {
+        return Err(reader.at_entry(
+            &section.placement,
+            "placement = \"runner\" needs transport = \"stdio\"; an HTTP server runs on neither",
+        ));
+    }
     Ok(McpServerConfig {
         transport,
         tools,

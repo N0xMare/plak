@@ -656,7 +656,7 @@ fn oauth_refusals_preserve_server_and_secret_names_as_typed_facts() -> TestResul
 #[test]
 fn a_missing_secret_keeps_its_requirement_after_the_resolver_boxes_it() -> TestResult {
     let server = fake()?;
-    let failure = read_secret(&server, "token", &secrets(&[]))
+    let failure = read_secret(&server, "token", &secrets(&[]), Shelf::Named)
         .err()
         .ok_or("an unset secret was present")?;
     assert!(!failure.message().contains(SECRET_VALUE));
@@ -741,4 +741,74 @@ fn only_a_verification_compiles_mcp_tools_from_records() {
     for attach in [TopologyHubAttach::AttachRoot, TopologyHubAttach::LookupOnly] {
         assert_eq!(McpBinding::for_attach(attach), McpBinding::Lease);
     }
+}
+
+/// This machine's runner secrets, and no named secret.
+struct RunnerShelf;
+
+impl NamedSecrets for RunnerShelf {
+    fn read(&self, _name: &str) -> Result<Option<NamedSecretValue>, String> {
+        Ok(None)
+    }
+
+    fn read_runner(&self, name: &str) -> Result<Option<NamedSecretValue>, String> {
+        Ok((name == "tok").then(|| NamedSecretValue::new("runner-shelf".to_owned())))
+    }
+}
+
+/// With no runner selected the host is the node's runner: a server placed
+/// there runs here, reads its secrets from the runner shelf only, and
+/// freezes `runner`. An HTTP table is never placed on a runner.
+#[test]
+fn a_runner_placed_server_without_a_runner_reads_only_the_runner_shelf() -> TestResult {
+    let workspace = tempfile::tempdir()?;
+    let server = fixture()?;
+    let table = rendered(
+        server.to_str().ok_or("fixture path")?,
+        &["--expect-env", "TOKEN=runner-shelf"],
+        &[("TOKEN", "tok")],
+        None,
+    ) + "placement = \"runner\"\n";
+
+    // The host's named secret of the same name is not read.
+    let refused = placed_server_spec(&fake()?, &table, &secrets(&[("tok", SECRET_VALUE)]), None)
+        .err()
+        .ok_or("a host secret served a runner-placed server")?;
+    assert!(
+        refused
+            .message()
+            .contains("runner secret \"tok\" is not set"),
+        "{}",
+        refused.message()
+    );
+    let runner_shelf: Arc<dyn NamedSecrets> = Arc::new(RunnerShelf);
+    let (_, site) = placed_server_spec(&fake()?, &table, &runner_shelf, None)?;
+    assert!(matches!(site, ServerSite::LocalRunner));
+
+    // The fixture exits unless it got the runner shelf's value.
+    let selection = TemplateToolSelection::parse(["mcp:fake/echo"])?;
+    let bound = bind_mcp_tools(
+        &selection,
+        &sections(table),
+        workspace.path(),
+        runner_shelf,
+        None,
+    )?;
+    let placed = bound.placed_records();
+    assert_eq!(placed.len(), 1);
+    assert!(
+        placed
+            .iter()
+            .all(|(_, placement)| *placement == McpPlacement::Runner)
+    );
+
+    let http = "[mcp_servers.fake]\ntransport = \"http\"\nurl = \"https://mcp.example/mcp\"\n\
+                placement = \"runner\"\nstartup_seconds = 20\ncall_seconds = 120\n";
+    assert_eq!(
+        placed_server_spec(&fake()?, http, &secrets(&[]), None)
+            .err()
+            .map(|failure| failure.message().to_owned()),
+        Some("mcp server fake has an invalid frozen definition".to_owned())
+    );
+    Ok(())
 }

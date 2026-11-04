@@ -61,6 +61,9 @@ pub(crate) struct StdioServer {
     environment: Vec<(EnvironmentVariableName, String)>,
     secret_names: Vec<EnvironmentVariableName>,
     secrets: Option<McpSecretResolver>,
+    /// Secrets the runner that spawns the server resolves from its own
+    /// store, by variable and secret name.
+    runner_secrets: Vec<(EnvironmentVariableName, String)>,
 }
 
 impl McpServerSpec {
@@ -81,6 +84,7 @@ impl McpServerSpec {
                 environment: Vec::new(),
                 secret_names: Vec::new(),
                 secrets: None,
+                runner_secrets: Vec::new(),
             }),
         )
     }
@@ -128,6 +132,23 @@ impl McpServerSpec {
         if let Transport::Stdio(stdio) = &mut self.transport {
             stdio.secret_names = names.into_iter().collect();
             stdio.secrets = Some(resolver);
+        }
+        self
+    }
+
+    /// Declares a stdio server's runner secrets: environment variables the
+    /// runner that spawns it fills from its own secret store, by name. No
+    /// value is resolved on the host, and a host spawn refuses them. An HTTP
+    /// definition ignores them.
+    ///
+    /// The variables and names are part of the definition digest.
+    #[must_use]
+    pub fn with_runner_secret_environment(
+        mut self,
+        secrets: impl IntoIterator<Item = (EnvironmentVariableName, String)>,
+    ) -> Self {
+        if let Transport::Stdio(stdio) = &mut self.transport {
+            stdio.runner_secrets = secrets.into_iter().collect();
         }
         self
     }
@@ -285,6 +306,16 @@ impl StdioServer {
                 .iter()
                 .map(|name| name.as_str().as_bytes().to_vec()),
         );
+        // Only a definition that names runner secrets digests them, so every
+        // other definition keeps its digest.
+        if !self.runner_secrets.is_empty() {
+            parts.push(b"runner-secrets".to_vec());
+            parts.push(self.runner_secrets.len().to_be_bytes().to_vec());
+            for (variable, secret) in &self.runner_secrets {
+                parts.push(variable.as_str().as_bytes().to_vec());
+                parts.push(secret.as_bytes().to_vec());
+            }
+        }
     }
 
     /// Builds one spawn request, resolving secrets now.
@@ -323,6 +354,16 @@ impl StdioServer {
             secrets,
             MAX_SERVICE_STDERR_TAIL_BYTES,
         )
+        .and_then(|request| {
+            if self.runner_secrets.is_empty() {
+                Ok(request)
+            } else {
+                plakous_tools::internal::runner::with_runner_secrets(
+                    request,
+                    self.runner_secrets.clone(),
+                )
+            }
+        })
         .map_err(|error| {
             McpError::with_source(
                 McpErrorKind::Definition,
@@ -394,11 +435,43 @@ mod tests {
             with_secret("one")
                 .with_environment([(EnvironmentVariableName::new("MODE")?, "x".to_owned())]),
             McpServerSpec::stdio(name.clone(), "github-mcp", ["other".to_owned()]),
+            with_secret("one").with_runner_secret_environment([(token.clone(), "gh".to_owned())]),
         ];
         for edited in edits {
             assert_ne!(base, edited.definition_digest()?, "{edited:?}");
         }
         assert!(!format!("{:?}", with_secret("one")).contains("one\""));
+        Ok(())
+    }
+
+    #[test]
+    fn runner_secrets_travel_by_name_and_only_when_declared() -> TestResult {
+        let name = McpServerName::new("github")?;
+        let token = EnvironmentVariableName::new("GITHUB_TOKEN")?;
+        let plain = McpServerSpec::stdio(name.clone(), "github-mcp", []);
+        let named = plain
+            .clone()
+            .with_runner_secret_environment([(token.clone(), "gh".to_owned())]);
+        let renamed = plain
+            .clone()
+            .with_runner_secret_environment([(token, "other".to_owned())]);
+        assert_ne!(plain.definition_digest()?, named.definition_digest()?);
+        assert_ne!(named.definition_digest()?, renamed.definition_digest()?);
+        // Declaring none leaves the digest a definition had before.
+        assert_eq!(
+            plain.definition_digest()?,
+            plain
+                .clone()
+                .with_runner_secret_environment([])
+                .definition_digest()?
+        );
+        let Transport::Stdio(stdio) = named.transport() else {
+            return Err("not a stdio definition".into());
+        };
+        let request = stdio.service_request(named.name())?;
+        let shown = format!("{request:?}");
+        assert!(shown.contains("runner_secret_count: 1"), "{shown}");
+        assert!(!shown.contains("\"gh\""), "{shown}");
         Ok(())
     }
 

@@ -220,6 +220,7 @@ fn run_accepts_turn_and_wall_clock_bounds() {
 }
 use super::*;
 use crate::command::Command;
+use crate::home::paths::SecretShelf;
 use proptest::prelude::*;
 
 fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Command, String> {
@@ -939,13 +940,40 @@ fn product_command_argv_matrix() {
         ),
         (
             &["secret", "set", "github"],
-            |c| matches!(c, Command::SecretSet { name } if name == "github"),
+            |c| matches!(c, Command::SecretSet { shelf: SecretShelf::Named, name } if name == "github"),
         ),
         (
             &["secret", "rm", "linear-ws"],
-            |c| matches!(c, Command::SecretRm { name } if name == "linear-ws"),
+            |c| matches!(c, Command::SecretRm { shelf: SecretShelf::Named, name } if name == "linear-ws"),
         ),
-        (&["secret", "list"], |c| matches!(c, Command::SecretList)),
+        (&["secret", "list"], |c| {
+            matches!(
+                c,
+                Command::SecretList {
+                    shelf: SecretShelf::Named
+                }
+            )
+        }),
+        (
+            &["runner", "secret", "set", "github"],
+            |c| matches!(c, Command::SecretSet { shelf: SecretShelf::Runner, name } if name == "github"),
+        ),
+        (
+            &["runner", "secret", "rm", "github"],
+            |c| matches!(c, Command::SecretRm { shelf: SecretShelf::Runner, name } if name == "github"),
+        ),
+        (&["runner", "secret", "list"], |c| {
+            matches!(
+                c,
+                Command::SecretList {
+                    shelf: SecretShelf::Runner
+                }
+            )
+        }),
+        (
+            &["runner", "secret", "set"],
+            |c| matches!(c, Command::CommandHelp { command } if command == "runner"),
+        ),
         (&["runner", "serve"], |c| {
             matches!(
                 c,

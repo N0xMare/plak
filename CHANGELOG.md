@@ -23,7 +23,7 @@ an export.
   environment descriptor and plan digest changes.
 - Product schema 36 adds the write-ahead `carry_intent` of a same-store carry,
   the session's node, the virtual root's profile, the runner display copy,
-  frozen MCP placement (`host` today), the `switch` workflow kind and the root
+  frozen MCP placement (`host` or `runner`), the `switch` workflow kind and the root
   interrupt cause and continuation decision intents. The clear workflow kind is
   now `new` with `plak:new:` operation ids, and the legacy `workflows` table is
   gone.
@@ -49,8 +49,8 @@ an export.
   command and the `clear` host phase keep their names.
 - Configuration compatibility: `config.toml` accepts `[host]
   resume_after_loss` (`hold` or `continue`, default `hold`), `[mcp_servers.<id>]
-  placement` (`host` or `runner`, default `host`) and `[runners.<name>]`,
-  validated and inert until node recovery and runner placement land. `plak`
+  placement` (`host` or `runner`, default `host`) and `[runners.<name>]`;
+  `resume_after_loss` is validated and inert until node recovery lands. `plak`
   writes them only when you set them, and `plak doctor` warns `config uses
   0.0.4-only keys` while one is set.
 - Plakous embedder break (agent lines): a head-advancing rebind's source
@@ -126,6 +126,12 @@ an export.
   (`StrictHostKeyChecking=yes`), a runner refuses roots in or around its
   product home, and a host's `ps <name>` sees only its own lines. No session
   is placed on a runner yet.
+- MCP servers can run on the node's runner: `[mcp_servers.<id>] placement =
+  "runner"` (stdio only) starts the server there, one per runner, workspace
+  and definition, with its `secret_env` names resolved from the runner's own
+  secrets (`plak runner secret set|rm|list`); host secret values never cross
+  to a runner. Without a remote runner the server runs here and reads this
+  home's runner secrets. Sessions freeze the placement each server ran under.
 - Claude `Read` returns PNG, JPEG, GIF and WebP as an image when the model
   accepts image input. Codex Direct adds `view_image` for one workspace image.
   Other packs stay text. A model that cannot accept the image is refused with

@@ -905,12 +905,12 @@ fn freeze_root_tools<P: plakous_host_protocol::ProtocolExtension>(
             config.state_roots.named_secrets(),
             None,
         )?;
+        frozen = frozen.with_mcp_tools(bound.placed_records());
         for notice in bound.notices {
             config
                 .session
                 .record_notice(TranscriptRow::warning(NoticeScope::Settings, notice));
         }
-        frozen = frozen.with_mcp_tools(bound.records);
     }
     config.session.frozen_tools = Some(frozen);
     Ok(())

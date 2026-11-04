@@ -1,6 +1,6 @@
 //! The keys a 0.0.3 build refuses as unknown (`[host] resume_after_loss`,
-//! `[mcp_servers.<id>] placement`, `[runners.<name>]`): accepted, validated
-//! and inert until their steps, and written only when set explicitly.
+//! `[mcp_servers.<id>] placement`, `[runners.<name>]`): accepted, validated,
+//! and written only when set explicitly.
 
 use std::path::Path;
 
