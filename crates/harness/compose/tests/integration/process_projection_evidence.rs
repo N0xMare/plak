@@ -1338,73 +1338,97 @@ fn write_stdin_poll_and_input_use_distinct_observation_windows() -> Result<(), T
     Ok(())
 }
 
-/// Live-drive regression: a model that sends `yield_time_ms: 0` (with a
-/// hallucinated `session_id`) must still receive the joined output of a short
-/// command, not an empty running observation it never polls.
-#[cfg(unix)]
-#[tokio::test]
-async fn exec_command_with_zero_yield_returns_the_joined_output() -> Result<(), TestError> {
-    use plakous_model::{CancellationToken, Clock, FixedClock, Timestamp};
+/// One `exec_command` start of `cmd` with `yield_time_ms: 0` (and a
+/// hallucinated `session_id`), then the empty polls a model sends while the
+/// answer says the process runs: whether the first answer said it ran on,
+/// the output joined across the answers, and the last answer.
+///
+/// A running first answer comes only after the whole 250 ms first
+/// observation (spec 01 §8.5), never at once; that lower bound is the one
+/// clock read. Each poll returns at the process's exit or its next output.
+async fn drive_zero_yield(cmd: &str) -> Result<(bool, String, Value), TestError> {
     use plakous_tools::{
-        EffectAuthorizationGrantSource, ExecutionEnvironment, ExecutionEnvironmentConfig,
-        ExecutionEnvironmentScope, ProgressSink, ToolPolicyRevision,
+        ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope,
     };
 
     let workspace = tempfile::tempdir()?;
-    let (registry, codex, _) = maps()?;
-    let prepared = codex.prepare(request(
-        "exec_command",
-        r#"{"cmd":"printf 'drive output'","workdir":".","shell":"/bin/sh","login":false,"tty":false,"yield_time_ms":0,"max_output_tokens":10000,"session_id":1}"#,
-    )?)?;
-    let receipt = prepared
-        .receipt()
-        .ok_or("missing projection receipt")?
-        .clone();
-    let run_id = prepared.invocation().run_id();
-    let turn_id = prepared.invocation().turn_id();
-    let attempt_id = prepared.invocation().attempt_id();
-    let call_id = prepared.invocation().call_id();
-    let (invocation, _) = prepared.into_parts();
     let environment = Arc::new(ExecutionEnvironment::host(
-        ExecutionEnvironmentScope::Run(run_id),
+        ExecutionEnvironmentScope::Run(RunId::from_str("00000000-0000-0000-0000-000000000101")?),
         workspace.path(),
         ".",
         ExecutionEnvironmentConfig::default(),
     )?);
     let sessions = environment.joined_process_sessions()?;
-    let revision = ToolPolicyRevision::new("exec-zero-yield", 1)?;
-    let binding = plakous_tools::internal::authorization_binding(
-        &invocation,
-        environment.descriptor().clone(),
-        revision,
-    )?;
-    let grant = plakous_tools::internal::authorization_grant(
-        binding,
-        EffectAuthorizationGrantSource::Policy,
-    );
-    let clock: Arc<dyn Clock> = Arc::new(FixedClock::new(Timestamp::new(72, 0)?));
-    let (progress, _receiver) = ProgressSink::channel(8, call_id, Arc::clone(&clock))?;
-    let context = plakous_tools::internal::tool_context(
-        run_id,
-        turn_id,
-        attempt_id,
-        CancellationToken::new(),
-        None,
-        clock,
-        environment,
-        grant,
-        progress,
-    );
-    let executor = plakous_tools::internal::executor(&registry, &invocation)?;
-    let outcome = executor.execute(invocation, context).await?;
-    let canonical: Value = serde_json::from_str(text(&outcome)?)?;
-    assert_eq!(canonical["status"], "exited", "{canonical}");
-    let raised = codex.raise(&receipt, outcome)?;
-    assert_eq!(
-        serde_json::from_str::<Value>(text(&raised)?)?,
-        serde_json::json!({"exit_code":0,"output":"drive output"})
-    );
+    let (registry, codex, _) = maps()?;
+    let started = std::time::Instant::now();
+    let first = drive_process(
+        &environment,
+        &registry,
+        &codex,
+        "exec_command",
+        &json!({"cmd":cmd,"workdir":".","shell":"/bin/sh","login":false,"tty":false,"yield_time_ms":0,"max_output_tokens":10000,"session_id":1}),
+        false,
+    )
+    .await?;
+    let mut answer: Value = serde_json::from_str(text(&first)?)?;
+    let mut output = answer["output"].as_str().unwrap_or_default().to_owned();
+    let ran_on = answer.get("exit_code").is_none_or(Value::is_null);
+    if ran_on {
+        assert!(
+            started.elapsed() >= std::time::Duration::from_millis(250),
+            "a running answer before the first observation ended: {answer}"
+        );
+        let session = answer["session_id"]
+            .as_u64()
+            .ok_or("a running answer names its session")?;
+        while answer.get("exit_code").is_none_or(Value::is_null) {
+            let polled = drive_process(
+                &environment,
+                &registry,
+                &codex,
+                "write_stdin",
+                &json!({"session_id": session, "chars": "", "yield_time_ms": 300_000}),
+                false,
+            )
+            .await?;
+            answer = serde_json::from_str(text(&polled)?)?;
+            output.push_str(answer["output"].as_str().unwrap_or_default());
+        }
+    }
     assert!(sessions.is_drained());
+    Ok((ran_on, output, answer))
+}
+
+/// Live-drive regression: a model that sends `yield_time_ms: 0` still
+/// receives the joined output of a short command, not an empty running
+/// answer it never polls. Whether the command exits inside the first
+/// observation is the scheduler's, not the product's: an exit inside it
+/// answers with the output at once, and a slower exit answers running after
+/// the whole window and the next poll joins it. Either way the model gets
+/// the output and the exit.
+#[cfg(unix)]
+#[tokio::test]
+async fn exec_command_with_zero_yield_returns_the_joined_output() -> Result<(), TestError> {
+    let (_, output, last) = drive_zero_yield("printf 'drive output'").await?;
+    assert_eq!(last["exit_code"], 0, "{last}");
+    assert_eq!(output, "drive output");
+    Ok(())
+}
+
+/// The running branch, pinned: a command that outlives the first
+/// observation is answered as running, only after that window, and the
+/// next empty poll joins its output at its exit.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_zero_yield_start_still_running_is_answered_after_the_window_and_joins_on_poll()
+-> Result<(), TestError> {
+    let (ran_on, output, last) = drive_zero_yield("sleep 1; printf late").await?;
+    assert!(
+        ran_on,
+        "a one-second command outlives the first observation"
+    );
+    assert_eq!(last["exit_code"], 0, "{last}");
+    assert_eq!(output, "late");
     Ok(())
 }
 
