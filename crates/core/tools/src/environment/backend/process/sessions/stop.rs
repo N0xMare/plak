@@ -13,7 +13,7 @@ impl JoinedProcessSessions {
         &self,
         id: JoinedProcessSessionId,
     ) -> Result<JoinedProcessStatus, ExecutionBackendError> {
-        if let Some(arm) = self.runner_arm() {
+        if let Some(arm) = self.arm_for(id) {
             return arm.join(id);
         }
         let session = self.session(id)?;
@@ -49,8 +49,10 @@ impl JoinedProcessSessions {
         by: crate::JobStopReason,
         grace: Duration,
     ) -> Result<JoinedProcessStatus, ExecutionBackendError> {
-        if let Some(arm) = self.runner_arm() {
-            return arm.stop_with_grace(id, by, grace);
+        if let Some(arm) = self.arm_for(id) {
+            let stopped = arm.stop_with_grace(id, by, grace);
+            arm.report(self);
+            return stopped;
         }
         if grace > Duration::from_secs(2) {
             return Err(invalid_request("process stop grace exceeds two seconds"));
@@ -78,7 +80,9 @@ impl JoinedProcessSessions {
         grace: Duration,
     ) -> Result<(), ExecutionBackendError> {
         if let Some(arm) = self.runner_arm() {
-            return arm.stop_jobs(by, grace);
+            let stopped = arm.stop_jobs(by, grace);
+            arm.report(self);
+            return stopped;
         }
         let ids = self
             .active_session_ids()
@@ -98,7 +102,9 @@ impl JoinedProcessSessions {
             if *lock(&self.inner.agent) != owner {
                 return Ok(());
             }
-            return arm.stop_jobs(by, grace);
+            let stopped = arm.stop_jobs(by, grace);
+            arm.report(self);
+            return stopped;
         }
         let ids = {
             let state = lock(&self.inner.state);
@@ -151,7 +157,9 @@ impl JoinedProcessSessions {
     /// Reports the first unresolved cleanup after attempting all foreground ids.
     pub fn stop_foreground(&self) -> Result<(), ExecutionBackendError> {
         if let Some(arm) = self.runner_arm() {
-            return arm.stop_foreground();
+            let stopped = arm.stop_foreground();
+            arm.report(self);
+            return stopped;
         }
         let mut failure = None;
         for id in self
@@ -175,8 +183,10 @@ impl JoinedProcessSessions {
         &self,
         id: JoinedProcessSessionId,
     ) -> Result<JoinedProcessStatus, ExecutionBackendError> {
-        if let Some(arm) = self.runner_arm() {
-            return arm.terminate(id);
+        if let Some(arm) = self.arm_for(id) {
+            let stopped = arm.terminate(id);
+            arm.report(self);
+            return stopped;
         }
         let deadline = Instant::now() + self.inner.limits.cleanup_duration();
         let session = self.session(id)?;
@@ -223,7 +233,9 @@ impl JoinedProcessSessions {
     /// a retryable `CleanupUnresolved`.
     pub fn join_all(&self) -> Result<(), ExecutionBackendError> {
         if let Some(arm) = self.runner_arm() {
-            return arm.stop_foreground();
+            let stopped = arm.stop_foreground();
+            arm.report(self);
+            return stopped;
         }
         let ids = lock(&self.inner.state)
             .active

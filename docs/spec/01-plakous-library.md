@@ -6250,7 +6250,19 @@ seen numbers the service's checkpointed counter includes. The agent attaches it 
 and makes its job restore (`seed_job_counter`, `consume_jobs`,
 `restore_job_terminals`) and the environment's adoption (`adopt_into`) through
 the port, as it does with a local port; capacity and job outputs are the
-runner's own. Backend errors cross with their kind, message, no-effect
+runner's own. A runner service's job events report nothing until the restore
+is done: the agent first reads the line's jobs from the runner
+(`refresh_jobs`; a runner that does not answer fails the construction rather
+than letting the restore match an empty view), so the terminal jobs no checkpoint row records, which an
+earlier host process already reported, are consumed rather than reported
+again, and reporting starts after the restore (`settle_jobs`). A durable row
+of a job the runner still lists is that live job, never a second snapshot of
+it; a row of a job the runner no longer lists, such as one a restarted runner
+lost, is restored as a terminal snapshot under the runner's session identity
+(a running row as of unknown outcome), and that session's reads stay on the
+host. A stop through the runner arm reads the line's jobs again before it
+returns and reports what ended, so a host that exits right after stopping its
+jobs has reported their ends. Backend errors cross with their kind, message, no-effect
 proof and conflict path. A link failure becomes `Io`, proven to have had no
 effect, when the call was never sent; `RecoveryRequired` when its outcome is
 unknown; the stale-owner `IdentityMismatch` when the runner refused its owner;

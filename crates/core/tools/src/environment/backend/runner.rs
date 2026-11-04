@@ -835,8 +835,8 @@ pub(crate) fn wait_on<T: Send>(
 }
 
 /// `environment`'s process-session service on its runner, whose link runs
-/// on `runtime`, adopted as the environment's service: what the agent
-/// attaches for a session on another runner.
+/// on `runtime`, adopted as the environment's service, its job events
+/// reporting at once: a session on another runner without a durable restore.
 ///
 /// # Errors
 ///
@@ -846,6 +846,7 @@ pub fn adopt_runner_process_sessions(
     runtime: &tokio::runtime::Handle,
 ) -> Result<crate::JoinedProcessSessions, ExecutionBackendError> {
     let sessions = environment.runner_process_sessions(runtime)?;
+    sessions.settle_runner_jobs();
     environment.adopt_joined_process_sessions(&sessions);
     Ok(sessions)
 }

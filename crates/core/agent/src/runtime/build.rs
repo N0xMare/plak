@@ -1182,6 +1182,10 @@ fn attach_job_environment(
         )
     })?;
     plakous_tools::internal::set_job_owner(&job_sessions, agent_id.to_string());
+    // A runner's jobs are read before the restore matches them against the
+    // checkpoint's rows, and report only after it.
+    port.refresh_jobs()
+        .map_err(|error| AgentError::from_tool(&plakous_tools::backend_runtime_error(error)))?;
     if let Some(bootstrap) = bootstrap {
         port.seed_job_counter(bootstrap.checkpoint.manifest().jobs().next_id());
         let rows = bootstrap.checkpoint.manifest().jobs().rows();
@@ -1215,6 +1219,7 @@ fn attach_job_environment(
                 .collect::<Vec<_>>(),
         );
     }
+    port.settle_jobs();
     port.adopt_into(&environment);
     Ok((environment, job_sessions))
 }

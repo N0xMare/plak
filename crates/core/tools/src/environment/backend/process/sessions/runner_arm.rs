@@ -59,10 +59,18 @@ struct ArmState {
     observed: BTreeSet<[u8; 16]>,
     /// A destructive poll's cursor per session.
     polled: BTreeMap<JoinedProcessSessionId, u64>,
+    /// Whether the service's owner has restored its durable jobs, after
+    /// which the line's job events report to the observer and the terminal
+    /// notices. Before it they only keep the mirror current, so a job an
+    /// earlier host process already reported and consumed is not reported
+    /// again ahead of the restore that retires it.
+    settled: bool,
 }
 
 /// One line's sessions on a runner, behind this process's service.
 pub(in crate::environment::backend) struct RunnerArm {
+    /// The runner's identity, named in what the arm reports of it.
+    runner: String,
     sessions: Arc<RunnerSessions>,
     runtime: tokio::runtime::Handle,
     state: Mutex<ArmState>,
@@ -111,6 +119,10 @@ impl JoinedProcessSessions {
     ) -> Result<Self, ExecutionBackendError> {
         let service = Self::refusing(environment)?;
         let arm = Arc::new(RunnerArm {
+            runner: environment
+                .backend()
+                .runner_id()
+                .map_or_else(String::new, |runner| runner.as_str().to_owned()),
             sessions: Arc::new(sessions),
             runtime: runtime.clone(),
             state: Mutex::default(),
@@ -123,6 +135,37 @@ impl JoinedProcessSessions {
 
     pub(super) fn runner_arm(&self) -> Option<&Arc<RunnerArm>> {
         self.inner.runner.get()
+    }
+
+    /// The runner arm a session's operations go to: none for a session this
+    /// service holds itself, such as a restored terminal snapshot of a job
+    /// the runner no longer lists.
+    pub(super) fn arm_for(&self, id: JoinedProcessSessionId) -> Option<&Arc<RunnerArm>> {
+        let arm = self.runner_arm()?;
+        let state = lock(&self.inner.state);
+        (!state.active.contains_key(&id) && !state.finished.contains_key(&id)).then_some(arm)
+    }
+
+    /// Reads the line's jobs from the runner before a restore matches them
+    /// against durable rows. Nothing for a local service.
+    ///
+    /// # Errors
+    ///
+    /// The runner did not answer: a restore against what it does not know
+    /// would report its jobs twice or not at all.
+    pub(crate) fn refresh_runner_jobs(&self) -> Result<(), ExecutionBackendError> {
+        match self.runner_arm() {
+            Some(arm) => arm.refresh(),
+            None => Ok(()),
+        }
+    }
+
+    /// Lets the line's job events report once the restore is done. Nothing
+    /// for a local service.
+    pub(crate) fn settle_runner_jobs(&self) {
+        if let Some(arm) = self.runner_arm() {
+            arm.settle(self);
+        }
     }
 }
 
@@ -155,6 +198,9 @@ impl RunnerArm {
     /// reported to the host's observer, and each newly ended one joins the
     /// service's terminal notices and wakes their subscribers.
     fn on_jobs(&self, service: &JoinedProcessSessions, jobs: &[JobView]) {
+        if !lock(&self.state).settled {
+            return;
+        }
         let observer = lock(&service.inner.job_observer).clone();
         let mut changed = false;
         for job in jobs {
@@ -203,6 +249,49 @@ impl RunnerArm {
                 .terminal_changes
                 .send_modify(|revision| *revision = revision.wrapping_add(1));
         }
+    }
+
+    /// Reads the line's jobs from the runner into the mirror, reporting
+    /// nothing. A failed read leaves the mirror as the job events left it.
+    pub(super) fn refresh(&self) -> Result<(), ExecutionBackendError> {
+        self.wait(self.sessions.jobs()).map(drop).map_err(|error| {
+            ExecutionBackendError::new(
+                error.kind(),
+                format!(
+                    "runner {} did not answer the job read: {}",
+                    self.runner,
+                    error.message()
+                ),
+            )
+            .with_proven_no_effect(error.proven_no_effect())
+        })
+    }
+
+    /// From now on the line's job events report; the jobs the mirror holds
+    /// report at once.
+    pub(super) fn settle(&self, service: &JoinedProcessSessions) {
+        lock(&self.state).settled = true;
+        self.on_jobs(service, &self.sessions.cached_jobs());
+    }
+
+    /// After a stop: reads the line's jobs again and reports what ended, so
+    /// a stop's terminals are known when it returns rather than at the next
+    /// job event, which a host about to exit may never see.
+    pub(super) fn report(&self, service: &JoinedProcessSessions) {
+        if !lock(&self.state).settled {
+            return;
+        }
+        // A failed read leaves the stop's terminals to the next job event.
+        let _ = self.refresh();
+        self.on_jobs(service, &self.sessions.cached_jobs());
+    }
+
+    /// Whether the runner lists the session as one of the line's jobs.
+    pub(super) fn lists(&self, session_id: [u8; 16]) -> bool {
+        self.sessions
+            .cached_jobs()
+            .iter()
+            .any(|job| job.session_id == session_id)
     }
 
     /// The runner's jobs this service has not consumed.

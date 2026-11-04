@@ -215,6 +215,24 @@ impl JoinedSessionsPort {
         self.sessions().consume_jobs(numbers);
     }
 
+    /// Reads a runner service's jobs from its runner before a restore
+    /// matches them against durable rows; nothing for a local service.
+    ///
+    /// # Errors
+    ///
+    /// The runner did not answer; the restore must not run without it.
+    #[doc(hidden)]
+    pub fn refresh_jobs(&self) -> Result<(), ExecutionBackendError> {
+        self.sessions().refresh_runner_jobs()
+    }
+
+    /// Lets a runner service's job events report once its restore is done;
+    /// nothing for a local service.
+    #[doc(hidden)]
+    pub fn settle_jobs(&self) {
+        self.sessions().settle_runner_jobs();
+    }
+
     /// Installs this port's service as `environment`'s process service.
     #[doc(hidden)]
     pub fn adopt_into(&self, environment: &crate::ExecutionEnvironment) {

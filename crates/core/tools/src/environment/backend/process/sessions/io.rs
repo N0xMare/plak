@@ -14,7 +14,7 @@ impl JoinedProcessSessions {
         &self,
         id: JoinedProcessSessionId,
     ) -> Result<crate::internal::ProcessSessionProjectionState, ExecutionBackendError> {
-        if let Some(arm) = self.runner_arm() {
+        if let Some(arm) = self.arm_for(id) {
             return Ok(arm.projection_state(id));
         }
         let session = self.session(id)?;
@@ -155,7 +155,7 @@ impl JoinedProcessSessions {
         bytes: &[u8],
         disposition: JoinedProcessInputDisposition,
     ) -> Result<(), ExecutionBackendError> {
-        if let Some(arm) = self.runner_arm() {
+        if let Some(arm) = self.arm_for(id) {
             return arm.write_stdin(id, bytes, disposition);
         }
         if bytes.len() > MAX_JOINED_PROCESS_SESSION_WRITE_BYTES {
@@ -199,7 +199,7 @@ impl JoinedProcessSessions {
         max_bytes: usize,
         max_records: usize,
     ) -> Result<JoinedProcessPollResult, ExecutionBackendError> {
-        if let Some(arm) = self.runner_arm() {
+        if let Some(arm) = self.arm_for(id) {
             return arm.poll(id, max_bytes, max_records);
         }
         if max_bytes == 0
@@ -281,7 +281,7 @@ impl JoinedProcessSessions {
         max_bytes: usize,
         max_records: usize,
     ) -> Result<JoinedProcessCursorPollResult, ExecutionBackendError> {
-        if let Some(arm) = self.runner_arm() {
+        if let Some(arm) = self.arm_for(id) {
             return arm.poll_from(id, cursor, max_bytes, max_records);
         }
         if max_bytes == 0
@@ -358,7 +358,7 @@ impl JoinedProcessSessions {
         max_bytes: usize,
         max_records: usize,
     ) -> Result<JoinedProcessCursorPollResult, ExecutionBackendError> {
-        if let Some(arm) = self.runner_arm() {
+        if let Some(arm) = self.arm_for(id) {
             return arm.poll_tail(id, max_bytes, max_records);
         }
         if max_bytes == 0

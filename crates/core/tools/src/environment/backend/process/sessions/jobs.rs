@@ -78,7 +78,7 @@ impl JoinedProcessSessions {
         &self,
         id: JoinedProcessSessionId,
     ) -> Result<tokio::sync::watch::Receiver<u64>, ExecutionBackendError> {
-        if let Some(arm) = self.runner_arm() {
+        if let Some(arm) = self.arm_for(id) {
             return Ok(arm.session_changes(id));
         }
         Ok(lock(&self.session(id)?.shared).changes.subscribe())
@@ -128,6 +128,7 @@ impl JoinedProcessSessions {
     }
 
     pub(crate) fn restore_job_terminals(&self, views: &[crate::JobView]) {
+        let arm = self.runner_arm();
         let mut state = lock(&self.inner.state);
         for view in views {
             if state
@@ -138,10 +139,21 @@ impl JoinedProcessSessions {
             {
                 continue;
             }
-            // Fresh allocation-local identity authorizes snapshot reads, never a PID.
-            let mut bytes = [0; 16];
-            bytes[..8].copy_from_slice(&self.inner.owner);
-            bytes[8..].copy_from_slice(&u64::from(view.number).to_be_bytes());
+            let bytes = if let Some(arm) = arm {
+                // A job the runner still lists is the runner's live job, not
+                // a snapshot; a job it no longer lists keeps the runner's
+                // session identity, so its events and rows match it.
+                if arm.lists(view.session_id) {
+                    continue;
+                }
+                view.session_id
+            } else {
+                // Fresh allocation-local identity authorizes snapshot reads, never a PID.
+                let mut bytes = [0; 16];
+                bytes[..8].copy_from_slice(&self.inner.owner);
+                bytes[8..].copy_from_slice(&u64::from(view.number).to_be_bytes());
+                bytes
+            };
             let snapshot = JoinedSession::terminal_snapshot(view, &self.inner);
             state
                 .finished
@@ -193,7 +205,7 @@ impl JoinedProcessSessions {
     /// Whether this process is session-owned rather than turn-owned.
     #[must_use]
     pub fn is_promoted(&self, id: JoinedProcessSessionId) -> bool {
-        if let Some(arm) = self.runner_arm() {
+        if let Some(arm) = self.arm_for(id) {
             return arm.is_promoted(id);
         }
         self.session(id)
@@ -499,7 +511,14 @@ impl JoinedProcessSessions {
             .collect();
         drop(state);
         if let Some(arm) = self.runner_arm() {
-            jobs.extend(arm.jobs());
+            // The runner's live view of a job wins over a restored snapshot.
+            let live = arm.jobs();
+            jobs.retain(|job| {
+                !live
+                    .iter()
+                    .any(|runner| runner.session_id == job.session_id)
+            });
+            jobs.extend(live);
         }
         jobs
     }
