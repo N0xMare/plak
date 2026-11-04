@@ -188,6 +188,24 @@ pub(in crate::agent) async fn continue_after_loss(
     }
 }
 
+/// The nodes the operator's Resume with no agent tries: every held or
+/// pending continuation after a loss.
+fn resumable_after_loss(tree: &crate::agent_tree::ProductAgentTree) -> Vec<String> {
+    tree.loss_continuations()
+        .into_iter()
+        .filter(|(_, continuation)| continuation.state != LossContinuationState::Running)
+        .map(|(agent_id, _)| agent_id)
+        .collect()
+}
+
+/// Whether the tree holds any child's continuation after a loss: what the
+/// root's one Resume has to resume in its tree.
+pub(crate) fn holds_after_loss(runtime: &ProductTopologyRuntime) -> bool {
+    runtime
+        .read(|tree| !resumable_after_loss(tree).is_empty())
+        .unwrap_or(false)
+}
+
 /// The operator's Resume: one node's held continuation, or every held one
 /// when `agent_id` is `None`. Returns each node tried and what it did.
 pub(crate) async fn operator_resume_after_loss(
@@ -199,15 +217,7 @@ pub(crate) async fn operator_resume_after_loss(
     let targets = match agent_id {
         Some(agent_id) => vec![agent_id.to_owned()],
         None => runtime
-            .read(|tree| {
-                tree.loss_continuations()
-                    .into_iter()
-                    .filter(|(_, continuation)| {
-                        continuation.state != LossContinuationState::Running
-                    })
-                    .map(|(agent_id, _)| agent_id)
-                    .collect()
-            })
+            .read(resumable_after_loss)
             .map_err(|error| error.message)?,
     };
     let mut resumed = Vec::new();

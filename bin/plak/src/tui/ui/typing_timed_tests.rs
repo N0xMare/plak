@@ -28,6 +28,7 @@ fn irreversible(action: &UserAction) -> bool {
             | UserAction::DropQueued { .. }
             | UserAction::SendQueuedNow { .. }
             | UserAction::ResumeQueueDrain
+            | UserAction::ResumeLossContinuation { .. }
             | UserAction::ResolveApproval { .. }
             | UserAction::Quit
             | UserAction::NewSession

@@ -679,7 +679,7 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         field: ConfigField::ResumeAfterLoss,
         kind: "enum",
         constraint: "hold|continue; unset holds; home-scoped",
-        doc: "Whether a sub-agent whose host was lost (a crash, a lease loss) holds for the operator's Resume or continues once by itself with a new instruction turn (chapter 03 §14.1). The root still holds either way; its continuation is not implemented yet. Read when the root opens; a released 0.0.3 build (or older) refuses a config.toml that sets it.",
+        doc: "Whether the root and the sub-agents whose host was lost (a crash, a lease loss) hold for the operator's Resume or continue once by themselves with a new instruction turn, the root's restored queue draining too (chapter 03 §14.1). Read when the root attaches and opens; a released 0.0.3 build (or older) refuses a config.toml that sets it.",
         example: "\"continue\"",
         scope: ConfigScope::Immediate,
     },

@@ -1605,7 +1605,7 @@ view, and nothing is both.
 | Root profile (`root_profile`: the root template and working set) | intent | `plak:create:<id>` | the profile the record's genesis froze, which is the session's profile while its tree has no rows (a virtual tree of one; a tree with rows records its own epochs, §5.5): what the roster source answers for the root bind, the same answer a tree genesis freezes. Written once, at genesis, and never moved: by the first runtime create of a created, imported or carried session (an import or carry successor takes its source's profile when it still resolves, else the home default it binds), into a `/new` reservation before its runtime create, from a rebind request onto a tree of its own (the profile it was frozen on), copied by a rebind that stays on its source's tree and by a fork, and from a switch request's profile. A record has none only before its first runtime create, or while it has no bound tuple. Export reads it (§2.5.1) |
 | Runner display copy (`runner_display`: runner name and id, workspace root and working directory on it) | intent | `plak:create:<id>` | a display copy of the runner and workspace the root's binding names, never authority; NULL is the host's own local runner at the record's workspace root, which every session is today; successors copy it; no reader yet |
 | Frozen MCP placement: each frozen MCP tool record's `placement` (`host` or `runner`) | intent | `plak:create:<id>` | frozen with the record's MCP tool records (above): the placement its server ran under at creation, `runner` for a server placed on the node's runner (chapter 07 §3.5) whether that runner is remote or this host; one server never freezes two placements; no reader yet |
-| Root interrupt cause and continuation decision of a virtual tree's root (`interrupt_cause`: the stopped turn or command and `operator`, `owner_lost`, `handoff` or `stopped`; `continuation_decision`: the anchor, host generation, cause `transient`, `owner_lost` or `handoff`, a round from 1, the decision time and a `new_turn`, `resubmit` or `withdrawn` decision) | intent | kind, anchor and ordinal | defined and decoded with unknown fields refused; no flow writes or reads them until node recovery lands; a tree with rows records the same facts in the tree store (chapter 03 §14) |
+| Root interrupt cause and continuation decision of the root (`interrupt_cause`: the stopped turn or command and `operator`, `owner_lost`, `handoff` or `stopped`; `continuation_decision`: the anchor, host generation, cause `transient`, `owner_lost` or `handoff`, a round from 1, the decision time and a `new_turn`, `resubmit` or `withdrawn` decision) | intent | kind, anchor and ordinal | defined and decoded with unknown fields refused; the root's loss writes the interrupt cause (`owner_lost`, anchored on the lost turn) and its Resume writes the continuation decision (a `new_turn` under a `plak:resume-loss:root:` command id), each at the applied cursor (chapter 03 §14.1), whether or not the root's tree has rows |
 | Carry intent: the write-ahead marker of a same-store carry (`carry_intent`: the source locator, that it continues the source's line, the carry's cause and whether it is the reload's orchestration carry) | intent | the successor's `plak:create:<id>` | written with the successor's record, locator unset, before the runtime create; cleared in the save that binds the locator; settled on open and at startup (below) |
 
 **Write-ahead carries.** A same-store carry (the binding-repair `/rebind`
@@ -3450,7 +3450,7 @@ after a gap; a fresh attachment starts with clean prompt provenance.
 | `interrupt` | — |
 | `background` | — (promotes in-flight top-level foreground commands; no-op otherwise) |
 | `compact` | — |
-| `recover` | — (idle only; recovers a fenced session now, or answers with a `nothing to recover` note before the next command is handled, also when a child recovery pass with nothing pending runs in the background) |
+| `recover` | — (idle only; recovers a fenced session now; while the root holds a continuation after a lost host it is the one Resume, as `resume`; otherwise it answers with a `nothing to recover` note before the next command is handled, also when a child recovery pass with nothing pending runs in the background) |
 | `resolve_approval` | `approval_id` (the non-empty opaque handle offered by `approval`), `choice` (`"allow"` or `"deny"`) |
 | `resume_queue` | — |
 | `clear` | — |
@@ -3458,7 +3458,7 @@ after a gap; a fresh attachment starts with clean prompt provenance.
 | `fork` | optional `account`; optional `compact` (`true` compacts the new session). `account` together with `compact` is refused |
 | `tree`, `stop_all` | — |
 | `interrupt_node`, `close_node` | `agent_id` |
-| `resume` | optional `agent_id` (a non-empty string); without it every held child |
+| `resume` | optional `agent_id` (a non-empty string); without it the one Resume: every held child, the root's held continuation and its restored queue |
 | `invoke_tool` | `name`, `arguments` (an object), optional `agent_id` |
 
 `tree`, `interrupt_node`, `close_node`, `stop_all`, `resume` and `invoke_tool`
@@ -4462,7 +4462,7 @@ follow-up, `Ctrl+E` loads it into the draft to edit, and the queue title reads
 `editing queued follow-up · Enter saves · Esc cancels` while the queue is
 unfocused. The draft it replaced returns as one undoable step when the edit
 ends: `Esc` cancels it, an applied save restores it, and an item that leaves
-the queue mid-edit merges its text with it. `Ctrl+R` resumes a restored drain, and `Ctrl+S` (or
+the queue mid-edit merges its text with it. `Ctrl+R` resumes a restored drain (it is the one Resume after a lost host: it also resumes the root's held continuation and every held child, chapter 03 §14.1), and `Ctrl+S` (or
 `Ctrl+Enter`) sends the selected follow-up now, whatever the draft holds. A click on a row's `[now]` or `[drop]`
 chip fires that action; the hit target is the painted chip, not the panel's
 trailing edge, and a chip fires only once it has been painted at that position

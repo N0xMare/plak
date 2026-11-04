@@ -30,6 +30,7 @@ fn irreversible(action: &UserAction) -> bool {
             | UserAction::DropQueued { .. }
             | UserAction::SendQueuedNow { .. }
             | UserAction::ResumeQueueDrain
+            | UserAction::ResumeLossContinuation { .. }
             | UserAction::ResolveApproval { .. }
             | UserAction::Quit
             | UserAction::NewSession
@@ -678,7 +679,8 @@ fn queue_letters_never_act_and_its_chords_do() {
     );
     assert_eq!(
         app.handle_key(key_ctrl(KeyCode::Char('r'))),
-        Some(UserAction::ResumeQueueDrain)
+        Some(UserAction::ResumeLossContinuation { agent_id: None }),
+        "Ctrl+R on the paused queue is the one Resume"
     );
     assert_eq!(app.handle_key(key_ctrl(KeyCode::Char('e'))), None);
     assert_eq!(app.input, "second", "Ctrl+E loads the selected one");

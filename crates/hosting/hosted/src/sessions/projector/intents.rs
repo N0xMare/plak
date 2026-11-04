@@ -249,8 +249,8 @@ fn valid_command_id(value: &str) -> bool {
     !value.is_empty() && !value.chars().any(char::is_control)
 }
 
-/// Why a virtual tree's root stopped short (spec 02 §2.6): the root of a tree
-/// with rows records its cause in the tree store instead.
+/// Why the root stopped short (spec 02 §2.6), whether or not its tree has
+/// rows.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RootInterruptCause {
@@ -311,9 +311,8 @@ pub enum RootContinuationDecision {
     },
 }
 
-/// One durable continuation decision for a virtual tree's root: one per
-/// cause, anchor, host generation and round. Decoded today; the recovery
-/// switch writes it.
+/// One durable continuation decision for the root: one per cause, anchor,
+/// host generation and round.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RootContinuation {
@@ -404,6 +403,28 @@ impl RootContinuation {
     }
 }
 
+/// A root loss intent, written at the current applied cursor.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RootLossIntent {
+    /// The root's owner-lost (or handoff) interrupt.
+    Interrupt(RootInterrupt),
+    /// Consent to its continuation.
+    Continuation(RootContinuation),
+}
+
+impl RootLossIntent {
+    /// The stored encoding.
+    ///
+    /// # Errors
+    /// Refuses an incoherent intent.
+    pub fn encode(&self) -> Result<String, String> {
+        match self {
+            Self::Interrupt(intent) => intent.encode(),
+            Self::Continuation(intent) => intent.encode(),
+        }
+    }
+}
+
 /// Every intent of one product session the projector reads.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ProductIntents {
@@ -421,17 +442,39 @@ pub struct ProductIntents {
     pub wake_suppressions: Vec<AnchoredIntent<()>>,
     /// Pause causes no fact carries.
     pub pause_causes: Vec<AnchoredIntent<HostPauseCause>>,
-    /// A virtual tree's root interrupt causes; no reader until recovery
-    /// switches.
+    /// The root's interrupt causes (spec 03 §14.1).
     pub root_interrupts: Vec<AnchoredIntent<RootInterrupt>>,
-    /// A virtual tree's root continuation decisions; no reader until
-    /// recovery switches.
+    /// The root's continuation decisions (spec 03 §14.1).
     pub root_continuations: Vec<AnchoredIntent<RootContinuation>>,
     /// An imported session's transcript, anchor 0, lane 1, in document order.
     pub imported: Vec<TranscriptRow>,
 }
 
 impl ProductIntents {
+    /// The (anchor, ordinal) of every host intent: what the next host
+    /// intent at an anchor is ordered after.
+    pub fn host_intent_positions(&self) -> impl Iterator<Item = (u64, u32)> + '_ {
+        let position = |anchor: u64, ordinal: u32| (anchor, ordinal);
+        self.wake_suppressions
+            .iter()
+            .map(move |intent| position(intent.anchor, intent.ordinal))
+            .chain(
+                self.pause_causes
+                    .iter()
+                    .map(move |intent| position(intent.anchor, intent.ordinal)),
+            )
+            .chain(
+                self.root_interrupts
+                    .iter()
+                    .map(move |intent| position(intent.anchor, intent.ordinal)),
+            )
+            .chain(
+                self.root_continuations
+                    .iter()
+                    .map(move |intent| position(intent.anchor, intent.ordinal)),
+            )
+    }
+
     /// Whether retention consumed a submission whose facts are no longer
     /// available. This does not imply an acceptance or derive a transcript row.
     #[must_use]

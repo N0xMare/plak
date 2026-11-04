@@ -176,6 +176,10 @@ struct RootRole<'a, P: plakous_host_protocol::ProtocolExtension> {
     /// The actor entered idle without a settled turn's tree pass (a
     /// workflow); the next idle pass runs the root's settled tree pass.
     idle_entry_pass_due: bool,
+    /// The root's continuation after a lost host is due at the next idle
+    /// boundary: consent was given (a Resume, `resume_after_loss =
+    /// "continue"`, or a decision a crash left pending).
+    root_loss_resume_due: bool,
 }
 
 enum HostStep {
@@ -189,6 +193,7 @@ enum HostStep {
 }
 
 mod idle;
+mod loss_resume;
 mod open;
 mod pending;
 mod prompt;

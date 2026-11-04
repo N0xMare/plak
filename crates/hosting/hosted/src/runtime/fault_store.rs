@@ -6,6 +6,7 @@ use std::sync::Arc;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StoreCall {
     WriteHostControls,
+    WriteRootLoss,
     Load,
     LoadQueueHead,
     Save,
@@ -129,6 +130,15 @@ impl<F: StoreFaults + 'static> SessionRecordStore for FaultStore<F> {
         self.faults
             .before_write(StoreCall::WriteHostControls, None)?;
         self.inner.write_host_controls(id, suppress_wake, pause)
+    }
+
+    fn write_root_loss(
+        &self,
+        id: &str,
+        intent: sessions::projector::RootLossIntent,
+    ) -> Result<(), crate::session_store::RecordStoreError> {
+        self.faults.before_write(StoreCall::WriteRootLoss, None)?;
+        self.inner.write_root_loss(id, intent)
     }
 
     fn load(&self, id: &str) -> Result<SessionRecord, String> {

@@ -164,6 +164,7 @@ async fn resumed_js_session_keeps_construction_jobs_after_policy_change() {
         scheduled_compaction: false,
         max_model_rounds: crate::agent::NATIVE_RUN_MAX_MODEL_ROUNDS,
         topology_enabled: false,
+        continue_after_loss: false,
         product_home: Some(directory.path().to_path_buf()),
         tool_selection: crate::tool_plan::NodeToolSelection::default(),
     };

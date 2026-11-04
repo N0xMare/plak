@@ -61,7 +61,7 @@ pub(super) use bind::{
     openrouter_frozen_pin,
 };
 pub(super) use continuation::continue_after_loss;
-pub(crate) use continuation::{LossResume, operator_resume_after_loss};
+pub(crate) use continuation::{LossResume, holds_after_loss, operator_resume_after_loss};
 pub(super) use controller::ProductChildController;
 #[cfg(test)]
 pub(super) use deliver::turn_ended_or;

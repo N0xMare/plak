@@ -262,6 +262,8 @@ pub(super) async fn production_build_clear_candidate<
             scheduled_compaction: config.compaction_enabled,
             max_model_rounds: config.max_model_rounds,
             topology_enabled,
+            continue_after_loss: config.resume_after_loss
+                == crate::runtime::ResumeAfterLoss::Continue,
         },
         stderr_buf,
     )

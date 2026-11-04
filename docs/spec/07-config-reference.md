@@ -173,8 +173,8 @@ The families are not `plak config set` keys: they are authored in the file, a
 save leaves them exactly as written, and `plak config show` prints the
 canonical rendering of the tool and server tables after the keys.
 
-`[host] resume_after_loss` decides whether a sub-agent a lost host
-interrupted holds for the operator's Resume or continues once by itself
+`[host] resume_after_loss` decides whether the root and the sub-agents a lost
+host interrupted hold for the operator's Resume or continue once by themselves
 (chapter 03 §14.1); `[mcp_servers.<id>] placement` places a server (§3.5);
 `[runners.<name>]` is read by `plak runner pair`, `plak runner ps` and `plak
 doctor` (§3.6) and by nothing else yet; `[web] allow` and `[web] origin` are
@@ -224,7 +224,7 @@ repository can never grant web access.
 | `telemetry.max_bytes` | integer | `536870912` | greater than 0; zero is refused as ambiguous. 536870912 is 512 MiB | Best-effort byte retention target for the main database, WAL and SHM; busy readers or unfinished sessions may keep it above target. |
 | `telemetry.max_age_days` | integer | `90` | greater than 0; zero is refused as ambiguous | Retention cutoff for local analytics rows, in days. |
 | `mcp.client_id_metadata_url` | string | `(unset)` | `https://` URL with a path, no query or fragment; home-scoped | The OAuth Client ID Metadata Document that identifies Plak to an MCP authorization server that supports one (spec 01 §8.5). Unset disables that registration path; the document lists the redirect URI `http://127.0.0.1/callback`, which a server matches on any port. Takes effect at the next `plak mcp login`. |
-| `host.resume_after_loss` | enum | `(unset)` | hold\|continue; unset holds; home-scoped | Whether a sub-agent whose host was lost (a crash, a lease loss) holds for the operator's Resume or continues once by itself with a new instruction turn (chapter 03 §14.1). The root still holds either way; its continuation is not implemented yet. Read when the root opens; a released 0.0.3 build (or older) refuses a config.toml that sets it. |
+| `host.resume_after_loss` | enum | `(unset)` | hold\|continue; unset holds; home-scoped | Whether the root and the sub-agents whose host was lost (a crash, a lease loss) hold for the operator's Resume or continue once by themselves with a new instruction turn, the root's restored queue draining too (chapter 03 §14.1). Read when the root attaches and opens; a released 0.0.3 build (or older) refuses a config.toml that sets it. |
 | `web.allow` | array of string | `(unset)` | tailnet logins, no duplicates; unset admits no one; home-scoped | The tailnet logins (Tailscale-User-Login) plak web admits through tailscale serve. Read when plak web starts; a 0.0.3 build refuses a config.toml that sets it. |
 | `web.origin` | string | `(unset)` | https://<host>[:port], nothing after it; home-scoped | The exact origin tailscale serve publishes plak web at; every request must name its host and a WebSocket upgrade its origin. Read when plak web starts; a 0.0.3 build refuses a config.toml that sets it. |
 

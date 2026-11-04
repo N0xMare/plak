@@ -482,9 +482,11 @@ impl App {
                 self.queue_edit_selected();
                 CtrlKey::Consumed
             }
+            // The one Resume (spec 03 §14.1): the restored queue, the root's
+            // continuation after a lost host, and every held child.
             KeyCode::Char('r' | 'R') if self.queue_focused => {
                 if self.queue_drain == super::QueueDrainState::RestoredPaused {
-                    CtrlKey::Action(UserAction::ResumeQueueDrain)
+                    CtrlKey::Action(UserAction::ResumeLossContinuation { agent_id: None })
                 } else {
                     CtrlKey::Consumed
                 }

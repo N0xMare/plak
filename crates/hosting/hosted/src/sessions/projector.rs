@@ -20,7 +20,7 @@ mod tests;
 pub use intents::{
     AnchoredIntent, HostPauseCause, OperatorNotice, ProductIntents, RootContinuation,
     RootContinuationCause, RootContinuationDecision, RootInterrupt, RootInterruptCause,
-    RootStopAnchor, Submission, SubmissionKind, WorkflowRequest,
+    RootLossIntent, RootStopAnchor, Submission, SubmissionKind, WorkflowRequest,
 };
 pub use join::{
     ProductTreeJoin, new_session_completion, pending_command_ids, pending_workflow_operation_ids,

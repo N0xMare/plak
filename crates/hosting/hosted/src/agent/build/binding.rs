@@ -552,6 +552,7 @@ pub(in crate::agent) async fn coding_session_runtime_binding_for(
         scheduled_compaction,
         max_model_rounds,
         topology_enabled: _,
+        continue_after_loss: _,
         tool_selection,
     } = spec;
     let binding_span = tracing::info_span!(

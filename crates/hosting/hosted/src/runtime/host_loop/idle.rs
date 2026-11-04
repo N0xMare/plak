@@ -235,6 +235,21 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                                 );
                             }
                         }
+                    } else if one_shot.is_none()
+                        && !self.role.config.attached_one_shot
+                        && self.root_loss_held()
+                    {
+                        // With a root a lost host interrupted, an attached
+                        // face's `/recover` is the root's Resume (spec 03
+                        // §14.1); `plak session recover` only recovers.
+                        return Ok(match self.resume_after_loss_all().await {
+                            Some((text, queued_delivery, user_echoed)) => HostStep::Prompt {
+                                text,
+                                queued_delivery,
+                                user_echoed,
+                            },
+                            None => HostStep::Continue,
+                        });
                     } else {
                         let nothing = (!self.role.recovered_at_open).then(|| {
                             "nothing to recover: no turn in this session was interrupted".to_owned()
@@ -968,6 +983,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     ).with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::AttachOnlyWhenDetached {}));
                     None
                 }
+                // The one Resume: every held child, the root's continuation
+                // and its restored queue.
+                Ok(UserAction::ResumeLossContinuation { agent_id: None }) => {
+                    self.resume_after_loss_all().await
+                }
                 Ok(
                     action @ (UserAction::OpenTopologyNavigator
                     | UserAction::RefreshTopologyTree
@@ -1026,6 +1046,19 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 Err(RecvTimeoutError::Timeout) => {
                     if self.role.pending_resume.is_some() {
                         return self.transient_resume_prompt().await;
+                    }
+                    if one_shot.is_none()
+                        && !self.role.config.attached_one_shot
+                        && self.role.root_loss_resume_due
+                    {
+                        return Ok(match self.root_loss_resume_delivery().await? {
+                            Some((text, queued_delivery, user_echoed)) => HostStep::Prompt {
+                                text,
+                                queued_delivery,
+                                user_echoed,
+                            },
+                            None => HostStep::Continue,
+                        });
                     }
                     if one_shot.is_none() && self.role.config.continuation.is_some() {
                         return self.continuation_prompt().await;

@@ -89,9 +89,9 @@ pub(crate) fn remedy_text(remedy: &NoticeRemedy, context: RemedyContext<'_>) -> 
     let open_tui = format!("open `plak --resume {session}`");
     match remedy {
         R::ResumeAfterLoss {} => match face {
-            Tui => "press r on a held agent in the Agents tab to resume it".into(),
-            Run => format!("{open_tui} and resume the held agents from the Agents tab"),
-            Jsonl => "send resume (with agent_id for one agent) to resume the held agents".into(),
+            Tui => "use /recover (or Ctrl+R on the paused queue) to resume everything the lost host interrupted, or r on one agent in the Agents tab".into(),
+            Run => format!("{open_tui} and use /recover to resume what the lost host interrupted"),
+            Jsonl => "send resume to resume everything the lost host interrupted, or resume with agent_id for one agent".into(),
         },
         R::RecoverChildren {} => match face {
             Tui => "\

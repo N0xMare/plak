@@ -526,6 +526,45 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                         ),
                     }
                 }
+                // During a turn the root holds nothing after a loss (the turn
+                // ended that), so the one Resume resumes the held children
+                // and the restored queue.
+                Ok(action @ UserAction::ResumeLossContinuation { agent_id: None }) => {
+                    if crate::topology_runtime::lookup(&crate::runtime::durable_topology_tree_id(
+                        self.host.rows,
+                        self.host.session,
+                    ))
+                    .is_some_and(|runtime| crate::agent::children::holds_after_loss(&runtime))
+                    {
+                        crate::topology_navigator::dispatch_topology_navigator_action(
+                            self.host.rows,
+                            self.host.session,
+                            self.host.events,
+                            self.host.roots.job_registry(),
+                            &action,
+                        )
+                        .await;
+                    }
+                    match commit_session_update(
+                        self.host.store,
+                        self.host.home,
+                        self.host.session,
+                        |candidate| {
+                            candidate.queue_drain_state = SessionQueueDrainState::LiveAutoDrain;
+                            true
+                        },
+                    ) {
+                        Ok(true) => emit_queue_snapshot(self.host.events, self.host.session),
+                        Ok(false) => {}
+                        Err(error) => queue_persist_failed(
+                            self.host.events,
+                            self.host.home,
+                            self.host.session,
+                            QueuePersistAction::ResumeDrain,
+                            &error,
+                        ),
+                    }
+                }
                 Ok(UserAction::ResumeQueueDrain) => {
                     match commit_session_update(
                         self.host.store,

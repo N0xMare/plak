@@ -54,60 +54,6 @@ impl ProductStore {
         Ok(submissions)
     }
 
-    pub fn write_host_controls(
-        &mut self,
-        session_id: &str,
-        suppress_wake: bool,
-        pause: Option<HostPauseCause>,
-    ) -> Result<(), RecordStoreError> {
-        self.durability(true)?;
-        let tx = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|error| {
-                super::write_error(error, "could not start host intent write".to_owned())
-            })?;
-        let exists: bool = tx
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sessions WHERE id=?1)",
-                [session_id],
-                |row| row.get(0),
-            )
-            .map_err(|error| {
-                super::write_error(error, "could not inspect host intent session".to_owned())
-            })?;
-        if !exists {
-            return Err("session not found".to_owned().into());
-        }
-        let anchor: i64 = tx.query_row("SELECT COALESCE((SELECT applied_seq FROM projector_cursors WHERE session_id=?1),0)", [session_id], |row| row.get(0))
-            .map_err(|error| super::write_error(error, "could not inspect host intent cursor".to_owned()))?;
-        let last: Option<u32> = tx
-            .query_row(
-                "SELECT MAX(ordinal) FROM host_intents WHERE session_id=?1 AND anchor=?2",
-                params![session_id, anchor],
-                |row| row.get(0),
-            )
-            .map_err(|error| {
-                super::write_error(error, "could not inspect host intent ordinal".to_owned())
-            })?;
-        let ordinal = last
-            .map_or(Some(0), |ordinal| ordinal.checked_add(1))
-            .ok_or_else(|| "host intent ordinal is exhausted".to_owned())?;
-        if suppress_wake {
-            tx.execute("INSERT INTO host_intents(session_id,kind,anchor,ordinal,value) VALUES(?1,?2,?3,?4,'null')", params![session_id, WAKE_SUPPRESSION, anchor, ordinal])
-                .map_err(|error| super::write_error(error, "could not record wake suppression".to_owned()))?;
-        }
-        if let Some(pause) = pause {
-            let value = serde_json::to_string(&pause).map_err(|error| {
-                super::write_error(error, "pause cause is not encodable".to_owned())
-            })?;
-            tx.execute("INSERT INTO host_intents(session_id,kind,anchor,ordinal,value) VALUES(?1,?2,?3,?4,?5)", params![session_id, PAUSE_CAUSE, anchor, ordinal, value])
-                .map_err(|error| super::write_error(error, "could not record pause cause".to_owned()))?;
-        }
-        tx.commit()
-            .map_err(|error| super::write_error(error, "could not commit host intents".to_owned()))
-    }
-
     /// The same-build source whose tree a successor inherits. Carry sources
     /// are references to another state directory, never topology authority.
     #[cfg(feature = "maintainer")]
@@ -481,8 +427,7 @@ impl ProductStore {
         )
     }
 
-    /// Writes a virtual tree's root interrupt cause. No flow writes one
-    /// before the recovery switch.
+    /// Writes a root interrupt cause at an explicit anchor.
     pub fn write_root_interrupt(
         &mut self,
         session_id: &str,
@@ -498,8 +443,7 @@ impl ProductStore {
         )
     }
 
-    /// Writes a virtual tree's root continuation decision. No flow writes
-    /// one before the recovery switch.
+    /// Writes a root continuation decision at an explicit anchor.
     pub fn write_root_continuation(
         &mut self,
         session_id: &str,
@@ -1546,6 +1490,7 @@ fn load_submissions_where(
     Ok(submissions)
 }
 
+mod cursor_intents;
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests;

@@ -232,6 +232,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         let host_authored = queued_delivery
             .as_ref()
             .is_some_and(|item| super::wake::is_wake_delivery(&self.role.config.session, item));
+        // A host continuation of the root's own work (a transient resume, or
+        // the continuation after a lost host) is host-authored but no child
+        // wake: it prepares its context and authority as a prompt does.
         let transient_resume = queued_delivery.as_ref().is_some_and(|item| {
             self.role
                 .config
@@ -242,6 +245,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     submission
                         .command_id
                         .starts_with(crate::driver::transient::ROOT_COMMAND_PREFIX)
+                        || crate::runtime::root_loss::is_root_loss_command(&submission.command_id)
                 })
         });
         if !host_authored {

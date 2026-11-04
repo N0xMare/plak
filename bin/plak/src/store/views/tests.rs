@@ -1120,6 +1120,61 @@ fn only_the_projector_commit_writes_view_tables() {
     );
 }
 
+/// The host writes the root's loss intents at the applied cursor,
+/// each after the host intents already there.
+#[test]
+fn root_loss_intents_are_written_at_the_applied_cursor_in_order() {
+    use plakous_hosted::sessions::projector::{
+        RootContinuation, RootContinuationCause, RootContinuationDecision, RootInterrupt,
+        RootInterruptCause, RootLossIntent, RootStopAnchor,
+    };
+    let root = tempdir().unwrap();
+    let (mut store, session) = store_with_session(root.path());
+    let anchor = RootStopAnchor::Turn {
+        turn_id: "turn-1".to_owned(),
+    };
+    store
+        .write_root_loss_at_cursor(
+            &session,
+            &RootLossIntent::Interrupt(RootInterrupt {
+                anchor: anchor.clone(),
+                cause: RootInterruptCause::OwnerLost,
+            }),
+        )
+        .unwrap();
+    store
+        .write_root_loss_at_cursor(
+            &session,
+            &RootLossIntent::Continuation(RootContinuation {
+                anchor,
+                host_generation: 1,
+                cause: RootContinuationCause::OwnerLost,
+                round: 1,
+                decided_at_ms: 1,
+                decision: RootContinuationDecision::NewTurn {
+                    command_id: "plak:resume-loss:root:x".to_owned(),
+                    withdrawn: Vec::new(),
+                },
+            }),
+        )
+        .unwrap();
+    let intents = store.load_intents(&session).unwrap();
+    assert_eq!(
+        (
+            intents.root_interrupts[0].anchor,
+            intents.root_interrupts[0].ordinal
+        ),
+        (0, 0)
+    );
+    assert_eq!(
+        (
+            intents.root_continuations[0].anchor,
+            intents.root_continuations[0].ordinal
+        ),
+        (0, 1)
+    );
+}
+
 /// The root interrupt cause and continuation decision of a virtual tree are
 /// host intents that no flow writes before the recovery switch: they round
 /// trip, and a malformed row refuses the load.

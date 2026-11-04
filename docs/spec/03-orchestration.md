@@ -3643,9 +3643,69 @@ child. Under `"continue"` the `recover_node` run the root's open starts
 resumes each held child once by itself; the attached root sets the policy on
 the tree's hub when it opens. Each run ends with that continuation pass, after
 every recovery it made, and reports the children still held in one live tree
-notice that is never stored. The root's own continuation and the restored
-queue's Resume are not part of this yet: the root still holds and its queue
-stays paused until the operator resumes it.
+notice that is never stored.
+
+**The root's continuation after a loss.** A root turn its lost host left
+running is closed by the root's next exact open, whose terminal is an
+abandonment with cause `process_lost`. The root records that loss as an
+interrupt with cause `owner_lost` in the product store's root interrupt,
+anchored on the lost turn, whether or not its tree has rows. A turn a live
+owner fenced ends recovery-required instead and is not a loss of its owner:
+its in-place recovery records no interrupt. The open finds the loss in the
+root's feed, not in a view a projection may already have moved past: before it
+projects anything it reads where to start, the earlier of the views' cursor
+and the anchor of the root's latest accepted submission (the lost turn's
+submission is never newer), and after its projection it scans the feed from
+there. The loss is the last root terminal in that range when no root turn was
+admitted after it. A scan start below the feed's retention restarts at the
+retained start, since only the last root terminal matters; a lost turn whose
+terminal is itself no longer retained is not found, so it is not held. The
+open records it once the views applied that terminal, at the applied cursor,
+once per lost turn; a projection still behind leaves it to the next open. The root is never blocked: it stays promptable and its
+restored queue stays paused. Its continuation is **held** while that loss is
+the root's latest interrupt, no continuation decision names it, and no root
+turn was admitted since (a submission written at or after the loss's cursor
+whose command was accepted; the lost turn's own submission is older, so a new
+operator prompt ends the hold, which is the later-turn rule applied to the
+root). Consent is one product-store root continuation naming the loss's stop
+anchor, deciding a new turn under a `plak:resume-loss:root:` command id
+derived from the loss intent's position. It records host generation 1: a
+loss names the one root turn a lost host left, so one decision per loss is
+already one per host generation. It is written before the turn is
+prepared; the turn is a host instruction (a host-wake submission under that
+id) to continue the current task from the last completed step, never a
+replay. A pending decision whose submission exists is that queued item, which
+a reopen keeps rather than discarding like an unadmitted wake (once the
+decision is no longer pending the reopen discards it like any other); one
+whose submission does not exist yet is prepared again under the same id; a
+decision whose command was accepted is no longer pending.
+
+*Durable before and after.* The closure: before it the feed holds the lost
+turn unfinished; after it, the turn's abandonment terminal, and the product
+store holds nothing new. The loss: before it the terminal is in the feed after
+the scan's start; after it, one root interrupt and nothing else. Consent: one
+decision and nothing else. The preparation: the submission with its queue
+item, in one record write. The dispatch: the runtime's command record under
+the decision's id. A crash between any two leaves rows the next open reads the
+same way, and the command id is the same, so the root's continuation runs
+once: an unrecorded loss is found again by the next open's scan; a decision
+without a submission is prepared again; a submission the runtime did not admit
+is the queued item the next open keeps and runs; an admitted one is either a
+turn the next exact open restores, which runs on, or one it closes, which is a
+new loss of the continuation turn with its own hold, never a second dispatch of
+the first.
+
+The operator's one Resume (`ResumeLossContinuation` with no agent: JSONL
+`resume`, the TUI's `Ctrl+R` on the paused queue, and `/recover` or JSONL
+`recover` on an attached face while the root holds one; `plak session recover`
+only recovers) resumes every held child, records the
+root's consent and runs its continuation, and lets the restored queue drain.
+Under `[host] resume_after_loss = "continue"` the root's open does the same
+for the root by itself: its held continuation runs once and its restored
+queue drains; a decision a crash left pending runs at the next open
+under either policy. The attached root sets the policy on its tree's hub
+wherever the custody-take scan runs (every root attach) and again when it
+opens.
 
 A child whose own turn a live owner fenced is recovered at once, without
 waiting for the parent: its turn waiter releases and reopens the session as

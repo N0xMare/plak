@@ -205,6 +205,14 @@ impl SessionRecordStore for SqliteSessionStore {
     ) -> Result<(), plakous_hosted::session_store::RecordStoreError> {
         self.with_write(|store| store.write_host_controls(id, suppress_wake, pause.clone()))
     }
+    fn write_root_loss(
+        &self,
+        id: &str,
+        intent: plakous_hosted::sessions::projector::RootLossIntent,
+    ) -> Result<(), plakous_hosted::session_store::RecordStoreError> {
+        crate::store::sessions::canonical_product_session_id(id)?;
+        self.with_write(|store| store.write_root_loss_at_cursor(id, &intent))
+    }
     fn load(&self, id: &str) -> Result<SessionRecord, String> {
         crate::store::sessions::canonical_product_session_id(id)?;
         self.with_store(|store| store.load(id))

@@ -41,6 +41,9 @@ pub struct ProductAgentSpec {
     /// Product `subagents`: whether a fresh root may open a topology hub. A
     /// tree that already exists is joined regardless.
     pub topology_enabled: bool,
+    /// The attached root's `resume_after_loss = "continue"`: a child held
+    /// after a loss continues by itself (spec 03 section 14.1).
+    pub continue_after_loss: bool,
     /// The product home this session belongs to, when it has one.
     ///
     /// `None` is a real state — a session constructed with no product home
@@ -82,6 +85,9 @@ pub struct ApiTopologyParent {
     pub max_model_rounds: usize,
     /// Product `subagents`: whether a fresh root may open a topology hub.
     pub topology_enabled: bool,
+    /// The attached root's `resume_after_loss = "continue"`: a child held
+    /// after a loss continues by itself (spec 03 section 14.1).
+    pub continue_after_loss: bool,
     /// The product home this hub root belongs to, when it has one; see
     /// [`ProductAgentSpec::product_home`].
     pub product_home: Option<PathBuf>,
@@ -121,6 +127,15 @@ impl SpawnParent {
         match self {
             Self::Native(spec) => spec.topology_enabled,
             Self::Api(parent) => parent.topology_enabled,
+        }
+    }
+
+    /// Whether a child held after a loss continues by itself under this
+    /// parent's root.
+    pub(in crate::agent) const fn continues_after_loss(&self) -> bool {
+        match self {
+            Self::Native(spec) => spec.continue_after_loss,
+            Self::Api(parent) => parent.continue_after_loss,
         }
     }
 
@@ -911,6 +926,7 @@ pub fn api_topology_parent(
         scheduled_compaction,
         max_model_rounds,
         topology_enabled,
+        continue_after_loss: false,
         created_output_bound: None,
     }
 }

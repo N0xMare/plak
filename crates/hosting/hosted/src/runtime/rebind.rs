@@ -250,6 +250,7 @@ pub(super) async fn resolve_rebind_target<P: plakous_host_protocol::ProtocolExte
         scheduled_compaction: config.compaction_enabled,
         max_model_rounds: config.max_model_rounds,
         topology_enabled,
+        continue_after_loss: config.resume_after_loss == crate::runtime::ResumeAfterLoss::Continue,
     };
     Ok(ResolvedRebindTarget {
         route: RebindRoute::Native {

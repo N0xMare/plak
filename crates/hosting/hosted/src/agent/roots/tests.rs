@@ -204,6 +204,7 @@ fn unreadable_roster_refuses_fresh_genesis_without_publishing_a_tree() {
         scheduled_compaction: true,
         max_model_rounds: 8,
         topology_enabled: true,
+        continue_after_loss: false,
         product_home: Some(home.path().to_path_buf()),
         tool_selection: crate::tool_plan::NodeToolSelection::default(),
     });
@@ -268,6 +269,7 @@ fn inspecting_a_persisted_tree_compiles_its_tools_without_attaching_or_saving() 
         scheduled_compaction: true,
         max_model_rounds: 8,
         topology_enabled: true,
+        continue_after_loss: false,
         product_home: Some(home.path().to_path_buf()),
         tool_selection: crate::tool_plan::NodeToolSelection::default(),
     });
@@ -417,6 +419,7 @@ async fn a_root_attach_keeps_the_trees_tasks_apart_from_the_session() {
         scheduled_compaction: true,
         max_model_rounds: 8,
         topology_enabled: true,
+        continue_after_loss: false,
         product_home: Some(home.path().to_path_buf()),
         tool_selection: crate::tool_plan::NodeToolSelection::default(),
     });

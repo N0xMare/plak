@@ -555,6 +555,7 @@ pub(super) fn native_spec<P: plakous_host_protocol::ProtocolExtension>(
         scheduled_compaction: config.compaction_enabled,
         max_model_rounds: config.max_model_rounds,
         topology_enabled: config.topology_enabled,
+        continue_after_loss: config.resume_after_loss == crate::runtime::ResumeAfterLoss::Continue,
     })
 }
 
@@ -843,6 +844,8 @@ pub(super) fn api_parent_from_config<P: plakous_host_protocol::ProtocolExtension
         config.max_model_rounds,
         config.topology_enabled,
     );
+    parent.continue_after_loss =
+        config.resume_after_loss == crate::runtime::ResumeAfterLoss::Continue;
     parent.prompt_host_facts = config.prompt_host_facts();
     parent.tool_selection = root_tool_selection(session);
     Ok(parent)
@@ -1002,6 +1005,8 @@ pub(super) async fn api_compaction_runtime_binding<P: plakous_host_protocol::Pro
         config.max_model_rounds,
         config.topology_enabled,
     );
+    parent.continue_after_loss =
+        config.resume_after_loss == crate::runtime::ResumeAfterLoss::Continue;
     parent.tool_selection = root_tool_selection(&config.session);
     api_session_runtime_binding(&parent, true, SessionToolFence::Full, cached_evidence)
         .await?
@@ -1045,6 +1050,8 @@ pub(super) async fn cached_api_runtime_for_record<P: plakous_host_protocol::Prot
         config.max_model_rounds,
         config.topology_enabled,
     );
+    parent.continue_after_loss =
+        config.resume_after_loss == crate::runtime::ResumeAfterLoss::Continue;
     parent.tool_selection = root_tool_selection(record);
     let prepared = Box::pin(api_session_runtime_binding(
         &parent,
@@ -1101,6 +1108,7 @@ pub(super) async fn production_host_runtime_binding<P: plakous_host_protocol::Pr
         scheduled_compaction: config.compaction_enabled,
         max_model_rounds: config.max_model_rounds,
         topology_enabled: config.topology_enabled,
+        continue_after_loss: config.resume_after_loss == crate::runtime::ResumeAfterLoss::Continue,
     };
     native_runtime_for_record(spec, role, stderr_buf).await
 }
@@ -1173,6 +1181,7 @@ pub(super) async fn production_open_session_for_host<
         scheduled_compaction: config.compaction_enabled,
         max_model_rounds: config.max_model_rounds,
         topology_enabled: config.topology_enabled,
+        continue_after_loss: config.resume_after_loss == crate::runtime::ResumeAfterLoss::Continue,
     };
 
     Box::pin(open_coding_session(spec, locator, stderr_buf)).await

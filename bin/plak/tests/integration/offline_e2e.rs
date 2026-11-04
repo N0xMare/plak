@@ -1585,6 +1585,66 @@ fn a_crash_restored_jsonl_queue_resumes_only_after_resume_queue() {
     );
 }
 
+/// A root turn SIGKILL interrupted is held on reopen (spec 03 §14.1):
+/// nothing dispatches until the one Resume, which continues it once with a
+/// new instruction turn; the next reopen holds nothing.
+#[test]
+fn a_jsonl_root_killed_mid_turn_is_held_until_resume_continues_it_once() {
+    const HELD: &str = "the turn the lost host was running is held";
+    let fixture = Fixture::new(&stalled_answer());
+    let mut agent = AgentProcess::start(&fixture, &[]);
+    let hello = agent.wait_for("hello", |record| record["kind"] == "hello");
+    let session = hello["session_id"].as_str().expect("session id").to_owned();
+    agent.send(&prompt_frame("stall please"));
+    agent.wait_for("running", |record| {
+        record["kind"] == "status" && record["phase"] == "running"
+    });
+    wait_for_provider_dispatch(&fixture);
+    signal(agent.id(), SIGKILL);
+    agent.close_stdin();
+    let _ = agent.finish();
+
+    fixture.write_script(&recovery_answer_script());
+    let evidence = fixture.root.join("evidence.jsonl");
+    let dispatched = || {
+        plakous_offline_crash_harness::evidence::read_evidence(&evidence)
+            .expect("evidence")
+            .iter()
+            .filter(|row| {
+                row.kind
+                    == plakous_offline_crash_harness::evidence::EvidenceKind::ProviderDispatched
+            })
+            .count()
+    };
+    let mut reopened = reopen_until_the_lease_clears(&fixture, &session);
+    reopened.wait_for("the held notice", |record| {
+        record.to_string().contains(HELD)
+    });
+    assert_eq!(dispatched(), 1, "nothing continues before the Resume");
+    reopened.send(&json!({"v": 1, "kind": "resume"}));
+    reopened.wait_for("the continuation", |record| {
+        record["kind"] == "assistant_done"
+    });
+    reopened.send(&quit_frame());
+    let resumed = reopened.finish();
+    assert!(resumed.status.success(), "{}", resumed.stderr);
+    assert_eq!(
+        resumed.assistant_text(),
+        vec!["recovered and answered".to_owned()]
+    );
+    assert_eq!(dispatched(), 2, "one continuation, no replay");
+
+    let mut again = reopen_until_the_lease_clears(&fixture, &session);
+    again.send(&quit_frame());
+    let quiet = again.finish();
+    assert!(quiet.status.success(), "{}", quiet.stderr);
+    assert!(
+        !quiet.lines.iter().any(|line| line.contains(HELD)),
+        "the continuation ran: nothing is held after it"
+    );
+    assert_eq!(dispatched(), 2);
+}
+
 /// A root-only session resumes exactly on both headless faces.
 #[test]
 fn a_root_only_session_resumes_on_run_and_agent() {

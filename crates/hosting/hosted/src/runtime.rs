@@ -144,6 +144,9 @@ pub(crate) mod result_mail;
 mod resume;
 #[cfg(test)]
 pub(crate) mod role_table_tests;
+pub(crate) mod root_loss;
+#[cfg(test)]
+mod root_loss_open_tests;
 pub mod shell;
 mod source_release;
 mod startup;

@@ -68,6 +68,7 @@ fn openrouter_test_parent() -> ApiTopologyParent {
         scheduled_compaction: true,
         max_model_rounds: NATIVE_RUN_MAX_MODEL_ROUNDS,
         topology_enabled: true,
+        continue_after_loss: false,
     }
 }
 

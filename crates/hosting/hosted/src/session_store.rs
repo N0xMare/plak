@@ -166,6 +166,19 @@ pub trait SessionRecordStore: Send + Sync {
         pause: Option<crate::sessions::projector::HostPauseCause>,
     ) -> Result<(), RecordStoreError>;
 
+    /// Writes a root loss intent (the root's owner-lost interrupt or its
+    /// continuation decision) at the current applied cursor, after every
+    /// host intent already there, whether or not the root's tree has rows.
+    ///
+    /// # Errors
+    /// A missing session, exhausted ordinal, an incoherent intent, or a
+    /// store failure.
+    fn write_root_loss(
+        &self,
+        id: &str,
+        intent: crate::sessions::projector::RootLossIntent,
+    ) -> Result<(), RecordStoreError>;
+
     /// Commits an immutable command submission and its queue item together,
     /// under the record's revision CAS, before dispatch.
     ///
@@ -783,6 +796,47 @@ mod memory {
                         ordinal,
                         value,
                     });
+            }
+            Ok(())
+        }
+
+        fn write_root_loss(
+            &self,
+            id: &str,
+            intent: crate::sessions::projector::RootLossIntent,
+        ) -> Result<(), RecordStoreError> {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if !state.records.contains_key(id) {
+                return Err("session not found".to_owned().into());
+            }
+            intent.encode()?;
+            let anchor = state.views.get(id).map_or(0, |views| views.cursor.get());
+            let intents = state.intents.entry(id.to_owned()).or_default();
+            let ordinal = intents
+                .host_intent_positions()
+                .filter(|(at, _)| *at == anchor)
+                .map(|(_, ordinal)| ordinal)
+                .max()
+                .map_or(Some(0), |ordinal| ordinal.checked_add(1))
+                .ok_or_else(|| "host intent ordinal is exhausted".to_owned())?;
+            match intent {
+                crate::sessions::projector::RootLossIntent::Interrupt(value) => intents
+                    .root_interrupts
+                    .push(crate::sessions::projector::AnchoredIntent {
+                        anchor,
+                        ordinal,
+                        value,
+                    }),
+                crate::sessions::projector::RootLossIntent::Continuation(value) => intents
+                    .root_continuations
+                    .push(crate::sessions::projector::AnchoredIntent {
+                        anchor,
+                        ordinal,
+                        value,
+                    }),
             }
             Ok(())
         }

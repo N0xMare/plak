@@ -181,7 +181,7 @@ are chords on the focused queue: `Ctrl+D` drops the selected one, `Ctrl+E`
 loads it into your draft to edit (the queue title then reads `editing queued
 follow-up · Enter saves · Esc cancels`; when you save or cancel, the draft it
 replaced comes back, and `Ctrl+Z` undoes that),
-`Ctrl+R` resumes a paused queue, and `Ctrl+S` (or `Ctrl+Enter`) sends the
+`Ctrl+R` resumes a paused queue (after a lost host it also resumes the interrupted turn and every held agent; `/recover` does the same), and `Ctrl+S` (or `Ctrl+Enter`) sends the
 selected one now, even with text in your draft. With the queue unfocused, `Ctrl+D` deletes the character
 after the caret, as in readline. A chip fires only after it has sat in place
 for about 300 ms, so a click aimed at a row the queue just moved does nothing.

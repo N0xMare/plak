@@ -93,6 +93,14 @@ impl SessionRecordStore for PresentingStore {
         self.inner.save_submission(session, submission)
     }
 
+    fn write_root_loss(
+        &self,
+        id: &str,
+        intent: crate::sessions::projector::RootLossIntent,
+    ) -> Result<(), crate::session_store::RecordStoreError> {
+        self.inner.write_root_loss(id, intent)
+    }
+
     fn discard_submission(
         &self,
         session: &mut SessionRecord,

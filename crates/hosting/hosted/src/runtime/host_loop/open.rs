@@ -76,6 +76,15 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
         // Creation freezes the root's tools; a wildcard MCP tool left out then
         // is a pending notice the operator must see (spec 07 §3.5).
         let freezing_tools = config.session.frozen_tools.is_none();
+        // Where the scan for a root turn a lost host left starts, read before
+        // anything is projected (spec 03 §14.1).
+        let loss_scan = (config.session.store_revision != 0)
+            .then(|| {
+                crate::runtime::root_loss::loss_scan(config.store.as_ref(), &config.session)
+                    .ok()
+                    .flatten()
+            })
+            .flatten();
         // A switch successor published before a crash takes its epoch from
         // the recorded bytes before its tools compile.
         super::super::rebind::settle_before_open(&config).await?;
@@ -143,8 +152,21 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
                 .await;
                 match projected {
                     Ok(views) => {
+                        // A pending root continuation after a loss is consent
+                        // the operator already gave: it is resubmitted, not
+                        // discarded. One whose continuation ended goes.
+                        let pending_loss = match crate::runtime::root_loss::root_loss_state(
+                            config.store.as_ref(),
+                            &config.session,
+                        ) {
+                            Ok(Some(crate::runtime::root_loss::RootLossState::Pending(
+                                command,
+                            ))) => Some(command),
+                            _ => None,
+                        };
                         for submission in &intents.submissions {
                             if submission.kind != SubmissionKind::HostWake
+                                || pending_loss.as_deref() == Some(submission.command_id.as_str())
                                 || intents.submission_consumed(
                                     &submission.command_id,
                                     views.state.retained_from,
@@ -273,6 +295,30 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
                     log.as_ref(),
                     &config,
                     SessionEvent::new("projector.deferred").str("error", &error),
+                );
+            }
+        }
+        // A root turn a lost host left, which this open or an earlier one
+        // closed, is the root's owner-lost interrupt; its held continuation
+        // is derived from it. Recording it once its terminal is applied keeps
+        // the lost turn's own submission older than the loss.
+        if let Some(scan) = loss_scan.filter(|scan| scan.session() == runtime_session) {
+            let recorded =
+                match crate::runtime::root_loss::lost_root_turn(opened.sessions(), scan).await {
+                    Ok(Some(lost)) => crate::runtime::root_loss::record_root_owner_lost(
+                        config.store.as_ref(),
+                        &config.session,
+                        &lost,
+                    )
+                    .map(drop),
+                    Ok(None) => Ok(()),
+                    Err(error) => Err(error),
+                };
+            if let Err(error) = recorded {
+                log_ev(
+                    log.as_ref(),
+                    &config,
+                    SessionEvent::new("session.root_loss_unrecorded").str("error", &error),
                 );
             }
         }
@@ -542,11 +588,13 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
                 shown_skill_notices: crate::skills::ShownSkillNotices::default(),
                 prep_hooks: super::prompt::preparation::Hooks::new(),
                 idle_entry_pass_due: false,
+                root_loss_resume_due: false,
             },
         );
         host.publish_pending_continuation();
         host.publish_projected_usage();
         host.finish_attach_scan();
+        host.arm_root_loss_resume();
         Ok(host)
     }
 }

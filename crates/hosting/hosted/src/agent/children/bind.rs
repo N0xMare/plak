@@ -826,6 +826,7 @@ pub(in crate::agent) async fn openrouter_child_runtime_binding(
         scheduled_compaction: inputs.scheduled_compaction,
         max_model_rounds: inputs.max_model_rounds,
         topology_enabled: inputs.topology_enabled,
+        continue_after_loss: false,
     };
     Box::pin(crate::agent::build::api_session_runtime_binding(
         &child,
@@ -1060,6 +1061,7 @@ pub async fn spawned_child_spec(
         scheduled_compaction: inputs.scheduled_compaction,
         max_model_rounds: inputs.max_model_rounds,
         topology_enabled: inputs.topology_enabled,
+        continue_after_loss: false,
     })
 }
 

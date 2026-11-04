@@ -51,8 +51,8 @@ an export.
   resume_after_loss` (`hold` or `continue`, default `hold`), `[mcp_servers.<id>]
   placement` (`host` or `runner`, default `host`), `[runners.<name>]` and
   `[web] allow` / `[web] origin` (read by `plak web`, below);
-  `resume_after_loss` applies to sub-agents a lost host interrupted. `plak`
-  writes them only when you set them, and `plak doctor` warns `config uses
+  `resume_after_loss` applies to the root and sub-agents a lost host
+  interrupted. `plak` writes them only when you set them, and `plak doctor` warns `config uses
   0.0.4-only keys` while one is set.
 - Plakous embedder break (agent lines): a head-advancing rebind's source
   becomes read-only, a non-head branch; opening it for work, committing on
@@ -220,6 +220,11 @@ an export.
   effect for sub-agents: each held one continues once by itself. Tree rows
   carry the interrupt `cause` and the `continuation` state (`held`, `pending`,
   `running`), and a live tree notice names the held agents after recovery.
+- A root turn a lost host interrupted is held the same way: the root stays
+  promptable (a new prompt ends the hold), and the one Resume (`Ctrl+R` on the
+  paused queue, `/recover`, or JSONL `resume`/`recover`) continues it once with
+  a new instruction turn, resumes every held agent and lets the restored queue
+  drain. `resume_after_loss = "continue"` does that by itself at open.
 - Reopening a session no longer pauses the agent tree. A sub-agent whose turn
   lost its owner is interrupted (owner lost) on reopen, keeps its attempt and
   waits for mail or a followup; a parked sub-agent whose wake was still
