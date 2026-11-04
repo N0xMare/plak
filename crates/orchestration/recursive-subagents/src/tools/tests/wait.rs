@@ -1270,7 +1270,9 @@ async fn cancelling_a_parked_hub_wait_releases_mail_to_the_deliverer() {
     );
     assert!(deliverer.calls.lock().unwrap().is_empty());
     drop(pending_wait);
-    let receipt = tokio::time::timeout(std::time::Duration::from_secs(1), pending_send)
+    // A liveness bound, not a deadline: the send's writer turns run on the
+    // blocking pool, which a loaded gate host can delay past a second.
+    let receipt = tokio::time::timeout(std::time::Duration::from_secs(15), pending_send)
         .await
         .unwrap()
         .unwrap();
