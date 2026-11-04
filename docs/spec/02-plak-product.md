@@ -3716,6 +3716,44 @@ verdicts) are addressed, the session profile and workspace chrome states.
   before the frame that names them; the next request or event drops any
   it does not name. A snapshot takes at most 64 pages and twice the
   presentation byte bound.
+- **Host service.** `plakous_hosted::host_service::HostService` is one
+  session's side of the wire, the only consumer of its observations and the
+  only sender of its attachments' intents; `plak agent --wire v2` speaks
+  through it, and the TUI and JSONL v1 do not yet. An attachment targets the
+  session's root (any other node is `unknown_node` until node attach).
+  Addressed answers follow the session's answer window: each intent carries
+  its attachment (and the client's own correlation) as its correlation, the
+  `IntentStarted` that opens the window names that attachment, which gets
+  its own correlation back, and the answers until the next `IntentStarted`
+  go to it. An answer inside a window no attachment opened (`IntentStarted`
+  without a correlation, or before any) goes to every attachment. The
+  observation types carry no other requester, so an answer the session gives
+  after another request's window opened goes to that window's attachment;
+  the session is to open the requester's window again before such a late
+  answer, which the host loop does not do yet. A transcript observation (snapshot, keyed patch, stream) goes,
+  whatever its class, to the attachments holding its scope: the root's to
+  all, an agent's to those that opened it. The session serves one agent
+  transcript: its first holder's open reaches the session, a later holder's
+  open asks for a fresh snapshot of it instead, and only its last holder's
+  close reaches the session; a scope change takes effect only once the
+  session took the intent. The service keeps, for the session that last
+  opened (`SessionOpening` or `SessionOpened` forgets everything kept
+  before), the latest state of each kind, the root snapshot with up to 64
+  patches after it (dropped by a clear or past that bound, when a new
+  attachment asks the session for a fresh one, and the attach fails if it
+  cannot), the approvals asked and not resolved, and the credential wait
+  that holds; an attachment's queue starts with exactly those. Beyond that
+  attach snapshot, which does not count against it, a queue holds at most
+  its capacity: a droppable event evicts the oldest droppable one (its
+  sequence gap shows the loss) or is itself dropped; a state replaces a
+  queued state of its kind, taking a fresh sequence number after what came
+  before it; a state, required event or addressed answer that still finds
+  no room drops the attachment, whose queue becomes one `resync_required`
+  and which takes and sends nothing more. Transcript content an attachment
+  lost to a full queue is a gap in that scope, repaid at its next take or
+  observation: the root's from the kept baseline, any other by asking the
+  session for a fresh snapshot of that scope. The session never waits on an
+  attachment.
 - **Serde.** Frames, intents and observations refuse unknown fields;
   intents and observations are tagged objects (`kind`, and `body` when
   they carry one), snake case. A

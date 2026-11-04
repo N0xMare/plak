@@ -219,6 +219,13 @@ an export.
   read fails the agent's construction (`runner <id> did not answer the job
   read`). Embedder break: `JoinedSessionsPort::refresh_jobs` returns a
   `Result`.
+- `plakous_hosted::host_service::HostService`: one session's wire v2 host
+  side (not yet served): attachments on the session's root, observations
+  fanned out by class with addressed answers routed by intent correlation,
+  an attach snapshot of every state, the root baseline, pending approvals
+  and the holding credential wait, and bounded per-attachment queues that
+  drop a slow attachment with `resync_required` instead of blocking the
+  session.
 - Version control on a runner (unsupported; only the test route selects a
   runner): an orchestration tree on a selected runner drives its copies
   through `RemoteVcs` over the runner link instead of refusing every effect.
