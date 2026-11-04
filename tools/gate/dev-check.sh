@@ -456,7 +456,7 @@ run_wasm_portability_checks() {
     echo "error: rustc target ${triple} is not installed for the pinned toolchain; run \`just dev-tools install\`" >&2
     return 1
   fi
-  crates="$(python3 tools/gate/check_workspace.py --portable-crates)" || return 1
+  crates="$(python3 tools/gate/check_workspace.py --wasm-libraries)" || return 1
   if [[ -z "${crates//[[:space:]]/}" ]]; then
     echo "error: the portable crate set is empty" >&2
     return 1

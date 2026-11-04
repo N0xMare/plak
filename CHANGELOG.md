@@ -264,6 +264,13 @@ an export.
   session ledger, kept from the child turn usage the tree projects. The
   intent x role table's B1 cells close. Embedder break: the new intents
   and `ProtocolExtension::reads_usage` (defaults to false).
+- Embedder break: `plakous::sessions` (session workflows, the feed, portable
+  histories and `SessionBackend::memory`) now needs the new facade feature
+  `store`, and without it the facade links no session store.
+  `sessions-sqlite` implies `store`, so an embedder that already selects it
+  changes nothing; one that uses sessions with only the memory backend adds
+  `store`. `plakous-store`'s `nix` and `rustix` are now `cfg(unix)` target
+  dependencies, so its memory backend also builds for `wasm32-unknown-unknown`.
 - An agent runs on a host `Runtime`: `AgentBuilder::runtime` supplies it, and
   without one the agent runs, as before, on the Tokio runtime current at
   build. The driver, the lease heartbeat, job-stop and cleanup blocking calls,

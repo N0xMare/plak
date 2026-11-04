@@ -328,7 +328,7 @@ plakous-hosted = [
 
 [workspace.metadata.plakous.facade-features]
 plak = ["sessions-sqlite"]
-plakous-recursive-subagents = []
+plakous-recursive-subagents = ["store"]
 plakous-hosted = ["sessions-sqlite"]
 
 [workspace.metadata.plakous.modules.plak.tui]
@@ -441,9 +441,9 @@ env-ceiling = 29
 reason = "Capability registry, grouped interactive identity/carry helpers, lookup/re-export predicates, the capacity-probe hook and the offline image-hash delay installed at the composition root; native contract-drift errors exist only with their compiled route."
 
 [workspace.metadata.plakous.cfg.plakous]
-feature-ceiling = 65
+feature-ceiling = 66
 env-sites = ["src/test_session_lease.rs"]
-reason = "Existing placement debt plus the auth/native-only drift type, error formatting and Codex live-refusal summaries; reduced products must not link omitted auth. The test-hooks session lease override is the only environment read, and other builds do not compile it."
+reason = "Existing placement debt plus the auth/native-only drift type, error formatting and Codex live-refusal summaries; reduced products must not link omitted auth. The store feature gates the sessions module at its one declaration. The test-hooks session lease override is the only environment read, and other builds do not compile it."
 
 [workspace.metadata.plakous.cfg.plakous-anthropic]
 feature-ceiling = 22

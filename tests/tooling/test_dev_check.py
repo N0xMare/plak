@@ -88,6 +88,7 @@ class DevCheckWorkerTests(unittest.TestCase):
                             s[0].endswith(checker)
                             and '--product-builds' not in s
                             and '--portable-crates' not in s
+                            and '--wasm-libraries' not in s
                             for s in scripts
                         ),
                         tier != ('--platform',),
@@ -216,7 +217,7 @@ if failure:
     raise SystemExit(failure)
 if sys.argv[1].endswith('changed_packages.py'):
     print(os.environ.get('GATE_CHANGED', ''), end='')
-if sys.argv[1].endswith('check_workspace.py') and '--portable-crates' in sys.argv:
+if sys.argv[1].endswith('check_workspace.py') and '--wasm-libraries' in sys.argv:
     print('plakous-model')
 ''',
         )
@@ -733,6 +734,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
                     s[0].endswith(checker)
                     and '--product-builds' not in s
                     and '--portable-crates' not in s
+                    and '--wasm-libraries' not in s
                     for s in scripts
                 )
             )

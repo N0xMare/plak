@@ -431,7 +431,7 @@ not supported embedder authority. Plak's maintainer feature enables its `jj` fea
 `plakous-host-protocol` in production, and on no other package in the tree —
 `plakous-workspace` in particular is reached only through the tree crate. The
 product and hosted crate declare only `sessions-sqlite` unconditionally on
-their default-disabled facade edges. Their own route and evaluator features
+their default-disabled facade edges, and the orchestration tree only `store`. Their own route and evaluator features
 forward to the facade where each implementation lives; neither package can
 borrow those declarations from the other's feature unification. Product
 defaults include all seven routes, JS, Python, MCP, local web fetch, images,
@@ -1817,6 +1817,15 @@ sessions run only on a runner there. The unix code is unchanged: the split
 moves host items into `cfg(unix)` modules and puts uninhabited or refusing
 stand-ins beside them for the other target.
 
+`plakous-store` is not listed: its `sqlite` feature links `rusqlite`, so its
+`--all-features` closure is native. It is on the second list,
+`PORTABLE_DEFAULT_LIBRARIES`, whose default library the builds group checks
+for the target beside the portable set (`check_workspace.py --wasm-libraries`
+prints both lists, portable set first) without the fence. Its default
+(memory) library is portable: `nix` and `rustix` are `cfg(unix)` target dependencies,
+and on a target that is neither Linux nor macOS the system lease clock refuses
+with `BackendUnavailable`, so a host supplies its own `LeaseClock`.
+
 The `static` group runs the fence inside `check_workspace.py`. For each listed
 crate it runs `cargo tree --offline --locked --target wasm32-unknown-unknown`
 over the normal closure (`-e normal`) twice: the crate's default features, then
@@ -1851,7 +1860,7 @@ The library check is in the `builds` group, not `static`. It is a compile with
 rustc warnings denied, and `builds` runs on both supported platforms, including
 the platform tier, which skips the platform-independent structure checkers.
 `static` stays free of target compilation. After the default, per-package and
-maintainer builds, the group checks each listed crate:
+maintainer builds, the group checks each listed crate and each `PORTABLE_DEFAULT_LIBRARIES` entry:
 
 ```text
 cargo check --locked -p <crate> --lib --target wasm32-unknown-unknown

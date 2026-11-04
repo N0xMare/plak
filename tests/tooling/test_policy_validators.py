@@ -2746,7 +2746,6 @@ class FeaturePolicyTests(unittest.TestCase):
                 "plakous-prompts",
                 "plakous-runner",
                 "plakous-runner-protocol",
-                "plakous-store",
                 "plakous-tool-files",
                 "plakous-tool-plan",
                 "plakous-tool-process",
@@ -2873,7 +2872,7 @@ class FeaturePolicyTests(unittest.TestCase):
             )
             for package in packages
         }
-        self.assertEqual(profile_counts["plakous"], 2 * 13 + 3)
+        self.assertEqual(profile_counts["plakous"], 2 * 14 + 3)
         # sqlite, perf-instrumentation, repository-only commit-trace.
         self.assertEqual(profile_counts["plakous-store"], 2 * 3 + 3)
         self.assertEqual(profile_counts["plak"], 2 * 20 + 3)
@@ -2898,7 +2897,6 @@ class FeaturePolicyTests(unittest.TestCase):
                 "plakous-prompts",
                 "plakous-runner",
                 "plakous-runner-protocol",
-                "plakous-store",
                 "plakous-tool-files",
                 "plakous-tool-plan",
                 "plakous-tool-process",
@@ -2908,6 +2906,11 @@ class FeaturePolicyTests(unittest.TestCase):
             },
         )
         self.assertNotIn("plakous-cell", minimal)
+        # The session store is the facade's `store` feature, never its minimum.
+        self.assertIn(
+            "plakous-store",
+            feature_policy.expected_closure("plakous", ("store",), False, manifests),
+        )
         native = feature_policy.expected_closure(
             "plakous",
             (

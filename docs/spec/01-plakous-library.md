@@ -2641,8 +2641,9 @@ replay material. Export also captures the committed named-state map.
 grammar and quotas; `named_state` returns those values as JSON. Session creation
 seeds them atomically with history at genesis. Replay stripping and validation
 do not discard named state; reopen and fork retain the ordinary map authority.
-This neutral JSON carrier is always available; it does not require the
-`composition` feature or link a worker, provider or HTTP implementation.
+This neutral JSON carrier is available with `store` (§12.1); it does not
+require the `composition` feature or link a worker, provider or HTTP
+implementation.
 
 For consumers encoding histories neutrally, the facade also names
 `ImageDetailHint`, `ToolResultUpdateBlock`, `SummarizedTurns`, and
@@ -10611,7 +10612,12 @@ types, the OAuth settings, login and status types, `McpError`, and
 No native route implies MCP; the product selects it explicitly.
 Configuration parsing, named-secret storage, the credential store's location
 and operator views stay with the product.
-`sessions-sqlite` enables `SessionBackend::sqlite`. `full` is all of the above.
+`store` compiles `plakous::sessions` (the session workflows, the feed, portable
+histories and `SessionBackend::memory`) and links `plakous-store`, whose
+memory backend also compiles for `wasm32-unknown-unknown` (chapter 06 §7.5),
+though its lease clock refuses there. Without it the
+facade links no session store. `sessions-sqlite` implies `store` and enables
+`SessionBackend::sqlite`. `full` is all of the above.
 
 The `sessions-sqlite` feature also compiles the doc-hidden
 `sessions::rehearsal` inspector, an unsupported repository-only maintainer seam,

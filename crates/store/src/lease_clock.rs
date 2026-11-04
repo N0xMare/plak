@@ -1,9 +1,13 @@
 //! Construction-bound continuous lease time, independent of observation UTC.
 
-use plakous_agent::internal::{LeaseClock, LeaseDomain, LeaseInstant, RunId, SessionStoreError};
+use plakous_agent::internal::{LeaseClock, LeaseInstant, SessionStoreError};
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use plakous_agent::internal::{LeaseDomain, RunId};
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::str::FromStr;
 
 pub(crate) struct SystemLeaseClock {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     domain: LeaseDomain,
     #[cfg(target_os = "linux")]
     _namespace: Option<std::fs::File>,
@@ -63,6 +67,7 @@ fn unavailable() -> SessionStoreError {
     SessionStoreError::BackendUnavailable
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn parse_boot_id(value: &str) -> Result<[u8; 16], SessionStoreError> {
     let id = RunId::from_str(value.trim()).map_err(|_| unavailable())?;
     let bytes = *id.as_uuid().as_bytes();

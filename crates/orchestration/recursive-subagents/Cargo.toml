@@ -26,7 +26,7 @@ reason = "Scoped tree transition and scenario-test debt; large-file and crate-wi
 
 [dependencies]
 futures-util = { workspace = true, features = ["std"] }
-plakous.workspace = true
+plakous = { workspace = true, features = ["store"] }
 plakous-host-protocol.workspace = true
 plakous-workspace.workspace = true
 rustix = { workspace = true, features = ["system"] }

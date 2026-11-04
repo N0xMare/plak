@@ -241,6 +241,10 @@ pub(super) fn cell_engine_contract_identity(
     .map_err(|error| AgentError::new(AgentErrorKind::Identity, error.to_string()))
 }
 
+#[cfg_attr(
+    not(feature = "store"),
+    allow(dead_code, reason = "a session reopen restores it")
+)]
 pub(crate) fn restore_stored_artifact(
     stored: &plakous_agent::internal::facade_support::StoredCompositionArtifact,
 ) -> Result<LocalCompositionEngineArtifact, AgentError> {

@@ -22,13 +22,15 @@ refuses unsupported combinations without switching routes or interpreters.
 
 ## Features
 
-Defaults are empty. Agent, application, construction, model, tools, profiles,
-prompts and session workflows (including the feed) are always available.
+Defaults are empty. Agent, application, construction, model, tools, profiles
+and prompts are always available. Session workflows (including the feed)
+need `store`, which `sessions-sqlite` implies.
 
 | Feature | Adds |
 | --- | --- |
 | `composition` | Code Mode, JavaScript and Python PTC over the cell client; no credentials, HTTP or interpreter dependencies |
-| `sessions-sqlite` | `SessionBackend::sqlite` |
+| `store` | `plakous::sessions` with `SessionBackend::memory` |
+| `sessions-sqlite` | `SessionBackend::sqlite`; implies `store` |
 | `anthropic`, `openrouter` | Provider integrations and explicit credential/model inputs |
 | `openai`, `xai` | Provider integration exports; the native `OpenAiLanguageModel`/`XaiLanguageModel` additionally require `codex`/`grok`, respectively |
 | `auth` | Credential store, OAuth, pins and account binding; implies `openai` and `xai` |

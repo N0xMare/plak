@@ -9,7 +9,7 @@
 //!
 //! | Tier | Modules | Stability |
 //! | --- | --- | --- |
-//! | **Embedder workflow** | [`agent`], [`application`], [`construction`], [`sessions`] (including `feed`), [`model`], [`tools`], [`profiles`], [`prompts`], [`VERSION`] | Exact-set supported inventory in the `tests/fixtures/facade-consumer` fixture |
+//! | **Embedder workflow** | [`agent`], [`application`], [`construction`], `sessions` (including `feed`; feature `store`), [`model`], [`tools`], [`profiles`], [`prompts`], [`VERSION`] | Exact-set supported inventory in the `tests/fixtures/facade-consumer` fixture |
 //! | **Credentials/subscriptions** | `auth`, `subscriptions` | Feature-gated library workflows; supported inventory imports, not product UX |
 //! | **Observations** | `exchange_observation` | Passive feature-gated hooks; no dispatch authority |
 //! | **Provider integrations** | `openai`, `xai`, `openrouter`, `anthropic` | Feature-gated; only inventory-named facade workflows are supported; remaining exports are nameable internals |
@@ -56,7 +56,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Curated agent facade.
 ///
 /// Prefer this module over depending on `plakous-agent` directly from application
-/// code. Use [`sessions`] for durable creation, exact opening
+/// code. Use `sessions` (feature `store`) for durable creation, exact opening
 /// and recovery; low-level store construction remains component-internal.
 ///
 /// Includes content-free [`TelemetryEmitter`](crate::agent::TelemetryEmitter) / [`TelemetrySink`](crate::agent::TelemetrySink) types for TUI
@@ -374,11 +374,12 @@ pub mod runner {
 ///
 /// This surface exposes semantic locators and reports only. Store traits,
 /// leases, compare-and-swap operations, object graphs, and SQL remain private.
+#[cfg(feature = "store")]
 pub mod sessions;
 
-#[cfg(feature = "test-hooks")]
+#[cfg(all(feature = "store", feature = "test-hooks"))]
 mod test_session_lease;
-#[cfg(not(feature = "test-hooks"))]
+#[cfg(all(feature = "store", not(feature = "test-hooks")))]
 mod test_session_lease {
     pub(crate) fn session_lease_seconds_override() -> Option<String> {
         None

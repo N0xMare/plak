@@ -88,6 +88,20 @@ class PortabilityFenceTests(unittest.TestCase):
         with patch.object(sys, "argv", ["check_workspace.py", "--nope"]):
             self.assertEqual(checker.main(), 2)
 
+    def test_wasm_libraries_flag_adds_the_default_only_libraries(self):
+        self.assertEqual(checker.PORTABLE_DEFAULT_LIBRARIES, ("plakous-store",))
+        self.assertFalse(set(checker.PORTABLE_DEFAULT_LIBRARIES) & set(checker.PORTABLE_CRATES))
+        buffer = StringIO()
+        with (
+            patch.object(sys, "argv", ["check_workspace.py", "--wasm-libraries"]),
+            redirect_stdout(buffer),
+        ):
+            self.assertEqual(checker.main(), 0)
+        self.assertEqual(
+            buffer.getvalue().splitlines(),
+            [*checker.PORTABLE_CRATES, "plakous-store"],
+        )
+
     def test_libc_is_banned_and_notify_is_banned_ahead_of_the_lock(self):
         nodes, errors = checker.parse_feature_tree(LIBC)
         self.assertEqual(errors, [])

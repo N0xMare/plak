@@ -130,6 +130,10 @@ pub(crate) fn scripted_model(
     )
 }
 
+#[cfg_attr(
+    not(feature = "store"),
+    allow(dead_code, reason = "the session tests use it")
+)]
 pub(crate) fn configured_model(
     model: Arc<dyn LanguageModel>,
     descriptor: ResolvedModelDescriptor,
@@ -149,6 +153,10 @@ pub(crate) fn configured_model(
     )
 }
 
+#[cfg_attr(
+    not(feature = "store"),
+    allow(dead_code, reason = "the session tests use it")
+)]
 pub(crate) fn configured_compaction_model(
     model: Arc<dyn LanguageModel>,
     descriptor: ResolvedModelDescriptor,
@@ -170,6 +178,10 @@ pub(crate) fn configured_compaction_model(
 #[allow(
     clippy::needless_pass_by_value,
     reason = "the test helper mirrors the production descriptor-consuming configuration seam"
+)]
+#[cfg_attr(
+    not(feature = "store"),
+    allow(dead_code, reason = "the session tests use it")
 )]
 pub(crate) fn configured_model_for_operation(
     model: Arc<dyn LanguageModel>,

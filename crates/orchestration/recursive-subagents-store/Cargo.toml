@@ -33,7 +33,7 @@ sha2.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
-plakous.workspace = true
+plakous = { workspace = true, features = ["store"] }
 plakous-workspace.workspace = true
 proptest = { workspace = true, features = ["std"] }
 rusqlite = { workspace = true, features = ["hooks"] }

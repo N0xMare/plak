@@ -4282,6 +4282,11 @@ PORTABLE_CRATES = (
     "plakous-tools",
     "plakous-agent",
 )
+# Libraries whose default features compile for the portable target although an
+# optional feature makes their full closure native, so they stay off
+# PORTABLE_CRATES and its fence. The builds group checks their default library
+# for wasm32 beside the portable set; `--wasm-libraries` prints both.
+PORTABLE_DEFAULT_LIBRARIES = ("plakous-store",)
 # The fence resolves this target, not the host: cfg(target_arch = "wasm32")
 # dependencies are in the closure and cfg(not(...)) ones are not.
 PORTABLE_TARGET = "wasm32-unknown-unknown"
@@ -5371,6 +5376,7 @@ def _check_workspace() -> int:
             "openai",
             "openrouter",
             "sessions-sqlite",
+            "store",
             "test-hooks",
             "web-fetch",
             "xai",
@@ -5858,8 +5864,12 @@ def main() -> int:
         for name in PORTABLE_CRATES:
             print(name)
         return 0
+    if sys.argv[1:] == ["--wasm-libraries"]:
+        for name in (*PORTABLE_CRATES, *PORTABLE_DEFAULT_LIBRARIES):
+            print(name)
+        return 0
     if sys.argv[1:]:
-        print("usage: check_workspace.py [--portable-crates]", file=sys.stderr)
+        print("usage: check_workspace.py [--portable-crates | --wasm-libraries]", file=sys.stderr)
         return 2
     return check_root(ROOT)
 

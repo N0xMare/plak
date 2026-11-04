@@ -705,7 +705,7 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES.update(
 EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-py-worker": "12692a8c10a6033ffd8c99be9fd192fb9d76cbd41de571b36aabdc8720bebce5",
     "plakous-js-runtime": "fd22d2bf42bb470f5ed7ec3a852aa0472c1fdafa2ced4641a4a4f42c0a4bdd2a",
-    "plakous": "8baeebd5773fddcff9261c44e05b6d919498f991714c22abcc3edd9751f90041",
+    "plakous": "06d75838a05ab84618d2060d45e7e9bd1f7e2f70d04de24a3d0a5859e8f8c352",
     "plakous-agent": "a3575595b6e3a90a1479335d3c0f6ec0f618354dc5831bc48fe31b28d9bb3e90",
     "plakous-anthropic": "1b02db17b7b8447f9f0abd665616ffbf380c1a6c1e41c192cdc0f075e3cf1c5f",
     "plakous-attempt": "87a0bece47ad17a768ac1eb58a4e6ff9712e6f53008fd524fae3fd4055282f6b",
@@ -727,7 +727,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-prompts": "b5355c6de6d0cc0d848eb5626b2bc7fb264d02ab34faa036453f8e3c2fa0f17d",
     "plakous-openrouter": "fc202257b7a1b3d0586e9d0df778bd1d578c8a6d06d6818e3d5feecc5961246c",
     "plakous-responses": "f565ee25c2e3227c43b269500077732e3fe06c06776e0e3610db0f508249a5ad",
-    "plakous-store": "179994d53d5e00aa9794335847d5102deafa6aa919be0c616adf8b0507314595",
+    "plakous-store": "6e755d259a663f5657443cd5c9f940f93e52fe7437f3f40d7047ba48ff5b526e",
     "plakous-tools": "e8215dca9755764a325b4584220d905026517f445d532db7ae6b48362b293824",
     "plakous-xai": "4b452bb53d65262dff9cc74e58ac83bb0f89ab6ad2201299eb5a7ed1238b0158",
     "plakous-runner-protocol": "074927a7f911be39d35b2c5f498ead01b23a3d188dc5b7aa8fc1e29eef3fd1e9",
