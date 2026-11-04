@@ -35,6 +35,7 @@ use serde::de::DeserializeOwned;
 
 use super::{HostService, Outbound, TreeNodes};
 use crate::error::{CliFailure, CliResult};
+use served::{ServedSession, Shared};
 
 /// How often a connection polls its input and the session's observations.
 const POLL: Duration = Duration::from_millis(20);
@@ -207,6 +208,16 @@ where
     Ok(false)
 }
 
+/// What a connection's leaving (its bye, its end of input, a frame that
+/// breaks the protocol, or its transport's end) does to the session.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Leave {
+    /// The session quits: the connection was its only client (stdio).
+    Quit,
+    /// The connection detaches; the session runs on for the next one.
+    Detach,
+}
+
 /// The connection's state after the handshake: one attachment at a time
 /// on the session's host service.
 pub struct WireConnection<P: ProtocolExtension, W: Write> {
@@ -215,18 +226,15 @@ pub struct WireConnection<P: ProtocolExtension, W: Write> {
     service: HostService<P>,
     attachment: Option<AttachmentId>,
     blobs: BlobAssembler,
+    leave: Leave,
     quit_sent: bool,
     /// Whether the process was asked to stop.
     stopped: Box<dyn Fn() -> bool + Send + Sync>,
-    /// The session the connection serves and how to find another session's
-    /// root, when the transport named them.
-    session: Option<(String, SessionRoots)>,
-    /// A session opening held until the binding that names its session.
-    held: Option<Vec<SessionObservation<P>>>,
-    /// After a switch, the next session's events an attach snapshot does
-    /// not carry, waiting for the next attachment.
-    replay: Vec<SessionObservation<P>>,
-    awaiting_attach: bool,
+    /// The session the connection serves, when the transport named it.
+    served: Option<Shared<P>>,
+    /// The served session's generation this connection's service handle is
+    /// rooted at.
+    generation: u64,
     /// A child's mail requests, by the correlation their intents carry,
     /// answered once the mail is written.
     mails: BTreeMap<String, RequestId>,
@@ -236,9 +244,6 @@ pub struct WireConnection<P: ProtocolExtension, W: Write> {
     settled: Vec<(RequestId, Outcome)>,
     next_mail: u64,
 }
-
-/// Finds a session's root node by its id.
-type SessionRoots = Box<dyn Fn(&str) -> Option<NodeAddress> + Send + Sync>;
 
 /// Whether `intent` is tree mail on a child's attachment.
 const fn is_mail<P: ProtocolExtension>(intent: &SessionIntent<P>) -> bool {
@@ -256,19 +261,30 @@ where
     /// A connection over a fresh host service for the session `actions`
     /// sends to, whose root is `root`.
     pub fn new(root: NodeAddress, stdout: W, actions: IntentSender<P>) -> Self {
+        let service = HostService::new(actions.clone(), root.clone(), ATTACHMENT_CAPACITY)
+            .with_nodes(std::sync::Arc::new(TreeNodes::new(root.tree_id)));
+        Self::on_service(service, stdout, actions, Leave::Quit)
+    }
+
+    /// A connection on a service other connections share, for the session
+    /// `actions` sends to; `leave` says what its leaving does.
+    pub fn on_service(
+        service: HostService<P>,
+        stdout: W,
+        actions: IntentSender<P>,
+        leave: Leave,
+    ) -> Self {
         Self {
             stdout,
-            service: HostService::new(actions.clone(), root.clone(), ATTACHMENT_CAPACITY)
-                .with_nodes(std::sync::Arc::new(TreeNodes::new(root.tree_id))),
+            service,
             actions,
             attachment: None,
             blobs: BlobAssembler::default(),
+            leave,
             quit_sent: false,
             stopped: Box::new(|| false),
-            session: None,
-            held: None,
-            replay: Vec::new(),
-            awaiting_attach: false,
+            served: None,
+            generation: 0,
             mails: BTreeMap::new(),
             window: None,
             settled: Vec::new(),
@@ -294,7 +310,19 @@ where
         session_id: impl Into<String>,
         roots: impl Fn(&str) -> Option<NodeAddress> + Send + Sync + 'static,
     ) -> Self {
-        self.session = Some((session_id.into(), Box::new(roots)));
+        self.served = Some(ServedSession::shared(
+            session_id.into(),
+            Box::new(roots),
+            self.service.clone(),
+        ));
+        self
+    }
+
+    /// This connection, serving the session `served` that other
+    /// connections serve too, its service handle rooted at `generation`.
+    fn on_served(mut self, served: Shared<P>, generation: u64) -> Self {
+        self.served = Some(served);
+        self.generation = generation;
         self
     }
 
@@ -302,123 +330,35 @@ where
     /// switched to; `false` when the switch's root cannot be found and the
     /// connection must end.
     fn observe(&mut self, event: SessionObservation<P>) -> CliResult<bool> {
-        if self.session.is_none() {
-            self.service.observe(event);
-            return Ok(true);
-        }
-        if self.awaiting_attach && !super::kept_for_attach(&event) {
-            self.replay.push(event.clone());
-            if self.replay.len() > ATTACHMENT_CAPACITY {
-                // Too far behind to replay: the attach snapshot is all.
-                self.replay.clear();
-            }
-        }
-        // A session's opening comes before the binding that names it, so
-        // what follows an opening is held until that binding says whose it
-        // is: the served session's, or the next one's.
-        let opening = matches!(event, SessionObservation::SessionOpening);
-        let binding = match &event {
-            SessionObservation::Binding { session_id, .. } => Some(session_id.clone()),
-            _ => None,
-        };
-        let Some(held) = self.held.as_mut() else {
-            if opening {
-                self.held = Some(vec![event]);
-                return Ok(true);
-            }
-            if let Some(next) = binding.flatten() {
-                return self.switch(next, vec![event]);
-            }
+        let Some(served) = self.served.clone() else {
             self.service.observe(event);
             return Ok(true);
         };
-        held.push(event);
-        if binding.is_none() && held.len() <= ATTACHMENT_CAPACITY {
-            return Ok(true);
+        let mut guard = served::lock(&served);
+        let found = guard.observe(event);
+        let switched = guard.generation() != self.generation;
+        drop(guard);
+        if switched {
+            // The attachment's `moved` goes out now, after what it held.
+            self.flush()?;
+            self.follow(&served::lock(&served));
         }
-        let held = self.held.take().unwrap_or_default();
-        if let Some(next) = binding.flatten() {
-            return self.switch(next, held);
-        }
-        for observation in held {
-            self.service.observe(observation);
-        }
-        Ok(true)
+        Ok(found)
     }
 
-    /// Takes `observations`, the opening of the session `next` names when it
-    /// is not the served one: the attachment ends with `moved` naming its
-    /// root, and the next attachment of that root gets the opening's events
-    /// after its attach snapshot. `false` when that root cannot be found.
-    fn switch(
-        &mut self,
-        next: String,
-        observations: Vec<SessionObservation<P>>,
-    ) -> CliResult<bool> {
-        let node = match &self.session {
-            Some((served, roots)) if *served != next => roots(&next),
-            _ => {
-                for observation in observations {
-                    self.service.observe(observation);
-                }
-                return Ok(true);
-            }
-        };
-        let Some(node) = node else {
-            for observation in observations {
-                self.service.observe(observation);
-            }
-            return Ok(false);
-        };
-        // What the old session's attachment still holds is delivered first;
-        // the switch's observations belong to the new session's attachment.
-        self.flush()?;
-        if let Some(attachment) = self.attachment.take() {
-            let _ = self.service.detach(attachment);
-            self.unanswered();
-            for (id, outcome) in std::mem::take(&mut self.settled) {
-                write_frame(&mut self.stdout, &HostFrame::<P>::Response { id, outcome })?;
-            }
-            write_frame(
-                &mut self.stdout,
-                &HostFrame::<P>::Moved {
-                    attachment,
-                    node: node.clone(),
-                },
-            )?;
+    /// Roots this connection's service handle where the served session's
+    /// is, once a switch moved it.
+    fn follow(&mut self, served: &ServedSession<P>) {
+        if served.generation() != self.generation {
+            self.service = served.service();
+            self.generation = served.generation();
         }
-        let nodes: std::sync::Arc<dyn super::ChildNodes> =
-            std::sync::Arc::new(TreeNodes::new(node.tree_id.clone()));
-        self.service.reroot(node, Some(nodes));
-        if let Some((served, _)) = &mut self.session {
-            *served = next;
-        }
-        // The service keeps what an attach re-emits; the rest of the
-        // opening after its last root snapshot waits for the next attach.
-        let baseline = observations.iter().rposition(|observation| {
-            matches!(observation, SessionObservation::PresentationSnapshot(snapshot)
-                if snapshot.scope == plakous_host_protocol::views::transcript::TranscriptScope::Root)
-        });
-        self.replay = observations
-            .iter()
-            .enumerate()
-            .filter(|(index, observation)| {
-                baseline.is_none_or(|baseline| *index > baseline)
-                    && !super::kept_for_attach(observation)
-            })
-            .map(|(_, observation)| observation.clone())
-            .collect();
-        self.awaiting_attach = true;
-        for observation in observations {
-            self.service.observe(observation);
-        }
-        Ok(true)
     }
 
     /// Serves frames and observations until the session ends. A client that
-    /// leaves (bye or end of input) quits the session first; so does a
-    /// process asked to stop, and a connection whose session switched to one
-    /// whose root cannot be found.
+    /// leaves (bye or end of input) leaves first, as its [`Leave`] says; so
+    /// does a process asked to stop, and a connection whose session switched
+    /// to one whose root cannot be found.
     ///
     /// # Errors
     ///
@@ -437,7 +377,7 @@ where
             self.flush()?;
             if reading && (lost || (self.stopped)()) {
                 reading = false;
-                self.quit();
+                self.leave();
             }
             if reading {
                 match lines.recv_timeout(POLL) {
@@ -445,7 +385,7 @@ where
                     Err(mpsc::RecvTimeoutError::Timeout) => continue,
                     Err(mpsc::RecvTimeoutError::Disconnected) => {
                         reading = false;
-                        self.quit();
+                        self.leave();
                     }
                 }
                 self.flush()?;
@@ -457,10 +397,8 @@ where
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    // An opening no binding followed (the open failed) is
-                    // the served session's.
-                    for observation in self.held.take().unwrap_or_default() {
-                        self.service.observe(observation);
+                    if let Some(served) = &self.served {
+                        served::lock(served).end();
                     }
                     self.flush()?;
                     return write_frame(&mut self.stdout, &HostFrame::<P>::Bye);
@@ -469,21 +407,37 @@ where
         }
     }
 
-    fn quit(&mut self) {
-        if !self.quit_sent {
-            self.quit_sent = true;
-            let _ = self.actions.send(SessionIntent::Quit);
+    /// The client left: the session quits, or the connection detaches,
+    /// as its [`Leave`] says. Leaving twice does nothing more.
+    pub fn leave(&mut self) {
+        match self.leave {
+            Leave::Quit => {
+                if !self.quit_sent {
+                    self.quit_sent = true;
+                    let _ = self.actions.send(SessionIntent::Quit);
+                }
+            }
+            Leave::Detach => {
+                if let Some(held) = self.attachment.take() {
+                    let _ = self.service.detach(held);
+                    self.unanswered();
+                }
+            }
         }
     }
 
     /// Answers one client line; `false` once the client has left.
-    fn frame(&mut self, line: Result<String, WireError>) -> CliResult<bool> {
+    ///
+    /// # Errors
+    ///
+    /// A lost output.
+    pub fn frame(&mut self, line: Result<String, WireError>) -> CliResult<bool> {
         let frame = match line.and_then(|line| decode_line::<ClientFrame<P>>(&line)) {
             // A second hello, or a line that is not a frame, names no
             // request to refuse: the connection ends, as a client that
             // broke the protocol.
             Ok(ClientFrame::Hello(_)) | Err(_) => {
-                self.quit();
+                self.leave();
                 return Ok(false);
             }
             Ok(frame) => frame,
@@ -491,12 +445,12 @@ where
         match frame {
             ClientFrame::Hello(_) => Ok(false),
             ClientFrame::Bye => {
-                self.quit();
+                self.leave();
                 Ok(false)
             }
             ClientFrame::Blob(chunk) => {
                 if self.blobs.push(chunk).is_err() {
-                    self.quit();
+                    self.leave();
                     return Ok(false);
                 }
                 Ok(true)
@@ -528,15 +482,18 @@ where
                     let _ = self.service.detach(held);
                     self.unanswered();
                 }
+                // An attach and the replay it takes are one step against
+                // the session's observations.
+                let served = self.served.clone();
+                let mut guard = served.as_ref().map(served::lock);
+                if let Some(guard) = &guard {
+                    self.follow(guard);
+                }
                 match self.service.attach(&node) {
                     Ok(attachment) => {
                         self.attachment = Some(attachment);
-                        // The opening a switch left waiting follows the
-                        // attach snapshot, after the `attached` answer.
-                        if std::mem::take(&mut self.awaiting_attach) {
-                            for observation in std::mem::take(&mut self.replay) {
-                                self.service.observe(observation);
-                            }
+                        if let Some(guard) = guard.as_mut() {
+                            guard.attached();
                         }
                         Some(Outcome::Ok(Answer::Attached { attachment }))
                     }
@@ -638,7 +595,11 @@ where
     /// pages, anything else as an event after its image blobs, and a
     /// resync-required that ends the attachment. A child's mail request is
     /// answered before the event that settles it.
-    fn flush(&mut self) -> CliResult<()> {
+    ///
+    /// # Errors
+    ///
+    /// A lost output, or a snapshot that cannot be paged.
+    pub fn flush(&mut self) -> CliResult<()> {
         for (id, outcome) in std::mem::take(&mut self.settled) {
             write_frame(&mut self.stdout, &HostFrame::<P>::Response { id, outcome })?;
         }
@@ -663,6 +624,20 @@ where
                         &mut self.stdout,
                         &HostFrame::<P>::ResyncRequired { attachment },
                     )?;
+                }
+                Outbound::Moved { node } => {
+                    self.attachment = None;
+                    self.unanswered();
+                    for (id, outcome) in std::mem::take(&mut self.settled) {
+                        write_frame(&mut self.stdout, &HostFrame::<P>::Response { id, outcome })?;
+                    }
+                    write_frame(
+                        &mut self.stdout,
+                        &HostFrame::<P>::Moved { attachment, node },
+                    )?;
+                    if let Some(served) = self.served.clone() {
+                        self.follow(&served::lock(&served));
+                    }
                 }
                 Outbound::Event {
                     observation: SessionObservation::PresentationSnapshot(snapshot),
@@ -699,6 +674,11 @@ where
         Ok(())
     }
 }
+
+mod served;
+mod session;
+
+pub use session::WireSession;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]

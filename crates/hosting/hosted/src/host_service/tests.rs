@@ -25,7 +25,7 @@ fn observations(outbound: Vec<Outbound<Core>>) -> Vec<Observation> {
         .into_iter()
         .map(|item| match item {
             Outbound::Event { observation, .. } => observation,
-            Outbound::ResyncRequired => panic!("dropped"),
+            Outbound::ResyncRequired | Outbound::Moved { .. } => panic!("dropped"),
         })
         .collect()
 }
@@ -248,7 +248,7 @@ fn an_evicted_droppable_event_leaves_a_sequence_gap() {
         .into_iter()
         .map(|item| match item {
             Outbound::Event { seq, .. } => seq,
-            Outbound::ResyncRequired => 0,
+            Outbound::ResyncRequired | Outbound::Moved { .. } => 0,
         })
         .collect();
     assert_eq!(seqs, [1, 2, 4]);
@@ -415,7 +415,7 @@ fn a_superseding_state_keeps_the_order_of_events() {
             Outbound::Event {
                 seq, observation, ..
             } => (seq, observation),
-            Outbound::ResyncRequired => panic!("dropped"),
+            Outbound::ResyncRequired | Outbound::Moved { .. } => panic!("dropped"),
         })
         .collect();
     assert_eq!(
@@ -668,7 +668,7 @@ fn every_attach_gets_a_fresh_id_and_a_sequence_from_one() {
             .into_iter()
             .map(|item| match item {
                 Outbound::Event { seq, .. } => seq,
-                Outbound::ResyncRequired => panic!("dropped"),
+                Outbound::ResyncRequired | Outbound::Moved { .. } => panic!("dropped"),
             })
             .collect()
     };

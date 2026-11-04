@@ -338,3 +338,100 @@ fn a_switchs_opening_reaches_the_next_attachment_not_the_old_one() {
     assert!(next.contains(&&notice), "{frames:?}");
     assert!(next.contains(&&draft), "{frames:?}");
 }
+
+/// A shared session moves every attachment when it switches: each
+/// connection's attachment ends with `moved` naming the new root, after
+/// none of the opening; the service then serves the new session, so a later
+/// connection attaches it too; the first attach after the switch gets the
+/// opening's events after its snapshot; and a switch whose root cannot be
+/// found ends the service.
+#[test]
+fn a_shared_session_moves_every_attachment_on_a_switch() {
+    use plakous_host_protocol::Core;
+    use plakous_host_protocol::views::transcript::NoticeScope;
+    let notice = SessionObservation::<Core>::Row(TranscriptRow::info(
+        NoticeScope::Host,
+        "the next session opened",
+    ));
+    let (actions, _intents) = plakous_host_protocol::intent_channel::<Core>();
+    let (published, events) = plakous_host_protocol::observation_channel::<Core>();
+    let session = WireSession::start(root(), "s1".to_owned(), actions, events, |id| {
+        (id != "lost").then(|| root_named(&format!("tree-{id}")))
+    });
+    let mut changes = session.changes();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    let (mut first, mut second, mut later) = (Vec::new(), Vec::new(), Vec::new());
+    let mut one = session.connect(&mut first, || false);
+    let mut two = session.connect(&mut second, || false);
+    assert!(matches!(
+        one.request(1, Op::Attach { node: root() }),
+        Some(Outcome::Ok(Answer::Attached { attachment: 1 }))
+    ));
+    assert!(matches!(
+        two.request(1, Op::Attach { node: root() }),
+        Some(Outcome::Ok(Answer::Attached { attachment: 2 }))
+    ));
+    published.send(binding("s1")).unwrap();
+    for observation in [
+        SessionObservation::SessionOpening,
+        notice.clone(),
+        binding("s2"),
+    ] {
+        published.send(observation).unwrap();
+    }
+    while session.session_id() != "s2" {
+        runtime.block_on(changes.changed()).unwrap();
+    }
+    assert_eq!(session.root(), root_named("tree-s2"));
+    assert!(!session.ended());
+    one.flush().unwrap();
+    two.flush().unwrap();
+    assert!(matches!(
+        one.request(
+            2,
+            Op::Attach {
+                node: root_named("tree-s2")
+            }
+        ),
+        Some(Outcome::Ok(Answer::Attached { attachment: 3 }))
+    ));
+    one.flush().unwrap();
+    let mut three = session.connect(&mut later, || false);
+    assert!(matches!(
+        three.request(
+            1,
+            Op::Attach {
+                node: root_named("tree-s2")
+            }
+        ),
+        Some(Outcome::Ok(Answer::Attached { attachment: 4 }))
+    ));
+    published.send(binding("lost")).unwrap();
+    while !session.ended() {
+        runtime.block_on(changes.changed()).unwrap();
+    }
+    drop((one, two, three));
+    for (frames, attachment) in [(host_frames(&first), 1), (host_frames(&second), 2)] {
+        let moved = frames
+            .iter()
+            .position(|frame| {
+                matches!(frame, HostFrame::Moved { attachment: held, node }
+                    if *held == attachment && *node == root_named("tree-s2"))
+            })
+            .expect("moved");
+        assert!(
+            frames[..moved].iter().all(|frame| !matches!(
+                frame,
+                HostFrame::Event { observation, .. } if *observation == notice
+            )),
+            "{frames:?}"
+        );
+    }
+    assert!(host_frames(&first).iter().any(|frame| matches!(
+        frame,
+        HostFrame::Event { attachment: 3, observation, .. } if *observation == notice
+    )));
+}

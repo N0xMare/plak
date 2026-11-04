@@ -216,8 +216,9 @@ impl<P: ProtocolExtension> FaceReceiver<P> {
             .unwrap_or_else(PoisonError::into_inner)
             .extend(taken.into_iter().filter_map(|outbound| match outbound {
                 Outbound::Event { observation, .. } => Some(observation),
-                // An unbounded queue is never dropped.
-                Outbound::ResyncRequired => None,
+                // An unbounded queue is never dropped, and a face's service
+                // is never moved.
+                Outbound::ResyncRequired | Outbound::Moved { .. } => None,
             }));
     }
 

@@ -92,6 +92,13 @@ pub enum Outbound<P: ProtocolExtension> {
     /// The attachment fell behind on what it may not lose and is dropped;
     /// it takes nothing more and must attach again.
     ResyncRequired,
+    /// The session was replaced by another (`/new`, a resume, a rebind)
+    /// whose root is `node`: the attachment has ended after what it held,
+    /// and its client attaches `node` fresh.
+    Moved {
+        /// The new session's root.
+        node: NodeAddress,
+    },
 }
 
 /// One attachment's state.
@@ -324,6 +331,26 @@ impl<P: ProtocolExtension> HostService<P> {
         self.root = root;
         self.nodes = nodes;
         self.lock().requester = None;
+    }
+
+    /// The session root this handle attaches.
+    #[must_use]
+    pub const fn root(&self) -> &NodeAddress {
+        &self.root
+    }
+
+    /// Ends every attachment with [`Outbound::Moved`] naming `node`, after
+    /// what each already holds: the session was replaced by the one whose
+    /// root that is. Each attachment's holder reroots its own handle.
+    pub fn move_attachments(&self, node: &NodeAddress) {
+        let mut state = self.lock();
+        state.requester = None;
+        for held in state.attachments.values_mut() {
+            if !held.dropped {
+                held.dropped = true;
+                held.queue.push_back(Outbound::Moved { node: node.clone() });
+            }
+        }
     }
 
     /// This service, with the session tree's children attachable through

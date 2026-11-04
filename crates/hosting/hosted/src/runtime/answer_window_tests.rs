@@ -128,7 +128,7 @@ fn a_late_answer_reaches_its_requester_through_the_service() {
             .into_iter()
             .filter_map(|item| match item {
                 Outbound::Event { observation, .. } => Some(observation),
-                Outbound::ResyncRequired => None,
+                Outbound::ResyncRequired | Outbound::Moved { .. } => None,
             })
             .collect()
     };
