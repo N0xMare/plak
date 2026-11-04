@@ -78,7 +78,8 @@ pub fn socket_path(run_directory: &Path, version: &VersionTriple) -> PathBuf {
 /// (spec 01 §8.4). The socket is removed on the way out.
 ///
 /// The daemon holds an exclusive lock on the socket's lock file beside it
-/// for its whole life, taken before the socket is touched: a second daemon
+/// for its whole life, taken before the socket is touched, and writes its
+/// process id into it while it holds it: a second daemon
 /// of the same version never unlinks or binds a live one's socket, and a
 /// socket found while holding the lock is a dead daemon's.
 ///
@@ -91,6 +92,7 @@ pub async fn serve_socket(
     socket: &Path,
     idle_grace: Duration,
 ) -> Result<(), DaemonError> {
+    check_socket_path(socket)?;
     let directory = socket.parent().unwrap_or_else(|| Path::new("."));
     private_directory(directory)?;
     let lock = {
@@ -108,6 +110,15 @@ pub async fn serve_socket(
             return Err(DaemonError::AlreadyServing(socket.to_path_buf()));
         }
         Err(std::fs::TryLockError::Error(error)) => return Err(DaemonError::Io(error)),
+    }
+    // The lock file names its holder, so an operator or a harness can find
+    // the daemon that serves a socket; the lock proves the name current.
+    {
+        use std::io::Write as _;
+        let mut holder = &lock;
+        holder.set_len(0)?;
+        write!(holder, "{}", std::process::id())?;
+        holder.sync_all()?;
     }
     if std::fs::symlink_metadata(socket).is_ok() {
         // A daemon that died left its socket behind.
@@ -160,6 +171,8 @@ pub async fn bridge_stdio(
     start: impl FnOnce() -> io::Result<()>,
     wait: Duration,
 ) -> io::Result<()> {
+    use tokio::io::AsyncWriteExt as _;
+    check_socket_path(socket)?;
     let mut stream = if let Ok(stream) = UnixStream::connect(socket).await {
         stream
     } else {
@@ -176,17 +189,69 @@ pub async fn bridge_stdio(
     let (mut from_daemon, mut to_daemon) = stream.split();
     let mut stdin = tokio::io::stdin();
     let mut stdout = tokio::io::stdout();
-    // Either side closing ends the bridge: the host's ssh hung up, or the
-    // daemon went away and the host must see its link end.
+    // Everything the daemon sent reaches the host, flushed, before the
+    // bridge ends: a daemon that refuses a host says why and then closes,
+    // and the host must read the refusal, not only the closed link.
+    let delivered = async {
+        let copied = tokio::io::copy(&mut from_daemon, &mut stdout).await;
+        let flushed = stdout.flush().await;
+        copied.and(flushed.map(|()| 0))
+    };
+    tokio::pin!(delivered);
     let copied = tokio::select! {
-        copied = tokio::io::copy(&mut stdin, &mut to_daemon) => copied,
-        copied = tokio::io::copy(&mut from_daemon, &mut stdout) => copied,
+        // The daemon went away: the host sees its last frames, then the end.
+        copied = &mut delivered => copied,
+        // The host hung up, or the daemon stopped reading. The daemon sees
+        // the end of its input and closes; what it sent until then is
+        // still delivered.
+        sent = tokio::io::copy(&mut stdin, &mut to_daemon) => {
+            let _ = to_daemon.shutdown().await;
+            match tokio::time::timeout(DRAIN, &mut delivered).await {
+                Ok(copied) => copied.and(sent),
+                Err(_) => sent,
+            }
+        }
     };
     match copied {
         Ok(_) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::BrokenPipe => Ok(()),
         Err(error) => Err(error),
     }
+}
+
+/// How long the bridge still delivers the daemon's output after the host's
+/// side ended.
+const DRAIN: Duration = Duration::from_secs(5);
+
+/// The longest socket path the platform's `sockaddr_un` holds, with its
+/// terminating NUL.
+#[cfg(target_os = "macos")]
+const SOCKET_PATH_LIMIT: usize = 104;
+#[cfg(not(target_os = "macos"))]
+const SOCKET_PATH_LIMIT: usize = 108;
+
+/// Refuses a socket path the platform cannot bind or connect to, naming it,
+/// rather than failing with an opaque error from the kernel. The daemon and
+/// the bridge check it first; a caller checks it before it prepares
+/// anything for a daemon.
+///
+/// # Errors
+///
+/// The path is too long for this platform's `sockaddr_un`.
+pub fn check_socket_path(socket: &Path) -> io::Result<()> {
+    let length = socket.as_os_str().len();
+    if length < SOCKET_PATH_LIMIT {
+        return Ok(());
+    }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        format!(
+            "the runner socket path {} is {length} bytes, past this platform's limit of {}; \
+             use a shorter product home",
+            socket.display(),
+            SOCKET_PATH_LIMIT - 1
+        ),
+    ))
 }
 
 /// Creates `directory` (mode 0700) or checks an existing one is the
@@ -217,4 +282,20 @@ fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
 fn owner_uid(directory: &Path) -> io::Result<u32> {
     use std::os::unix::fs::MetadataExt as _;
     Ok(std::fs::metadata(directory)?.uid())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "unit tests")]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_socket_path_past_the_platform_limit_is_refused_by_name() {
+        let short = Path::new("/tmp/run/v1-0123456789ab.sock");
+        assert!(check_socket_path(short).is_ok());
+        let long = PathBuf::from(format!("/tmp/{}/v1-0123456789ab.sock", "d".repeat(100)));
+        let refused = check_socket_path(&long).unwrap_err();
+        assert_eq!(refused.kind(), io::ErrorKind::InvalidInput);
+        assert!(refused.to_string().contains(&long.display().to_string()));
+    }
 }

@@ -177,6 +177,50 @@ async fn an_unpaired_host_fails_at_once(home: &Path, work: &Path, runner: Versio
     );
 }
 
+/// The bridge ends as soon as the daemon closes, with the host's input still
+/// open: the host sees its stdout end, not only a later failed write.
+async fn a_refused_link_ends_the_bridge_at_once(home: &Path, runner: VersionTriple) {
+    use plakous::runner::protocol::{HostFrame, frame::encode};
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    let mut child = tokio::process::Command::new(plak_bin())
+        .args(["runner", "connect", "--stdio"])
+        .env("PLAK_TEST_STORAGE_CAPACITY", "available")
+        .env("PLAK_HOME", home)
+        .env("HOME", home)
+        .current_dir(home)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let bind = HostFrame::Bind(Bind {
+        host_id: uuid::Uuid::new_v4().hyphenated().to_string(),
+        host_instance: uuid::Uuid::new_v4().hyphenated().to_string(),
+        version: runner,
+        inspect: false,
+    });
+    stdin.write_all(&encode(&bind).unwrap()).await.unwrap();
+    stdin.flush().await.unwrap();
+    let mut output = Vec::new();
+    let ended = tokio::time::timeout(
+        Duration::from_secs(5),
+        child.stdout.take().unwrap().read_to_end(&mut output),
+    )
+    .await;
+    assert!(
+        ended.is_ok(),
+        "the bridge's stdout outlived the refusing daemon"
+    );
+    let exited = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+    assert!(
+        exited.is_ok_and(|status| status.is_ok()),
+        "the bridge outlived its link"
+    );
+    drop(stdin);
+}
+
 #[test]
 fn a_runner_daemon_pairs_bridges_lists_and_exits_idle() {
     let (guard, home) = isolated_home();
@@ -231,7 +275,8 @@ fn a_runner_daemon_pairs_bridges_lists_and_exits_idle() {
 
         probes_stay_under_the_roots(&paired, &home, &work).await;
         vcs_reads_stay_under_the_roots(&paired, &home, &work).await;
-        an_unpaired_host_fails_at_once(&home, &work, runner).await;
+        an_unpaired_host_fails_at_once(&home, &work, runner.clone()).await;
+        a_refused_link_ends_the_bridge_at_once(&home, runner).await;
     });
 
     let listed = plak_command(&home).args(["runner", "ps"]).output().unwrap();

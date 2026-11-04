@@ -57,7 +57,14 @@ pub(crate) fn run(
         .map_err(|error| CliFailure::new(format!("the runner runtime did not start: {error}")))?;
     match command {
         RunnerCommand::Serve => runtime.block_on(serve(paths)),
-        RunnerCommand::Connect => runtime.block_on(connect(paths)),
+        RunnerCommand::Connect => {
+            let bridged = runtime.block_on(connect(paths));
+            // The bridge's stdin copy may still sit in a blocking read of
+            // the host's input; waiting for it would keep stdout open after
+            // the daemon closed, so the host would not see the link end.
+            runtime.shutdown_background();
+            return bridged.map(|()| ProcessOutcome::Success);
+        }
         RunnerCommand::Allow { host_id } => allow(paths, &host_id, stdout),
         RunnerCommand::Ps { name: None } => runtime.block_on(ps_local(paths, stdout)),
         RunnerCommand::Ps { name: Some(name) } => runtime.block_on(ps_remote(paths, &name, stdout)),
@@ -69,6 +76,9 @@ pub(crate) fn run(
 /// `plak runner serve`: the daemon, in the foreground, until it is idle.
 async fn serve(paths: &PlakPaths) -> CliResult<()> {
     let home = RunnerHome::of(paths);
+    // Before anything is written for the daemon: a path the platform cannot
+    // bind leaves nothing behind.
+    let socket = checked_socket(&home)?;
     let config = home.config()?;
     let Some(first) = config.roots.first() else {
         return Err(CliFailure::new(format!(
@@ -144,7 +154,6 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
         },
     )
     .map_err(|error| CliFailure::new(format!("the runner did not start: {error}")))?;
-    let socket = daemon::socket_path(&home.run_directory(), &version());
     match daemon::serve_socket(service, &socket, config.idle_exit()).await {
         Ok(()) => Ok(()),
         // One daemon per user and build is enough.
@@ -211,6 +220,14 @@ fn vcs_extension(
     )
 }
 
+/// This build's daemon socket in `home`, refused by name when the platform
+/// cannot bind or connect to it.
+fn checked_socket(home: &RunnerHome) -> CliResult<std::path::PathBuf> {
+    let socket = daemon::socket_path(&home.run_directory(), &version());
+    daemon::check_socket_path(&socket).map_err(|error| CliFailure::new(error.to_string()))?;
+    Ok(socket)
+}
+
 /// How the daemon reads a runner secret a service names: from this home's
 /// runner shelf (`plak runner secret set`), never its named secrets.
 fn runner_secret(
@@ -226,8 +243,8 @@ fn runner_secret(
 /// starting it detached when none answers.
 async fn connect(paths: &PlakPaths) -> CliResult<()> {
     let home = RunnerHome::of(paths);
+    let socket = checked_socket(&home)?;
     let config = home.config()?;
-    let socket = daemon::socket_path(&home.run_directory(), &version());
     let start = || start_daemon(paths, &home, &config);
     daemon::bridge_stdio(&socket, start, START_WAIT)
         .await
@@ -325,7 +342,7 @@ fn allow(paths: &PlakPaths, host_id: &str, stdout: &mut dyn std::io::Write) -> C
 /// every host.
 async fn ps_local(paths: &PlakPaths, stdout: &mut dyn std::io::Write) -> CliResult<()> {
     let home = RunnerHome::of(paths);
-    let socket = daemon::socket_path(&home.run_directory(), &version());
+    let socket = checked_socket(&home)?;
     let Ok(stream) = tokio::net::UnixStream::connect(&socket).await else {
         writeln!(stdout, "no runner is running").map_err(|_| CliFailure::new("stdout failed"))?;
         return Ok(());

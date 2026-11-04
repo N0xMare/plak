@@ -5679,12 +5679,21 @@ runner for a session yet.
   in a 0700 directory, named after the protocol version and a hash of the
   version triple, and closes a connection from another user before its hello.
   It holds an exclusive lock on the socket's lock file for its life, taken
-  before it touches the socket, so a second daemon of the same triple refuses
+  before it touches the socket, and writes its process id into it while it
+  holds it, so a second daemon of the same triple refuses
   to start without unlinking or binding the first one's socket, and a socket
   found under the lock is a dead daemon's and is replaced. It exits after its
   idle grace with no connection, no service, no running or orphaned job and
   no answer or tombstone a host has not acknowledged. The stdio bridge
-  connects to it, or starts it once and waits for it to listen.
+  connects to it, or starts it once and waits for it to listen, and delivers
+  everything the daemon sent, flushed, before it ends, even after the host's
+  side ended first: a daemon that refuses a host's bind sends the refusal and
+  closes, and the host records the refusal before its failed calls return.
+  `plak runner connect --stdio` then ends at once, without waiting for the
+  host's input, so the host sees its link end. A socket path past the
+  platform's `sockaddr_un` limit (103 bytes on macOS, 107 elsewhere) is
+  refused by name, by the daemon and by the bridge; `plak runner serve`,
+  `connect` and `ps` check it before they prepare or ask anything.
 - **Host link.** A call waits 30 s for an answer (120 s for an effect call),
   then its outcome is unknown. Effect calls, owner controls, observations and
   reads outstanding when the link is lost are replayed by key and digest on
