@@ -497,7 +497,7 @@ impl PersistentTerminal {
     pub fn run(
         &mut self,
         launch: TuiLaunch,
-        actions: Option<crate::tui::UserActionSender>,
+        actions: Option<crate::tui::FaceActionSender>,
         events: Option<crate::tui::HostEventReceiver>,
     ) -> Result<TuiOutcome, TuiError> {
         if launch.mouse_enabled && !self.restoration.mouse_captured {
@@ -525,7 +525,7 @@ impl PersistentTerminal {
 #[cfg(test)]
 pub(crate) fn run_hosted(
     launch: TuiLaunch,
-    actions: Option<crate::tui::UserActionSender>,
+    actions: Option<crate::tui::FaceActionSender>,
     events: Option<crate::tui::HostEventReceiver>,
 ) -> Result<TuiOutcome, TuiError> {
     let mut session = PersistentTerminal::open(launch.mouse_enabled)?;
@@ -537,7 +537,7 @@ pub(crate) fn run_hosted(
 pub(super) fn handle_terminal_event(
     app: &mut App,
     event: Event,
-    actions: Option<&crate::tui::UserActionSender>,
+    actions: Option<&crate::tui::FaceActionSender>,
     mouse_enabled: bool,
 ) {
     match event {
@@ -581,7 +581,7 @@ pub(super) fn handle_terminal_event(
 /// send the loop into a blocking `read` for bytes that have not arrived.
 pub(super) fn drain_terminal_input(
     app: &mut App,
-    actions: Option<&crate::tui::UserActionSender>,
+    actions: Option<&crate::tui::FaceActionSender>,
     mouse_enabled: bool,
     budget: usize,
 ) -> Result<usize, TuiError> {
@@ -660,7 +660,7 @@ pub(super) fn draw_frame(terminal: &mut PlakTerminal, app: &mut App) -> Result<(
 pub(super) fn run_app(
     terminal: &mut PlakTerminal,
     mut app: App,
-    actions: Option<&crate::tui::UserActionSender>,
+    actions: Option<&crate::tui::FaceActionSender>,
     events: Option<&crate::tui::HostEventReceiver>,
     mouse_enabled: bool,
 ) -> Result<TuiOutcome, TuiError> {
@@ -858,7 +858,7 @@ pub(super) fn run_app(
 pub(super) fn dispatch_action(
     app: &mut App,
     action: &UserAction,
-    actions: Option<&crate::tui::UserActionSender>,
+    actions: Option<&crate::tui::FaceActionSender>,
 ) {
     app.drop_new_after_stop_for(action);
     match action {
@@ -932,7 +932,7 @@ pub(super) fn dispatch_action(
 
 pub(super) fn request_terminal_handoff(
     app: &mut App,
-    actions: Option<&crate::tui::UserActionSender>,
+    actions: Option<&crate::tui::FaceActionSender>,
     handoff: TuiHandoff,
 ) {
     if matches!(
@@ -969,7 +969,7 @@ pub(super) fn commit_sent_action(app: &mut App, action: &UserAction) {
 /// binding/config state is changed only by callers after this returns true.
 pub(super) fn send_user_action(
     app: &mut App,
-    actions: Option<&crate::tui::UserActionSender>,
+    actions: Option<&crate::tui::FaceActionSender>,
     action: UserAction,
 ) -> bool {
     let Some(tx) = actions else {
@@ -994,6 +994,9 @@ pub(super) fn send_user_action(
                 crate::tui::UserActionSendError::Disconnected(_) => "product host is disconnected",
                 crate::tui::UserActionSendError::Duplicate(_) => {
                     "that session operation is already queued or running"
+                }
+                crate::tui::UserActionSendError::Refused(_) => {
+                    "another attachment holds the session's agent view"
                 }
             };
             match error.into_action() {

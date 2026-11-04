@@ -40,7 +40,7 @@ impl App {
     /// Ask the product for the acknowledged attempts of a newly seen tree.
     pub(crate) fn maybe_request_agent_acknowledgements(
         &mut self,
-        actions: Option<&crate::tui::UserActionSender>,
+        actions: Option<&crate::tui::FaceActionSender>,
     ) {
         let Some(tree_id) = self.agent_acks.request.clone() else {
             return;
@@ -157,7 +157,7 @@ impl App {
     /// The overlay stays closed; a crash-restored queue drain is not resumed.
     pub(crate) fn maybe_request_tree_snapshot_after_attach(
         &mut self,
-        actions: Option<&crate::tui::UserActionSender>,
+        actions: Option<&crate::tui::FaceActionSender>,
     ) {
         if !self.pending_open_tree {
             return;
@@ -173,7 +173,7 @@ impl App {
     /// the reason and returns the draft.
     pub(crate) fn maybe_flush_pending_prompt_after_attach(
         &mut self,
-        actions: Option<&crate::tui::UserActionSender>,
+        actions: Option<&crate::tui::FaceActionSender>,
     ) {
         if !self.agent_enabled && self.startup_pending {
             return;

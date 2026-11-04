@@ -226,7 +226,7 @@ impl App {
         ))
     }
 
-    pub(super) fn maybe_reread_usage(&mut self, actions: Option<&crate::tui::UserActionSender>) {
+    pub(super) fn maybe_reread_usage(&mut self, actions: Option<&crate::tui::FaceActionSender>) {
         if self.usage_refresh.pending_read
             && let Some(actions) = actions
             && actions
@@ -241,7 +241,7 @@ impl App {
     /// Usage tab is the open control tab.
     pub(super) fn maybe_sync_usage_watch(
         &mut self,
-        actions: Option<&crate::tui::UserActionSender>,
+        actions: Option<&crate::tui::FaceActionSender>,
     ) {
         let armed = self.control_tab == Some(ControlTab::Usage);
         if armed == self.usage_watch_sent {

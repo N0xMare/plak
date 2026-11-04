@@ -411,7 +411,7 @@ fn run_agent_stdio_stopping_on(
                             } else if let AgentCommand::Prompt { steer: true, .. } = &command {
                                 if busy {
                                     if let Some(action) = command.into_user_action(busy) {
-                                        send_correlated_action(&actions, action, cmd_id)?;
+                                        send_command_action(&mut stdout, &actions, action, cmd_id)?;
                                     }
                                 } else {
                                     let _ = writeln!(stderr, "plak agent: {IDLE_STEER_MESSAGE}");
@@ -437,7 +437,7 @@ fn run_agent_stdio_stopping_on(
                                 }
                             } else if let Some(action) = command.into_user_action(busy) {
                                 prompt_origins.submitted(&action, cmd_id.clone());
-                                send_correlated_action(&actions, action, cmd_id)?;
+                                send_command_action(&mut stdout, &actions, action, cmd_id)?;
                             }
                         }
                     },
@@ -836,14 +836,14 @@ impl PromptOrigins {
 }
 
 fn begin_shutdown(
-    actions: &crate::surface_protocol::UserActionSender,
+    actions: &crate::surface_protocol::FaceActionSender,
     busy: bool,
 ) -> CliResult<()> {
     begin_shutdown_until(actions, busy, Instant::now() + ACTION_RETRY)
 }
 
 fn begin_shutdown_until(
-    actions: &crate::surface_protocol::UserActionSender,
+    actions: &crate::surface_protocol::FaceActionSender,
     busy: bool,
     deadline: Instant,
 ) -> CliResult<()> {
@@ -857,44 +857,62 @@ fn begin_shutdown_until(
 }
 
 fn send_action(
-    actions: &crate::surface_protocol::UserActionSender,
+    actions: &crate::surface_protocol::FaceActionSender,
     action: UserAction,
 ) -> CliResult<()> {
     send_action_until(actions, action, Instant::now() + ACTION_RETRY)
 }
 
 /// Sends a stdin command's action tagged with its id, which the host echoes
-/// when it starts handling it.
-fn send_correlated_action(
-    actions: &crate::surface_protocol::UserActionSender,
+/// when it starts handling it. An action the host service refuses for this
+/// face's role is that command's `error` record; the stream goes on.
+fn send_command_action(
+    stdout: &mut dyn Write,
+    actions: &crate::surface_protocol::FaceActionSender,
     action: UserAction,
     command_id: String,
 ) -> CliResult<()> {
-    send_action_until_with(
+    match send_action_until_with(
         actions,
         action,
-        Some(command_id),
+        Some(command_id.clone()),
         Instant::now() + ACTION_RETRY,
-    )
+    )? {
+        Sent::Taken => Ok(()),
+        Sent::Refused => write_line(stdout, &diagnostic_line(Some(&command_id), REFUSED_MESSAGE)),
+    }
+}
+
+/// The `error` record of a command whose action the host service refused.
+const REFUSED_MESSAGE: &str = "refused: another attachment holds the session's agent view";
+
+/// Whether the host took an action.
+#[derive(Debug, Eq, PartialEq)]
+enum Sent {
+    Taken,
+    /// The host service refused it for this face's role.
+    Refused,
 }
 
 fn send_action_until(
-    actions: &crate::surface_protocol::UserActionSender,
+    actions: &crate::surface_protocol::FaceActionSender,
     action: UserAction,
     deadline: Instant,
 ) -> CliResult<()> {
-    send_action_until_with(actions, action, None, deadline)
+    send_action_until_with(actions, action, None, deadline)?;
+    Ok(())
 }
 
 fn send_action_until_with(
-    actions: &crate::surface_protocol::UserActionSender,
+    actions: &crate::surface_protocol::FaceActionSender,
     mut action: UserAction,
     correlation: Option<String>,
     deadline: Instant,
-) -> CliResult<()> {
+) -> CliResult<Sent> {
     loop {
         match actions.send_correlated(action, correlation.clone()) {
-            Ok(()) => return Ok(()),
+            Ok(()) => return Ok(Sent::Taken),
+            Err(UserActionSendError::Refused(_)) => return Ok(Sent::Refused),
             Err(UserActionSendError::Duplicate(returned)) if Instant::now() < deadline => {
                 thread::yield_now();
                 action = returned;

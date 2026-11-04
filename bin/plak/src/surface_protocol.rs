@@ -476,6 +476,10 @@ pub type HostEventSender = plakous_host_protocol::ObservationSender<PlakExtensio
 /// attachment of the host service.
 pub type HostEventReceiver = plakous_hosted::host_service::FaceReceiver<PlakExtension>;
 
+/// What a Plak face sends with: its intents pass through its session's host
+/// service as its attachment's.
+pub type FaceActionSender = plakous_hosted::host_service::FaceSender<PlakExtension>;
+
 /// Construct Plak's bounded intent mailbox.
 #[must_use]
 pub fn user_action_channel() -> (UserActionSender, UserActionReceiver) {
@@ -490,14 +494,15 @@ pub fn host_event_channel() -> (HostEventSender, HostEventReceiver) {
     (sender, HostEventReceiver::new(receiver))
 }
 
-/// The mailbox ends a Plak face holds on a host worker: its intents
-/// tagged with its attachment and its observations taken through the host
-/// service ([`plakous_hosted::host_service::face`]).
+/// The mailbox ends a Plak face holds on a host worker: the face is an
+/// attachment of the worker's session's host service, its intents passing
+/// through the service and its observations taken from it
+/// ([`plakous_hosted::host_service::face`]).
 #[must_use]
 pub fn face_of(
     (actions, events, worker): plakous_hosted::runtime::HostWorker<PlakExtension>,
 ) -> (
-    UserActionSender,
+    FaceActionSender,
     HostEventReceiver,
     plakous_hosted::runtime::HostWorkerHandle,
 ) {

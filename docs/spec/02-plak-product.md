@@ -3830,22 +3830,43 @@ verdicts) are addressed, the session profile and workspace chrome states.
   while the root runs a turn and waits while it runs a workflow.
 - **Faces.** The TUI, `plak agent` JSONL v1, an attached session command
   and the shell host are in-process attachments of their session's service
-  (`plakous_hosted::host_service::face`). A face sends its intents itself,
-  through the session's own mailbox sender tagged with its attachment, so
+  (`plakous_hosted::host_service::face`, `HostService::attach_face`). The
+  faces' service (`HostService::for_faces`) holds the session's mailbox
+  without being one of its senders, so
+  the session still ends when its last face sender and attachment are
+  gone. A face's intents pass through the service as its attachment's
+  (`FaceSender`): an agent transcript is opened, held and released there as
+  for any attachment, and an open the service refuses (another attachment
+  holds another agent's) comes back as the intent's `Refused` refusal. They
+  go out on the session's own mailbox sender tagged with the attachment, so
   the mailbox's urgent interrupt and quit lanes with their coalescing, its
   one clear, compaction or fork in flight, its shutdown hooks (run on quit
-  or when the face's sender, the last one, drops) and its storage interrupt
-  probe are unchanged. It takes its observations through `FaceReceiver`,
-  which has the observation mailbox's receiving methods: each observation
-  the session published passes through the service on the face's own read,
-  into a queue that holds every transcript scope and is unbounded, so
-  the face receives what the session sent, in order, with its own
-  correlation (a JSONL command id, or none from the TUI) back in each
-  `IntentStarted` it owns. The session's observation mailbox stays the
-  bound a slow face meets, with its own loss and resnapshot rules; a face's
-  service keeps nothing for later attachments and asks the session nothing,
-  and passes an `IntentStarted` naming an attachment it does not hold
-  through unchanged, as no attachment's.
+  or when the last sender drops) and its storage interrupt probe are
+  unchanged. A face takes its observations through `FaceReceiver`, which
+  has the observation mailbox's receiving methods: each observation the
+  session published passes through the service on the face's own read,
+  into the face's queue, which holds the root transcript and the agent
+  transcript the face opened and is unbounded, so the face receives what
+  the service routed to it, in order, with its own correlation (a JSONL
+  command id, or none from the TUI) back in each `IntentStarted` it owns.
+  The session's observation mailbox stays the bound a slow face meets,
+  with its own loss and resnapshot rules. A face attaches before the
+  session's first observation and asks it nothing; its attachment ends
+  with its receiver and closes nothing in the session. A faces' service
+  passes an `IntentStarted` naming an attachment it does not hold (another
+  sender's correlation on the face's mailbox) through unchanged, as no
+  attachment's. A JSONL v1 command whose intent the service refuses gets
+  an `error` record with its id, and the stream goes on. A face's service
+  names no root node yet, since the deferred TUI launch learns its tree
+  only on the host worker. Four TUI signals are process-local and not
+  intents or observations, each with its reason: the process list and
+  running count the host mirrors into the mailbox (a remote face sees job
+  lifecycle events instead); the promptable mark after the first painted
+  frame, which gates passive maintenance on this terminal; the
+  abandon-and-release request after the terminal is restored, which is
+  this process's exit; and the launcher's `/new` and resume publication
+  cells, which hand one launch round to the next and outlive any
+  attachment.
 - **Serde.** Frames, intents and observations refuse unknown fields;
   intents and observations are tagged objects (`kind`, and `body` when
   they carry one), snake case. A

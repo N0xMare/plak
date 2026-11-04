@@ -199,10 +199,13 @@ impl<P: ProtocolExtension> HostService<P> {
     /// Attaches to the child `agent`: the attachment holds its transcript,
     /// whose baseline the session is asked for.
     pub(super) fn attach_child(&self, agent: &str) -> Result<AttachmentId, RequestRefusal> {
-        let (Some(nodes), Some(actions)) = (&self.nodes, &self.actions) else {
+        let Some(nodes) = &self.nodes else {
             return Err(RequestRefusal::UnknownNode);
         };
         admitted(nodes.state(agent))?;
+        let Some(actions) = self.mailbox() else {
+            return Err(RequestRefusal::Disconnected);
+        };
         let scope = TranscriptScope::Agent(agent.to_owned());
         // Held across the ask, so the baseline the session answers with
         // finds the attachment holding its scope.
@@ -214,7 +217,7 @@ impl<P: ProtocolExtension> HostService<P> {
             });
         }
         let id = state.next_attachment;
-        let sender = actions.clone().tagged(origin(id));
+        let sender = actions.tagged(origin(id));
         let ask = if state.agent_holders.get(agent).copied().unwrap_or(0) > 0 {
             SessionIntent::ResyncTranscript {
                 scope: scope.clone(),

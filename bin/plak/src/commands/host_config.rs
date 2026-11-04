@@ -211,7 +211,7 @@ pub(crate) fn credential_gate_refusal(
 /// Returns channels + join handle when ready; `Err(reason)` falls back to shell TUI
 /// with an operator-visible attach failure reason.
 pub type HostedAgentChannels = (
-    crate::surface_protocol::UserActionSender,
+    crate::surface_protocol::FaceActionSender,
     crate::surface_protocol::HostEventReceiver,
     plakous_hosted::runtime::HostWorkerHandle,
 );

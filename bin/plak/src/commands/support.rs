@@ -48,7 +48,7 @@ pub const VOLUNTARY_QUIT_GRACE: Duration = Duration::from_secs(1);
 
 /// Session-owned process-group stops are supplied at this boundary.
 fn stop_background_processes_for_interactive_exit(
-    _host_mailbox: &crate::surface_protocol::UserActionSender,
+    _host_mailbox: &crate::surface_protocol::FaceActionSender,
 ) {
 }
 
@@ -63,7 +63,7 @@ fn stop_background_processes_for_interactive_exit(
 /// A panicked join invokes the product's content-free report callback.
 pub fn exit_restored_tui(
     worker: plakous_hosted::runtime::HostWorkerHandle,
-    host_mailbox: crate::surface_protocol::UserActionSender,
+    host_mailbox: crate::surface_protocol::FaceActionSender,
     report_worker_failure: fn(),
 ) -> ! {
     stop_background_processes_for_interactive_exit(&host_mailbox);

@@ -64,6 +64,7 @@ fn a_completed_session_ends_with_exactly_one_bye() {
 #[test]
 fn a_terminating_signal_asks_the_drive_for_the_same_stop_quit_asks_for() {
     let (actions, received) = crate::surface_protocol::user_action_channel();
+    let actions = crate::surface_protocol::FaceActionSender::unattached(actions);
     begin_shutdown(&actions, true).expect("a fresh queue accepts both");
     let mut delivered = Vec::new();
     while let Ok(delivery) = received.try_recv() {
@@ -724,6 +725,7 @@ fn openrouter_hello_preserves_canonical_effort_and_omission() {
 #[test]
 fn saturated_controls_keep_the_shutdown_lane_available() {
     let (actions, _receiver) = crate::surface_protocol::user_action_channel();
+    let actions = crate::surface_protocol::FaceActionSender::unattached(actions);
     while actions.send(UserAction::Prompt("queued".into())).is_ok() {}
     let error = send_action_until(
         &actions,
@@ -1484,4 +1486,47 @@ fn actual_jsonl_refusal_pauses_followup_until_resume_queue() {
     until(&|event| event["kind"] == "bye");
     drop(input);
     assert_eq!(worker.join().unwrap().unwrap(), ProcessOutcome::Success);
+}
+
+/// A command whose action the host service refuses for this face's role
+/// (another attachment holds the session's one agent view) is answered by
+/// that command's `error` record, and the stream goes on.
+#[test]
+fn a_refused_command_is_its_own_error_record() {
+    use plakous_host_protocol::wire::NodeAddress;
+    let (actions, intents) = crate::surface_protocol::user_action_channel();
+    let (_published, events) = plakous_host_protocol::observation_channel();
+    let root = NodeAddress {
+        tree_id: "t1".into(),
+        agent_id: "t1".into(),
+    };
+    let service =
+        plakous_hosted::host_service::HostService::for_faces(actions.clone(), root.clone(), 16);
+    let (face, _events) = service.attach_face(actions, events);
+    let remote = service.attach(&root).unwrap();
+    service
+        .intent(
+            remote,
+            UserAction::OpenAgentTranscript {
+                agent_id: "c1".into(),
+            },
+        )
+        .unwrap();
+    while intents.try_recv().is_ok() {}
+    let mut stdout = Vec::new();
+    send_command_action(
+        &mut stdout,
+        &face,
+        UserAction::OpenAgentTranscript {
+            agent_id: "c2".into(),
+        },
+        "cmd-1".into(),
+    )
+    .unwrap();
+    let record: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
+    assert_eq!(record["kind"], "error");
+    assert_eq!(record["id"], "cmd-1");
+    assert!(intents.try_recv().is_err(), "the refused intent never left");
+    send_command_action(&mut stdout, &face, UserAction::Interrupt, "cmd-2".into()).unwrap();
+    assert_eq!(intents.try_recv().unwrap(), UserAction::Interrupt);
 }

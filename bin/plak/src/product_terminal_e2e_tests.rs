@@ -1785,7 +1785,7 @@ fn wait_for_event(
 }
 
 fn send_action(
-    actions: &crate::surface_protocol::UserActionSender,
+    actions: &crate::surface_protocol::FaceActionSender,
     action: crate::surface_protocol::UserAction,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     actions.send(action).map_err(|error| {

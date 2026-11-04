@@ -355,7 +355,7 @@ may-use = [
     "crate::config::TuiPreferences",
     "crate::config::UserAction",
     "crate::config::UserActionSendError",
-    "crate::config::UserActionSender",
+    "crate::config::FaceActionSender",
     "crate::config::UsageDecorationReader",
     "crate::config::WorkspaceChrome",
     "crate::config::usage_verticals",

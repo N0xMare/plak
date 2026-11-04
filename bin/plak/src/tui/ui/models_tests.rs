@@ -167,7 +167,7 @@ fn configured_light_theme_is_applied_at_launch() {
 
 #[test]
 fn saturated_dispatch_restores_prompt_and_edit() {
-    fn saturated_sender() -> crate::tui::UserActionSender {
+    fn saturated_sender() -> crate::tui::FaceActionSender {
         let (sender, _receiver) = user_action_channel();
         for index in 0..plakous_host_protocol::limits::INTENT_QUEUE_CAPACITY {
             sender

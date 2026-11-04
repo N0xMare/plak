@@ -248,6 +248,9 @@ pub enum IntentSendError<P: ProtocolExtension = Core> {
     Disconnected(SessionIntent<P>),
     /// The same non-repeatable mutation is queued or executing.
     Duplicate(SessionIntent<P>),
+    /// The host service refused it for the sending attachment's role: it
+    /// never reached the mailbox.
+    Refused(SessionIntent<P>),
 }
 
 impl<P: ProtocolExtension> IntentSendError<P> {
@@ -255,9 +258,10 @@ impl<P: ProtocolExtension> IntentSendError<P> {
     #[must_use]
     pub fn into_action(self) -> SessionIntent<P> {
         match self {
-            Self::Saturated(action) | Self::Disconnected(action) | Self::Duplicate(action) => {
-                action
-            }
+            Self::Saturated(action)
+            | Self::Disconnected(action)
+            | Self::Duplicate(action)
+            | Self::Refused(action) => action,
         }
     }
 }
@@ -268,6 +272,10 @@ impl<P: ProtocolExtension> IntentSendError<P> {
 /// sends carries beside its correlation, so the host's `IntentStarted` names
 /// the attachment that sent it; everything else is the shared queue's.
 pub struct IntentSender<P: ProtocolExtension = Core>(Arc<IntentQueue<P>>, Option<Arc<str>>);
+
+/// A handle on an intent queue that is not one of its senders: holding it
+/// does not keep the host from seeing the last sender leave.
+pub struct WeakIntentSender<P: ProtocolExtension = Core>(Arc<IntentQueue<P>>);
 
 /// Single host consumer for the bounded control queue.
 pub struct IntentReceiver<P: ProtocolExtension = Core>(Arc<IntentQueue<P>>);
@@ -458,6 +466,16 @@ impl<P: ProtocolExtension> IntentSender<P> {
         Self(queue, Some(tag.into()))
     }
 
+    /// This sender as a handle on its queue that is not one of its senders
+    /// ([`WeakIntentSender`]): when it was the last, the host sees the last
+    /// sender leave.
+    #[must_use]
+    pub fn downgrade(self) -> WeakIntentSender<P> {
+        let weak = WeakIntentSender(Arc::clone(&self.0));
+        drop(self);
+        weak
+    }
+
     /// [`Self::send`] with an opaque correlation the host echoes in
     /// [`SessionObservation::IntentStarted`] when it starts the action. Urgent
     /// actions (interrupt, quit) carry none.
@@ -528,6 +546,27 @@ impl<P: ProtocolExtension> IntentSender<P> {
         self.0.ready.notify_one();
         self.0.wake_waiter();
         Ok(())
+    }
+}
+
+impl<P: ProtocolExtension> Clone for WeakIntentSender<P> {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+}
+
+impl<P: ProtocolExtension> WeakIntentSender<P> {
+    /// An untagged sender of the queue, or `None` once its last sender
+    /// left: a queue whose host saw that stays closed.
+    #[must_use]
+    pub fn upgrade(&self) -> Option<IntentSender<P>> {
+        self.0
+            .senders
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |senders| {
+                (senders > 0).then_some(senders + 1)
+            })
+            .ok()?;
+        Some(IntentSender(Arc::clone(&self.0), None))
     }
 }
 

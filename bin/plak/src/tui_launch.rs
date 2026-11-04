@@ -47,7 +47,7 @@ fn settle_tui_round(
     ui: Result<tui::TuiOutcome, tui::TuiError>,
     persistent_tui: &mut Option<tui::PersistentTerminal>,
     join: plakous_hosted::runtime::HostWorkerHandle,
-    host_mailbox: surface_protocol::UserActionSender,
+    host_mailbox: surface_protocol::FaceActionSender,
     label: &str,
     store: &dyn store::session_records::SessionRecordStore,
     session_id: &str,
@@ -391,7 +391,7 @@ fn begin_tui_session_launch(
 fn run_persistent_tui(
     terminal: &mut Option<tui::PersistentTerminal>,
     launch: tui::TuiLaunch,
-    actions: &surface_protocol::UserActionSender,
+    actions: &surface_protocol::FaceActionSender,
     events: surface_protocol::HostEventReceiver,
 ) -> Result<tui::TuiOutcome, tui::TuiError> {
     if terminal.is_none() {
@@ -414,7 +414,7 @@ const RESUME_PICKER_SHELL_REASON: &str = "pick a session to resume · Esc keeps 
 /// Asks the host for the cwd-scoped session list. The TUI itself marks the
 /// request outstanding through `TuiLaunch::open_resume_picker`; only that pair
 /// opens the picker when `HostEvent::ResumeSessions` arrives.
-fn request_resume_picker(action_tx: &surface_protocol::UserActionSender) -> CliResult<()> {
+fn request_resume_picker(action_tx: &surface_protocol::FaceActionSender) -> CliResult<()> {
     action_tx
         .send(surface_protocol::UserAction::ResumeSession { id: None })
         .map_err(|_| CliFailure::new("resume picker host is unavailable"))

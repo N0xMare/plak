@@ -229,7 +229,7 @@ impl App {
 
     pub(super) fn maybe_refresh_composer_chrome(
         &mut self,
-        actions: Option<&crate::tui::UserActionSender>,
+        actions: Option<&crate::tui::FaceActionSender>,
     ) {
         if !self.composer_chrome.refresh_pending {
             return;

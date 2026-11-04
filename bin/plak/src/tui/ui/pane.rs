@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use super::{App, TranscriptSelection};
-use crate::tui::{UserAction, UserActionSender};
+use crate::tui::{FaceActionSender, UserAction};
 use plakous_host_protocol::views::transcript::{TranscriptRevision, TranscriptScope};
 
 use crate::tui::blocks::{self, ScrollBlock, TranscriptChange, TranscriptRenderCache};
@@ -268,7 +268,7 @@ impl App {
     /// one it serves, when that changed since it was last told. Every way in
     /// or out of an agent view (Enter, Esc, a submit, a session switch) goes
     /// through here on the next loop pass.
-    pub(crate) fn sync_agent_transcript(&mut self, actions: Option<&UserActionSender>) {
+    pub(crate) fn sync_agent_transcript(&mut self, actions: Option<&FaceActionSender>) {
         let Some(tx) = actions else {
             return;
         };
@@ -302,7 +302,7 @@ impl App {
         self.host_agent_transcript = wanted;
     }
 
-    fn sync_transcript_resync(&mut self, actions: &UserActionSender) {
+    fn sync_transcript_resync(&mut self, actions: &FaceActionSender) {
         if self.pane.resync_sent.is_none_or(|(_, sent)| {
             self.now().saturating_duration_since(sent) >= std::time::Duration::from_secs(1)
         }) && let Some(scope) = &self.pane.resync

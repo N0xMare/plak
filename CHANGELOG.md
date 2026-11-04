@@ -289,6 +289,18 @@ an export.
   of its own. A wire v2 child attachment's interrupt now runs on the tree
   (`ProductTopologyRuntime::executor`), not behind the root session's
   mailbox, and is taken whatever the root runs.
+- The TUI is an attachment of its session's host service: a face's
+  intents pass through the service (`host_service::FaceSender`,
+  `HostService::attach_face`), so its agent view is opened, held and
+  released there as any attachment's and its queue holds the root and the
+  agent transcript it opened. The faces' service holds the session's
+  mailbox without being one of its senders (`HostService::for_faces`,
+  `IntentSender::downgrade`, `WeakIntentSender`), so the session still ends when its last face sender
+  goes, and it keeps the attach snapshot for later attachments. Embedder
+  break: `face` returns a `FaceSender`, `IntentSendError::Refused` (an
+  intent the service refused for the attachment's role; `plak agent` JSONL
+  v1 answers it as that command's `error` record), `HostService` is
+  `Clone` (its clones are the same service), and the new types.
 - Version control on a runner (unsupported; only the test route selects a
   runner): an orchestration tree on a selected runner drives its copies
   through `RemoteVcs` over the runner link instead of refusing every effect.

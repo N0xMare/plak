@@ -13,10 +13,10 @@ use std::path::PathBuf;
 // The product's settings vocabulary and its extension of the host protocol,
 // re-exported so the module reads them as `crate::tui::*`.
 pub(crate) use crate::config::{
-    AgentAcknowledgement, HostEvent, HostEventReceiver, McpOverview, McpSessionBinding,
-    ProfileApply, ProfileDifference, ProfileOutcome, ProfileRole, ProfileRow, ProfilesView,
-    SettingsTheme, SettingsView, SurfaceIntent, SurfaceObservation, UserAction,
-    UserActionSendError, UserActionSender, WorkspaceChrome,
+    AgentAcknowledgement, FaceActionSender, HostEvent, HostEventReceiver, McpOverview,
+    McpSessionBinding, ProfileApply, ProfileDifference, ProfileOutcome, ProfileRole, ProfileRow,
+    ProfilesView, SettingsTheme, SettingsView, SurfaceIntent, SurfaceObservation, UserAction,
+    UserActionSendError, WorkspaceChrome,
 };
 #[cfg(test)]
 pub(crate) use crate::config::{host_event_channel, user_action_channel};
@@ -284,7 +284,7 @@ pub fn run_session(launch: TuiLaunch) -> Result<TuiOutcome, TuiError> {
 #[cfg(test)]
 pub fn run_hosted(
     launch: TuiLaunch,
-    actions: Option<UserActionSender>,
+    actions: Option<FaceActionSender>,
     events: Option<HostEventReceiver>,
 ) -> Result<TuiOutcome, TuiError> {
     ui::run_hosted(launch, actions, events)

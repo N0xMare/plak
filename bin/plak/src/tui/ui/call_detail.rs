@@ -237,7 +237,7 @@ impl App {
     /// while its item is still open.
     pub(crate) fn maybe_request_call_details(
         &mut self,
-        actions: Option<&crate::tui::UserActionSender>,
+        actions: Option<&crate::tui::FaceActionSender>,
     ) {
         let Some(tx) = actions else {
             return;

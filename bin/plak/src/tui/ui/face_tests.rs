@@ -1,7 +1,8 @@
-//! The TUI through its host-service face (spec 02 §4.4): its intents go out
-//! on the session's own mailbox sender, tagged with its attachment, and its
-//! observations come back through the service. The urgent lanes, the
-//! one-in-flight admission and the shutdown signals stay the mailbox's.
+//! The TUI as an attachment of its session's host service (spec 02 §4.4):
+//! its intents pass through the service and go out on the session's own
+//! mailbox sender, tagged with its attachment, and its observations come
+//! back through the service. The urgent lanes, the one-in-flight admission
+//! and the shutdown signals stay the mailbox's.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -18,7 +19,7 @@ use crate::tui::{HostEvent, HostEventReceiver, UserAction, UserActionSendError};
 /// side of them.
 struct Pilot {
     app: App,
-    actions: crate::tui::UserActionSender,
+    actions: crate::tui::FaceActionSender,
     events: HostEventReceiver,
     intents: crate::surface_protocol::UserActionReceiver,
     observations: plakous_host_protocol::ObservationSender<crate::surface_protocol::PlakExtension>,
@@ -28,7 +29,7 @@ struct Pilot {
 
 impl Pilot {
     fn new() -> Self {
-        let (worker_actions, intents) = crate::tui::user_action_channel();
+        let (worker_actions, intents) = crate::surface_protocol::user_action_channel();
         let (observations, worker_events) = observation_channel();
         let (actions, events) = plakous_hosted::host_service::face(worker_actions, worker_events);
         let shut_down = Arc::new(AtomicBool::new(false));
@@ -199,11 +200,37 @@ fn the_tui_drives_approval_credential_wait_interrupt_and_quit_through_its_face()
     quit(pilot);
 }
 
-/// The face's sender is the session's own, re-tagged: dropping it is the
-/// last sender leaving, which runs the shutdown hooks as it always did.
+/// The TUI's agent view is its attachment's: the session is asked by the
+/// face's attachment, and the TUI takes the root and the agent transcript it
+/// opened, not another agent's.
+#[test]
+fn the_tui_takes_only_the_agent_transcript_it_opened() {
+    use plakous_host_protocol::views::transcript::{TranscriptScope, TranscriptStreamDelta};
+    let stream = |agent: &str| HostEvent::TranscriptStream {
+        scope: TranscriptScope::Agent(agent.into()),
+        delta: TranscriptStreamDelta::AssistantDone,
+    };
+    let mut pilot = Pilot::new();
+    let open = UserAction::OpenAgentTranscript {
+        agent_id: "c1".into(),
+    };
+    dispatch_action(&mut pilot.app, &open, Some(&pilot.actions));
+    let delivery = pilot.intents.try_recv().unwrap();
+    assert_eq!(delivery, open);
+    assert_eq!(
+        delivery.started().map(HostEvent::from),
+        Some(HostEvent::IntentStarted(Some("attachment:1".into())))
+    );
+    pilot.publish([stream("c2"), stream("c1")]);
+    assert_eq!(pilot.drain(), [stream("c1")]);
+}
+
+/// The face's sender is the session's own, re-tagged, and the service is
+/// not one of its senders: dropping it is the last sender leaving, which
+/// runs the shutdown hooks as it always did.
 #[test]
 fn dropping_the_face_sender_is_the_last_sender_leaving() {
-    let (worker_actions, intents) = crate::tui::user_action_channel();
+    let (worker_actions, intents) = crate::surface_protocol::user_action_channel();
     let (_observations, worker_events) = observation_channel();
     let (actions, _events) = plakous_hosted::host_service::face(worker_actions, worker_events);
     let shut_down = Arc::new(AtomicBool::new(false));

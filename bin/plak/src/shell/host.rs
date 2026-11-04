@@ -129,7 +129,7 @@ impl ShellHostRunner<PlakExtension> for ProductShellHost {
 pub fn spawn_shell_host(
     config: ShellHostConfig<PlakExtension>,
 ) -> (
-    crate::surface_protocol::UserActionSender,
+    crate::surface_protocol::FaceActionSender,
     crate::surface_protocol::HostEventReceiver,
     plakous_hosted::runtime::HostWorkerHandle,
 ) {
@@ -142,7 +142,7 @@ pub fn spawn_shell_host_with_clear_publication(
     config: ShellHostConfig<PlakExtension>,
     clear_publication: Option<Arc<std::sync::Mutex<Option<String>>>>,
 ) -> (
-    crate::surface_protocol::UserActionSender,
+    crate::surface_protocol::FaceActionSender,
     crate::surface_protocol::HostEventReceiver,
     plakous_hosted::runtime::HostWorkerHandle,
 ) {

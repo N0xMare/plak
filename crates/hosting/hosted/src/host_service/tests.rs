@@ -1,6 +1,6 @@
 use plakous_host_protocol::views::PresentationSnapshot;
 use plakous_host_protocol::views::transcript::{TranscriptPatch, TranscriptStreamDelta};
-use plakous_host_protocol::{Core, Draft, IntentReceiver, intent_channel};
+use plakous_host_protocol::{Core, Draft, IntentReceiver, intent_channel, observation_channel};
 
 use super::*;
 
@@ -481,32 +481,45 @@ fn an_attach_that_cannot_ask_for_a_baseline_fails() {
     assert_eq!(service.detach(1), Err(RequestRefusal::NotAttached));
 }
 
-/// A face sends through the session's own sender, tagged with its
-/// attachment, and takes everything the session published, in order and in
-/// every scope, with its own correlation back in `IntentStarted`; its
-/// service asks the session nothing.
+/// A face is an attachment of its session's service: its intents pass
+/// through the service, tagged with its attachment; it takes the root's
+/// observations and the agent transcript it opened, in order, with its own
+/// correlation back in `IntentStarted`, and attaching asks the session
+/// nothing.
 #[test]
-fn a_face_takes_everything_in_order_with_its_own_correlation() {
+fn a_face_takes_its_scopes_in_order_with_its_own_correlation() {
     let (actions, intents) = intent_channel::<Core>();
-    let (published, events) = plakous_host_protocol::observation_channel::<Core>();
-    let (actions, face) = face(actions, events);
+    let (published, events) = observation_channel::<Core>();
+    let service = HostService::for_faces(actions.clone(), root(), 2);
+    let (actions, face) = service.attach_face(actions, events);
+    assert!(intents.try_recv().is_err(), "attaching a face asks nothing");
+    actions
+        .send(SessionIntent::OpenAgentTranscript {
+            agent_id: "c1".into(),
+        })
+        .unwrap();
+    assert_eq!(
+        intents.try_recv().unwrap().started(),
+        Some(plakous_host_protocol::ContentObservation::IntentStarted(
+            Some("attachment:1".into())
+        ))
+    );
     actions
         .send_correlated(SessionIntent::Prompt(Draft::from("hi")), Some("c7".into()))
         .unwrap();
-    let delivery = intents.try_recv().unwrap();
-    assert!(delivery.correlated());
-    let started = delivery.started().unwrap();
+    let started = intents.try_recv().unwrap().started().unwrap();
     assert_eq!(
         Observation::from(started.clone()),
         Observation::IntentStarted(Some("attachment:1:c7".into()))
     );
-    let foreign = Observation::IntentStarted(Some("c9".into()));
     for observation in [
         started.into(),
         stream(TranscriptScope::Agent("c1".into())),
+        stream(TranscriptScope::Agent("c2".into())),
         Observation::DraftRestored(Draft::from("back")),
-        foreign.clone(),
         approval("a1"),
+        approval("a2"),
+        approval("a3"),
     ] {
         published.send(observation).unwrap();
     }
@@ -516,11 +529,12 @@ fn a_face_takes_everything_in_order_with_its_own_correlation() {
             Observation::IntentStarted(Some("c7".into())),
             stream(TranscriptScope::Agent("c1".into())),
             Observation::DraftRestored(Draft::from("back")),
-            foreign,
             approval("a1"),
-        ]
+            approval("a2"),
+            approval("a3"),
+        ],
+        "a face's queue is unbounded"
     );
-    assert!(intents.try_recv().is_err(), "a face's service asks nothing");
     drop(published);
     assert_eq!(
         face.try_recv(),
@@ -528,14 +542,113 @@ fn a_face_takes_everything_in_order_with_its_own_correlation() {
     );
 }
 
-/// A face's mailbox may carry a correlation that only looks like an
-/// attachment's (an untagged sender, another face on the same mailbox):
-/// its window and the answers in it reach the face as no attachment's,
-/// unchanged.
+/// The service holds the session's mailbox without being one of its
+/// senders: when the face's sender goes, the session sees its last sender
+/// leave, with the service and the face's receiver still held.
 #[test]
-fn a_face_passes_a_foreign_attachment_window_through() {
+fn the_service_does_not_keep_the_session_open() {
+    let (actions, intents) = intent_channel::<Core>();
+    let (_published, events) = observation_channel::<Core>();
+    let shut_down = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    intents.on_shutdown({
+        let shut_down = Arc::clone(&shut_down);
+        move || shut_down.store(true, std::sync::atomic::Ordering::Release)
+    });
+    let service = HostService::for_faces(actions.clone(), root(), 4);
+    let (actions, _face) = service.attach_face(actions, events);
+    drop(actions);
+    assert!(shut_down.load(std::sync::atomic::Ordering::Acquire));
+    assert_eq!(service.attach(&root()), Err(RequestRefusal::Disconnected));
+}
+
+/// The session serves one agent transcript: a face's open of another while
+/// a remote attachment holds one is refused and hands the intent back, and
+/// a face that leaves stops holding its own without closing it.
+#[test]
+fn a_faces_agent_view_is_one_of_the_services() {
+    let (actions, intents) = intent_channel::<Core>();
+    let (_published, events) = observation_channel::<Core>();
+    let service = HostService::for_faces(actions.clone(), root(), 16);
+    let (face_actions, face) = service.attach_face(actions, events);
+    let remote = service.attach(&root()).unwrap();
+    while intents.try_recv().is_ok() {}
+    service
+        .intent(
+            remote,
+            SessionIntent::OpenAgentTranscript {
+                agent_id: "c1".into(),
+            },
+        )
+        .unwrap();
+    let open_c2 = SessionIntent::OpenAgentTranscript {
+        agent_id: "c2".into(),
+    };
+    assert_eq!(
+        face_actions.send(open_c2.clone()),
+        Err(IntentSendError::Refused(open_c2))
+    );
+    face_actions
+        .send(SessionIntent::OpenAgentTranscript {
+            agent_id: "c1".into(),
+        })
+        .unwrap();
+    let ask: Vec<_> = std::iter::from_fn(|| intents.try_recv().ok())
+        .map(|delivery| (*delivery).clone())
+        .collect();
+    assert_eq!(
+        ask,
+        [
+            SessionIntent::OpenAgentTranscript {
+                agent_id: "c1".into()
+            },
+            SessionIntent::ResyncTranscript {
+                scope: TranscriptScope::Agent("c1".into())
+            },
+        ],
+        "a later holder is resnapshotted, not reopened"
+    );
+    drop(face);
+    service
+        .intent(remote, SessionIntent::CloseAgentTranscript)
+        .unwrap();
+    assert_eq!(
+        *intents.try_recv().unwrap(),
+        SessionIntent::CloseAgentTranscript,
+        "the last holder's close reaches the session"
+    );
+    // A sender whose face left sends as it is.
+    face_actions.send(SessionIntent::Interrupt).unwrap();
+    assert_eq!(*intents.try_recv().unwrap(), SessionIntent::Interrupt);
+}
+
+/// A face of a service of its own holds every scope and passes a
+/// correlation that only looks like an attachment's through, unchanged.
+#[test]
+fn a_face_of_its_own_passes_a_foreign_attachment_window_through() {
+    let (published, events) = observation_channel::<Core>();
+    let face = FaceReceiver::new(events);
+    let foreign = Observation::IntentStarted(Some("attachment:7".into()));
+    let answer = Observation::DraftRestored(Draft::from("back"));
+    for observation in [
+        foreign.clone(),
+        answer.clone(),
+        stream(TranscriptScope::Agent("c1".into())),
+    ] {
+        published.send(observation).unwrap();
+    }
+    assert_eq!(
+        face.try_iter().collect::<Vec<_>>(),
+        [foreign, answer, stream(TranscriptScope::Agent("c1".into()))]
+    );
+}
+
+/// A faces' service passes a window naming an attachment it does not hold
+/// (another sender's correlation on the face's mailbox) through unchanged,
+/// as no attachment's.
+#[test]
+fn a_faces_service_passes_a_foreign_attachment_window_through() {
     let (actions, _intents) = intent_channel::<Core>();
-    let (published, events) = plakous_host_protocol::observation_channel::<Core>();
+    let (published, events) = observation_channel::<Core>();
     let (_actions, face) = face(actions, events);
     let foreign = Observation::IntentStarted(Some("attachment:7".into()));
     let answer = Observation::DraftRestored(Draft::from("back"));

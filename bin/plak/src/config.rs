@@ -6,14 +6,25 @@ pub(crate) use crate::capabilities::usage_verticals;
 pub(crate) use crate::product_config::{DEFAULT_SCROLL_LINES, MAX_SCROLL_LINES, MIN_SCROLL_LINES};
 pub(crate) use crate::tui_preferences::TuiPreferences;
 mod usage_decoration;
-pub(crate) use crate::surface_protocol::{
-    AgentAcknowledgement, HostEvent, HostEventReceiver, McpOverview, McpSessionBinding,
-    ProfileApply, ProfileDifference, ProfileOutcome, ProfileRole, ProfileRow, ProfilesView,
-    SettingsTheme, SettingsView, SurfaceIntent, SurfaceObservation, UserAction,
-    UserActionSendError, UserActionSender, WorkspaceChrome,
-};
 #[cfg(all(test, feature = "tui"))]
-pub(crate) use crate::surface_protocol::{host_event_channel, user_action_channel};
+pub(crate) use crate::surface_protocol::host_event_channel;
+pub(crate) use crate::surface_protocol::{
+    AgentAcknowledgement, FaceActionSender, HostEvent, HostEventReceiver, McpOverview,
+    McpSessionBinding, ProfileApply, ProfileDifference, ProfileOutcome, ProfileRole, ProfileRow,
+    ProfilesView, SettingsTheme, SettingsView, SurfaceIntent, SurfaceObservation, UserAction,
+    UserActionSendError, WorkspaceChrome,
+};
+
+/// A test's TUI mailbox: the receiver, and a face sender no service serves,
+/// whose intents reach it as sent.
+#[cfg(all(test, feature = "tui"))]
+pub(crate) fn user_action_channel() -> (
+    FaceActionSender,
+    crate::surface_protocol::UserActionReceiver,
+) {
+    let (actions, intents) = crate::surface_protocol::user_action_channel();
+    (FaceActionSender::unattached(actions), intents)
+}
 /// Reading, sniffing and chips of the image files a draft attaches.
 pub(crate) use plakous_hosted::attachments as image_attachments;
 pub(crate) use usage_decoration::UsageDecorationReader;
