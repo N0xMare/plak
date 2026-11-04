@@ -125,7 +125,10 @@ an export.
   after a lost link. The ssh link requires a known host key
   (`StrictHostKeyChecking=yes`), a runner refuses roots in or around its
   product home, and a host's `ps <name>` sees only its own lines. No session
-  is placed on a runner yet.
+  is placed on a runner yet. `connect --stdio` delivers every frame the daemon
+  sent, so a refused bind reaches the host as a refusal, and then ends at once.
+  `serve`, `connect` and `ps` refuse a socket path past the platform's
+  `sockaddr_un` limit by name before doing anything else.
 - MCP servers can run on the node's runner: `[mcp_servers.<id>] placement =
   "runner"` (stdio only) starts the server there, one per runner, workspace
   and definition, with its `secret_env` names resolved from the runner's own
@@ -202,6 +205,13 @@ an export.
 
 ### Plakous
 
+- An agent whose jobs run on a runner reads the line's jobs from the runner
+  before it restores them and reports nothing until the restore is done, so
+  a terminal an earlier host already reported is not reported again and a job
+  the runner still lists is that live job. A runner that does not answer that
+  read fails the agent's construction (`runner <id> did not answer the job
+  read`). Embedder break: `JoinedSessionsPort::refresh_jobs` returns a
+  `Result`.
 - Version control on a runner (unsupported; only the test route selects a
   runner): an orchestration tree on a selected runner drives its copies
   through `RemoteVcs` over the runner link instead of refusing every effect.
@@ -309,6 +319,12 @@ an export.
 
 ### Development
 
+- A test's wall-clock wait that only guards against a hang is thirty seconds;
+  a bound that tells prompt from late runs in the serial lane, on a paused
+  clock or event-driven (spec 05 §2.3).
+- The strict crash sweep covers a job on a child runner surviving host loss
+  and a runner restart that loses its jobs; each fixture reaps every daemon of
+  its runner home.
 - The strict crash sweep runs its shapes on one shared worker pool and
   refreshes its progress tables every 30 seconds instead of after every cut,
   which makes it about a third faster; `timings.jsonl` records each task.
