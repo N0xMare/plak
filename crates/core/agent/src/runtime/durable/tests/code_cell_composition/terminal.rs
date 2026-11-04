@@ -32,7 +32,7 @@ fn nested_process(
                 cell_id: "C".into(),
                 runtime_call_id: identity.into(),
                 tool_name: "exec_command".into(),
-                input: Some(json!({"cmd":"exec sleep 3600", "yield_time_ms":hint})),
+                input: Some(json!({"cmd":"exec sleep 600", "yield_time_ms":hint})),
             },
             responder: Box::new(CancelCellResponder {
                 identity: identity.into(),

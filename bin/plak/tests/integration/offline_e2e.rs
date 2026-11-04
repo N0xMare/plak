@@ -188,9 +188,9 @@ fn released_leftover_terminal_recording_sigkill_cuts_preserve_no_signal_authorit
         }
     }
     let run = |cut: Option<u64>| {
-        let shell = "trap 'printf stopped > stopped.txt; exit 0' TERM; printf '%s' \"$$\" > owned.pid; while [ ! -f finish-leftover ]; do sleep 0.02; done; printf released > released.txt";
+        let shell = "trap 'printf stopped > stopped.txt; exit 0' TERM; printf '%s' \"$$\" > owned.pid; n=0; while [ ! -f finish-leftover ] && [ -d \"$PWD\" ] && [ $((n += 1)) -le 30000 ]; do sleep 0.02; done; printf released > released.txt";
         let command = format!(
-            "sh -c '{}' >/dev/null 2>&1 & while [ ! -f owned.pid ]; do sleep 0.02; done; exit 0",
+            "sh -c '{}' >/dev/null 2>&1 & n=0; while [ ! -f owned.pid ] && [ -d \"$PWD\" ] && [ $((n += 1)) -le 30000 ]; do sleep 0.02; done; exit 0",
             shell.replace('\'', "'\\''")
         );
         let mut script = promoted_run_script(&command);
@@ -3656,16 +3656,16 @@ impl Drop for RunJobCli {
 fn leftover_jobs_unredirected_http_writer_survives_run_exit() {
     for budget_first in [false, true] {
         let command = if budget_first {
-            "while [ ! -f release-leader ]; do sleep 0.02; done; python3 -u server.py & while [ ! -f service.port ]; do sleep 0.02; done; exit 0"
+            "n=0; while [ ! -f release-leader ] && [ -d \"$PWD\" ] && [ $((n += 1)) -le 30000 ]; do sleep 0.02; done; python3 -u server.py & n=0; while [ ! -f service.port ] && [ -d \"$PWD\" ] && [ $((n += 1)) -le 30000 ]; do sleep 0.02; done; exit 0"
         } else {
-            "python3 -u server.py & while [ ! -f service.port ]; do sleep 0.02; done; exit 0"
+            "python3 -u server.py & n=0; while [ ! -f service.port ] && [ -d \"$PWD\" ] && [ $((n += 1)) -le 30000 ]; do sleep 0.02; done; exit 0"
         };
         let mut script = promoted_run_script(command);
         script["steps"][0]["output"]["tool"]["arguments"]["yield_time_ms"] =
             json!(if budget_first { 0 } else { 30_000 });
         if budget_first {
             script["steps"].as_array_mut().unwrap().insert(1, json!({"output": {"tool": {"name": "process_session_start", "arguments": {
-            "command": "touch release-leader; while [ ! -f service.port ]; do sleep 0.02; done", "workdir": ".", "login": false, "tty": false, "keep_stdin_open": false, "yield_time_ms": 30000, "max_output_bytes": 8192
+            "command": "touch release-leader; n=0; while [ ! -f service.port ] && [ -d \"$PWD\" ] && [ $((n += 1)) -le 30000 ]; do sleep 0.02; done", "workdir": ".", "login": false, "tty": false, "keep_stdin_open": false, "yield_time_ms": 30000, "max_output_bytes": 8192
         }}}, "finish": "tool_calls"}));
         }
         let fixture = Fixture::new(&script);
@@ -3733,7 +3733,7 @@ fn leftover_jobs_run_exits_without_waiting_and_stops_by_default() {
         let quoted =
             format!("{RUN_OWNED_COMMAND}; printf released > released.txt").replace('\'', "'\\''");
         let command = format!(
-            "sh -c '{quoted}' >/dev/null 2>&1 & while [ ! -f owned.pid ]; do sleep 0.02; done; exit 0"
+            "sh -c '{quoted}' >/dev/null 2>&1 & n=0; while [ ! -f owned.pid ] && [ -d \"$PWD\" ] && [ $((n += 1)) -le 30000 ]; do sleep 0.02; done; exit 0"
         );
         let mut script = promoted_run_script(&command);
         script["steps"][0]["output"]["tool"]["arguments"]["yield_time_ms"] = json!(30_000);
@@ -3817,7 +3817,7 @@ fn assert_leftover_terminal_reopen(fixture: &Fixture, expected: plakous::tools::
 
 #[test]
 fn run_waits_for_a_real_promoted_process_then_continues_and_prints_only_last_answer() {
-    let command = "printf ready > ready.txt; while [ ! -f release.txt ]; do sleep 0.1; done";
+    let command = "printf ready > ready.txt; n=0; while [ ! -f release.txt ] && [ -d \"$PWD\" ] && [ $((n += 1)) -le 6000 ]; do sleep 0.1; done";
     let fixture = Fixture::new(&promoted_run_script(command));
     let mut run = RunJobCli::start(&fixture, &[]);
     let waiting = format!("plak: waiting for p1 ({command}); Ctrl-C to stop");
@@ -3852,7 +3852,7 @@ fn run_max_turns_stops_a_real_promoted_process_and_exits_six() {
     script["steps"].as_array_mut().unwrap().insert(
         1,
         json!({"output": {"tool": {"name": "process_session_start", "arguments": {
-            "command": "while [ ! -f owned.pid ]; do sleep 0.05; done",
+            "command": "n=0; while [ ! -f owned.pid ] && [ -d \"$PWD\" ] && [ $((n += 1)) -le 12000 ]; do sleep 0.05; done",
             "workdir": ".",
             "login": false,
             "tty": false,
@@ -4242,7 +4242,7 @@ fn real_promoted_job_quit_releases_and_resumes_exact_session() {
 #[test]
 fn processes_pty_idle_exit_refreshes_live_count_without_another_turn() {
     let plan = promoted_run_script(
-        "printf '%s' \"$$\" > owned.pid; while [ ! -f finish-job ]; do sleep 0.01; done",
+        "printf '%s' \"$$\" > owned.pid; n=0; while [ ! -f finish-job ] && [ -d \"$PWD\" ] && [ $((n += 1)) -le 60000 ]; do sleep 0.01; done",
     );
     let fixture = Fixture::new(&plan);
     let mut config = std::fs::OpenOptions::new()

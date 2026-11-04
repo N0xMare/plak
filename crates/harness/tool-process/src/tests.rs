@@ -1102,7 +1102,7 @@ async fn contended_observation_does_not_block_the_async_worker() -> Result<(), B
     let sessions = environment.joined_process_sessions()?;
     let control = OperationContext::new(plakous_model::CancellationToken::new());
     let request = JoinedProcessStartRequest::new(
-        JoinedProcessCommand::literal("/bin/sh", ["-c", "trap 'echo stopping > stopping; while :; do :; done' TERM; echo ready > ready; while :; do :; done"].map(String::from))?,
+        JoinedProcessCommand::literal("/bin/sh", ["-c", "trap 'echo stopping > stopping; n=0; while true && [ -d \"$PWD\" ] && [ $((n += 1)) -le 60000 ]; do sleep 0.01; done' TERM; echo ready > ready; n=0; while true && [ -d \"$PWD\" ] && [ $((n += 1)) -le 60000 ]; do sleep 0.01; done"].map(String::from))?,
         ".", [], false, JoinedProcessTerminalMode::Pipes,
     )?;
     let setup = sessions.clone();

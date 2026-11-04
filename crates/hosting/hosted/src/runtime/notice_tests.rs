@@ -269,7 +269,7 @@ fn an_unconsumed_job_terminal_preempts_foreground_once_per_turn() {
     let config = process_host(
         root.path(),
         serde_json::json!([
-            {"output":{"tool": start_call("while [ ! -f finish ]; do sleep 0.01; done", 250, false)},"finish":"tool_calls"},
+            {"output":{"tool": start_call("n=0; while [ ! -f finish ] && [ -d \"$PWD\" ] && [ $((n += 1)) -le 60000 ]; do sleep 0.01; done", 250, false)},"finish":"tool_calls"},
             {"output":{"tools": [start_call("read line", 600_000, true), start_call("sleep 1; printf next", 5000, false)]},"finish":"tool_calls"},
             {"output":{"text":"the terminal notice woke only the first wait"}}
         ]),
@@ -334,8 +334,8 @@ fn a_notices_off_root_does_not_preempt_on_a_job_terminal() {
     let mut config = process_host(
         root.path(),
         serde_json::json!([
-            {"output":{"tool": start_call("while [ ! -f finish ]; do sleep 0.01; done", 250, false)},"finish":"tool_calls"},
-            {"output":{"tool": start_call("while [ ! -f release ]; do sleep 0.01; done", 600_000, false)},"finish":"tool_calls"},
+            {"output":{"tool": start_call("n=0; while [ ! -f finish ] && [ -d \"$PWD\" ] && [ $((n += 1)) -le 60000 ]; do sleep 0.01; done", 250, false)},"finish":"tool_calls"},
+            {"output":{"tool": start_call("n=0; while [ ! -f release ] && [ -d \"$PWD\" ] && [ $((n += 1)) -le 60000 ]; do sleep 0.01; done", 600_000, false)},"finish":"tool_calls"},
             {"output":{"text":"the foreground command completed inline"}}
         ]),
     );

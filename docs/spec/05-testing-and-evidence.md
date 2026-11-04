@@ -1213,6 +1213,24 @@ review date; re-dating one alone fails such a test at review time, never on a
 calendar date. Product commands inject a fixed clock (spec 02 §8.6) and API
 surfaces carry no calendar expiry.
 
+**A fixture process never outlives its test by more than its bound.** A test
+that dies leaves its spawned processes behind: its temporary directory goes,
+and a sentinel file a fixture polls for never appears. So every shell loop a
+test spawns compares a pass count with a literal bound, sized to about ten
+minutes (`n=0; while [ ! -f finish ] && [ -d "$PWD" ] && [ $((n += 1)) -le
+60000 ]; do sleep 0.01; done`), and polls in its fixture directory so it also
+stops once that directory is gone; a loop reading its input ends at end of
+file; and a fixture's single sleep lasts at most 600 s. `check_workspace.py`
+checks every Rust string literal, test modules included, with comma-separated
+literals (argv arrays, `concat!`) joined, and refuses: a `while` or `until`
+loop that neither steps a counter and compares it with a literal bound (in its
+condition, or in an exit guard in its body) nor reads to end of file from an
+input that has one (`tail -f` and `yes` do not); a `for ((...))` loop without
+a literal comparison; and a `sleep` over 600 s. `do` and `done` count only in
+command position, so prose is not a loop; shell text a test only highlights is
+exempt. Load probes run at most `nproc / 2` hogs, each under `timeout` and
+`nice -n 19`, killed by a trap when the probe exits.
+
 ### 2.1 Placement
 
 Test code has one home per kind, and production behavior is never moved into

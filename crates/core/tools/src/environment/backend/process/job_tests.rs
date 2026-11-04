@@ -11,7 +11,7 @@ fn explicit_leftover_disown_is_released_and_reopen_is_read_only() -> TestResult 
     let service = sessions(directory.path())?;
     let id = service.start(
         request(
-            "while [ ! -f finish-leftover ]; do sleep 0.01; done &",
+            "(n=0; while [ ! -f finish-leftover ] && [ -d \"$PWD\" ] && [ $((n += 1)) -le 60000 ]; do sleep 0.01; done) &",
             false,
         )?,
         OperationContext::new(CancellationToken::new()),

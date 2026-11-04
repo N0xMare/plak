@@ -350,8 +350,9 @@ impl plakous_tools::ToolExecutor for SessionUpdateTool {
                     // Shutdown closes stdin before the stop signal. `read` then
                     // returns on EOF, and a command that continues into `exit 7`
                     // records Exited(7) instead of Stopped(SessionExit). Only a
-                    // completed line takes that path; EOF sleeps until the signal.
-                    "while :; do if read line; then printf 'terminal\\000tail'; exit 7; fi; sleep 60; done"
+                    // completed line takes that path; EOF sleeps until the signal,
+                    // or for at most ten minutes once no test is left to send it.
+                    "if read line; then printf 'terminal\\000tail'; exit 7; fi; exec sleep 600"
                 }
                 SessionUpdateFixtureMode::JoinedForeground
                 | SessionUpdateFixtureMode::ExitedRetained => "true",

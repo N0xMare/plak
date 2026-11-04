@@ -803,7 +803,7 @@ async fn submitted_child_uses_authoritative_failed_terminal_instead_of_channel_s
                                 ["-c".into()],
                             )
                             .unwrap(),
-                            "exec sleep 3600",
+                            "exec sleep 600",
                         )
                         .unwrap(),
                         ".",

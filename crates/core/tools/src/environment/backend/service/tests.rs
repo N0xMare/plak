@@ -199,7 +199,7 @@ async fn host_service_ignoring_sigterm_is_killed_after_the_grace() -> TestResult
         .spawn_service(
             request(
                 "sh",
-                &["-c", "trap '' TERM; echo ready; while :; do sleep 1; done"],
+                &["-c", "trap '' TERM; echo ready; n=0; while true && [ -d \"$PWD\" ] && [ $((n += 1)) -le 600 ]; do sleep 1; done"],
             )?,
             control(),
         )

@@ -896,7 +896,7 @@ fn process_child_script(quiescent: bool) -> Result<Arc<ScriptPlan>, String> {
     let plan = Arc::new(serde_json::from_value(serde_json::json!({
         "version": 1, "process_tools": true, "steps": [
             {"output":{"tool":{"name":"process_session_start","arguments":{
-                "command":"sleep 1; trap 'printf stopped > stopped.txt; exit 0' TERM; printf '%s' \"$$\" > owned.pid; while :; do sleep 0.1; done",
+                "command":"sleep 1; trap 'printf stopped > stopped.txt; exit 0' TERM; printf '%s' \"$$\" > owned.pid; n=0; while true && [ -d \"$PWD\" ] && [ $((n += 1)) -le 6000 ]; do sleep 0.1; done",
                 "workdir":".","login":false,"tty":false,"keep_stdin_open":false,
                 "yield_time_ms":0,"max_output_bytes":8192
             }}},"finish":"tool_calls"},

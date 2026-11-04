@@ -119,7 +119,7 @@ async fn leftover_jobs_disowned_writer_keeps_pipe_and_spools_until_eof() -> Test
     );
     let result = start_leftover(
         &environment,
-        "(while [ ! -f finish ]; do sleep 0.02; done; printf AFTER_DISOWN) & exit 0",
+        "(n=0; while [ ! -f finish ] && [ -d \"$PWD\" ] && [ $((n += 1)) -le 30000 ]; do sleep 0.02; done; printf AFTER_DISOWN) & exit 0",
         false,
     )
     .await?;
@@ -238,7 +238,7 @@ async fn leftover_jobs_pty_output_after_leader_exit_is_platform_specific() -> Te
     let directory = tempfile::tempdir()?;
     let environment = environment(directory.path())?;
     let result = start_leftover(&environment,
-        "(while [ ! -f finish ]; do sleep 0.02; done; printf AFTER_LEADER; echo $? > write-status) & exit 0", true).await?;
+        "(n=0; while [ ! -f finish ] && [ -d \"$PWD\" ] && [ $((n += 1)) -le 30000 ]; do sleep 0.02; done; printf AFTER_LEADER; echo $? > write-status) & exit 0", true).await?;
     let sessions = environment.joined_process_sessions()?;
     let id = result.session_id;
     std::fs::write(directory.path().join("finish"), "")?;
@@ -347,7 +347,7 @@ async fn leftover_jobs_report_group_empty_and_keep_spooling() -> TestResult {
     );
     let result = start_leftover(
         &environment,
-        "(while [ ! -f finish ]; do sleep 0.02; done; echo AFTER) & exit 0",
+        "(n=0; while [ ! -f finish ] && [ -d \"$PWD\" ] && [ $((n += 1)) -le 30000 ]; do sleep 0.02; done; echo AFTER) & exit 0",
         false,
     )
     .await?;

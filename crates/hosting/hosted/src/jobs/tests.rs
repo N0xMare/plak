@@ -325,8 +325,10 @@ fn user_stop_grants_the_term_grace_without_blocking_the_caller() -> TestResult {
     let job = start_script(
         service.local(),
         &format!(
-            "trap 'touch {termed}; while [ ! -e {release} ]; do sleep 0.01; done; \
-                 touch {graced}; exit 0' TERM; touch {ready}; while :; do sleep 0.01; done",
+            "trap 'touch {termed}; n=0; \
+                 while [ ! -e {release} ] && [ -d \"$PWD\" ] && [ $((n += 1)) -le 60000 ]; \
+                 do sleep 0.01; done; touch {graced}; exit 0' TERM; touch {ready}; \
+                 n=0; while [ -d \"$PWD\" ] && [ $((n += 1)) -le 60000 ]; do sleep 0.01; done",
             ready = ready.display(),
             termed = termed.display(),
             release = release.display(),
@@ -625,7 +627,7 @@ impl Local for JoinedSessionsPort {
 }
 
 fn start(service: &JoinedProcessSessions) -> TestResult<plakous::tools::JoinedProcessSessionId> {
-    start_script(service, "exec sleep 3600")
+    start_script(service, "exec sleep 600")
 }
 
 fn start_script(

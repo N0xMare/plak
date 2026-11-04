@@ -1396,7 +1396,7 @@ impl LocalCompositionEventReceiver for FakeEvents {
                         return std::future::pending().await;
                     }
                     let input = if fixture.evidence.steer_fixture.load(Ordering::Acquire) {
-                        json!({"cmd": "while [ ! -f ready ]; do sleep 0.02; done; exit 7",
+                        json!({"cmd": "n=0; while [ ! -f ready ] && [ -d \"$PWD\" ] && [ $((n += 1)) -le 30000 ]; do sleep 0.02; done; exit 7",
                                         "yield_time_ms": if fixture.evidence.empty_poll.load(Ordering::Acquire) { 300 } else { 10000 }})
                     } else if fixture.evidence.terminal_poll.load(Ordering::Acquire) {
                         json!({"cmd": "stty -echo; read line; printf terminal; exit 7", "tty": true, "yield_time_ms": 300})

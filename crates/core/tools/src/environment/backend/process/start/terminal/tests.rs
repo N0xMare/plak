@@ -157,7 +157,7 @@ fn delayed_pty() -> Result<(JoinedProcessResources, DelayedPtyReader), Box<dyn s
     command.cwd(workspace.path());
     command.args([
         "-c",
-        "printf x; while [ ! -f leader-release ]; do sleep 0.01; done",
+        "printf x; n=0; while [ ! -f leader-release ] && [ -d \"$PWD\" ] && [ $((n += 1)) -le 60000 ]; do sleep 0.01; done",
     ]);
     let child = pair.slave.spawn_command(command)?;
     let process_group = child

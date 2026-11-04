@@ -485,7 +485,7 @@ async fn transient_resume_exhaustion_preserves_failure_without_corrective_rounds
 #[tokio::test]
 async fn a_live_job_parks_the_child_and_its_terminal_wakes_it_to_submit() {
     let fixture = fixture(
-        json!([start_job("while [ ! -e release-job ]; do sleep 0.01; done"),
+        json!([start_job("n=0; while [ ! -e release-job ] && [ -d \"$PWD\" ] && [ $((n += 1)) -le 60000 ]; do sleep 0.01; done"),
             {"output": {"text": "started"}}, held("woke")]),
         leaf,
     )

@@ -2087,9 +2087,18 @@ def rust_tokens(source: str) -> list[RustToken]:
     return list(_cached_rust_tokens(source))
 
 
+def all_rust_tokens(source: str) -> list[RustToken]:
+    """Lex Rust including test-only items; comments are still absent."""
+    return list(_cached_all_rust_tokens(source))
+
+
 @lru_cache(maxsize=None)
 def _cached_rust_tokens(source: str) -> tuple[RustToken, ...]:
-    source = production_rust_source(source)
+    return _cached_all_rust_tokens(production_rust_source(source))
+
+
+@lru_cache(maxsize=None)
+def _cached_all_rust_tokens(source: str) -> tuple[RustToken, ...]:
     tokens: list[RustToken] = []
     index = 0
     while index < len(source):
@@ -2857,6 +2866,7 @@ def source_scan() -> Iterator[None]:
             _blank_rust_non_code,
             production_rust_source,
             _cached_rust_tokens,
+            _cached_all_rust_tokens,
             _cached_test_module_targets,
             _cached_test_module_files,
         ):
@@ -4923,6 +4933,162 @@ INCLUDED_FILE = re.compile(
 )
 
 
+# A shell loop written into a Rust string: a fixture process a test spawns.
+# `do` and `done` count only in command position, so prose such as "failed
+# while waiting; do not retry until the job is done" is not a loop.
+LOOP_KEYWORD = re.compile(r"(?<![\w$-])(?:while|until|for)(?![\w-])")
+LOOP_HEAD = re.compile(
+    r"(?P<kind>while|until)\b(?P<head>.*?)[;\n]\s*do(?![\w-])"
+    r"|for\s+(?P<arith>\(\(.*?\)\))\s*[;\n]?\s*do(?![\w-])"
+    r"|for\s+\w+(?:\s+in\b[^;\n]*)?\s*[;\n]\s*do(?![\w-])",
+    re.S,
+)
+LOOP_WORD = re.compile(r"(?:(?<=[;\n])|(?<=[;&\n]\s))\s*(do|done)(?![\w-])")
+# One comparison of a counter with a literal: `$((n += 1)) -le N`, `"$n" -lt N`.
+COUNTER_TEST = re.compile(
+    r'"?\$(?:\(\((?P<expr>[^)]*)\)\)|\{?(?P<var>\w+)\}?)"?\s+-(?P<op>le|lt|ge|gt|eq)\s+"?\d+"?'
+)
+
+
+def _counter_step(name: str) -> re.Pattern[str]:
+    """`name += 1`, `name=$((name + 1))` or `name++`."""
+    step = rf"\b{name}\s*\+=\s*1\b|\b{name}\s*=\s*\$\(\(\s*\$?{name}\s*\+\s*1\s*\)\)"
+    return re.compile(rf"{step}|\b{name}\+\+")
+
+
+EXIT_GUARD = re.compile(r"\s*\]\s*(?P<join>\|\||&&)\s*(?:exit|break|return)\b")
+READ_HEAD = re.compile(r"^\s*(?:IFS=\S*\s+)?read\b")
+# A pipe source that never reaches end of file.
+ENDLESS_SOURCE = re.compile(r"\btail\s+(?:-\w*[fF]|--follow)|\byes\b")
+FIXTURE_SLEEP = re.compile(
+    r"(?<![\w-])sleep\s+"
+    r"(?:(?P<infinity>infinity)|(?P<value>\d+(?:\.\d+)?)(?P<unit>[smhd]?))(?![\w.])"
+)
+SLEEP_UNITS = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
+MAX_FIXTURE_SLEEP_SECONDS = 600
+# Shell text that is displayed or highlighted, never run.
+UNRUN_SHELL_SOURCES = {("plak", "src/tui/highlight.rs")}
+
+
+def _string_runs(tokens: list[RustToken]) -> list[str]:
+    """String literals, with comma-separated runs (argv arrays, `concat!`) joined."""
+    runs: list[str] = []
+    current: list[str] = []
+    expect_string = True
+    for token in tokens:
+        if token.kind == "string" and expect_string:
+            current.append(token.value)
+            expect_string = False
+        elif token.value == "," and current and not expect_string:
+            expect_string = True
+        else:
+            if current:
+                runs.append(" ".join(current))
+            current = [token.value] if token.kind == "string" else []
+            expect_string = token.kind != "string"
+    if current:
+        runs.append(" ".join(current))
+    return runs
+
+
+def _loop_body_end(text: str, start: int) -> int | None:
+    """Index just past the `done` closing a loop body that begins at `start`."""
+    depth = 1
+    for word in LOOP_WORD.finditer(text, start):
+        depth += 1 if word.group(1) == "do" else -1
+        if depth == 0:
+            return word.end()
+    return None
+
+
+def _counted(loop_kind: str, head: str, body: str) -> bool:
+    """A counter stepped in the loop is compared with a literal bound that ends it."""
+    text = f"{head}\n{body}"
+    for part, in_head in ((head, True), (body, False)):
+        for test in COUNTER_TEST.finditer(part):
+            operand = test.group("var") or re.match(r"\s*\$?(\w*)", test.group("expr")).group(1)
+            if not operand or not _counter_step(operand).search(text):
+                continue
+            stops_when_small = test.group("op") in {"le", "lt"}
+            if in_head:
+                if stops_when_small == (loop_kind != "until"):
+                    return True
+                continue
+            guard = EXIT_GUARD.match(part, test.end())
+            if guard and stops_when_small == (guard.group("join") == "||"):
+                return True
+    return False
+
+
+def _unbounded_loops(text: str) -> list[str]:
+    loops: list[str] = []
+    for keyword in LOOP_KEYWORD.finditer(text):
+        head = LOOP_HEAD.match(text, keyword.start())
+        if head is None:
+            continue
+        end = _loop_body_end(text, head.end())
+        if end is None:
+            continue
+        loop = text[keyword.start() : end]
+        body = text[head.end() : end]
+        if head.group("kind"):
+            condition = head.group("head")
+            if READ_HEAD.match(condition):
+                pipeline = re.split(r"[;\n&(]", text[: keyword.start()])[-1]
+                if "|" not in pipeline or not ENDLESS_SOURCE.search(pipeline):
+                    continue
+            elif _counted(head.group("kind"), condition, body):
+                continue
+        elif head.group("arith") is not None:
+            if re.search(r";\s*\w+\s*[<>]=?\s*\d+\s*;", head.group("arith")):
+                continue
+        else:
+            # `for name in words` runs once per word of a finished expansion.
+            continue
+        loops.append(loop)
+    return loops
+
+
+def validate_fixture_loops(package_name: str, sources: dict[str, str]) -> list[str]:
+    """Every shell loop a Rust string spawns ends within a bound.
+
+    A fixture process outlives a test that dies: its temporary directory goes,
+    and a sentinel it polls for never appears. Each `while`/`until` loop
+    therefore steps a counter that it compares with a literal bound, in its
+    condition (`[ $((n += 1)) -le N ]`) or in an exit guard in its body
+    (`[ "$waits" -lt N ] || exit`), or reads its input until end of file from
+    a source that has one; a `for ((...))` loop compares with a literal; and a
+    single sleep lasts at most 600 s (spec 05 §2). Test modules count, and a
+    loop split across comma-separated string literals is joined first.
+    """
+    errors: list[str] = []
+    for path, source in sorted(sources.items()):
+        if (package_name, path) in UNRUN_SHELL_SOURCES:
+            continue
+        found: list[str] = []
+        for text in _string_runs(all_rust_tokens(source)):
+            for loop in _unbounded_loops(text):
+                snippet = " ".join(loop.split())[:80]
+                found.append(
+                    f"{package_name}:{path}: unbounded shell loop in a fixture: {snippet!r}; "
+                    "count its passes against a literal bound ($((n += 1)) -le N), "
+                    "guard its body ([ \"$n\" -lt N ] || exit) or read to end of file"
+                )
+            for sleep in FIXTURE_SLEEP.finditer(text):
+                seconds = (
+                    float("inf")
+                    if sleep.group("infinity")
+                    else float(sleep.group("value")) * SLEEP_UNITS[sleep.group("unit")]
+                )
+                if seconds > MAX_FIXTURE_SLEEP_SECONDS:
+                    found.append(
+                        f"{package_name}:{path}: fixture {sleep.group(0)!r} exceeds "
+                        f"{MAX_FIXTURE_SLEEP_SECONDS} s"
+                    )
+        errors.extend(dict.fromkeys(found))
+    return errors
+
+
 def validate_package_local_includes(
     package_name: str,
     sources: dict[str, str],
@@ -5118,6 +5284,7 @@ def _check_workspace() -> int:
         }
         rust_files = package_rust_files(ROOT, package, nested)
         errors.extend(validate_package_local_includes(name, rust_files))
+        errors.extend(validate_fixture_loops(name, rust_files))
         errors.extend(
             validate_lint_ratchet(
                 name, package_lint_inventory(package, rust_files), package_lint_rule(package)
