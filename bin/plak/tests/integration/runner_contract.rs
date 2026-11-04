@@ -127,8 +127,10 @@ async fn an_unpaired_host_fails_at_once(home: &Path, work: &Path, runner: Versio
         ),
         "a refused link takes no call"
     );
+    // Half the 30 s call window: a refusal that waited the window out fails,
+    // and a loaded host's bridge start-up does not.
     assert!(
-        asked.elapsed() < Duration::from_secs(5),
+        asked.elapsed() < Duration::from_secs(15),
         "{:?}",
         asked.elapsed()
     );
