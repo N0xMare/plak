@@ -297,7 +297,7 @@ impl ProductAgentTree {
     }
 
     /// The commits runner `runner` already holds for this tree, at most
-    /// [`MAX_RUNNER_ANCESTORS`]: each was the tip of a bundle applied
+    /// `MAX_RUNNER_ANCESTORS`: each was the tip of a bundle applied
     /// there. A bundle to it leaves out each one the runner still holds.
     #[must_use]
     pub fn tree_runner_ancestors(&self, runner: &str) -> Vec<String> {

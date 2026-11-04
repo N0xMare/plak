@@ -115,8 +115,8 @@ pub trait VcsOps: Send + Sync {
         )))
     }
 
-    /// Pins the parent's state as a base snapshot to carry (see
-    /// [`super::transfer`]).
+    /// Pins the parent's state as a base snapshot to carry to a copy on
+    /// another runner.
     fn snapshot_base<'a>(
         &'a self,
         parent_cwd: &'a Path,
