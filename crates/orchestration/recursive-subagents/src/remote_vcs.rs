@@ -337,6 +337,9 @@ fn link_error(failure: &RunnerFailure, stage: Option<&stage::VcsStage>) -> VcsEr
         RunnerFailure::StaleOwner => {
             VcsError::mint_unavailable("the runner refused the VCS step's owner")
         }
+        RunnerFailure::NotHolder => VcsError::mint_unavailable(
+            "another process of this host holds the VCS step's line on the runner",
+        ),
         RunnerFailure::Backend(error) => {
             VcsError::mint_unavailable(format!("the runner refused the VCS step: {error}"))
         }

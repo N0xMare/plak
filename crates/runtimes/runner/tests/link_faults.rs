@@ -40,7 +40,9 @@ use plakous_runner::{
     RunnerOptions, RunnerService, daemon,
 };
 use plakous_runner_protocol::{Bind, VersionTriple};
-use plakous_tools::internal::runner::{RunnerBackend, RunnerSessions, runner_environment};
+use plakous_tools::internal::runner::{
+    RunnerBackend, RunnerFailure, RunnerSessions, runner_environment,
+};
 use plakous_tools::{
     ExecutionBackendErrorKind, ExecutionEnvironment, ExecutionEnvironmentConfig,
     ExecutionEnvironmentScope, JobStatus, JoinedProcessCommand, JoinedProcessStartRequest,
@@ -388,9 +390,14 @@ async fn host_killed_mid_call_is_recovered_and_readopted_by_its_host_id() {
         "{lines:?}"
     );
 
-    // The same host identity returns as a new process. A newer owner of the
-    // line re-adopts it first: only the line's holder may replay its keys.
+    // The same host identity returns as a new process. Before it holds the
+    // line its replay is refused, and the call stays journaled.
     let (client, environment, backend) = connect(directory.path(), "instance-2", true).await;
+    let refused = client.recover().await;
+    assert_eq!(refused.len(), 1, "{refused:?}");
+    assert_eq!(refused[0].answer, Err(RunnerFailure::NotHolder));
+    // A newer owner of the line re-adopts it first: only the line's holder
+    // may replay its keys.
     let sessions = RunnerSessions::new(&backend, &environment, owner(1, 2));
     let jobs = sessions.jobs().await.unwrap();
     assert_eq!(jobs.len(), 1);

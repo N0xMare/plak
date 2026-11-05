@@ -274,7 +274,6 @@ impl RunnerClient {
     pub async fn recover(&self) -> Vec<RecoveredCall> {
         let left = std::mem::take(&mut *lock(&self.inner.left));
         let instance = self.instance();
-        let not_holder = format!("{:?}", Refusal::OwnerNotTransferred);
         let mut recovered = Vec::with_capacity(left.len());
         let mut kept = Vec::new();
         for entry in left {
@@ -287,8 +286,7 @@ impl RunnerClient {
             };
             // A replay the link lost, or one another holder must make, stays
             // recorded for the next recovery.
-            let held_elsewhere =
-                matches!(&answer, Err(RunnerFailure::Refused(reason)) if *reason == not_holder);
+            let held_elsewhere = matches!(answer, Err(RunnerFailure::NotHolder));
             let answered = !held_elsewhere
                 && !matches!(&answer, Err(RunnerFailure::OutcomeUnknown(reason)) if reason == LINK_LOST);
             if held_elsewhere {
@@ -1026,6 +1024,7 @@ fn request_answer(frame: RunnerFrame) -> Option<(String, Result<Value, RunnerFai
             request_id,
             Err(match refusal {
                 Refusal::Unsupported { .. } => RunnerFailure::Unsupported,
+                Refusal::OwnerNotTransferred => RunnerFailure::NotHolder,
                 other => RunnerFailure::Refused(format!("{other:?}")),
             }),
             false,

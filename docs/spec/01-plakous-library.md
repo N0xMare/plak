@@ -5785,7 +5785,8 @@ The at-most-once law across restarts:
   instance and settles the rest as of unknown outcome, since a runner restart
   forgot them. The journal is the home's, shared by its processes: only the
   process that serves the lines recovers it, and a call refused because
-  another instance holds its line stays journaled.
+  another instance holds its line (`OwnerNotTransferred`, which the host
+  carries as the typed `RunnerFailure::NotHolder`) stays journaled.
 - **Both restarted.** Every outstanding call is of unknown outcome.
 - **Jobs across a host restart.** A job keeps running on the runner when the
   host process that started it is lost. A successor host process of the same

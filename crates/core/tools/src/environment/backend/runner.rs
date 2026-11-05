@@ -414,6 +414,10 @@ pub enum RunnerFailure {
     Backend(Value),
     /// The runner accepts a newer owner of the line; nothing ran.
     StaleOwner,
+    /// Another process of this host holds the line, so the runner answered
+    /// nothing to this one; nothing ran, and the call is the holder's to
+    /// answer.
+    NotHolder,
     /// The runner does not implement the operation; nothing ran.
     Unsupported,
     /// The link refused the call without sending it.
@@ -602,6 +606,10 @@ fn failure_error(failure: RunnerFailure) -> ExecutionBackendError {
         RunnerFailure::Refused(detail) => ExecutionBackendError::new(
             ExecutionBackendErrorKind::InvalidRequest,
             format!("the runner refused the operation: {detail}"),
+        ),
+        RunnerFailure::NotHolder => ExecutionBackendError::new(
+            ExecutionBackendErrorKind::InvalidRequest,
+            "the runner refused the operation: another process of this host holds the agent line",
         ),
     }
 }
