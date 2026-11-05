@@ -473,7 +473,7 @@ impl PlakousApplication {
     /// telemetry sink attached.
     pub(crate) fn state_roots(&self) -> CliResult<product_agent::ProductStateRoots> {
         let roots = product_state_roots_from(
-            self.product_paths()?.home().to_path_buf(),
+            self.product_paths()?,
             self.state_home.clone(),
             self.extra_telemetry_sink.clone(),
             self.session_records()?,

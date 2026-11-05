@@ -175,7 +175,7 @@ fn prepare_tui_launch(
     let paths = services.paths()?.clone();
     let store = services.session_records()?;
     home::state::ensure_usable_state(&paths, &mut io::stderr().lock()).map_err(CliFailure::new)?;
-    let state_roots = services.state_roots()?;
+    let state_roots = services.state_roots_for(&paths)?;
     let cwd = paths.workspace().map_err(CliFailure::new)?.to_path_buf();
     // No-id resume enters the ordinary TUI first. The existing host-owned
     // `/resume` action supplies the cwd-scoped snapshot to the one picker UI;

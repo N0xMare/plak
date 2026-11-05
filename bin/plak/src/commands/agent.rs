@@ -265,7 +265,7 @@ pub(crate) fn run_agent_after_admission(
         store.save(&mut record).map_err(CliFailure::new)?;
         record
     };
-    let state_roots = services.state_roots()?;
+    let state_roots = services.state_roots_for(paths)?;
     let account = record.account.clone().ok_or_else(|| {
         CliFailure::classified(
             CliFailureKind::Usage,

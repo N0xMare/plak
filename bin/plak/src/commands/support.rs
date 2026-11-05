@@ -94,15 +94,18 @@ pub fn exit_restored_tui(
     std::process::exit(code);
 }
 
-/// Product state roots under `product`, with the caller's extra telemetry
-/// sink attached.
+/// Product state roots for a session of `context`, the product context of
+/// its workspace, with the caller's extra telemetry sink attached. The
+/// roots' roster source reads that context's configuration, so a trusted
+/// project's templates reach the session's genesis roster; everything else
+/// is the context's home.
 ///
 /// The binary owns the OTLP bridge. The composition root builds the sink once and
 /// passes it to every state root it opens, under the process's one job
 /// bound (`jobs`). This construction also captures HOME once to supply the
 /// conventional product-state protection paths.
 pub fn product_state_roots_from(
-    product: PathBuf,
+    context: &product_paths::PlakPaths,
     state_home: PathBuf,
     extra_telemetry_sink: Option<Arc<dyn plakous_hosted::agent::ExtraTelemetrySink>>,
     session_records: Arc<dyn crate::store::session_records::SessionRecordStore>,
@@ -112,10 +115,11 @@ pub fn product_state_roots_from(
     // its own copy, and the telemetry writer registry is keyed by the path the
     // factory holds. With a symlinked home the raw path would register the
     // same file on disk under a second key.
-    let product = std::fs::canonicalize(&product).unwrap_or(product);
+    let product =
+        std::fs::canonicalize(context.home()).unwrap_or_else(|_| context.home().to_path_buf());
     let paths = product_paths::PlakPaths::from_home(product.clone());
     let telemetry = crate::telemetry_sink::ProductTelemetryFactory::new(paths.clone());
-    let paths_for_roster = paths.clone();
+    let paths_for_roster = context.clone();
     let named_secret_paths = paths.clone();
     let credentials = crate::openrouter_product::ProductOpenRouterCredentials::shared(&paths);
     let platform_credentials = crate::platform_product::ProductPlatformCredentials::shared(&paths);

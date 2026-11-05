@@ -651,6 +651,22 @@ impl ProductStateRoots {
     }
 
     /// The product's roster and topology gate.
+    /// The roster a new tree of these roots freezes for a root bound to
+    /// `account`, `tuple` and `effort`: its spawn menu and every template it
+    /// reaches.
+    ///
+    /// # Errors
+    ///
+    /// The roster source's: a configuration that does not load.
+    pub fn genesis_roster(
+        &self,
+        account: &str,
+        tuple: &str,
+        effort: Option<&str>,
+    ) -> CliResult<crate::orchestration::RosterInput> {
+        self.roster_source.roster(account, tuple, effort)
+    }
+
     pub(crate) fn roster_source(&self) -> &Arc<dyn RosterSource> {
         &self.roster_source
     }

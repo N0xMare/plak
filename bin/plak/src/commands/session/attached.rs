@@ -146,7 +146,7 @@ fn build_attached_host_config(
     // The repository gate's offline model; see `crate::test_hooks`.
     #[cfg(feature = "test-hooks")]
     if let Some(selection) = crate::test_hooks::selected() {
-        let state_roots = services.state_roots()?;
+        let state_roots = services.state_roots_for(paths)?;
         let (effort, explicit) = product_host::effort_from_config(record.effort.as_deref());
         return selection
             .map_err(CliFailure::new)
@@ -200,7 +200,7 @@ fn build_attached_host_config(
         explicit,
         classify_rebind_fallback,
     )?;
-    let state_roots = services.state_roots()?;
+    let state_roots = services.state_roots_for(paths)?;
     build_host_config(
         paths,
         &state_roots,

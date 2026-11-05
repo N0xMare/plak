@@ -114,10 +114,21 @@ impl Services {
             .clone())
     }
 
-    /// Product state roots under this home, with the extra sink attached.
+    /// Product state roots of the launch directory's context, with the
+    /// extra sink attached.
     pub(crate) fn state_roots(&self) -> CliResult<plakous_hosted::agent::ProductStateRoots> {
+        self.state_roots_for(self.paths()?)
+    }
+
+    /// Product state roots for a session of `context`, its workspace's
+    /// product context: its roster reads that context's configuration. A
+    /// session's host builds them once and keeps them in its host config.
+    pub(crate) fn state_roots_for(
+        &self,
+        context: &PlakPaths,
+    ) -> CliResult<plakous_hosted::agent::ProductStateRoots> {
         crate::commands::support::product_state_roots_from(
-            self.paths()?.home().to_path_buf(),
+            context,
             self.home.state()?.to_path_buf(),
             self.extra_telemetry_sink(),
             self.session_records()?,

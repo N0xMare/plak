@@ -103,6 +103,10 @@ an export.
 
 ### Plak
 
+- A tree's genesis roster reads the session's own workspace: a trusted
+  project's templates in its `[roster] working_set` are on the root's spawn
+  menu. Before, the roster read the home alone, so a trusted project's
+  templates never reached a tree.
 - `plak host` (hidden, maintainer builds): the per-user host process, as a
   skeleton that hosts no session yet. One per home and state key
   (`state/<key>/host.lock`, a second one refuses naming the first); a control
