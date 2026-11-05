@@ -49,11 +49,70 @@ fn same_processes(held: &[ProcessView], next: &[ProcessView]) -> bool {
 }
 
 /// A process row as every attachment, a remote one included, receives it
-/// (spec 04 §2.10): its command redacted and bounded as a tool row's subject
-/// is, and its output tail through the display redactor a tool row's detail
-/// goes through, kept to the tail's own bound.
+/// (spec 04 §2.10): its command redacted ([`redacted_job_command`]) and
+/// bounded as a tool row's subject is, and its output tail redacted as a
+/// whole-line tail ([`redacted_job_tail`]).
 fn redacted_process(mut view: ProcessView) -> ProcessView {
-    view.command = crate::sessions::live_tool_subject(&view.command);
-    view.output = plakous::tools::preview_redaction::text(&view.output);
+    view.command = crate::sessions::live_tool_subject(&redacted_job_command(&view.command));
+    view.output = redacted_job_tail(&view.output);
     view
+}
+
+/// A job's displayed command, redacted as the raw command it shows. The
+/// runtime displays a command with each newline and carriage return escaped
+/// (`\n`, `\r`) and cut at 1 KiB; escaped, a secret that starts a line
+/// (a heredoc's token) follows a letter and misses the redactor's word
+/// boundary. The escapes are undone for the redactor and made again after
+/// it, which gives back the displayed text wherever nothing was redacted; a
+/// private key the cut left without its END is redacted to the end.
+pub(super) fn redacted_job_command(command: &str) -> String {
+    let raw = command.replace("\\r", "\r").replace("\\n", "\n");
+    plakous::tools::preview_redaction::text(&raw)
+        .replace('\r', "\\r")
+        .replace('\n', "\\n")
+}
+
+/// The runtime's bound on a job's retained output tail, in bytes.
+const TAIL_BYTES: usize = 4096;
+
+/// How far under [`TAIL_BYTES`] a tail cut at that bound can end up, once
+/// line endings and a trailing newline are normalized away.
+const TAIL_SLACK: usize = 64;
+
+/// A job's retained output tail, redacted for display. A tail at its byte
+/// bound starts wherever the bytes ran out, likely inside a line, where a
+/// secret's prefix may have been cut off: that partial first line is
+/// dropped, so the redactor sees whole lines. A private key whose BEGIN was
+/// cut off is redacted from the start of the tail to its END.
+pub(super) fn redacted_job_tail(output: &str) -> String {
+    let output = if output.len() + TAIL_SLACK >= TAIL_BYTES {
+        output.split_once('\n').map_or(output, |(_, rest)| rest)
+    } else {
+        output
+    };
+    let mut text = plakous::tools::preview_redaction::text(output);
+    // The redactor took every whole key and every key without its END, so
+    // an END left is a key's whose BEGIN is gone.
+    if let Some(end) = last_key_end(&text) {
+        text.replace_range(..end, plakous::tools::preview_redaction::MARKER);
+    }
+    text
+}
+
+/// Where the last `-----END [WORD ]PRIVATE KEY-----` marker in `text` ends.
+fn last_key_end(text: &str) -> Option<usize> {
+    const KEY: &str = "PRIVATE KEY-----";
+    const END: &str = "-----END ";
+    let mut search = text.len();
+    while let Some(at) = text[..search].rfind(KEY) {
+        let before = &text[..at];
+        let worded = before
+            .strip_suffix(' ')
+            .map(|word| word.trim_end_matches(|ch: char| ch.is_ascii_uppercase()));
+        if before.ends_with(END) || worded.is_some_and(|rest| rest.ends_with(END)) {
+            return Some(at + KEY.len());
+        }
+        search = at;
+    }
+    None
 }

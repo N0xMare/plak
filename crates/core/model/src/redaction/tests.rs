@@ -145,3 +145,20 @@ fn pretty_bounded_matches_json_redaction_and_stops_without_the_tail() {
         "bounded pretty of a long array used {spent:?} of CPU"
     );
 }
+
+/// A private key cut before its END is redacted from its BEGIN to the end
+/// of the text; a whole key before it is redacted alone, and redacting the
+/// result again changes nothing.
+#[test]
+fn a_private_key_without_its_end_is_redacted_to_the_end() {
+    let body = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7";
+    let cut = format!("cat > key <<EOF\n-----BEGIN RSA PRIVATE KEY-----\n{body}");
+    assert_eq!(text(&cut), "cat > key <<EOF\n[redacted]");
+    let whole = format!(
+        "-----BEGIN PRIVATE KEY-----\n{body}\n-----END PRIVATE KEY-----\nkept\n\
+         -----BEGIN OPENSSH PRIVATE KEY-----\n{body}"
+    );
+    let redacted = text(&whole);
+    assert_eq!(redacted, "[redacted]\nkept\n[redacted]");
+    assert_eq!(text(&redacted), redacted);
+}

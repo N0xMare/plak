@@ -4065,9 +4065,12 @@ verdicts) are addressed, the session profile and workspace chrome states.
   next session without an opening, so the host follows its `clear_view`
   with an empty `processes` when it had published rows, and a face drops
   its list on `clear_view` as on `session_opening`. Each row's command is
-  redacted and bounded as a tool row's subject is, and its output tail goes
-  through the display redactor a tool row's detail does (chapter 04
-  §2.10). A child attachment gets none, and JSONL v1 never projects
+  redacted as the raw command the runtime displays (chapter 04 §5) and
+  bounded as a tool row's subject is; its output tail goes through the
+  display redactor a tool row's detail does, starting at its first whole
+  line when the runtime's byte bound cut into one, with a private key whose
+  BEGIN the tail lost redacted up to its END (chapter 04 §2.10). A child
+  attachment gets none, and JSONL v1 never projects
   it. The face sends the intent
   `promptable` once after its first painted frame: it sets the flag that
   gates passive maintenance and never enters the session's queue, so it

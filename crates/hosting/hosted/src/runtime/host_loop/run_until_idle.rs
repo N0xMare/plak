@@ -320,7 +320,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             if !waiting_noted {
                 let waiting = running
                     .iter()
-                    .map(|job| format!("p{} ({})", job.number, job.command))
+                    .map(|job| {
+                        let command = crate::sessions::live_tool_subject(
+                            &crate::runtime::processes::redacted_job_command(&job.command),
+                        );
+                        format!("p{} ({command})", job.number)
+                    })
                     .chain(waiting_rows.iter().map(|(_, label)| label.clone()))
                     .collect::<Vec<_>>();
                 let _ = self.role.events.notice(

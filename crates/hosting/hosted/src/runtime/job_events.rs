@@ -75,11 +75,12 @@ fn process_row(job: &JobView) -> Option<crate::sessions::TranscriptRow> {
     }))
 }
 
-/// The command a process row names: redacted and bounded the way a tool
-/// subject is (spec 04 §5), one line.
+/// The command a process row names: redacted as the raw command it shows
+/// and bounded the way a tool subject is (spec 04 §5), one line.
 fn process_subject(command: &str) -> Option<String> {
     let command = command.trim();
-    (!command.is_empty()).then(|| super::events::live_tool_subject(command))
+    (!command.is_empty())
+        .then(|| super::events::live_tool_subject(&super::processes::redacted_job_command(command)))
 }
 
 impl JobEvents {
@@ -239,9 +240,16 @@ mod tests {
             subject("GITHUB_TOKEN=ghp_abcdefghijklmnopqrst gh pr list").as_deref(),
             Some("GITHUB_TOKEN=[redacted] gh pr list")
         );
+        // The runtime displays a command with its newlines escaped; a
+        // heredoc's token on its own line is redacted all the same.
         assert_eq!(
-            subject("make\n&& make test").as_deref(),
-            Some("make↵&& make test")
+            subject("make\\n&& make test").as_deref(),
+            Some("make\\n&& make test")
+        );
+        assert_eq!(
+            subject("gh auth login --with-token <<EOF\\nghp_abcdefghijklmnopqrstuvwxyz0123\\nEOF")
+                .as_deref(),
+            Some("gh auth login --with-token <<EOF\\n[redacted]\\nEOF")
         );
         let long = subject(&"x".repeat(1_000)).unwrap();
         assert!(long.len() <= 240 && long.ends_with('…'), "{long}");

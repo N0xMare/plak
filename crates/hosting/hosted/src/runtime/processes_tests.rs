@@ -100,3 +100,74 @@ fn published_process_rows_are_redacted() {
     );
     assert!(published[0].command.starts_with("curl"));
 }
+
+/// Secrets a heredoc writes on lines of their own, as the runtime displays
+/// the command: each newline escaped as `\n`. Each pair is the line and the
+/// part of it that must not be shown.
+const HEREDOC_SECRETS: [(&str, &str); 4] = [
+    (
+        "ghp_abcdefghijklmnopqrstuvwxyz0123",
+        "abcdefghijklmnopqrstuvwxyz0123",
+    ),
+    (
+        "sk-abcdefghijklmnopqrstuvwxyz0123",
+        "abcdefghijklmnopqrstuvwxyz0123",
+    ),
+    ("AKIAABCDEFGHIJKLMNOP", "ABCDEFGHIJKLMNOP"),
+    (
+        "Authorization: Bearer abcdefghijklmnopqrstuvwxyz",
+        "abcdefghijklmnopqrstuvwxyz",
+    ),
+];
+
+/// A key the runtime's 1 KiB cut left without its END.
+const CUT_KEY: &str = "cat > id <<EOF\\n-----BEGIN OPENSSH PRIVATE KEY-----\\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ";
+
+/// The command of a published row as the runtime displays it: newlines
+/// escaped, cut. A token on its own line and a key without its END are
+/// redacted all the same, and the escapes stay as they were displayed.
+#[test]
+fn a_heredoc_secret_in_a_displayed_command_is_redacted() {
+    use super::processes::redacted_job_command;
+    for (line, secret) in HEREDOC_SECRETS {
+        let command = format!("gh auth login --with-token <<EOF\\n{line}\\nEOF");
+        let shown = redacted_job_command(&command);
+        assert!(!shown.contains(secret), "{shown:?}");
+        assert!(
+            shown.starts_with("gh auth login --with-token <<EOF\\n") && shown.ends_with("\\nEOF"),
+            "{shown:?}"
+        );
+    }
+    let shown = redacted_job_command(CUT_KEY);
+    assert_eq!(shown, "cat > id <<EOF\\n[redacted]");
+    let plain = "printf 'a\\nb' && make\\r\\ntest";
+    assert_eq!(redacted_job_command(plain), plain);
+}
+
+/// A tail at its byte bound loses its partial first line, where a secret's
+/// prefix may have been cut off; a shorter tail keeps every line; a key
+/// whose BEGIN was cut off is redacted up to its END.
+#[test]
+fn a_tail_shows_whole_lines_and_no_orphan_key() {
+    use super::processes::redacted_job_tail;
+    let mut cut = format!(
+        "cdefghijklmnopqrstuvwxyz0123456789 =abcdefghijkl0123 {}",
+        "y".repeat(70)
+    );
+    for number in 1..=36 {
+        cut.push_str(&format!("\nline {number:03} {}", "x".repeat(100)));
+    }
+    assert!((4_032..=4_096).contains(&cut.len()), "{}", cut.len());
+    let shown = redacted_job_tail(&cut);
+    assert!(shown.starts_with("line 001"), "{shown:?}");
+    assert!(!shown.contains("cdefghij") && !shown.contains("abcdefghijkl0123"));
+    assert_eq!(redacted_job_tail("first\nsecond"), "first\nsecond");
+    assert_eq!(
+        redacted_job_tail("Zm9vYmFyYmF6cXV4\nMIIEvQIBADANBg\n-----END RSA PRIVATE KEY-----\nafter"),
+        "[redacted]\nafter"
+    );
+    assert_eq!(
+        redacted_job_tail("-----END CERTIFICATE-----\nkept"),
+        "-----END CERTIFICATE-----\nkept"
+    );
+}

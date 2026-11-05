@@ -28,6 +28,9 @@ static CREDENTIAL_NAME: LazyLock<Regex> = LazyLock::new(|| compile(NAME));
 static RULES: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
     [
         (r"(?s)-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----.*?-----END (?:[A-Z]+ )?PRIVATE KEY-----", MARKER),
+        // A key whose END a cut or a bound left out: every whole key is gone
+        // by now, so the rest of the text is the key's.
+        (r"(?s)-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----.*", MARKER),
         (r#"(?im)(\b(?:Authorization|Proxy-Authorization|X-Api-Key|Cookie)[ \t]*:[ \t]*)([^\s"'\[\r\n][^\r\n"']*)"#, "${1}[redacted]"),
         (r"((?i:\bBearer|\bBasic)[ \t]+)[A-Za-z0-9._~+/-]{16,}=*", "${1}[redacted]"),
         (r"\bsk-[A-Za-z0-9_-]{20,}", MARKER),

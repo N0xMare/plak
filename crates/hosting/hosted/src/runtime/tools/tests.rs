@@ -879,3 +879,33 @@ fn tool_subject_stash_correlates_parallel_same_name_lifecycles_exactly() {
     let mut restarted = ToolSubjectStash::new();
     assert!(restarted.take("exec_command", None).is_none());
 }
+
+/// A process tool row names its process's command as the runtime displays
+/// it, newlines escaped: a heredoc's token on its own line is redacted
+/// there too.
+#[test]
+fn a_process_rows_command_has_its_heredoc_secret_redacted() {
+    use plakous_host_protocol::views::{ProcessStatus, ProcessView};
+    let locator: plakous::sessions::SessionLocator = "00000000-0000-0000-0000-000000000001/00000000-0000-0000-0000-000000000002/00000000-0000-0000-0000-000000000003".parse().unwrap();
+    let process = ProcessView {
+        id: format!("{}:{}:p7", locator.session_id(), locator.branch_id()),
+        command: "gh auth login --with-token <<EOF\\nghp_abcdefghijklmnopqrstuvwxyz0123\\nEOF"
+            .into(),
+        owner: "root".into(),
+        started_at: 0,
+        elapsed_ms: 0,
+        status: ProcessStatus::Running,
+        output: String::new(),
+    };
+    let subject = process_subject(
+        "process_session_wait",
+        &serde_json::json!({"session_id":7}),
+        Some(locator),
+        &[process],
+        Some(&serde_json::json!({"status":"running"})),
+    );
+    assert_eq!(
+        subject,
+        "7 · gh auth login --with-token <<EOF\\n[redacted]\\nEOF · still running"
+    );
+}

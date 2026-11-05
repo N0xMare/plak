@@ -209,14 +209,18 @@ pub(super) fn process_subject_for_ids(
     let subjects = ids
         .iter()
         .map(|id| {
-            let command = locator.and_then(|locator| {
-                let key = process_key(locator, id);
-                processes
-                    .iter()
-                    .find(|process| process.id == key && !process.command.is_empty())
-                    .map(|process| process.command.as_str())
-                    .or_else(|| start_commands.get(&key).map(String::as_str))
-            });
+            // A process's command, from its row or its start, is the
+            // runtime's displayed command.
+            let command = locator
+                .and_then(|locator| {
+                    let key = process_key(locator, id);
+                    processes
+                        .iter()
+                        .find(|process| process.id == key && !process.command.is_empty())
+                        .map(|process| process.command.as_str())
+                        .or_else(|| start_commands.get(&key).map(String::as_str))
+                })
+                .map(super::processes::redacted_job_command);
             let mut subject = id.clone();
             if label == "process_session_write" {
                 subject.push_str(&format!(" · {} bytes", input.unwrap_or_default().len()));

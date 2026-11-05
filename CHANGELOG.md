@@ -611,6 +611,14 @@ an export.
 
 ### Security
 
+- A background job's command is redacted for display with the runtime's
+  escaped newlines undone, so a token a heredoc writes on its own line is
+  redacted (process views, process transcript rows, process tool rows and
+  the run's waiting notice, which showed the command unredacted). A
+  displayed output tail starts at its first whole line when the byte bound
+  cut into one, and a private key whose BEGIN it lost is redacted up to its
+  END. The display redactor also redacts a private key without its END, to
+  the end of the text.
 - pulldown-cmark is 0.13.6 (RUSTSEC-2026-0433, quadratic parsing of nested
   image wikilinks). Plak never enables wikilinks, so it was not exposed.
 - The build audit also waives RUSTSEC-2026-0429 for zip 8.6.0. Like

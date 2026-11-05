@@ -731,11 +731,14 @@ That includes the wire's session requests (`retry_attach`,
 `resume_session`, `rebind`), which act on the serving user's own sessions
 as the TUI's `/attach`, `/resume` and rebind do. What it is shown is what
 the TUI shows, redacted as the TUI's rows are: the session's process rows
-(chapter 02 §4.4) carry each command redacted as a tool row's subject and
-each output tail through the same display redactor as a tool row's detail,
-so a secret the model typed into a command or a process printed does not
-cross the network as typed. The redactor is best-effort display
-minimization, not a credential boundary. The endpoint's whole job is
+(chapter 02 §4.4) carry each command redacted as the raw command it shows
+(§5) and each output tail through the same display redactor as a tool
+row's detail, from its first whole line, so a secret the model typed into
+a command or a process printed does not reach the client as typed. The job
+lifecycle observations are not yet redacted: `job_started` carries the
+runtime's displayed command and `job_terminal` its retained output, as
+JSONL v1 projects them. The redactor is best-effort display minimization,
+not a credential boundary. The endpoint's whole job is
 deciding who the client is, and its checks stop different attackers.
 
 - **The tailnet identity stops everyone who is not an allowed login.** The
@@ -1726,7 +1729,7 @@ User, model, and tool content may itself be sensitive. It is governed by
 minimization, redaction, private permissions, retention, and truthful
 at-rest-protection metadata rather than by a claim that it is encrypted.
 Observation subjects (including the command a process transcript row
-names), argument/result previews, hosted session-log previews and every
+or process view names), argument/result previews, hosted session-log previews and every
 public diagnostic (`SafeDiagnostic`: model errors, provider refusal details and
 other bounded diagnostics) share one small regex redactor, owned by
 `plakous-model`. It runs before clipping and is **best effort, not a security
@@ -1735,7 +1738,13 @@ in full; display minimization does not rewrite it. The one display text in a
 Plakous change-feed fact (chapter 01 §5.11) is an effect's presentation subject:
 the bounded, redacted `ToolStarted` subject that Plakous core computes from the
 committed call block, never from live event state; every other fact carries
-identities and summaries only. Content a projector reads through the feed's
+identities and summaries only. A background job's command is displayed by the
+runtime with each newline and carriage return escaped (`\n`, `\r`) and cut at
+1 KiB, and its output as a tail of at most 4 KiB and 40 lines; neither is
+redacted there, since the runtime's own process notices to the model carry
+them. A host redacts that command with the escapes undone and made again, so a
+token a heredoc writes on its own line keeps its word boundary, and starts a
+tail cut inside a line at its first whole line. Content a projector reads through the feed's
 checkpoint reads is canonical history, and what the product persists from it
 passes the same redaction and bounds as a live row.
 
@@ -1768,6 +1777,8 @@ The text rules run in this order (each whole match becomes `[redacted]`
 unless a replacement is shown):
 
 - `(?s)-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----.*?-----END (?:[A-Z]+ )?PRIVATE KEY-----`.
+- `(?s)-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----.*`: a key a cut or a bound left
+  without its END, to the end of the text.
 - `(?im)(\b(?:Authorization|Proxy-Authorization|X-Api-Key|Cookie)[ \t]*:[ \t]*)([^\s"'\[\r\n][^\r\n"']*)` -> `${1}[redacted]`.
 - `((?i:\bBearer|\bBasic)[ \t]+)[A-Za-z0-9._~+/-]{16,}=*` -> `${1}[redacted]`.
 - `\bsk-[A-Za-z0-9_-]{20,}`.
