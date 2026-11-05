@@ -94,13 +94,13 @@ mod terminal;
 #[cfg(test)]
 use durable::checkpoint_can_abandon_compaction;
 pub use terminal::checkpoint_closes_on_reopen;
-pub(crate) use terminal::checkpoint_retained_history;
 pub(crate) use terminal::valid_terminal_enrichment;
 #[cfg(test)]
 pub(crate) use terminal::{
     checkpoint_finalizes_root_turn, checkpoint_recovers_an_abandoned_turn,
     checkpoint_root_terminal_result,
 };
+pub(crate) use terminal::{checkpoint_retained_history, history_prunable_at};
 
 mod agent;
 pub use agent::{abandon_and_release_many, close_admission, lease_released, shutdown_for_transfer};

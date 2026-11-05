@@ -66,6 +66,7 @@ mod turn_fence_workflow;
 mod workflow_abandonment;
 #[path = "../workflow_closure_tests.rs"]
 mod workflow_closure_tests;
+mod working_prune;
 
 mod cancel_cell;
 mod capacity_fence;

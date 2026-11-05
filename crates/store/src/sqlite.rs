@@ -882,8 +882,16 @@ impl SqliteSessionStore {
                     .require_open()
                     .and_then(|()| usage(&backend.connection, backend.limits));
             }
+            // A traced gate run cuts at every commit and needs one commit
+            // order per run: deferred reclamation this job left pending runs
+            // right after it, before its reply, not whenever the actor idles.
             #[cfg(feature = "commit-trace")]
-            drop(settle);
+            {
+                drop(settle);
+                if crate::commit_trace::active() {
+                    while backend.background_step() {}
+                }
+            }
             activity.finish(lane.label(), label, started);
             let _ = reply.send(result);
         });

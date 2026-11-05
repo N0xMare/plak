@@ -1943,6 +1943,18 @@ uses the quick `final_only,direct_tool_then_final` selection. An explicit
 `--shapes` selection applies in either mode. The wrapper overrides any inherited
 `PLAK_CRASH_SWEEP_SHAPES`, leaving it unset for the strict all-shapes default so
 the Rust registry supplies the complete inventory.
+`PLAK_TEST_WORKING_PRUNE_MINIMUM=1 PLAK_TEST_WORKING_PRUNE_MARGIN=1 just dev
+crash-sweep --strict` runs every shape with the owner pruning between every
+pair of rounds (spec 01 §4 history retention). The minimum knob lowers the
+64-checkpoint batch; the margin knob lowers the 64-checkpoint recency floor,
+and 0 or 1 both leave the horizon at the head's parent so a short turn still
+prunes. The fixture forwards both variables to each spawned `plak`. Both knobs
+are for the crash sweep only, not the durability crash matrix or the offline
+lane, and the parity tests run at the default margin of 64. A traced
+build's SQLite actor drains deferred reclamation right after the job that
+queued it rather than when it next idles, so mid-turn reclamation cannot race
+the next round's commits and every twin pilot keeps one commit order; untraced
+builds are unchanged.
 One pool of `--jobs` workers runs every shape's setup, twin pilot and cuts:
 shapes run concurrently, each fixture in its own home, and a shape's cuts are
 queued ahead of the setups still waiting, so its seed is cut and removed before
@@ -4479,9 +4491,22 @@ Working head is `RecoveryRequired` at the facade and
 `Invalid(PruneHeadNotQuiescent)` at the store, and a store over its absolute
 limit is pruned. Over 80 SQLite rounds with automatic prunes, an explicit prune
 and a reopen, a duplicate of the previous root command replays its exact turn
-and checkpoint, and a duplicate of the command 17 turns back is refused,
-unrecorded, as `ControlErrorKind::Reclaimed` without running or moving the head
+and checkpoint, a duplicate of the fourth latest root command replays, and a
+duplicate of the fifth is refused, unrecorded, as `ControlErrorKind::Reclaimed`
+without running or moving the head
 (`duplicates_replay_within_the_retained_window_and_are_reclaimed_past_it`).
+One 200-round Working turn over the memory backend keeps at most 160 checkpoints
+by pruning between rounds
+(`a_long_working_turn_prunes_superseded_checkpoints_between_rounds`); the agent
+suite pins the same bound and the reclaimed non-head bytes against a store that
+prunes like a backend (`long_turn_keeps_its_superseded_working_checkpoints_bounded`),
+that every mid-turn prune retains exactly the four latest terminal checkpoints
+(`mid_turn_prunes_keep_exactly_the_four_latest_terminal_checkpoints`), and that
+the owner prunes nothing while a paid fold awaits its receipt
+(`the_owner_never_prunes_while_a_paid_fold_awaits_its_receipt`). Both stores
+refuse an ordinary prune under a Working head and prune one on the owner's
+`at_working_head` assent, keeping a retained checkpoint whose receipt is typed
+`Pruned` (`run_working_prune_conformance`).
 A child recovery whose recorded checkpoint retention reclaimed applies the
 child's feed first and opens the head the feed names, and the create checkpoint
 stays loadable

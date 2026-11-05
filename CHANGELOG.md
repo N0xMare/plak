@@ -346,6 +346,21 @@ an export.
 
 ### Plakous
 
+- A long turn no longer keeps every checkpoint it commits: between two model
+  rounds the owner prunes superseded history at its Working head under the
+  same 64-checkpoint minimum as the idle sweep, and that prune also keeps the
+  head and the 64 checkpoints before it. A request whose horizon is at or
+  below the one the branch already records removes nothing. A 200-round turn retains about 130 checkpoints
+  instead of about 1,400. A reader that lags more than 64 commits inside the
+  turn reads the head and shows `earlier output not retained`. Nothing is
+  pruned while a compaction workflow is between its identity commit and its
+  receipt. `PruneBranch::at_working_head` is the owner's request for it; an
+  ordinary `PruneBranch::new` under a Working head is still
+  `Invalid(PruneHeadNotQuiescent)`, and a released Working head is never
+  pruned.
+- Retention keeps the 4 most recent root terminal results (was 16): a
+  duplicate of an older root command is `ControlErrorKind::Reclaimed`, and a
+  bridge must settle a handed-off item within 4 further root turns.
 - An agent whose jobs run on a runner reads the line's jobs from the runner
   before it restores them and reports nothing until the restore is done, so
   a terminal an earlier host already reported is not reported again and a job
@@ -674,6 +689,11 @@ an export.
 
 ### Development
 
+- A traced gate build's SQLite actor runs deferred reclamation right after the
+  job that queued it, so a sweep with `PLAK_TEST_WORKING_PRUNE_MINIMUM=1`
+  and `PLAK_TEST_WORKING_PRUNE_MARGIN=1` (test-hooks knobs that prune between
+  every pair of rounds, the margin one lowering the recency floor) keeps one
+  commit order per twin pilot.
 - A test's wall-clock wait that only guards against a hang is thirty seconds;
   a bound that tells prompt from late runs in the serial lane, on a paused
   clock or event-driven (spec 05 §2.3).

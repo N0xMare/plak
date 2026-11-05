@@ -144,6 +144,11 @@ impl Trace {
     }
 }
 
+/// Whether this process traces its commits (some store installed the trace).
+pub(crate) fn active() -> bool {
+    TRACE.get().is_some()
+}
+
 /// Installs the shared tracer on a writable WAL connection.
 ///
 /// Returns false without changing the connection when the trace env is absent.

@@ -63,6 +63,12 @@ slow-timeout = { period = "300s", terminate-after = 2 }
 filter = 'test(tls_integrity_reproducer_matrix)'
 slow-timeout = { period = "300s", terminate-after = 2 }
 
+# One scripted turn long enough that a Working prune has run, held before
+# its terminal. Sqlite commits make it slower than the agent-store twin.
+[[profile.default.overrides]]
+filter = 'test(a_reader_within_the_recency_margin_projects_exactly_across_an_in_turn_compaction)'
+slow-timeout = { period = "240s", terminate-after = 2 }
+
 [profile.offline]
 default-filter = '''
 not (
@@ -213,6 +219,7 @@ not (
   | test(owner_reopen_polls_a_reinstated_lease_with_a_new_operation_id)
   | test(child_wake_admitted_before_dispatch_is_abandoned_without_duplicate_admission)
   | test(gc_after_a_compaction_cut_before_projection_prunes_at_the_compacted_head)
+  | test(working_prune_waits_out_a_compaction_between_identity_and_receipt)
   | test(sqlite_paid_compaction_sigkill_reopens_exactly_once)
   | test(sqlite_no_locator_paid_compaction_sigkill_is_never_redispatched)
   | test(complete_run_is_one_exact_new_state_and_probe_is_inert)
@@ -396,6 +403,7 @@ default-filter = '''
   | test(owner_reopen_polls_a_reinstated_lease_with_a_new_operation_id)
   | test(child_wake_admitted_before_dispatch_is_abandoned_without_duplicate_admission)
   | test(gc_after_a_compaction_cut_before_projection_prunes_at_the_compacted_head)
+  | test(working_prune_waits_out_a_compaction_between_identity_and_receipt)
   | test(sqlite_paid_compaction_sigkill_reopens_exactly_once)
   | test(sqlite_no_locator_paid_compaction_sigkill_is_never_redispatched)
   | test(complete_run_is_one_exact_new_state_and_probe_is_inert)

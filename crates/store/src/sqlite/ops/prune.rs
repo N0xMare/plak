@@ -49,7 +49,7 @@ pub(in super::super) fn prune(
     lines::require_line_head(&tx, selector, line, generation)?;
     let head = checkpoint_row(&tx, row.head.checkpoint().checkpoint_id())?
         .ok_or(SessionStoreError::corrupt())?;
-    if head.kind != RuntimeCheckpointKind::Quiescent {
+    if head.kind != RuntimeCheckpointKind::Quiescent && !r.admits_working_head() {
         return Err(SessionStoreError::Invalid(
             StoreInvalidReason::PruneHeadNotQuiescent,
         ));
@@ -62,13 +62,30 @@ pub(in super::super) fn prune(
             .map_or(BranchRevision::INITIAL, |h| h.revision),
         0,
     );
-    // The head's parent is the horizon: everything strictly below it that no
-    // receipt, fork, other branch or the runtime still names is superseded.
-    let (Some(horizon_revision), Some(horizon_checkpoint)) =
-        (row.head.revision().get().checked_sub(1), head.parent)
-    else {
+    // The horizon is the head's parent, lowered for a Working-head prune so
+    // the head and the `recency_margin` checkpoints before it stay. Everything
+    // strictly below it that no receipt, fork, other branch or the runtime
+    // still names is superseded. A request at or below the horizon already
+    // recorded does not move it backward.
+    let Some(horizon_revision) = r.horizon_revision() else {
         tx.commit().map_err(map_sqlite)?;
         return Ok(unchanged);
+    };
+    if previous
+        .as_ref()
+        .is_some_and(|stored| horizon_revision <= stored.revision.get())
+    {
+        tx.commit().map_err(map_sqlite)?;
+        return Ok(unchanged);
+    }
+    let horizon_checkpoint = if horizon_revision.saturating_add(1) == row.head.revision().get() {
+        let Some(parent) = head.parent else {
+            tx.commit().map_err(map_sqlite)?;
+            return Ok(unchanged);
+        };
+        parent
+    } else {
+        checkpoint_at_revision(&tx, selector, horizon_revision)?
     };
     let mut statement = tx.prepare(PRUNE_CANDIDATES).map_err(map_sqlite)?;
     let superseded = statement
@@ -180,6 +197,27 @@ pub(in super::super) fn incremental_vacuum(
     let mut rows = statement.query([]).map_err(map_sqlite)?;
     while rows.next().map_err(map_sqlite)?.is_some() {}
     Ok(())
+}
+
+fn checkpoint_at_revision(
+    tx: &Transaction<'_>,
+    selector: SessionRef,
+    revision: u64,
+) -> Result<CheckpointId, SessionStoreError> {
+    tx.query_row(
+        "SELECT checkpoint_id FROM checkpoints WHERE session_id=?1 AND branch_id=?2 AND revision=?3",
+        params![
+            id(selector.session_id()),
+            id(selector.branch_id()),
+            u64b(revision)
+        ],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .map_err(map_sqlite)?
+    .map(|value| parse::<CheckpointId>(&value))
+    .transpose()?
+    .ok_or_else(SessionStoreError::corrupt)
 }
 
 fn write_horizon(tx: &Transaction<'_>, h: &BranchHorizon) -> Result<(), SessionStoreError> {

@@ -999,6 +999,10 @@ pub(super) fn scripted_tool_policy(script: &ScriptPlan) -> Arc<dyn ToolPolicy> {
 pub(super) fn scripted_agent_config(script: &ScriptPlan) -> plakous::agent::AgentConfig {
     let config = plakous::agent::AgentConfig::default()
         .with_observation_budget_cap_bytes(script.observation_budget_cap_bytes);
+    let config = script
+        .max_model_rounds
+        .filter(|rounds| *rounds > 0)
+        .map_or(config, |rounds| config.with_max_model_rounds(rounds));
     let config = script.effect_decision_timeout_ms.map_or(config, |timeout| {
         config.with_effect_decision_timeout(std::time::Duration::from_millis(timeout))
     });

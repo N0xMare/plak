@@ -2638,6 +2638,7 @@ async fn sqlite_prune_conformance_reopens_exact_and_verified() -> Result<(), Box
     let store =
         SqliteSessionStore::open_with_clock(&db.path, Arc::new(ObservedLeaseClock::new(100)))?;
     conformance::run_prune_conformance(&store, RuntimeDurability::Required, 40_000).await?;
+    conformance::run_working_prune_conformance(&store, RuntimeDurability::Required, 42_000).await?;
     conformance::run_reclaimed_address_conformance(
         Arc::new(store.clone()),
         RuntimeDurability::Required,

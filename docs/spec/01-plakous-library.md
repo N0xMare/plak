@@ -585,10 +585,13 @@ idempotent bridge requires no transaction spanning the product store and the
 
 The bridge is bounded by history retention (§4). A duplicate of a finished root
 command replays its acknowledgement and turn result only while the command is
-among the 16 most recent finalized root commands of the branch; past that bound
-the duplicate is refused, unrecorded, as `ControlErrorKind::Reclaimed`. A bridge MUST therefore settle each handed-off
+among the 4 most recent finalized root commands of the branch; past that bound
+the duplicate is refused, unrecorded, as `ControlErrorKind::Reclaimed`. Past that
+window, a feed reader that still names an older terminal receives a generic
+terminal row (`NotRetained`), not the terminal's failure or abandonment detail.
+A bridge MUST therefore settle each handed-off
 item (consume it on the first acknowledgement or a duplicate within the bound)
-before 16 further root turns finish, and treats `Reclaimed` as proof that the
+before 4 further root turns finish, and treats `Reclaimed` as proof that the
 command was admitted and finished: it consumes the item and does not resend it.
 
 ### 3.3 The closed turn procedure
@@ -1059,13 +1062,28 @@ The in-process working turn is neither a checkpoint nor a second recovery
 authority.
 
 **History retention.** A checkpoint is authority only while something can
-still select it. Once a branch head is `Quiescent`, the checkpoints strictly
-below the head's parent are *superseded* unless something still names them:
+still select it. Below the live owner's head, the checkpoints strictly below
+the head's parent are *superseded* unless something still names them:
 the session's create checkpoint, a fork receipt's source or target, a fork
 lineage or another branch's parent, or a checkpoint the runtime retains
-(`checkpoint_retained_history`: where each of the 16 most recent finalized root
+(`checkpoint_retained_history`: where each of the 4 most recent finalized root
 commands published its terminal result, so a duplicate of one still
-rehydrates). Pruning removes superseded checkpoints with their commit receipts
+rehydrates; an older duplicate is `Reclaimed`). A Working turn's head adds one
+condition: while any `Compaction` operation in its ledger is not `Finalized`,
+nothing is superseded. A compaction workflow records that operation first and
+finalizes it last, so until then it is between its identity commit and its
+receipt, and its recovery loads its source checkpoint, its deterministic
+targets and the targets' parents by name. Everything else a
+Working turn's recovery reads is the head itself (its ledger, context state and
+continuation frames) and the retained terminal checkpoints. Checkpoints an
+embedder names for a released session's workflow (code-cell abandonment,
+effect evidence, and compaction receipt recovery or abandonment) run only on a
+released session. `AgentSessions::compact` runs through the attached driver as
+its own guarded `Compaction` operation; only `recover` and `abandon_compaction`
+run on a released session. The embedder consumes those answers before it
+reopens a driver. That consumption rule is a library contract. The hosted
+product satisfies it by not calling the released workflows; its child
+effect-evidence branch cannot run. Pruning removes superseded checkpoints with their commit receipts
 and every object no surviving checkpoint reaches. The head's canonical history
 is complete in the head itself, so history paging, export, resume and fork are
 unchanged by it. A pruned checkpoint or receipt is refused as
@@ -1080,13 +1098,26 @@ once at least 64 checkpoints are
 superseded. The owner remembers the horizon of its last prune receipt, seeded
 at open from the horizon the store persisted for the branch (`LoadedBranch`
 carries it), and asks the store only when the revisions between that horizon
-and the head's parent could number 64, so most turns cost no store
+and the prune frontier could number 64 (the head's parent, or for a Working head the lower of that and 64 revisions before the head), so most turns cost no store
 transaction, and a reopened owner does not repeat its predecessor's prune; the prune runs under
 the owner's lease gate (the heartbeat waits for it), bounded by the store
 operation deadline and checkpoint-pruning work. SQLite defers the object walk
 to its bounded background lane (§5.2). This never changes or delays the published result: it runs after
-publication, a failure is only a `RetentionFinished` telemetry observation, and
-a Working head is never pruned. Before dispatching the prune, the owner
+publication, and a failure is only a `RetentionFinished` telemetry observation.
+The live owner also prunes at a Working head, at the top of every model round
+after the first of a turn's run (a turn's first round is not delayed, and
+between rounds no workflow of the turn is mid-flight), under
+the same 64-checkpoint minimum and best-effort rule, through
+`PruneBranch::at_working_head`. That prune's horizon is the lower of the head's
+parent and 64 revisions before the head, so the head and the 64 checkpoints before it stay.
+A reader that lags more than 64 commits inside a turn reads the head and shows
+`earlier output not retained`, as one does across idle retention. A long turn's
+superseded checkpoints therefore stay within about one minimum, plus that
+recency margin, plus a round's commits. A test-hooks build reads
+`PLAK_TEST_WORKING_PRUNE_MINIMUM` for that minimum, and
+`PLAK_TEST_WORKING_PRUNE_MARGIN` for the recency floor, so a gate sweep prunes
+between every pair of rounds. Both knobs are for the crash sweep only
+(spec 05); parity tests run at the default margin. Before dispatching the prune, the owner
 unconditionally reduces its object cache to the current root's reachable
 closure. Cache membership must not imply that a superseded object survives
 store reclamation; reconstructing its address later must supply it again.
@@ -1105,8 +1136,9 @@ fork, rebind, clear) keeps its request until the feed settles it, and prunes
 explicitly only at its head view after applying the feed to its tail; it skips
 a session whose request has no fact. An admitted session-workflow compaction
 that loses its owner is the runtime's to close at the next open (§5.5), never
-the consumer's. Automatic retention runs only after a root or child turn's
-terminal publication, and never at a Working head.
+the consumer's. Automatic retention runs after a root or child turn's terminal
+publication and between the rounds of a Working turn the owner runs live; a
+released Working head is never pruned.
 
 A checkpoint contains or references:
 
@@ -1474,7 +1506,8 @@ newer unknown required state fails closed; it is never silently repaired,
 truncated, or replaced with defaults.
 `SessionStore::prune(PruneBranch)` binds the live owner lease, the exact
 expected head, the runtime-retained checkpoint set and a minimum. It refuses a
-Working head as `Invalid(PruneHeadNotQuiescent)` and a moved head as
+Working head as `Invalid(PruneHeadNotQuiescent)` unless the request is the
+owner's mid-turn `PruneBranch::at_working_head`, and a moved head as
 `Conflict`, removes nothing unless at least the minimum would go, and returns a
 `PruneReceipt` (head, horizon revision, pruned checkpoints). SQLite defers object
 reclamation; prune/delete acknowledgements report only checkpoint removals. The branch
@@ -1483,7 +1516,8 @@ commit receipt at or below it is kept, and a retained checkpoint whose parent
 was pruned keeps its sealed parent id. `load_checkpoint`, `recover_commit` and
 commit replay of a pruned id, and `recover_commit` of a retained checkpoint at
 or below the horizon, return `Pruned`. Repeating a prune at the same head
-reclaims nothing. Pruning is a reclaim: it is never refused for capacity and
+reclaims nothing. A requested horizon at or below the one the branch already
+records is an unchanged receipt: zero removals, and that horizon stays. Pruning is a reclaim: it is never refused for capacity and
 runs over the absolute limit. The trait default prunes nothing, so a
 conforming backend may retain all history.
 

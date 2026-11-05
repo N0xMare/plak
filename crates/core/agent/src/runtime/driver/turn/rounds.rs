@@ -329,10 +329,17 @@ impl Driver {
         // The prompt append checked the segment limit just before this frame's
         // first round.
         let mut segment_limit_checked = append_user;
+        let mut between_rounds = false;
         loop {
             if command.cancellation.is_cancelled() || self.shutdown.is_cancelled() {
                 command.cancellation.cancel();
                 return Err(cancelled_error());
+            }
+            // Only between two rounds of this turn: a turn's first round is
+            // not delayed (idle retention after a terminal yields to queued
+            // roots), and between rounds no workflow of the turn is mid-flight.
+            if std::mem::replace(&mut between_rounds, true) {
+                self.retain_history_mid_turn(command.turn_id).await;
             }
             if !std::mem::take(&mut segment_limit_checked)
                 && let Some(refusal) = self.segment_limit_refusal(command.turn_id)

@@ -129,15 +129,24 @@ impl Fixture {
     }
 }
 
-/// Carries the profiler's output path into the spawned binary.
+/// Carries the profiler's output path, and the gate's mid-turn prune knobs,
+/// into the spawned binary.
 ///
 /// The fixture clears the environment so a scripted lifecycle cannot inherit an
 /// operator's settings, and that also strips `LLVM_PROFILE_FILE`. Without it a
 /// coverage run reports zero for every line these tests execute, because the
-/// lines run in a child process that never writes a profile. The variables are
-/// forwarded only when the parent has them, so an ordinary run stays hermetic.
+/// lines run in a child process that never writes a profile. A sweep run with
+/// `PLAK_TEST_WORKING_PRUNE_MINIMUM` prunes between rounds in every shape, and
+/// `PLAK_TEST_WORKING_PRUNE_MARGIN` lowers the recency floor for that prune.
+/// The variables are forwarded only when the parent has them, so an ordinary run
+/// stays hermetic.
 pub(super) fn forward_coverage_environment(command: &mut Command) {
-    for name in ["LLVM_PROFILE_FILE", "CARGO_LLVM_COV_TARGET_DIR"] {
+    for name in [
+        "LLVM_PROFILE_FILE",
+        "CARGO_LLVM_COV_TARGET_DIR",
+        "PLAK_TEST_WORKING_PRUNE_MINIMUM",
+        "PLAK_TEST_WORKING_PRUNE_MARGIN",
+    ] {
         if let Some(value) = std::env::var_os(name) {
             command.env(name, value);
         }

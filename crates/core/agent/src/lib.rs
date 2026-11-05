@@ -87,6 +87,22 @@ mod test_hooks;
 #[cfg(not(feature = "test-hooks"))]
 mod test_hooks {
     pub(crate) fn credential_wait_clear_refused(_: &dyn std::fmt::Debug) {}
+
+    pub(crate) const fn working_prune_minimum(production: u64) -> u64 {
+        production
+    }
+
+    pub(crate) const fn working_prune_margin(production: u64) -> u64 {
+        production
+    }
+
+    #[cfg(test)]
+    pub(crate) fn note_working_prune_before_provider() {}
+
+    #[cfg(test)]
+    pub(crate) const fn working_prune_before_provider() -> usize {
+        0
+    }
 }
 #[cfg(not(target_arch = "wasm32"))]
 mod tokio_runtime;

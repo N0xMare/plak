@@ -658,22 +658,36 @@ impl DeleteReceipt {
 
 /// Exact request to reclaim superseded checkpoint history of one branch.
 ///
-/// Only the live owner may prune, only at its exact Quiescent head. The store
+/// Only the live owner may prune, at its exact head: a Quiescent head, or a
+/// Working head only through [`Self::at_working_head`]. The store
 /// keeps the head, its parent, every create and fork checkpoint, every
-/// checkpoint another branch depends on, and every checkpoint in `retain`;
-/// everything else below the head's parent is removed with its commit receipt
-/// and queues objects no retained checkpoint reaches for deferred reclamation.
+/// checkpoint another branch depends on, and every checkpoint in `retain`.
+/// A Working-head prune also keeps the head and the
+/// [`Self::WORKING_RECENCY_MARGIN`] checkpoints before it. Everything else
+/// below the horizon is
+/// removed with its commit receipt and queues objects no retained checkpoint
+/// reaches for deferred reclamation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PruneBranch {
     lease: BranchLease,
     expected: BranchHead,
     retain: BTreeSet<CheckpointId>,
     minimum: u64,
+    working_head: bool,
+    /// Newest checkpoints kept above the ordinary parent horizon. Zero for an
+    /// ordinary prune; [`Self::WORKING_RECENCY_MARGIN`] for a Working head.
+    recency_margin: u64,
 }
 
 impl PruneBranch {
-    /// Binds one prune to the owner's lease and exact head. Nothing is removed
-    /// unless at least `minimum` checkpoints would be.
+    /// Checkpoints before the head that a Working-head prune never removes:
+    /// the head and the 64 checkpoints before it. The horizon is the lower of
+    /// the head's parent and this many revisions before the head, so a reader
+    /// that lags by no more than this still loads the checkpoint it names.
+    pub const WORKING_RECENCY_MARGIN: u64 = 64;
+
+    /// Binds one prune to the owner's lease and exact Quiescent head. Nothing
+    /// is removed unless at least `minimum` checkpoints would be.
     #[must_use]
     pub const fn new(
         lease: BranchLease,
@@ -686,6 +700,90 @@ impl PruneBranch {
             expected,
             retain,
             minimum,
+            working_head: false,
+            recency_margin: 0,
+        }
+    }
+
+    /// Binds one prune to a live owner's exact Working head, mid-turn. The
+    /// owner asserts that its turn's recovery reads nothing the store would
+    /// remove beyond `retain` and the recency margin; a released Working head
+    /// is left for recovery.
+    #[must_use]
+    pub const fn at_working_head(
+        lease: BranchLease,
+        expected: BranchHead,
+        retain: BTreeSet<CheckpointId>,
+        minimum: u64,
+    ) -> Self {
+        Self {
+            lease,
+            expected,
+            retain,
+            minimum,
+            working_head: true,
+            recency_margin: Self::WORKING_RECENCY_MARGIN,
+        }
+    }
+
+    /// Replaces the recency margin. The live owner passes the test-hooks value;
+    /// [`Self::at_working_head`] itself stays at [`Self::WORKING_RECENCY_MARGIN`].
+    #[must_use]
+    pub(crate) const fn with_recency_margin(mut self, recency_margin: u64) -> Self {
+        self.recency_margin = recency_margin;
+        self
+    }
+
+    /// Working-head prune with an explicit recency margin. Production uses
+    /// [`Self::at_working_head`]; tests pass `0` to show what a prune that
+    /// ignores the margin does to a reader.
+    #[cfg(test)]
+    #[must_use]
+    pub const fn at_working_head_with_margin(
+        lease: BranchLease,
+        expected: BranchHead,
+        retain: BTreeSet<CheckpointId>,
+        minimum: u64,
+        recency_margin: u64,
+    ) -> Self {
+        Self {
+            lease,
+            expected,
+            retain,
+            minimum,
+            working_head: true,
+            recency_margin,
+        }
+    }
+
+    /// Whether the owner admits a Working head ([`Self::at_working_head`]).
+    #[must_use]
+    pub const fn admits_working_head(&self) -> bool {
+        self.working_head
+    }
+
+    /// Revisions before the head this prune keeps, besides the head. Zero
+    /// unless the request is [`Self::at_working_head`].
+    #[must_use]
+    pub const fn recency_margin(&self) -> u64 {
+        self.recency_margin
+    }
+
+    /// Revision at and below which this prune reclaims receipts, and strictly
+    /// below which checkpoints are superseded. `None` when the head has no
+    /// parent. A Working-head request lowers it to keep
+    /// the head and the [`Self::WORKING_RECENCY_MARGIN`] checkpoints before it.
+    #[must_use]
+    pub const fn horizon_revision(&self) -> Option<u64> {
+        let head = self.expected.revision().get();
+        let Some(parent) = head.checked_sub(1) else {
+            return None;
+        };
+        let lowered = head.saturating_sub(self.recency_margin);
+        if parent < lowered {
+            Some(parent)
+        } else {
+            Some(lowered)
         }
     }
 
@@ -695,7 +793,7 @@ impl PruneBranch {
         &self.lease
     }
 
-    /// Returns the exact expected Quiescent head.
+    /// Returns the exact expected head.
     #[must_use]
     pub const fn expected(&self) -> BranchHead {
         self.expected

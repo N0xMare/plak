@@ -1404,7 +1404,7 @@ pub(in crate::runtime) fn terminal_turn_result(
 
 /// Root terminal results a duplicate command can still rehydrate after
 /// history retention; older duplicates are refused as reclaimed.
-const RETAINED_TERMINAL_RESULTS: usize = 16;
+const RETAINED_TERMINAL_RESULTS: usize = 4;
 
 /// Historical checkpoints this head still names as authority: the checkpoints
 /// the most recent finalized root commands published their terminal results
@@ -1433,6 +1433,29 @@ pub(crate) fn checkpoint_retained_history(
         .take(RETAINED_TERMINAL_RESULTS)
         .copied()
         .collect()
+}
+
+/// Whether the owner of `checkpoint`, its branch head, may prune the history
+/// below it now. A Quiescent head may. A Working head may only while no
+/// compaction workflow is between its identity commit and its receipt: its
+/// `Compaction` operation is recorded first and finalized last, and until then
+/// its recovery loads its source, its deterministic targets and their parent
+/// checkpoints by name. Everything else a Working turn's recovery reads is the
+/// head itself, and the terminal checkpoints it names are retained by
+/// [`checkpoint_retained_history`].
+#[must_use]
+pub(crate) fn history_prunable_at(checkpoint: &RuntimeCheckpoint) -> bool {
+    let manifest = checkpoint.manifest();
+    matches!(manifest.lifecycle(), crate::RuntimeLifecycle::Quiescent)
+        || manifest.ledger().operations().into_iter().all(|operation| {
+            !matches!(
+                operation.kind(),
+                crate::DurableOperationKind::Compaction { .. }
+            ) || matches!(
+                operation.state(),
+                crate::DurableOperationState::Finalized(_)
+            )
+        })
 }
 
 /// Whether an exact reopen can close this Working head using saved local

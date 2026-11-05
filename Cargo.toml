@@ -486,6 +486,10 @@ feature-ceiling = 63
 env-sites = ["src/test_session_lease.rs"]
 reason = "Existing placement debt plus the auth/native-only drift type, error formatting and Codex live-refusal summaries; reduced products must not link omitted auth. The store feature gates the sessions module at its one declaration. The test-hooks session lease override is the only environment read, and other builds do not compile it."
 
+[workspace.metadata.plakous.cfg.plakous-agent]
+env-sites = ["src/test_hooks.rs"]
+reason = "The test-hooks mid-turn prune minimum and recency margin are the only environment reads. Other builds do not compile that module."
+
 [workspace.metadata.plakous.cfg.plakous-anthropic]
 feature-ceiling = 22
 reason = "Native beta classification and its HTTP hook stay feature-gated; shared API-key construction removes a native-only helper."

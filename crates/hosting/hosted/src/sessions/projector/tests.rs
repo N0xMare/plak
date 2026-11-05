@@ -13,9 +13,10 @@ use plakous::model::{
 };
 use plakous::sessions::SessionLocator;
 use plakous::sessions::feed::{
-    FeedBranchTransition, FeedCallerLineage, FeedCancelCause, FeedCommandKind, FeedCompactPass,
-    FeedCompactReason, FeedFact, FeedHeader, FeedLocator, FeedOperationKind, FeedOperationState,
-    FeedRecord, FeedSeq, FeedTurnOutcome, FeedWorkflowKind, FeedWorkflowOutcome,
+    FeedBranchTransition, FeedCallerLineage, FeedCancelCause, FeedChange, FeedCommandKind,
+    FeedCompactPass, FeedCompactReason, FeedFact, FeedHeader, FeedLocator, FeedOperationKind,
+    FeedOperationState, FeedRecord, FeedSeq, FeedTurnOutcome, FeedWorkflowKind,
+    FeedWorkflowOutcome,
 };
 use proptest::prelude::*;
 
@@ -2749,6 +2750,226 @@ async fn a_pilot_feed_projects_identically_at_every_page_boundary() -> TestResul
             tool_calls: 1,
             compactions: 1,
         }
+    );
+    session.release().await?;
+    Ok(())
+}
+
+/// A reader that stays within the Working-head recency margin, across an
+/// in-turn compaction and the prunes it provokes, still projects the exact
+/// rows. The read is taken while the turn is held, before the idle prune at
+/// its terminal. Checkpoints older than the margin may be gone; the tool
+/// result and the fold are not. A catch-up at the first retained revision
+/// matches a reader that followed the whole feed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_reader_within_the_recency_margin_projects_exactly_across_an_in_turn_compaction()
+-> TestResult {
+    use plakous::sessions::{
+        CreateSessionOutcome, CreateSessionRequest, SessionBackend, SessionOperationId,
+    };
+    use plakous_offline_crash_harness::gate::GateHandle;
+    use plakous_offline_crash_harness::script::{SCRIPT_VERSION, ScriptPlan};
+    use plakous_offline_crash_harness::{BoundaryController, protocol::CrashBoundary};
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicU64;
+
+    let directory = tempfile::tempdir()?;
+    let workspace = directory.path();
+    let sessions = AgentSessions::new(SessionBackend::sqlite(workspace.join("runtime.sqlite"))?)?;
+    let controller = BoundaryController::quiet_from_evidence_path(
+        CrashBoundary::None,
+        workspace.join("evidence.jsonl"),
+    )?;
+    let gate = GateHandle::new();
+    // Continuations stay one turn and barely grow the projected input, so a
+    // Working prune can run before the fold. One oversized tool result then
+    // folds, and the hold is the next round, inside the 64-checkpoint margin.
+    // A stop-finished note would end the turn on the first round.
+    let mut steps = Vec::new();
+    for _ in 0..48 {
+        steps.push(serde_json::json!({
+            "output": {"text": "note"},
+            "finish": "assistant_continuation",
+            "usage": {}
+        }));
+    }
+    steps.push(serde_json::json!({
+        "output": {"tool": {"name": "loopback_effect", "arguments": {}}},
+        "finish": "tool_calls",
+        "usage": {}
+    }));
+    // The turn model answers the fold from the next script step. Only a
+    // stop with text is a summary; a continuation is a non-summary terminal.
+    steps.push(serde_json::json!({
+        "output": {"text": "Summary of earlier work:\nthe probe was folded"},
+        "usage": {}
+    }));
+    steps.push(serde_json::json!({
+        "gate": gate.script(),
+        "output": {"text": "after the hold"},
+        "usage": {}
+    }));
+    let plan: Arc<ScriptPlan> = Arc::new(serde_json::from_value(serde_json::json!({
+        "version": SCRIPT_VERSION,
+        "maximum_projected_input": 40_000,
+        "scheduled_compaction": true,
+        "content_sensitive_projection": true,
+        "tool_result_bytes": 60_000,
+        "fold": "accept",
+        "max_model_rounds": 96,
+        "steps": steps
+    }))?);
+    let binding = plakous_offline_crash_harness::scripted_runtime_binding_with_cursor(
+        workspace,
+        controller,
+        Arc::clone(&plan),
+        Arc::new(AtomicU64::new(1)),
+    )?;
+    let CreateSessionOutcome::Created { session, .. } = sessions
+        .create(CreateSessionRequest::new(
+            SessionOperationId::new("projector-margin:create")?,
+            binding,
+        ))
+        .await?
+    else {
+        return Err("not created".into());
+    };
+    let turn = session.agent().prompt("probe across the fold").await?;
+    if tokio::time::timeout(std::time::Duration::from_secs(180), gate.entered())
+        .await
+        .is_err()
+    {
+        gate.release();
+        let outcome = turn.result().await;
+        return Err(format!("the turn never reached the held round: {outcome:?}").into());
+    }
+    let records = pilot_records(&sessions, session.locator().session_id()).await?;
+    let mut head_revision = 0_u64;
+    let mut horizon = 0_u64;
+    let mut compact_revision = None;
+    for record in &records {
+        match record.header().change {
+            FeedChange::Advanced { revision, .. } => {
+                head_revision = head_revision.max(revision.get());
+            }
+            FeedChange::Pruned {
+                horizon: pruned_horizon,
+                ..
+            } => horizon = horizon.max(pruned_horizon.get()),
+            _ => {}
+        }
+        let settled_here = record.facts().iter().any(|fact| {
+            matches!(
+                fact,
+                FeedFact::WorkflowSettled {
+                    kind: FeedWorkflowKind::Compact { .. },
+                    outcome: FeedWorkflowOutcome::Compacted { .. },
+                    ..
+                }
+            )
+        });
+        if settled_here {
+            let revision = match record.header().change {
+                FeedChange::Advanced { revision, .. } => revision.get(),
+                _ => head_revision,
+            };
+            compact_revision = Some(revision);
+        }
+    }
+    assert!(
+        horizon > 0,
+        "the turn never pruned; head revision {head_revision}"
+    );
+    let floor = head_revision.saturating_sub(64);
+    assert!(
+        horizon <= floor,
+        "horizon {horizon} ate into the newest 64 of head {head_revision}"
+    );
+    let compact_revision = compact_revision.ok_or_else(|| {
+        format!(
+            "the turn never finalized an in-turn compaction; head {head_revision} horizon {horizon} floor {floor} records {}",
+            records.len()
+        )
+    })?;
+    assert!(
+        compact_revision >= floor,
+        "the compaction at revision {compact_revision} is outside the margin of head {head_revision} (floor {floor}, horizon {horizon})"
+    );
+    // A suffix alone never applies: an empty lineage accepts only `Created`.
+    // The whole feed is the reader. Checkpoints older than the margin may be
+    // gone; the tool and the fold, inside it, must still read back exactly,
+    // including a catch-up that resumes at the first retained revision.
+    let start = records
+        .iter()
+        .position(|record| {
+            matches!(
+                record.header().change,
+                FeedChange::Advanced { revision, .. } if revision.get() >= floor
+            )
+        })
+        .ok_or("no checkpoint inside the recency margin")?;
+    let intents = ProductIntents::default();
+    let all = run(&sessions, SessionViews::empty(), &intents, &records).await?;
+    assert!(
+        all.views.rows.values().any(|row| {
+            row.as_tool().is_some_and(|tool| {
+                tool.name == "loopback_effect"
+                    && tool.state == "succeeded"
+                    && tool.detail.as_deref().is_some_and(|detail| {
+                        !detail.is_empty() && !detail.contains(NOT_RETAINED_ROW)
+                    })
+            })
+        }),
+        "the retained window lost the tool output: {:?}",
+        all.views.rows
+    );
+    assert!(
+        all.views.rows.values().any(|row| {
+            row.as_tool()
+                .is_some_and(|tool| tool.name == "compact" && tool.finished_at_ms.is_some())
+        }),
+        "the retained window lost the compaction: {:?}",
+        all.views.rows
+    );
+    let caught_up = run(
+        &sessions,
+        run(
+            &sessions,
+            SessionViews::empty(),
+            &intents,
+            &records[..start],
+        )
+        .await?
+        .views,
+        &intents,
+        &records[start..],
+    )
+    .await?;
+    assert_eq!(
+        caught_up.views, all.views,
+        "a catch-up at the recency floor (record {start}) diverged"
+    );
+    for size in [1_usize, records.len()] {
+        let mut views = SessionViews::empty();
+        let mut cursor = 0;
+        while cursor < records.len() {
+            let end = (cursor + size).min(records.len());
+            views = run(&sessions, views, &intents, &records[cursor..end])
+                .await?
+                .views;
+            cursor = end;
+        }
+        assert_eq!(views, all.views, "page size {size}");
+    }
+    gate.release();
+    let result = turn.result().await?;
+    assert!(
+        matches!(
+            result.outcome(),
+            plakous::agent::TurnResultOutcome::Completed(_)
+        ),
+        "{:?}",
+        result.outcome()
     );
     session.release().await?;
     Ok(())

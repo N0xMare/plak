@@ -2113,6 +2113,10 @@ anchored below it, then the `Branched` record, then its own. A session created
 by import starts from its imported transcript intent. A read whose checkpoint
 was pruned falls back to the current head by entry identity; items a compaction
 has since removed derive one `earlier output not retained` marker row instead.
+A Working-head prune leaves the head and the 64 checkpoints before it (spec 01 §4), so a reader
+that lags by no more than 64 commits inside a turn, including across an in-turn
+compaction, still projects exactly. A reader that lags further reads the head
+and shows `earlier output not retained`, as it does across idle retention.
 When the feed is behind retention, the projector seeds the head locator from
 the followed branch's current head, never an arbitrary sibling head, restarts
 the counters from zero, derives the transcript from that branch's canonical

@@ -1533,6 +1533,218 @@ async fn assert_retained(
     Ok(())
 }
 
+/// `chain.last`'s successor at `revision` with an unfinished turn.
+fn working_successor(
+    chain: &PruneChain,
+    revision: u64,
+    durability: RuntimeDurability,
+) -> TestResult<RuntimeCheckpoint> {
+    use plakous_agent::internal::{
+        DurableOperationKind, DurableOperationRecord, DurableOperationState,
+        DurableOperationTransition, RecoveryAction, RecoveryHandlerSignature, RecoveryObligation,
+        RecoveryObligationKind, RuntimeComponentKind, RuntimeLifecycle, RuntimeManifest,
+        RuntimeOperationLedger, RuntimeOperationRoot, RuntimeWorkingRoot, WorkingRecoveryPhase,
+    };
+    let selector = chain.created.branch().session();
+    let index = usize::try_from(revision)?;
+    let quiescent = checkpoint_with_payload(
+        topology(
+            selector.session_id(),
+            selector.branch_id(),
+            chain.ids[index],
+            Some(chain.ids[index - 1]),
+            revision,
+            None,
+            chain.created.lease().fence().get(),
+        )?,
+        2,
+        durability,
+        RuntimeContextState::genesis(selector.session_id(), selector.branch_id(), [0x51; 32])?,
+        false,
+        &chain_payload(revision, 512),
+    )?;
+    let manifest = quiescent.manifest();
+    let turn_id = id(70_801)?;
+    let operation = DurableOperationRecord::new(
+        7,
+        DurableOperationKind::Provider {
+            root: RuntimeOperationRoot::Turn(turn_id),
+            attempt_id: id(70_802)?,
+        },
+        component(RuntimeComponentKind::Operation, b"provider-request-v1")?,
+        vec![DurableOperationTransition::new(
+            id(70_803)?,
+            DurableOperationState::Prepared,
+        )],
+    )?;
+    Ok(RuntimeCheckpoint::new(RuntimeManifest::new(
+        manifest.provenance().clone(),
+        manifest.topology(),
+        RuntimeLifecycle::Working {
+            root: RuntimeWorkingRoot::Turn {
+                turn_id,
+                next_round: 1,
+            },
+            recovery_phase: WorkingRecoveryPhase::DispatchEvidence,
+            obligations: vec![RecoveryObligation::new(
+                7,
+                RecoveryHandlerSignature::new(
+                    RecoveryObligationKind::ProviderAttempt,
+                    RecoveryAction::ProviderEvidenceRequired,
+                ),
+            )],
+        },
+        manifest.harness_plan_component().clone(),
+        manifest.provider_configuration().clone(),
+        manifest.canonical().clone(),
+        manifest.binding().clone(),
+        manifest.tools().clone(),
+        RuntimeOperationLedger::new(Vec::new(), vec![operation])?,
+        None,
+        None,
+        manifest.jobs().clone(),
+        manifest.named_state().clone(),
+        manifest.durability(),
+    )?)?)
+}
+
+/// Mid-turn retention: a Working head is pruned only on the owner's explicit
+/// assent, and then only below the recency margin.
+pub(crate) async fn run_working_prune_conformance(
+    store: &dyn SessionStore,
+    durability: RuntimeDurability,
+    base: u128,
+) -> TestResult {
+    // Head revision is COMMITS + 1. The margin keeps that revision and the
+    // 64 before it, so the chain has to be longer than the margin before
+    // anything below it can go.
+    const COMMITS: u64 = 70;
+    const MARGIN: u64 = PruneBranch::WORKING_RECENCY_MARGIN;
+    let mut chain = prune_chain(store, durability, base, COMMITS, 512).await?;
+    chain
+        .ids
+        .push(id::<CheckpointId>(base + 100 + u128::from(COMMITS + 1))?);
+    let next = working_successor(&chain, COMMITS + 1, durability)?;
+    let publication = bundle(&next, Some(&chain.prior))?;
+    let head = store
+        .commit(CommitCheckpoint::new(
+            chain.created.lease().clone(),
+            chain.head,
+            publication,
+        ))
+        .await?
+        .head();
+    let lease = chain.created.lease().clone();
+    assert_eq!(
+        store
+            .prune(PruneBranch::new(lease.clone(), head, BTreeSet::new(), 1))
+            .await,
+        Err(SessionStoreError::Invalid(
+            StoreInvalidReason::PruneHeadNotQuiescent
+        )),
+        "an ordinary prune never removes history under a Working head"
+    );
+    let receipt = store
+        .prune(PruneBranch::at_working_head(
+            lease,
+            head,
+            BTreeSet::from([chain.ids[2]]),
+            1,
+        ))
+        .await?;
+    let head_revision = COMMITS + 1;
+    let horizon = head_revision - MARGIN;
+    assert_eq!(receipt.horizon().get(), horizon);
+    // Below the horizon, only the create checkpoint and the retained revision
+    // stay. The horizon checkpoint and everything newer, including the head,
+    // stay with them.
+    let retained = (0..=usize::try_from(head_revision)?)
+        .filter(|index| *index == 0 || *index == 2 || u64::try_from(*index).unwrap_or(0) >= horizon)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        receipt.pruned_checkpoints(),
+        head_revision + 1 - u64::try_from(retained.len())?
+    );
+    assert_retained(
+        store,
+        &chain.ids[..=usize::try_from(head_revision)?],
+        &retained,
+    )
+    .await?;
+    assert_eq!(
+        store.recover_commit(chain.ids[2]).await.map(|_| ()),
+        Err(SessionStoreError::Pruned),
+        "a retained checkpoint's receipt at or below the horizon is typed pruned"
+    );
+    assert_eq!(
+        store
+            .recover_commit(chain.ids[usize::try_from(head_revision)?])
+            .await?
+            .receipt()
+            .head(),
+        head
+    );
+    working_head_prune_does_not_regress_a_recorded_horizon(store, durability, base + 1_000).await
+}
+
+/// An ordinary prune records a horizon, then one Working commit asks for a
+/// lower one (`head - 64`). That request must not move the stored horizon or
+/// remove a checkpoint the earlier prune kept.
+async fn working_head_prune_does_not_regress_a_recorded_horizon(
+    store: &dyn SessionStore,
+    durability: RuntimeDurability,
+    base: u128,
+) -> TestResult {
+    const COMMITS: u64 = 70;
+    let mut chain = prune_chain(store, durability, base, COMMITS, 512).await?;
+    let lease = chain.created.lease().clone();
+    let ordinary = store
+        .prune(PruneBranch::new(
+            lease.clone(),
+            chain.head,
+            BTreeSet::from([chain.ids[5]]),
+            1,
+        ))
+        .await?;
+    assert_eq!(ordinary.horizon().get(), COMMITS - 1);
+    store.load_checkpoint(chain.ids[5]).await?;
+    chain
+        .ids
+        .push(id::<CheckpointId>(base + 100 + u128::from(COMMITS + 1))?);
+    let next = working_successor(&chain, COMMITS + 1, durability)?;
+    let publication = bundle(&next, Some(&chain.prior))?;
+    let head = store
+        .commit(CommitCheckpoint::new(
+            lease.clone(),
+            chain.head,
+            publication,
+        ))
+        .await?
+        .head();
+    let receipt = store
+        .prune(PruneBranch::at_working_head(
+            lease,
+            head,
+            BTreeSet::new(),
+            1,
+        ))
+        .await?;
+    assert_eq!(
+        (receipt.pruned_checkpoints(), receipt.horizon()),
+        (0, ordinary.horizon()),
+        "a Working-head horizon below the stored one changes nothing"
+    );
+    store.load_checkpoint(chain.ids[5]).await?;
+    assert_eq!(
+        store
+            .load_branch(chain.created.branch().session())
+            .await?
+            .horizon(),
+        Some(ordinary.horizon())
+    );
+    Ok(())
+}
+
 /// History retention: the exact retained set, typed `Pruned` for removed
 /// checkpoints and receipts, idempotent repeats, forks before and after a
 /// prune, and exact usage accounting.
@@ -1985,6 +2197,7 @@ pub(super) async fn memory_semantic_deletion_conformance() -> TestResult {
 pub(super) async fn memory_prune_conformance() -> TestResult {
     let store = Arc::new(MemorySessionStore::new(MemoryStoreLimits::default())?);
     run_prune_conformance(store.as_ref(), RuntimeDurability::Disabled, 30_000).await?;
+    run_working_prune_conformance(store.as_ref(), RuntimeDurability::Disabled, 32_000).await?;
     run_reclaimed_address_conformance(store, RuntimeDurability::Disabled, 35_000).await
 }
 

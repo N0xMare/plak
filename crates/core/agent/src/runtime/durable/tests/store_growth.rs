@@ -198,8 +198,11 @@ fn assert_rounds_track_new_items(bytes: &[RoundBytes]) {
     );
 }
 
-#[tokio::test]
-async fn long_turn_persists_each_round_in_proportion_to_its_new_items() -> TestResult {
+/// Runs the 200-round turn against a store that prunes like a backend when
+/// `simulate_prune` is set, and like the stub (never) otherwise.
+async fn long_turn(
+    simulate_prune: bool,
+) -> TestResult<(Arc<TestCreateStore>, Arc<ArtifactModel>, Agent)> {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
     let rounds = (0..ROUNDS).collect::<Vec<_>>();
@@ -214,6 +217,9 @@ async fn long_turn_persists_each_round_in_proportion_to_its_new_items() -> TestR
     )?;
     model.item_context.store(true, Ordering::Release);
     let store = Arc::new(TestCreateStore::default());
+    store
+        .simulate_prune
+        .store(simulate_prune, Ordering::Release);
     let sessions = DurableSessionRuntime::current(
         store.clone(),
         RuntimeDurability::Required,
@@ -237,9 +243,106 @@ async fn long_turn_persists_each_round_in_proportion_to_its_new_items() -> TestR
         result.outcome()
     );
     assert_eq!(result.model_rounds(), ROUNDS + 1);
+    Ok((store, model, agent))
+}
 
+#[tokio::test]
+async fn long_turn_persists_each_round_in_proportion_to_its_new_items() -> TestResult {
+    let (store, model, agent) = long_turn(false).await?;
     let bytes = round_bytes(&store, &model)?;
     assert_rounds_track_new_items(&bytes);
+    agent.shutdown().await?;
+    Ok(())
+}
+
+/// Bytes of the objects reachable from `checkpoints`, counting shared objects once.
+fn closure_bytes<'a>(
+    checkpoints: impl IntoIterator<Item = &'a Arc<RuntimeCheckpoint>>,
+) -> TestResult<usize> {
+    let mut seen = BTreeSet::new();
+    let mut total = 0;
+    for checkpoint in checkpoints {
+        for object in RuntimeCheckpointCodec::bundle(checkpoint, None)?.objects() {
+            if seen.insert(object.address()) {
+                total += object.canonical_bytes().len();
+            }
+        }
+    }
+    Ok(total)
+}
+
+#[tokio::test]
+async fn long_turn_keeps_its_superseded_working_checkpoints_bounded() -> TestResult {
+    // One automatic prune's minimum, the recency margin, and the rounds
+    // committed before the next round boundary reaches it.
+    const RETAINED_BOUND: usize = 64 + 64 + 16;
+    let (store, _model, agent) = long_turn(true).await?;
+    let accepted = lock_mutex(&store.accepted_commits).clone();
+    let log = lock_mutex(&store.prune_log).clone();
+    assert!(
+        log.iter().filter(|prune| prune.working_head).count() >= ROUNDS / 20,
+        "{} mid-turn prunes over {ROUNDS} rounds",
+        log.iter().filter(|prune| prune.working_head).count()
+    );
+    assert_eq!(
+        crate::test_hooks::working_prune_before_provider(),
+        0,
+        "a turn's first round is not a prune point"
+    );
+    // Retained after each accepted commit: everything accepted so far minus
+    // what the prunes acknowledged by then removed.
+    let mut removed = BTreeSet::new();
+    let mut prunes = log.iter().peekable();
+    let mut peak = 0;
+    for index in 0..accepted.len() {
+        while let Some(prune) = prunes.next_if(|prune| prune.accepted <= index + 1) {
+            removed.extend(prune.removed.iter().copied());
+        }
+        peak = peak.max(index + 1 - removed.len());
+    }
+    for prune in &log {
+        assert!(prune.retained.len() <= 4, "the terminal window is 4");
+        assert!(prune.removed.is_disjoint(&prune.retained));
+    }
+    let (head, _) = accepted.last().ok_or("no accepted commit")?;
+    let retained = accepted
+        .iter()
+        .map(|(checkpoint, _)| checkpoint)
+        .filter(|checkpoint| !removed.contains(&checkpoint.id()))
+        .collect::<Vec<_>>();
+    let head_bytes = closure_bytes([head])?;
+    let retained_bytes = closure_bytes(retained.iter().copied())?;
+    let mut written = BTreeSet::new();
+    let stored = lock_mutex(&store.state).stored_commits.clone();
+    let mut written_bytes = 0;
+    for (checkpoint, _) in &accepted {
+        for object in stored
+            .get(&checkpoint.id())
+            .ok_or("accepted commit was not stored")?
+            .bundle()
+            .supplied_objects()
+        {
+            if written.insert(object.address()) {
+                written_bytes += object.canonical_bytes().len();
+            }
+        }
+    }
+    eprintln!(
+        "store-growth retention: {} commits, {} mid-turn prunes; peak {peak} retained checkpoints, {} at the end; non-head bytes {} without mid-turn pruning, {} with it (head {head_bytes} B)",
+        accepted.len(),
+        log.iter().filter(|prune| prune.working_head).count(),
+        retained.len(),
+        written_bytes.saturating_sub(head_bytes),
+        retained_bytes.saturating_sub(head_bytes),
+    );
+    assert!(
+        peak <= RETAINED_BOUND,
+        "{peak} checkpoints retained during the turn"
+    );
+    assert!(
+        retained_bytes.saturating_sub(head_bytes) * 4 < written_bytes.saturating_sub(head_bytes),
+        "mid-turn pruning reclaims most non-head bytes"
+    );
     agent.shutdown().await?;
     Ok(())
 }

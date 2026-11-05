@@ -147,9 +147,64 @@ pub(super) struct TestCreateStore {
     pub(super) prune_release: Notify,
     /// The horizon of the last acknowledged prune, reported by `load_branch`.
     pub(super) horizon: Mutex<Option<BranchRevision>>,
+    /// Prunes like a backend: every stored commit below the request's horizon
+    /// that the request does not retain, once at least its minimum would go.
+    pub(super) simulate_prune: AtomicBool,
+    /// Each simulated prune: accepted commits at the time, whether the head
+    /// was Working, the retained set it named, and what it removed.
+    pub(super) prune_log: Mutex<Vec<SimulatedPrune>>,
+}
+
+#[derive(Clone)]
+pub(super) struct SimulatedPrune {
+    pub(super) accepted: usize,
+    pub(super) working_head: bool,
+    pub(super) retained: BTreeSet<CheckpointId>,
+    pub(super) removed: BTreeSet<CheckpointId>,
 }
 
 impl TestCreateStore {
+    fn simulated_prune(
+        &self,
+        request: &crate::PruneBranch,
+        horizon: BranchRevision,
+    ) -> Result<u64, SessionStoreError> {
+        let state = lock_mutex(&self.state);
+        let head = state
+            .stored_commits
+            .get(&request.expected().checkpoint().checkpoint_id())
+            .ok_or(SessionStoreError::Conflict)?;
+        let working_head = head.checkpoint().kind() != crate::RuntimeCheckpointKind::Quiescent;
+        if working_head && !request.admits_working_head() {
+            return Err(SessionStoreError::Invalid(
+                StoreInvalidReason::PruneHeadNotQuiescent,
+            ));
+        }
+        let mut pruned = lock_mutex(&self.pruned_commits);
+        let removed = state
+            .stored_commits
+            .iter()
+            .filter(|(id, stored)| {
+                stored.checkpoint().manifest().topology().branch_revision < horizon.get()
+                    && !request.retain().contains(id)
+                    && !pruned.contains(id)
+            })
+            .map(|(id, _)| *id)
+            .collect::<BTreeSet<_>>();
+        let count = u64::try_from(removed.len()).unwrap_or(u64::MAX);
+        if count == 0 || count < request.minimum() {
+            return Ok(0);
+        }
+        pruned.extend(removed.iter().copied());
+        lock_mutex(&self.prune_log).push(SimulatedPrune {
+            accepted: lock_mutex(&self.accepted_commits).len(),
+            working_head,
+            retained: request.retain().clone(),
+            removed,
+        });
+        Ok(count)
+    }
+
     fn capacity_refused(&self) -> bool {
         let refused = self.full_writes.load(Ordering::Acquire)
             || lock_mutex(&self.full_until)
@@ -454,6 +509,11 @@ impl SessionStore for TestCreateStore {
         self.record_admission_job("load_checkpoint");
         self.checkpoint_loads.fetch_add(1, Ordering::Relaxed);
         Box::pin(async move {
+            if self.simulate_prune.load(Ordering::Acquire)
+                && lock_mutex(&self.pruned_commits).contains(&checkpoint)
+            {
+                return Err(SessionStoreError::Pruned);
+            }
             let state = lock_mutex(&self.state);
             state
                 .stored_commits
@@ -1485,13 +1545,26 @@ impl SessionStore for TestCreateStore {
             if self.fail_prune.load(Ordering::Acquire) {
                 return Err(SessionStoreError::BackendUnavailable);
             }
-            let horizon =
-                BranchRevision::from_store(request.expected().revision().get().saturating_sub(1));
+            let candidate = BranchRevision::from_store(request.horizon_revision().unwrap_or(0));
+            let pruning = self.simulate_prune.load(Ordering::Acquire);
+            let pruned = if pruning {
+                self.simulated_prune(&request, candidate)?
+            } else {
+                0
+            };
+            // A simulated no-op keeps the previous horizon, as the stores do,
+            // so the owner retries. An inert prune still reports the candidate
+            // horizon: idle tests count on one call advancing it.
+            let horizon = if pruned == 0 && pruning {
+                lock_mutex(&self.horizon).unwrap_or(BranchRevision::INITIAL)
+            } else {
+                candidate
+            };
             *lock_mutex(&self.horizon) = Some(horizon);
             Ok(crate::PruneReceipt::from_store(
                 request.expected(),
                 horizon,
-                0,
+                pruned,
             ))
         })
     }

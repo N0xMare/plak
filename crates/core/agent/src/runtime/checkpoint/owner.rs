@@ -535,8 +535,8 @@ impl CheckpointOwner {
     }
     /// Reclaims superseded history at the current head when at least
     /// `minimum` checkpoints would go. Returns `None` without a durable
-    /// branch or at a Working head: only a Quiescent head has no in-flight
-    /// work whose recovery could still read older checkpoints.
+    /// branch, or at a head whose in-flight work could still read an older
+    /// checkpoint by name ([`crate::runtime::history_prunable_at`]).
     pub(in crate::runtime) async fn prune_superseded(
         &self,
         minimum: u64,
@@ -551,7 +551,9 @@ impl CheckpointOwner {
         let Some((gate, timeout)) = gate else {
             return Ok(None);
         };
-        if !self.may_reach_prune_minimum(minimum) {
+        if !self.may_reach_prune_minimum(minimum)
+            || !crate::runtime::history_prunable_at(&lock_mutex(&self.state).checkpoint())
+        {
             return Ok(None);
         }
         // The heartbeat renews under this gate; holding it keeps the lease
@@ -575,7 +577,7 @@ impl CheckpointOwner {
         let Some(branch) = branch else {
             return Ok(None);
         };
-        if checkpoint.kind() != RuntimeCheckpointKind::Quiescent {
+        if !crate::runtime::history_prunable_at(&checkpoint) {
             return Ok(None);
         }
         // Pruning may commit even if its acknowledgement is lost. Forget all
@@ -589,12 +591,15 @@ impl CheckpointOwner {
                 .current_root_closure()
                 .map_err(checkpoint_bundle_error)?;
         }
-        let request = PruneBranch::new(
-            branch.lease.clone(),
-            branch.head,
-            crate::runtime::checkpoint_retained_history(&checkpoint),
-            minimum,
-        );
+        let retain = crate::runtime::checkpoint_retained_history(&checkpoint);
+        let request = if checkpoint.kind() == RuntimeCheckpointKind::Quiescent {
+            PruneBranch::new(branch.lease.clone(), branch.head, retain, minimum)
+        } else {
+            PruneBranch::at_working_head(branch.lease.clone(), branch.head, retain, minimum)
+                .with_recency_margin(crate::test_hooks::working_prune_margin(
+                    PruneBranch::WORKING_RECENCY_MARGIN,
+                ))
+        };
         let receipt = capacity_store_call(
             StorePhase::Prune,
             branch.store_timeouts.operation,
@@ -623,16 +628,28 @@ impl CheckpointOwner {
         }
     }
 
-    /// Whether the checkpoints strictly between the known horizon and the
-    /// head's parent could number `minimum`. When they cannot, neither the
-    /// retained set nor a store transaction is needed.
+    /// Whether the checkpoints strictly between the known horizon and this
+    /// head's prune frontier could number `minimum`. The frontier is the
+    /// parent's revision, or for a Working head the lower of that and the
+    /// recency margin. When they cannot, neither the retained set nor a store
+    /// transaction is needed.
     fn may_reach_prune_minimum(&self, minimum: u64) -> bool {
         let authority = lock_mutex(&self.state);
         let Some(branch) = authority.durable.as_ref() else {
             return false;
         };
-        let parent = branch.head.revision().get().saturating_sub(1);
-        parent.saturating_sub(authority.pruned_horizon) >= minimum
+        let head = branch.head.revision().get();
+        let parent = head.saturating_sub(1);
+        // A Working head keeps the newest checkpoints even when more than
+        // `minimum` sit below its parent. Count only what the store would
+        // actually remove, or a long turn retries a no-op prune every round.
+        let margin = if authority.checkpoint.kind() == RuntimeCheckpointKind::Quiescent {
+            0
+        } else {
+            crate::test_hooks::working_prune_margin(PruneBranch::WORKING_RECENCY_MARGIN)
+        };
+        let frontier = parent.min(head.saturating_sub(margin));
+        frontier.saturating_sub(authority.pruned_horizon) >= minimum
     }
     pub(in crate::runtime) async fn retire(
         &mut self,

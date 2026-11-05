@@ -134,6 +134,9 @@ pub struct ScriptPlan {
     /// turn observe more than policy allows.
     #[serde(default)]
     pub observation_budget_cap_bytes: Option<usize>,
+    /// Raise the turn's model-round cap. Absent keeps the production default.
+    #[serde(default)]
+    pub max_model_rounds: Option<usize>,
     /// Attach a real Code Mode profile instead of exposing tools directly.
     ///
     /// The model is then offered the `exec` and `wait` markers over the Codex

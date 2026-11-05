@@ -238,7 +238,7 @@ async fn prune_history_refuses_an_attached_session_and_names_a_moved_head() -> T
     Ok(())
 }
 
-/// Retention keeps the terminal results of the 16 most recent root commands:
+/// Retention keeps the terminal results of the 4 most recent root commands:
 /// a duplicate of one of them replays its exact result after automatic prunes
 /// and a reopen, and a duplicate of an older one is refused, typed and
 /// unrecorded, without running again.
@@ -302,7 +302,9 @@ async fn duplicates_replay_within_the_retained_window_and_are_reclaimed_past_it(
         return Err("the pruned session did not reopen quiescently".into());
     };
 
-    let recent = ROUNDS - 1;
+    // The window is the four latest root results: the fourth replays, the
+    // fifth is reclaimed.
+    let recent = ROUNDS - 3;
     let replayed = session
         .agent()
         .command(TurnCommand::Start {
@@ -332,7 +334,7 @@ async fn duplicates_replay_within_the_retained_window_and_are_reclaimed_past_it(
         results[recent - 1]
     );
 
-    let reclaimed_round = ROUNDS - 17;
+    let reclaimed_round = ROUNDS - 4;
     let reclaimed = session
         .agent()
         .command(TurnCommand::Start {

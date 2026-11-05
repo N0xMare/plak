@@ -191,13 +191,47 @@ impl Driver {
 
     /// Idle-only maintenance; failures leave history for the next terminal's retry.
     pub(super) async fn retain_history_when_idle(&self, turn_id: plakous_model::TurnId) {
-        let started = crate::executor::now();
-        let pruned = AssertUnwindSafe(
-            self.authority
-                .prune_superseded(AUTOMATIC_PRUNE_MINIMUM_CHECKPOINTS),
+        self.retain_history(turn_id, AUTOMATIC_PRUNE_MINIMUM_CHECKPOINTS)
+            .await;
+    }
+
+    /// Between two rounds of a Working turn, so a long turn's superseded
+    /// checkpoints stay bounded by about one prune's minimum plus the recency
+    /// margin. Best effort like the idle sweep: a failure leaves history for
+    /// the next round.
+    pub(super) async fn retain_history_mid_turn(&self, turn_id: plakous_model::TurnId) {
+        #[cfg(test)]
+        {
+            let provider_rounds = self
+                .authority
+                .checkpoint()
+                .manifest()
+                .ledger()
+                .operations()
+                .into_iter()
+                .filter(|operation| {
+                    matches!(
+                        operation.kind(),
+                        crate::DurableOperationKind::Provider { .. }
+                    )
+                })
+                .count();
+            if provider_rounds == 0 {
+                crate::test_hooks::note_working_prune_before_provider();
+            }
+        }
+        self.retain_history(
+            turn_id,
+            crate::test_hooks::working_prune_minimum(AUTOMATIC_PRUNE_MINIMUM_CHECKPOINTS),
         )
-        .catch_unwind()
         .await;
+    }
+
+    async fn retain_history(&self, turn_id: plakous_model::TurnId, minimum: u64) {
+        let started = crate::executor::now();
+        let pruned = AssertUnwindSafe(self.authority.prune_superseded(minimum))
+            .catch_unwind()
+            .await;
         let (status, receipt) = match pruned {
             Ok(Ok(None)) => return,
             Ok(Ok(Some(receipt))) if receipt.pruned_checkpoints() == 0 => return,

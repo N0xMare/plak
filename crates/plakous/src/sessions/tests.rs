@@ -87,6 +87,7 @@ mod debt;
 #[cfg(feature = "sessions-sqlite")]
 mod feed;
 mod lines;
+mod long_turn_retention;
 #[cfg(feature = "composition")]
 mod python;
 #[cfg(all(unix, feature = "sessions-sqlite"))]

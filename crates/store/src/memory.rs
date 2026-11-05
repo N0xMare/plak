@@ -714,23 +714,22 @@ impl MemorySessionStore {
                 .ok_or(SessionStoreError::corrupt())?
                 .checkpoint,
         );
-        if checkpoint.kind() != RuntimeCheckpointKind::Quiescent {
+        if checkpoint.kind() != RuntimeCheckpointKind::Quiescent && !request.admits_working_head() {
             return Err(SessionStoreError::Invalid(
                 StoreInvalidReason::PruneHeadNotQuiescent,
             ));
         }
-        let unchanged = PruneReceipt::from_store(
-            head,
-            state
-                .horizons
-                .get(&selector)
-                .copied()
-                .unwrap_or(BranchRevision::INITIAL),
-            0,
-        );
-        let Some(horizon) = head.revision().get().checked_sub(1) else {
+        let stored = state.horizons.get(&selector).copied();
+        let unchanged =
+            PruneReceipt::from_store(head, stored.unwrap_or(BranchRevision::INITIAL), 0);
+        let Some(horizon) = request.horizon_revision() else {
             return Ok(unchanged);
         };
+        // A request at or below the horizon already recorded must not move it
+        // backward: the earlier prune kept checkpoints between the two.
+        if stored.is_some_and(|revision| horizon <= revision.get()) {
+            return Ok(unchanged);
+        }
         let pinned = pinned_checkpoints(&state, selector);
         let superseded = state
             .checkpoints
