@@ -310,29 +310,71 @@ fn start_daemon(
 
 /// The `PATH` the user's login shell sets, asked once with a 5 s bound.
 fn login_shell_path() -> Option<String> {
-    let shell = crate::environment::login_shell()?;
-    let mut child = std::process::Command::new(shell)
+    login_shell_answer(&crate::environment::login_shell()?, LOGIN_SHELL_DEADLINE)
+}
+
+/// How long a login shell may take to say its `PATH`.
+const LOGIN_SHELL_DEADLINE: Duration = Duration::from_secs(5);
+
+/// What `shell -l -c 'printf %s "$PATH"'` prints, when it exits successfully
+/// within `deadline` and prints one line. The shell runs in a process group
+/// of its own, which is killed once it has answered or the deadline passed:
+/// a startup file that leaves a job in the background (`sleep 20 &`) holds
+/// the pipe open, so neither its end of output nor its exit is waited for
+/// past the deadline.
+fn login_shell_answer(shell: &str, deadline: Duration) -> Option<String> {
+    let deadline = std::time::Instant::now() + deadline;
+    let mut command = std::process::Command::new(shell);
+    command
         .args(["-l", "-c", "printf %s \"$PATH\""])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .ok()?;
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) if status.success() => break,
-            Ok(Some(_)) | Err(_) => return None,
-            Ok(None) if std::time::Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
+        .stderr(std::process::Stdio::null());
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    let mut child = command.spawn().ok()?;
+    let group = i32::try_from(child.id())
+        .ok()
+        .and_then(rustix::process::Pid::from_raw);
+    let mut stdout = child.stdout.take()?;
+    let (sender, output) = std::sync::mpsc::sync_channel(1);
+    // The read ends at end of output, which the group's kill below brings
+    // if a background job still holds the pipe.
+    std::thread::spawn(move || {
+        let mut text = String::new();
+        let read = std::io::Read::read_to_string(&mut stdout, &mut text);
+        let _ = sender.send(read.map(|_| text));
+    });
+    // Waited on without reaping, so the group keeps its identity until it
+    // is killed.
+    let exited = loop {
+        let Some(pid) = group else {
+            break None;
+        };
+        match rustix::process::waitid(
+            rustix::process::WaitId::Pid(pid),
+            rustix::process::WaitIdOptions::EXITED
+                | rustix::process::WaitIdOptions::NOWAIT
+                | rustix::process::WaitIdOptions::NOHANG,
+        ) {
+            Ok(Some(status)) => break Some(status.exit_status() == Some(0)),
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(10));
             }
-            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+            _ => break None,
         }
+    };
+    if let Some(group) = group {
+        let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
     }
-    let mut path = String::new();
-    std::io::Read::read_to_string(child.stdout.as_mut()?, &mut path).ok()?;
+    let _ = child.wait();
+    if exited != Some(true) {
+        return None;
+    }
+    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+    let path = output
+        .recv_timeout(remaining + Duration::from_millis(100))
+        .ok()?
+        .ok()?;
     (!path.is_empty() && !path.contains('\n')).then_some(path)
 }
 
@@ -499,3 +541,7 @@ fn boot_id() -> String {
         .filter(|text| !text.is_empty())
         .unwrap_or_else(|| "unknown".to_owned())
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "unit tests")]
+mod tests;
