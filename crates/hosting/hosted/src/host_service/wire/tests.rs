@@ -435,3 +435,108 @@ fn a_shared_session_moves_every_attachment_on_a_switch() {
         HostFrame::Event { attachment: 3, observation, .. } if *observation == notice
     )));
 }
+
+/// Events past the capacity between `moved` and the next attach.
+fn overflow_after_a_switch<W: Write>(
+    connection: &mut WireConnection<plakous_host_protocol::Core, W>,
+    next: &str,
+) {
+    use plakous_host_protocol::views::transcript::NoticeScope;
+    assert!(connection.observe(binding(next)).unwrap());
+    for index in 0..=ATTACHMENT_CAPACITY {
+        let row = TranscriptRow::info(NoticeScope::Host, format!("event {index}"));
+        assert!(connection.observe(SessionObservation::Row(row)).unwrap());
+    }
+}
+
+fn attach_line(id: RequestId, tree: &str) -> Result<String, WireError> {
+    let attach = ClientFrame::<plakous_host_protocol::Core>::Request {
+        id,
+        op: Op::Attach {
+            node: root_named(tree),
+        },
+    };
+    Ok(encode_line(&attach).unwrap())
+}
+
+/// More events between `moved` and the next attach than an attachment holds
+/// are not a silent gap: the next attachment is answered `attached` and
+/// then told to resync, as a slow consumer is, with no event of it between.
+#[test]
+fn a_replay_past_the_capacity_ends_in_a_resync() {
+    use plakous_host_protocol::Core;
+    let (actions, _intents) = plakous_host_protocol::intent_channel::<Core>();
+    let mut stdout = Vec::new();
+    let mut connection = WireConnection::new(root(), &mut stdout, actions)
+        .serving("s1", |id| Some(root_named(&format!("tree-{id}"))));
+    connection.request(1, Op::Attach { node: root() });
+    overflow_after_a_switch(&mut connection, "s2");
+    assert!(connection.frame(attach_line(2, "tree-s2")).unwrap());
+    connection.flush().unwrap();
+    drop(connection);
+    let frames = host_frames(&stdout);
+    let attached = frames
+        .iter()
+        .position(|frame| {
+            matches!(
+                frame,
+                HostFrame::Response {
+                    id: 2,
+                    outcome: Outcome::Ok(Answer::Attached { attachment: 2 })
+                }
+            )
+        })
+        .expect("attached");
+    assert!(
+        matches!(
+            frames.get(attached + 1),
+            Some(HostFrame::ResyncRequired { attachment: 2 })
+        ),
+        "{:?}",
+        &frames[attached..]
+    );
+    assert!(
+        !frames
+            .iter()
+            .any(|frame| matches!(frame, HostFrame::Event { attachment: 2, .. })),
+        "no event of the resynced attachment"
+    );
+}
+
+/// A replay given up after one switch does not outlive it: after another
+/// switch, the next attachment gets that switch's replay and no resync.
+#[test]
+fn a_later_switch_replays_again_after_an_overflow() {
+    use plakous_host_protocol::Core;
+    use plakous_host_protocol::views::transcript::NoticeScope;
+    let notice = SessionObservation::<Core>::Row(TranscriptRow::info(
+        NoticeScope::Host,
+        "the third session opened",
+    ));
+    let (actions, _intents) = plakous_host_protocol::intent_channel::<Core>();
+    let mut stdout = Vec::new();
+    let mut connection = WireConnection::new(root(), &mut stdout, actions)
+        .serving("s1", |id| Some(root_named(&format!("tree-{id}"))));
+    overflow_after_a_switch(&mut connection, "s2");
+    for observation in [
+        SessionObservation::SessionOpening,
+        notice.clone(),
+        binding("s3"),
+    ] {
+        assert!(connection.observe(observation).unwrap());
+    }
+    assert!(connection.frame(attach_line(1, "tree-s3")).unwrap());
+    connection.flush().unwrap();
+    drop(connection);
+    let frames = host_frames(&stdout);
+    assert!(
+        !frames
+            .iter()
+            .any(|frame| matches!(frame, HostFrame::ResyncRequired { .. })),
+        "{frames:?}"
+    );
+    assert!(frames.iter().any(|frame| matches!(
+        frame,
+        HostFrame::Event { observation, .. } if *observation == notice
+    )));
+}

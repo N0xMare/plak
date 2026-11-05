@@ -33,6 +33,9 @@ pub(super) struct ServedSession<P: ProtocolExtension> {
     /// not carry, waiting for the next attachment.
     replay: Vec<SessionObservation<P>>,
     awaiting_attach: bool,
+    /// The replay outgrew the attachment capacity and was given up: the
+    /// next attachment resyncs instead of getting a silent gap.
+    replay_lost: bool,
 }
 
 /// The served session behind its lock; the pump and every connection hold
@@ -57,6 +60,7 @@ impl<P: ProtocolExtension> ServedSession<P> {
             held: None,
             replay: Vec::new(),
             awaiting_attach: false,
+            replay_lost: false,
         }))
     }
 
@@ -80,12 +84,9 @@ impl<P: ProtocolExtension> ServedSession<P> {
     /// to; `false` when the switch's root cannot be found and the service
     /// must end.
     pub(super) fn observe(&mut self, event: SessionObservation<P>) -> bool {
-        if self.awaiting_attach && !kept_for_attach(&event) {
+        if self.awaiting_attach && !self.replay_lost && !kept_for_attach(&event) {
             self.replay.push(event.clone());
-            if self.replay.len() > ATTACHMENT_CAPACITY {
-                // Too far behind to replay: the attach snapshot is all.
-                self.replay.clear();
-            }
+            self.limit_replay();
         }
         let opening = matches!(event, SessionObservation::SessionOpening);
         let binding = match &event {
@@ -150,6 +151,8 @@ impl<P: ProtocolExtension> ServedSession<P> {
             .map(|(_, observation)| observation.clone())
             .collect();
         self.awaiting_attach = true;
+        self.replay_lost = false;
+        self.limit_replay();
         self.pass(observations);
         true
     }
@@ -162,11 +165,23 @@ impl<P: ProtocolExtension> ServedSession<P> {
     }
 
     /// A connection attached: the opening a switch left waiting follows its
-    /// attach snapshot, after the `attached` answer.
-    pub(super) fn attached(&mut self) {
-        if std::mem::take(&mut self.awaiting_attach) {
-            let replay = std::mem::take(&mut self.replay);
-            self.pass(replay);
+    /// attach snapshot, after the `attached` answer. `true` when that
+    /// replay was given up, so the attachment must resync, as a slow
+    /// consumer does, rather than miss events.
+    pub(super) fn attached(&mut self) -> bool {
+        if !std::mem::take(&mut self.awaiting_attach) {
+            return false;
+        }
+        let replay = std::mem::take(&mut self.replay);
+        self.pass(replay);
+        std::mem::take(&mut self.replay_lost)
+    }
+
+    /// Gives the replay up once it outgrows the attachment capacity.
+    fn limit_replay(&mut self) {
+        if self.replay.len() > ATTACHMENT_CAPACITY {
+            self.replay.clear();
+            self.replay_lost = true;
         }
     }
 

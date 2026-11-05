@@ -225,6 +225,8 @@ pub struct WireConnection<P: ProtocolExtension, W: Write> {
     actions: IntentSender<P>,
     service: HostService<P>,
     attachment: Option<AttachmentId>,
+    /// The attachment just answered `attached` that must resync at once.
+    resync_after_attach: Option<AttachmentId>,
     blobs: BlobAssembler,
     leave: Leave,
     quit_sent: bool,
@@ -279,6 +281,7 @@ where
             service,
             actions,
             attachment: None,
+            resync_after_attach: None,
             blobs: BlobAssembler::default(),
             leave,
             quit_sent: false,
@@ -466,6 +469,17 @@ where
                 if let Some(outcome) = outcome {
                     write_frame(&mut self.stdout, &HostFrame::<P>::Response { id, outcome })?;
                 }
+                if let Some(attachment) = self.resync_after_attach.take() {
+                    let _ = self.service.detach(attachment);
+                    if self.attachment == Some(attachment) {
+                        self.attachment = None;
+                        self.unanswered();
+                    }
+                    write_frame(
+                        &mut self.stdout,
+                        &HostFrame::<P>::ResyncRequired { attachment },
+                    )?;
+                }
                 Ok(true)
             }
         }
@@ -492,8 +506,10 @@ where
                 match self.service.attach(&node) {
                     Ok(attachment) => {
                         self.attachment = Some(attachment);
-                        if let Some(guard) = guard.as_mut() {
-                            guard.attached();
+                        if let Some(guard) = guard.as_mut()
+                            && guard.attached()
+                        {
+                            self.resync_after_attach = Some(attachment);
                         }
                         Some(Outcome::Ok(Answer::Attached { attachment }))
                     }
