@@ -21,7 +21,7 @@ use super::{
 /// What one continuation request did.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum LossResume {
-    /// The continuation turn started (or a recorded one rejoined).
+    /// The continuation turn started.
     Started,
     /// The child has no continuation held or pending after a loss.
     NotHeld,
@@ -68,15 +68,42 @@ async fn resume_after_loss(
     let Ok(_claim) = crate::agent::recovery::claim_child(runtime, agent_id).await else {
         return LossResume::Busy;
     };
+    // A turn the open restored is settled as lost and the decision taken
+    // again on it, once, in this same pass.
+    for _ in 0..2 {
+        match resume_claimed(parent, runtime, agent_id).await {
+            Resumed::Settled(resume) => return resume,
+            Resumed::Restored => {}
+        }
+    }
+    LossResume::Deferred(
+        "the child's lost turn was settled twice; its continuation waits".to_owned(),
+    )
+}
+
+/// One try of [`resume_after_loss`] for a child its caller holds.
+enum Resumed {
+    Settled(LossResume),
+    /// The open restored a turn the lost owner left; it is settled as lost,
+    /// so the continuation is decided again.
+    Restored,
+}
+
+/// The durable consent of one continuation: the command id, the child's
+/// session locator and path, and the cause. `Ok(None)` when the child holds
+/// no continuation. A refused publication rolls the decision back: nothing
+/// is dispatched on consent that is not durable.
+async fn record_consent(
+    runtime: &ProductTopologyRuntime,
+    agent_id: &str,
+) -> Result<Option<(String, String, String, crate::agent_tree::ContinuationCause)>, String> {
     let decided_at_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| {
             u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
         });
     let id = agent_id.to_owned();
-    // A refused publication rolls the decision back: nothing is dispatched
-    // on consent that is not durable.
-    let recorded = runtime
+    runtime
         .mutate_then_emit(false, move |tree| {
             let Some(cause) = tree
                 .loss_continuation(&id)
@@ -95,88 +122,99 @@ async fn resume_after_loss(
             let path = node.path.display().to_string();
             Ok(Some((command_id, locator, path, cause)))
         })
-        .await;
-    let (command_id, locator, path, cause) = match recorded {
+        .await
+}
+
+async fn resume_claimed(
+    parent: &SpawnParent,
+    runtime: &Arc<ProductTopologyRuntime>,
+    agent_id: &str,
+) -> Resumed {
+    let (command_id, locator, path, cause) = match record_consent(runtime, agent_id).await {
         Ok(Some(recorded)) => recorded,
         Ok(None) => {
             withdraw_ended_continuation(runtime, agent_id).await;
-            return LossResume::NotHeld;
+            return Resumed::Settled(LossResume::NotHeld);
         }
-        Err(error) => return LossResume::Deferred(error),
+        Err(error) => return Resumed::Settled(LossResume::Deferred(error)),
     };
     let Ok(command) = CommandId::new(command_id.clone()) else {
-        return LossResume::Deferred("the continuation command id is invalid".to_owned());
+        return Resumed::Settled(LossResume::Deferred(
+            "the continuation command id is invalid".to_owned(),
+        ));
     };
+    // The open projects nothing before it is known whether it restored a
+    // turn: a restored turn's acceptance must fold after its re-mark.
     let reopened = match reopen_spawned_child(
         parent,
         agent_id,
         &path,
         &locator,
         "loss-resume",
-        ChildReopenMode::REJOIN,
+        ChildReopenMode::TAKE,
     )
     .await
     {
         Ok(reopened) => reopened,
-        Err(error) => return LossResume::Deferred(error.message),
+        Err(error) => return Resumed::Settled(LossResume::Deferred(error.message)),
     };
     match reopened {
-        // The continuation (or a Start the lost process journaled) was
-        // admitted before its turn bound: that turn rejoins.
+        // A turn the open restored (this continuation, or a Start the lost
+        // process admitted before binding it) is lost again, never rejoined:
+        // it is cancelled and the child is marked owner-lost on it, so its
+        // continuation is decided anew on that turn.
         ChildReopen::Attached {
             session,
             recovered: Some(recovered),
-        } => match super::reopen::rejoin_recovered_turn(
-            runtime,
-            agent_id,
-            *session,
-            recovered.turn_id(),
-            recovered.control(),
-            recovered.result(),
-        )
-        .await
-        {
-            Ok(_) => LossResume::Started,
-            Err(failure) => LossResume::Deferred(delivery_failure_text(failure)),
-        },
-        ChildReopen::Attached { session, .. } => {
-            #[cfg(test)]
-            crate::agent::park::hooks::before_loss_continuation_reserve(agent_id).await;
-            match super::turns::start_child_turn_as(
+        } => {
+            super::reopen::mark_restored_lost(runtime, agent_id, *session, recovered).await;
+            Resumed::Restored
+        }
+        reopened @ ChildReopen::Attached { .. } => {
+            let reconciled = super::reopen::reconcile_reopened_child_results(
                 runtime,
                 agent_id,
-                *session,
-                command,
-                ChildCommand::fresh(continuation_instruction(cause), CommandKind::Resume),
-                StartAdmission::LossContinuation(command_id),
+                reopened,
+                ChildReopenMode::OWNER,
             )
-            .await
-            {
-                Ok(_) => LossResume::Started,
-                Err(ChildStartFailure::Refused(reason)) if super::turns::hold_ended(&reason) => {
-                    withdraw_ended_continuation(runtime, agent_id).await;
-                    LossResume::NotHeld
+            .await;
+            let session = match reconciled {
+                Ok(ChildReopen::Attached { session, .. }) => session,
+                Ok(ChildReopen::RecoveryRequired(_)) => {
+                    return Resumed::Settled(LossResume::Deferred(
+                        "the child's session is recovery-required; its continuation waits"
+                            .to_owned(),
+                    ));
                 }
-                Err(failure) => LossResume::not_started(failure),
-            }
+                Err(error) => return Resumed::Settled(LossResume::Deferred(error)),
+            };
+            #[cfg(test)]
+            crate::agent::park::hooks::before_loss_continuation_reserve(agent_id).await;
+            Resumed::Settled(
+                match super::turns::start_child_turn_as(
+                    runtime,
+                    agent_id,
+                    *session,
+                    command,
+                    ChildCommand::fresh(continuation_instruction(cause), CommandKind::Resume),
+                    StartAdmission::LossContinuation(command_id),
+                )
+                .await
+                {
+                    Ok(_) => LossResume::Started,
+                    Err(ChildStartFailure::Refused(reason))
+                        if super::turns::hold_ended(&reason) =>
+                    {
+                        withdraw_ended_continuation(runtime, agent_id).await;
+                        LossResume::NotHeld
+                    }
+                    Err(failure) => LossResume::not_started(failure),
+                },
+            )
         }
-        ChildReopen::RecoveryRequired(_) => LossResume::Deferred(
+        ChildReopen::RecoveryRequired(_) => Resumed::Settled(LossResume::Deferred(
             "the child's session is recovery-required; its continuation waits".to_owned(),
-        ),
-    }
-}
-
-/// A rejoin refusal as operator text.
-fn delivery_failure_text(failure: crate::agent_tree_tools::MailDeliveryFailure) -> String {
-    use crate::agent_tree_tools::MailDeliveryFailure;
-    match failure {
-        MailDeliveryFailure::Refused(reason) | MailDeliveryFailure::RecoveryRequired(reason) => {
-            reason.to_string()
-        }
-        MailDeliveryFailure::TurnEnded => "the child's turn ended before it rejoined".to_owned(),
-        MailDeliveryFailure::SlotBusy => {
-            "the child's live slot was still starting or retiring".to_owned()
-        }
+        )),
     }
 }
 

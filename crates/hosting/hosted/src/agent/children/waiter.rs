@@ -66,11 +66,7 @@ pub(super) async fn register_admitted_turn(
         .prepare_then_emit(move |tree| {
             admission.check(tree, &id)?;
             tree.bind_turn_owner(&id, turn_id.to_string());
-            let registration = TurnWaiterRegistration::enter(&driver, tree, &id);
-            if admission == StartAdmission::ReopenWake {
-                tree.unpark_child(&id);
-            }
-            Ok(registration)
+            Ok(TurnWaiterRegistration::enter(&driver, tree, &id))
         })
         .await?;
     Ok(())
@@ -95,6 +91,7 @@ impl TurnWaiterRegistration {
     }
 
     /// [`Self::enter`] under its own tree lock.
+    #[cfg(test)]
     pub(in crate::agent) async fn register(driver: &TreeDriver, agent_id: &str) -> Option<Self> {
         let writer = driver.clone();
         let id = agent_id.to_owned();
@@ -803,7 +800,7 @@ async fn recycle_fenced_child(driver: &TreeDriver, agent_id: &str) -> Option<Fen
             })
         })
         .ok()??;
-    let Ok(ChildReopen::Attached { session, .. }) = reopen_spawned_child(
+    let Ok(ChildReopen::Attached { session, recovered }) = reopen_spawned_child(
         &parent,
         agent_id,
         &path,
@@ -815,6 +812,15 @@ async fn recycle_fenced_child(driver: &TreeDriver, agent_id: &str) -> Option<Fen
     else {
         return None;
     };
+    // A turn the open restored (a hosted continuation) is never resumed by a
+    // recycle: it is cancelled within the host's bound before the release.
+    if let Some(recovered) = recovered {
+        let _ = crate::interrupt::settle_cancel(
+            recovered.control().cancel(),
+            plakous_host_protocol::limits::HOST_CANCEL_SETTLE_TIMEOUT,
+        )
+        .await;
+    }
     let report = session
         .agent()
         .and_then(plakous::agent::Agent::abandoned_turn)

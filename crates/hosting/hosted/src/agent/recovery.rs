@@ -117,7 +117,7 @@ impl ChildSessionPort for ParentSessionPort {
             let mode = ChildReopenMode {
                 lease_wait: Duration::ZERO,
                 recovery: true,
-                rejoin: false,
+                project: true,
             };
             let kind = recovery_operation_kind();
             match reopen_spawned_child(&self.parent, agent_id, path, locator, &kind, mode).await {

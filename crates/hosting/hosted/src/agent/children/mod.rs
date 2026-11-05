@@ -66,13 +66,13 @@ pub(super) use controller::ProductChildController;
 #[cfg(test)]
 pub(super) use deliver::turn_ended_or;
 pub(super) use deliver::{ProductLiveCanceller, ProductMailDeliverer, submit_harness_prompt};
+#[cfg(test)]
+pub(super) use reopen::SESSION_LEASE_HOLD_HINT;
 pub(super) use reopen::{
     CHILD_LEASE_POLL, CHILD_LEASE_WAIT, ChildReopen, ChildReopenError, ChildReopenErrorKind,
-    ChildReopenMode, format_session_reopen_error, recover_owed_children, rejoin_recovered_start,
+    ChildReopenMode, format_session_reopen_error, mark_restored_lost, recover_owed_children,
     reopen_spawned_child,
 };
-#[cfg(test)]
-pub(super) use reopen::{SESSION_LEASE_HOLD_HINT, reconcile_reopened_results};
 #[cfg(test)]
 pub(super) use turns::{
     ADMITTED_TURN_REACHED_PROVIDER, ChildCommand, start_child_turn_owned_with_ack,
@@ -92,8 +92,6 @@ pub(super) use waiter::{
 pub(super) use waiter::{child_turn_was_cancelled, start_instruction_turn, transient_resume_bound};
 
 use bind::{SPAWN_MATERIALIZE_TIMEOUT, StartupCaller};
-use deliver::mail_command_id;
-use reopen::{bound_child_turn_matches, occupy_recovered_child};
 use turns::start_child_turn_owned;
 use waiter::register_admitted_turn;
 

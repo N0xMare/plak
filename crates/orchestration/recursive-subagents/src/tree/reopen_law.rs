@@ -65,17 +65,17 @@ impl ProductAgentTree {
         let running = |node: &&super::NodeRecord| {
             node.agent_id != self.root_agent_id && node.status == NodeStatus::Running
         };
-        // A parked child whose start the lost process prepared but no fact
-        // names may have been admitted: its recover_node rejoins it or marks it.
-        let (rejoinable, lost): (Lost, Lost) = self
+        // Every parked child is the lost owner's, a start it prepared but no
+        // fact names included: none is rejoined after a take. Such a start
+        // leaves the child owed (below), whose recover_node cancels a turn
+        // the runtime admitted for it and withdraws one it never admitted.
+        let lost: Lost = self
             .nodes
             .values()
             .filter(running)
             .filter(|node| parked.contains(&node.agent_id))
             .map(|node| (node.agent_id.clone(), node.attempt_id.clone()))
-            .partition(|(agent_id, attempt_id)| {
-                self.has_unfacted_start(agent_id, attempt_id.as_ref())
-            });
+            .collect();
         // An interrupted child still bound to a turn is owed too: an
         // interrupt (or an earlier owner-lost mark) written before the
         // turn's terminal was projected leaves the binding to its feed.
@@ -113,26 +113,7 @@ impl ProductAgentTree {
             })
             .map(|node| node.agent_id.clone())
             .collect::<Vec<String>>();
-        self.recovery_owed = bound
-            .into_iter()
-            .chain(unwithdrawn)
-            .chain(rejoinable.into_iter().map(|(agent_id, _)| agent_id))
-            .collect();
-    }
-
-    /// A Wake or MailStart prepared for this attempt that no fact names
-    /// and the tree has not withdrawn.
-    fn has_unfacted_start(&self, agent_id: &str, attempt_id: Option<&super::AttemptId>) -> bool {
-        self.commands.values().any(|command| {
-            command.recipient == agent_id
-                && matches!(
-                    command.kind,
-                    super::AgentCommandKind::Wake | super::AgentCommandKind::MailStart
-                )
-                && command.fact.is_none()
-                && !command.withdrawn
-                && command.attempt_id.as_ref() == attempt_id
-        })
+        self.recovery_owed = bound.into_iter().chain(unwithdrawn).collect();
     }
 
     fn interrupt_owner_lost(&mut self, agent_id: &str, attempt_id: Option<super::AttemptId>) {
@@ -206,12 +187,32 @@ impl ProductAgentTree {
         node.status == NodeStatus::Running
     }
 
-    /// recover_node's mark (design section 6.3, step 5): this owed child's
-    /// exact open did not restore its turn, so the lost owner's turn is
-    /// gone. It is interrupted with cause `owner_lost`, attempt and subtree
-    /// kept. It stays owed until the caller has projected the feed the open
-    /// left ([`Self::recovery_settled`]), so no delivery sees the mark
-    /// before the lost turn's terminal is folded.
+    /// Law L for a turn the lost owner admitted on an interrupted child
+    /// before binding it (a continuation, wake or mail Start), which a
+    /// custody take's exact open restored and cancelled: that turn is lost
+    /// again, so the child is interrupted with cause `owner_lost` anew and
+    /// its continuation is decided on that turn. The turn the attempt binds
+    /// is the one its latest interrupt already covers: no new mark.
+    pub fn mark_restored_turn_lost(&mut self, agent_id: &str, turn_id: &str) {
+        if let Some(node) = self.nodes.get(agent_id)
+            && node.status == NodeStatus::Interrupted
+            && self
+                .current_attempt(agent_id)
+                .is_none_or(|attempt| attempt.turn_id.as_deref() != Some(turn_id))
+        {
+            let attempt_id = node.attempt_id.clone();
+            self.interrupt_owner_lost(agent_id, attempt_id);
+            self.bump();
+        }
+    }
+
+    /// recover_node's mark (design section 6.3, step 5): the lost owner's
+    /// turn of this owed child is gone, whether its exact open restored the
+    /// turn (and the caller cancelled it) or not. It is interrupted with
+    /// cause `owner_lost`, attempt and subtree kept. It stays owed until the
+    /// caller has projected the feed the open left
+    /// ([`Self::recovery_settled`]), so no delivery sees the mark before the
+    /// lost turn's terminal is folded.
     pub fn mark_owner_lost(&mut self, agent_id: &str) {
         if let Some(node) = self.nodes.get(agent_id)
             && node.status == NodeStatus::Running

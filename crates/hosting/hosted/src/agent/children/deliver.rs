@@ -7,10 +7,13 @@ use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind};
 use super::{
     Arc, ChildAssignmentStartKind, ChildBoundBind, ChildReopen, ChildReopenMode, ChildStartFailure,
     CommandId, FromStr, Future, LiveRelease, Pin, SpawnParent, TreeDriver, TurnId,
-    assignment_start_prompt, bound_child_turn_matches, occupy_recovered_child, prompt_composition,
-    rejoin_recovered_start, release_startup, reopen_spawned_child, spawn_child_start_composition,
-    start_child_turn,
+    assignment_start_prompt, mark_restored_lost, prompt_composition, release_startup,
+    reopen_spawned_child, spawn_child_start_composition, start_child_turn,
 };
+
+/// A delivery that found a turn the lost owner left: the turn was settled
+/// as lost and the mail stays unread.
+const LOST_TURN_SETTLED: &str = "the child's turn was lost with its host and is settled; the mail stays unread for its continuation";
 
 /// Reminder (1) then force (2) after a Completed turn with no `submit_result`.
 /// Never copies assistant text into `output_json`.
@@ -29,7 +32,7 @@ pub(in crate::agent) fn turn_ended_or(
     }
 }
 
-pub(super) fn mail_command_id(message_id: &str, kind: &str) -> Result<CommandId, String> {
+fn mail_command_id(message_id: &str, kind: &str) -> Result<CommandId, String> {
     CommandId::new(format!("plak:mail:{message_id}:{kind}")).map_err(|error| error.to_string())
 }
 
@@ -116,7 +119,7 @@ impl ProductMailDeliverer {
                 &path,
                 &locator,
                 "followup-withdrawal",
-                ChildReopenMode::REJOIN,
+                ChildReopenMode::OWNER,
             )
             .await;
             let (attached, recovered) = match opened {
@@ -255,7 +258,7 @@ impl ProductMailDeliverer {
             &request.path,
             &request.session_locator,
             "mail-open",
-            ChildReopenMode::REJOIN,
+            ChildReopenMode::OWNER,
         )
         .await?
         {
@@ -269,17 +272,12 @@ impl ProductMailDeliverer {
         // `reserve_startup_admitted`. A test forces that window here.
         #[cfg(test)]
         crate::agent::park::hooks::around_reopen_spawned_child(&request.agent_id).await;
+        // A turn the open restored is a lost owner's, never rejoined: it is
+        // settled as lost and this mail stays unread for the child's
+        // continuation or next wake.
         if let Some(recovered) = recovered {
-            return rejoin_recovered_start(
-                &self.runtime,
-                &request.agent_id,
-                &request.message_id,
-                attached,
-                recovered.turn_id(),
-                recovered.control(),
-                recovered.result(),
-            )
-            .await;
+            mark_restored_lost(&self.runtime, &request.agent_id, attached, recovered).await;
+            return Err(LOST_TURN_SETTLED.into());
         }
         let (template, tier, workspace_path, bind) = self
             .runtime
@@ -536,13 +534,8 @@ impl ProductMailDeliverer {
             }
         };
         if let Some(recovered) = recovered {
-            if !bound_child_turn_matches(&self.runtime, &request.agent_id, recovered.turn_id()) {
-                let _ = attached.release_opened().await;
-                return Err("recovered child turn does not match the bound assignment".into());
-            }
-            occupy_recovered_child(&self.runtime, request.agent_id.clone(), attached, recovered)
-                .await?;
-            return Ok(());
+            mark_restored_lost(&self.runtime, &request.agent_id, attached, recovered).await;
+            return Err(LOST_TURN_SETTLED.into());
         }
         // Opened + bound turn has no RecoveredTurnHandle. Joining via
         // turn_control would occupy without a waiter and is a restart drain

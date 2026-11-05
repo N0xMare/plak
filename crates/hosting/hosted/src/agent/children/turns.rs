@@ -48,7 +48,7 @@ pub(in crate::agent) enum ChildStartFailure {
     Refused(String),
     /// Anything else; the child's startup outcome needs recovery.
     Failed(String),
-    /// A reopen wake's hold ended after the runtime admitted its Start, so
+    /// A continuation's hold ended after the runtime admitted its Start, so
     /// the turn was not bound and its session was released. Its batch is
     /// already in the session's history.
     HoldEndedAfterAdmission(String),
@@ -87,10 +87,6 @@ impl From<ChildStartFailure> for String {
 pub(in crate::agent) enum StartAdmission {
     /// Any Start the tree already admitted (a spawn, a mail Start).
     Ordinary,
-    /// A held child's reopen wake: its reservation and its bind each
-    /// re-check the hold, so an interrupt or close that ended it refuses the
-    /// Start instead of the reservation writing `running` over it.
-    ReopenWake,
     /// A continuation after a loss under its recorded command id: its
     /// reservation and its bind each re-check that the continuation is still
     /// pending, so a close, an interrupt or another turn that ended it
@@ -129,7 +125,7 @@ async fn reached_provider(
 }
 
 pub(in crate::agent) fn hold_ended(error: &str) -> bool {
-    error == crate::agent::park::REOPEN_HOLD_ENDED || error == LOSS_CONTINUATION_ENDED
+    error == LOSS_CONTINUATION_ENDED
 }
 
 impl StartAdmission {
@@ -140,8 +136,6 @@ impl StartAdmission {
     ) -> Result<(), String> {
         match self {
             Self::Ordinary => Ok(()),
-            Self::ReopenWake if tree.reopen_wake_admissible(agent_id) => Ok(()),
-            Self::ReopenWake => Err(crate::agent::park::REOPEN_HOLD_ENDED.to_owned()),
             Self::LossContinuation(command_id)
                 if tree.loss_continuation_admissible(agent_id, command_id) =>
             {

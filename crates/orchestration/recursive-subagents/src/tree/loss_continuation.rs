@@ -259,7 +259,27 @@ impl ProductAgentTree {
             .collect()
     }
 
-    /// The turn of the attempt's latest accepted command.
+    /// Whether a planned handoff let go of `agent_id`'s current turn: its
+    /// attempt's latest interrupt is a handoff and no turn was admitted
+    /// after it. A reopen tells the runtime so when it closes the turn the
+    /// handoff left waiting at a decision, so the abandonment is not called
+    /// a lost process.
+    #[must_use]
+    pub fn turn_handed_off(&self, agent_id: &str) -> bool {
+        let Some(attempt_id) = self
+            .nodes
+            .get(agent_id)
+            .and_then(|node| node.attempt_id.as_ref())
+        else {
+            return false;
+        };
+        self.latest_interrupt(agent_id, attempt_id)
+            .is_some_and(|(interrupt, cause)| {
+                cause == Some(InterruptCause::Handoff)
+                    && !self.turn_admitted_after(agent_id, attempt_id, interrupt)
+            })
+    }
+
     /// Whether a command of the attempt was accepted after the interrupt
     /// intent `interrupt` was recorded, by feed position.
     fn turn_admitted_after(&self, agent_id: &str, attempt_id: &AttemptId, interrupt: &str) -> bool {

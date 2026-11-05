@@ -147,8 +147,14 @@ impl Fixture {
                 {"output": {"tool": {"name": "write", "arguments": {"path": "child.txt", "content": "one effect"}}}, "finish": "tool_calls"},
                 {"output": {"text": "certified terminal"}}
             ])
-        } else if mode == "wake" && restored {
+        } else if matches!(mode, "wake" | "wake-decision") && restored {
             json!([{"output": {"text": "relaunch terminal"}}])
+        } else if mode == "wake-decision" {
+            json!([
+                {"output": {"text": "park point"}},
+                {"output": {"tool": {"name": "write", "arguments": {"path": "child.txt", "content": "one effect"}}}, "finish": "tool_calls"},
+                {"output": {"text": "decided"}}
+            ])
         } else if mode == "wake" {
             json!([{"output": {"text": "park point"}}, held])
         } else if matches!(mode, "idle" | "wake-prepared") {
@@ -158,7 +164,7 @@ impl Fixture {
         };
         let plan: Arc<ScriptPlan> = Arc::new(
             serde_json::from_value(json!({"version": 1, "steps": steps,
-                "tool_policy": if certified { "decision_required" } else { "allow" }
+                "tool_policy": if certified || mode == "wake-decision" { "decision_required" } else { "allow" }
             }))
             .unwrap(),
         );
@@ -252,13 +258,13 @@ impl Fixture {
                 move |tree| {
                     let name = crate::agent_tree_protocol::TemplateName::parse("review").unwrap();
                     let mut binding = tree.current_epoch().binding(&name).unwrap().clone();
-                    binding.max_turns = Some(
-                        if matches!(mode.as_str(), "wake" | "idle" | "wake-prepared") {
-                            2
-                        } else {
-                            1
-                        },
-                    );
+                    binding.max_turns = Some(if mode == "wake-decision" {
+                        3
+                    } else if matches!(mode.as_str(), "wake" | "idle" | "wake-prepared") {
+                        2
+                    } else {
+                        1
+                    });
                     tree.pin_template("review", binding);
                     tree.spawn_agent("root", &SpawnAgentRequest::test_review(), None)
                         .map(|spawned| spawned.agent_id)
@@ -310,7 +316,7 @@ impl Fixture {
         let result = submission.result().unwrap().clone();
         let turn = result.turn_id();
         let control = submission.turn().unwrap().control();
-        if matches!(mode, "wake" | "idle" | "wake-prepared") {
+        if matches!(mode, "wake" | "idle" | "wake-prepared" | "wake-decision") {
             result.result().await.unwrap();
             self.runtime
                 .mutate_then_emit_borrowed_for_test(false, |tree| {
@@ -504,7 +510,7 @@ impl Fixture {
                 .unwrap();
             cut_ready(&id).await;
         }
-        if mode == "wake" {
+        if matches!(mode, "wake" | "wake-decision") {
             if let Some(trace) = std::env::var_os("PLAK_TEST_COMMIT_TRACE") {
                 let ordinal = trace_rows(Path::new(&trace))
                     .into_iter()
@@ -537,7 +543,36 @@ impl Fixture {
                 .await,
                 crate::agent::park::ParkEnd::Woken(..)
             ));
-            gate.entered().await;
+            if mode == "wake-decision" {
+                // The woken turn waits at its write's effect decision.
+                tokio::time::timeout(Duration::from_secs(20), async {
+                    loop {
+                        let agent = self
+                            .runtime
+                            .live
+                            .lock()
+                            .await
+                            .get(&id)
+                            .and_then(crate::topology_runtime::LiveChildHandle::agent);
+                        if let Some(agent) = agent
+                            && !agent
+                                .attach(plakous::agent::ViewRequest::metadata())
+                                .await
+                                .unwrap()
+                                .snapshot()
+                                .pending_effect_decisions()
+                                .is_empty()
+                        {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                })
+                .await
+                .unwrap();
+            } else {
+                gate.entered().await;
+            }
             cut_ready(&id).await;
         }
         cut_ready(&id).await;
@@ -571,6 +606,17 @@ impl Fixture {
                             crate::agent_tree_protocol::AttemptStatus::Running
                         );
                         assert_eq!(attempt.failure, None);
+                        // The mark precedes the fold of a turn the open
+                        // abandoned, so the interrupt keeps its cause.
+                        let view = crate::agent_tree::view::project_tree_view(tree);
+                        assert_eq!(
+                            view.nodes
+                                .iter()
+                                .find(|node| node.agent_id == id)
+                                .unwrap()
+                                .interrupt_cause,
+                            Some(plakous_host_protocol::views::InterruptCauseView::OwnerLost)
+                        );
                         assert_eq!(
                             tree.pending_mail("root"),
                             [] as [plakous_recursive_subagents::tree::MailRecord; 0]
@@ -616,40 +662,6 @@ impl Fixture {
         self.runtime
             .read(|tree| tree.commands().values().cloned().collect())
             .unwrap()
-    }
-
-    async fn until_settled(&self, id: &str) {
-        tokio::time::timeout(Duration::from_secs(20), async {
-            loop {
-                let changed = self.runtime.read(ProductAgentTree::waiters).unwrap();
-                let notified = changed.notified();
-                tokio::pin!(notified);
-                notified.as_mut().enable();
-                if self
-                    .runtime
-                    .read(|tree| tree.attempt(id).is_some_and(|a| a.status.is_stopped()))
-                    .unwrap()
-                {
-                    break;
-                }
-                notified.await;
-            }
-        })
-        .await
-        .unwrap_or_else(|error| {
-            panic!(
-                "{}: {error}: {:?}",
-                self.tree_id,
-                self.runtime
-                    .read(|tree| (
-                        tree.node(id).cloned(),
-                        tree.attempt(id).cloned(),
-                        tree.waiting_on(id).cloned(),
-                        tree.commands().clone()
-                    ))
-                    .unwrap()
-            )
-        });
     }
 
     async fn abandonments(&self, id: &str) -> usize {
@@ -766,7 +778,7 @@ fn trace_rows(path: &Path) -> Vec<serde_json::Value> {
 }
 
 #[test]
-fn child_wake_admitted_before_dispatch_rejoins_without_duplicate_admission() {
+fn child_wake_admitted_before_dispatch_is_abandoned_without_duplicate_admission() {
     let pilot = tempfile::tempdir().unwrap();
     std::fs::write(pilot.path().join("trace-enabled"), "").unwrap();
     kill_owner(pilot.path(), "wake");
@@ -876,12 +888,15 @@ fn await_owner(child: &mut std::process::Child, mode: &str) -> String {
         })
 }
 
-/// The exempt bound case: recover_node over an owed child whose exact open
-/// restores its turn (the decision barrier the lost owner left) rejoins it.
-/// The child stays running and unmarked, its owed mark is gone, and nothing
-/// dispatches again.
+/// recover_node over an owed child whose lost turn waits at an effect
+/// decision (a first-turn barrier on its assignment): the take's open closes
+/// that turn as abandoned with cause `process_lost`, nothing started, never
+/// restoring or cancelling it, so nothing tells the child not to act on its
+/// assignment; the child is interrupted with cause `owner_lost` and nothing
+/// dispatches again. This child's attempt spent its one turn, so it holds no
+/// continuation and stays interrupted for its parent.
 #[test]
-fn an_owed_child_whose_open_restores_its_turn_rejoins_unmarked() {
+fn an_owed_child_at_a_decision_barrier_is_closed_as_abandoned_and_marked_owner_lost() {
     let root = tempfile::tempdir().unwrap();
     let id = kill_owner(root.path(), "certified");
     let dispatched = || {
@@ -905,120 +920,26 @@ fn an_owed_child_whose_open_restores_its_turn_rejoins_unmarked() {
             "a bound turn is owed a recover_node"
         );
         super::super::children::recover_owed_children(&fixture.parent, &fixture.runtime).await;
-        assert!(fixture.runtime.live.lock().await.contains_key(&id));
-        fixture
-            .runtime
-            .read(|tree| {
-                assert!(!tree.recovery_owed(&id));
-                assert_eq!(tree.node(&id).unwrap().status, NodeStatus::Running);
-                assert!(
-                    !tree.operations().values().any(|operation| {
-                        operation.caller_agent_id == id && operation.tool_name == "interrupt"
-                    }),
-                    "not marked"
-                );
-            })
-            .unwrap();
-        crate::topology_runtime::force_release(&fixture.tree_id).await;
-    });
-    assert_eq!(
-        dispatched(),
-        before,
-        "the rejoined turn waits at its decision"
-    );
-}
-
-#[test]
-fn child_rejoin_preserves_certified_decision_and_settles_waits() {
-    let root = tempfile::tempdir().unwrap();
-    let id = kill_owner(root.path(), "certified");
-    tokio::runtime::Runtime::new().unwrap().block_on(async {
-        let fixture = Fixture::new(root.path(), "certified", None, true);
-        fixture
-            .runtime
-            .mutate_then_emit_borrowed_for_test(false, |tree| {
-                let mail = tree
-                    .send_agent_message(
-                        "root",
-                        &SendAgentMessageRequest {
-                            refresh: None,
-                            agent_id: id.clone(),
-                            message: "retained receipt".into(),
-                            purpose: None,
-                            priority: None,
-                            in_reply_to: None,
-                            output_schema_json: None,
-                        },
-                        None,
-                    )
-                    .map_err(|error| error.message)?;
-                let envelope = tree.pending_mail(&id).pop().unwrap();
-                tree.remember_success(
-                    "child-retained-wait",
-                    &id,
-                    "wait_agent",
-                    &json!({}),
-                    &json!({"output": {}, "acknowledged": [envelope], "newly_delivered": []}),
-                )
-                .map_err(|error| error.message)?;
-                tree.acknowledge_mail(&mail.message_id)
-                    .map_err(|error| error.message)
-            })
-            .await
-            .unwrap();
-        let locator = std::fs::read_to_string(root.path().join("created-locator")).unwrap();
-        let path = root.path().to_string_lossy().into_owned();
-        let super::super::children::ChildReopen::Attached { session, recovered } =
-            super::super::children::reopen_spawned_child(
-                &fixture.parent,
-                &id,
-                &path,
-                &locator,
-                "certified-rejoin",
-                super::super::children::ChildReopenMode {
-                    lease_wait: super::CHILD_LEASE_WAIT,
-                    recovery: false,
-                    rejoin: true,
-                },
-            )
-            .await
-            .unwrap()
-        else {
-            panic!("certified child did not reopen")
-        };
-        let restored = recovered.expect("RestoredWorking must preserve the child turn");
-        let turn = restored.turn_id();
-        let control = restored.control();
-        let decision = restored.pending_decision().unwrap().clone();
-        let _ = super::super::children::rejoin_recovered_start(
-            &fixture.runtime,
-            &id,
-            "not-own-mail",
-            *session,
-            turn,
-            control.clone(),
-            restored.result(),
-        )
-        .await;
-        assert!(fixture.runtime.live.lock().await.contains_key(&id));
-        assert_eq!(
-            fixture
-                .runtime
-                .read(|tree| tree.retained_wait_receipts(&id).len())
-                .unwrap(),
-            1
+        assert!(
+            !fixture.runtime.live.lock().await.contains_key(&id),
+            "not rejoined"
         );
-        control
-            .allow_effect(
-                decision,
-                plakous::tools::EffectDecisionAuditId::new("child:restored-approval").unwrap(),
-            )
-            .await
-            .unwrap();
-        fixture.until_settled(&id).await;
         let locator = fixture
             .runtime
             .read(|tree| {
+                assert!(!tree.recovery_owed(&id));
+                assert_eq!(tree.node(&id).unwrap().status, NodeStatus::Interrupted);
+                assert_eq!(tree.attempt(&id).unwrap().turn_id, None);
+                let view = crate::agent_tree::view::project_tree_view(tree);
+                assert_eq!(
+                    view.nodes
+                        .iter()
+                        .find(|node| node.agent_id == id)
+                        .unwrap()
+                        .interrupt_cause,
+                    Some(plakous_host_protocol::views::InterruptCauseView::OwnerLost)
+                );
+                assert_eq!(tree.loss_continuation(&id), None, "a spent attempt");
                 tree.node(&id)
                     .unwrap()
                     .session_locator
@@ -1032,51 +953,138 @@ fn child_rejoin_preserves_certified_decision_and_settles_waits() {
         let feed = crate::agent::read_tree_feed(&sessions, locator.session_id(), 0)
             .await
             .unwrap();
-        assert_eq!(
-            feed.records
-                .iter()
-                .flat_map(plakous::sessions::feed::FeedRecord::facts)
-                .filter(|fact| matches!(fact,
-            plakous::sessions::feed::FeedFact::TurnTerminal { turn_id, .. } if *turn_id == turn))
-                .count(),
-            1
+        let outcomes = feed
+            .records
+            .iter()
+            .flat_map(plakous::sessions::feed::FeedRecord::facts)
+            .filter_map(|fact| match fact {
+                plakous::sessions::feed::FeedFact::TurnTerminal { outcome, .. } => Some(outcome),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            matches!(
+                outcomes.as_slice(),
+                [plakous::sessions::feed::FeedTurnOutcome::Cancelled {
+                    cause: plakous::sessions::feed::FeedCancelCause::Abandoned {
+                        claim: plakous::agent::AbandonedTurnClaim::NothingStarted,
+                        cause: plakous::agent::AbandonmentCause::ProcessLost,
+                        ..
+                    },
+                }]
+            ),
+            "the barrier's turn ends abandoned, never as a requested cancel: {outcomes:?}"
         );
-        assert_eq!(
-            fixture
-                .runtime
-                .read(|tree| tree.attempt(&id).unwrap().usage.turns)
-                .unwrap(),
-            1
-        );
-        assert_eq!(
-            std::fs::read_to_string(root.path().join("child.txt")).unwrap(),
-            "one effect"
+        crate::topology_runtime::force_release(&fixture.tree_id).await;
+    });
+    assert_eq!(
+        dispatched(),
+        before,
+        "the barrier's turn never dispatched again"
+    );
+    assert!(
+        !root.path().join("child.txt").exists(),
+        "its pending effect never ran"
+    );
+}
+
+/// A lost wake that waited at an effect decision: the take's open closes
+/// its turn as abandoned, never as a requested cancel, so the mail the wake
+/// carried is read once and nothing tells the child not to act on it. Under
+/// `continue` the child continues once, by a new turn, and the mail is never
+/// delivered again.
+#[test]
+fn a_lost_wake_at_a_decision_has_its_mail_acted_on_exactly_once() {
+    let root = tempfile::tempdir().unwrap();
+    let id = kill_owner(root.path(), "wake-decision");
+    let dispatched = || {
+        plakous_offline_crash_harness::evidence::read_evidence(root.path().join("dispatch.jsonl"))
+            .unwrap()
+            .into_iter()
+            .filter(|row| {
+                row.kind
+                    == plakous_offline_crash_harness::evidence::EvidenceKind::ProviderDispatched
+            })
+            .count()
+    };
+    let before = dispatched();
+    assert_eq!(before, 2, "the assignment and the wake");
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let fixture = Fixture::new(root.path(), "wake-decision", None, true);
+        fixture.runtime.set_continue_after_loss(true);
+        let _ = super::recover_tree(&fixture.tree_id).await;
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while dispatched() < before + 1 {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("the continuation dispatched");
+        // Long enough for a second delivery to show itself.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let locator = fixture
+            .runtime
+            .read(|tree| {
+                assert_eq!(tree.pending_mail(&id).len(), 0, "the mail was read");
+                let carriers = tree
+                    .commands()
+                    .values()
+                    .filter(|command| {
+                        command.recipient == id
+                            && !command.message_ids.is_empty()
+                            && command.fact == Some(crate::agent_tree::CommandFact::Accepted)
+                    })
+                    .count();
+                assert_eq!(carriers, 1, "the mail is carried by the wake alone");
+                tree.node(&id)
+                    .unwrap()
+                    .session_locator
+                    .as_ref()
+                    .unwrap()
+                    .parse::<plakous::sessions::SessionLocator>()
+                    .unwrap()
+            })
+            .unwrap();
+        let sessions = fixture.parent.state_roots().runtime_sessions().unwrap();
+        let feed = crate::agent::read_tree_feed(&sessions, locator.session_id(), 0)
+            .await
+            .unwrap();
+        let outcomes = feed
+            .records
+            .iter()
+            .flat_map(plakous::sessions::feed::FeedRecord::facts)
+            .filter_map(|fact| match fact {
+                plakous::sessions::feed::FeedFact::TurnTerminal { outcome, .. } => Some(outcome),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            outcomes.iter().any(|outcome| matches!(
+                outcome,
+                plakous::sessions::feed::FeedTurnOutcome::Cancelled {
+                    cause: plakous::sessions::feed::FeedCancelCause::Abandoned {
+                        cause: plakous::agent::AbandonmentCause::ProcessLost,
+                        ..
+                    },
+                }
+            )),
+            "{outcomes:?}"
         );
         assert!(
-            fixture
-                .runtime
-                .read(|tree| tree.retained_wait_receipts(&id).is_empty())
-                .unwrap()
+            !outcomes.iter().any(|outcome| matches!(
+                outcome,
+                plakous::sessions::feed::FeedTurnOutcome::Cancelled {
+                    cause: plakous::sessions::feed::FeedCancelCause::Requested,
+                }
+            )),
+            "no turn of the child was closed as a requested cancel: {outcomes:?}"
         );
-        assert_eq!(
-            fixture
-                .runtime
-                .read(|tree| tree.pending_mail(&id).len())
-                .unwrap(),
-            1
-        );
-        fixture.recover(&id, After::Settled).await;
+        crate::topology_runtime::force_release(&fixture.tree_id).await;
     });
-    let evidence =
-        plakous_offline_crash_harness::evidence::read_evidence(root.path().join("dispatch.jsonl"))
-            .unwrap();
-    assert_eq!(
-        evidence
-            .iter()
-            .filter(|row| row.kind
-                == plakous_offline_crash_harness::evidence::EvidenceKind::ProviderDispatched)
-            .count(),
-        2
+    assert_eq!(dispatched(), before + 1, "one continuation, and no replay");
+    assert!(
+        !root.path().join("child.txt").exists(),
+        "the decided-on effect never ran"
     );
 }
 

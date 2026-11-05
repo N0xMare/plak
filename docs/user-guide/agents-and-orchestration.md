@@ -246,9 +246,10 @@ the unfinished turn is recorded once as abandoned (never re-sent or re-run), and
 the child is marked `interrupted` the same way. Either way its attempt, its
 sub-agents and its surviving processes are kept, nothing is retried by itself,
 and no result is sent for it; the parent can re-task it with a follow-up or
-close it, and a crash does not spend the tree's attempt budget. A child whose
-lost turn the reopen finds still waiting (at an approval, or admitted but not
-yet sent) rejoins that turn instead. Until its recovery has run, a child takes
+close it, and a crash does not spend the tree's attempt budget. A lost turn
+the reopen finds still waiting (at an approval, or admitted but not yet sent)
+is closed the same way, never rejoined, and its request is not marked as
+something not to act on. Until its recovery has run, a child takes
 no turn: mail for it waits and is kept. A child that still reads
 `recovery_required` holds none of its parent's child slots, but it does count
 toward the tree's node budget until it is closed.

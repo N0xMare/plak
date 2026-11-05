@@ -4,208 +4,13 @@ use crate::driver::reopen::classify_opened;
 
 use super::{
     AgentSessionsError, AgentSessionsErrorKind, Arc, AttachedCodingSession, ChildBoundBind,
-    ChildFeedSource, Duration, FromStr, LiveRelease, OpenSessionOutcome, OpenSessionRequest,
+    Duration, FromStr, LiveRelease, OpenSessionOutcome, OpenSessionRequest,
     RecoverEffectEvidenceOutcome, RecoverEffectEvidenceRequest, RecoveredTurnHandle,
     RecoveryRequiredReport, SessionEffectEvidence, SessionLocator, SessionOperationId,
     SessionRecoveryAction, SessionToolFence, SpawnParent, ToolExecutorId, ToolOutcome, TurnId,
-    TurnResultHandle, TurnWaiterRegistration, child_session_runtime_binding, mail_command_id,
-    mutate_child, occupancy_session_fence, persist_or_fault,
+    child_session_runtime_binding, mutate_child, occupancy_session_fence, persist_or_fault,
     require_reconstructed_coding_projection, spawn_parent_tree_id,
 };
-
-/// Rejoins the turn a mail Start's reopen recovered unbound: a Start the
-/// lost process journaled and the runtime admitted before the tree bound its
-/// turn (spec 03 section 14.1). The reopen left that command prepared; it
-/// settles from its record before the turn is joined. The turn binds to the
-/// attempt before its waiter can observe it, so a turn that ends at once
-/// settles as the bound turn and is never marked active again; a turn that
-/// loses the live slot is unbound. An attempt that already binds another
-/// turn refuses the rejoin (`RecoveryRequired`): the recovered turn is
-/// cancelled and released and that binding stays. Only a turn this mail's own Start
-/// admitted carried the mail. A turn another command admitted (a lost wake,
-/// another mail's Start) is bound and occupied all the same, and the send
-/// hears `TurnEnded` and follows up into it, so the mail is never
-/// acknowledged by a turn that did not carry it.
-pub(in crate::agent) async fn rejoin_recovered_start(
-    runtime: &crate::topology_runtime::ProductTopologyRuntime,
-    agent_id: &str,
-    message_id: &str,
-    attached: AttachedCodingSession,
-    turn: TurnId,
-    control: plakous::agent::TurnControl,
-    result: TurnResultHandle,
-) -> Result<crate::agent_tree_tools::MailDeliveryAck, crate::agent_tree_tools::MailDeliveryFailure>
-{
-    let (admitted, occupied) =
-        rejoin_recovered_turn(runtime, agent_id, attached, turn, control, result).await?;
-    if admitted == mail_command_id(message_id, "start")?.as_str() && occupied == turn {
-        return Ok(crate::agent_tree_tools::MailDeliveryAck {
-            turn_id: Some(turn.to_string()),
-        });
-    }
-    Err(crate::agent_tree_tools::MailDeliveryFailure::TurnEnded)
-}
-
-/// Rejoins a Start the lost process journaled and the runtime admitted
-/// before the tree bound its turn: the command settles from its record, the
-/// turn binds to the attempt and occupies the live slot under a new waiter.
-/// Returns the command that admitted it and the turn that occupies the slot.
-pub(in crate::agent) async fn rejoin_recovered_turn(
-    runtime: &crate::topology_runtime::ProductTopologyRuntime,
-    agent_id: &str,
-    attached: AttachedCodingSession,
-    turn: TurnId,
-    control: plakous::agent::TurnControl,
-    result: TurnResultHandle,
-) -> Result<(String, TurnId), crate::agent_tree_tools::MailDeliveryFailure> {
-    use crate::topology_runtime::LiveChildHandle as _;
-    let admitted = match crate::agent::park::settle_recovered_start(
-        runtime, agent_id, &attached, turn,
-    )
-    .await
-    {
-        Ok(admitted) => admitted,
-        Err(error) => {
-            let _ = Box::new(crate::agent::live::ChildActorHandle::without_observation(
-                &runtime.driver().release_owners(),
-                attached,
-                turn,
-                control,
-            ))
-            .cancel_and_release(runtime.driver().clone(), None)
-            .await;
-            return Err(error.into());
-        }
-    };
-    // Only the expected state binds: an attempt with no turn binds the
-    // recovered one, an attempt that already binds it is left as it is, and
-    // an attempt that binds any other turn refuses the rejoin, which cancels
-    // and releases the recovered turn below without touching that binding.
-    // The turn's waiter registers with the bind and is dropped only after a
-    // lost occupy unbound it, so the bound turn never reads as unwatched.
-    let driver = runtime.driver().clone();
-    let id = agent_id.to_owned();
-    let bound = runtime
-        .prepare_then_emit(move |tree| {
-            let current = tree
-                .attempt(&id)
-                .ok_or_else(|| "recovered child turn has no attempt to bind".to_owned())?
-                .turn_id
-                .clone();
-            match current {
-                None => Ok(TurnWaiterRegistration::enter(&driver, tree, &id)),
-                Some(current) if current == turn.to_string() => {
-                    Ok(TurnWaiterRegistration::enter(&driver, tree, &id))
-                }
-                Some(current) => Err(format!(
-                    "recovered child turn {turn} does not match the turn {current} the attempt binds"
-                )),
-            }
-        })
-        .await;
-    let mut registration = match bound {
-        Ok(registration) => registration,
-        Err(error) => {
-            let _ = Box::new(crate::agent::live::ChildActorHandle::without_observation(
-                &runtime.driver().release_owners(),
-                attached,
-                turn,
-                control,
-            ))
-            .cancel_and_release(runtime.driver().clone(), None)
-            .await;
-            return Err(error.into());
-        }
-    };
-    let occupied = occupy_recovered_turn(
-        runtime,
-        agent_id.to_owned(),
-        attached,
-        turn,
-        control,
-        result,
-        &mut registration,
-    )
-    .await;
-    TurnWaiterRegistration::release_taken(&mut registration).await;
-    let occupied = occupied?;
-    #[cfg(test)]
-    crate::agent::park::hooks::after_recovered_occupy(agent_id).await;
-    Ok((admitted, occupied))
-}
-
-pub(super) async fn occupy_recovered_child(
-    runtime: &crate::topology_runtime::ProductTopologyRuntime,
-    agent_id: String,
-    attached: AttachedCodingSession,
-    recovered: RecoveredTurnHandle,
-) -> Result<TurnId, String> {
-    let (turn, control, result) = (recovered.turn_id(), recovered.control(), recovered.result());
-    let mut registration = TurnWaiterRegistration::register(runtime.driver(), &agent_id).await;
-    occupy_recovered_turn(
-        runtime,
-        agent_id,
-        attached,
-        turn,
-        control,
-        result,
-        &mut registration,
-    )
-    .await
-}
-
-/// Occupies the live slot with a recovered turn and hands it, with the
-/// waiter `registration` taken before the slot became visible, to a turn
-/// waiter. A slot another turn won answers that turn and leaves the
-/// registration with the caller.
-async fn occupy_recovered_turn(
-    runtime: &crate::topology_runtime::ProductTopologyRuntime,
-    agent_id: String,
-    attached: AttachedCodingSession,
-    turn: TurnId,
-    control: plakous::agent::TurnControl,
-    result: TurnResultHandle,
-    registration: &mut Option<TurnWaiterRegistration>,
-) -> Result<TurnId, String> {
-    let feed = ChildFeedSource::of(&attached);
-    let actor = crate::agent::live::ChildActorHandle::new(
-        &runtime.driver().release_owners(),
-        attached,
-        turn,
-        control,
-    );
-    let watcher = actor.watcher();
-    let child: Box<dyn crate::topology_runtime::LiveChildHandle> = Box::new(actor);
-    match runtime.try_occupy_live(agent_id.clone(), child).await {
-        Ok(turn_id) => {
-            if let Some(registration) = registration.take() {
-                watcher.watch(
-                    registration,
-                    Arc::clone(&runtime.live),
-                    runtime.observer(),
-                    Some(feed),
-                    result,
-                );
-            }
-            Ok(turn_id)
-        }
-        Err(loser) => {
-            let occupied = runtime
-                .live
-                .lock()
-                .await
-                .get(&agent_id)
-                .map(crate::topology_runtime::LiveChildHandle::turn_id);
-            if let Some(failure) = loser.release(runtime.driver().clone()).await.failure {
-                return Err(failure);
-            }
-            match occupied {
-                Some(existing) => Ok(existing),
-                None => Err("topology hub is shutting down".into()),
-            }
-        }
-    }
-}
 
 struct InflightChild {
     pub(super) agent_id: String,
@@ -236,16 +41,17 @@ fn inflight_children(tree: &crate::agent_tree::ProductAgentTree) -> Vec<Inflight
 /// take owes one, descendants first: each child the reopen law found with a
 /// bound or active turn, or parked with a start the lost process prepared.
 ///
-/// The exact open decides. A turn the open restores (a decision barrier, or
-/// an admitted start not yet dispatched) rejoins. Anything else was the lost
-/// owner's: right after the open the child is interrupted with cause
-/// `owner_lost`, attempt and subtree kept, and the feed the open left is
-/// projected after that mark. A child whose open refuses stays owed, takes
-/// no new turn, and records the refusal as its fault. Each child is held
-/// for its own recovery; one another run holds is skipped.
+/// Every turn the open finds was the lost owner's, one it restores (a
+/// decision barrier, or an admitted start not yet dispatched) included: that
+/// turn is cancelled, never rejoined. Right after the open the child is
+/// interrupted with cause `owner_lost`, attempt and subtree kept, and the
+/// feed the open left is projected after that mark. A child whose open
+/// refuses stays owed, takes no new turn, and records the refusal as its
+/// fault. Each child is held for its own recovery; one another run holds is
+/// skipped.
 #[allow(
     clippy::too_many_lines,
-    reason = "Child recovery reconciles each owed attempt with its live owner, the exact reopen, the rejoin and the owner-lost mark."
+    reason = "Child recovery reconciles each owed attempt with its live owner, the exact reopen and the owner-lost mark."
 )]
 pub(in crate::agent) async fn recover_owed_children(
     parent: &SpawnParent,
@@ -304,36 +110,17 @@ pub(in crate::agent) async fn recover_owed_children(
             &path,
             &locator,
             "park-wake",
-            ChildReopenMode::REJOIN,
+            ChildReopenMode::TAKE,
         )
         .await
         {
-            // A wake or mail Start the lost process journaled was admitted
-            // before its turn bound: that turn rejoins (spec 03 §14.1).
+            // A wake or mail Start the lost process journaled and the
+            // runtime admitted before its turn bound is the lost owner's
+            // work: never rejoined after a take (spec 03 §14.1).
             Ok(ChildReopen::Attached {
                 session,
                 recovered: Some(recovered),
-            }) => {
-                let owner = runtime
-                    .read(|tree| tree.tree_id.clone())
-                    .ok()
-                    .and_then(|tree_id| crate::topology_runtime::lookup(&tree_id));
-                match owner {
-                    Some(owner) => {
-                        if crate::agent::park::rejoin_reopened(
-                            &owner, &agent_id, *session, recovered,
-                        )
-                        .await
-                        .is_err()
-                        {
-                            mark_owner_lost(runtime, &agent_id, None).await;
-                        } else {
-                            settle_owed(runtime, &agent_id).await;
-                        }
-                    }
-                    None => mark_owner_lost(runtime, &agent_id, None).await,
-                }
-            }
+            }) => mark_restored_lost(runtime, &agent_id, *session, recovered).await,
             Ok(ChildReopen::Attached { session, .. }) => {
                 mark_owner_lost(runtime, &agent_id, Some(*session)).await;
             }
@@ -367,8 +154,8 @@ pub(in crate::agent) async fn recover_owed_children(
     .await;
 }
 
-/// recover_node for a child with a bound turn: the exact open rejoins a
-/// turn it restores, and marks the child owner-lost otherwise.
+/// recover_node for a child with a bound turn: the exact open, then the
+/// owner-lost mark, after cancelling a turn the open restored.
 async fn recover_bound_child(
     parent: &SpawnParent,
     runtime: &crate::topology_runtime::ProductTopologyRuntime,
@@ -384,23 +171,18 @@ async fn recover_bound_child(
         &child.path,
         &child.locator,
         "reattach",
-        ChildReopenMode::OWNER,
+        ChildReopenMode::TAKE,
     )
     .await
     .map_err(|reason| reason.message)?;
     match reopened {
+        // A turn the open restored (a decision barrier, an admitted start
+        // not yet dispatched) is the lost owner's: never rejoined.
         ChildReopen::Attached {
             session: attached,
             recovered: Some(recovered),
-        } if bound_child_turn_matches(runtime, &child.agent_id, recovered.turn_id()) => {
-            if occupy_recovered_child(runtime, child.agent_id.clone(), *attached, recovered)
-                .await
-                .is_ok()
-            {
-                settle_owed(runtime, &child.agent_id).await;
-            } else {
-                mark_owner_lost(runtime, &child.agent_id, None).await;
-            }
+        } => {
+            mark_restored_lost(runtime, &child.agent_id, *attached, recovered).await;
             Ok(())
         }
         ChildReopen::Attached {
@@ -462,7 +244,33 @@ async fn mark_owner_lost(
     agent_id: &str,
     reopened: Option<AttachedCodingSession>,
 ) {
-    mark_and_project(runtime, agent_id, reopened).await;
+    mark_and_project(runtime, agent_id, reopened, None).await;
+    settle_owed(runtime, agent_id).await;
+}
+
+/// The owner-lost mark for a child whose exact open restored a turn the
+/// lost owner left. A child's open closes an effect-decision barrier itself,
+/// so only a hosted continuation is restored here. The turn is cancelled
+/// first, so its terminal is in the feed the mark projects. On a child
+/// already interrupted (a continuation, wake or mail Start the lost owner
+/// admitted before binding it) the restored turn is lost again: the mark is
+/// recorded anew on that turn, and the child's continuation is decided on it
+/// (spec 03 §14.1).
+pub(in crate::agent) async fn mark_restored_lost(
+    runtime: &crate::topology_runtime::ProductTopologyRuntime,
+    agent_id: &str,
+    session: AttachedCodingSession,
+    recovered: RecoveredTurnHandle,
+) {
+    // The release's shutdown would cancel the turn too; the explicit cancel
+    // bounds the wait for its terminal by the host's cancel bound.
+    let _ = crate::interrupt::settle_cancel(
+        recovered.control().cancel(),
+        plakous_host_protocol::limits::HOST_CANCEL_SETTLE_TIMEOUT,
+    )
+    .await;
+    let turn = recovered.turn_id().to_string();
+    mark_and_project(runtime, agent_id, Some(session), Some(turn)).await;
     settle_owed(runtime, agent_id).await;
 }
 
@@ -470,13 +278,25 @@ async fn mark_and_project(
     runtime: &crate::topology_runtime::ProductTopologyRuntime,
     agent_id: &str,
     reopened: Option<AttachedCodingSession>,
+    restored: Option<String>,
 ) {
     let driver = runtime.driver().for_agent(agent_id);
     let id = agent_id.to_owned();
     mutate_child(&driver, agent_id, {
         let writer = driver.clone();
         move |tree| {
-            tree.mark_owner_lost(&id);
+            // A running child is marked; an interrupted one whose restored
+            // turn the lost owner admitted after its last interrupt is
+            // marked again on that turn.
+            if let Some(turn) = restored.as_deref()
+                && tree.node(&id).is_ok_and(|node| {
+                    node.status == crate::agent_tree_protocol::NodeStatus::Interrupted
+                })
+            {
+                tree.mark_restored_turn_lost(&id, turn);
+            } else {
+                tree.mark_owner_lost(&id);
+            }
             persist_or_fault(&writer, tree, &id);
         }
     })
@@ -594,11 +414,11 @@ pub(in crate::agent) struct ChildReopenMode {
     /// locator: no abandoned-turn fact (its settlement carries that), and no
     /// retirement failure when the result reconciliation refuses.
     pub(in crate::agent) recovery: bool,
-    /// The caller rejoins a recovered turn its attempt does not bind (a
-    /// Start the lost process journaled and the runtime admitted before the
-    /// bind), so the result reconcile leaves that turn's command prepared
-    /// for the rejoin to settle. Every other caller settles it here.
-    pub(in crate::agent) rejoin: bool,
+    /// Whether the reopen projects the feed the open left before it
+    /// returns. A custody take's recover_node projects it itself, after its
+    /// owner-lost mark: a lost turn's terminal folded before the mark would
+    /// interrupt the child with no cause, and so with no continuation.
+    pub(in crate::agent) project: bool,
 }
 
 impl ChildReopenMode {
@@ -607,12 +427,14 @@ impl ChildReopenMode {
     pub(in crate::agent) const OWNER: Self = Self {
         lease_wait: CHILD_LEASE_WAIT,
         recovery: false,
-        rejoin: false,
+        project: true,
     };
 
-    /// An owner reopen that rejoins an unbound recovered turn itself.
-    pub(super) const REJOIN: Self = Self {
-        rejoin: true,
+    /// A custody take's reopen of a child it owes recover_node, and a loss
+    /// continuation's: as [`Self::OWNER`], with the feed left for the mark
+    /// (or the caller) to project.
+    pub(in crate::agent) const TAKE: Self = Self {
+        project: false,
         ..Self::OWNER
     };
 }
@@ -865,6 +687,15 @@ async fn reopen_spawned_child_at_head(
         ChildReopenError::unavailable(format!("child session locator is invalid: {error}"))
     })?;
     let generation = topology.read(|tree| tree.host_generation).unwrap_or(1);
+    // A turn a planned handoff let go of was not lost with its process.
+    let barrier_cause = if topology
+        .read(|tree| tree.turn_handed_off(agent_id))
+        .unwrap_or(false)
+    {
+        plakous::agent::AbandonmentCause::Interrupted
+    } else {
+        plakous::agent::AbandonmentCause::ProcessLost
+    };
     let mut retry = crate::driver::reopen::ExactRetry::with_lease_wait(mode.lease_wait);
     let opened = loop {
         // Read before the child's configuration is compiled, and re-read on the
@@ -927,8 +758,13 @@ async fn reopen_spawned_child_at_head(
         .map_err(|_| ChildReopenError::unavailable("child reopen operation identity is invalid"))?;
         #[cfg(test)]
         super::reopen_error_tests::record_operation(&operation_id);
-        match Box::pin(sessions.open(OpenSessionRequest::new(operation_id, locator, runtime))).await
-        {
+        // A child's reopen never takes over a pending decision: the turn the
+        // previous owner left at one is closed as abandoned, never restored,
+        // so nothing tells the child its request was cancelled (spec 03
+        // §14.1).
+        let request = OpenSessionRequest::new(operation_id, locator, runtime)
+            .closing_effect_decision_barriers(barrier_cause);
+        match Box::pin(sessions.open(request)).await {
             Ok(OpenSessionOutcome::RecoveryRequired {
                 retry_after_seconds: Some(retry_after),
                 ..
@@ -997,47 +833,13 @@ async fn reopen_spawned_child_at_head(
         .map_err(ChildReopenError::unavailable)
 }
 
-pub(super) fn bound_child_turn_matches(
-    runtime: &crate::topology_runtime::ProductTopologyRuntime,
-    agent_id: &str,
-    turn: TurnId,
-) -> bool {
-    runtime
-        .read(|tree| {
-            tree.attempt(agent_id)
-                .and_then(|attempt| attempt.turn_id.as_deref())
-                == Some(turn.to_string().as_str())
-        })
-        .unwrap_or(false)
-}
-
 /// Settles a reopened child's command intents from its feed's
 /// `CommandAccepted` and `CommandRejected` facts through the tree projector.
-/// `recovered` is the turn the caller rejoins, if any. A rejoined turn on an
-/// attempt that binds none is a Start the lost process wrote and the runtime
-/// admitted before the tree bound it: the rejoin (or the mail Start that
-/// reopened the child) applies the feed itself, under its reopen hold, and
-/// finds that command by its fact (spec 03 section 14.1).
 pub(in crate::agent) async fn reconcile_reopened_results(
     runtime: &crate::topology_runtime::ProductTopologyRuntime,
     agent_id: &str,
     session: &AttachedCodingSession,
-    recovered: Option<TurnId>,
 ) -> Result<(), String> {
-    let expected = runtime
-        .read(|tree| {
-            tree.attempt(agent_id)
-                .and_then(|attempt| attempt.turn_id.clone())
-        })
-        .map_err(|error| error.message)?
-        .map(|turn| {
-            turn.parse::<TurnId>()
-                .map_err(|_| "bound child turn is invalid".to_owned())
-        })
-        .transpose()?;
-    if recovered.is_some() && expected.is_none() {
-        return Ok(());
-    }
     // Only unresolved command intents need their facts here; with none, the
     // reopen's own feed pass (recovery's release, the wake's preparation)
     // applies the feed with the terminal reads it needs.
@@ -1059,13 +861,9 @@ pub(super) async fn reconcile_reopened_child_results(
     let ChildReopen::Attached { session, recovered } = reopened else {
         return Ok(reopened);
     };
-    // Only a caller that rejoins the recovered turn keeps its command
-    // prepared; a recovery or recycle reopen settles everything from the
-    // records.
-    let rejoining = recovered
-        .as_ref()
-        .filter(|_| mode.rejoin)
-        .map(RecoveredTurnHandle::turn_id);
+    if !mode.project {
+        return Ok(ChildReopen::Attached { session, recovered });
+    }
     let expected_attempt = runtime
         .read(|tree| {
             tree.attempt(agent_id)
@@ -1089,7 +887,7 @@ pub(super) async fn reconcile_reopened_child_results(
             .await
             .map_err(|error| error.message)?;
         }
-        reconcile_reopened_results(runtime, agent_id, &session, rejoining).await
+        reconcile_reopened_results(runtime, agent_id, &session).await
     }
     .await;
     if let Err(error) = reconciled {

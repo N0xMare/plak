@@ -615,28 +615,6 @@ pub(super) fn prepared_commands(
         .map_err(|error| error.message)
 }
 
-/// The command `recipient`'s feed accepted as `turn`, if one did.
-pub(super) fn accepted_command(
-    driver: &TreeDriver,
-    recipient: &str,
-    turn: plakous::model::TurnId,
-) -> Result<Option<String>, String> {
-    let turn = turn.to_string();
-    driver
-        .read(|tree| {
-            tree.commands()
-                .values()
-                .find(|command| {
-                    command.recipient == recipient
-                        && command.kind != AgentCommandKind::RootBatch
-                        && command.fact == Some(crate::agent_tree::CommandFact::Accepted)
-                        && command.turn_id.as_deref() == Some(turn.as_str())
-                })
-                .map(|command| command.command_id.clone())
-        })
-        .map_err(|error| error.message)
-}
-
 /// Applies `recipient`'s feed to its tail through the tree projector (spec
 /// 03 §14.1, §14.3): every command the feed names gets its fact, accepted
 /// batches are acknowledged and accepted commands bind their turns. A

@@ -3520,7 +3520,8 @@ landing into the root is recorded as the root's fault reason instead, and a
 root persisted `recovery_required` reopens `running`.
 
 **The reopen law.** What the lost process left in flight was its lost owner's
-(design laws L and R). A reopen marks only what the tree rows prove:
+(design laws L and R), and no turn is rejoined in place after a custody take.
+A reopen marks only what the tree rows prove:
 
 - In-flight VCS is faulted as above.
 - A running child the rows show parked between turns is interrupted with
@@ -3531,10 +3532,11 @@ root persisted `recovery_required` reopens `running`.
   the attempt, or a pending transient Resume, proves one when a retained-head
   seed no longer counts it). An unstarted spawn or fresh followup, even one
   whose Start was prepared, has none and is not marked.
-- **Exempt from that mark:** a parked child with a Wake or mail Start command
-  the lost process prepared for its current attempt that no fact names and the
-  tree has not withdrawn. That start may have been admitted, so the child is
-  owed a `recover_node` instead.
+  A parked child with a Wake or mail Start command the lost process prepared
+  for its current attempt that no fact names and the tree has not withdrawn is
+  marked all the same, and is owed a `recover_node` (below): that start may
+  have been admitted, so its turn is cancelled, or it was not, so it is
+  withdrawn with its mail released unread and unclaimed.
 - A running child with a bound or active turn is owed a `recover_node`; so is
   an interrupted one, whose interrupt was written before its turn's terminal
   was projected.
@@ -3543,8 +3545,7 @@ root persisted `recovery_required` reopens `running`.
 
 An owed child takes no turn until its `recover_node` ran in this process:
 mail for it is not delivered (the send waits as for a busy slot, `SlotBusy`,
-and the mail stays durable), and an interrupt of it takes effect and ends
-what its `recover_node` would rejoin. The same holds for the operator's
+and the mail stays durable), and an interrupt of it takes effect. The same holds for the operator's
 mail and interrupt from a face attached to the node (chapter 02 §4.4); the
 operator acts there as the tree's root, so its mail is the root's
 `send_agent_message`, recorded and read with the root as its sender, and
@@ -3560,16 +3561,33 @@ retirement owns, or a turn waiter's recycle owns.
 
 `recover_node` opens the child's session exactly and lets the open decide:
 
-- **Exempt, rejoined:** an open that restores the lost turn (`RestoredWorking`:
-  a decision barrier, or an admitted Start not yet dispatched) rejoins it. A
-  bound turn occupies the child's live slot under a new waiter; an exempt
-  parked start rejoins through the parked rejoin, which binds the turn to the
-  command that admitted it. The child is not marked.
-- **Marked:** any other open (the open closed the lost turn as abandoned, or
-  found no turn) marks the child right after the open: the interrupt with cause
+- **A decision barrier is closed, never restored:** every child open closes
+  effect-decision barriers (chapter 01 §5.5), so a turn the previous owner
+  left waiting at an effect decision ends abandoned, nothing started, its
+  decision never made: with cause `process_lost`, or `interrupted` when a
+  planned handoff let go of that turn (no turn admitted after the handoff). Its history carries the
+  abandonment note, never a requested cancel's, so neither the assignment nor
+  the mail the turn carried is marked as something not to act on; that mail
+  was read once and stays read, and the continuation acts on it.
+- **Restored, never rejoined:** an open that still restores the lost turn
+  (`RestoredWorking`: a hosted tool-batch or server-pause continuation) does
+  not rejoin it. The restored turn is cancelled first, within the host's
+  cancel bound, so its terminal is in the feed, and the child is then marked
+  as below. A child
+  already interrupted (a continuation, wake or mail Start the lost owner
+  admitted before binding it, so not the turn its attempt binds, which its
+  latest interrupt already covers) has its restored turn lost again: the
+  `owner_lost` interrupt is recorded anew, anchored on that turn, and the
+  child's continuation is decided on it under the policy (§14.1, continuation
+  after a loss).
+- **Marked:** every open (the open restored the lost turn and it was
+  cancelled, closed it as abandoned, or found no turn) marks the child right
+  after the open: the interrupt with cause
   `owner_lost` is written first, then the reopened session is released and the
   feed its open left is projected, so the abandoned turn's terminal folds as
-  the interrupted turn's. A prepared command that feed does not name never ran
+  the interrupted turn's. The open itself projects nothing: a lost turn's
+  terminal folded before the mark would interrupt the child with no cause, and
+  so with no continuation. A prepared command that feed does not name never ran
   and is withdrawn, its mail unread; a turn binding no terminal released is
   released. The owed mark settles last, so no delivery sees the child between
   the mark and the projection.
@@ -3594,8 +3612,9 @@ running parked child and no interrupt intent; after it they hold one anchored
 mark: before `recover_node`, the bound turn and the child session's head the
 lost process left; after it, the interrupt intent, the feed records the exact
 open wrote (an abandoned terminal or none), the projection of those records,
-and the withdrawn unadmitted commands. A rejoin writes the turn's binding to
-its waiter and no mark. A crash between any two of these leaves rows the next
+and the withdrawn unadmitted commands. A restored turn is cancelled before the
+mark; a crash after that cancel leaves its terminal in the feed, which the next
+`recover_node` folds after its mark. A crash between any two of these leaves rows the next
 reopen classifies the same way: an intent written is folded again, never
 duplicated (it is keyed by its fold position); a child marked but not yet
 projected is interrupted and still bound, so it is owed again and its next
@@ -3646,9 +3665,10 @@ the held node and no decision; after it, the decision and nothing else; the
 Start then writes the command intent before it submits. A crash between the
 decision and the submission leaves it pending, and the next run submits it. A
 crash after the runtime admitted the command leaves either a turn the child's
-exact open restores, which rejoins, or an accepted command the next projection
-names, which is no longer pending; so a continuation is never dispatched
-twice.
+exact open restores, which is cancelled and lost again (the child is marked
+anew on it, and its continuation decided on that turn), or an accepted
+command the next projection names, which is no longer pending; so a
+continuation is never dispatched twice.
 Its Start re-checks that it is still pending when it reserves the child and
 when it binds the turn, so a close, an interrupt or another turn that ended it
 refuses the Start. A Start the runtime already admitted when its bind is
@@ -3739,7 +3759,9 @@ release takes the flag first, so a refused or failed release leaves none
 armed and a later plain release never inherits it. The release's cancel of
 a running root turn is bounded by the host's cancel bound (5 s), not an
 interactive quit's 300 ms, so a turn slow to settle under load is still
-handed off; the reload's join waits that much longer than a quit's. A turn
+handed off; the reload's join waits that grace and the release after it
+(a child's cancel inside the hub's release, and its two-second join) beyond a
+quit's. A turn
 that does not settle within it degrades the release into an ordinary loss:
 the handoff is disarmed and nothing is recorded, the release abandons the
 turn by lease and says so with a warning, never an error, and the next open
@@ -3805,12 +3827,11 @@ before submission, and what became of it is the child feed's
 - A command with `CommandAccepted` binds the attempt it names to the fact's turn
   id; the binding is a view, so a turn admitted before a process loss is bound
   however far the lost process got. Its batch is acknowledged. If that turn has
-  no `TurnTerminal` yet, it is still running when the child reopens, and it is
-  rejoined, never left `recovery_required`. A mail Start that reopens such a
-  child joins that turn and acknowledges its own mail only when the accepted
-  command is its own Start; a turn another command admitted (a lost wake,
-  another mail's Start) is joined all the same, and the send delivers its mail
-  into it as a follow-up (§4.3).
+  no `TurnTerminal` yet, it was in flight when its owner was lost: it is never
+  rejoined after a take, nor left `recovery_required`. The take's
+  `recover_node` cancels it and marks the child; a mail delivery whose reopen
+  finds one does the same and fails closed, its mail staying unread for the
+  child's continuation or next wake.
 - A command with `CommandRejected` is settled rejected: its mail returns to
   unread and nothing is retried.
 - The live submission site settles the same outcome from its acknowledgement,
@@ -3966,8 +3987,8 @@ the receipt's `workspace_recovery` names the remaining blocker, and
 
 The host settles a child by reopening its session exactly (§14.1). Here (for
 `recover_agent` and an unresolved session outcome; an owed child's
-`recover_node` rejoins instead, §14.1) a head that restores a resumable working
-turn is cancelled and released, never rejoined, and the child is interrupted
+`recover_node` cancels it the same way and marks the child, §14.1) a head that
+restores a resumable working turn is cancelled and released, never rejoined, and the child is interrupted
 (law L). A head that requires effect evidence is
 refused `recovery_effect_evidence_refused`: the product holds no
 executor-owned effect evidence to finalize it with. A startup that never

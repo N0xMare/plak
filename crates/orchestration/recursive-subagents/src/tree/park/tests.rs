@@ -386,11 +386,11 @@ fn a_parked_child_with_another_unresolved_command_is_marked_and_owed_once() {
 }
 
 /// A parked child with a start the lost process prepared and no fact names
-/// is exempt from the reopen law's mark: it stays running and owed, its
-/// recover_node rejoins the start under the reopening state, mail waits for
-/// that boundary, and an interrupt ends it.
+/// is marked like every parked child: no start is rejoined after a take.
+/// The unfacted start leaves it owed, so its recover_node cancels a turn the
+/// runtime admitted for it and withdraws one it never admitted.
 #[test]
-fn an_owed_parked_start_rejoins_under_a_reopening_state_an_interrupt_ends() {
+fn an_owed_parked_start_is_marked_owner_lost_and_owed() {
     let (_root, mut tree) = tree();
     let woken = after_one_turn(&mut tree);
     tree.release_attempt_turn(&woken).unwrap();
@@ -410,38 +410,15 @@ fn an_owed_parked_start_rejoins_under_a_reopening_state_an_interrupt_ends() {
         ))
         .unwrap();
     }
-    let mut reopened = ProductAgentTree::reopen(tree.to_persisted());
+    let reopened = ProductAgentTree::reopen(tree.to_persisted());
     for agent in [&woken, &interrupted] {
-        assert_eq!(reopened.node(agent).unwrap().status, NodeStatus::Running);
-        assert!(reopened.recovery_owed(agent), "exempt, and owed");
+        assert_eq!(
+            reopened.node(agent).unwrap().status,
+            NodeStatus::Interrupted
+        );
+        assert!(reopened.recovery_owed(agent), "marked, and owed");
         assert!(!reopened.is_parked(agent));
     }
-
-    assert!(reopened.begin_reopen_wake(&woken));
-    assert!(reopened.reopen_wake_admissible(&woken));
-    assert!(!reopened.begin_reopen_wake(&woken), "one rejoin at a time");
-    assert!(reopened.is_parked(&woken));
-    assert!(reopened.waiting_on(&woken).is_none());
-    let sent = reopened
-        .send_agent_message("root", &mail(&woken, "status?"), None)
-        .unwrap();
-    assert_eq!(sent.disposition, MailDisposition::Queued);
-    reopened.unpark_child(&woken);
-    assert!(!reopened.is_parked(&woken));
-
-    assert!(reopened.begin_reopen_wake(&interrupted));
-    assert_eq!(
-        reopened
-            .interrupt_agent("root", &close_req(&interrupted), None)
-            .unwrap(),
-        NodeStatus::Interrupted
-    );
-    assert!(!reopened.reopen_wake_admissible(&interrupted));
-    assert!(!reopened.is_parked(&interrupted));
-    assert!(
-        !reopened.begin_reopen_wake(&interrupted),
-        "an interrupted child is not rejoined"
-    );
 }
 
 #[test]

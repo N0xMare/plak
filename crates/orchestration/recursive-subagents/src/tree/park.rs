@@ -39,10 +39,6 @@ enum ParkState {
     /// The host is admitting the wake turn: mail still waits for the next
     /// boundary rather than racing the Start.
     Waking,
-    /// The host is rejoining the start the lost process prepared for an
-    /// owed child (its recover_node): mail still waits, and an interrupt
-    /// ends it.
-    Reopening,
     /// The wake was not admitted and the host is ending the attempt: new mail
     /// is refused as terminal and an interrupt no longer applies.
     Ending,
@@ -184,48 +180,6 @@ impl ProductAgentTree {
                 .nodes
                 .get(agent_id)
                 .is_some_and(|node| node.status == NodeStatus::Running)
-    }
-
-    /// Begins the rejoin of an owed child's prepared start, before the
-    /// rejoin binds a turn for it. Returns whether the child is still owed
-    /// its recover_node on a running node with an open, unsubmitted attempt:
-    /// an interrupt or close that landed since ended it, and nothing may
-    /// start.
-    pub fn begin_reopen_wake(&mut self, agent_id: &str) -> bool {
-        if !self.reopen_target_open(agent_id)
-            || !self.recovery_owed(agent_id)
-            || self.parked.contains_key(agent_id)
-        {
-            return false;
-        }
-        self.parked.insert(
-            agent_id.to_owned(),
-            ParkedChild {
-                waiting_on: WaitingOn::default(),
-                state: ParkState::Reopening,
-                continuation: false,
-            },
-        );
-        true
-    }
-
-    /// Whether a reopen wake begun by [`Self::begin_reopen_wake`] may still
-    /// start or bind its turn: nothing ended the hold since.
-    #[must_use]
-    pub fn reopen_wake_admissible(&self, agent_id: &str) -> bool {
-        self.parked
-            .get(agent_id)
-            .is_some_and(|parked| parked.state == ParkState::Reopening)
-            && self.reopen_target_open(agent_id)
-    }
-
-    fn reopen_target_open(&self, agent_id: &str) -> bool {
-        self.nodes
-            .get(agent_id)
-            .is_some_and(|node| node.status == NodeStatus::Running)
-            && self.current_attempt(agent_id).is_some_and(|attempt| {
-                attempt.status == AttemptStatus::Running && attempt.output_json.is_none()
-            })
     }
 
     /// Marks a parked child whose wake was not admitted as ending its

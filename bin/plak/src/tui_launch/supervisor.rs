@@ -12,6 +12,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+/// What a reload's join waits beyond a quit's: the root turn's handoff
+/// cancel grace, then the release after it, in which a child's cancel takes
+/// at most the same bound and the hub's release join two seconds more.
+const RELOAD_RELEASE_BOUND: Duration = plakous_host_protocol::limits::HOST_CANCEL_SETTLE_TIMEOUT
+    .saturating_mul(2)
+    .saturating_add(Duration::from_secs(2));
+
 use plakous::agent::ReasoningEffort;
 
 use super::{supported_provider_rows, tui_presentation_bundle, tui_presentation_values};
@@ -111,11 +118,8 @@ fn settle_tui_round(
         ) {
             // A reload is a planned handoff: the host records each node with
             // work in flight as handed off before it releases (spec 03 §14.1).
-            // Its running turn's cancel may take the host's cancel bound to
-            // settle, so the join waits that much longer than a quit's.
             host_mailbox.request_handoff_and_release();
-            tui_timing::remaining_exit_budget()
-                + plakous_host_protocol::limits::HOST_CANCEL_SETTLE_TIMEOUT
+            tui_timing::remaining_exit_budget() + RELOAD_RELEASE_BOUND
         } else {
             host_mailbox.request_abandon_and_release();
             tui_timing::remaining_exit_budget()

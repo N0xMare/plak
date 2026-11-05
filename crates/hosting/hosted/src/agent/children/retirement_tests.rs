@@ -1653,7 +1653,12 @@ async fn assert_reopened_result_reconciliation(corrective: bool, empty: bool) {
     )
     .await
     .unwrap();
-    assert!(!bound_child_turn_matches(&runtime, &parent.agent_id, turn));
+    assert_ne!(
+        runtime
+            .read(|tree| tree.attempt(&parent.agent_id).unwrap().turn_id.clone())
+            .unwrap(),
+        Some(turn.to_string())
+    );
     if corrective {
         assert_eq!(
             runtime

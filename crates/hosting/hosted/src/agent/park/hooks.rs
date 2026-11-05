@@ -9,7 +9,6 @@ pub(in crate::agent) type Hook =
 static BEFORE_WAKE_ADMISSION: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
 static BEFORE_FAILED_WAKE_END: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
 static AFTER_FOLLOW_UP_ADMISSION: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
-static AFTER_RECOVERED_OCCUPY: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
 static AROUND_REOPEN_SPAWNED_CHILD: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
 static BEFORE_LOSS_CONTINUATION_RESERVE: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
 static AFTER_LOSS_CONTINUATION_ADMISSION: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
@@ -58,16 +57,6 @@ pub(in crate::agent) fn set_after_follow_up_admission(agent_id: &str, hook: Hook
 
 pub(in crate::agent) async fn after_follow_up_admission(agent_id: &str) {
     run(&AFTER_FOLLOW_UP_ADMISSION, agent_id).await;
-}
-
-/// Runs `hook` after a mail Start's rejoin handed its recovered turn to
-/// a turn waiter, before the rejoin returns.
-pub(in crate::agent) fn set_after_recovered_occupy(agent_id: &str, hook: Hook) {
-    set(&AFTER_RECOVERED_OCCUPY, agent_id, hook);
-}
-
-pub(in crate::agent) async fn after_recovered_occupy(agent_id: &str) {
-    run(&AFTER_RECOVERED_OCCUPY, agent_id).await;
 }
 
 /// Runs `hook` after a mail Start has reopened the child session and

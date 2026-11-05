@@ -401,3 +401,75 @@ fn interrupts_record_their_cause() {
         assert_eq!(tree.loss_continuation(&running), None);
     }
 }
+
+/// A restored copy of the turn the attempt binds is the turn its latest
+/// interrupt already covers: it is not marked again, so a handed-off child
+/// keeps `handoff` and continues by itself once.
+#[test]
+fn a_restored_bound_turn_keeps_its_handoff() {
+    let (_root, mut tree, [running, ..]) = working_children();
+    tree.record_handoff().unwrap();
+    tree.mark_restored_turn_lost(&running, "00000000-0000-0000-0000-000000000001");
+    assert_eq!(
+        view(&tree, &running).interrupt_cause,
+        Some(InterruptCauseView::Handoff)
+    );
+    let continuation = tree.loss_continuation(&running).unwrap();
+    assert_eq!(continuation.cause, ContinuationCause::Handoff);
+    assert_eq!(continuation.state, LossContinuationState::Held);
+}
+
+/// A turn the lost owner admitted on an interrupted child before binding it
+/// (a wake, mail Start or continuation), restored after a take, is lost
+/// again: re-marked `owner_lost`, so the child's continuation is decided on
+/// that turn under the policy, never by the handoff it no longer covers.
+#[test]
+fn a_restored_unbound_turn_is_marked_owner_lost_again() {
+    let (_root, mut tree, [_, parked, _]) = working_children();
+    tree.record_handoff().unwrap();
+    assert_eq!(
+        tree.loss_continuation(&parked).unwrap().cause,
+        ContinuationCause::Handoff
+    );
+    tree.mark_restored_turn_lost(&parked, "00000000-0000-0000-0000-0000000000aa");
+    assert_eq!(
+        view(&tree, &parked).interrupt_cause,
+        Some(InterruptCauseView::OwnerLost)
+    );
+    assert_eq!(
+        tree.loss_continuation(&parked).unwrap().cause,
+        ContinuationCause::OwnerLost
+    );
+}
+
+/// A reopen closing a turn a planned handoff let go of tells the runtime
+/// so: the turn is handed off until a turn is admitted after the handoff,
+/// which a lost process then loses.
+#[test]
+fn a_turn_is_handed_off_until_a_later_one_is_admitted() {
+    let (_root, mut tree, [running, parked, held]) = working_children();
+    assert!(!tree.turn_handed_off(&running));
+    tree.record_handoff().unwrap();
+    assert!(tree.turn_handed_off(&running));
+    assert!(tree.turn_handed_off(&parked));
+    assert!(
+        !tree.turn_handed_off(&held),
+        "a held loss is not handed off"
+    );
+    let command = tree.record_loss_continuation(&parked, 1).unwrap();
+    let attempt = tree.node(&parked).unwrap().attempt_id.clone();
+    tree.record_command(AgentCommand::intent(
+        command.clone(),
+        &parked,
+        attempt,
+        AgentCommandKind::Resume,
+        "continue",
+        Vec::new(),
+    ))
+    .unwrap();
+    let accepted = tree.commands.get_mut(&command).unwrap();
+    accepted.fact = Some(CommandFact::Accepted);
+    accepted.accepted_seq = Some(1_000);
+    accepted.turn_id = Some("00000000-0000-0000-0000-000000000009".to_owned());
+    assert!(!tree.turn_handed_off(&parked));
+}

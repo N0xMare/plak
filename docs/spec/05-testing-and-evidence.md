@@ -2126,7 +2126,8 @@ continuation of the child, any earlier cut leaves its loss held. The second
 runs under `resume_after_loss = "continue"`, opens the child's gate once the
 root answered and quits plainly once the child's attempt ended, so no live
 turn races the release; a cut that loses the child's running request
-continues it at most once. Either way each continuation is one accepted
+continues it exactly once (the same cut under `hold`, in the first shape,
+leaves it held). Either way each continuation is one accepted
 continuation command and one request, counted while it runs, and a second
 relaunch dispatches nothing for the root or the child. Their lifecycles
 let the root answer only after every store stayed still for a second behind
@@ -2678,9 +2679,9 @@ attempt count and command rows and sends no result mail.
 `root_stale_open_reprojects_once_then_opens_the_new_head` pins root stale-head
 adoption; `root_second_stale_open_refuses_contention_without_a_third_projection`
 and `root_stale_open_with_projection_debt_refuses_without_retry` pin its refusal
-boundaries. `root_startup_rejoins_certified_decision_once_and_settles_waits` and
-`child_rejoin_preserves_certified_decision_and_settles_waits` pin both restored
-turns. `recover_agent_waits_for_a_still_held_child_lease` pins the explicit recovery
+boundaries. `root_startup_rejoins_certified_decision_once_and_settles_waits` pins
+the root's restored turn; a child's never is: its open closes an effect-decision
+barrier as abandoned (`an_owed_child_at_a_decision_barrier_is_closed_as_abandoned_and_marked_owner_lost`). `recover_agent_waits_for_a_still_held_child_lease` pins the explicit recovery
 wait; `owner_reopen_polls_a_reinstated_lease_with_a_new_operation_id` pins the
 owner's inner lease poll, elapsed wait and incremented open identity. These
 durability tests are separate from enrollment in the single-root sweep.

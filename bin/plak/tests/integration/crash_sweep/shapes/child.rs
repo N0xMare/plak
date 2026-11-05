@@ -10,8 +10,8 @@
 //! "continue"`. The child's gate opens once the root answered, and the
 //! face quits plainly once the child's attempt ended, so no live turn
 //! races the release. A cut that loses the child's running request
-//! continues it at most once: one the custody take's recovery rejoins is
-//! not continued.
+//! relaunches into exactly one continuation of it; the same cut under
+//! `hold` (`handoff_resume_child`'s earlier cuts) leaves it held.
 //!
 //! Either way every continuation is one accepted continuation command and
 //! one request, and a second relaunch continues nothing more.
@@ -228,11 +228,24 @@ fn child_ended(fixture: &Fixture) -> bool {
 }
 
 fn child_accepted(fixture: &Fixture) -> bool {
-    tree(fixture, &session(fixture)).is_some_and(|tree| {
-        tree.rows().commands().values().any(|command| {
-            command.recipient == "c1"
-                && command.fact == Some(plakous_recursive_subagents::tree::CommandFact::Accepted)
-        })
+    tree(fixture, &session(fixture)).is_some_and(|tree| child_accepted_rows(tree.rows()))
+}
+
+/// Whether the lost owner had already decided to finalize the child's
+/// attempt: its last turn ended, and the next owner only completes that.
+fn finalizing(rows: &plakous_recursive_subagents::tree::ProductAgentTree) -> bool {
+    rows.operations().values().any(|operation| {
+        operation.caller_agent_id == "c1"
+            && operation.tool_name == "child_finalization"
+            && serde_json::from_str::<Value>(&operation.canonical_request)
+                .is_ok_and(|request| request["decision"] == "Finalize")
+    })
+}
+
+fn child_accepted_rows(rows: &plakous_recursive_subagents::tree::ProductAgentTree) -> bool {
+    rows.commands().values().any(|command| {
+        command.recipient == "c1"
+            && command.fact == Some(plakous_recursive_subagents::tree::CommandFact::Accepted)
     })
 }
 
@@ -249,9 +262,11 @@ fn tree(fixture: &Fixture, session: &str) -> Option<PersistedTree> {
 /// What the rows say about the child before any relaunch reads them.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Before {
-    /// No child row, or a child whose request never ran.
+    /// No child row, or a child whose runtime never accepted a turn.
     NotRunning,
-    /// A running child request the cut lost with its host.
+    /// A running child the cut lost with its host: its attempt is open with
+    /// turns left and not being finalized, and its runtime accepted a turn,
+    /// whether or not one is bound now.
     Running,
     /// A durable handoff of the child's running request.
     HandedOff,
@@ -273,11 +288,13 @@ fn before(fixture: &Fixture, session: &str) -> Before {
             ContinuationCause::OwnerLost | ContinuationCause::Transient => Before::Running,
         };
     }
-    let turn_bound = rows
-        .attempt("c1")
-        .is_some_and(|attempt| attempt.turn_id.is_some() && attempt.output_json.is_none());
+    let open = rows.attempt("c1").is_some_and(|attempt| {
+        attempt.status == plakous_recursive_subagents::protocol::AttemptStatus::Running
+            && attempt.output_json.is_none()
+    }) && !rows.attempt_turns_spent("c1")
+        && !finalizing(rows);
     match node.status {
-        NodeStatus::Running if turn_bound => Before::Running,
+        NodeStatus::Running if open && child_accepted_rows(rows) => Before::Running,
         NodeStatus::Interrupted => Before::Interrupted,
         _ => Before::NotRunning,
     }
@@ -412,18 +429,14 @@ pub(in super::super) fn after_kill(
     }
     reopened.send(&prompt_frame("crash-sweep-followup-prompt"));
     reopened.wait_for_completed_turns(1 + usize::from(requeued));
-    // A handed-off child continues by itself under either policy, and
-    // nothing else does under `hold`. Under `continue` the rows before the
-    // relaunch do not decide it: a request lost in flight is rejoined by
-    // the custody take's recovery rather than continued, and the plain
-    // quit's own release may have ended it in the runtime first. That
-    // variant is bounded at once.
+    // A handed-off child continues by itself under either policy; a child
+    // whose running request the cut lost continues once under `continue`
+    // and is held under `hold`; nothing else continues.
     let expected = match (before, variant) {
-        (Before::HandedOff, _) => Some(1),
-        (_, Variant::OwnerLost) => None,
-        _ => Some(0),
+        (Before::HandedOff, _) | (Before::Running, Variant::OwnerLost) => 1,
+        _ => 0,
     };
-    wait_for_child_dispatches(fixture, child_before + expected.unwrap_or(1));
+    wait_for_child_dispatches(fixture, child_before + expected);
     // Long enough for a second continuation to show itself.
     std::thread::sleep(std::time::Duration::from_millis(500));
     reopened.send(&quit_frame());
@@ -436,10 +449,9 @@ pub(in super::super) fn after_kill(
         resumed(fixture, session),
         "{before:?}: each continuation is one consented command and one request"
     );
-    assert!(
-        expected.map_or(continues <= 1, |expected| continues == expected),
-        "{before:?}: a lost or handed-off child continues once, and only by its rows; \
-         it continued {continues} times"
+    assert_eq!(
+        continues, expected,
+        "{before:?}: a lost or handed-off child continues once, and only by its rows"
     );
     let root_after = invariants::dispatches(fixture).len();
     assert_eq!(

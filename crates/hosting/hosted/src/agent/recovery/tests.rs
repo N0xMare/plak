@@ -4862,6 +4862,134 @@ async fn an_owed_childs_mark_keeps_its_pending_continuation() {
     crate::topology_runtime::force_release(&fixture.tree_id).await;
 }
 
+/// A Wake the lost process prepared over the child's unread mail and the
+/// runtime never admitted is withdrawn by the take's mark: its batch is
+/// released unread and unclaimed, so the continuation, by the operator's
+/// Resume under hold or by itself under `continue`, delivers the mail
+/// exactly once.
+#[tokio::test]
+async fn a_withdrawn_wake_leaves_its_mail_for_one_continuation() {
+    use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind, CommandLedger as _};
+    for continues in [false, true] {
+        let fixture = Fixture::new(if continues {
+            "withdrawn-wake-continue"
+        } else {
+            "withdrawn-wake-hold"
+        });
+        let id = owner_lost_child(&fixture).await;
+        fixture
+            .runtime
+            .mutate_then_emit(false, {
+                let id = id.clone();
+                move |tree| {
+                    tree.send_agent_message(
+                        "root",
+                        &SendAgentMessageRequest {
+                            refresh: None,
+                            agent_id: id,
+                            message: "status?".into(),
+                            purpose: None,
+                            priority: None,
+                            in_reply_to: None,
+                            output_schema_json: None,
+                        },
+                        None,
+                    )
+                    .map(|_| ())
+                    .map_err(|error| error.message)
+                }
+            })
+            .await
+            .unwrap();
+        let message = fixture
+            .runtime
+            .read(|tree| tree.wake_mail(&id)[0].message_id.clone())
+            .unwrap();
+        // The lost process journaled a wake over that mail; nothing admitted it.
+        let wake = "plak:test:lost-wake".to_owned();
+        crate::agent::ledger::ChildLedger::new(fixture.runtime.driver(), &id)
+            .prepare(CommandIntent {
+                command_id: &wake,
+                kind: CommandKind::Wake,
+                base_text: crate::child_prompts::PLAK_CHILD_WAKE_PROMPT,
+                batch: BatchRule::WakeAll,
+            })
+            .await
+            .unwrap();
+        assert!(
+            fixture
+                .runtime
+                .read(|tree| tree.commands()[&wake].message_ids.contains(&message))
+                .unwrap(),
+            "the wake's batch carries the mail"
+        );
+        fixture
+            .runtime
+            .mutate_then_emit(false, |tree| {
+                tree.apply_reopen_law();
+                Ok(())
+            })
+            .await
+            .unwrap();
+        crate::agent::recover_owed_children(&fixture.parent, &fixture.runtime).await;
+        fixture
+            .runtime
+            .read(|tree| {
+                assert!(
+                    tree.commands()[&wake].withdrawn,
+                    "what never ran is withdrawn"
+                );
+                assert_eq!(
+                    tree.wake_mail(&id)
+                        .iter()
+                        .map(|mail| mail.message_id.clone())
+                        .collect::<Vec<_>>(),
+                    std::slice::from_ref(&message),
+                    "the batch is released unread and unclaimed"
+                );
+            })
+            .unwrap();
+        if continues {
+            fixture.runtime.set_continue_after_loss(true);
+            recover_tree(&fixture.tree_id).await;
+        } else {
+            let resumed =
+                crate::agent::children::operator_resume_after_loss(&fixture.runtime, Some(&id))
+                    .await
+                    .unwrap();
+            assert_eq!(
+                resumed,
+                vec![(id.clone(), crate::agent::children::LossResume::Started)]
+            );
+        }
+        let continuation = continuation_admitted(&fixture).await;
+        fixture
+            .runtime
+            .read(|tree| {
+                let carriers = tree
+                    .commands()
+                    .values()
+                    .filter(|command| {
+                        command.message_ids.contains(&message)
+                            && command.fact == Some(crate::agent_tree::CommandFact::Accepted)
+                    })
+                    .map(|command| command.command_id.clone())
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    carriers,
+                    std::slice::from_ref(&continuation),
+                    "read exactly once"
+                );
+                assert_eq!(
+                    tree.wake_mail(&id),
+                    [] as [crate::agent_tree::MailRecord; 0]
+                );
+            })
+            .unwrap();
+        crate::topology_runtime::force_release(&fixture.tree_id).await;
+    }
+}
+
 /// A continuation prepared and then ended by an interrupt strands nothing:
 /// the reopen law owes the child, its recovery withdraws the command, and
 /// the child takes mail again.
