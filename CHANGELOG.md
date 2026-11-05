@@ -372,6 +372,17 @@ an export.
   has since switched, is refused `moved` with the served session's root
   (`RequestRefusal::Moved`), not `unknown_node`: a connection welcomed
   before a switch learns where the session went.
+- Wire v2 session requests: `retry_attach`, `resume_session` and `rebind`
+  ops (`Op::RetryAttach`, `Op::ResumeSession`, `Op::Rebind`), each naming
+  its requester attachment and a client `request_id`, answered `moved`
+  with the new root (`Answer::Moved`) or refused `session_unavailable`
+  (`RequestRefusal::SessionUnavailable`). Every `moved` frame a session
+  request causes names its `request_id`. The session host serves
+  `resume_session`; `retry_attach` and `rebind` are refused there until a
+  launcher serves them. A transcript the session's observation mailbox
+  lost ends its wire holders with `resync_required` once per loss.
+  Embedder break: `HostService::move_attachments` takes the request id and
+  `Outbound::Moved` carries it.
 - The TUI's last direct product reads move behind the protocol: the
   reload target is the session host's `probe_reload` (answered by
   `reload_probed` with the target and the host build's refusal, or

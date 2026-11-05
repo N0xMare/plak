@@ -238,7 +238,7 @@ fn a_session_switch_moves_the_attachment_to_the_new_root() {
     drop(connection);
     assert!(host_frames(&stdout).iter().any(|frame| matches!(
         frame,
-        HostFrame::Moved { attachment: 1, node } if *node == root_named("tree-s2")
+        HostFrame::Moved { attachment: 1, node, .. } if *node == root_named("tree-s2")
     )));
 }
 
@@ -519,7 +519,7 @@ fn a_shared_session_moves_every_attachment_on_a_switch() {
         let moved = frames
             .iter()
             .position(|frame| {
-                matches!(frame, HostFrame::Moved { attachment: held, node }
+                matches!(frame, HostFrame::Moved { attachment: held, node, .. }
                     if *held == attachment && *node == root_named("tree-s2"))
             })
             .expect("moved");
@@ -908,4 +908,357 @@ fn a_later_switch_replays_again_after_an_overflow() {
         frame,
         HostFrame::Event { observation, .. } if *observation == notice
     )));
+}
+
+/// The `IntentStarted` the session announces as it takes `delivery`.
+fn started_of(
+    delivery: &plakous_host_protocol::IntentDelivery<plakous_host_protocol::Core>,
+) -> SessionObservation<plakous_host_protocol::Core> {
+    match delivery.started() {
+        Some(plakous_host_protocol::ContentObservation::IntentStarted(started)) => {
+            SessionObservation::IntentStarted(started)
+        }
+        other => panic!("no start: {other:?}"),
+    }
+}
+
+/// A resume request goes to the session as its own resume, correlated to
+/// the request: the switch it causes answers it `moved` with the new root
+/// before the requester's `moved` frame, which names the request. An error
+/// in its window refuses it `session_unavailable`, the session unchanged. A
+/// second request while one is in flight is refused; a retry or a rebind,
+/// which only a launcher can do, is refused `session_unavailable` at once;
+/// a child attachment is refused them for its role.
+#[test]
+fn a_resume_request_is_answered_by_its_switch_or_its_error() {
+    use plakous_host_protocol::Core;
+    use plakous_host_protocol::views::transcript::NoticeScope;
+    let (actions, intents) = plakous_host_protocol::intent_channel::<Core>();
+    let mut stdout = Vec::new();
+    let mut connection = WireConnection::new(root(), &mut stdout, actions)
+        .serving("s1", |id| Some(root_named(&format!("tree-{id}"))));
+    assert!(matches!(
+        connection.request(1, Op::Attach { node: root() }),
+        Some(Outcome::Ok(Answer::Attached { attachment: 1 }))
+    ));
+    while intents.try_recv().is_ok() {}
+    let resume = |request_id: &str, session: &str| Op::ResumeSession {
+        attachment: 1,
+        request_id: request_id.into(),
+        session: session.into(),
+    };
+    assert_eq!(connection.request(2, resume("r1", "lost")), None);
+    let refused = intents.try_recv().expect("the resume reached the session");
+    assert_eq!(
+        *refused,
+        SessionIntent::ResumeSession {
+            id: Some("lost".into())
+        }
+    );
+    assert_eq!(
+        connection.request(3, resume("r2", "s2")),
+        Some(Outcome::Refused(RequestRefusal::OneInFlight))
+    );
+    for observation in [
+        started_of(&refused),
+        SessionObservation::Row(TranscriptRow::error(
+            NoticeScope::Session,
+            "resume: no such session",
+        )),
+    ] {
+        assert!(connection.observe(observation).unwrap());
+    }
+    connection.flush().unwrap();
+    assert_eq!(connection.attachment, Some(1), "the session is unchanged");
+    for (id, op) in [
+        (
+            4,
+            Op::RetryAttach {
+                attachment: 1,
+                request_id: "r3".into(),
+            },
+        ),
+        (
+            5,
+            Op::Rebind {
+                attachment: 1,
+                request_id: "r4".into(),
+                cause: "asked".into(),
+            },
+        ),
+    ] {
+        assert!(matches!(
+            connection.request(id, op),
+            Some(Outcome::Refused(RequestRefusal::SessionUnavailable { .. }))
+        ));
+    }
+    assert_eq!(connection.request(6, resume("r5", "s2")), None);
+    let switching = intents.try_recv().expect("the resume reached the session");
+    for observation in [
+        started_of(&switching),
+        SessionObservation::SessionOpening,
+        binding("s2"),
+    ] {
+        assert!(connection.observe(observation).unwrap());
+    }
+    connection.flush().unwrap();
+    drop(connection);
+    let frames = host_frames(&stdout);
+    assert!(frames.iter().any(|frame| matches!(
+        frame,
+        HostFrame::Response {
+            id: 2,
+            outcome: Outcome::Refused(RequestRefusal::SessionUnavailable { detail })
+        } if detail == "resume: no such session"
+    )));
+    let answered = frames
+        .iter()
+        .position(|frame| {
+            matches!(frame, HostFrame::Response {
+                id: 6,
+                outcome: Outcome::Ok(Answer::Moved { node })
+            } if *node == root_named("tree-s2"))
+        })
+        .expect("answered moved");
+    assert!(
+        matches!(
+            frames.get(answered + 1),
+            Some(HostFrame::Moved { attachment: 1, node, request_id: Some(request) })
+                if *node == root_named("tree-s2") && request == "r5"
+        ),
+        "{:?}",
+        &frames[answered..]
+    );
+}
+
+/// Every connection's `moved` names the session request that caused the
+/// switch, so a client tells another's request from its own; a switch no
+/// request caused names none.
+#[test]
+fn every_moved_names_the_request_that_switched() {
+    use plakous_host_protocol::Core;
+    let (actions, intents) = plakous_host_protocol::intent_channel::<Core>();
+    let (published, events) = plakous_host_protocol::observation_channel::<Core>();
+    let session = WireSession::start(root(), "s1".to_owned(), actions, events, |id| {
+        Some(root_named(&format!("tree-{id}")))
+    });
+    let (mut first_out, mut second_out) = (Vec::new(), Vec::new());
+    let mut first = session.connect(&mut first_out, Face::Remote, || false);
+    let mut second = session.connect(&mut second_out, Face::Local, || false);
+    assert!(first.request(1, Op::Attach { node: root() }).is_some());
+    assert!(second.request(1, Op::Attach { node: root() }).is_some());
+    while intents.try_recv().is_ok() {}
+    assert_eq!(
+        first.request(
+            2,
+            Op::ResumeSession {
+                attachment: 1,
+                request_id: "r1".into(),
+                session: "s2".into(),
+            }
+        ),
+        None
+    );
+    let resume = intents.try_recv().expect("the resume reached the session");
+    let switch = |observations: [SessionObservation<Core>; 3], next: &str| {
+        for observation in observations {
+            published.send(observation).unwrap();
+        }
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while session.session_id() != next {
+            assert!(Instant::now() < deadline, "the switch to {next}");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    };
+    switch(
+        [
+            started_of(&resume),
+            SessionObservation::SessionOpening,
+            binding("s2"),
+        ],
+        "s2",
+    );
+    first.flush().unwrap();
+    second.flush().unwrap();
+    assert!(
+        second
+            .request(
+                2,
+                Op::Attach {
+                    node: root_named("tree-s2")
+                }
+            )
+            .is_some()
+    );
+    switch(
+        [
+            SessionObservation::IntentStarted(None),
+            SessionObservation::SessionOpening,
+            binding("s3"),
+        ],
+        "s3",
+    );
+    second.flush().unwrap();
+    drop((first, second));
+    let moved = |frames: Vec<HostFrame<Core>>| {
+        frames
+            .into_iter()
+            .filter_map(|frame| match frame {
+                HostFrame::Moved { request_id, .. } => Some(request_id),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(moved(host_frames(&first_out)), [Some("r1".to_owned())]);
+    assert_eq!(
+        moved(host_frames(&second_out)),
+        [Some("r1".to_owned()), None]
+    );
+    assert!(host_frames(&first_out).iter().any(|frame| matches!(
+        frame,
+        HostFrame::Response {
+            id: 2,
+            outcome: Outcome::Ok(Answer::Moved { .. })
+        }
+    )));
+}
+
+/// Client request ids are only unique per connection: when two
+/// connections use the same one, a switch answers only the connection whose
+/// attachment asked; the other's request is answered `not_attached` as its
+/// attachment ends, and may still switch later.
+#[test]
+fn a_switch_answers_only_the_connection_that_asked() {
+    use plakous_host_protocol::Core;
+    let (actions, intents) = plakous_host_protocol::intent_channel::<Core>();
+    let (published, events) = plakous_host_protocol::observation_channel::<Core>();
+    let session = WireSession::start(root(), "s1".to_owned(), actions, events, |id| {
+        Some(root_named(&format!("tree-{id}")))
+    });
+    let (mut first_out, mut second_out) = (Vec::new(), Vec::new());
+    let mut first = session.connect(&mut first_out, Face::Remote, || false);
+    let mut second = session.connect(&mut second_out, Face::Remote, || false);
+    assert!(first.request(1, Op::Attach { node: root() }).is_some());
+    assert!(second.request(1, Op::Attach { node: root() }).is_some());
+    while intents.try_recv().is_ok() {}
+    for (connection, attachment, target) in [(&mut first, 1, "s2"), (&mut second, 2, "s3")] {
+        assert_eq!(
+            connection.request(
+                2,
+                Op::ResumeSession {
+                    attachment,
+                    request_id: "1".into(),
+                    session: target.into(),
+                }
+            ),
+            None
+        );
+    }
+    let first_resume = intents.try_recv().expect("the first resume");
+    for observation in [
+        started_of(&first_resume),
+        SessionObservation::SessionOpening,
+        binding("s2"),
+    ] {
+        published.send(observation).unwrap();
+    }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while session.session_id() != "s2" {
+        assert!(Instant::now() < deadline, "the switch");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    first.flush().unwrap();
+    second.flush().unwrap();
+    drop((first, second));
+    let answer = |frames: Vec<HostFrame<Core>>| {
+        frames.into_iter().find_map(|frame| match frame {
+            HostFrame::Response { id: 2, outcome } => Some(outcome),
+            _ => None,
+        })
+    };
+    assert_eq!(
+        answer(host_frames(&first_out)),
+        Some(Outcome::Ok(Answer::Moved {
+            node: root_named("tree-s2")
+        }))
+    );
+    assert_eq!(
+        answer(host_frames(&second_out)),
+        Some(Outcome::Refused(RequestRefusal::NotAttached))
+    );
+}
+
+/// A transcript the session's mailbox lost content of ends the attachments
+/// holding it with `resync_required` once, and drops the root baseline
+/// kept for attaches, so the next attach asks the session for a fresh
+/// one; an attach during the same loss is not ended again, and a later
+/// loss ends its holders again.
+#[test]
+fn a_lost_transcript_resyncs_its_holders_once_per_loss() {
+    use plakous_host_protocol::Core;
+    use plakous_host_protocol::limits::OBSERVATION_QUEUE_CAPACITY;
+    use plakous_host_protocol::views::PresentationSnapshot;
+    use plakous_host_protocol::views::transcript::{NoticeScope, TranscriptPatch};
+    let (actions, intents) = plakous_host_protocol::intent_channel::<Core>();
+    let (published, events) = plakous_host_protocol::observation_channel::<Core>();
+    let service = HostService::new(actions, root(), ATTACHMENT_CAPACITY);
+    service.observe(SessionObservation::PresentationSnapshot(
+        PresentationSnapshot::empty(1),
+    ));
+    let first = service.attach(&root(), Face::Remote).unwrap();
+    assert!(intents.try_recv().is_err(), "a kept baseline needs no ask");
+    let drop_root_patch = || {
+        for index in 0..OBSERVATION_QUEUE_CAPACITY {
+            let row = TranscriptRow::error(NoticeScope::Host, format!("error {index}"));
+            let _ = published.send(SessionObservation::Row(row));
+        }
+        let patch = TranscriptPatch {
+            scope: TranscriptScope::Root,
+            from_revision: 1,
+            to_revision: 2,
+            upserts: Vec::new(),
+            deletes: Vec::new(),
+        };
+        assert!(
+            published
+                .send(SessionObservation::TranscriptPatch(patch))
+                .is_err()
+        );
+        assert!(events.transcript_resnapshot_required_for(&TranscriptScope::Root));
+    };
+    let ended = |attachment| {
+        service
+            .take(attachment)
+            .iter()
+            .any(|item| matches!(item, Outbound::ResyncRequired))
+    };
+    let mut losses = LostTranscripts::default();
+    losses.check(&service, &events);
+    assert!(!ended(first), "no loss, no resync");
+    drop_root_patch();
+    losses.check(&service, &events);
+    assert!(ended(first));
+    let second = service.attach(&root(), Face::Remote).unwrap();
+    assert!(
+        matches!(
+            intents.try_recv().as_deref(),
+            Ok(SessionIntent::ResyncTranscript {
+                scope: TranscriptScope::Root
+            })
+        ),
+        "the attach asks for a fresh baseline"
+    );
+    losses.check(&service, &events);
+    assert!(!ended(second), "the same loss ends no later attach");
+    let _ = events.try_iter().count();
+    published
+        .send(SessionObservation::PresentationSnapshot(
+            PresentationSnapshot::empty(2),
+        ))
+        .unwrap();
+    losses.check(&service, &events);
+    let _ = events.try_iter().count();
+    drop_root_patch();
+    losses.check(&service, &events);
+    assert!(ended(second), "a later loss ends its holders again");
 }

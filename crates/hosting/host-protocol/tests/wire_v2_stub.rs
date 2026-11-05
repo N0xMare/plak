@@ -125,6 +125,14 @@ fn stub_host(stream: UnixStream) {
                     id,
                     outcome: Outcome::Ok(Answer::Pong),
                 }),
+                Op::RetryAttach { .. } | Op::ResumeSession { .. } | Op::Rebind { .. } => {
+                    end.send(&Host::Response {
+                        id,
+                        outcome: Outcome::Refused(RequestRefusal::SessionUnavailable {
+                            detail: "the stub serves one session".to_owned(),
+                        }),
+                    });
+                }
             },
             Client::Hello(_) => panic!("one hello"),
             Client::Bye => {

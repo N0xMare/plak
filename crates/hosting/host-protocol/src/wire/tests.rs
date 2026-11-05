@@ -119,6 +119,79 @@ fn frames_round_trip_as_lines() {
     ));
 }
 
+/// The session requests, their answers and the `moved` they cause round
+/// trip; a switch no request caused names none.
+#[test]
+fn session_requests_round_trip_as_lines() {
+    for frame in [
+        Client::Request {
+            id: 4,
+            op: Op::RetryAttach {
+                attachment: 3,
+                request_id: "r1".into(),
+            },
+        },
+        Client::Request {
+            id: 5,
+            op: Op::ResumeSession {
+                attachment: 3,
+                request_id: "r2".into(),
+                session: "s2".into(),
+            },
+        },
+        Client::Request {
+            id: 6,
+            op: Op::Rebind {
+                attachment: 3,
+                request_id: "r3".into(),
+                cause: "the binding changed".into(),
+            },
+        },
+    ] {
+        let line = encode_line(&frame).unwrap();
+        assert_eq!(decode_line::<Client>(&line).unwrap(), frame);
+    }
+    for frame in [
+        Host::Response {
+            id: 5,
+            outcome: Outcome::Ok(Answer::Moved {
+                node: NodeAddress {
+                    tree_id: "t2".into(),
+                    agent_id: "t2".into(),
+                },
+            }),
+        },
+        Host::Response {
+            id: 6,
+            outcome: Outcome::Refused(RequestRefusal::SessionUnavailable {
+                detail: "no launcher".into(),
+            }),
+        },
+        Host::Moved {
+            attachment: 3,
+            node: NodeAddress {
+                tree_id: "t2".into(),
+                agent_id: "t2".into(),
+            },
+            request_id: Some("r2".into()),
+        },
+    ] {
+        let line = encode_line(&frame).unwrap();
+        assert_eq!(decode_line::<Host>(&line).unwrap(), frame);
+    }
+    // A switch no request caused names none.
+    let line = encode_line(&Host::Moved {
+        attachment: 3,
+        node: NodeAddress {
+            tree_id: "t2".into(),
+            agent_id: "t2".into(),
+        },
+        request_id: None,
+    })
+    .unwrap();
+    assert!(!line.contains("request_id"), "{line}");
+}
+
 /// A line over the cap is refused when written and when read, and the
 /// reader skips it whole without holding it.
 #[test]

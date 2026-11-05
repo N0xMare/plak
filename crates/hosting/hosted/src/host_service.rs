@@ -100,6 +100,9 @@ pub enum Outbound<P: ProtocolExtension> {
     Moved {
         /// The new session's root.
         node: NodeAddress,
+        /// The session request that caused the switch: the attachment
+        /// that asked and its client's id for it.
+        request: Option<(AttachmentId, String)>,
     },
 }
 
@@ -354,15 +357,24 @@ impl<P: ProtocolExtension> HostService<P> {
     /// what each already holds: the session was replaced by the one whose
     /// root that is. Each attachment's holder reroots its own handle.
     ///
-    /// Returns the attachments it ended.
-    pub fn move_attachments(&self, node: &NodeAddress) -> Vec<AttachmentId> {
+    /// `request` names the session request that caused the switch, if one
+    /// did: the attachment that asked and its client's id for it. Returns
+    /// the attachments it ended.
+    pub fn move_attachments(
+        &self,
+        node: &NodeAddress,
+        request: Option<(AttachmentId, &str)>,
+    ) -> Vec<AttachmentId> {
         let mut state = self.lock();
         state.requester = None;
         let mut moved = Vec::new();
         for (id, held) in &mut state.attachments {
             if !held.dropped {
                 held.dropped = true;
-                held.queue.push_back(Outbound::Moved { node: node.clone() });
+                held.queue.push_back(Outbound::Moved {
+                    node: node.clone(),
+                    request: request.map(|(requester, id)| (requester, id.to_owned())),
+                });
                 moved.push(*id);
             }
         }
@@ -380,6 +392,30 @@ impl<P: ProtocolExtension> HostService<P> {
             state.snapshot.baseline = None;
         }
         state.holding = holding;
+    }
+
+    /// Ends every attachment holding the transcript of each scope in
+    /// `lost` with [`Outbound::ResyncRequired`], after what it already
+    /// holds: the session's mailbox dropped content of that transcript, so
+    /// what the attachment shows has a gap only a fresh baseline repays. A
+    /// root baseline kept for attaches has the same gap and is dropped, so
+    /// the next attach asks the session for a fresh one. `lost` is asked
+    /// of every scope an attachment holds.
+    fn resync_lost_transcripts(&self, mut lost: impl FnMut(&TranscriptScope) -> bool) {
+        let mut state = self.lock();
+        if lost(&TranscriptScope::Root) {
+            state.snapshot.baseline = None;
+        }
+        for held in state.attachments.values_mut() {
+            let gapped = match &held.scopes {
+                Scopes::Held(scopes) => scopes.iter().any(&mut lost),
+                Scopes::All => false,
+            };
+            if gapped && !held.dropped {
+                held.dropped = true;
+                held.queue.push_back(Outbound::ResyncRequired);
+            }
+        }
     }
 
     /// Ends every attachment with [`Outbound::ResyncRequired`], after what

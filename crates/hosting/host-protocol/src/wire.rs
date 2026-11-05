@@ -208,6 +208,33 @@ pub enum Op<P: ProtocolExtension> {
     },
     /// Liveness.
     Ping,
+    /// Re-resolve the session's binding and open it again.
+    RetryAttach {
+        /// The requester: the connection's root attachment.
+        attachment: AttachmentId,
+        /// The client's id for the request, unique among its own, echoed
+        /// on every `moved` the request causes.
+        request_id: String,
+    },
+    /// Switch the session to the user's session `session`.
+    ResumeSession {
+        /// The requester: the connection's root attachment.
+        attachment: AttachmentId,
+        /// As [`Op::RetryAttach`]'s.
+        request_id: String,
+        /// The durable session id.
+        session: String,
+    },
+    /// Carry the session's history into a new session on the current
+    /// root binding.
+    Rebind {
+        /// The requester: the connection's root attachment.
+        attachment: AttachmentId,
+        /// As [`Op::RetryAttach`]'s.
+        request_id: String,
+        /// Why exact reopen cannot continue, or the operator's own reason.
+        cause: String,
+    },
 }
 
 /// The answer to an admitted request.
@@ -225,6 +252,12 @@ pub enum Answer {
     Accepted,
     /// Liveness.
     Pong,
+    /// The session request switched the session to the one rooted at
+    /// `node`; the requester's `moved` follows.
+    Moved {
+        /// The new session's root.
+        node: NodeAddress,
+    },
 }
 
 /// Why a request was refused. Nothing it asked for happened.
@@ -264,6 +297,12 @@ pub enum RequestRefusal {
     },
     /// No such attachment on this connection.
     NotAttached,
+    /// The session request could not open its session; the session the
+    /// connection serves is unchanged.
+    SessionUnavailable {
+        /// Why.
+        detail: String,
+    },
     /// The request could not be read.
     Malformed {
         /// What was wrong.
@@ -407,6 +446,10 @@ pub enum HostFrame<P: ProtocolExtension> {
         attachment: AttachmentId,
         /// The node to attach next.
         node: NodeAddress,
+        /// The session request that caused the switch, by its client's
+        /// id; absent for a switch no session request caused.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        request_id: Option<String>,
     },
     /// The host is closing the connection.
     Bye,

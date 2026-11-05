@@ -19,7 +19,7 @@ use tokio::sync::watch;
 
 use super::super::{HostService, TreeNodes};
 use super::served::{self, ServedSession, Shared};
-use super::{ATTACHMENT_CAPACITY, Face, Leave, POLL, WireConnection};
+use super::{ATTACHMENT_CAPACITY, Face, Leave, LostTranscripts, POLL, WireConnection};
 
 /// A session served to any number of connections over time.
 pub struct WireSession<P: ProtocolExtension> {
@@ -57,6 +57,7 @@ impl<P: ProtocolExtension> WireSession<P> {
         // The pump is the session's only observation consumer; it ends
         // with the session's observations and is never joined.
         thread::spawn(move || {
+            let mut lost = LostTranscripts::default();
             loop {
                 match events.recv_timeout(POLL) {
                     Ok(event) => {
@@ -65,6 +66,7 @@ impl<P: ProtocolExtension> WireSession<P> {
                         while let Ok(event) = events.try_recv() {
                             found &= guard.observe(event);
                         }
+                        lost.check(&guard.service(), &events);
                         drop(guard);
                         if !found {
                             pump_ended.store(true, Ordering::Release);

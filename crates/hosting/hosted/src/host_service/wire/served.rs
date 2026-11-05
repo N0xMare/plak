@@ -40,6 +40,10 @@ pub(super) struct ServedSession<P: ProtocolExtension> {
     /// An opening outgrew the hold before its binding: the service holds
     /// new attachments until the binding says whose it is.
     unresolved: bool,
+    /// The session request whose answer window is open: the attachment
+    /// that asked and its client's id for it. The switch it causes names
+    /// it on every `moved`, and answers the asker alone.
+    requested: Option<(AttachmentId, String)>,
     /// The replay outgrew the attachment capacity and was given up: an
     /// owed attachment's connection resyncs instead of getting a silent
     /// gap.
@@ -69,6 +73,7 @@ impl<P: ProtocolExtension> ServedSession<P> {
             replay: Vec::new(),
             owed: BTreeSet::new(),
             unresolved: false,
+            requested: None,
             replay_lost: false,
         }))
     }
@@ -103,6 +108,11 @@ impl<P: ProtocolExtension> ServedSession<P> {
             _ => None,
         };
         let Some(held) = self.held.as_mut() else {
+            // A window opened inside a held opening is the next session's
+            // own; the request that switches is the one before it.
+            if let SessionObservation::IntentStarted(started) = &event {
+                self.requested = started.as_deref().and_then(super::session_request_of);
+            }
             if opening && !self.unresolved {
                 self.held = Some(vec![event]);
                 return true;
@@ -173,7 +183,12 @@ impl<P: ProtocolExtension> ServedSession<P> {
         // switch's observations belong to the new session's attachments.
         // A connection moved before and not yet attached again is owed
         // this switch's replay instead of the last one's.
-        self.owed.extend(self.service.move_attachments(&node));
+        let requested = self.requested.take();
+        let request = requested
+            .as_ref()
+            .map(|(requester, id)| (*requester, id.as_str()));
+        self.owed
+            .extend(self.service.move_attachments(&node, request));
         let nodes: Arc<dyn ChildNodes> = Arc::new(TreeNodes::new(node.tree_id.clone()));
         self.service.reroot(node, Some(nodes));
         self.session = next;

@@ -712,7 +712,10 @@ widens it.
 
 `plak web` (chapter 02 §4.5) serves one session to browsers on the tailnet.
 Everything a client admitted there can do, an operator at the TUI can do,
-except the local-face intents of §4.6: it holds the serving user's shell. The endpoint's whole job is deciding who the
+except the local-face intents of §4.6: it holds the serving user's shell.
+That includes the wire's session requests (`retry_attach`,
+`resume_session`, `rebind`), which act on the serving user's own sessions
+as the TUI's `/attach`, `/resume` and rebind do. The endpoint's whole job is deciding who the
 client is, and its checks stop different attackers.
 
 - **The tailnet identity stops everyone who is not an allowed login.** The

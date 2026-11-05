@@ -16,12 +16,12 @@
 //! attachment ends with `moved {node}` naming the new session's root, and
 //! the client attaches it fresh.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use plakous_host_protocol::views::transcript::{NoticeTone, TranscriptRow};
+use plakous_host_protocol::views::transcript::{NoticeTone, TranscriptRow, TranscriptScope};
 use plakous_host_protocol::wire::{
     Answer, AttachmentId, BlobAssembler, ClientFrame, HandshakeRefusal, HostFrame, NodeAddress, Op,
     Outcome, RequestId, RequestRefusal, WIRE_VERSION, Welcome, WireError, admit_hello, decode_line,
@@ -280,6 +280,81 @@ pub struct WireConnection<P: ProtocolExtension, W: Write> {
     /// Responses decided outside their request's frame.
     settled: Vec<(RequestId, Outcome)>,
     next_mail: u64,
+    /// The session request in flight: its frame's id, its client's id and
+    /// the attachment that asked.
+    session_request: Option<(RequestId, String, AttachmentId)>,
+    lost_transcripts: LostTranscripts,
+}
+
+/// The client correlation a session request's intent carries, before its
+/// client's id.
+const SESSION_REQUEST: &str = "session-request:";
+
+/// The session request an answer window's correlation names: the
+/// attachment that asked and its client's id for it. Client ids are only
+/// unique per connection, so the asker tells two connections' apart.
+fn session_request_of(correlation: &str) -> Option<(AttachmentId, String)> {
+    let correlation = correlation
+        .strip_prefix(super::ANSWER)
+        .unwrap_or(correlation);
+    let (requester, client) = super::attachment_of(correlation)?;
+    let id = client?.strip_prefix(SESSION_REQUEST)?.to_owned();
+    Some((requester, id))
+}
+
+/// The transcripts the session's mailbox lost content of that the service
+/// already ended its holders for, until the session queues their fresh
+/// baseline.
+#[derive(Default)]
+pub(super) struct LostTranscripts(BTreeSet<TranscriptScope>);
+
+impl LostTranscripts {
+    /// Ends the attachments holding a transcript the session's mailbox
+    /// newly lost content of with `resync_required`: their clients attach
+    /// again, and the attach asks the session for a fresh baseline.
+    pub(super) fn check<P: ProtocolExtension>(
+        &mut self,
+        service: &HostService<P>,
+        events: &ObservationReceiver<P>,
+    ) {
+        self.0
+            .retain(|scope| events.transcript_resnapshot_required_for(scope));
+        let mut newly = BTreeSet::new();
+        service.resync_lost_transcripts(|scope| {
+            let lost = !self.0.contains(scope) && events.transcript_resnapshot_required_for(scope);
+            if lost {
+                newly.insert(scope.clone());
+            }
+            lost
+        });
+        self.0.extend(newly);
+    }
+}
+
+/// What a session request asks for.
+enum SessionChange {
+    RetryAttach,
+    Resume(String),
+    Rebind,
+}
+
+impl SessionChange {
+    /// The op's wire name.
+    const fn name(&self) -> &'static str {
+        match self {
+            Self::RetryAttach => "retry_attach",
+            Self::Resume(_) => "resume_session",
+            Self::Rebind => "rebind",
+        }
+    }
+
+    /// Its row in the role table, which refuses it to a child.
+    const fn row(&self) -> &'static str {
+        match self {
+            Self::RetryAttach => "readiness",
+            Self::Resume(_) | Self::Rebind => "workflow",
+        }
+    }
 }
 
 /// Whether `intent` is tree mail on a child's attachment.
@@ -332,6 +407,8 @@ where
             window: None,
             settled: Vec::new(),
             next_mail: 0,
+            session_request: None,
+            lost_transcripts: LostTranscripts::default(),
         }
     }
 
@@ -447,6 +524,7 @@ where
             while let Ok(event) = events.try_recv() {
                 lost |= !self.observe(event)?;
             }
+            self.lost_transcripts.check(&self.service, events);
             self.flush()?;
             if reading && (lost || (self.stopped)()) {
                 reading = false;
@@ -568,6 +646,9 @@ where
         let refused = |refusal| Some(Outcome::Refused(refusal));
         match op {
             Op::Ping => Some(Outcome::Ok(Answer::Pong)),
+            op @ (Op::RetryAttach { .. } | Op::ResumeSession { .. } | Op::Rebind { .. }) => {
+                self.session_request(id, op)
+            }
             Op::Attach { node } => {
                 // An attach and the replay it takes are one step against
                 // the session's observations.
@@ -670,12 +751,73 @@ where
         }
     }
 
-    /// The mail requests of an attachment that ended are not attached.
+    /// The mail requests and session request of an attachment that ended
+    /// are not attached. A session request may still take effect: the
+    /// `moved` it causes names it.
     fn unanswered(&mut self) {
         self.window = None;
-        for (_, id) in std::mem::take(&mut self.mails) {
+        let session = self.session_request.take().map(|(id, _, _)| id);
+        for id in std::mem::take(&mut self.mails).into_values().chain(session) {
             self.settled
                 .push((id, Outcome::Refused(RequestRefusal::NotAttached)));
+        }
+    }
+
+    /// Takes a session request from `attachment`, the connection's root
+    /// attachment: a resume goes to the session as its own intent, answered
+    /// once the session switched or refused it. A retry or a rebind reopens
+    /// the session, which only a launcher that owns the session's host can
+    /// do; this host serves one session, so it keeps it.
+    fn session_request(&mut self, id: RequestId, op: Op<P>) -> Option<Outcome> {
+        let (attachment, request_id, change) = match op {
+            Op::RetryAttach {
+                attachment,
+                request_id,
+            } => (attachment, request_id, SessionChange::RetryAttach),
+            Op::ResumeSession {
+                attachment,
+                request_id,
+                session,
+            } => (attachment, request_id, SessionChange::Resume(session)),
+            Op::Rebind {
+                attachment,
+                request_id,
+                cause: _,
+            } => (attachment, request_id, SessionChange::Rebind),
+            // `request` answers every other op itself.
+            _ => return None,
+        };
+        let refused = |refusal| Some(Outcome::Refused(refusal));
+        if self.attachment != Some(attachment) {
+            return refused(RequestRefusal::NotAttached);
+        }
+        if self.service.is_child(attachment) {
+            return refused(RequestRefusal::RefusedForRole {
+                row: change.row().to_owned(),
+            });
+        }
+        if self.session_request.is_some() {
+            return refused(RequestRefusal::OneInFlight);
+        }
+        let SessionChange::Resume(session) = change else {
+            return refused(RequestRefusal::SessionUnavailable {
+                detail: format!(
+                    "{} reopens the session, which this host cannot do; it keeps the session it serves",
+                    change.name()
+                ),
+            });
+        };
+        let correlation = format!("{SESSION_REQUEST}{request_id}");
+        match self.service.intent_correlated(
+            attachment,
+            SessionIntent::ResumeSession { id: Some(session) },
+            Some(&correlation),
+        ) {
+            Ok(()) => {
+                self.session_request = Some((id, request_id, attachment));
+                None
+            }
+            Err(refusal) => refused(refusal),
         }
     }
 
@@ -685,6 +827,30 @@ where
         let outcome = match observation {
             SessionObservation::IntentStarted(correlation) => {
                 self.window.clone_from(correlation);
+                return;
+            }
+            // A session request is refused by the error its window shows;
+            // its switch answers it as its `moved` goes out.
+            SessionObservation::Row(TranscriptRow::Notice(notice))
+                if notice.tone == NoticeTone::Error
+                    && self
+                        .session_request
+                        .as_ref()
+                        .is_some_and(|(_, request, _)| {
+                            self.window
+                                .as_deref()
+                                .and_then(|window| window.strip_prefix(SESSION_REQUEST))
+                                == Some(request.as_str())
+                        }) =>
+            {
+                if let Some((id, _, _)) = self.session_request.take() {
+                    self.settled.push((
+                        id,
+                        Outcome::Refused(RequestRefusal::SessionUnavailable {
+                            detail: notice.text.clone(),
+                        }),
+                    ));
+                }
                 return;
             }
             SessionObservation::DraftAccepted(_) => Outcome::Ok(Answer::Accepted),
@@ -745,7 +911,7 @@ where
                         &HostFrame::<P>::ResyncRequired { attachment },
                     )?;
                 }
-                Outbound::Moved { node } => {
+                Outbound::Moved { node, request } => {
                     self.tell(&node);
                     self.attachment = None;
                     // A connection moved again before attaching the root is
@@ -756,13 +922,28 @@ where
                     {
                         served::lock(served).forget(previous);
                     }
+                    // Answered only when this connection's own attachment
+                    // asked: another's request may share the client id.
+                    if let Some((id, _, _)) = self.session_request.take_if(|(_, asked, asker)| {
+                        request
+                            .as_ref()
+                            .is_some_and(|(requester, id)| requester == asker && id == asked)
+                    }) {
+                        self.settled
+                            .push((id, Outcome::Ok(Answer::Moved { node: node.clone() })));
+                    }
+                    let request_id = request.map(|(_, id)| id);
                     self.unanswered();
                     for (id, outcome) in std::mem::take(&mut self.settled) {
                         write_frame(&mut self.stdout, &HostFrame::<P>::Response { id, outcome })?;
                     }
                     write_frame(
                         &mut self.stdout,
-                        &HostFrame::<P>::Moved { attachment, node },
+                        &HostFrame::<P>::Moved {
+                            attachment,
+                            node,
+                            request_id,
+                        },
                     )?;
                     if let Some(served) = self.served.clone() {
                         self.follow(&served::lock(&served));

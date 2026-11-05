@@ -3773,8 +3773,9 @@ verdicts) are addressed, the session profile and workspace chrome states.
   connection the same way. A connection serves the session its welcome
   names until that session switches to another (`/new`, a resume, a
   rebind): the host then ends the attachment with `moved {attachment,
-  node}`, naming the new session's root, and the client attaches that node
-  fresh on the same connection. The new session's opening comes before the
+  node, request_id?}`, naming the new session's root and, when a session
+  request caused the switch, that request's client id, and the client
+  attaches that node fresh on the same connection. The new session's opening comes before the
   binding that names it, so the host holds what follows a session opening
   until that binding: none of it reaches the old attachment (an opening
   too long to hold, past an attachment's capacity, ends the old
@@ -3803,16 +3804,39 @@ verdicts) are addressed, the session profile and workspace chrome states.
   numbered, so the attachment's sequence shows no gap for them.
 - **Requests.** A `request` carries a client-chosen id and an `op`:
   `attach` (a node, by tree and agent id), `detach`, `intent` (an
-  attachment and a session intent) or `ping`. It gets exactly one
-  `response` with that id: `attached`, `detached`, `accepted` (the intent
-  entered the node's mailbox; what it does arrives as observations) or
-  `pong`, or a refusal: `backpressure`, `one_in_flight`, `disconnected`,
+  attachment and a session intent), `ping`, or a session request. It gets
+  exactly one `response` with that id: `attached`, `detached`, `accepted`
+  (the intent entered the node's mailbox; what it does arrives as
+  observations), `pong` or `moved` (a session request's switch, with the
+  new root), or a refusal: `backpressure`, `one_in_flight`, `disconnected`,
   `refused_for_role` (with its role-table row), `unknown_node`, `moved`
   (with the served session's root: the attach named a root the connection
   told its client of, in its welcome or a `moved`, of a session that has
   since switched, so the client attaches that node instead), `node_closed`, `node_retiring`,
-  `out_of_reach`, `mail_refused` (with the tree's reason), `not_attached` or
-  `malformed`. A refused request did nothing.
+  `out_of_reach`, `mail_refused` (with the tree's reason), `not_attached`,
+  `session_unavailable` (with why) or `malformed`. A refused request did
+  nothing.
+- **Session requests.** `retry_attach` (re-resolve the binding and open the
+  session again), `resume_session {session}` (switch to one of the user's
+  sessions) and `rebind {cause}` (carry the history into a new session on
+  the current root binding) each name the requester, the connection's root
+  attachment, and a `request_id` the client chooses, unique among its own.
+  A child attachment is refused them `refused_for_role` (rows `readiness`
+  and `workflow`), and a connection has one in flight (`one_in_flight`).
+  They act on the user's own sessions as the TUI's `/attach`, `/resume`
+  and rebind do, so a remote face may send them (chapter 04 §2.10). The
+  response comes when the request is settled: `moved` with the new root,
+  just before the requester's own `moved` frame, or `session_unavailable`
+  when the session could not be opened and the served session is
+  unchanged. A request whose attachment ends first is answered
+  `not_attached`; it may still take effect, and every `moved` it causes
+  names its `request_id`, on every connection still attached. Client ids
+  are unique only per connection, so the response answers the connection
+  whose attachment asked, never another that used the same id. The session host serves `resume_session` as the
+  session's own resume; `retry_attach` and `rebind` reopen the session,
+  which only a launcher that owns the session's host can do, so a host
+  that serves one session (`plak agent --wire v2`, `plak web`) refuses
+  them `session_unavailable` and keeps its session.
 - **Observation classes.** Every observation is one class. A **state** is
   broadcast as the latest value of its kind and is part of the attach
   snapshot. An **event** is broadcast as it happens; a *required* event is
@@ -3889,7 +3913,11 @@ verdicts) are addressed, the session profile and workspace chrome states.
   and which takes and sends nothing more. Transcript content an attachment
   lost to a full queue is a gap in that scope, repaid at its next take or
   observation: the root's from the kept baseline, any other by asking the
-  session for a fresh snapshot of that scope. The session's presentation
+  session for a fresh snapshot of that scope. Content of a transcript the
+  session's own observation mailbox dropped before the host service took
+  it is lost to every holder: each attachment holding that scope is ended
+  with `resync_required` once per loss, the kept root baseline goes with
+  it, and the client's next attach asks the session for a fresh one. The session's presentation
   baselines and revisions are one set its publisher keeps for every
   attachment, which is sound because each attachment's gaps and their
   repair are its own. The session never waits on an attachment.
