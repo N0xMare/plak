@@ -168,13 +168,18 @@ fn a_handoff_the_host_could_not_record_holds_as_a_loss() {
     assert_eq!(dispatches(&lost.evidence), 1, "nothing continued");
 }
 
-/// The tree's half, through the host: a running child turn and a parked
-/// child are handed off before the release, and a parked child whose
-/// attempt spent its `max_turns` is interrupted but owed no continuation.
-/// The next host's custody take continues the two once by itself, under
-/// hold; a second take continues nothing.
+/// The tree's half, through the host: a parked child is handed off before
+/// the release, and a parked child whose attempt spent its `max_turns` is
+/// interrupted but owed no continuation. A child whose rows still say
+/// running while its runtime turn already ended recovery-required is not
+/// handed off: the releasing host projects its feed first, which settles
+/// it, and its recovery takes it. The next host's custody take continues
+/// the parked child once by itself, under hold; a second take continues
+/// nothing. (A truly running child is handed off and continued through
+/// the product's child route by the offline TUI test and the
+/// `handoff_resume_child` sweep shape.)
 #[test]
-fn a_handed_off_tree_continues_its_running_and_parked_children_once() {
+fn a_handed_off_tree_continues_its_parked_child_once() {
     let root = tempfile::tempdir().unwrap();
     let (config, _) = scripted_host_with(root.path(), script(serde_json::json!([])));
     let tree_id = config.session.id.clone();
@@ -194,7 +199,10 @@ fn a_handed_off_tree_continues_its_running_and_parked_children_once() {
     actions.request_handoff_and_release();
     let _ = host.join().unwrap();
     let recorded = recorded.lock().unwrap().clone().expect("the handoff ran");
-    assert_eq!(recorded[&running], Some(ContinuationCause::Handoff));
+    assert_eq!(
+        recorded[&running], None,
+        "a turn its runtime already ended is not handed off"
+    );
     assert_eq!(recorded[&parked], Some(ContinuationCause::Handoff));
     assert_eq!(
         recorded[&spent], None,
@@ -204,12 +212,12 @@ fn a_handed_off_tree_continues_its_running_and_parked_children_once() {
     tokio.block_on(async {
         fixture.next_host_take().await;
         let (decisions, _) = fixture.continuations();
-        assert_eq!(decisions, 2, "one continuation each, without a Resume");
-        fixture.continuations_settled(2).await;
+        assert_eq!(decisions, 1, "one continuation, without a Resume");
+        fixture.continuations_settled(1).await;
         fixture.next_host_take().await;
         let (decisions, commands) = fixture.continuations();
-        assert_eq!(decisions, 2, "a second take decides nothing again");
-        assert_eq!(commands.len(), 2, "{commands:?}");
+        assert_eq!(decisions, 1, "a second take decides nothing again");
+        assert_eq!(commands.len(), 1, "{commands:?}");
         assert_eq!(
             fixture.status(&spent),
             crate::agent_tree_protocol::NodeStatus::Interrupted

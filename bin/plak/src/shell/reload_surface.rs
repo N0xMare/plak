@@ -174,6 +174,7 @@ fn not_taken(paths: &PlakPaths, request: &ReloadRequest, why: &str) {
 pub(super) fn probe(
     paths: &PlakPaths,
     session: Option<plakous_hosted::runtime::SurfaceSession>,
+    phase: plakous_hosted::runtime::SurfacePhase,
     events: &Sender<PlakExtension>,
 ) {
     let answer = ProbeAnswer(Some(events.answering()));
@@ -184,12 +185,25 @@ pub(super) fn probe(
         });
         return;
     };
+    // The work in flight now, which only a reload resuming this session
+    // hands off.
+    let in_flight = if phase == plakous_hosted::runtime::SurfacePhase::Busy {
+        Some(crate::carry::CARRY_REFUSED_TURN)
+    } else if session.live_children {
+        Some(crate::carry::CARRY_REFUSED_CHILDREN)
+    } else {
+        None
+    };
     let paths = paths.clone();
     let _ = std::thread::Builder::new()
         .name("plak-reload-probe".to_owned())
         .spawn(move || {
-            let (target, refusal) =
-                crate::carry::probe_reload(&paths, &session.workspace, Some(&session.id));
+            let (target, refusal) = crate::carry::probe_reload(
+                &paths,
+                &session.workspace,
+                Some(&session.id),
+                in_flight,
+            );
             answer.send(SurfaceObservation::ReloadProbed {
                 target: target.map(Box::new),
                 refusal,

@@ -31,6 +31,9 @@ pub struct CodingSessionOpenFailure {
     /// The frozen binding input this build reconstructs differently, when the
     /// open (or its verification) refused for that reason.
     pub binding_change: Option<Box<plakous::agent::BindingChange>>,
+    /// A verification refused because the head holds unsettled work (a turn
+    /// still running in its owner), so nothing past it was compared.
+    pub unsettled_work: bool,
 }
 
 impl From<CliFailure> for CodingSessionOpenFailure {
@@ -39,6 +42,7 @@ impl From<CliFailure> for CodingSessionOpenFailure {
             failure: Box::new(failure),
             current_locator: None,
             binding_change: None,
+            unsettled_work: false,
         }
     }
 }
@@ -101,6 +105,7 @@ impl From<AgentSessionsError> for CodingSessionOpenFailure {
             failure: Box::new(failure),
             current_locator,
             binding_change,
+            unsettled_work: false,
         }
     }
 }
@@ -985,6 +990,7 @@ async fn attach_native_source(
                 failure: Box::new(error.failure.with_cleanup_failure(cleanup)),
                 current_locator: error.current_locator,
                 binding_change: error.binding_change,
+                unsettled_work: error.unsettled_work,
             });
         }
         return result;
@@ -1201,6 +1207,7 @@ async fn attach_api_source(
                     failure: Box::new(error.failure.with_cleanup_failure(cleanup)),
                     current_locator: error.current_locator,
                     binding_change: error.binding_change,
+                    unsettled_work: error.unsettled_work,
                 });
             }
         }
@@ -1253,26 +1260,27 @@ async fn attach_runtime_source(
         ),
         current_locator: error.current_locator(),
         binding_change: error.binding_change().cloned().map(Box::new),
+        unsettled_work: false,
     };
     if let RuntimeTarget::Verify(locator) = target {
         if seed.is_some() {
             return Err(CliFailure::new("a carried history seeds only a new session").into());
         }
-        return match Box::pin(sessions.verify_open(locator, runtime))
+        let verified = Box::pin(sessions.verify_open(locator, runtime))
             .await
-            .map_err(reopen_failure)?
-        {
-            plakous::sessions::OpenVerification::Opens => Ok(AttachedCodingSession {
-                output_bound_rederived,
-                reachability_probe,
-                sessions: Arc::clone(&sessions),
-                opened: None,
-                recovered_turn: None,
-                locator,
-                topology_owner,
-            }),
-            _ => Err(reopen_refusal(wording.reopen_needs_recovery, None).into()),
-        };
+            .map_err(reopen_failure)?;
+        if verified != plakous::sessions::OpenVerification::Opens {
+            return Err(unsettled_work_refusal(wording));
+        }
+        return Ok(AttachedCodingSession {
+            output_bound_rederived,
+            reachability_probe,
+            sessions: Arc::clone(&sessions),
+            opened: None,
+            recovered_turn: None,
+            locator,
+            topology_owner,
+        });
     }
     if let Some(locator) = target.locator() {
         if seed.is_some() {
@@ -1352,6 +1360,15 @@ fn create_request(
         }
         None => request,
     }
+}
+
+/// A verification that found unsettled work at the head: only an owning
+/// open settles it, so nothing past the head was compared.
+fn unsettled_work_refusal(wording: &RuntimeWording) -> CodingSessionOpenFailure {
+    let mut refusal =
+        CodingSessionOpenFailure::from(reopen_refusal(wording.reopen_needs_recovery, None));
+    refusal.unsettled_work = true;
+    refusal
 }
 
 pub(in crate::agent) fn require_reconstructed_coding_projection(

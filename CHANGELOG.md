@@ -239,8 +239,14 @@ an export.
 - A planned handoff (`/reload`) records each node with work in flight as
   handed off before its host releases it, and the next host continues each
   once by itself, whatever `resume_after_loss` says; a handoff it could not
-  record holds like a loss. `/reload` still refuses while a turn, a process or
-  a sub-agent runs, so it hands off nothing in flight yet. Interrupts now
+  record holds like a loss. `/reload` no longer refuses while a turn or a
+  sub-agent runs: it hands them off, and the new build continues each once. It
+  still refuses while a background process runs, and a reload that carries
+  into a new session still refuses a running turn or sub-agent. The installed
+  build cannot check a session whose turn is still running, so it is asked
+  again once the handoff settled it; if it then would not reopen the session
+  exactly, or cannot say, the session stays open in this build, which continues the
+  handed-off work once. Interrupts now
   record why (`operator`, `parent`, `cascade`, `stopped`), and tree rows carry
   it. A stop is final: stopping a running root turn is recorded before its
   cancel, so a host lost before the turn ended never continues it, and

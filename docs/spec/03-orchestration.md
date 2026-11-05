@@ -3737,12 +3737,18 @@ upgrade) releases its session as a planned handoff: the face requests the
 release with the handoff armed (`request_handoff_and_release`), and the
 release takes the flag first, so a refused or failed release leaves none
 armed and a later plain release never inherits it. Inside its own release,
-before any lease is released, the releasing host records an interrupt with
-cause `handoff` on each child that is running or parked (a child held after a
-loss keeps its hold), and, when its quit reached a running root turn, a
-product-store root interrupt with cause `handoff` anchored on that turn, once
-its views applied the turn's admission (so the turn's own submission is older
-than the interrupt). Only the releasing host writes it; the face never touches
+before any lease is released, the releasing host applies each running
+child's feed to its tail, then records an interrupt with cause `handoff` on
+each child that is running or parked and whose assignment started (a turn of
+its attempt was admitted; a child reserved for startup whose Start was
+never accepted is not handed off, and its startup is recovered instead; a
+child held after a loss keeps its hold), and, when its quit reached a running
+root turn, a product-store root interrupt with cause `handoff` anchored on
+that turn, once its views applied the turn's admission (so the turn's own
+submission is older than the interrupt; when they had not, nothing is written
+and the release logs `session.handoff_unrecorded`). The projection first puts
+the handoff's fold position past the acceptance of the turn it interrupts, so
+that turn never reads as one admitted after the handoff. Only the releasing host writes it; the face never touches
 the stores. The next host continues each handed-off node once by itself,
 under either policy: a child through the continuation pass of its first
 recovery run, the root at its open, whose restored queue then drains. A
@@ -3755,16 +3761,18 @@ continues by itself without a durable handoff row. *Durable before and
 after:* before the record the rows hold the working nodes; after it, one
 `handoff` interrupt per node and nothing else, then the release. A crash
 after the record reads as the handoff it was meant to be; a crash before it
-reads as a loss. Today's `/reload` refuses while a turn runs, while
-background processes run and while sub-agents run (chapter 02 §5.1), so it
-hands off no node with work in flight yet.
+reads as a loss. `/reload` hands off a running root turn and running or
+parked sub-agents when it resumes the same session; it still refuses while
+background processes run (chapter 02 §5.1).
 
 **Stops.** Every interrupt intent records its cause: a parent's
 `interrupt_agent` records `parent`, the operator's interrupt of a node
 `operator`, the root's interrupt reaching its descendants `cascade`, and an
 embedded run's exit `stopped`. The operator's interrupt of a running root
 turn records a product-store root interrupt with cause `operator`, anchored on
-that turn, before its cancel is requested. Any root interrupt anchored on a
+that turn, before its cancel is requested; a refused write is tried once
+more, and a stop whose record still failed is reported and cancels, but is not
+durable (a host lost before the turn's terminal then reads a loss). Any root interrupt anchored on a
 turn is final for it: a stop recorded first keeps a later loss or handoff of
 the same turn from being recorded, so a host lost before the stopped turn's
 terminal leaves a stop that nothing continues, under either policy. The

@@ -221,15 +221,17 @@ longer retained, Plak consumes it without rerunning it and says
 The line under the composer border reads `/ commands · Ctrl+X menu · ?
 keybinds`, plus a red `Esc stop` while a turn runs. When a newer `plak` is
 installed on `PATH` it says `new build installed · /reload`. `/reload` restarts
-on that build and resumes this session; it is refused, with a transcript note,
-while:
+on that build and resumes this session. A turn that is running and sub-agents
+that are running are handed over: the new build continues each of them once,
+by itself. `/reload` is refused, with a transcript note, while:
 
-- a turn runs: `reload refused: wait for the turn to finish or cancel it`;
 - background processes run: `reload refused: background processes are
   running; stop them first (/ps)`;
-- sub-agents run: `reload refused: sub-agents are still running`;
 - no `plak` is installed on `PATH`: `reload refused: no installed plak found
-  on PATH`.
+  on PATH`;
+- the reload would carry the session into a new one (below) and a turn or
+  sub-agents run: `reload refused: wait for the turn to finish or cancel it`
+  or `reload refused: sub-agents are still running`.
 
 A refusal never closes the TUI. Before closing anything, `/reload` asks the
 installed build whether it would reopen this session exactly. If it would, the

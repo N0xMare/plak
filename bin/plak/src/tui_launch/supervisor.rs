@@ -1211,9 +1211,13 @@ fn reload_installed_plak(
     record: &mut product_sessions::SessionRecord,
     target: Option<carry::ReloadTarget>,
 ) -> CliResult<String> {
-    let Some(target) = target else {
+    let Some(mut target) = target else {
         return Err(CliFailure::new("reload: no installed plak found on PATH"));
     };
+    if let Some(reason) = carry::reverify_released(&mut target, &record.workspace_root, &record.id)
+    {
+        return Ok(reason);
+    }
     if let Some(reason) = target.refusal(&home::state::state_key()) {
         return Ok(reason);
     }

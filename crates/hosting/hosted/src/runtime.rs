@@ -844,13 +844,19 @@ pub enum ReopenVerdict {
         current_revision: Option<String>,
     },
     /// The open refuses for another reason (credentials, configuration,
-    /// unsettled work, storage), with the refusal's text.
+    /// storage), with the refusal's text.
     Refused(String),
     /// The open cannot be verified without an effect a verification never
-    /// takes (listing MCP servers whose tools were never frozen), with the
-    /// reason.
+    /// takes (listing MCP servers whose tools were never frozen), or the head
+    /// holds unsettled work its owner settles first
+    /// ([`REOPEN_UNSETTLED_WORK`]), with the reason.
     Unknown(String),
 }
+
+/// The [`ReopenVerdict::Unknown`] reason for a head whose owner is still
+/// running a turn: only an owning open settles it, so nothing past the head
+/// was compared. A verification after the owner released it answers.
+pub const REOPEN_UNSETTLED_WORK: &str = "unsettled_work";
 
 /// Answers whether an exact reopen of `head` would attach, by running the open's
 /// own authority check, runtime compilation and Plakous verification without
@@ -888,6 +894,9 @@ pub fn verify_exact_reopen<P: plakous_host_protocol::ProtocolExtension>(
     }
     Ok(match verified {
         Ok(()) => ReopenVerdict::Opens,
+        Err(failure) if failure.unsettled_work => {
+            ReopenVerdict::Unknown(REOPEN_UNSETTLED_WORK.to_owned())
+        }
         Err(failure) => match failure.binding_change {
             Some(change) => ReopenVerdict::BindingChanged {
                 current_revision: matches!(

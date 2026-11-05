@@ -1395,7 +1395,20 @@ name MCP servers rebuilds those tools from the records it froze at creation
 with no server behind them (`McpToolPack::unbound`, chapter 01): the probe
 never starts, connects or leases an MCP server, so it never renews an MCP
 login; a session whose MCP tools were never frozen answers `unknown`
-(`mcp_tools_unfrozen`) instead of listing the servers. The verdict is one of
+(`mcp_tools_unfrozen`) instead of listing the servers. A head with unsettled
+work (the source's own running root turn) answers `unknown` (`unsettled_work`):
+only an owning open settles it, so nothing past the head was compared. The
+source then asks again after its handoff released the turn and settled the
+head, printing `checking the installed build…` on the plain terminal; if that
+answer is `refused`, `binding_changed`, `unknown` again or none, nothing is
+exec'd or carried (a carry's successor is another session, which the handoff
+does not reach, and an unverified exec could leave the handed-off work with no
+build that reopens it): the session stays open in this build, which continues
+the handed-off work once, with `reload kept this session open: the installed
+build would not reopen it exactly: its <change> differs; the handed-off work
+continues in this build`, `reload kept this session open: the installed build
+could not confirm it would reopen it; the handed-off work continues in this
+build`, or the `refused` note. The verdict is one of
 `opens`, `binding_changed` with the named change (chapter 01 §5.4), `refused`
 with the open's refusal, or `unknown`. It runs in the destination because only the
 destination derives its own binding; it reads the real home because the route,
@@ -4432,14 +4445,22 @@ remaining on the source and creating another successor at the next reload.
 
 The normal reload handoff carries the session forward when
 that build has another state key, or the same key and an exact-reopen verdict
-of `binding_changed` (§2.5.1). It is refused while a turn runs,
-while sub-agents or background processes are live, or when no installed `plak` resolves on `PATH`, so a
-refusal never closes the TUI. Asking the installed build its state key is the
-session's host's (the product surface's `probe_reload`, answered off its
-thread by `reload_probed` with the target and this build's refusal of it,
-or `reload_probe_failed`): the transcript reads `checking installed build…`
-while the TUI stays responsive, and the refusals are checked again when the
-answer lands.
+of `binding_changed` (§2.5.1). It is refused while background processes are
+live, or when no installed `plak` resolves on `PATH`, so a refusal never
+closes the TUI. A running root turn and running or parked sub-agents do not
+refuse a reload that resumes the same session: the reload is a planned
+handoff, the host records each of them as handed off before it releases, and
+the new build continues each once by itself (chapter 03 §14.1). A reload that
+carries into a new session (another state key, or a binding the new build
+derives differently) still refuses while a turn or sub-agents run, since its
+successor is another session; the host's probe decides that, from its phase
+and its attached tree. A prompt that starts a turn while the installed-build
+check runs refuses the reload as a changed conversation. Asking the installed
+build its state key is the session's host's (the product surface's
+`probe_reload`, answered off its thread by `reload_probed` with the target and
+this build's refusal of it, or `reload_probe_failed`): the transcript reads
+`checking installed build…` while the TUI stays responsive, and the refusals
+are checked again when the answer lands.
 Otherwise the TUI quits through the ordinary
 handoff path — host worker joined and session released, then the terminal
 restored — and the process replaces itself (`exec`) with the executable its own
@@ -4506,8 +4527,9 @@ its handoff instead, and a switch back to the same session settles nothing. An
 outcome that cannot be written is logged (`plak.reload`) and the request
 dropped, never carried over. The TUI notes `reload
 requested onto build <binary-id>; it runs when this session is idle`, and performs it at the next idle boundary: never during a turn, so a
-request from the agent's own turn runs after that turn ends. If sub-agents or
+request from the agent's own turn runs after that turn ends. If
 background processes are live at that boundary it refuses instead of waiting
+(running sub-agents are handed off)
 (`requested reload refused: <reason>`). Otherwise it runs exactly `/reload`:
 the same probes, exact-reopen verdict and one-step carry. It refuses, and does
 not hand off, when the installed build now reports another binary id, when the

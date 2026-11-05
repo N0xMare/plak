@@ -1249,21 +1249,22 @@ fn every_control_center_entry_point_routes_through_real_dispatch() {
 /// `/reload` hands an idle session to the installed binary and never cuts off
 /// a running turn or live sub-agents.
 #[test]
-fn reload_quits_into_a_handoff_only_when_idle() {
+fn reload_is_refused_up_front_only_while_a_background_process_runs() {
     let mut app = App::new(launch_basic(), true);
+    app.background_processes = 1;
+    app.set_input("/reload".to_owned());
+    assert_eq!(app.submit_line(false), None);
+    assert!(!app.should_quit && app.terminal_handoff.is_none() && !app.pending_reload);
+    assert!(blocks_contain(
+        &app,
+        "reload refused: background processes are running"
+    ));
+
+    // A running turn and running sub-agents are handed off: the reload goes
+    // on to ask the installed build.
+    app.background_processes = 0;
     app.busy = true;
-    app.set_input("/reload".to_owned());
-    assert_eq!(app.submit_line(false), None);
-    assert!(!app.should_quit && app.terminal_handoff.is_none());
-    assert!(blocks_contain(&app, "reload refused"));
-
-    app.busy = false;
     app.tree_live_descendants = 1;
-    app.set_input("/reload".to_owned());
-    assert_eq!(app.submit_line(false), None);
-    assert!(!app.should_quit && app.terminal_handoff.is_none());
-
-    app.tree_live_descendants = 0;
     app.set_input("/reload".to_owned());
     assert_eq!(app.submit_line(false), None);
     assert!(app.pending_reload && !app.should_quit);
@@ -1391,38 +1392,35 @@ fn an_unanswered_host_reload_probe_times_out() {
     assert!(app.reload_probe.is_none() && !app.should_quit);
 }
 
+fn installed_target(state_key: String) -> crate::carry::ReloadTarget {
+    crate::carry::ReloadTarget {
+        executable: std::path::PathBuf::from("new-installed-plak"),
+        capacity: None,
+        capacity_error: None,
+        state_key: Some(state_key),
+        probe: None,
+        reopen: None,
+        request: None,
+    }
+}
+
+/// A reload that resumes this session hands running sub-agents off to the
+/// new build. (The host's probe refuses one that carries into another
+/// session: `carry::tests`.)
 #[test]
 fn reload_hands_off_to_the_installed_executable_before_applying_an_epoch() {
     for children in [0, 1] {
         let mut app = App::new(launch_basic(), true);
         app.tree_live_descendants = children;
-        app.start_reload_probe(|| {
-            Some(crate::carry::ReloadTarget {
-                executable: std::path::PathBuf::from("new-installed-plak"),
-                capacity: None,
-                capacity_error: None,
-                state_key: Some(crate::home::state::state_key()),
-                probe: None,
-                reopen: None,
-                request: None,
-            })
-        });
+        app.start_reload_probe(|| Some(installed_target(crate::home::state::state_key())));
         let outcome = settle_reload_probe(&mut app);
-        if children == 0 {
-            let super::reload::ReloadOutcome::HandOff(Some(target)) = outcome else {
-                panic!("reload must start the installed build: {outcome:?}");
-            };
-            assert_eq!(
-                target.executable,
-                std::path::PathBuf::from("new-installed-plak")
-            );
-        } else {
-            assert!(matches!(outcome, super::reload::ReloadOutcome::Refused));
-            assert!(blocks_contain(
-                &app,
-                "reload refused: sub-agents are still running"
-            ));
-        }
+        let super::reload::ReloadOutcome::HandOff(Some(target)) = outcome else {
+            panic!("reload must start the installed build: {outcome:?}");
+        };
+        assert_eq!(
+            target.executable,
+            std::path::PathBuf::from("new-installed-plak")
+        );
     }
 }
 
@@ -1446,25 +1444,16 @@ fn a_completed_prompt_during_reload_probe_invalidates_its_capacity_estimate() {
     ));
 }
 
+/// A running turn is handed off by a reload that resumes this session.
 #[test]
-fn a_turn_started_while_the_reload_probe_ran_refuses_the_handoff() {
+fn a_running_turn_is_handed_off_by_a_resuming_reload() {
     let mut app = App::new(launch_basic(), true);
-    let (release, gate) = mpsc::channel::<()>();
-    app.start_reload_probe(move || {
-        let _ = gate.recv();
-        None
-    });
     app.busy = true;
-    release.send(()).unwrap();
+    app.start_reload_probe(|| Some(installed_target(crate::home::state::state_key())));
     assert!(matches!(
         settle_reload_probe(&mut app),
-        super::reload::ReloadOutcome::Refused
+        super::reload::ReloadOutcome::HandOff(Some(_))
     ));
-    assert!(blocks_contain(
-        &app,
-        "reload refused: wait for the turn to finish or cancel it"
-    ));
-    assert!(!app.should_quit && app.terminal_handoff.is_none());
 }
 
 #[test]

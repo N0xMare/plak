@@ -83,6 +83,7 @@ fn nearest_profile_ties_keep_the_first_profile_list_row() {
         effort: Some("high".into()),
         fast: false,
         workspace: paths.home().to_path_buf(),
+        live_children: false,
         mcp: None,
         roster: Some(crate::roster_input::snapshot_from_config(
             &prepared.config,
@@ -114,6 +115,7 @@ fn stale_composer_refresh_cannot_publish_profile_or_workspace() {
         fast: false,
         workspace: std::path::PathBuf::from("."),
         roster: None,
+        live_children: false,
         mcp: None,
     };
     let row = session_profile(&config, std::path::Path::new("."), &session);
@@ -172,6 +174,7 @@ fn composer_refresh_uses_the_launch_workspace() {
         fast: false,
         workspace,
         roster: None,
+        live_children: false,
         mcp: None,
     };
     ProductSurface::new(paths).dispatch(
@@ -216,6 +219,7 @@ fn session_identity_uses_frozen_cards_not_current_config() {
         fast: root.is_fast(),
         workspace: dir.path().to_owned(),
         roster: Some(frozen),
+        live_children: false,
         mcp: None,
     };
     let matched = session_profile(&prepared.config, dir.path(), &session);
@@ -312,6 +316,7 @@ fn session_profile_keeps_config_order_and_sibling_references() {
             root.model.clone(),
             root.effort.clone(),
         )),
+        live_children: false,
         mcp: None,
     };
     let shape = |cards: &[crate::surface_protocol::ProfileRole]| {
@@ -365,6 +370,7 @@ fn default_effort_identity_survives_none_and_explicit_default() {
             root.model.clone(),
             None,
         )),
+        live_children: false,
         mcp: None,
     };
     assert_eq!(
@@ -1798,6 +1804,7 @@ fn a_failed_config_loads_no_profile_templates_and_does_not_say_custom() {
         fast: false,
         workspace: paths.home().to_path_buf(),
         roster: None,
+        live_children: false,
         mcp: None,
     };
     let (events, rx) = host_event_sink();

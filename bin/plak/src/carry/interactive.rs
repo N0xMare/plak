@@ -73,6 +73,25 @@ impl ReloadTarget {
         None
     }
 
+    /// Whether a reload onto this build carries into a new session (another
+    /// state key, or a binding the build derives differently) rather than
+    /// resuming this one.
+    pub(crate) fn carries(&self, running_key: &str) -> bool {
+        self.state_key
+            .as_deref()
+            .is_some_and(|key| key != running_key || self.binding_change().is_some())
+    }
+
+    /// Whether the destination compared nothing because this session's own
+    /// turn was still running when it was asked.
+    fn verified_over_unsettled_work(&self) -> bool {
+        matches!(
+            self.reopen.as_deref(),
+            Some(ReopenProbe::Unknown { reason })
+                if reason == plakous_hosted::runtime::REOPEN_UNSETTLED_WORK
+        )
+    }
+
     /// The frozen binding input the installed build derives differently, when
     /// exact reopen there would refuse for that reason.
     pub(crate) fn binding_change(&self) -> Option<&str> {
@@ -198,6 +217,55 @@ pub(crate) fn reload_target_for_session(
         }
     }
     Some(target)
+}
+
+/// This build's refusal of a reload onto `target`: the target's own, or the
+/// work `in_flight` when the reload carries into another session.
+pub(crate) fn reload_refusal(
+    target: &ReloadTarget,
+    running_key: &str,
+    in_flight: Option<&'static str>,
+) -> Option<String> {
+    target.refusal(running_key).or_else(|| {
+        target
+            .carries(running_key)
+            .then_some(in_flight)
+            .flatten()
+            .map(str::to_owned)
+    })
+}
+
+/// Asks the destination again once this session has released its work,
+/// when its first answer compared nothing because a turn was running: the
+/// handoff settled the head, so it now answers. The note keeps the session
+/// open in this build, where the handed-off work continues, when the
+/// destination now refuses it or derives another binding: a carry's
+/// successor is another session, which a handoff does not reach.
+pub(crate) fn reverify_released(
+    target: &mut ReloadTarget,
+    workspace: &Path,
+    id: &str,
+) -> Option<String> {
+    if !target.verified_over_unsettled_work() {
+        return None;
+    }
+    // The terminal is plain again: the TUI has handed the session off.
+    let _ = writeln!(std::io::stdout(), "checking the installed build…");
+    let _ = std::io::stdout().flush();
+    target.reopen = reopen_verdict(&target.executable, workspace, id).map(Box::new);
+    match target.reopen.as_deref() {
+        Some(ReopenProbe::Opens) => target.refusal(&crate::home::state::state_key()),
+        Some(ReopenProbe::BindingChanged { change }) => Some(format!(
+            "reload kept this session open: the installed build would not reopen it exactly: its {change} differs; the handed-off work continues in this build"
+        )),
+        // Without a verdict now, an exec could leave the handed-off work
+        // with no build that reopens it.
+        Some(ReopenProbe::Unknown { .. }) | None => Some(
+            "reload kept this session open: the installed build could not confirm it would reopen it; the handed-off work continues in this build"
+                .to_owned(),
+        ),
+        Some(ReopenProbe::Refused { .. }) => target.refusal(&crate::home::state::state_key()),
+    }
 }
 
 /// A destination that exits 2 does not know the carry probe, so it predates

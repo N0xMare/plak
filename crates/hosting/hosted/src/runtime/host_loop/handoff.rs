@@ -7,13 +7,21 @@
 //! without a durable handoff row.
 
 use super::{RootActor, SessionEvent, durable_tree_id, log_ev};
-use crate::runtime::root_loss::{handed_off_root_turn, loss_scan, record_root_handoff};
+use crate::runtime::root_loss::{
+    RootInterruptWrite, handed_off_root_turn, loss_scan, record_root_handoff,
+};
 
 impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     pub(super) async fn record_planned_handoff(&mut self) {
         let rows = self.role.config.topology_rows();
         let tree_id = durable_tree_id(&rows, &self.role.config.session);
         if let Some(runtime) = crate::topology_runtime::lookup(&tree_id) {
+            // A handoff covers the turn it interrupts: its fold position has
+            // to be past that turn's acceptance, or the turn reads as one
+            // admitted after the handoff and the child is held instead.
+            if let Err(error) = crate::agent::project_running_children(&runtime).await {
+                self.log_unrecorded_handoff("projection", &error);
+            }
             let recorded = runtime
                 .mutate_then_emit(false, |tree| {
                     tree.record_handoff().map_err(|error| error.message)
@@ -36,7 +44,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         let session = &self.role.config.session;
         let recorded = match loss_scan(store, session) {
             Ok(Some(scan)) => match handed_off_root_turn(self.opened.sessions(), scan).await {
-                Ok(Some(turn)) => record_root_handoff(store, session, &turn).map(drop),
+                Ok(Some(turn)) => match record_root_handoff(store, session, &turn) {
+                    // The next open reads the turn as a loss and holds it.
+                    Ok(RootInterruptWrite::ViewsBehind) => {
+                        Err("the session's views had not applied the turn's admission".to_owned())
+                    }
+                    Ok(_) => Ok(()),
+                    Err(error) => Err(error),
+                },
                 Ok(None) => Ok(()),
                 Err(error) => Err(error),
             },

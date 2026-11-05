@@ -35,22 +35,36 @@ pub(crate) use reload::{
 pub(crate) use {
     epoch::apply_on_reload,
     interactive::{
-        ReloadPlan, carry_foreign_session, carry_out, rebind_session, reload_plan, switch_to,
+        ReloadPlan, carry_foreign_session, carry_out, rebind_session, reload_plan,
+        reverify_released, switch_to,
     },
 };
 
+/// A running turn refuses a reload or rebind whose successor is another
+/// session: only a reload that resumes the same session hands it off.
+pub(crate) const CARRY_REFUSED_TURN: &str =
+    "reload refused: wait for the turn to finish or cancel it";
+
+/// Running sub-agents refuse a reload or rebind whose successor is another
+/// session, for the same reason.
+pub(crate) const CARRY_REFUSED_CHILDREN: &str = "reload refused: sub-agents are still running";
+
 /// The installed build a reload of `session_id` would start, and this
 /// build's refusal of it, resolved while the session is still attached.
+/// `in_flight` is the work a running turn or sub-agents leave, which a
+/// reload resuming the same session hands off (spec 02 §5.1) and one
+/// carrying into another session refuses.
 #[cfg(feature = "tui")]
 pub(crate) fn probe_reload(
     paths: &crate::home::paths::PlakPaths,
     workspace: &std::path::Path,
     session_id: Option<&str>,
+    in_flight: Option<&'static str>,
 ) -> (Option<ReloadTarget>, Option<String>) {
     let target = interactive::reload_target_for_session(paths, workspace, session_id);
-    let refusal = target
-        .as_ref()
-        .and_then(|target| target.refusal(&crate::home::state::state_key()));
+    let refusal = target.as_ref().and_then(|target| {
+        interactive::reload_refusal(target, &crate::home::state::state_key(), in_flight)
+    });
     (target, refusal)
 }
 
@@ -60,6 +74,7 @@ pub(crate) const fn probe_reload(
     _paths: &crate::home::paths::PlakPaths,
     _workspace: &std::path::Path,
     _session_id: Option<&str>,
+    _in_flight: Option<&'static str>,
 ) -> (Option<ReloadTarget>, Option<String>) {
     (None, None)
 }

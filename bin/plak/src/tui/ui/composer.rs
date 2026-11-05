@@ -271,7 +271,7 @@ impl App {
     }
 
     fn request_rebind(&mut self, cause: String) -> Option<UserAction> {
-        if let Some(refusal) = self.reload_refusal() {
+        if let Some(refusal) = self.reload_refusal().or_else(|| self.carry_refusal()) {
             self.push_block(ScrollBlock::System(refusal.replacen("reload", "rebind", 1)));
         } else {
             self.pending_rebind = Some(cause);
@@ -280,12 +280,19 @@ impl App {
     }
 
     /// Session state that refuses `/reload`, checked again when the
-    /// installed-build probe answers.
+    /// installed-build probe answers. A running turn and running sub-agents
+    /// do not: a reload that resumes the same session hands them off, and
+    /// the new build continues each once (spec 02 §5.1).
     pub(super) fn reload_refusal(&self) -> Option<&'static str> {
+        (self.background_processes > 0)
+            .then_some("reload refused: background processes are running; stop them first (/ps)")
+    }
+
+    /// Work in flight that a reload carrying into a new session, or a
+    /// rebind, cannot hand off: the successor is another session.
+    pub(super) fn carry_refusal(&self) -> Option<&'static str> {
         if self.busy {
             Some("reload refused: wait for the turn to finish or cancel it")
-        } else if self.background_processes > 0 {
-            Some("reload refused: background processes are running; stop them first (/ps)")
         } else if self.tree_live_descendants > 0 {
             Some("reload refused: sub-agents are still running")
         } else {

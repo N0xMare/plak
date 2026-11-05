@@ -257,6 +257,7 @@ fn working_children() -> (tempfile::TempDir, ProductAgentTree, [String; 3]) {
             .unwrap();
         tree.set_active_turn(child, true).unwrap();
         tree.bind_attempt_turn(child, turn).unwrap();
+        accept_start(&mut tree, child, turn);
     }
     for child in [&parked, &held] {
         tree.release_attempt_turn(child).unwrap();
@@ -264,6 +265,47 @@ fn working_children() -> (tempfile::TempDir, ProductAgentTree, [String; 3]) {
     }
     tree.mark_owner_lost(&held);
     (root, tree, [running, parked, held])
+}
+
+/// Records `child`'s Start command as accepted as `turn`.
+fn accept_start(tree: &mut ProductAgentTree, child: &str, turn: &str) {
+    let command = format!("start:{child}");
+    let attempt = tree.node(child).unwrap().attempt_id.clone();
+    tree.record_command(AgentCommand::intent(
+        command.clone(),
+        child,
+        attempt,
+        AgentCommandKind::Start,
+        "assignment",
+        Vec::new(),
+    ))
+    .unwrap();
+    let accepted = tree.commands.get_mut(&command).unwrap();
+    accepted.fact = Some(CommandFact::Accepted);
+    // This fixture has no feed: the acceptance sits at the fold position a
+    // later intent records, as a host's projection leaves it.
+    accepted.accepted_seq = Some(0);
+    accepted.turn_id = Some(turn.to_owned());
+}
+
+/// A child reserved for startup whose Start was never accepted is not
+/// handed off: a continuation would reach it without its assignment. Its
+/// startup is left to recovery.
+#[test]
+fn a_handoff_skips_a_child_whose_assignment_never_started() {
+    let (_root, mut tree, [running, parked, _]) = working_children();
+    let starting = tree
+        .spawn_agent("root", &spawn_req(), None)
+        .unwrap()
+        .agent_id;
+    tree.set_active_turn(&starting, true).unwrap();
+    let mut handed_off = tree.record_handoff().unwrap();
+    handed_off.sort();
+    let mut expected = vec![running, parked];
+    expected.sort();
+    assert_eq!(handed_off, expected);
+    assert_eq!(tree.node(&starting).unwrap().status, NodeStatus::Running);
+    assert_eq!(tree.loss_continuation(&starting), None);
 }
 
 /// A planned handoff interrupts each running or parked child with cause

@@ -1246,7 +1246,12 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
                 self.reload.check(session, events);
             }
             SurfaceIntent::ProbeReload => {
-                crate::shell::reload_surface::probe(&self.paths, facts.session, events);
+                crate::shell::reload_surface::probe(
+                    &self.paths,
+                    facts.session,
+                    facts.phase,
+                    events,
+                );
             }
             SurfaceIntent::AcceptReloadRequest { request_id } => {
                 self.reload.accept(&request_id);

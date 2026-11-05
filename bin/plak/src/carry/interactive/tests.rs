@@ -297,3 +297,36 @@ fn a_failed_carry_probe_names_this_builds_export_version_or_the_route_refusal() 
     assert!(refused.ends_with("retry /reload"));
     assert!(!refused.contains("too old"));
 }
+
+/// The host's probe refuses work in flight only for a reload that carries
+/// into another session; a reload resuming this session hands it off.
+#[test]
+fn work_in_flight_refuses_only_a_carrying_reload() {
+    let target = |state_key: &str| ReloadTarget {
+        executable: PathBuf::from("new-installed-plak"),
+        capacity: None,
+        capacity_error: None,
+        state_key: Some(state_key.to_owned()),
+        probe: None,
+        reopen: None,
+        request: None,
+    };
+    let running = "r27.e35.p36.t10";
+    for in_flight in [
+        crate::carry::CARRY_REFUSED_TURN,
+        crate::carry::CARRY_REFUSED_CHILDREN,
+    ] {
+        assert_eq!(
+            reload_refusal(&target(running), running, Some(in_flight)),
+            None
+        );
+        assert_eq!(
+            reload_refusal(&target("r99.e99.p99.t99"), running, Some(in_flight)).as_deref(),
+            Some(in_flight)
+        );
+    }
+    assert_eq!(
+        reload_refusal(&target("r99.e99.p99.t99"), running, None),
+        None
+    );
+}

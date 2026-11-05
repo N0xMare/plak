@@ -10,6 +10,7 @@ pub mod build;
 pub mod children;
 pub(crate) mod feed_projection;
 mod ledger;
+pub(crate) use ledger::project_running_children;
 pub mod live;
 mod park;
 mod recovery;

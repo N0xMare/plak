@@ -227,31 +227,7 @@ pub(crate) async fn lost_root_turn(
     sessions: &AgentSessions,
     scan: LossScan,
 ) -> Result<Option<LostRootTurn>, String> {
-    let mut scanner = LossScanner::new(scan.after);
-    loop {
-        let page = sessions
-            .feed_page(FeedPageRequest::after(FeedCursor::new(
-                scan.session,
-                scanner.cursor,
-            )))
-            .await
-            .map_err(|error| error.to_string())?;
-        let records = match page {
-            FeedPage::Records { records, .. } => records,
-            FeedPage::BehindRetention { retained_from, .. }
-                if scanner.behind_retention(retained_from.get()) =>
-            {
-                continue;
-            }
-            _ => return Ok(None),
-        };
-        if records.is_empty() {
-            return Ok(scanner.lost);
-        }
-        for record in records {
-            scanner.record(record.header().seq, record.facts());
-        }
-    }
+    LossScanner::new(scan.after).run(sessions, scan).await
 }
 
 /// The loss scan's position and candidate between feed pages.
@@ -259,14 +235,51 @@ struct LossScanner {
     cursor: FeedSeq,
     restarted: bool,
     lost: Option<LostRootTurn>,
+    fold: fn(&mut Option<LostRootTurn>, u64, &FeedFact),
 }
 
 impl LossScanner {
     const fn new(after: FeedSeq) -> Self {
+        Self::folding(after, fold_lost_turn)
+    }
+
+    const fn folding(after: FeedSeq, fold: fn(&mut Option<LostRootTurn>, u64, &FeedFact)) -> Self {
         Self {
             cursor: after,
             restarted: false,
             lost: None,
+            fold,
+        }
+    }
+
+    async fn run(
+        mut self,
+        sessions: &AgentSessions,
+        scan: LossScan,
+    ) -> Result<Option<LostRootTurn>, String> {
+        loop {
+            let page = sessions
+                .feed_page(FeedPageRequest::after(FeedCursor::new(
+                    scan.session,
+                    self.cursor,
+                )))
+                .await
+                .map_err(|error| error.to_string())?;
+            let records = match page {
+                FeedPage::Records { records, .. } => records,
+                FeedPage::BehindRetention { retained_from, .. }
+                    if self.behind_retention(retained_from.get()) =>
+                {
+                    continue;
+                }
+                _ => return Ok(None),
+            };
+            if records.is_empty() {
+                return Ok(self.lost);
+            }
+            for record in records {
+                self.record(record.header().seq, record.facts());
+            }
         }
     }
 
@@ -285,7 +298,7 @@ impl LossScanner {
     fn record(&mut self, seq: FeedSeq, facts: &[FeedFact]) {
         self.cursor = seq;
         for fact in facts {
-            fold_lost_turn(&mut self.lost, seq.get(), fact);
+            (self.fold)(&mut self.lost, seq.get(), fact);
         }
     }
 }
@@ -334,12 +347,13 @@ pub(crate) fn record_root_owner_lost(
     lost: &LostRootTurn,
 ) -> Result<bool, String> {
     record_root_interrupt(store, session, lost, RootInterruptCause::OwnerLost)
+        .map(|write| write == RootInterruptWrite::Written)
 }
 
 /// Records a planned handoff of the root's running turn `turn` (spec 03
 /// section 14.1): the releasing host writes it before it releases, once its
 /// views applied the turn's admission, so the next open continues the turn
-/// once by itself. Says whether it wrote one.
+/// once by itself. Says what it wrote.
 ///
 /// # Errors
 /// A product store read or write refused.
@@ -347,7 +361,7 @@ pub(crate) fn record_root_handoff(
     store: &dyn SessionRecordStore,
     session: &SessionRecord,
     turn: &LostRootTurn,
-) -> Result<bool, String> {
+) -> Result<RootInterruptWrite, String> {
     record_root_interrupt(store, session, turn, RootInterruptCause::Handoff)
 }
 
@@ -370,6 +384,18 @@ pub(crate) fn record_root_stop(
         applied_seq: 0,
     };
     record_root_interrupt(store, session, &turn, cause)
+        .map(|write| write == RootInterruptWrite::Written)
+}
+
+/// What one root interrupt write did.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RootInterruptWrite {
+    Written,
+    /// An interrupt already anchored on the turn is final.
+    AlreadyAnchored,
+    /// The session's views had not applied the turn's admission or
+    /// terminal yet, so nothing was written.
+    ViewsBehind,
 }
 
 /// Writes one root interrupt anchored on `lost`'s turn. Any root interrupt
@@ -380,7 +406,7 @@ fn record_root_interrupt(
     session: &SessionRecord,
     lost: &LostRootTurn,
     cause: RootInterruptCause,
-) -> Result<bool, String> {
+) -> Result<RootInterruptWrite, String> {
     let anchor = RootStopAnchor::Turn {
         turn_id: lost.turn_id.clone(),
     };
@@ -391,13 +417,13 @@ fn record_root_interrupt(
         .iter()
         .any(|intent| intent.value.anchor == anchor)
     {
-        return Ok(false);
+        return Ok(RootInterruptWrite::AlreadyAnchored);
     }
     let applied = store
         .load_views(&session.id)?
         .map_or(0, |views| views.cursor.get());
     if applied < lost.applied_seq {
-        return Ok(false);
+        return Ok(RootInterruptWrite::ViewsBehind);
     }
     store
         .write_root_loss(
@@ -405,13 +431,14 @@ fn record_root_interrupt(
             RootLossIntent::Interrupt(RootInterrupt { anchor, cause }),
         )
         .map_err(|error| error.to_string())?;
-    Ok(true)
+    Ok(RootInterruptWrite::Written)
 }
 
 /// The root turn a planned handoff hands over, if the feed after `scan`
 /// ends with one: the last root turn admitted, still unfinished or ended by
 /// the releasing host's cancel. A turn that completed, failed or was fenced
-/// is not handed over.
+/// is not handed over. A scan start below the feed's retention restarts at
+/// the retained start, as the loss scan does.
 ///
 /// # Errors
 /// A feed read refused.
@@ -419,49 +446,36 @@ pub(crate) async fn handed_off_root_turn(
     sessions: &AgentSessions,
     scan: LossScan,
 ) -> Result<Option<LostRootTurn>, String> {
-    let mut cursor = scan.after;
-    let mut running = None;
-    loop {
-        let page = sessions
-            .feed_page(FeedPageRequest::after(FeedCursor::new(
-                scan.session,
-                cursor,
-            )))
-            .await
-            .map_err(|error| error.to_string())?;
-        let FeedPage::Records { records, .. } = page else {
-            return Ok(None);
-        };
-        if records.is_empty() {
-            return Ok(running);
+    LossScanner::folding(scan.after, fold_handed_off_turn)
+        .run(sessions, scan)
+        .await
+}
+
+/// One feed fact's effect on the handoff scan's candidate: a root admission
+/// replaces it with its turn, and that turn's terminal clears it unless the
+/// releasing host's cancel ended it.
+fn fold_handed_off_turn(running: &mut Option<LostRootTurn>, seq: u64, fact: &FeedFact) {
+    match fact {
+        FeedFact::CommandAccepted {
+            kind: FeedCommandKind::Root { .. },
+            turn_id: Some(turn_id),
+            ..
+        } => {
+            *running = Some(LostRootTurn {
+                turn_id: turn_id.to_string(),
+                applied_seq: seq,
+            });
         }
-        for record in records {
-            cursor = record.header().seq;
-            for fact in record.facts() {
-                match fact {
-                    FeedFact::CommandAccepted {
-                        kind: FeedCommandKind::Root { .. },
-                        turn_id: Some(turn_id),
-                        ..
-                    } => {
-                        running = Some(LostRootTurn {
-                            turn_id: turn_id.to_string(),
-                            applied_seq: cursor.get(),
-                        });
-                    }
-                    FeedFact::TurnTerminal {
-                        turn_id, outcome, ..
-                    } if !matches!(outcome, FeedTurnOutcome::Cancelled { .. })
-                        && running
-                            .as_ref()
-                            .is_some_and(|turn| turn.turn_id == turn_id.to_string()) =>
-                    {
-                        running = None;
-                    }
-                    _ => {}
-                }
-            }
+        FeedFact::TurnTerminal {
+            turn_id, outcome, ..
+        } if !matches!(outcome, FeedTurnOutcome::Cancelled { .. })
+            && running
+                .as_ref()
+                .is_some_and(|turn| turn.turn_id == turn_id.to_string()) =>
+        {
+            *running = None;
         }
+        _ => {}
     }
 }
 

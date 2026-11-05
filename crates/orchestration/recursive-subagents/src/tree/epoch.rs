@@ -303,10 +303,13 @@ impl ProductAgentTree {
     }
 
     /// A planned handoff (spec 03 section 14.1): before the releasing host
-    /// lets go, each child that is running or parked is interrupted with
-    /// cause `handoff`, its attempt kept, so the next host continues it once
-    /// by itself. A child held after a loss keeps its hold. Returns the
-    /// children handed off.
+    /// lets go, each child whose assignment started (a turn of its attempt
+    /// was admitted) and that is running or parked is interrupted
+    /// with cause `handoff`, its attempt kept, so the next host continues it
+    /// once by itself. A child reserved for startup whose Start was never
+    /// accepted is not: the continuation would reach it without its
+    /// assignment, and its startup is recovered instead. A child held after
+    /// a loss keeps its hold. Returns the children handed off.
     ///
     /// # Errors
     /// Refuses malformed recorded intent data.
@@ -328,7 +331,8 @@ impl ProductAgentTree {
         let ids: Vec<String> = self.nodes.keys().cloned().collect();
         for id in ids {
             let parked = self.is_parked(&id) && !self.is_park_ending(&id);
-            let owned = self.has_turn_owner(&id);
+            let owned = self.has_turn_owner(&id)
+                && (cause != super::InterruptCause::Handoff || self.assignment_started(&id));
             if let Some(node) = self.nodes.get(&id)
                 && id != root
                 && (owned || parked)
@@ -356,6 +360,29 @@ impl ProductAgentTree {
             }
         }
         Ok(interrupted)
+    }
+
+    /// Whether `agent_id`'s current attempt has a turn the runtime admitted:
+    /// one bound to it (a turn is bound only once its command was accepted),
+    /// or an accepted command on record.
+    fn assignment_started(&self, agent_id: &str) -> bool {
+        if self
+            .attempt(agent_id)
+            .is_some_and(|attempt| attempt.turn_id.is_some())
+        {
+            return true;
+        }
+        let attempt = self
+            .nodes
+            .get(agent_id)
+            .and_then(|node| node.attempt_id.as_ref());
+        attempt.is_some_and(|attempt| {
+            self.commands.values().any(|command| {
+                command.recipient == agent_id
+                    && command.attempt_id.as_ref() == Some(attempt)
+                    && command.fact == Some(super::CommandFact::Accepted)
+            })
+        })
     }
 
     /// Records that the root's turn was interrupted while work was still

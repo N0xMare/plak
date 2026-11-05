@@ -334,8 +334,8 @@ impl App {
     }
 
     /// At an idle boundary, starts the requested reload, or refuses it when
-    /// sub-agents or background processes are live: it never waits on work
-    /// and never interrupts a turn.
+    /// background processes are live: it never waits on work and never
+    /// interrupts a turn. Running sub-agents are handed off.
     pub(super) fn service_reload_request(&mut self) {
         if self.busy
             || self.reload_probe.is_some()
@@ -376,7 +376,12 @@ impl App {
                 self.push_block(ScrollBlock::System("reload kept this session open: the conversation changed during the capacity check; retry /reload".to_owned()));
                 return Some(ReloadOutcome::Refused);
             }
-            if let Some(reason) = self.reload_refusal().map(str::to_owned) {
+            // A confirmed reload carries: nothing in flight is handed off.
+            if let Some(reason) = self
+                .reload_refusal()
+                .or_else(|| self.carry_refusal())
+                .map(str::to_owned)
+            {
                 self.push_block(ScrollBlock::System(reason));
                 return Some(ReloadOutcome::Refused);
             }
@@ -415,6 +420,8 @@ impl App {
             self.push_block(ScrollBlock::System("reload kept this session open: the conversation changed during the capacity check; retry /reload".to_owned()));
             return Some(ReloadOutcome::Refused);
         }
+        // The host answered the carry verdict: a running turn or
+        // sub-agents refuse only a reload into another session.
         let refusal = self.reload_refusal().map(str::to_owned).or(host_refusal);
         if let Some(reason) = refusal {
             self.push_block(ScrollBlock::System(reason));

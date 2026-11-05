@@ -105,7 +105,12 @@ fn only_a_uuid_session_is_announced() {
 fn a_probe_with_no_session_is_refused_as_such() {
     let (_root, paths) = home();
     let (sender, received) = plakous_host_protocol::observation_channel();
-    probe(&paths, None, &Sender::over(sender));
+    probe(
+        &paths,
+        None,
+        plakous_hosted::runtime::SurfacePhase::Idle,
+        &Sender::over(sender),
+    );
     assert!(matches!(
         received.try_recv().unwrap(),
         HostEvent::Extension(SurfaceObservation::ReloadProbed { target: None, refusal: Some(refusal) })

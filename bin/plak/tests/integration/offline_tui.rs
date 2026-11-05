@@ -2646,36 +2646,51 @@ fn a_slow_identity_hash_still_carries_a_changed_binding() {
     terminal.quit();
 }
 
-/// A changed binding never carries live work: a running turn refuses the
-/// reload before anything is asked or torn down, and the session stays.
+/// A changed binding never carries live work. The installed build cannot
+/// compare a head whose turn is still running, so the handoff goes first and
+/// it is asked again: it now names the change, nothing carries, and the
+/// handed-off turn continues once in this build.
 #[test]
-fn a_reload_whose_binding_changed_is_refused_while_a_turn_runs() {
+fn a_reload_whose_binding_changed_keeps_a_running_turn_here_and_continues_it_once() {
     let fixture = Fixture::new(&stalled_then_answers(30_000));
-    let fake_bin = fixture.root.join("fake-bin-busy");
+    let fake_bin = fixture.root.join("fake-bin-changed");
     std::fs::create_dir_all(&fake_bin).expect("fake bin");
     let mut terminal = Terminal::spawn(&fixture, Launch::OnPath(&fake_bin));
     terminal.wait_ready();
+    fixture.wait_for_identity_cache();
     terminal.send(b"stall while I reload\r");
     fixture.wait_for_provider_dispatch();
+    // Installed after the launch, so only the reload's questions reach it:
+    // that build reads a script whose adapter differs.
+    let changed = fixture.root.join("changed-script.json");
     let mut script = stalled_then_answers(30_000);
     script["adapter_profile"] = json!("offline-loopback-adapter-v2");
-    fixture.write_script(&script);
+    write_json(&changed, &script);
+    write_script_file(
+        &fake_bin.join("plak"),
+        &format!(
+            "#!/bin/sh\nPLAK_TEST_SCRIPT='{changed}'\nexport PLAK_TEST_SCRIPT\nexec '{real}' \"$@\"\n",
+            changed = changed.display(),
+            real = fixture.root.join("real-bin").join("plak").display()
+        ),
+    );
+    fixture.write_script(&json!({
+        "version": 1,
+        "repeat_last_step": true,
+        "steps": [{"output": {"text": "continued in this build"}}]
+    }));
     terminal.send(b"/reload\r");
-    terminal.wait_screen("reload refused: wait for the turn to finish or cancel it");
+    terminal.wait_screen("the handed-off work continues in this build");
+    terminal.wait_screen("continued in this build");
+    terminal.wait_absent("Esc stop");
     assert!(terminal.is_alive());
     assert_eq!(fixture.session_ids().len(), 1);
     assert!(!fixture.home().join("carry").exists());
-    // Stop the turn and wait for it to settle before quitting: a quit over a
-    // turn whose cancel has not settled within the quit bound escalates
-    // (exit 130), which a loaded machine reaches.
-    terminal.send(b"\x1b");
-    terminal.wait_screen("Stop this turn?");
-    terminal.send(b"\r");
-    terminal.wait_where("the turn settled", |frame| {
-        !frame.contains("Stop this turn?")
-            && !frame.contains("cancelling…")
-            && !frame.contains("waiting for model")
-    });
+    assert_eq!(
+        provider_dispatches(&fixture),
+        2,
+        "the interrupted request and one continuation"
+    );
     terminal.quit();
 }
 
@@ -2973,53 +2988,138 @@ fn a_requested_reload_onto_another_state_key_carries_and_wakes_the_successor() {
     terminal.quit();
 }
 
-/// A live sub-agent at the idle boundary refuses a requested reload instead
-/// of waiting: the transcript and the requester's outcome both say so.
+/// A background process at the idle boundary refuses a requested reload
+/// instead of waiting: the transcript and the requester's outcome both say
+/// so. (Running sub-agents are handed off, chapter 03 §14.1.)
 #[test]
-fn a_requested_reload_is_refused_while_a_sub_agent_runs() {
-    let spawn = tree_turn_script()["steps"][0].clone();
+fn a_requested_reload_is_refused_while_a_background_process_runs() {
     let fixture = Fixture::new(&json!({
-        "version": 1, "tree": true, "durable_tree": true,
-        "child_hold_ms": 60_000, "repeat_last_step": true,
-        "steps": [spawn, {"output": {"text": "a child is still running"}}]
+        "version": 1,
+        "process_tools": true,
+        "repeat_last_step": true,
+        "steps": [
+            {"output": {"tool": {"name": "process_session_start", "arguments": {
+                "command": "sleep 120",
+                "workdir": ".",
+                "login": false,
+                "tty": false,
+                "keep_stdin_open": false,
+                "yield_time_ms": 0,
+                "max_output_bytes": 8192
+            }}}, "finish": "tool_calls"},
+            {"output": {"text": "a process is still running"}}
+        ]
     }));
-    enable_subagents(&fixture);
     enable_reload_requests(&fixture);
-    let fake_bin = fixture.root.join("fake-bin-live-child");
+    let fake_bin = fixture.root.join("fake-bin-live-process");
     std::fs::create_dir_all(&fake_bin).expect("fake bin");
     let mut terminal = Terminal::spawn(&fixture, Launch::OnPath(&fake_bin));
     terminal.wait_ready();
-    terminal.send(b"start a child and stop\r");
-    terminal.wait_screen("a child is still running");
+    terminal.send(b"start a process and stop\r");
+    terminal.wait_screen("a process is still running");
     terminal.wait_absent("Esc stop");
+    let session = fixture.session_ids()[0].clone();
     let binary = running_binary_id(&fixture);
-    // The root's host is the one that announces itself.
-    let channel = fixture.home().join("run").join("reload-requests");
-    let deadline = Instant::now() + WAIT;
-    let source = loop {
-        let announced = std::fs::read_dir(&channel).ok().and_then(|entries| {
-            entries.flatten().find_map(|entry| {
-                let name = entry.file_name().into_string().ok()?;
-                name.strip_suffix(".listener").map(str::to_owned)
-            })
-        });
-        if let Some(session) = announced {
-            break session;
-        }
-        assert!(Instant::now() < deadline, "the host never announced itself");
-        std::thread::sleep(Duration::from_millis(100));
-    };
-    let outcome = ask_reload_until_announced(&fixture, &source, &binary);
+    let outcome = ask_reload_until_announced(&fixture, &session, &binary);
     let written = wait_for_outcome(&outcome);
     assert_eq!(written["outcome"], "refused", "{written}");
     assert!(
         written["reason"]
             .as_str()
-            .is_some_and(|reason| reason.contains("sub-agents are still running")),
+            .is_some_and(|reason| reason.contains("background processes are running")),
         "{written}"
     );
     terminal.wait_screen("requested reload refused");
     assert!(terminal.is_alive());
+    terminal.quit();
+}
+
+/// Provider requests the offline model dispatched, across processes.
+fn provider_dispatches(fixture: &Fixture) -> usize {
+    std::fs::read_to_string(fixture.evidence())
+        .unwrap_or_default()
+        .lines()
+        .filter(|line| line.contains("provider_dispatched"))
+        .count()
+}
+
+/// An installed build that is this binary: a reload resumes this session
+/// on it, in the same terminal.
+fn install_this_build(fixture: &Fixture, fake_bin: &Path) {
+    let real = fixture.root.join("real-bin").join("plak");
+    write_script_file(
+        &fake_bin.join("plak"),
+        &format!("#!/bin/sh\nexec '{}' \"$@\"\n", real.display()),
+    );
+}
+
+/// `/reload` during a running root turn hands it off (spec 02 §5.1): the
+/// new build continues the turn once by itself, and the interrupted
+/// request is not replayed.
+#[test]
+fn a_reload_during_a_running_turn_hands_it_to_the_new_build_once() {
+    let fixture = Fixture::new(&stalled_then_answers(30_000));
+    let fake_bin = fixture.root.join("fake-bin-handoff");
+    std::fs::create_dir_all(&fake_bin).expect("fake bin");
+    install_this_build(&fixture, &fake_bin);
+    let mut terminal = Terminal::spawn(&fixture, Launch::OnPath(&fake_bin));
+    terminal.wait_ready();
+    fixture.wait_for_identity_cache();
+    terminal.send(b"stall while I reload\r");
+    fixture.wait_for_provider_dispatch();
+    fixture.write_script(&json!({
+        "version": 1,
+        "repeat_last_step": true,
+        "steps": [{"output": {"text": "continued after the reload"}}]
+    }));
+    terminal.send(b"/reload\r");
+    terminal.wait_screen("continued after the reload");
+    terminal.wait_absent("Esc stop");
+    assert_eq!(fixture.session_ids().len(), 1, "the same session resumed");
+    assert_eq!(
+        provider_dispatches(&fixture),
+        2,
+        "the interrupted request and one continuation"
+    );
+    terminal.quit();
+}
+
+fn write_json(path: &Path, value: &Value) {
+    std::fs::write(path, serde_json::to_vec_pretty(value).expect("json")).expect("json file");
+}
+
+/// A prompt typed while the installed-build check runs is never lost: it
+/// changes the conversation, so the reload refuses and the prompt is
+/// answered in this build.
+#[test]
+fn a_prompt_typed_during_the_reload_check_refuses_the_reload_and_is_answered() {
+    let fixture = Fixture::new(&tool_then_answer("the prompt in the reload window"));
+    let fake_bin = fixture.root.join("fake-bin-slow-probe");
+    std::fs::create_dir_all(&fake_bin).expect("fake bin");
+    let real = fixture.root.join("real-bin").join("plak");
+    let gate = fixture.root.join("probe-gate");
+    let mut terminal = Terminal::spawn(&fixture, Launch::OnPath(&fake_bin));
+    terminal.wait_ready();
+    fixture.wait_for_identity_cache();
+    // Installed after the launch, so the reload's questions reach it.
+    write_script_file(
+        &fake_bin.join("plak"),
+        &format!(
+            "#!/bin/sh\n\
+             if [ \"$1 $2\" = 'version --reload-probe' ]; then n=0; while [ ! -e '{gate}' ] && [ $((n += 1)) -le 1200 ]; do sleep 0.05; done; fi\n\
+             exec '{real}' \"$@\"\n",
+            gate = gate.display(),
+            real = real.display()
+        ),
+    );
+    terminal.send(b"/reload\r");
+    terminal.wait_screen("checking installed build");
+    terminal.send(b"answer while the reload checks\r");
+    terminal.wait_screen("the prompt in the reload window");
+    std::fs::write(&gate, b"").expect("open the probe gate");
+    terminal.wait_screen("reload kept this session open: the conversation changed");
+    assert!(terminal.is_alive());
+    assert_eq!(fixture.session_ids().len(), 1);
     terminal.quit();
 }
 

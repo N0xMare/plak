@@ -125,6 +125,9 @@ pub struct SurfaceSession {
     pub workspace: std::path::PathBuf,
     /// This session's frozen tree epoch, when it has one.
     pub roster: Option<crate::orchestration::OrchestrationSnapshot>,
+    /// Whether a sub-agent of this session's attached tree is running or
+    /// parked: work a reload carrying into a new session cannot hand off.
+    pub live_children: bool,
     /// The MCP tools this session froze at creation; `None` unless the
     /// handler asked for them ([`SurfaceHandler::needs_session_tools`]).
     pub mcp: Option<SurfaceMcp>,
@@ -202,16 +205,26 @@ pub(super) fn session_facts(
     rows: Option<&dyn super::topology_state::TopologyRows>,
     with_tools: bool,
 ) -> SurfaceSession {
-    let roster = rows.and_then(|rows| {
-        let tree_id = super::topology_state::durable_tree_id(rows, session);
-        match crate::topology_runtime::lookup(&tree_id) {
-            Some(runtime) => runtime.read(|tree| tree.current_epoch().clone()).ok(),
-            None => rows
-                .tree(&tree_id)
-                .ok()
-                .flatten()
-                .map(|tree| tree.current_epoch().clone()),
-        }
+    let tree_id = rows.map(|rows| super::topology_state::durable_tree_id(rows, session));
+    let hub = tree_id.as_deref().and_then(crate::topology_runtime::lookup);
+    let roster = match (&hub, rows, &tree_id) {
+        (Some(runtime), _, _) => runtime.read(|tree| tree.current_epoch().clone()).ok(),
+        (None, Some(rows), Some(tree_id)) => rows
+            .tree(tree_id)
+            .ok()
+            .flatten()
+            .map(|tree| tree.current_epoch().clone()),
+        _ => None,
+    };
+    let live_children = hub.is_some_and(|runtime| {
+        runtime
+            .read(|tree| {
+                tree.nodes().values().any(|node| {
+                    node.parent_agent_id.is_some()
+                        && node.status == crate::agent_tree_protocol::NodeStatus::Running
+                })
+            })
+            .unwrap_or(false)
     });
     SurfaceSession {
         id: session.id.clone(),
@@ -221,6 +234,7 @@ pub(super) fn session_facts(
         fast: session.target_selection == crate::binding::TargetSelection::NativePriority,
         workspace: session.workspace_root.clone(),
         roster,
+        live_children,
         mcp: with_tools.then(|| SurfaceMcp::of(session)),
     }
 }

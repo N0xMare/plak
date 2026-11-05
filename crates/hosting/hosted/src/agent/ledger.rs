@@ -655,6 +655,40 @@ pub(super) async fn project_child_feed(
     .await
 }
 
+/// Brings every running child's projection to its feed's tail, so a record
+/// the tree makes now orders after each command a child's runtime accepted.
+/// The children's sessions are read where their parent created them.
+pub(crate) async fn project_running_children(
+    runtime: &crate::topology_runtime::ProductTopologyRuntime,
+) -> Result<(), String> {
+    let Some(parent) = crate::agent::build::rejoin_parent(runtime) else {
+        return Ok(());
+    };
+    let sessions = parent
+        .state_roots()
+        .runtime_sessions()
+        .map_err(|error| error.message().to_owned())?;
+    let children = runtime
+        .read(|tree| {
+            tree.nodes()
+                .values()
+                .filter(|node| {
+                    node.parent_agent_id.is_some()
+                        && node.status == crate::agent_tree_protocol::NodeStatus::Running
+                })
+                .filter_map(|node| Some((node.agent_id.clone(), node.session_locator.clone()?)))
+                .collect::<Vec<_>>()
+        })
+        .map_err(|error| error.message)?;
+    for (agent_id, locator) in children {
+        let locator: plakous::sessions::SessionLocator = locator
+            .parse()
+            .map_err(|_| format!("child {agent_id} has an invalid session locator"))?;
+        project_feed(runtime, &agent_id, &sessions, locator.session_id()).await?;
+    }
+    Ok(())
+}
+
 /// [`project_child_feed`] for a session by id, with no lease. Returns
 /// whether the pass went behind the feed's retention.
 pub(super) async fn project_feed(
