@@ -1438,3 +1438,47 @@ fn a_childs_quit_answers_detached() {
     );
     assert_eq!(connection.attachment, None);
 }
+
+/// A clear (its binding, then `ClearView`, with no opening) empties the
+/// process list every attachment holds as a state: a connection that
+/// attaches after it gets an empty list in its attach snapshot, not the
+/// cleared session's rows.
+#[test]
+fn an_attach_after_a_clear_holds_no_process_of_the_cleared_session() {
+    use plakous_host_protocol::Core;
+    use plakous_host_protocol::views::{ProcessStatus, ProcessView};
+    let (actions, _intents) = plakous_host_protocol::intent_channel::<Core>();
+    let (observations, events) = plakous_host_protocol::observation_channel::<Core>();
+    let sender = crate::runtime::Sender::over(observations);
+    sender.publish_processes(vec![ProcessView {
+        id: "s1:main:p1".into(),
+        command: "make".into(),
+        owner: "root".into(),
+        started_at: 1,
+        elapsed_ms: 100,
+        status: ProcessStatus::Running,
+        output: String::new(),
+    }]);
+    let _ = sender.send(crate::surface_protocol::ContentEvent::ClearView);
+    drop(sender);
+    let (client, lines) = mpsc::sync_channel(4);
+    client.send(attach_line(1, "t1")).unwrap();
+    client
+        .send(Ok(encode_line(&ClientFrame::<Core>::Bye).unwrap()))
+        .unwrap();
+    let mut stdout = Vec::new();
+    WireConnection::new(root(), &mut stdout, actions)
+        .serve(&lines, &events)
+        .unwrap();
+    let held: Vec<_> = host_frames(&stdout)
+        .into_iter()
+        .filter_map(|frame| match frame {
+            HostFrame::Event {
+                observation: SessionObservation::Processes { views, running },
+                ..
+            } => Some((views.len(), running)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(held, [(0, 0)], "{held:?}");
+}

@@ -126,6 +126,7 @@ pub mod network_watch;
 #[cfg(test)]
 mod notice_tests;
 mod oneshot;
+mod processes;
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod processes_tests;
@@ -288,24 +289,6 @@ pub struct Sender<P: plakous_host_protocol::ProtocolExtension = plakous_host_pro
     recorded: Option<Arc<std::sync::Mutex<Vec<ContentEvent<P>>>>>,
 }
 
-/// Whether two process lists show the same: a running process's elapsed
-/// time counts only in whole seconds.
-fn same_processes(
-    held: &[plakous_host_protocol::views::ProcessView],
-    next: &[plakous_host_protocol::views::ProcessView],
-) -> bool {
-    held.len() == next.len()
-        && held.iter().zip(next).all(|(old, new)| {
-            old.id == new.id
-                && old.command == new.command
-                && old.owner == new.owner
-                && old.started_at == new.started_at
-                && old.status == new.status
-                && old.output == new.output
-                && old.elapsed_ms / 1000 == new.elapsed_ms / 1000
-        })
-}
-
 /// The correlation one `IntentStarted` carried.
 #[derive(Clone, Eq, PartialEq)]
 struct Started(Option<String>);
@@ -458,28 +441,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
         }
     }
 
-    /// Publishes the session's process rows when they changed since the
-    /// last published ones: anything but a running process's elapsed time
-    /// within the same second. A session that never had a process publishes
-    /// none: no rows is what a face holds before the first.
-    pub(crate) fn publish_processes(&self, views: Vec<plakous_host_protocol::views::ProcessView>) {
-        let mut last = self
-            .processes
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let unchanged = match last.as_ref() {
-            Some(held) => same_processes(held, &views),
-            None => views.is_empty(),
-        };
-        if unchanged {
-            return;
-        }
-        *last = Some(views.clone());
-        drop(last);
-        let running = views.iter().filter(|row| row.status.is_live()).count();
-        let _ = self.send(ContentEvent::Processes { views, running });
-    }
-
     /// The last usage view the session published, if any.
     pub(crate) fn usage(
         &self,
@@ -491,6 +452,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
     }
 
     fn publish(&self, value: HostEvent<P>) -> bool {
+        let mut cleared_processes = false;
         if matches!(value, HostEvent::ClearView | HostEvent::SessionOpening) {
             self.presentations
                 .lock()
@@ -500,11 +462,21 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .clear();
-            // The opening session's attachments keep no process list yet.
-            *self
+            let mut processes = self
                 .processes
                 .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if matches!(value, HostEvent::SessionOpening) {
+                // The opening session's attachments keep no process list
+                // yet: its first list comes as its own.
+                *processes = None;
+            } else if processes.as_ref().is_some_and(|held| !held.is_empty()) {
+                // A clear opens its session without an opening, and every
+                // attachment holds the last list as a state: it is replaced
+                // by an empty one right after the clear.
+                *processes = Some(Vec::new());
+                cleared_processes = true;
+            }
         }
         let boundary = matches!(value, HostEvent::Status { .. } | HostEvent::SetBusy(false));
         let mut presentations = self
@@ -538,6 +510,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             return self.inner.send(value).is_ok();
         }
         let sent = self.inner.send(value.clone()).is_ok();
+        if cleared_processes {
+            let _ = self.inner.send(HostEvent::Processes {
+                views: Vec::new(),
+                running: 0,
+            });
+        }
         let _ = presentations.observe(
             plakous_host_protocol::views::transcript::TranscriptScope::Root,
             &value,

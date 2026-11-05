@@ -419,7 +419,9 @@ an export.
   tagged frame); embedder break for its readers.
 - The session's background processes and the face's promptable mark are
   wire v2 traffic: the state observation `processes {views, running}`
-  (`SessionObservation::Processes`), published when the rows change, and
+  (`SessionObservation::Processes`), published when the rows change (a
+  clear follows its `clear_view` with an empty list), each command and
+  output tail redacted as a tool row's are, and
   the intent `promptable` (`SessionIntent::Promptable`), which sets the
   passive-maintenance flag without entering the queue. Embedder break:
   the mailbox mirror is gone (`IntentSender::processes`,

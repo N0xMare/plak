@@ -594,4 +594,26 @@ fn the_processes_observation_is_the_process_list() {
     // sends none.
     app.apply_host_event(HostEvent::SessionOpening);
     assert!(app.processes.is_empty());
+    // A clear opens the next session without an opening: the cleared
+    // session's running processes go with it.
+    app.apply_host_event(HostEvent::Processes {
+        views: vec![running_again()],
+        running: 1,
+    });
+    assert_eq!(app.background_processes, 1);
+    app.apply_host_event(HostEvent::ClearView);
+    assert!(app.processes.is_empty());
+    assert_eq!(app.background_processes, 0);
+}
+
+fn running_again() -> ProcessView {
+    ProcessView {
+        id: "root:p2".into(),
+        command: "sleep 30".into(),
+        owner: "root".into(),
+        started_at: 20,
+        elapsed_ms: 1_000,
+        status: ProcessStatus::Running,
+        output: String::new(),
+    }
 }

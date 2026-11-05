@@ -923,6 +923,9 @@ impl App {
                 self.pane.assistant_stream_active = false;
                 self.open_approval = None;
                 self.pane.scroll_from_bottom = 0;
+                // The cleared session's processes are not this one's; its
+                // own list follows when it has one.
+                self.apply_process_snapshot(std::sync::Arc::new(Vec::new()));
                 self.mark_transcript_replaced();
             }
             HostEvent::Usage(usage) => {

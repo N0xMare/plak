@@ -729,8 +729,14 @@ Everything a client admitted there can do, an operator at the TUI can do,
 except the local-face intents of §4.6: it holds the serving user's shell.
 That includes the wire's session requests (`retry_attach`,
 `resume_session`, `rebind`), which act on the serving user's own sessions
-as the TUI's `/attach`, `/resume` and rebind do. The endpoint's whole job is deciding who the
-client is, and its checks stop different attackers.
+as the TUI's `/attach`, `/resume` and rebind do. What it is shown is what
+the TUI shows, redacted as the TUI's rows are: the session's process rows
+(chapter 02 §4.4) carry each command redacted as a tool row's subject and
+each output tail through the same display redactor as a tool row's detail,
+so a secret the model typed into a command or a process printed does not
+cross the network as typed. The redactor is best-effort display
+minimization, not a credential boundary. The endpoint's whole job is
+deciding who the client is, and its checks stop different attackers.
 
 - **The tailnet identity stops everyone who is not an allowed login.** The
   endpoint binds only a unix socket in a `0700` directory owned by the

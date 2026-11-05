@@ -4037,12 +4037,19 @@ verdicts) are addressed, the session profile and workspace chrome states.
   names no root node yet, since the deferred TUI launch learns its tree
   only on the host worker. The session's background processes are the
   state observation `processes {views, running}`: every live and recently
-  ended process row of the session's job registry, and how many are
-  running or stopping. The host publishes it when the rows change (a
-  running row's elapsed time only by the whole second), so every root
-  attachment holds the latest in its attach snapshot; a session that has
-  had no process since it opened publishes none, which a face reads as an
-  empty list. A child attachment gets none, and JSONL v1 never projects
+  ended process row of the session's job registry that its tree shows, and
+  how many of those visible rows are running or stopping (a running process
+  of a branch or tree the session does not show is not counted). The host
+  publishes it when the rows change (a running row's elapsed time only by
+  the whole second), so every root attachment holds the latest in its
+  attach snapshot; a session that has had no process since it opened
+  publishes none, which a face reads as an empty list. A clear opens the
+  next session without an opening, so the host follows its `clear_view`
+  with an empty `processes` when it had published rows, and a face drops
+  its list on `clear_view` as on `session_opening`. Each row's command is
+  redacted and bounded as a tool row's subject is, and its output tail goes
+  through the display redactor a tool row's detail does (chapter 04
+  §2.10). A child attachment gets none, and JSONL v1 never projects
   it. The face sends the intent
   `promptable` once after its first painted frame: it sets the flag that
   gates passive maintenance and never enters the session's queue, so it

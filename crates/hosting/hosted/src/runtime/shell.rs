@@ -285,7 +285,9 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
             });
         }
         UserAction::RefreshReadiness => state.readiness.start(config),
-        // A flag its sender sets; it never enters the queue.
+        // Unreachable: `IntentSender::send_correlated` sets the promptable
+        // flag and returns before queueing on every send path, so the
+        // intent never enters the queue; the arm keeps the match exhaustive.
         UserAction::Promptable => {}
         UserAction::OpenAgentTranscript { agent_id } => {
             super::child_live::send_agent_transcript(

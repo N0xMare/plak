@@ -725,7 +725,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                         self.host.events,
                     );
                 }
-                // A flag its sender sets; it never enters the queue.
+                // Unreachable: `IntentSender::send_correlated` sets the promptable
+                // flag and returns before queueing on every send path, so the
+                // intent never enters the queue; the arm keeps the match exhaustive.
                 Ok(UserAction::Promptable) => {}
                 Ok(UserAction::ResyncTranscript { scope }) => {
                     self.host.events.resync_transcript(&scope);
