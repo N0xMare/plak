@@ -260,21 +260,25 @@ async fn drive(socket: &mut Socket, served: &Served) -> Ended {
         let _ = send_pending(socket, &outbox).await;
         return Ended::SessionClosed;
     }
-    let admitted =
-        handshake::<PlakExtension>(&first, served.welcome(), &mut outbox.clone(), &move || {
-            stop.stopped()
-        });
+    // Connected before the welcome, which names the session and root of
+    // the connection's own handle: a switch after it moves the connection.
+    let mut connection = served
+        .session
+        // The web endpoint is never a local face, however its client
+        // authenticated: it may not exec or hand off the host's build.
+        .connect(outbox.clone(), Face::Remote, move || stop.stopped());
+    let admitted = handshake::<PlakExtension>(
+        &first,
+        served.welcome(&connection),
+        &mut outbox.clone(),
+        &move || stop.stopped(),
+    );
     if let Err(ended) = send_pending(socket, &outbox).await {
         return ended;
     }
     if !matches!(admitted, Ok(true)) {
         return Ended::Policy("handshake refused");
     }
-    let mut connection = served
-        .session
-        // The web endpoint is never a local face, however its client
-        // authenticated: it may not exec or hand off the host's build.
-        .connect(outbox.clone(), Face::Remote, move || stop.stopped());
     let ended = attached(socket, served, &mut connection, &outbox, &mut pong).await;
     // Every way out detaches, so the session never holds a dead attachment.
     connection.leave();

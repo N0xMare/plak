@@ -251,6 +251,13 @@ pub struct WireConnection<P: ProtocolExtension, W: Write> {
     attachment: Option<AttachmentId>,
     /// The attachment just answered `attached` that must resync at once.
     resync_after_attach: Option<AttachmentId>,
+    /// The session this connection's service handle serves, when the
+    /// transport named it: what its welcome names, with the handle's root.
+    session: Option<String>,
+    /// Every root this connection told its client of (the welcome's and
+    /// each `moved` node): an attach of one the session has since left is
+    /// refused `moved` with the root now.
+    told: Vec<NodeAddress>,
     /// The attachment a switch last moved, owed that switch's replay on
     /// this connection's next root attach.
     moved: Option<AttachmentId>,
@@ -304,12 +311,15 @@ where
         actions: IntentSender<P>,
         leave: Leave,
     ) -> Self {
+        let told = vec![service.root().clone()];
         Self {
             stdout,
             service,
             actions,
             attachment: None,
             resync_after_attach: None,
+            session: None,
+            told,
             moved: None,
             blobs: BlobAssembler::default(),
             leave,
@@ -351,20 +361,41 @@ where
         session_id: impl Into<String>,
         roots: impl Fn(&str) -> Option<NodeAddress> + Send + Sync + 'static,
     ) -> Self {
+        let session_id = session_id.into();
         self.served = Some(ServedSession::shared(
-            session_id.into(),
+            session_id.clone(),
             Box::new(roots),
             self.service.clone(),
         ));
+        self.session = Some(session_id);
         self
     }
 
     /// This connection, serving the session `served` that other
-    /// connections serve too, its service handle rooted at `generation`.
-    fn on_served(mut self, served: Shared<P>, generation: u64) -> Self {
+    /// connections serve too, its service handle rooted at `generation`,
+    /// that of the session `session`.
+    fn on_served(mut self, served: Shared<P>, generation: u64, session: String) -> Self {
         self.served = Some(served);
         self.generation = generation;
+        self.session = Some(session);
         self
+    }
+
+    /// The session this connection serves and its root, both of the same
+    /// generation: what its welcome names. `None` when the transport named
+    /// no session.
+    #[must_use]
+    pub fn welcomed(&self) -> Option<(String, NodeAddress)> {
+        self.session
+            .clone()
+            .map(|session| (session, self.service.root().clone()))
+    }
+
+    /// Records that the client was told of `root`.
+    fn tell(&mut self, root: &NodeAddress) {
+        if !self.told.contains(root) {
+            self.told.push(root.clone());
+        }
     }
 
     /// Takes one observation, moving the connection to the session it
@@ -393,6 +424,7 @@ where
         if served.generation() != self.generation {
             self.service = served.service();
             self.generation = served.generation();
+            self.session = Some(served.session().to_owned());
         }
     }
 
@@ -549,16 +581,16 @@ where
                         self.moved = Some(held);
                     }
                 }
-                let known = self.service.root().clone();
                 if let Some(guard) = &guard {
                     self.follow(guard);
                 }
-                // A connection welcomed before a switch, or that missed its
-                // `moved`, still names the root it knew.
-                if node == known && node != *self.service.root() {
-                    return refused(RequestRefusal::Moved {
-                        node: self.service.root().clone(),
-                    });
+                // A connection welcomed before a switch, or told of a root
+                // the session left again before it attached, names a root
+                // it was told.
+                if node != *self.service.root() && self.told.contains(&node) {
+                    let root = self.service.root().clone();
+                    self.tell(&root);
+                    return refused(RequestRefusal::Moved { node: root });
                 }
                 match self.service.attach(&node, self.face) {
                     Ok(attachment) => {
@@ -710,6 +742,7 @@ where
                     )?;
                 }
                 Outbound::Moved { node } => {
+                    self.tell(&node);
                     self.attachment = None;
                     self.moved = Some(attachment);
                     self.unanswered();

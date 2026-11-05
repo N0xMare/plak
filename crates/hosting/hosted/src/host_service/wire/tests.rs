@@ -223,7 +223,7 @@ fn a_session_switch_moves_the_attachment_to_the_new_root() {
     assert_eq!(connection.attachment, None);
     assert!(matches!(
         connection.request(2, Op::Attach { node: root() }),
-        Some(Outcome::Refused(RequestRefusal::UnknownNode))
+        Some(Outcome::Refused(RequestRefusal::Moved { node })) if node == root_named("tree-s2")
     ));
     assert!(matches!(
         connection.request(
@@ -255,6 +255,7 @@ fn an_attach_of_the_welcomed_root_after_a_switch_is_refused_moved() {
     });
     let mut stdout = Vec::new();
     let mut connection = session.connect(&mut stdout, Face::Remote, || false);
+    assert_eq!(connection.welcomed(), Some(("s1".to_owned(), root())));
     published.send(binding("s2")).unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     while session.session_id() != "s2" {
@@ -287,8 +288,58 @@ fn an_attach_of_the_welcomed_root_after_a_switch_is_refused_moved() {
     ));
     assert_eq!(
         connection.request(4, Op::Attach { node: root() }),
-        Some(Outcome::Refused(RequestRefusal::UnknownNode)),
-        "a connection that followed the switch knows the new root"
+        Some(Outcome::Refused(RequestRefusal::Moved {
+            node: root_named("tree-s2")
+        })),
+        "the welcomed root stays one the client was told"
+    );
+}
+
+/// After two switches before the client attaches again, the root its one
+/// `moved` named is refused `moved` with the root now, which it attaches.
+#[test]
+fn a_root_told_before_another_switch_is_refused_moved() {
+    use plakous_host_protocol::Core;
+    let (actions, _intents) = plakous_host_protocol::intent_channel::<Core>();
+    let mut stdout = Vec::new();
+    let mut connection = WireConnection::new(root(), &mut stdout, actions)
+        .serving("s1", |id| Some(root_named(&format!("tree-{id}"))));
+    assert!(connection.request(1, Op::Attach { node: root() }).is_some());
+    assert!(connection.observe(binding("s2")).unwrap());
+    assert!(connection.observe(binding("s3")).unwrap());
+    assert_eq!(
+        connection.welcomed(),
+        Some(("s3".to_owned(), root_named("tree-s3")))
+    );
+    for told in [root_named("tree-s2"), root()] {
+        assert_eq!(
+            connection.request(2, Op::Attach { node: told }),
+            Some(Outcome::Refused(RequestRefusal::Moved {
+                node: root_named("tree-s3")
+            }))
+        );
+    }
+    assert!(matches!(
+        connection.request(
+            3,
+            Op::Attach {
+                node: root_named("tree-s3")
+            }
+        ),
+        Some(Outcome::Ok(Answer::Attached { .. }))
+    ));
+    drop(connection);
+    let moved: Vec<_> = host_frames(&stdout)
+        .into_iter()
+        .filter_map(|frame| match frame {
+            HostFrame::Moved { node, .. } => Some(node),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        moved,
+        [root_named("tree-s2")],
+        "one moved, at the first switch"
     );
 }
 

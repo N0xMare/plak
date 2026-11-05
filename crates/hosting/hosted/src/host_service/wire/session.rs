@@ -104,7 +104,9 @@ impl<P: ProtocolExtension> WireSession<P> {
 
     /// A new connection writing its frames to `out`, serving this session
     /// to a client its acceptor marked `face`; it detaches when it leaves,
-    /// and ends once `stopped` turns true.
+    /// and ends once `stopped` turns true. Its welcome names
+    /// [`WireConnection::welcomed`], taken from the same generation as its
+    /// service handle.
     pub fn connect<W: Write>(
         &self,
         out: W,
@@ -116,12 +118,16 @@ impl<P: ProtocolExtension> WireSession<P> {
         ClientFrame<P>: DeserializeOwned,
     {
         let guard = served::lock(&self.served);
-        let (service, generation) = (guard.service(), guard.generation());
+        let (service, generation, session) = (
+            guard.service(),
+            guard.generation(),
+            guard.session().to_owned(),
+        );
         drop(guard);
         WireConnection::on_service(service, out, self.actions.clone(), Leave::Detach)
             .face(face)
             .with_stop(stopped)
-            .on_served(Arc::clone(&self.served), generation)
+            .on_served(Arc::clone(&self.served), generation, session)
     }
 
     /// Changes whenever the session published something or ended.

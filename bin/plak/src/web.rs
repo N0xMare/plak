@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 use plakous_host_protocol::wire::Welcome;
 use plakous_hosted::error::{CliFailure, CliResult, ProcessOutcome};
 use plakous_hosted::host_service::wire::{
-    WireSession, session_root, session_root_of, session_welcome,
+    WireConnection, WireSession, session_root, session_root_of, session_welcome,
 };
 use plakous_hosted::runtime::spawn_host_worker;
 
@@ -53,14 +53,16 @@ pub(crate) struct Served {
 }
 
 impl Served {
-    /// The welcome a connection gets: it names the session served now.
-    pub(crate) fn welcome(&self) -> Welcome {
-        session_welcome(
-            self.binary_id.clone(),
-            host_generation(),
-            self.session.session_id(),
-            self.session.root(),
-        )
+    /// The welcome `connection` gets: it names the session its service
+    /// handle serves and that session's root, of one generation.
+    pub(crate) fn welcome<W: std::io::Write>(
+        &self,
+        connection: &WireConnection<PlakExtension, W>,
+    ) -> Welcome {
+        let (session, root) = connection
+            .welcomed()
+            .unwrap_or_else(|| (self.session.session_id(), self.session.root()));
+        session_welcome(self.binary_id.clone(), host_generation(), session, root)
     }
 }
 
