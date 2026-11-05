@@ -17,7 +17,7 @@ pub(super) struct PendingResume {
 }
 
 impl PendingResume {
-    fn spawn(
+    pub(super) fn spawn(
         tasks: &crate::TaskSet,
         session_id: String,
         plan: ResumePlan,

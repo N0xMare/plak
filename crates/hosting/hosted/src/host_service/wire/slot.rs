@@ -4,8 +4,16 @@
 //! resident (its actor's idle release); the slot then joins the worker and
 //! holds only the session's id. The next trigger, a connection that wants
 //! the session, materializes it again through the exact reopen and serves
-//! it as before. A trigger that arrives while the session is releasing
-//! waits for the release to commit, then opens it.
+//! it as before. A trigger takes its hold on the session's residency here,
+//! under the slot's lock, so a session is never handed to a connection
+//! after it began to release: a trigger that finds it releasing waits for
+//! the release to commit, then opens it.
+//!
+//! A release that does not join within `RELEASE_JOIN` (60 s) fails the
+//! trigger that waited for it and leaves the slot dormant, its worker
+//! running on unjoined to its own end. The next trigger opens the session by id, and
+//! that open is refused for as long as the old worker holds the session's
+//! runtime lease, so a slow release never yields a second live session.
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
@@ -13,7 +21,7 @@ use std::time::{Duration, Instant};
 use plakous_host_protocol::wire::NodeAddress;
 use plakous_host_protocol::{IntentSender, ObservationReceiver, ProtocolExtension};
 
-use super::super::AttachmentCount;
+use super::super::{AttachmentCount, ResidencyHold};
 use super::WireSession;
 use crate::error::{CliFailure, CliResult};
 use crate::runtime::HostWorkerHandle;
@@ -50,6 +58,7 @@ enum Slot<P: ProtocolExtension> {
     Resident {
         session: Arc<WireSession<P>>,
         worker: HostWorkerHandle,
+        attachments: AttachmentCount,
     },
     Dormant {
         session_id: String,
@@ -60,6 +69,7 @@ enum Slot<P: ProtocolExtension> {
 pub struct SessionSlot<P: ProtocolExtension> {
     slot: Mutex<Slot<P>>,
     open: Opener<P>,
+    release_join: Duration,
 }
 
 impl<P: ProtocolExtension> SessionSlot<P>
@@ -78,34 +88,52 @@ where
         Self {
             slot: Mutex::new(resident(opened)),
             open: Box::new(open),
+            release_join: RELEASE_JOIN,
         }
     }
 
-    /// The resident session: the one served now, or, when it released
-    /// itself, the same session (or the one it last switched to) opened
+    /// This slot, giving a release `release_join` to join.
+    #[cfg(test)]
+    pub(crate) const fn with_release_join(mut self, release_join: Duration) -> Self {
+        self.release_join = release_join;
+        self
+    }
+
+    /// The resident session, held resident for the caller until it drops
+    /// the hold: the one served now, or, when it released itself or is
+    /// releasing, the same session (or the one it last switched to) opened
     /// again. Blocks while a release joins or an open runs.
     ///
     /// # Errors
     ///
     /// The release did not join in time, or the session does not open.
-    pub fn resident(&self) -> CliResult<Arc<WireSession<P>>> {
+    pub fn resident(&self) -> CliResult<(Arc<WireSession<P>>, ResidencyHold)> {
         let mut slot = self.lock();
-        settle(&mut slot)?;
-        if let Slot::Dormant { session_id } = &*slot {
-            // On a thread of its own: an open builds the session's own
-            // executor, which a caller's async runtime would refuse.
-            let open = &self.open;
-            let opened = std::thread::scope(|scope| {
-                scope
-                    .spawn(|| open(session_id))
-                    .join()
-                    .map_err(|_| CliFailure::new("the session's open panicked"))
-            })??;
-            *slot = resident(opened);
-        }
-        match &*slot {
-            Slot::Resident { session, .. } => Ok(Arc::clone(session)),
-            Slot::Dormant { .. } => Err(CliFailure::new("the session did not open")),
+        loop {
+            settle(&mut slot, self.release_join)?;
+            if let Slot::Dormant { session_id } = &*slot {
+                // On a thread of its own: an open builds the session's own
+                // executor, which a caller's async runtime would refuse.
+                let open = &self.open;
+                let opened = std::thread::scope(|scope| {
+                    scope
+                        .spawn(|| open(session_id))
+                        .join()
+                        .map_err(|_| CliFailure::new("the session's open panicked"))
+                })??;
+                *slot = resident(opened);
+            }
+            if let Slot::Resident {
+                session,
+                attachments,
+                ..
+            } = &*slot
+                && let Some(hold) = attachments.hold()
+            {
+                return Ok((Arc::clone(session), hold));
+            }
+            // It began to release since it was settled: join it, then open
+            // it again.
         }
     }
 
@@ -113,7 +141,11 @@ where
     #[must_use]
     pub fn dormant(&self) -> bool {
         match &*self.lock() {
-            Slot::Resident { session, .. } => session.ended(),
+            Slot::Resident {
+                session,
+                attachments,
+                ..
+            } => session.ended() || attachments.releasing(),
             Slot::Dormant { .. } => true,
         }
     }
@@ -161,16 +193,22 @@ where
             &opened.attachments,
         )),
         worker: opened.worker,
+        attachments: opened.attachments,
     }
 }
 
-/// Moves a session whose service ended (it released itself) to dormant,
-/// once its worker joined.
-fn settle<P: ProtocolExtension>(slot: &mut Slot<P>) -> CliResult<()> {
-    let Slot::Resident { session, .. } = &*slot else {
+/// Moves a session that released itself, or is releasing, to dormant, and
+/// joins its worker within `deadline`.
+fn settle<P: ProtocolExtension>(slot: &mut Slot<P>, deadline: Duration) -> CliResult<()> {
+    let Slot::Resident {
+        session,
+        attachments,
+        ..
+    } = &*slot
+    else {
         return Ok(());
     };
-    if !session.ended() {
+    if !session.ended() && !attachments.releasing() {
         return Ok(());
     }
     let session_id = session.session_id();
@@ -178,7 +216,7 @@ fn settle<P: ProtocolExtension>(slot: &mut Slot<P>) -> CliResult<()> {
     else {
         return Ok(());
     };
-    join(worker, RELEASE_JOIN)
+    join(worker, deadline)
 }
 
 fn join(worker: HostWorkerHandle, deadline: Duration) -> CliResult<()> {

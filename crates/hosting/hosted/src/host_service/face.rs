@@ -146,7 +146,12 @@ impl<P: ProtocolExtension> HostService<P> {
         actions: IntentSender<P>,
         events: ObservationReceiver<P>,
     ) -> (FaceSender<P>, FaceReceiver<P>) {
-        let (attachment, _) = self.admit(None, Face::Local);
+        let attachment = {
+            let mut state = self.lock();
+            let (id, attachment, _) = self.admission(&mut state, None, Face::Local);
+            state.insert_face(id, attachment);
+            id
+        };
         let sender = FaceSender {
             actions: actions.tagged(origin(attachment)),
             service: self.clone(),
@@ -228,7 +233,12 @@ impl<P: ProtocolExtension> FaceReceiver<P> {
     #[must_use]
     pub fn new(events: ObservationReceiver<P>) -> Self {
         let service = HostService::serving(None, unnamed(), usize::MAX);
-        let (attachment, _) = service.admit(None, Face::Local);
+        let attachment = {
+            let mut state = service.lock();
+            let (id, attachment, _) = service.admission(&mut state, None, Face::Local);
+            state.insert_face(id, attachment);
+            id
+        };
         Self {
             events,
             service,

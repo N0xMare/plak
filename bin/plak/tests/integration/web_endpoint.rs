@@ -600,3 +600,21 @@ fn wake(web: &mut Web) {
     prompt(&mut again, attachment, "after the wake", ANSWER);
     drop(again);
 }
+
+/// A connection holds its session resident from the moment the endpoint
+/// hands it the session, before it attaches: a client that waits past the
+/// idle release between its welcome and its attach still attaches the
+/// session it was handed, which a release would have refused it
+/// (`node_retiring`) or ended under it.
+#[test]
+fn a_connection_holds_its_session_before_it_attaches() {
+    let fixture = Fixture::new(&json!({"version": 1, "steps": [{"output": {"text": ANSWER}}]}));
+    let (web, ready) = launch_with(&fixture, &["--idle-release", "1"]);
+    assert!(ready, "plak web started");
+    let cookie = cookie(&web);
+    let mut socket = upgrade(&web, &cookie);
+    let root = hello(&mut socket);
+    // Several idle releases' worth of decisions pass before the attach.
+    std::thread::sleep(std::time::Duration::from_secs(4));
+    attach(&mut socket, &root, 1);
+}

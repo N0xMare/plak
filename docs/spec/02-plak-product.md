@@ -3906,19 +3906,37 @@ verdicts) are addressed, the session profile and workspace chrome states.
   session resident while anything needs it: a turn, a queued or deferred
   command, recovery debt, a pending continuation (a transient resume, a
   lost host's Resume, a host-authored continuation), a background process,
-  a resident child in its tree, or an attachment. Once none has held for
-  the idle release, 300 s, the session's own actor releases it through its
-  joined quit: its runtime lease and holder record, then the root's hub
-  entry, and the tree's custody last, since nothing else in the tree is
-  resident. Every condition is read in the actor when it decides, so a job
-  terminal, an attach or an intent racing the timer is never lost: it lands
-  before the decision and keeps the session, or after the release and opens
-  it again. An embedded face's session (the TUI, `plak agent`, `plak run`)
-  is never released for being idle. A host serves each session through a
-  slot (`host_service::wire::SessionSlot`), resident (the host worker and the
-  wire service its connections share) or dormant (the session id): a released
-  session's worker is joined, and the next trigger opens it again by id. A
-  trigger while the release joins waits for it, then opens the session.
+  a resident child in its tree, or an attachment. A parked child waits on
+  its parent and keeps its live session, so a tree with a parked child
+  stays resident. Once none has held for the idle release, 300 s, the
+  session's own actor releases it through its joined quit: its runtime
+  lease and holder record, then the root's hub entry, and the tree's
+  custody last, since nothing else in the tree is resident. Every
+  condition is read in the actor when it decides, so a job terminal or an
+  intent racing the timer is never lost: it lands before the decision and
+  keeps the session, or after the release and opens it again. The decision
+  ends by marking the session releasing, in the one atomic step that finds
+  it with no attachment and no connection's hold
+  (`host_service::AttachmentCount`); after the mark the session takes
+  neither, and an attach to it is refused `node_retiring`. Every attach and
+  hold also advances a generation in the same word, and the actor marks
+  only from the exact word it read before the receive whose timeout led to
+  the decision, so a client that attached, sent an intent and left again
+  in between still keeps the session: its intent was accepted and runs. An
+  attach racing the timer therefore either comes first and keeps the
+  session, or finds it released. An embedded face's session (the TUI, `plak agent`,
+  `plak run`) is never released for being idle. A host serves each session
+  through a slot (`host_service::wire::SessionSlot`), resident (the host
+  worker and the wire service its connections share) or dormant (the
+  session id): a released session's worker is joined, and the next trigger
+  opens it again by id. A trigger takes its connection's hold under the
+  slot, and the connection keeps it until it ends; a trigger that finds the
+  session releasing, or the release joining, waits for the release to
+  commit, then opens the session, and is never handed the releasing one.
+  A release that does not join within 60 s fails the trigger that waited
+  and leaves the slot dormant while the old worker runs on to its end; the
+  next trigger's open is refused while that worker holds the session's
+  lease, so a slow release never yields a second live session.
 - **Session requests.** `retry_attach` (re-resolve the binding and open the
   session again), `resume_session {session}` (switch to one of the user's
   sessions) and `rebind {cause}` (carry the history into a new session on

@@ -50,7 +50,7 @@ mod tree_nodes;
 pub mod wire;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use plakous_host_protocol::observation::{Delivery, ObservationClass};
@@ -185,8 +185,8 @@ struct State<P: ProtocolExtension> {
     agent_holders: BTreeMap<String, usize>,
     /// Whether a new attachment waits ([`Attachment::waiting`]).
     holding: bool,
-    /// How many attachments the map holds, for [`AttachmentCount`].
-    count: Arc<AtomicUsize>,
+    /// The session's residency count, which counts the map's attachments.
+    count: AttachmentCount,
 }
 
 /// One session's host service; its clones are the same service.
@@ -299,29 +299,181 @@ fn baseline_scope<P: ProtocolExtension>(
     }
 }
 
-/// How many attachments a session's host service holds now, readable by
-/// the session itself (its residency, spec 02 §4.4). It is made before the
-/// service exists and bound once the service is
-/// ([`HostService::with_attachment_count`]); unbound it reads none.
+/// What keeps a session resident from its host's side, readable by the
+/// session itself (its residency, spec 02 §4.4): its host service's
+/// attachments and the holds of connections its host handed it to, and
+/// whether the session has begun to release. Every count taken also bumps a
+/// generation, so the word the session's actor read before it decided
+/// changes with any attach or hold since, even one already gone again. The
+/// release begins only from exactly that word, with nothing counted, in one
+/// atomic step, and nothing is counted after it: an attach or a hold either
+/// comes first and keeps the session, or is refused and finds it released.
 #[derive(Clone, Debug, Default)]
-pub struct AttachmentCount(Arc<std::sync::OnceLock<Arc<AtomicUsize>>>);
+pub struct AttachmentCount(Arc<CountWord>);
+
+/// The count's word: the attachments and holds in the low 32 bits, the
+/// releasing bit above them, and the generation in the bits above that,
+/// whose carry leaves the word.
+#[derive(Debug, Default)]
+struct CountWord {
+    bits: AtomicU64,
+    #[cfg(test)]
+    seam: Mutex<MarkSeam>,
+}
+
+const COUNTED: u64 = (1 << 32) - 1;
+/// The bit of the word that says the session is releasing.
+const RELEASING: u64 = 1 << 32;
+/// One count taken: one more counted, and the next generation.
+const TAKEN: u64 = (1 << 33) + 1;
+
+/// The count's word as the session's actor read it before deciding to
+/// release ([`AttachmentCount::seen`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CountSeen(u64);
+
+impl CountSeen {
+    /// The attachments and holds counted when it was read.
+    pub(crate) const fn count(self) -> u64 {
+        self.0 & COUNTED
+    }
+}
 
 impl AttachmentCount {
-    /// The attachments the bound service holds.
+    /// The attachments and holds counted now.
     #[must_use]
     pub fn get(&self) -> usize {
+        usize::try_from(self.load() & COUNTED).unwrap_or(usize::MAX)
+    }
+
+    /// Whether the session has begun to release.
+    #[must_use]
+    pub fn releasing(&self) -> bool {
+        self.load() & RELEASING != 0
+    }
+
+    /// The word now, for a later [`Self::begin_release`].
+    pub(crate) fn seen(&self) -> CountSeen {
+        CountSeen(self.load())
+    }
+
+    /// Marks the session releasing if the word is still exactly `seen` and
+    /// `seen` counted nothing; `false` when an attachment or a hold was
+    /// counted then, or has been since.
+    pub(crate) fn begin_release(&self, seen: CountSeen) -> bool {
+        #[cfg(test)]
+        let (before, after) = {
+            let mut seam = self.seam();
+            (seam.before.take(), seam.after.take())
+        };
+        #[cfg(test)]
+        if let Some(before) = before {
+            before();
+        }
+        let marked = seen.count() == 0
+            && seen.0 & RELEASING == 0
+            && self
+                .0
+                .bits
+                .compare_exchange(
+                    seen.0,
+                    seen.0 | RELEASING,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
+                .is_ok();
+        #[cfg(test)]
+        if let Some(after) = after {
+            after(marked);
+        }
+        marked
+    }
+
+    /// Holds the session resident until the hold is dropped; `None` once it
+    /// is releasing.
+    #[must_use]
+    pub fn hold(&self) -> Option<ResidencyHold> {
+        self.try_add().then(|| ResidencyHold(self.clone()))
+    }
+
+    fn load(&self) -> u64 {
+        self.0.bits.load(Ordering::Acquire)
+    }
+
+    /// Counts one more unless the session is releasing.
+    fn try_add(&self) -> bool {
         self.0
-            .get()
-            .map_or(0, |count| count.load(Ordering::Acquire))
+            .bits
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |word| {
+                (word & RELEASING == 0).then_some(word.wrapping_add(TAKEN))
+            })
+            .is_ok()
+    }
+
+    /// Counts one more, releasing or not: an in-process face's attachment,
+    /// whose session is never released for being idle.
+    fn add(&self) {
+        self.0.bits.fetch_add(TAKEN, Ordering::AcqRel);
+    }
+
+    fn remove(&self) {
+        self.0.bits.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// What a test runs inside [`AttachmentCount::begin_release`]: `before`
+/// between the read and the swap, `after` once it marked or not.
+#[cfg(test)]
+#[derive(Default)]
+struct MarkSeam {
+    before: Option<Box<dyn FnOnce() + Send>>,
+    after: Option<Box<dyn FnOnce(bool) + Send>>,
+}
+
+#[cfg(test)]
+impl std::fmt::Debug for MarkSeam {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("MarkSeam")
+    }
+}
+
+#[cfg(test)]
+impl AttachmentCount {
+    /// Runs `before` in the next release decision, after the actor read the
+    /// word and before it tries the mark, and `after` with whether it marked.
+    pub(crate) fn around_next_mark(
+        &self,
+        before: impl FnOnce() + Send + 'static,
+        after: impl FnOnce(bool) + Send + 'static,
+    ) {
+        let mut seam = self.seam();
+        seam.before = Some(Box::new(before));
+        seam.after = Some(Box::new(after));
+    }
+
+    fn seam(&self) -> std::sync::MutexGuard<'_, MarkSeam> {
+        self.0.seam.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// A connection's hold on its session's residency
+/// ([`AttachmentCount::hold`]), from the moment its host hands it the
+/// session until it ends.
+#[derive(Debug)]
+pub struct ResidencyHold(AttachmentCount);
+
+impl Drop for ResidencyHold {
+    fn drop(&mut self) {
+        self.0.remove();
     }
 }
 
 impl<P: ProtocolExtension> HostService<P> {
-    /// This service, counting its attachments into `count`; the first
-    /// service bound to a count is the one it reads.
+    /// This service, counting its attachments into `count`. Bound before
+    /// anything attaches.
     #[must_use]
     pub fn with_attachment_count(self, count: &AttachmentCount) -> Self {
-        let _ = count.0.set(Arc::clone(&self.lock().count));
+        self.lock().count = count.clone();
         self
     }
 
@@ -360,7 +512,7 @@ impl<P: ProtocolExtension> HostService<P> {
                 requester: None,
                 agent_holders: BTreeMap::new(),
                 holding: false,
-                count: Arc::default(),
+                count: AttachmentCount::default(),
             })),
         }
     }
@@ -546,7 +698,9 @@ impl<P: ProtocolExtension> HostService<P> {
     /// [`RequestRefusal::UnknownNode`] for a node that is neither the
     /// session's root nor one of its tree's children;
     /// [`RequestRefusal::NodeClosed`] and [`RequestRefusal::NodeRetiring`]
-    /// for a child that is closed or retiring.
+    /// for a child that is closed or retiring;
+    /// [`RequestRefusal::NodeRetiring`] too once the session is releasing
+    /// ([`AttachmentCount`]).
     pub fn attach(&self, node: &NodeAddress, face: Face) -> Result<AttachmentId, RequestRefusal> {
         self.attach_asking(node, face, true)
     }
@@ -573,7 +727,12 @@ impl<P: ProtocolExtension> HostService<P> {
         let Some(mailbox) = self.mailbox() else {
             return Err(RequestRefusal::Disconnected);
         };
-        let (id, asked) = self.admit(Some(mailbox), face);
+        let (id, asked) = {
+            let mut state = self.lock();
+            let (id, attachment, asked) = self.admission(&mut state, Some(mailbox), face);
+            state.insert_counted(id, attachment)?;
+            (id, asked)
+        };
         if let Some(sender) = asked.filter(|_| ask) {
             // No baseline is kept: the session's fresh root snapshot reaches
             // every attachment holding the root, this one included. An
@@ -588,15 +747,15 @@ impl<P: ProtocolExtension> HostService<P> {
         Ok(id)
     }
 
-    /// Adds an attachment with the attach snapshot queued, and the sender
-    /// to ask the session for a root baseline through when none is kept.
-    /// With no `mailbox` it is a face's, which sends its own intents.
-    fn admit(
+    /// A new attachment with the attach snapshot queued, its id, and the
+    /// sender to ask the session for a root baseline through when none is
+    /// kept. With no `mailbox` it is a face's, which sends its own intents.
+    fn admission(
         &self,
+        state: &mut State<P>,
         mailbox: Option<IntentSender<P>>,
         face: Face,
-    ) -> (AttachmentId, Option<IntentSender<P>>) {
-        let mut state = self.lock();
+    ) -> (AttachmentId, Attachment<P>, Option<IntentSender<P>>) {
         let id = state.next_attachment;
         state.next_attachment += 1;
         let waiting = state.holding;
@@ -636,8 +795,7 @@ impl<P: ProtocolExtension> HostService<P> {
                 observation,
             });
         }
-        state.insert_counted(id, attachment);
-        (id, ask)
+        (id, attachment, ask)
     }
 
     /// Whether `attachment` is attached to a child node.
@@ -1015,9 +1173,29 @@ impl<P: ProtocolExtension> State<P> {
     }
 
     /// Adds `attachment` under `id`, counted.
-    fn insert_counted(&mut self, id: AttachmentId, attachment: Attachment<P>) {
+    ///
+    /// # Errors
+    ///
+    /// [`RequestRefusal::NodeRetiring`] once the session is releasing: it
+    /// takes no attachment.
+    fn insert_counted(
+        &mut self,
+        id: AttachmentId,
+        attachment: Attachment<P>,
+    ) -> Result<(), RequestRefusal> {
+        if !self.count.try_add() {
+            return Err(RequestRefusal::NodeRetiring);
+        }
+        if self.attachments.insert(id, attachment).is_some() {
+            self.count.remove();
+        }
+        Ok(())
+    }
+
+    /// Adds an in-process face's `attachment` under `id`, counted.
+    fn insert_face(&mut self, id: AttachmentId, attachment: Attachment<P>) {
         if self.attachments.insert(id, attachment).is_none() {
-            self.count.fetch_add(1, Ordering::AcqRel);
+            self.count.add();
         }
     }
 
@@ -1025,7 +1203,7 @@ impl<P: ProtocolExtension> State<P> {
     fn remove_counted(&mut self, id: AttachmentId) -> Option<Attachment<P>> {
         let removed = self.attachments.remove(&id);
         if removed.is_some() {
-            self.count.fetch_sub(1, Ordering::AcqRel);
+            self.count.remove();
         }
         removed
     }

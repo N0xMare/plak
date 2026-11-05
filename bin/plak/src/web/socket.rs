@@ -238,7 +238,7 @@ async fn send_pending(socket: &mut Socket, outbox: &Outbox) -> Result<(), Ended>
     Ok(())
 }
 
-async fn drive(socket: &mut Socket, served: &Served) -> Ended {
+async fn drive(socket: &mut Socket, served: &Arc<Served>) -> Ended {
     let mut pong = None;
     let outbox = Outbox::default();
     let hello = match tokio::time::timeout(HELLO_DEADLINE, next_text(socket, &mut pong)).await {
@@ -251,11 +251,18 @@ async fn drive(socket: &mut Socket, served: &Served) -> Ended {
     drop(lines);
     let stop = served.stop;
     // The connection is the session's trigger: a session that released
-    // itself is opened again for it. One that does not open is refused in
-    // a v2 frame; the connection passed the gate, so the reason is its own.
-    let session = match tokio::task::block_in_place(|| served.slot.resident()) {
-        Ok(session) => session,
-        Err(failure) => {
+    // itself is opened again for it, and the connection holds it resident
+    // until it ends. One that does not open is refused in a v2 frame; the
+    // connection passed the gate, so the reason is its own. A release join
+    // or an open can take a while, so it waits off the runtime's workers.
+    let resident = {
+        let served = Arc::clone(served);
+        tokio::task::spawn_blocking(move || served.slot.resident()).await
+    };
+    let (session, _hold) = match resident {
+        Ok(Ok(resident)) => resident,
+        Err(_) => return Ended::Lost("the session's open failed"),
+        Ok(Err(failure)) => {
             let _ = refuse::<PlakExtension>(
                 &mut outbox.clone(),
                 HandshakeRefusal::Unavailable {

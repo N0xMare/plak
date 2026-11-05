@@ -224,6 +224,10 @@ impl<P: ProtocolExtension> HostService<P> {
                 row: "transcript".to_owned(),
             });
         }
+        // A releasing session takes no attachment; refused before the ask.
+        if state.count.releasing() {
+            return Err(RequestRefusal::NodeRetiring);
+        }
         let id = state.next_attachment;
         let sender = actions.tagged(origin(id));
         let ask = if state.agent_holders.get(agent).copied().unwrap_or(0) > 0 {
@@ -254,7 +258,7 @@ impl<P: ProtocolExtension> HostService<P> {
                 // opening's binding, it takes nothing until that binding.
                 waiting,
             },
-        );
+        )?;
         *state.agent_holders.entry(agent.to_owned()).or_default() += 1;
         Ok(id)
     }

@@ -158,6 +158,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             let mut acknowledgement = None;
             let mut command_reply = false;
             let deferred = self.role.interrupt_state.borrow_mut().take_deferred();
+            // Read before the receive: an idle release decided at its
+            // timeout begins only if nothing attached since.
+            let residency_seen = self.residency_seen();
             let received = match deferred {
                 Some(delivery) => Ok(delivery),
                 None => self.receive(IDLE_OBSERVE_POLL_INTERVAL).await,
@@ -1083,7 +1086,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     if one_shot.is_none() && observed_tree {
                         return self.child_wake_prompt(Instant::now()).await;
                     }
-                    if one_shot.is_none() && self.idle_release_due().await {
+                    if one_shot.is_none() && self.idle_release_due(residency_seen).await {
                         return Ok(self.release_idle());
                     }
                     return Ok(HostStep::Continue);
