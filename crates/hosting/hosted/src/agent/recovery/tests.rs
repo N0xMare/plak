@@ -5373,6 +5373,41 @@ async fn children_stop_one_reserve_before_the_root_through_the_product_wiring() 
     );
     assert_eq!(sessions.accepted_create(&operation).await.unwrap(), None);
 
+    // The spawn replay (a never-accepted create) goes through the children's
+    // handle too. Past the mark it is refused and creates nothing; the plain
+    // handle would create it, because the root still has ordinary headroom.
+    let uncreated = fixture
+        .runtime
+        .mutate_then_emit(false, |tree| {
+            tree.spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+                .map(|spawned| spawned.agent_id)
+                .map_err(|error| error.message)
+        })
+        .await
+        .unwrap();
+    let replay_operation = spawn_child_operation_id(&fixture.tree_id, &uncreated).unwrap();
+    let replayed = ParentSessionPort {
+        parent: fixture.parent.clone(),
+    }
+    .replay_create(&fixture.runtime, &uncreated)
+    .await;
+    let Err(refusal) = replayed else {
+        panic!("a spawn replay created a session past the children's mark");
+    };
+    assert!(
+        refusal
+            .error
+            .message
+            .contains("subordinate ordinary writes stop at 96"),
+        "{}",
+        refusal.error.message
+    );
+    assert_eq!(
+        sessions.accepted_create(&replay_operation).await.unwrap(),
+        None,
+        "a refused spawn replay created a session"
+    );
+
     // The reopened child's next turn is refused, typed, with nothing written.
     let path = fixture
         .runtime

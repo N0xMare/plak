@@ -94,6 +94,8 @@ mod retention;
 #[cfg(all(feature = "composition", feature = "sessions-sqlite"))]
 mod sdk;
 mod subordinate;
+#[cfg(all(unix, feature = "composition", feature = "sessions-sqlite"))]
+mod subordinate_cell;
 
 #[test]
 fn facade_open_admits_only_runtime_restorable_working_phases() {

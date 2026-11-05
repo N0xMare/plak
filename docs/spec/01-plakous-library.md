@@ -1805,13 +1805,14 @@ below current usage; integrity and corruption refusals are unchanged.
 used, limit, reserve and the ordinary and settlement thresholds, against the
 default limits, from the recorded counters in one row read; the database file
 size and its free-list bytes) read-only, including over a store past its
-limits. `SessionBackend::inspect_sqlite_session_retention` reads, in one
-read-only snapshot, every session's retained checkpoints and the object bytes
-they reach (shared objects count toward every session that reaches them),
-largest first. It reads the objects, the edges and the checkpoint roots in three
-sequential scans, each its own read statement with no per-row lookup, and walks
-the graph in memory; an object deleted between the scans is skipped, so a store
-written meanwhile gives approximate figures. It is an operator inspection, never
+limits. `SessionBackend::inspect_sqlite_session_retention` reads every session's
+retained checkpoints and the object bytes they reach (shared objects count
+toward every session that reaches them), largest first. It reads the objects
+and the edges in keyset pages of about 10,000 rows by primary key, and the
+checkpoint roots in one scan. Each page or scan is its own read statement
+with no per-row lookup, and the graph is walked in memory; a read mark lasts
+one page. An object deleted between pages is skipped, so a store written
+meanwhile gives approximate figures. It is an operator inspection, never
 a runtime path.
 
 **Pruning in SQLite.** One `IMMEDIATE` transaction checks the lease, exact

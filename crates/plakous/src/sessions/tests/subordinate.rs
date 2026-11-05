@@ -11,24 +11,36 @@ use plakous_agent::internal::{
     SessionStoreError, SessionSummary, StoreAdmission, StoreFuture, StoreReclaimMode,
     StoreReclaimReport, StoreUsage, StoredCheckpoint,
 };
+#[cfg(all(unix, feature = "sessions-sqlite"))]
+use plakous_store::SqliteStoreOptions;
 use std::num::NonZeroUsize;
 use std::sync::atomic::AtomicU64;
 
 /// The checkpoint limit the test reports: the store's own ordinary threshold
 /// is 56 and a subordinate handle's mark 48.
 const LIMIT: u64 = 64;
-const MARK: u64 = 48;
+pub(super) const MARK: u64 = 48;
+/// Usage strictly between the mark and the store's ordinary threshold.
+pub(super) const BETWEEN: u64 = 52;
+/// The evaluation-request tag a running cell's prepare commits. Seeing it is
+/// the moment the cell is in flight and the next nested call is new work.
+const EVALUATION_TAG: &[u8] = b"plakous-local-composition-evaluation-v2";
 
 /// A memory store whose checkpoint usage reads `used`; a reclaim frees one
-/// checkpoint when `reclaim_frees` is set.
-struct Metered {
-    inner: MemorySessionStore,
-    used: AtomicU64,
+/// checkpoint when `reclaim_frees` is set. `commits` counts every commit the
+/// runtime attempts on this store. When `raise_between` is set, the first
+/// successful commit that carries a cell evaluation raises `used` to
+/// [`BETWEEN`], which is after that prepare and before the cell's nested call.
+pub(super) struct Metered<S> {
+    inner: S,
+    pub(super) used: AtomicU64,
     reclaims: AtomicUsize,
     reclaim_frees: AtomicBool,
+    pub(super) commits: AtomicUsize,
+    pub(super) raise_between: AtomicBool,
 }
 
-impl SessionStore for Metered {
+impl<S: SessionStore> SessionStore for Metered<S> {
     fn lease_now(&self) -> Result<LeaseInstant, SessionStoreError> {
         self.inner.lease_now()
     }
@@ -54,7 +66,19 @@ impl SessionStore for Metered {
         self.inner.release(lease)
     }
     fn commit(&self, request: CommitCheckpoint) -> StoreFuture<'_, CommitReceipt> {
-        self.inner.commit(request)
+        self.commits.fetch_add(1, Ordering::SeqCst);
+        let arm = self.raise_between.load(Ordering::SeqCst) && contains_evaluation(&request);
+        let raise = &self.raise_between;
+        let used = &self.used;
+        let committed = self.inner.commit(request);
+        Box::pin(async move {
+            let receipt = committed.await?;
+            if arm {
+                raise.store(false, Ordering::SeqCst);
+                used.store(BETWEEN, Ordering::SeqCst);
+            }
+            Ok(receipt)
+        })
     }
     fn recover_commit(&self, checkpoint: CheckpointId) -> StoreFuture<'_, CommittedCheckpoint> {
         self.inner.recover_commit(checkpoint)
@@ -181,6 +205,8 @@ async fn subordinate_writes_stop_at_the_mark_after_one_reclaim_and_replays_still
         used: AtomicU64::new(0),
         reclaims: AtomicUsize::new(0),
         reclaim_frees: AtomicBool::new(false),
+        commits: AtomicUsize::new(0),
+        raise_between: AtomicBool::new(false),
     });
     let sessions = AgentSessions::new(SessionBackend::from_store(
         store.clone(),
@@ -238,5 +264,123 @@ async fn subordinate_writes_stop_at_the_mark_after_one_reclaim_and_replays_still
     create(&children, &workspace, "subordinate:after-reclaim").await??;
     assert_eq!(store.reclaims.load(Ordering::SeqCst), reclaims + 1);
     assert_eq!(store.used.load(Ordering::SeqCst), MARK - 1);
+    Ok(())
+}
+
+/// A durable store whose reported checkpoint usage the test sets. The memory
+/// backend refuses a required-durability genesis, and both the Start pre-check
+/// and a cell's nested call read usage only on a durable session.
+#[cfg(all(unix, feature = "sessions-sqlite"))]
+pub(super) fn durable_metered_store(path: &Path) -> TestResult<Arc<Metered<SqliteSessionStore>>> {
+    let nonzero = |value| NonZeroUsize::new(value).ok_or("nonzero SQLite fixture limit");
+    let options = SqliteStoreOptions::new(
+        MemoryStoreLimits::new(
+            nonzero(64)?,
+            nonzero(64)?,
+            nonzero(usize::try_from(LIMIT)?)?,
+            nonzero(1 << 20)?,
+            nonzero(256 << 20)?,
+            nonzero(16)?,
+        ),
+        nonzero(8)?,
+    );
+    Ok(Arc::new(Metered {
+        inner: SqliteSessionStore::open_with_clock_and_options(
+            path,
+            Arc::new(FixedLeaseClock::new(timestamp()?)),
+            options,
+        )?,
+        used: AtomicU64::new(0),
+        reclaims: AtomicUsize::new(0),
+        reclaim_frees: AtomicBool::new(false),
+        commits: AtomicUsize::new(0),
+        raise_between: AtomicBool::new(false),
+    }))
+}
+
+fn contains_evaluation(request: &CommitCheckpoint) -> bool {
+    request.checkpoint().objects().iter().any(|object| {
+        object
+            .canonical_bytes()
+            .windows(EVALUATION_TAG.len())
+            .any(|window| window == EVALUATION_TAG)
+    })
+}
+
+/// A Start between the mark and the store's ordinary threshold is the runtime's
+/// pressure check, not the commit guard: it is refused and the store is not
+/// asked to commit.
+#[cfg(all(unix, feature = "sessions-sqlite"))]
+#[tokio::test]
+async fn a_start_between_the_mark_and_the_ordinary_threshold_is_refused_before_commit() -> TestResult
+{
+    assert!(MARK < BETWEEN && BETWEEN < StoreAdmission::Ordinary.threshold(LIMIT));
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let store = durable_metered_store(&directory.path().join("session.sqlite3"))?;
+    let sessions = AgentSessions::new(SessionBackend::from_store(
+        Arc::clone(&store) as Arc<dyn SessionStore>,
+        RuntimeDurability::Required,
+    ))?;
+    let children = sessions.with_subordinate_admission();
+    let binding = completing_runtime_binding_with_durability(
+        Arc::clone(&workspace),
+        descriptor()?,
+        b"subordinate-start",
+        LocalDurabilityDisposition::DurableRequired,
+    )?;
+    let CreateSessionOutcome::Created { session, .. } = children
+        .create(CreateSessionRequest::new(
+            SessionOperationId::new("subordinate:start-below")?,
+            binding,
+        ))
+        .await?;
+    store.used.store(BETWEEN, Ordering::SeqCst);
+    let held = children.store.usage().await?;
+    assert!(
+        held.ordinary_exhausted().is_some(),
+        "the handle must report the mark inside the window"
+    );
+    assert!(
+        sessions.store.usage().await?.ordinary_exhausted().is_none(),
+        "the store's own threshold is still ahead"
+    );
+    let commits = store.commits.load(Ordering::SeqCst);
+    let submission = session
+        .agent()
+        .command(plakous_agent::TurnCommand::Start {
+            command_id: CommandId::new("subordinate:start-between")?,
+            input: "more work".to_owned().into(),
+        })
+        .await;
+    let rejection = match submission {
+        Ok(submission) => submission
+            .acknowledgement()
+            .rejection()
+            .cloned()
+            .ok_or("a root was admitted between the mark and the ordinary threshold")?,
+        Err(error) => error,
+    };
+    assert_eq!(
+        rejection.kind(),
+        plakous_agent::ControlErrorKind::StoragePressure,
+        "{rejection}"
+    );
+    assert!(
+        rejection.message().contains(&format!(
+            "subordinate ordinary writes stop at {MARK}, before the store's 56"
+        )),
+        "{}",
+        rejection.message()
+    );
+    assert_eq!(
+        store.commits.load(Ordering::SeqCst),
+        commits,
+        "the pre-check attempted a commit"
+    );
+    session.release().await?;
+    drop(children);
+    drop(sessions);
+    store.shutdown().await?;
     Ok(())
 }

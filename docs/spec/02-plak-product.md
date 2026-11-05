@@ -1611,11 +1611,11 @@ most object bytes (`SessionBackend::inspect_sqlite_session_retention`), each as
 `<bytes> bytes, <n> checkpoints: session <id>`, or `runtime session <id>` when
 no product record names it (a sub-agent's). Objects are shared, so each
 session's figure counts every object it reaches and the figures do not sum to
-the store's. The per-session walk reads the objects, edges and checkpoint
-roots in three sequential scans and resolves them in memory: on a 3.4 GB store
-of 472,000 objects and 724,000 edges the scans take about five seconds cold
-and memory stays near 60 MB, and no read snapshot outlives one scan, so a
-concurrent store's checkpoint waits at most that long. When another process
+the store's. The per-session walk reads the objects and edges in keyset pages of about
+10,000 rows and the checkpoint roots in one scan, and resolves them in memory,
+so a read mark lasts one page. On a 3.4 GB store of 472,000 objects and
+724,000 edges a cold walk took 8.7 to 16 seconds and a warm walk about 1.2
+seconds, with peak memory 112 to 138 MB. When another process
 holds a state key's runtime store open, it adds `note: a running plak on this
 home uses state <key> of another build; this gc ran as build state <key> and
 did not touch that store; ...`: each build reclaims only its own state key's
