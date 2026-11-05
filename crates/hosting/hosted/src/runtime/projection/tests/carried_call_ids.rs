@@ -4,7 +4,7 @@
 //! (spec 02 §2.6).
 
 use super::*;
-use crate::runtime::host_loop::transcript_keys_tests::{child_result, fold, is_repair};
+use crate::runtime::host_loop::transcript_keys_tests::{child_result, fold, is_repair, results};
 use crate::runtime::recover_tests::{script, scripted_host_with};
 use crate::sessions::projector::{Lane, RowKey};
 use crate::sessions::{ProductTranscript, SessionRecord};
@@ -95,16 +95,11 @@ fn a_steer_over_a_reused_committed_call_id_publishes_only_valid_presentations() 
     }
     let mut folded = TranscriptState::default();
     fold(seen, &mut folded);
-    let results: Vec<_> = folded
-        .items()
-        .values()
-        .filter(|row| row.call_id() == Some("child-result:m1"))
-        .collect();
     assert_eq!(
-        results,
+        results(&folded),
         [
-            &child_result("m1 · c1 completed"),
-            &child_result("m1 · c2 completed")
+            child_result("m1 · c1 completed"),
+            child_result("m1 · c2 completed")
         ]
     );
 }

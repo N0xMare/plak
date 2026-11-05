@@ -18,9 +18,10 @@ pub(crate) mod read_fault;
 mod tests;
 
 pub use intents::{
-    AnchoredIntent, HostPauseCause, OperatorNotice, ProductIntents, RootContinuation,
-    RootContinuationCause, RootContinuationDecision, RootInterrupt, RootInterruptCause,
-    RootLossIntent, RootStopAnchor, Submission, SubmissionKind, WorkflowRequest,
+    AnchoredIntent, HostPauseCause, IMPORTED_NOTICE_PREFIX, OperatorNotice, ProductIntents,
+    RootContinuation, RootContinuationCause, RootContinuationDecision, RootInterrupt,
+    RootInterruptCause, RootLossIntent, RootStopAnchor, Submission, SubmissionKind,
+    WorkflowRequest,
 };
 pub use join::{
     ProductTreeJoin, new_session_completion, pending_command_ids, pending_workflow_operation_ids,

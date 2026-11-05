@@ -31,6 +31,15 @@ pub(in crate::runtime) fn child_result(subject: &str) -> TranscriptRow {
     })
 }
 
+pub(in crate::runtime) fn results(folded: &TranscriptState) -> Vec<TranscriptRow> {
+    folded
+        .items()
+        .values()
+        .filter(|row| row.call_id() == Some("child-result:m1"))
+        .cloned()
+        .collect()
+}
+
 pub(in crate::runtime) fn is_repair(row: &TranscriptRow) -> bool {
     row.text()
         .is_some_and(|text| text.contains("invalid transcript presentation"))
@@ -127,6 +136,15 @@ fn a_tree_result_reusing_a_committed_call_id_publishes_both_rows_in_key_order() 
         "tree:successor:result:m1",
         "m1 · c2 completed",
     );
+    fold(events.try_iter().collect(), &mut folded);
+    assert_eq!(
+        results(&folded),
+        [
+            child_result("m1 · c1 completed"),
+            child_result("m1 · c2 completed")
+        ],
+        "the later result is its own row live, not an update of the earlier one"
+    );
     // Turn end refreshes the projection from the store.
     run_turn(&mut host, &action_tx, "the next turn");
     fold(events.try_iter().collect(), &mut folded);
@@ -141,16 +159,11 @@ fn a_tree_result_reusing_a_committed_call_id_publishes_both_rows_in_key_order() 
             .map(|item| (item.key, item.row))
             .collect()
     );
-    let results: Vec<_> = folded
-        .items()
-        .values()
-        .filter(|row| row.call_id() == Some("child-result:m1"))
-        .collect();
     assert_eq!(
-        results,
+        results(&folded),
         [
-            &child_result("m1 · c1 completed"),
-            &child_result("m1 · c2 completed")
+            child_result("m1 · c1 completed"),
+            child_result("m1 · c2 completed")
         ]
     );
     host.block(async |host| host.release().await).unwrap();

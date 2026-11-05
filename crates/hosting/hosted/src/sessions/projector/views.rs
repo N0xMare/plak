@@ -349,16 +349,12 @@ impl SessionViews {
     }
 
     /// The transcript: the truncation marker when rows were dropped, then the
-    /// projector's rows, the operator notices and imported rows merged in key
-    /// order. A notice or imported row older than the oldest kept projector
-    /// row of a truncated transcript went with it.
+    /// projector's rows and the operator notices (imported rows among them)
+    /// merged in key order. A notice older than the oldest kept projector row
+    /// of a truncated transcript went with it.
     #[must_use]
     pub fn transcript(&self, intents: &ProductIntents) -> Vec<(RowKey, TranscriptRow)> {
         let mut merged: BTreeMap<RowKey, TranscriptRow> = self.rows.clone();
-        for (ordinal, row) in intents.imported.iter().enumerate() {
-            let ordinal = u32::try_from(ordinal).unwrap_or(u32::MAX);
-            merged.insert(RowKey::new(0, Lane::Product, ordinal), row.clone());
-        }
         for notice in &intents.notices {
             merged.insert(notice.key(), notice.row.clone());
         }

@@ -404,3 +404,38 @@ fn v12_document_round_trips_named_state_selection_and_full_history() {
             .contains("first request rebuilds the prompt cache")
     );
 }
+
+#[test]
+fn rows_sharing_a_call_id_survive_a_document_round_trip() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("export.json");
+    // A carried session's imported result, then its own tree's first result
+    // under the same call id: rows are identified by position, not call id.
+    let result = |subject: &str| {
+        TranscriptRow::Tool(plakous_hosted::sessions::ToolItem {
+            call_id: "child-result:m1".into(),
+            name: "child_result".into(),
+            exposed_name: None,
+            kind: plakous_host_protocol::views::ActivityKind::Agent,
+            state: "done".into(),
+            subject: Some(subject.into()),
+            detail: None,
+            started_at_ms: None,
+            finished_at_ms: None,
+            parent_call_id: None,
+            cell_id: None,
+            wait: None,
+        })
+    };
+    for mut document in document_versions() {
+        document.transcript = vec![
+            TranscriptRow::user("before the carry"),
+            result("m1 · c1 completed"),
+            TranscriptRow::assistant("carried answer"),
+            result("m1 · c2 completed"),
+        ];
+        fs::write(&path, serde_json::to_value(&document).unwrap().to_string()).unwrap();
+        let imported = read_document(&path).unwrap().into_import().unwrap();
+        assert_eq!(imported.record.transcript.to_vec(), document.transcript);
+    }
+}

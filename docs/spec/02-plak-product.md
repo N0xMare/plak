@@ -2084,7 +2084,9 @@ An unsaved notice receives its provisional identity once; projector reloads
 carry that identity with the pending notice rather than allocating one from
 the rebuilt window length. A reload shows the pending notices after the
 committed rows, in key order, and drops a named pending notice whose identity
-the store already holds; that notice is shown once, at its committed key. Skipped headers and blank thinking rows claim no
+the store already holds; that notice is shown once, at its committed key. A debug build asserts that a
+pending notice never sorts before the rows already shown; a release build
+gives such a notice a fresh provisional key. Skipped headers and blank thinking rows claim no
 stored presentation key. A debug build asserts that the stored projection's
 retained keys are strictly increasing.
 
@@ -2202,16 +2204,26 @@ is its position among the rows that record derives. An operator notice's anchor
 is the cursor the authoring host had applied when it wrote the notice, lane 1,
 and its ordinal is a product-local counter. Intent-backed views order their
 intents by the same anchor. Imported rows are anchor 0, lane 1, in document
-order, ahead of every row of the new session's feed. A notice therefore follows every
+order, ahead of every row of the new session's feed. They are notices under
+`plak:import:<n>` identities, so imported rows and notices are one key space a
+store numbers once: a carried session's first commit writes the imported rows
+first, and the notices recorded before that commit follow them at anchor 0
+under their own identities. A notice therefore follows every
 row the operator could already see and precedes every row derived from a later
 record, live and after any rebuild. A tool row replaced in place keeps the key
-of the record that created it. Only a live tool observation replaces a row by
-call id: rows a store committed (projector rows, notices and imported rows)
-stay distinct rows under their own keys even when they name the same call id,
-because a carried session's successor tree numbers its mail from the start and
-its result notices can reuse an imported row's `child-result:` call id. The
-newest such row owns the call id for later live updates. When the transcript
-bound drops a tool row,
+of the record that created it. Committed rows are identified by their row key
+(a document's rows by their position), never by call id: projector rows,
+notices and imported rows stay distinct rows even when they name the same call
+id, through every rebuild, export and import. Call ids repeat across a carry
+because a carried session's successor tree numbers its mail from the start, so
+its result notices can reuse an imported row's `child-result:<message id>`;
+that id format stays as it is, and the consumers carry the rule. A live
+observation updates by call id only a runtime-lane row or a live
+(provisional) row; it never updates a committed product-lane row (a notice or
+an imported row), and one that repeats such a row exactly is already shown. A
+face settles a newly keyed row into a live preview or a provisional-key block
+of the same identity, never into a block at a committed key. When the
+transcript bound drops a tool row,
 its call bookkeeping becomes a settled tombstone until the owning turn ends.
 A late result neither restores that key below the retained floor nor counts
 the call again.

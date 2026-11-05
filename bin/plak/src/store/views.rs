@@ -25,8 +25,6 @@ const WAKE_SUPPRESSION: &str = "wake_suppression";
 const PAUSE_CAUSE: &str = "pause_cause";
 const ROOT_INTERRUPT: &str = "interrupt_cause";
 const ROOT_CONTINUATION: &str = "continuation_decision";
-/// Imported rows are notices at anchor 0 under this identity prefix.
-const IMPORTED_NOTICE_PREFIX: &str = "plak:import:";
 
 fn invalid(_: rusqlite::Error) -> String {
     "product view row is invalid".to_owned()
@@ -638,7 +636,6 @@ impl ProductStore {
                         insert_notice(&tx, &target.id, notice)?;
                     }
                 }
-                write_import_intents(&tx, &target.id, &intents.imported)?;
                 let has_cursor: bool = tx
                     .query_row(
                         "SELECT EXISTS(SELECT 1 FROM projector_cursors WHERE session_id=?1)",
@@ -1216,16 +1213,16 @@ pub(super) fn views_of(
 
 /// Writes a committing record's operator notices as intents, anchored at
 /// the cursor the store has applied for it, in the record's transaction. A
-/// carried-forward session's first commit writes its imported transcript at
-/// anchor 0, lane 1, in document order.
+/// carried-forward session's first commit first writes its imported
+/// transcript at anchor 0, lane 1, in document order; the notices recorded
+/// before that commit follow it as notices, under their own identities.
 pub(super) fn write_notices(
     connection: &Connection,
     session: &plakous_hosted::sessions::SessionRecord,
     first_commit: bool,
 ) -> Result<(), RecordStoreError> {
     if first_commit && session.carried_forward_from().is_some() {
-        write_import_intents(connection, &session.id, &session.transcript)?;
-        return Ok(());
+        write_import_intents(connection, &session.id, session.transcript.imported_rows())?;
     }
     if session.transcript.pending_notices().is_empty() {
         return Ok(());
@@ -1312,23 +1309,19 @@ pub(super) fn transcript_of(
     ))
 }
 
-pub(super) fn write_import_intents(
+pub(super) fn write_import_intents<'a>(
     connection: &Connection,
     session_id: &str,
-    rows: &[TranscriptRow],
+    rows: impl IntoIterator<Item = &'a TranscriptRow>,
 ) -> Result<(), RecordStoreError> {
-    for (ordinal, row) in rows.iter().enumerate() {
+    for (ordinal, row) in rows.into_iter().enumerate() {
+        let ordinal = u32::try_from(ordinal).map_err(|error| {
+            super::write_error(error, "imported transcript is too long".to_owned())
+        })?;
         insert_notice(
             connection,
             session_id,
-            &OperatorNotice {
-                notice_id: format!("{IMPORTED_NOTICE_PREFIX}{ordinal}"),
-                anchor: 0,
-                ordinal: u32::try_from(ordinal).map_err(|error| {
-                    super::write_error(error, "imported transcript is too long".to_owned())
-                })?,
-                row: row.clone(),
-            },
+            &OperatorNotice::imported(ordinal, row.clone()),
         )?;
     }
     Ok(())

@@ -127,7 +127,9 @@ pub struct ProductTranscript {
     /// Absolute sequence of the first line after the marker. Sequences never
     /// move, so a call's row stays addressable while older rows are dropped.
     base: u64,
-    /// Tool call id to the absolute sequence of its newest row.
+    /// Tool call id to the absolute sequence of its newest live-updatable row:
+    /// a runtime-lane row or a live (provisional) one. A committed product-lane
+    /// row, a notice or an imported row, is never updated by call id.
     calls: HashMap<String, u64>,
     /// Ordering key of each row, parallel to `lines` and strictly increasing:
     /// the marker's, a committed row's stored key, or a live row's provisional
@@ -176,11 +178,12 @@ impl std::ops::Deref for ProductTranscript {
 }
 
 impl ProductTranscript {
-    /// A projection holding `rows` (an import).
-    /// Every row goes through [`Self::append`], the path live rows take: a
-    /// truncation marker survives only as the first row, a session header is
-    /// never stored, tool and thinking rows are bounded, and rows past the
-    /// bound are dropped the same way appends drop them.
+    /// A projection holding `rows` (an import), each its own line in
+    /// document order. Rows a store or a document committed are identified
+    /// by their position, never by call id, so two rows naming one call stay
+    /// two rows. A truncation marker survives only as the first row, a
+    /// session header is never stored, tool and thinking rows are bounded,
+    /// and rows past the bound are dropped the same way appends drop them.
     #[must_use]
     pub fn from_lines(rows: Vec<TranscriptRow>) -> Self {
         let mut transcript = Self::default();
@@ -188,8 +191,8 @@ impl ProductTranscript {
         if rows.next_if_eq(&TranscriptRow::Truncated).is_some() {
             transcript.push_marker();
         }
-        for row in rows {
-            transcript.append(row);
+        for row in rows.filter(is_line) {
+            transcript.push_row(bound_row(row), provisional_key());
         }
         let offset = usize::from(transcript.marked);
         for index in offset..transcript.lines.len() {
@@ -200,6 +203,9 @@ impl ProductTranscript {
                 u32::try_from(sequence).unwrap_or(u32::MAX),
             );
         }
+        // Imported rows are committed product-lane rows: no call id of theirs
+        // is live.
+        transcript.calls.clear();
         transcript
     }
 
@@ -217,7 +223,7 @@ impl ProductTranscript {
                 let sequence = transcript.next_sequence();
                 let call_id = call_id.or_else(|| row.call_id().map(str::to_owned));
                 if let Some(call_id) = call_id {
-                    transcript.calls.entry(call_id).or_insert(sequence);
+                    transcript.calls.insert(call_id, sequence);
                 }
                 provisional_key()
             };
@@ -263,6 +269,20 @@ impl ProductTranscript {
                 key: *key,
                 row: row.clone(),
             })
+            .collect()
+    }
+
+    /// Every row but the pending notices, in order: the transcript a carried
+    /// session's first commit imports, before it writes those notices as
+    /// notices under their own identities.
+    #[must_use]
+    pub fn imported_rows(&self) -> Vec<&TranscriptRow> {
+        let pending: HashSet<&RowKey> = self.notice_keys.iter().collect();
+        self.lines
+            .iter()
+            .zip(&self.keys)
+            .filter(|(_, key)| !pending.contains(key))
+            .map(|(row, _)| row)
             .collect()
     }
 
@@ -327,16 +347,15 @@ impl ProductTranscript {
     }
 
     /// Shows `item` as its own row, never as an update of an earlier row with
-    /// the same call id, and records it as pending. Its key is kept unless a
-    /// row already at or past it would put it out of order; then it takes a
-    /// fresh provisional key, which sorts after every row shown so far.
+    /// the same call id, and records it as pending under its key. Callers
+    /// show a pending notice after the rows it follows; a release build that
+    /// meets an earlier key gives the notice a fresh provisional key, which
+    /// sorts after every row shown so far.
     pub(crate) fn record_notice_item(&mut self, item: TranscriptItem, id: Option<String>) {
         let TranscriptItem { key, row } = item;
-        let key = if self.keys.last().is_some_and(|last| *last >= key) {
-            provisional_key()
-        } else {
-            key
-        };
+        let early = self.keys.last().is_some_and(|last| *last >= key);
+        debug_assert!(!early, "a pending notice sorts before the rows shown");
+        let key = if early { provisional_key() } else { key };
         if let Some(id) = id {
             self.notice_ids.insert(key, id);
         }
@@ -460,10 +479,12 @@ impl ProductTranscript {
         *self = Self::default();
     }
 
-    /// Push one bounded row under `key`; a tool row becomes its call id's.
+    /// Push one bounded row under `key`; a live-updatable tool row becomes
+    /// its call id's.
     fn push_row(&mut self, row: TranscriptRow, key: RowKey) {
         debug_assert!(self.keys.last().is_none_or(|last| *last < key));
-        if let Some(call_id) = row.call_id() {
+        let updatable = key.lane == Lane::Runtime || key.anchor >= 1_u64 << 63;
+        if let Some(call_id) = row.call_id().filter(|_| updatable) {
             let sequence = self.next_sequence();
             self.calls.insert(call_id.to_owned(), sequence);
         }

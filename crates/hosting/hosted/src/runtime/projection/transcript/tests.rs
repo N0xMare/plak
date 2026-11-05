@@ -881,6 +881,95 @@ fn invalid_view_repair_restores_key_order_uniqueness_and_bounds() {
 }
 
 #[test]
+fn live_rows_update_runtime_rows_by_call_id_but_never_a_committed_notice() {
+    let (sink, _receiver) = observation_channel::<Core>();
+    let mut publisher = Presentations::default();
+    let tool = |call_id: &str, subject: &str| {
+        TranscriptRow::Tool(plakous_host_protocol::views::transcript::ToolItem {
+            call_id: call_id.into(),
+            name: "child_result".into(),
+            exposed_name: None,
+            kind: plakous_host_protocol::views::ActivityKind::Agent,
+            state: "done".into(),
+            subject: Some(subject.into()),
+            detail: None,
+            started_at_ms: None,
+            finished_at_ms: None,
+            parent_call_id: None,
+            cell_id: None,
+            wait: None,
+        })
+    };
+    let running = RowKey::new(2, Lane::Runtime, 0);
+    let imported = RowKey::new(0, Lane::Product, 1);
+    assert!(publisher.snapshot(
+        PresentationSnapshot {
+            scope: TranscriptScope::Root,
+            items: vec![
+                TranscriptItem {
+                    key: imported,
+                    row: tool("child-result:m1", "m1 · c1 completed"),
+                },
+                TranscriptItem {
+                    key: running,
+                    row: tool("call", "running"),
+                },
+            ],
+            ..PresentationSnapshot::default()
+        },
+        &sink,
+    ));
+    let mut observe = |event: HostEvent<Core>| {
+        assert!(publisher.observe(TranscriptScope::Root, &event, &sink));
+        publisher.states[&TranscriptScope::Root].items().clone()
+    };
+    let rows = observe(HostEvent::Row(tool("call", "done")));
+    assert_eq!(
+        rows[&running],
+        tool("call", "done"),
+        "a runtime row updates in place"
+    );
+    let rows = observe(HostEvent::Row(tool("child-result:m1", "m1 · c1 completed")));
+    assert_eq!(
+        rows.len(),
+        2,
+        "a repeat of a committed notice is already shown"
+    );
+    // A reopened tree pass re-sends an unread result's line.
+    let rows = observe(HostEvent::ToolLine {
+        call_id: Some("child-result:m1".into()),
+        parent_call_id: None,
+        cell_id: None,
+        kind: plakous_host_protocol::views::ActivityKind::Agent,
+        name: "child_result".into(),
+        state: "done".into(),
+        subject: Some("m1 · c1 completed".into()),
+        detail: None,
+        duration_ms: None,
+        started_at_ms: None,
+        finished_at_ms: None,
+        wait: None,
+    });
+    assert_eq!(rows.len(), 2);
+    let rows = observe(HostEvent::Row(tool("child-result:m1", "m1 · c2 completed")));
+    assert_eq!(
+        rows.len(),
+        3,
+        "a new row naming that call id is its own row"
+    );
+    assert_eq!(
+        rows[&imported],
+        tool("child-result:m1", "m1 · c1 completed")
+    );
+    let rows = observe(HostEvent::Row(tool("child-result:m1", "m1 · c2 delivered")));
+    assert_eq!(rows.len(), 3, "the live row updates in place");
+    assert_eq!(
+        rows.values().next_back(),
+        Some(&tool("child-result:m1", "m1 · c2 delivered"))
+    );
+}
+
+#[test]
 fn a_repair_notice_stays_in_its_scope_once_per_cause_until_the_face_clears() {
     let (sink, receiver) = observation_channel::<Core>();
     let mut publisher = Presentations::default();

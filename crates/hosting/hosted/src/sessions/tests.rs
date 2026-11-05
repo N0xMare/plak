@@ -142,6 +142,99 @@ fn rows_sharing_a_call_id_keep_their_own_keys_stored_and_live() {
 }
 
 #[test]
+fn a_document_with_rows_sharing_a_call_id_keeps_every_row() {
+    let lines = vec![
+        TranscriptRow::user("before the carry"),
+        child_result("m1 · c1 completed"),
+        TranscriptRow::assistant("carried answer"),
+        child_result("m1 · c2 completed"),
+    ];
+    let transcript = ProductTranscript::from_lines(lines.clone());
+    assert_eq!(transcript.to_vec(), lines);
+    assert!(
+        transcript
+            .items()
+            .windows(2)
+            .all(|items| items[0].key < items[1].key)
+    );
+    assert_eq!(
+        ProductTranscript::from_lines(transcript.to_vec()).to_vec(),
+        lines
+    );
+}
+
+#[test]
+fn a_carried_first_commit_writes_its_earlier_notices_as_notices() {
+    let root = tempfile::tempdir().unwrap();
+    let store = MemoryStore::new();
+    let mut record = SessionRecord::new(root.path().to_owned());
+    record.link_carried_forward("00000000-0000-4000-8000-0000000000aa", "carried-state");
+    let imported = vec![
+        TranscriptRow::user("imported prompt"),
+        TranscriptRow::assistant("imported answer"),
+    ];
+    record.transcript = ProductTranscript::from_lines(imported.clone());
+    let named = TranscriptRow::info(NoticeScope::Tree, "named before the first commit");
+    record
+        .transcript
+        .record_named_notice("tree:carried:milestone:1".into(), named.clone());
+    let unnamed = TranscriptRow::info(NoticeScope::Session, "carried forward");
+    record.record_notice(unnamed.clone());
+    assert_eq!(
+        record.transcript.imported_rows(),
+        imported.iter().collect::<Vec<_>>()
+    );
+    store.save(&mut record).unwrap();
+
+    // Imported rows and notices are one key space: the notices follow the
+    // imported rows at anchor 0, under their own identities.
+    let intents = store.load_intents(&record.id).unwrap();
+    let notices: Vec<_> = intents
+        .notices
+        .iter()
+        .map(|notice| {
+            (
+                notice
+                    .notice_id
+                    .starts_with(projector::IMPORTED_NOTICE_PREFIX),
+                notice.key(),
+                notice.row.clone(),
+            )
+        })
+        .collect();
+    let key = |ordinal| projector::RowKey::new(0, projector::Lane::Product, ordinal);
+    assert_eq!(
+        notices,
+        [
+            (true, key(0), imported[0].clone()),
+            (true, key(1), imported[1].clone()),
+            (false, key(2), named.clone()),
+            (false, key(3), unnamed.clone())
+        ]
+    );
+    assert_eq!(
+        intents.notices[2].notice_id, "tree:carried:milestone:1",
+        "the notice keeps its identity"
+    );
+    record = store.load(&record.id).unwrap();
+    assert_eq!(
+        record.transcript.to_vec(),
+        [
+            imported[0].clone(),
+            imported[1].clone(),
+            named.clone(),
+            unnamed
+        ]
+    );
+    // A producer's retry of the named notice is deduplicated by identity.
+    record
+        .transcript
+        .record_named_notice("tree:carried:milestone:1".into(), named);
+    store.save(&mut record).unwrap();
+    assert_eq!(store.load_intents(&record.id).unwrap().notices.len(), 4);
+}
+
+#[test]
 fn a_rebuilt_projection_restores_pending_notices_once_in_key_order() {
     let root = tempfile::tempdir().unwrap();
     let store = MemoryStore::new();

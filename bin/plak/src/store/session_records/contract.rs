@@ -1512,3 +1512,52 @@ fn the_sqlite_store_honours_the_contract() {
     std::fs::create_dir_all(&workspace).unwrap();
     suite(&SqliteSessionStore::new(paths), &workspace);
 }
+
+#[test]
+fn a_carried_first_commit_writes_its_earlier_notices_after_the_import_as_notices() {
+    each_store(|store, workspace| {
+        let mut carried = record(workspace);
+        carried.bind_plakous_locator(locator()).unwrap();
+        carried.link_carried_forward(&uuid::Uuid::new_v4().to_string(), "previous-build");
+        let imported = vec![
+            TranscriptRow::user("imported prompt"),
+            TranscriptRow::assistant("imported answer"),
+        ];
+        carried.transcript =
+            plakous_hosted::sessions::ProductTranscript::from_lines(imported.clone());
+        let notice = TranscriptRow::info(NoticeScope::Session, "carried forward from the source");
+        carried.record_notice(notice.clone());
+        store.save(&mut carried).unwrap();
+
+        // Imported rows and notices are one key space: the notice follows the
+        // imported rows at anchor 0 as a notice, under its own identity.
+        let intents = store.load_intents(&carried.id).unwrap();
+        let notices: Vec<_> = intents
+            .notices
+            .iter()
+            .map(|notice| {
+                (
+                    notice
+                        .notice_id
+                        .starts_with(plakous_hosted::sessions::projector::IMPORTED_NOTICE_PREFIX),
+                    notice.anchor,
+                    notice.ordinal,
+                    notice.row.clone(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            notices,
+            [
+                (true, 0, 0, imported[0].clone()),
+                (true, 0, 1, imported[1].clone()),
+                (false, 0, 2, notice.clone())
+            ]
+        );
+        let loaded = store.load(&carried.id).unwrap();
+        assert_eq!(
+            loaded.transcript.to_vec(),
+            [imported[0].clone(), imported[1].clone(), notice]
+        );
+    });
+}

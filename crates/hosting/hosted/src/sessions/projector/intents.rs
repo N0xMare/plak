@@ -181,7 +181,24 @@ pub struct OperatorNotice {
     pub row: TranscriptRow,
 }
 
+/// The identity prefix of a carried session's imported rows.
+pub const IMPORTED_NOTICE_PREFIX: &str = "plak:import:";
+
 impl OperatorNotice {
+    /// Row `ordinal` of a carried session's imported transcript: anchor 0,
+    /// lane 1, in document order. Imported rows and notices are one key space
+    /// that a store numbers once, so the notices the session writes at anchor
+    /// 0 take the ordinals after the imported ones.
+    #[must_use]
+    pub fn imported(ordinal: u32, row: TranscriptRow) -> Self {
+        Self {
+            notice_id: format!("{IMPORTED_NOTICE_PREFIX}{ordinal}"),
+            anchor: 0,
+            ordinal,
+            row,
+        }
+    }
+
     /// The notice's immutable ordering key.
     #[must_use]
     pub const fn key(&self) -> RowKey {
@@ -446,8 +463,6 @@ pub struct ProductIntents {
     pub root_interrupts: Vec<AnchoredIntent<RootInterrupt>>,
     /// The root's continuation decisions (spec 03 §14.1).
     pub root_continuations: Vec<AnchoredIntent<RootContinuation>>,
-    /// An imported session's transcript, anchor 0, lane 1, in document order.
-    pub imported: Vec<TranscriptRow>,
 }
 
 impl ProductIntents {

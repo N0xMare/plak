@@ -120,24 +120,18 @@ pub(super) fn put_row(views: &mut SessionViews, key: RowKey, row: TranscriptRow)
 /// Past either transcript bound, drops the oldest rows down to seven eighths
 /// of both, in key order; the newest row always stays. A function of the rows
 /// alone, so a rebuild trims identically.
-/// The product-lane rows the transcript bound counts after record `seq`:
-/// imported rows and the operator notices anchored before it, with their
+/// The product-lane rows the transcript bound counts after record `seq`: the
+/// operator notices (imported rows among them) anchored before it, with their
 /// encoded sizes. A notice anchored at or after `seq` was written after this
 /// record was applied, so it is not counted here, incrementally or in a
 /// rebuild.
 pub(super) fn counted_notices(intents: &ProductIntents, seq: u64) -> Vec<(RowKey, u64)> {
-    let imported = intents.imported.iter().enumerate().map(|(ordinal, row)| {
-        (
-            RowKey::new(0, Lane::Product, u32::try_from(ordinal).unwrap_or(u32::MAX)),
-            row_bytes(row) as u64,
-        )
-    });
-    let notices = intents
+    intents
         .notices
         .iter()
         .filter(|notice| notice.anchor < seq)
-        .map(|notice| (notice.key(), row_bytes(&notice.row) as u64));
-    imported.chain(notices).collect()
+        .map(|notice| (notice.key(), row_bytes(&notice.row) as u64))
+        .collect()
 }
 
 /// The transcript bound over the merged transcript: the projector's rows and

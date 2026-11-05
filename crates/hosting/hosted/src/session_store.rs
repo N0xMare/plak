@@ -515,7 +515,8 @@ mod memory {
 
     /// Records `session`'s operator notices as intents at the cursor the store
     /// applied, as the SQLite store does in the record's transaction; a
-    /// carried-forward session's first commit records its imported rows.
+    /// carried-forward session's first commit records its imported rows
+    /// first, then the notices recorded before it.
     fn persist_notices(
         state: &mut State,
         session: &SessionRecord,
@@ -527,14 +528,19 @@ mod memory {
             .map_or(0, |views| views.cursor.get());
         let mut intents = state.intents.get(&session.id).cloned().unwrap_or_default();
         if first_commit && session.carried_forward_from().is_some() {
-            intents.imported = session
+            let imported = session
                 .transcript
-                .iter()
-                .filter(|row| !matches!(row, crate::sessions::TranscriptRow::Truncated))
-                .cloned()
-                .collect();
-            state.intents.insert(session.id.clone(), intents);
-            return Ok(());
+                .imported_rows()
+                .into_iter()
+                .filter(|row| !matches!(row, crate::sessions::TranscriptRow::Truncated));
+            for (ordinal, row) in imported.enumerate() {
+                intents
+                    .notices
+                    .push(crate::sessions::projector::OperatorNotice::imported(
+                        u32::try_from(ordinal).unwrap_or(u32::MAX),
+                        row.clone(),
+                    ));
+            }
         }
         let mut ordinal = intents
             .notices
@@ -1372,8 +1378,6 @@ mod memory {
                     .filter(|notice| notice.anchor < successor.published_seq.get())
                     .cloned()
                     .collect();
-                next.intents.entry(target.id.clone()).or_default().imported =
-                    intents.imported.clone();
             }
             next.views.insert(id.to_owned(), views.clone());
             *state = next;

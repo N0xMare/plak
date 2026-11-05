@@ -256,6 +256,12 @@ an export.
   key order. A repaired presentation now keeps one error notice per cause in
   that transcript and logs the cause to `plak.log`, and the TUI's note for a
   refused snapshot survives the resync that answers it.
+- Rows that share a call id are kept apart everywhere: importing a document
+  keeps every row, and a new tree result that reuses an imported result's call
+  id shows as its own row while the turn runs, in the host and in the TUI,
+  instead of briefly replacing the imported one. A carried session's first save
+  keeps the notices recorded before it (such as the carried-forward note) as
+  notices with their own identities, after the imported rows.
 
 ### Plakous
 

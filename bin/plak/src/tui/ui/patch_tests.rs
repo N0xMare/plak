@@ -1255,3 +1255,43 @@ fn a_refused_snapshot_note_survives_the_resync_snapshot_once_per_cause() {
     assert_eq!(refusals(&app), 1, "the resync snapshot keeps the note");
     assert!(paint(&mut app).contains("invalid·presentation·snapshot·refused·(KeyOrder)"));
 }
+
+#[test]
+fn a_committed_row_sharing_a_call_id_stays_a_block_of_its_own() {
+    let mut app = scoped_app(&TranscriptScope::Root);
+    let result = |subject: &str| {
+        let mut tool = tool_item("child-result:m1", "child_result");
+        tool.subject = Some(subject.to_owned());
+        TranscriptRow::Tool(tool)
+    };
+    // An imported result, then the first result of the tree the session runs
+    // now, which numbers its mail from the start again.
+    let imported = RowKey::new(0, Lane::Product, 1);
+    let later = RowKey::new(6, Lane::Product, 0);
+    app.apply_host_event(HostEvent::PresentationSnapshot(snapshot(
+        1,
+        &BTreeMap::from([(imported, result("m1 · c1 completed"))]),
+    )));
+    app.apply_host_event(HostEvent::TranscriptPatch(TranscriptPatch {
+        scope: TranscriptScope::Root,
+        from_revision: 1,
+        to_revision: 2,
+        upserts: vec![TranscriptItem {
+            key: later,
+            row: result("m1 · c2 completed"),
+        }],
+        deletes: Vec::new(),
+    }));
+    assert_eq!(app.pane.keyed.get(imported), Some(0));
+    assert_eq!(app.pane.keyed.get(later), Some(1));
+    let subjects: Vec<_> = app
+        .pane
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            crate::tui::blocks::ScrollBlock::Tool { subject, .. } => subject.clone(),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(subjects, ["m1 · c1 completed", "m1 · c2 completed"]);
+}

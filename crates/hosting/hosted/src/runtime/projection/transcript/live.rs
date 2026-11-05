@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use plakous_host_protocol::ProtocolExtension;
 use plakous_host_protocol::views::transcript::{
-    RowKey, ThinkingRow, ToolItem, TranscriptItem, TranscriptRow,
+    Lane, RowKey, ThinkingRow, ToolItem, TranscriptItem, TranscriptRow,
 };
 
 use crate::surface_protocol::HostEvent;
@@ -16,7 +16,13 @@ pub(super) struct LiveRows {
     pub(super) copied_rows: usize,
     pending: BTreeMap<RowKey, TranscriptRow>,
     assistant: Option<RowKey>,
+    /// Call id to its live-updatable row: a runtime-lane row or a live
+    /// (provisional) one. A committed product-lane row, an operator notice or
+    /// an imported row, is never updated by call id.
     calls: HashMap<String, RowKey>,
+    /// Call id to its committed product-lane rows. An observation that
+    /// repeats one of them exactly is already shown.
+    settled: HashMap<String, Vec<RowKey>>,
     thinking: HashMap<String, (RowKey, Instant)>,
     /// Provisional key of the last row issued before the current model request.
     /// A discard deletes assistant and thinking rows only after this key, so an
@@ -37,10 +43,17 @@ impl LiveRows {
         self.assistant = None;
         self.thinking.clear();
         self.request_floor = None;
-        self.calls = rows
-            .iter()
-            .filter_map(|(key, row)| row.call_id().map(|id| (id.to_owned(), *key)))
-            .collect();
+        self.calls.clear();
+        self.settled.clear();
+        for (key, row) in rows {
+            match row.call_id() {
+                Some(id) if updatable(*key) => {
+                    self.calls.insert(id.to_owned(), *key);
+                }
+                Some(id) => self.settled.entry(id.to_owned()).or_default().push(*key),
+                None => {}
+            }
+        }
     }
 
     fn key(&mut self) -> RowKey {
@@ -51,6 +64,10 @@ impl LiveRows {
 
     pub(super) fn retain(&mut self, rows: &BTreeMap<RowKey, TranscriptRow>) {
         self.calls.retain(|_, key| rows.contains_key(key));
+        self.settled.retain(|_, keys| {
+            keys.retain(|key| rows.contains_key(key));
+            !keys.is_empty()
+        });
         self.thinking.retain(|_, (key, _)| rows.contains_key(key));
         self.assistant = self.assistant.filter(|key| rows.contains_key(key));
     }
@@ -130,14 +147,21 @@ impl LiveRows {
             ..
         } = event
         {
+            let id = call_id.as_deref().unwrap_or(name);
+            let fresh = !self.calls.contains_key(id);
             let unchanged_state = self
                 .calls
-                .get(call_id.as_deref().unwrap_or(name))
+                .get(id)
                 .and_then(|key| self.pending.get(key).or_else(|| rows.get(key)))
                 .and_then(TranscriptRow::as_tool)
                 .is_some_and(|tool| tool.state == *state);
             let (key, row) = self.tool(event, rows)?;
-            self.pending.insert(key, crate::sessions::bound_row(row));
+            let row = crate::sessions::bound_row(row);
+            if fresh && self.repeats_settled(&row, rows) {
+                self.calls.remove(id);
+                return None;
+            }
+            self.pending.insert(key, row);
             if unchanged_state && matches!(state.as_str(), "running" | "waiting") {
                 return None;
             }
@@ -211,10 +235,14 @@ impl LiveRows {
                 )
             }
             HostEvent::Row(row) => {
-                let key = row
-                    .call_id()
-                    .and_then(|id| self.calls.get(id).copied())
-                    .unwrap_or_else(|| self.key());
+                let live = row.call_id().and_then(|id| self.calls.get(id).copied());
+                if live.is_none() && self.repeats_settled(row, rows) {
+                    return Some(LiveChange {
+                        upserts: Vec::new(),
+                        deletes: Vec::new(),
+                    });
+                }
+                let key = live.unwrap_or_else(|| self.key());
                 if !rows.contains_key(&key) {
                     self.assistant = None;
                 }
@@ -289,6 +317,16 @@ impl LiveRows {
         deletes
     }
 
+    /// Whether `row` repeats a committed product-lane row of its call id.
+    fn repeats_settled(&self, row: &TranscriptRow, rows: &BTreeMap<RowKey, TranscriptRow>) -> bool {
+        row.call_id()
+            .and_then(|id| self.settled.get(id))
+            .is_some_and(|keys| {
+                let row = crate::sessions::bound_row(row.clone());
+                keys.iter().any(|key| rows.get(key) == Some(&row))
+            })
+    }
+
     fn tool<P: ProtocolExtension>(
         &mut self,
         event: &HostEvent<P>,
@@ -358,6 +396,12 @@ impl LiveRows {
             )
         })
     }
+}
+
+/// Whether a live observation may update the row at `key` by call id: a
+/// runtime-lane row its turn can still settle, or a live (provisional) row.
+fn updatable(key: RowKey) -> bool {
+    key.lane == Lane::Runtime || key.anchor >= 1_u64 << 63
 }
 
 fn append_bounded(text: &mut String, delta: &str, limit: usize) {

@@ -961,7 +961,6 @@ proptest! {
             feed.intents = ProductIntents {
                 submissions: feed.intents.submissions.clone(),
                 notices: feed.intents.notices.iter().filter(|notice| notice.anchor < feed.seq).cloned().collect(),
-                imported: feed.intents.imported.clone(),
                 ..ProductIntents::default()
             };
         }
@@ -1049,7 +1048,6 @@ proptest! {
         let target_intents = ProductIntents {
             submissions: feed.intents.submissions.clone(),
             notices: feed.intents.notices.iter().filter(|notice| notice.anchor < branched_at).cloned().collect(),
-            imported: feed.intents.imported.clone(),
             ..ProductIntents::default()
         };
         let prefix = project(
@@ -1940,7 +1938,9 @@ fn notices_and_imported_rows_merge_by_anchor() {
         steer: false,
         end: End::Completed,
     }]);
-    feed.intents.imported = vec![TranscriptRow::user("imported")];
+    feed.intents
+        .notices
+        .push(OperatorNotice::imported(0, TranscriptRow::user("imported")));
     feed.intents.notices.push(OperatorNotice {
         notice_id: "n1".to_owned(),
         anchor: 1,
@@ -2955,7 +2955,8 @@ fn a_rejected_call_takes_its_subject_from_its_call_block() {
 }
 
 /// The transcript a store restores without bounding projector rows again
-/// equals the one bounding every row rebuilds, call identities included.
+/// equals the one bounding every row rebuilds. Only the restored projector
+/// rows keep live call identities: rows a document imports carry none.
 fn assert_restore_equals_rebuild(views: &SessionViews, intents: &ProductIntents) {
     for row in views.rows.values() {
         assert_eq!(&crate::sessions::bound_row(row.clone()), row);
@@ -2965,7 +2966,12 @@ fn assert_restore_equals_rebuild(views: &SessionViews, intents: &ProductIntents)
         merged.iter().map(|(_, row)| row.clone()).collect(),
     );
     let restored = crate::sessions::ProductTranscript::stored(merged);
-    assert_eq!(restored.rows(), rebuilt.rows());
+    assert_eq!(restored.to_vec(), rebuilt.to_vec());
+    for (row, call_id) in restored.rows() {
+        if let Some(call_id) = call_id {
+            assert_eq!(row.call_id(), Some(call_id));
+        }
+    }
     assert_eq!(restored.pending_notices(), []);
 }
 
@@ -3026,10 +3032,13 @@ fn bounded_stored_rows_restore_as_rebuilt_and_product_rows_are_bounded() {
         detail: Some(format!("imported {secret}")),
         ..only_tool(&project_all(&feed).views).clone()
     };
-    feed.intents.imported = vec![TranscriptRow::Tool(crate::sessions::ToolItem {
-        call_id: "imported-call".to_owned(),
-        ..imported
-    })];
+    feed.intents.notices.push(OperatorNotice::imported(
+        0,
+        TranscriptRow::Tool(crate::sessions::ToolItem {
+            call_id: "imported-call".to_owned(),
+            ..imported
+        }),
+    ));
     let views = project_all(&feed).views;
     let tool = only_tool(&views);
     let detail = tool.detail.as_deref().unwrap();
@@ -3040,8 +3049,12 @@ fn bounded_stored_rows_restore_as_rebuilt_and_product_rows_are_bounded() {
     assert!(!tool.subject.as_deref().unwrap().contains(secret));
     assert_restore_equals_rebuild(&views, &feed.intents);
     let restored = crate::sessions::ProductTranscript::stored(views.transcript(&feed.intents));
-    let imported = restored.tool_activity("imported-call").unwrap();
-    assert!(!imported.detail.unwrap().contains(secret));
+    let imported = restored
+        .iter()
+        .filter_map(TranscriptRow::as_tool)
+        .find(|tool| tool.call_id == "imported-call")
+        .unwrap();
+    assert!(!imported.detail.as_deref().unwrap().contains(secret));
 }
 
 #[test]

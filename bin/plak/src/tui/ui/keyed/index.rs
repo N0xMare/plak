@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::mem::{Discriminant, discriminant};
 use std::ops::{Bound, Range};
 
-use plakous_host_protocol::views::transcript::RowKey;
+use plakous_host_protocol::views::transcript::{Lane, RowKey};
 
 use super::ScrollBlock;
 
@@ -69,10 +69,20 @@ impl BlockIndex {
         self.keys.get(&key).map(|at| *at - self.head)
     }
 
+    /// The block a newly keyed row settles into: a live preview, a runtime-lane
+    /// row or a row at a provisional key with the same identity, else a preview
+    /// of the same kind. A block at a committed product-lane key (a notice or
+    /// an imported row) keeps it, so a row that shares its call id is a block
+    /// of its own.
     pub(in crate::tui::ui) fn preview(&self, block: &ScrollBlock) -> Option<usize> {
         self.visit(1);
         identity(block)
             .and_then(|id| self.identities.get(&id).copied())
+            .filter(|at| {
+                self.slots
+                    .get(at)
+                    .is_none_or(|key| key.lane == Lane::Runtime || key.anchor >= 1_u64 << 63)
+            })
             .or_else(|| {
                 self.previews
                     .iter()
