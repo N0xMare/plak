@@ -162,17 +162,38 @@ pub fn consume_jobs(sessions: &crate::JoinedProcessSessions, numbers: &[u32]) {
     sessions.consume_jobs(numbers);
 }
 
+/// What a job's output tail starts with when it was cut inside its only
+/// line: the text after it is the end of a line whose start is gone.
+pub const JOB_TAIL_FRAGMENT: &str = "…";
+
+/// The most bytes a job's output tail holds.
+const JOB_TAIL_BYTES: usize = 4096;
+
 /// Bounds and sanitizes a terminal tail without letting process controls enter a checkpoint.
+///
+/// A tail always starts where a line does: where `text` does, after a line
+/// its line bound left out, or, when its byte bound cut into a line, at the
+/// next line. A tail cut inside its only line starts with
+/// [`JOB_TAIL_FRAGMENT`] instead. A tail is its own tail.
 pub fn job_output_tail(text: &str) -> String {
+    output_tail(text, false)
+}
+
+/// [`job_output_tail`] of `text`, the end of an output whose earlier bytes
+/// were cut away when `cut`: its start is then not a line's start either.
+pub(crate) fn output_tail(text: &str, cut: bool) -> String {
     let normalized = text.replace("\r\n", "\n").replace('\r', "");
     let text = normalized.as_str();
     let text = text.strip_suffix('\n').unwrap_or(text);
     let mut reversed = Vec::new();
     let mut bytes = 0;
     let mut lines = 1;
+    // Whether the kept text starts inside a line.
+    let mut partial = cut;
     for ch in text.chars().rev() {
         if ch == '\n' {
             if lines == 40 {
+                partial = false;
                 break;
             }
             lines += 1;
@@ -182,13 +203,27 @@ pub fn job_output_tail(text: &str) -> String {
         } else {
             ch
         };
-        if bytes + ch.len_utf8() > 4096 {
+        if bytes + ch.len_utf8() > JOB_TAIL_BYTES {
+            partial = true;
             break;
         }
         bytes += ch.len_utf8();
         reversed.push(ch);
     }
-    reversed.into_iter().rev().collect()
+    let kept: String = reversed.into_iter().rev().collect();
+    if !partial {
+        return kept;
+    }
+    if let Some((_, whole)) = kept.split_once('\n') {
+        return whole.to_owned();
+    }
+    let mut start = kept
+        .len()
+        .saturating_sub(JOB_TAIL_BYTES - JOB_TAIL_FRAGMENT.len());
+    while !kept.is_char_boundary(start) {
+        start += 1;
+    }
+    format!("{JOB_TAIL_FRAGMENT}{}", &kept[start..])
 }
 
 fn make_process_session_update(
@@ -701,3 +736,6 @@ pub fn with_process_telemetry(
 pub fn process_telemetry(outcome: &ToolOutcome) -> Option<ProcessTelemetry> {
     outcome.process_telemetry
 }
+
+#[cfg(test)]
+mod tests;

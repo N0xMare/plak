@@ -7018,7 +7018,12 @@ evidence: exited/stopped/released, exit code or stopper (neither for released), 
 tail. The producer computes the tail from the back of retained output and
 normalizes CRLF to LF, drops lone CR, and replaces all remaining control
 characters (including C1 and DEL) except newline and tab with U+FFFD before enforcing
-the UTF-8 byte bound. Terminal construction defensively applies the same bound
+the UTF-8 byte bound. A tail starts where a line does: where the output does,
+after a line the 40-line bound left out, or, when the byte bound or an
+earlier cut of retained output fell inside a line, at the next line; a tail
+cut inside its only line starts with `…` (`JOB_TAIL_FRAGMENT`) instead, so a
+host can tell a fragment from a line's start. A tail is its own tail.
+Terminal construction defensively applies the same bound
 and sanitation. Missing stop attribution is `outcome_unknown`, never an
 invented model stop. Every termination path records its real stopper.
 Consumption cannot drop an unjoined active owner: a terminal row consumed

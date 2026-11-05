@@ -220,7 +220,7 @@ pub(super) fn process_subject_for_ids(
                         .map(|process| process.command.as_str())
                         .or_else(|| start_commands.get(&key).map(String::as_str))
                 })
-                .map(super::processes::redacted_job_command);
+                .map(crate::jobs::display::redacted_job_command);
             let mut subject = id.clone();
             if label == "process_session_write" {
                 subject.push_str(&format!(" · {} bytes", input.unwrap_or_default().len()));

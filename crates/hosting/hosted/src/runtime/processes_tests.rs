@@ -128,7 +128,7 @@ const CUT_KEY: &str = "cat > id <<EOF\\n-----BEGIN OPENSSH PRIVATE KEY-----\\nb3
 /// redacted all the same, and the escapes stay as they were displayed.
 #[test]
 fn a_heredoc_secret_in_a_displayed_command_is_redacted() {
-    use super::processes::redacted_job_command;
+    use crate::jobs::display::redacted_job_command;
     for (line, secret) in HEREDOC_SECRETS {
         let command = format!("gh auth login --with-token <<EOF\\n{line}\\nEOF");
         let shown = redacted_job_command(&command);
@@ -144,23 +144,17 @@ fn a_heredoc_secret_in_a_displayed_command_is_redacted() {
     assert_eq!(redacted_job_command(plain), plain);
 }
 
-/// A tail at its byte bound loses its partial first line, where a secret's
-/// prefix may have been cut off; a shorter tail keeps every line; a key
-/// whose BEGIN was cut off is redacted up to its END.
+/// The runtime starts a tail at a line, or marks one cut inside its only
+/// line; that fragment is not shown, only the mark. A key whose BEGIN was
+/// cut off is redacted up to its END.
 #[test]
 fn a_tail_shows_whole_lines_and_no_orphan_key() {
-    use super::processes::redacted_job_tail;
-    let mut cut = format!(
-        "cdefghijklmnopqrstuvwxyz0123456789 =abcdefghijkl0123 {}",
-        "y".repeat(70)
+    use crate::jobs::display::redacted_job_tail;
+    let fragment = plakous::tools::JOB_TAIL_FRAGMENT;
+    assert_eq!(
+        redacted_job_tail(&format!("{fragment}cdefghijklmnopqrstuvwxyz0123456789")),
+        fragment
     );
-    for number in 1..=36 {
-        cut.push_str(&format!("\nline {number:03} {}", "x".repeat(100)));
-    }
-    assert!((4_032..=4_096).contains(&cut.len()), "{}", cut.len());
-    let shown = redacted_job_tail(&cut);
-    assert!(shown.starts_with("line 001"), "{shown:?}");
-    assert!(!shown.contains("cdefghij") && !shown.contains("abcdefghijkl0123"));
     assert_eq!(redacted_job_tail("first\nsecond"), "first\nsecond");
     assert_eq!(
         redacted_job_tail("Zm9vYmFyYmF6cXV4\nMIIEvQIBADANBg\n-----END RSA PRIVATE KEY-----\nafter"),

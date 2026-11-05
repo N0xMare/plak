@@ -11,6 +11,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub(crate) mod display;
+
 type BranchKey = (plakous::model::SessionId, plakous::model::BranchId);
 
 /// One line's service and the head that currently owns it.

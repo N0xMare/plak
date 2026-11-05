@@ -79,8 +79,9 @@ fn process_row(job: &JobView) -> Option<crate::sessions::TranscriptRow> {
 /// and bounded the way a tool subject is (spec 04 §5), one line.
 fn process_subject(command: &str) -> Option<String> {
     let command = command.trim();
-    (!command.is_empty())
-        .then(|| super::events::live_tool_subject(&super::processes::redacted_job_command(command)))
+    (!command.is_empty()).then(|| {
+        super::events::live_tool_subject(&crate::jobs::display::redacted_job_command(command))
+    })
 }
 
 impl JobEvents {

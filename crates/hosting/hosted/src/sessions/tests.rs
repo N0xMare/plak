@@ -494,6 +494,43 @@ proptest::proptest! {
     }
 }
 
+/// A stored projector row an older bound wrote is shown as this build
+/// bounds it: a process row's heredoc token, kept by the subject bound
+/// alone, is redacted on read. A row this build bounded is shown as stored.
+#[test]
+fn stored_rows_are_bounded_again_on_read() {
+    use super::projector::{Lane, RowKey};
+    let stale = TranscriptRow::Process(plakous_host_protocol::views::transcript::ProcessNotice {
+        job_id: "p1".to_owned(),
+        outcome: plakous_host_protocol::views::transcript::ProcessOutcome::Exited { code: Some(0) },
+        duration_ms: Some(5),
+        subject: Some(
+            "gh auth login --with-token <<EOF\\nghp_abcdefghijklmnopqrstuvwxyz0123\\nEOF"
+                .to_owned(),
+        ),
+    });
+    let current = bound_row(TranscriptRow::user("kept as stored"));
+    let transcript = ProductTranscript::stored(vec![
+        (RowKey::new(3, Lane::Runtime, 0), stale.clone()),
+        (RowKey::new(4, Lane::Runtime, 0), current.clone()),
+    ]);
+    let shown: Vec<TranscriptRow> = transcript
+        .items()
+        .iter()
+        .map(|item| item.row.clone())
+        .collect();
+    assert_eq!(shown, vec![bound_row(stale), current]);
+    let TranscriptRow::Process(process) = &shown[0] else {
+        panic!("the process row keeps its kind");
+    };
+    let subject = process.subject.as_deref().unwrap();
+    assert!(!subject.contains("ghp_"), "{subject}");
+    assert!(
+        subject.starts_with("gh auth login --with-token <<EOF\\n"),
+        "{subject}"
+    );
+}
+
 #[test]
 fn blank_thinking_is_not_a_row() {
     let mut session = SessionRecord::new(PathBuf::from("/work"));

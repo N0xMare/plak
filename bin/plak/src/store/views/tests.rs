@@ -1345,3 +1345,58 @@ fn a_switch_request_round_trips_and_a_corrupt_selection_refuses_the_load() {
         .unwrap();
     assert!(store.load_intents(&session).is_err());
 }
+
+/// A process row as a build before the escaped-command redaction stored it:
+/// the runtime's displayed command, newlines escaped, through the subject
+/// bound alone, so the heredoc's token on its own line was kept.
+fn stale_process_row() -> TranscriptRow {
+    use plakous_host_protocol::views::transcript::{ProcessNotice, ProcessOutcome};
+    TranscriptRow::Process(ProcessNotice {
+        job_id: "p1".to_owned(),
+        outcome: ProcessOutcome::Exited { code: Some(0) },
+        duration_ms: Some(5),
+        subject: Some(
+            "gh auth login --with-token <<EOF\\nghp_abcdefghijklmnopqrstuvwxyz0123\\nEOF"
+                .to_owned(),
+        ),
+    })
+}
+
+fn stored_rows(paths: &PlakPaths) -> Vec<(i64, String)> {
+    let connection = Connection::open(paths.product_database()).unwrap();
+    let mut statement = connection
+        .prepare("SELECT anchor,row FROM transcript_rows ORDER BY anchor")
+        .unwrap();
+    statement
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+}
+
+/// Rows an older bound stored (whatever build wrote them, whenever) are
+/// shown as this build bounds them, by a writable load and a read-only
+/// inspection alike; the stored rows are not written.
+#[test]
+fn rows_an_older_bound_stored_are_redacted_on_read() {
+    let root = tempdir().unwrap();
+    let paths = PlakPaths::explicit(root.path().join("p"));
+    let (mut store, session) = store_with_session(root.path());
+    let stale = views_at(2, &[(2, stale_process_row())]);
+    store
+        .commit_projection_views(
+            &session,
+            &writes(&SessionViews::empty(), &stale),
+            &stale.state,
+        )
+        .unwrap();
+    let stored = stored_rows(&paths);
+    assert!(stored[0].1.contains("ghp_"));
+
+    let loaded = store.load(&session).unwrap();
+    assert!(!format!("{:?}", loaded.transcript).contains("ghp_"));
+    drop(store);
+    let inspected = ProductStore::inspect_session_read_only(&paths, &session).unwrap();
+    assert!(!format!("{:?}", inspected.transcript).contains("ghp_"));
+    assert_eq!(stored_rows(&paths), stored);
+}

@@ -1482,3 +1482,58 @@ fn an_attach_after_a_clear_holds_no_process_of_the_cleared_session() {
         .collect();
     assert_eq!(held, [(0, 0)], "{held:?}");
 }
+
+/// A wire face is shown a job's lifecycle redacted as a process row is: a
+/// heredoc's token in the displayed command, and the fragment of a tail
+/// cut inside its only line, never reach the client.
+#[test]
+fn a_jobs_lifecycle_reaches_a_wire_face_redacted() {
+    use plakous_host_protocol::Core;
+    let (actions, _intents) = plakous_host_protocol::intent_channel::<Core>();
+    let token = "ghp_abcdefghijklmnopqrstuvwxyz0123";
+    // A tail the runtime cut inside its only line, inside the token.
+    let tail = format!("{}{}", plakous::tools::JOB_TAIL_FRAGMENT, &token[4..]);
+    let mut stdout = Vec::new();
+    let mut connection = WireConnection::new(root(), &mut stdout, actions);
+    assert!(connection.frame(attach_line(1, "t1")).unwrap());
+    for observation in [
+        SessionObservation::JobStarted {
+            job_id: "p1".into(),
+            owner: "root".into(),
+            command: format!("gh auth login --with-token <<EOF\\n{token}\\nEOF"),
+        },
+        SessionObservation::JobTerminal {
+            job_id: "p1".into(),
+            owner: "root".into(),
+            status: "exited".into(),
+            exit_code: Some(0),
+            stop_reason: None,
+            elapsed_ms: 10,
+            output: tail,
+        },
+    ] {
+        assert!(connection.observe(observation).unwrap());
+    }
+    connection.flush().unwrap();
+    drop(connection);
+    let mut shown = Vec::new();
+    for frame in host_frames(&stdout) {
+        match frame {
+            HostFrame::Event {
+                observation: SessionObservation::JobStarted { command, .. },
+                ..
+            } => shown.push(command),
+            HostFrame::Event {
+                observation: SessionObservation::JobTerminal { output, .. },
+                ..
+            } => shown.push(output),
+            _ => {}
+        }
+    }
+    assert_eq!(shown.len(), 2, "{shown:?}");
+    assert_eq!(
+        shown[0],
+        "gh auth login --with-token <<EOF\\n[redacted]\\nEOF"
+    );
+    assert_eq!(shown[1], plakous::tools::JOB_TAIL_FRAGMENT);
+}

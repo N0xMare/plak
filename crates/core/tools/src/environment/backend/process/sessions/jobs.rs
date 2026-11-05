@@ -549,7 +549,9 @@ impl JoinedProcessSessions {
             .take(4096)
             .collect::<Vec<_>>();
         bytes.reverse();
-        let tail = crate::internal::job_output_tail(&String::from_utf8_lossy(&bytes));
+        let produced = shared.output.total_stdout_bytes + shared.output.total_stderr_bytes;
+        let cut = produced > u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+        let tail = crate::internal::output_tail(&String::from_utf8_lossy(&bytes), cut);
         crate::JobView {
             number: Self::job_number(id),
             command: session.command.clone(),

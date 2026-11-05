@@ -392,10 +392,11 @@ impl ProductTranscript {
     /// merges it, with nothing pending. Every row is its own line under its
     /// stored key, never an in-place update of an earlier row: call ids are
     /// not unique across lanes, since a carried session's imported rows and
-    /// its own tree notices can name the same `child-result:` call. Projector
-    /// rows are shown as stored, because the projector bounded each through
-    /// `bound_row`, which is the identity on its output. Notices and imported
-    /// rows (the product lane) are bounded as an append bounds them.
+    /// its own tree notices can name the same `child-result:` call. Every
+    /// row, the projector's included, is bounded again through `bound_row`:
+    /// it is the identity on its own output, so a row this build's bound
+    /// wrote is shown as stored, and a row an older bound wrote (whatever
+    /// build wrote it, whenever) is shown as this build bounds it.
     #[must_use]
     pub fn stored(rows: Vec<(RowKey, TranscriptRow)>) -> Self {
         let mut transcript = Self::default();
@@ -410,11 +411,7 @@ impl ProductTranscript {
             if !is_line(&row) {
                 continue;
             }
-            let row = match key.lane {
-                Lane::Runtime => row,
-                Lane::Product => bound_row(row),
-            };
-            transcript.push_row(row, key);
+            transcript.push_row(bound_row(row), key);
         }
         debug_assert!(
             transcript
@@ -583,7 +580,8 @@ fn marker_bytes() -> usize {
 
 /// Every stored row is bounded here, live, projected and imported alike: a
 /// tool or process row's subject (redacted, then 240 bytes on one line, the
-/// same function the live path uses), a tool row's detail (redacted, then
+/// same function the live path uses; a process row's command redacted with
+/// the runtime's escapes undone), a tool row's detail (redacted, then
 /// [`MAX_TOOL_ACTIVITY_DETAIL_BYTES`](super::MAX_TOOL_ACTIVITY_DETAIL_BYTES)),
 /// a thinking row's text ([`MAX_THINKING_ACTIVITY_BYTES`]). A single row still
 /// larger than the whole byte bound keeps the tail of its text, behind
@@ -591,9 +589,10 @@ fn marker_bytes() -> usize {
 /// fit together. Only text-bearing rows can grow that large.
 ///
 /// A bounded row is a fixed point: a cut never leaves text a second redaction
-/// would change. [`ProductTranscript::stored`] relies on it and shows projector
-/// rows as persisted, so a change to the display redactor or to these bounds
-/// must bump the product schema or drop the views to force a rebuild.
+/// would change. [`ProductTranscript::stored`] bounds every stored row again
+/// as it reads it, so a change to the display redactor or to these bounds
+/// takes effect on the next read of rows stored before it, with no schema
+/// bump and no rebuild.
 pub(crate) fn bound_row(mut row: TranscriptRow) -> TranscriptRow {
     match &mut row {
         TranscriptRow::Tool(tool) => {
@@ -606,11 +605,12 @@ pub(crate) fn bound_row(mut row: TranscriptRow) -> TranscriptRow {
                 .take()
                 .map(|value| super::bound_tool_detail(&value));
         }
+        // A process row names the runtime's displayed command, escaped:
+        // redacted with the escapes undone, then bounded as a subject.
         TranscriptRow::Process(process) => {
-            process.subject = process
-                .subject
-                .take()
-                .map(|value| super::live_tool_subject(&value));
+            process.subject = process.subject.take().map(|value| {
+                super::live_tool_subject(&crate::jobs::display::redacted_job_command(&value))
+            });
         }
         TranscriptRow::Thinking(thinking) => {
             thinking.text = super::bound_activity(

@@ -3219,3 +3219,56 @@ async fn sibling_records_need_no_reads_and_match_fully_loaded_views() -> TestRes
     assert!(matches!(own, Err(RunError::Read(_))));
     Ok(())
 }
+
+/// A process row the projector stores names the runtime's displayed
+/// command, newlines escaped: a heredoc's token on its own line is redacted
+/// there as it is live, so the stored row that replaces the live one shows
+/// no more.
+#[test]
+fn a_stored_process_row_redacts_a_heredoc_secret() {
+    let mut feed = Feed::new();
+    let operation_id = feed.fresh();
+    let fact = |state| FeedFact::OperationAdvanced {
+        operation_id,
+        turn_id: None,
+        kind: FeedOperationKind::ProcessSession {
+            job_number: Some(7),
+        },
+        state,
+    };
+    feed.advance(vec![fact(FeedOperationState::Dispatched)], Reads::default());
+    feed.advance(
+        vec![fact(FeedOperationState::Completed)],
+        Reads {
+            calls: vec![(
+                CallTarget::Operation(operation_id),
+                CallRead::Job {
+                    number: Some(7),
+                    command: Some(
+                        "gh auth login --with-token <<EOF\\nghp_abcdefghijklmnopqrstuvwxyz0123\\nEOF"
+                            .to_owned(),
+                    ),
+                    end: Some(JobEnd {
+                        stopped: false,
+                        exit_code: Some(0),
+                    }),
+                },
+            )],
+            ..Reads::default()
+        },
+    );
+    let rows = project_all(&feed)
+        .views
+        .transcript(&ProductIntents::default());
+    let subjects: Vec<_> = rows
+        .iter()
+        .filter_map(|(_, row)| match row {
+            TranscriptRow::Process(process) => process.subject.clone(),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        subjects,
+        ["gh auth login --with-token <<EOF\\n[redacted]\\nEOF"]
+    );
+}

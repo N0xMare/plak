@@ -361,6 +361,44 @@ impl SessionChange {
     }
 }
 
+/// What a wire face is shown of `observation`. A background job's
+/// lifecycle carries the runtime's displayed command and retained output
+/// tail, which are the model's process notices too; a face is a display
+/// surface, so they reach it redacted as a process row's are (spec 04
+/// §2.10). JSONL v1 projects them as they are.
+fn shown<P: ProtocolExtension>(observation: SessionObservation<P>) -> SessionObservation<P> {
+    use crate::jobs::display::{redacted_job_command, redacted_job_tail};
+    match observation {
+        SessionObservation::JobStarted {
+            job_id,
+            owner,
+            command,
+        } => SessionObservation::JobStarted {
+            job_id,
+            owner,
+            command: redacted_job_command(&command),
+        },
+        SessionObservation::JobTerminal {
+            job_id,
+            owner,
+            status,
+            exit_code,
+            stop_reason,
+            elapsed_ms,
+            output,
+        } => SessionObservation::JobTerminal {
+            job_id,
+            owner,
+            status,
+            exit_code,
+            stop_reason,
+            elapsed_ms,
+            output: redacted_job_tail(&output),
+        },
+        observation => observation,
+    }
+}
+
 /// Whether `intent` is tree mail on a child's attachment.
 const fn is_mail<P: ProtocolExtension>(intent: &SessionIntent<P>) -> bool {
     matches!(
@@ -1000,8 +1038,9 @@ where
                 Outbound::Event {
                     seq,
                     class,
-                    mut observation,
+                    observation,
                 } => {
+                    let mut observation = shown(observation);
                     let taken = take_observation_images(&mut observation, &format!("e{seq}"));
                     for chunk in taken.chunks {
                         write_frame(&mut self.stdout, &HostFrame::<P>::Blob(chunk))?;

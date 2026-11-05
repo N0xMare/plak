@@ -1333,6 +1333,10 @@ pub mod tools {
             RetrievalUsage,
         };
     }
+    /// Unsupported hosting seam: what a job's output tail cut inside its
+    /// only line starts with.
+    #[doc(hidden)]
+    pub use plakous_tools::internal::JOB_TAIL_FRAGMENT;
     /// Unsupported preview-minimization seam for official observation and hosting.
     #[doc(hidden)]
     pub use plakous_tools::internal::preview as preview_redaction;

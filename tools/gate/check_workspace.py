@@ -1498,6 +1498,9 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
         | {
             "CodexMinimalLocalCodeModeDescriptorV1",
             "preview_redaction",
+            # Hidden, unsupported seam: the mark a job tail cut inside its
+            # only line starts with, so a face shows no fragment.
+            "JOB_TAIL_FRAGMENT",
             # Hidden, unsupported runner seam: the selected runner's probe
             # (spec 01 §8.5).
             "runner::workspace_probe",

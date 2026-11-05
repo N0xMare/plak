@@ -1933,11 +1933,15 @@ A field this table does not name is not persisted. A live row may carry more
 (an `elapsed_ms`, a streamed preview); the persisted row the projector writes,
 and therefore every restore and rebuild, carries exactly the sourced fields.
 The projector redacts and bounds each row once, when it writes it, and a
-bounded row is a fixed point of that bounding. A restore or terminal
-publication shows projector rows as persisted, without redacting or bounding
-them again; notices and imported rows are still bounded. A change to the
-display redactor or the row bounds therefore bumps the product schema or drops
-the views to force a rebuild.
+bounded row is a fixed point of that bounding. A read bounds every stored row
+again, the projector's included (`ProductTranscript::stored`, which every
+restore, export and terminal publication of a stored transcript reads
+through): a row this build's bounding wrote is shown as stored, and a row an
+older bounding wrote, by whatever build and whenever, is shown as this build
+bounds it. A change to the display redactor or the row bounds therefore takes
+effect on read, with no schema bump, no rebuild and no write; the stored row
+and the view state's byte count stay as written until the projector writes
+that row again.
 
 **The projector.** One pure function applies one feed record to the views:
 `project(views, intents, record, reads) -> views'`, where `reads` are the
@@ -4067,9 +4071,12 @@ verdicts) are addressed, the session profile and workspace chrome states.
   its list on `clear_view` as on `session_opening`. Each row's command is
   redacted as the raw command the runtime displays (chapter 04 §5) and
   bounded as a tool row's subject is; its output tail goes through the
-  display redactor a tool row's detail does, starting at its first whole
-  line when the runtime's byte bound cut into one, with a private key whose
-  BEGIN the tail lost redacted up to its END (chapter 04 §2.10). A child
+  display redactor a tool row's detail does, whole lines only (a tail the
+  runtime cut inside its only line shows as its `…` mark), with a private
+  key whose BEGIN the tail lost redacted up to its END (chapter 04 §2.10). Every wire
+  v2 face is shown a job's lifecycle the same way: `job_started`'s command
+  and `job_terminal`'s output are redacted as a row's are, while JSONL v1
+  (§4.3.2) keeps them as the runtime displays them. A child
   attachment gets none, and JSONL v1 never projects
   it. The face sends the intent
   `promptable` once after its first painted frame: it sets the flag that

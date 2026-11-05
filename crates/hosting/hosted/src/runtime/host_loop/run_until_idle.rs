@@ -322,7 +322,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     .iter()
                     .map(|job| {
                         let command = crate::sessions::live_tool_subject(
-                            &crate::runtime::processes::redacted_job_command(&job.command),
+                            &crate::jobs::display::redacted_job_command(&job.command),
                         );
                         format!("p{} ({command})", job.number)
                     })

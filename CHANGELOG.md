@@ -613,12 +613,17 @@ an export.
 
 - A background job's command is redacted for display with the runtime's
   escaped newlines undone, so a token a heredoc writes on its own line is
-  redacted (process views, process transcript rows, process tool rows and
-  the run's waiting notice, which showed the command unredacted). A
-  displayed output tail starts at its first whole line when the byte bound
-  cut into one, and a private key whose BEGIN it lost is redacted up to its
-  END. The display redactor also redacts a private key without its END, to
-  the end of the text.
+  redacted (process views, live and stored process transcript rows, process
+  tool rows and the run's waiting notice, which showed the command
+  unredacted), and so are wire v2's `job_started` command and
+  `job_terminal` output for every face (JSONL v1 keeps them as the runtime
+  displays them). A job's output tail now starts at a line's start, or with
+  `…` (`plakous::tools::JOB_TAIL_FRAGMENT`) when it was cut inside its only
+  line, which a face shows as the mark alone; a private key whose BEGIN the
+  tail lost is redacted up to its END. The display redactor also redacts a
+  private key without its END, to the end of the text. Every read of a
+  stored transcript bounds its projector rows again, so rows an older build
+  stored come out redacted too; the state key stays `r27.e35.p36.t10`.
 - pulldown-cmark is 0.13.6 (RUSTSEC-2026-0433, quadratic parsing of nested
   image wikilinks). Plak never enables wikilinks, so it was not exposed.
 - The build audit also waives RUSTSEC-2026-0429 for zip 8.6.0. Like

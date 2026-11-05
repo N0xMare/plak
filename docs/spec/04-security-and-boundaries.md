@@ -733,12 +733,13 @@ as the TUI's `/attach`, `/resume` and rebind do. What it is shown is what
 the TUI shows, redacted as the TUI's rows are: the session's process rows
 (chapter 02 §4.4) carry each command redacted as the raw command it shows
 (§5) and each output tail through the same display redactor as a tool
-row's detail, from its first whole line, so a secret the model typed into
-a command or a process printed does not reach the client as typed. The job
-lifecycle observations are not yet redacted: `job_started` carries the
-runtime's displayed command and `job_terminal` its retained output, as
-JSONL v1 projects them. The redactor is best-effort display minimization,
-not a credential boundary. The endpoint's whole job is
+row's detail, whole lines only, so a secret the model typed into
+a command or a process printed does not reach the client as typed. Wire
+v2 shows every face the job lifecycle the same way: `job_started`'s command
+and `job_terminal`'s output tail are redacted as a process row's are. JSONL
+v1, a local, same-user stream, projects them as the runtime displays them.
+The redactor is best-effort display minimization, not a credential
+boundary. The endpoint's whole job is
 deciding who the client is, and its checks stop different attackers.
 
 - **The tailnet identity stops everyone who is not an allowed login.** The
@@ -1740,13 +1741,17 @@ the bounded, redacted `ToolStarted` subject that Plakous core computes from the
 committed call block, never from live event state; every other fact carries
 identities and summaries only. A background job's command is displayed by the
 runtime with each newline and carriage return escaped (`\n`, `\r`) and cut at
-1 KiB, and its output as a tail of at most 4 KiB and 40 lines; neither is
-redacted there, since the runtime's own process notices to the model carry
-them. A host redacts that command with the escapes undone and made again, so a
-token a heredoc writes on its own line keeps its word boundary, and starts a
-tail cut inside a line at its first whole line. Content a projector reads through the feed's
+1 KiB, and its output as a tail of at most 4 KiB and 40 lines that starts at a
+line's start or is marked a fragment (chapter 01); neither is redacted there,
+since the runtime's own process notices to the model carry them. A host
+redacts that command with the escapes undone and made again, so a token a
+heredoc writes on its own line keeps its word boundary, and shows a tail
+marked a fragment as its mark alone, so no secret whose prefix a cut removed
+is shown in part. Content a projector reads through the feed's
 checkpoint reads is canonical history, and what the product persists from it
-passes the same redaction and bounds as a live row.
+passes the same redaction and bounds as a live row. Every read of a stored
+row bounds it again, so a redactor change takes effect on read for rows an
+earlier redactor stored, whatever build wrote them (chapter 02 §2.6).
 
 The terminal interface displays only tool data already in the attached
 session's canonical history or its own retained transcript rows, or in the
