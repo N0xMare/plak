@@ -301,6 +301,8 @@ pub(crate) enum Command {
     /// Hidden `plak web`: one headless session's wire v2 and the web UI on
     /// a private listener.
     Web(WebCommand),
+    /// Hidden `plak host`: the per-user host process (skeleton).
+    Host,
     /// Hidden `plak wire schema`: this build's wire v2 JSON Schema.
     WireSchema,
 }
@@ -452,6 +454,7 @@ impl Command {
             | Self::ContinueSession { .. } => "run",
             Self::Agent { .. } => "agent",
             Self::Web(_) => "web",
+            Self::Host => "host",
             Self::WireSchema => "wire",
         }
     }
@@ -478,6 +481,7 @@ pub(crate) fn command_needs_product_state(command: &Command) -> bool {
             | Command::ContinueSession { .. }
             | Command::Agent { .. }
             | Command::Web(_)
+            | Command::Host
             | Command::SessionList
             | Command::SessionRecover { .. }
             | Command::SessionExport { .. }

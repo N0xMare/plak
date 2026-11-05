@@ -318,6 +318,27 @@ impl PlakPaths {
         self.home.join("run")
     }
 
+    /// `plak host`'s control sockets, one per state key (spec 04 §4.7):
+    /// a 0700 directory under a 0700 `host/`. Not state.
+    #[must_use]
+    pub fn host_run_dir(&self) -> PathBuf {
+        self.home.join("host").join("run")
+    }
+
+    /// The control socket of this build's `plak host`.
+    #[must_use]
+    pub fn host_socket(&self) -> PathBuf {
+        self.host_run_dir()
+            .join(format!("{}.sock", crate::home::state::state_key()))
+    }
+
+    /// The lock this build's `plak host` holds for its whole life: one host
+    /// per home and state key.
+    #[must_use]
+    pub fn host_lock(&self) -> PathBuf {
+        self.state_dir().join("host.lock")
+    }
+
     /// Parent of every build's state directory.
     #[must_use]
     pub fn state_root(&self) -> PathBuf {

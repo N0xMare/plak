@@ -465,6 +465,10 @@ enum TopCommand {
         #[arg(long)]
         dev_login: Option<String>,
     },
+    /// The per-user host process: one per home and state key, on a
+    /// private control socket (maintainer builds; hosts no session yet).
+    #[command(hide = true)]
+    Host,
     /// Wire v2 tools (maintainer builds).
     #[command(hide = true)]
     Wire {

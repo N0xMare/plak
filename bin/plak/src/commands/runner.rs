@@ -11,7 +11,7 @@
 mod dial;
 mod home;
 
-pub(crate) use home::host_id;
+pub(crate) use home::{host_id, private_directory};
 
 use std::path::Path;
 use std::sync::Arc;
@@ -100,7 +100,7 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
             home.config_path().display()
         )));
     };
-    home::private_directory(home.root())?;
+    private_directory(home.root())?;
     let excluded = paths.home().to_path_buf();
     refuse_unsafe_roots(&home, &config, &excluded)?;
     if !home::admitted_workspace(&config.roots, &excluded, first) {
@@ -281,7 +281,7 @@ fn start_daemon(
             .or_else(crate::environment::inherited_path)
             .unwrap_or_else(|| "/usr/bin:/bin".to_owned()),
     };
-    home::private_directory(home.root())
+    private_directory(home.root())
         .map_err(|error| std::io::Error::other(error.message().to_owned()))?;
     let log = {
         use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
@@ -309,7 +309,7 @@ fn start_daemon(
 }
 
 /// The `PATH` the user's login shell sets, asked once with a 5 s bound.
-fn login_shell_path() -> Option<String> {
+pub(crate) fn login_shell_path() -> Option<String> {
     login_shell_answer(&crate::environment::login_shell()?, LOGIN_SHELL_DEADLINE)
 }
 
@@ -470,7 +470,7 @@ async fn pair(paths: &PlakPaths, name: &str, stdout: &mut dyn std::io::Write) ->
         binary_id: dialed.hello.binary_id.as_deref(),
     };
     let directory = paths.home().join("runners").join(name);
-    home::private_directory(&directory)?;
+    private_directory(&directory)?;
     home::write_private(
         &directory.join("runner.json"),
         &serde_json::to_vec_pretty(&record).map_err(|error| CliFailure::new(error.to_string()))?,

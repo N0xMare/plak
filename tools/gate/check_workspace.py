@@ -694,6 +694,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plak", "src/web/auth.rs"): {"info", "warn"},
     ("plak", "src/web/listen.rs"): {"select"},
     ("plak", "src/web/socket.rs"): {"info", "select"},
+    ("plak", "src/host/socket.rs"): {"select"},
     # The wire schema document's envelope.
     ("plak", "src/wire_schema.rs"): {"json"},
     ("plak", "src/commands/secret_input.rs"): {"select"},

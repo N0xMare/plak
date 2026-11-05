@@ -312,6 +312,7 @@ another session's jobs.
       product.sqlite3             Plak intents and feed-derived views, schema 36
       subagents.sqlite3           the agent tree, schema 10
       custody-hosts/<instance>.lock  each live host process's custody liveness lock (chapter 03 §14)
+      host.lock                   held by this build's `plak host` for its life, naming its pid and binary (§4.6); not state
       deleted-artifacts/<uuid>.json  retained physical ownership, never authority
   carry/<id>.<uuid>.json      session export documents, 0600 in 0700 (§2.5.1)
   references/<id>.json        obsolete archives, retained only for cleanup (§2.5)
@@ -319,6 +320,7 @@ another session's jobs.
   logs/plak.log               PLAK_LOG boundary spans
   binary-ids                  development-build identity cache, 0600 (§1), disposable
   host-id                     this home's host identity (runners, tree custody), 0600, made at first use
+  host/run/<state key>.sock   `plak host`'s control socket, 0600 in 0700 directories (§4.6, chapter 04 §4.7); not state
   runners/<name>/runner.json  a paired runner's identity and version, 0600
   runners/<name>/calls/       the keyed calls this host sent the runner and has no answer for (chapter 01 §8.4)
   runner/                     this machine's runner home, 0700 (an existing one is closed to 0700):
@@ -4130,6 +4132,56 @@ The hidden maintainer command `plak web --listen <unix:path|127.0.0.1:port>
   refusals with their reason, path and login (the presented one for a login
   not allowed, bounded and printable), at most 60 refusal lines a minute
   with a count of the rest; never a cookie, the key, or a frame.
+
+### 4.6 `plak host`
+
+The hidden maintainer command `plak host` (feature `web`, in maintainer
+builds) is the per-user host process, run in the foreground under a systemd
+user unit or a terminal multiplexer on the host machine. It hosts no session
+yet and changes no other face: the TUI, `plak run`, `plak agent` and `plak
+web` run their sessions as before.
+
+- **One per home and state key.** Before anything else it takes an exclusive
+  lock on `state/<key>/host.lock` and holds it for its life; the file names
+  its pid and binary id. A second `plak host` of the same home and state key
+  refuses, naming them. The lock is per state key because the stores are, so
+  builds of different formats each host their own state.
+- **Identity.** It binds its custody identity at start (chapter 03 §14): the
+  home's `host-id` and this process's instance, which its start line names.
+- **Control socket.** `host/run/<key>.sock` under the home, 0600 in a 0700
+  `run/` under a 0700 `host/`; a socket found there is a dead host's, since
+  only the holder of `host.lock` replaces it, and the host removes its own
+  socket, before releasing the lock, when it stops. Only the user who owns the
+  directory may speak on it (chapter 04 §4.7). Every admitted connection's
+  hello is answered `refused unavailable` ("plak host serves no session yet")
+  in a wire v2 frame (§4.4), and the connection is closed. At most 16
+  connections wait for their hello at once; another is closed unanswered,
+  and a failed accept is retried after 100 ms.
+- **Tool environment.** It captures the login shell's `PATH` once at start,
+  bounded at 5 s however the shell's startup files behave, as `plak runner
+  serve` does when `runner.toml` sets no `path` (the shell runs in a process
+  group of its own, killed once it answered or the deadline passed), falling back to its own `PATH` and then `/usr/bin:/bin`, with its
+  own `HOME`; the start line names the source but never the directories.
+  Sessions it hosts will run their tools with that environment, not the shell
+  a TUI was started in (no direnv, no per-project `PATH`).
+- **Stopping.** `SIGTERM`, `SIGHUP` or `SIGINT` stops it: it stops accepting,
+  removes its socket and releases the lock. The stop is bounded: the process
+  exits within 60 s of the signal however its work stands, under the unit's
+  `TimeoutStopSec`. It prints `plak host: serving on <socket> (host <host
+  id>, instance <instance>); tools get <source>` once it accepts.
+
+The unit runs it as a planned stop, not a crash: `KillMode=mixed` signals the
+host alone and kills the rest of the cgroup only after the timeout, so a
+session's processes are never signalled before the host has handed them off.
+
+```ini
+[Service]
+ExecStart=%h/.local/bin/plak host
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=90
+Restart=on-failure
+```
 
 ## 5. The terminal interface
 

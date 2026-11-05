@@ -297,6 +297,7 @@ impl TopCommand {
                 cwd,
                 dev_login,
             })),
+            Self::Host => Ok(Command::Host),
             Self::Wire {
                 action: WireAction::Schema,
             } => Ok(Command::WireSchema),

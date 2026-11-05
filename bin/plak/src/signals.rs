@@ -214,6 +214,19 @@ pub fn install<F>(announcement: SignalAnnouncement, request_stop: F)
 where
     F: Fn() + Send + 'static,
 {
+    install_bounded(announcement, GRACEFUL_STOP_DEADLINE, request_stop);
+}
+
+/// [`install`], with `deadline` in place of [`GRACEFUL_STOP_DEADLINE`]: how
+/// long the graceful stop may take after the signal before the process exits.
+#[cfg(unix)]
+pub fn install_bounded<F>(
+    announcement: SignalAnnouncement,
+    deadline: std::time::Duration,
+    request_stop: F,
+) where
+    F: Fn() + Send + 'static,
+{
     // Registration must be live before this returns. Handing the caller back
     // an unarmed process leaves a window in which the default disposition
     // still applies, and a supervisor that stops a slow start inside that
@@ -223,7 +236,7 @@ where
     let (registered, confirmed) = std::sync::mpsc::sync_channel(1);
     if std::thread::Builder::new()
         .name("plak-stop-signals".to_owned())
-        .spawn(move || watch(announcement, &request_stop, &registered))
+        .spawn(move || watch(announcement, deadline, &request_stop, &registered))
         .is_ok()
     {
         // `Err` means the thread gave up before registering, which leaves the
@@ -235,6 +248,7 @@ where
 #[cfg(unix)]
 fn watch(
     announcement: SignalAnnouncement,
+    deadline: std::time::Duration,
     request_stop: &dyn Fn(),
     registered: &std::sync::mpsc::SyncSender<()>,
 ) {
@@ -277,7 +291,7 @@ fn watch(
     // the turn is cancelled and joined and the branch head is left current: a
     // bare exit here leaves the session unresumable with a stale locator.
     request_stop();
-    std::thread::sleep(GRACEFUL_STOP_DEADLINE);
+    std::thread::sleep(deadline);
     // Still here: the graceful stop did not finish in time and a supervisor's
     // patience is nearly up. A face that deferred its announcement has said
     // nothing yet, so it says it now, and then we leave rather than hang.

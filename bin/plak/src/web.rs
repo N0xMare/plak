@@ -221,7 +221,7 @@ pub(crate) struct StopProbe {
 }
 
 impl StopProbe {
-    fn armed() -> Self {
+    pub(crate) fn armed() -> Self {
         Self {
             interrupts: crate::signals::interrupts(),
             stops: crate::signals::signalled_stops(),

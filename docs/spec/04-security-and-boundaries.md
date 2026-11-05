@@ -1642,6 +1642,27 @@ running interactive session to reload onto the installed build (chapter 02
   equally edit that user's state; the opt-in exists so a home that never
   wants agents to restart its sessions is not asked.
 
+### 4.7 The host socket is a same-user local channel
+
+`plak host` (chapter 02 §4.6) listens on `host/run/<state key>.sock` under
+the product home. Its authority is exactly the user's own:
+
+- The socket is 0600 in a 0700 `run/` under a 0700 `host/`, both forced
+  private (an existing one is closed to 0700) and refused when they are not
+  directories. The socket path is checked against the platform's
+  `sockaddr_un` limit and refused by name when it is too long.
+- Before a byte is read, the peer's credentials (`SO_PEERCRED`, or
+  `getpeereid` on macOS) must name the uid that owns the socket's directory;
+  any other peer, or one whose credentials cannot be read, is closed without
+  an answer.
+- Only the holder of the state key's `host.lock` binds or replaces the
+  socket, so a live host's socket is never unlinked by another, and a host
+  removes only the socket file it bound (by device and inode).
+- The socket grants nothing the user's shell does not already have: any
+  process of the user can already read and write the home. There is no
+  port and no network surface; a remote client reaches a host only through
+  the web endpoint's gate (§2.10).
+
 ## 5. Redaction
 
 Composition named state is session data in the runtime store, not a credential

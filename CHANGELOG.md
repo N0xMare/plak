@@ -103,6 +103,13 @@ an export.
 
 ### Plak
 
+- `plak host` (hidden, maintainer builds): the per-user host process, as a
+  skeleton that hosts no session yet. One per home and state key
+  (`state/<key>/host.lock`, a second one refuses naming the first); a control
+  socket `host/run/<key>.sock` for this user only, which refuses every hello
+  `unavailable`; its custody identity and the login shell's `PATH` captured
+  once at start; a `SIGTERM` stops it within 60 s. Spec 02 §4.6 carries the
+  systemd unit. No other face changes.
 - `plak web` (hidden, maintainer builds): one headless session's wire v2 over
   a WebSocket at `/wire`, and a web UI's static build, on a private unix
   socket that `tailscale serve --bg unix:<path>` publishes on the tailnet,
