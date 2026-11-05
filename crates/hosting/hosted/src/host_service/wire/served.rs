@@ -37,6 +37,9 @@ pub(super) struct ServedSession<P: ProtocolExtension> {
     replay: Vec<SessionObservation<P>>,
     /// The moved attachments still owed the replay.
     owed: BTreeSet<AttachmentId>,
+    /// An opening outgrew the hold before its binding: the service holds
+    /// new attachments until the binding says whose it is.
+    unresolved: bool,
     /// The replay outgrew the attachment capacity and was given up: an
     /// owed attachment's connection resyncs instead of getting a silent
     /// gap.
@@ -65,6 +68,7 @@ impl<P: ProtocolExtension> ServedSession<P> {
             held: None,
             replay: Vec::new(),
             owed: BTreeSet::new(),
+            unresolved: false,
             replay_lost: false,
         }))
     }
@@ -99,11 +103,14 @@ impl<P: ProtocolExtension> ServedSession<P> {
             _ => None,
         };
         let Some(held) = self.held.as_mut() else {
-            if opening {
+            if opening && !self.unresolved {
                 self.held = Some(vec![event]);
                 return true;
             }
             if let Some(next) = binding.flatten() {
+                if self.unresolved {
+                    return self.resolve(next, event);
+                }
                 return self.switch(next, vec![event]);
             }
             self.service.observe(event);
@@ -121,11 +128,31 @@ impl<P: ProtocolExtension> ServedSession<P> {
         if overflowed {
             // Too long an opening to hold: it may be the next session's,
             // which the served session's attachments must not be shown, so
-            // they end and attach again for a fresh snapshot.
+            // they end, and an attachment made before its binding takes
+            // nothing until the binding ends it.
             self.service.resync_attachments();
+            self.service.hold_attachments(true);
+            self.unresolved = true;
         }
         self.pass(held);
         true
+    }
+
+    /// The binding `binding` of an opening that outgrew the hold names its
+    /// session `next`. The attachments made since take nothing more: the
+    /// served session's own opening ends them with `resync_required`,
+    /// another's switches and moves them, owed what follows. Either way the
+    /// next attach asks the session for a fresh baseline, which carries
+    /// what the hold kept from them.
+    fn resolve(&mut self, next: String, binding: SessionObservation<P>) -> bool {
+        self.unresolved = false;
+        self.service.hold_attachments(false);
+        if next == self.session {
+            self.service.resync_attachments();
+            self.service.observe(binding);
+            return true;
+        }
+        self.switch(next, vec![binding])
     }
 
     /// Takes `observations`, the opening of the session `next` names. When
@@ -175,6 +202,9 @@ impl<P: ProtocolExtension> ServedSession<P> {
     /// The session's observations ended: an opening no binding followed
     /// (the open failed) is the served session's.
     pub(super) fn end(&mut self) {
+        if std::mem::take(&mut self.unresolved) {
+            self.service.hold_attachments(false);
+        }
         let held = self.held.take().unwrap_or_default();
         self.pass(held);
     }

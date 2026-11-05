@@ -634,30 +634,74 @@ fn each_moved_connection_gets_the_replay_on_its_next_root_attach() {
 /// An opening too long to hold until the binding that names its session
 /// ends the served session's attachments with `resync_required`, after
 /// what they held and before any of the opening: none of it reaches them,
-/// whichever session it turns out to be.
+/// whichever session it turns out to be. An attachment made before the
+/// binding takes nothing, not even a snapshot; the binding ends it with
+/// `moved` when it names another session, or `resync_required` when it
+/// names the served one, and the next attach asks the session for a fresh
+/// baseline.
 #[test]
 fn an_opening_too_long_to_hold_resyncs_the_old_attachments() {
+    for (next, root_after) in [("s2", root_named("tree-s2")), ("s1", root())] {
+        overflowed_opening_resolved_by(next, &root_after);
+    }
+}
+
+fn overflowed_opening_resolved_by(next: &str, root_after: &NodeAddress) {
     use plakous_host_protocol::Core;
-    use plakous_host_protocol::views::transcript::NoticeScope;
+    use plakous_host_protocol::views::transcript::{NoticeScope, TranscriptScope};
     let before = SessionObservation::<Core>::Row(TranscriptRow::info(NoticeScope::Host, "before"));
-    let (actions, _intents) = plakous_host_protocol::intent_channel::<Core>();
+    let (actions, intents) = plakous_host_protocol::intent_channel::<Core>();
     let mut stdout = Vec::new();
     let mut connection = WireConnection::new(root(), &mut stdout, actions)
         .serving("s1", |id| Some(root_named(&format!("tree-{id}"))));
     connection.request(1, Op::Attach { node: root() });
     assert!(connection.observe(before.clone()).unwrap());
+    let opening = |index: usize| {
+        SessionObservation::Row(TranscriptRow::info(
+            NoticeScope::Host,
+            format!("opening {index}"),
+        ))
+    };
     assert!(
         connection
             .observe(SessionObservation::SessionOpening)
             .unwrap()
     );
     for index in 0..=ATTACHMENT_CAPACITY {
-        let row = TranscriptRow::info(NoticeScope::Host, format!("opening {index}"));
-        assert!(connection.observe(SessionObservation::Row(row)).unwrap());
+        assert!(connection.observe(opening(index)).unwrap());
     }
     connection.flush().unwrap();
-    assert!(connection.observe(binding("s2")).unwrap());
+    while intents.try_recv().is_ok() {}
+    assert!(matches!(
+        connection.request(2, Op::Attach { node: root() }),
+        Some(Outcome::Ok(Answer::Attached { attachment: 2 }))
+    ));
+    assert!(intents.try_recv().is_err(), "a waiting attach asks nothing");
+    assert!(
+        connection
+            .observe(opening(ATTACHMENT_CAPACITY + 1))
+            .unwrap()
+    );
+    assert!(connection.observe(binding(next)).unwrap());
     connection.flush().unwrap();
+    assert!(matches!(
+        connection.request(
+            3,
+            Op::Attach {
+                node: root_after.clone()
+            }
+        ),
+        Some(Outcome::Ok(Answer::Attached { attachment: 3 }))
+    ));
+    assert!(
+        matches!(
+            intents.try_recv().as_deref(),
+            Ok(SessionIntent::ResyncTranscript {
+                scope: TranscriptScope::Root
+            })
+        ),
+        "{next}: the next attach asks for a fresh baseline"
+    );
     drop(connection);
     let frames = host_frames(&stdout);
     let resync = frames
@@ -679,8 +723,19 @@ fn an_opening_too_long_to_hold_resyncs_the_old_attachments() {
                 ..
             } if row.text().is_some_and(|text| text.starts_with("opening"))
         )),
-        "{frames:?}"
+        "{next}: {frames:?}"
     );
+    assert!(
+        !frames
+            .iter()
+            .any(|frame| matches!(frame, HostFrame::Event { attachment: 2, .. })),
+        "{next}: {frames:?}"
+    );
+    let ended = frames.iter().any(|frame| match next {
+        "s1" => matches!(frame, HostFrame::ResyncRequired { attachment: 2 }),
+        _ => matches!(frame, HostFrame::Moved { attachment: 2, node, .. } if node == root_after),
+    });
+    assert!(ended, "{next}: {frames:?}");
     assert!(
         !frames
             .iter()

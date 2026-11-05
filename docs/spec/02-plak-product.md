@@ -3770,7 +3770,11 @@ verdicts) are addressed, the session profile and workspace chrome states.
   binding that names it, so the host holds what follows a session opening
   until that binding: none of it reaches the old attachment (an opening
   too long to hold, past an attachment's capacity, ends the old
-  attachments with `resync_required` before any of it), and what the
+  attachments with `resync_required` before any of it; an attachment made
+  before its binding takes nothing, not even its snapshot, until the
+  binding ends it with `moved` or, when the opening was the served
+  session's own, `resync_required`, and the next attach takes a fresh
+  baseline), and what the
   next attach snapshot does not carry (an open notice, an answer before the
   next session's first window) follows the `attached` answer of each moved
   connection's next root attach, an answer to one connection's intent to

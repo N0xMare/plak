@@ -247,6 +247,7 @@ impl<P: ProtocolExtension> HostService<P> {
                 gapped: BTreeSet::new(),
                 snapshot_held: 0,
                 dropped: false,
+                waiting: false,
             },
         );
         *state.agent_holders.entry(agent.to_owned()).or_default() += 1;

@@ -125,6 +125,10 @@ struct Attachment<P: ProtocolExtension> {
     /// count against the capacity.
     snapshot_held: usize,
     dropped: bool,
+    /// Admitted while the service held what follows a session opening it
+    /// could not resolve: it takes nothing until the opening's binding ends
+    /// it with `moved` or `resync_required`.
+    waiting: bool,
 }
 
 /// The transcript scopes an attachment holds.
@@ -175,6 +179,8 @@ struct State<P: ProtocolExtension> {
     /// How many attachments hold each agent transcript: the session serves
     /// it from the first holder's open to the last holder's close.
     agent_holders: BTreeMap<String, usize>,
+    /// Whether a new attachment waits ([`Attachment::waiting`]).
+    holding: bool,
 }
 
 /// One session's host service; its clones are the same service.
@@ -322,6 +328,7 @@ impl<P: ProtocolExtension> HostService<P> {
                 },
                 requester: None,
                 agent_holders: BTreeMap::new(),
+                holding: false,
             })),
         }
     }
@@ -360,6 +367,19 @@ impl<P: ProtocolExtension> HostService<P> {
             }
         }
         moved
+    }
+
+    /// While `holding`, a new attachment takes nothing, not even its attach
+    /// snapshot, until it is ended ([`Attachment::waiting`]); the kept root
+    /// baseline is dropped as the hold ends, since what the hold kept from
+    /// every attachment reached it, and the next attach asks the session
+    /// for a fresh one.
+    fn hold_attachments(&self, holding: bool) {
+        let mut state = self.lock();
+        if state.holding && !holding {
+            state.snapshot.baseline = None;
+        }
+        state.holding = holding;
     }
 
     /// Ends every attachment with [`Outbound::ResyncRequired`], after what
@@ -498,16 +518,17 @@ impl<P: ProtocolExtension> HostService<P> {
         let mut state = self.lock();
         let id = state.next_attachment;
         state.next_attachment += 1;
+        let waiting = state.holding;
         let snapshot = &state.snapshot;
         let mut items: Vec<SessionObservation<P>> = snapshot.states.clone();
-        let needs_baseline = snapshot.baseline.is_none();
+        let needs_baseline = snapshot.baseline.is_none() && !waiting;
         if let Some((baseline, patches)) = &snapshot.baseline {
             items.push(baseline.clone());
             items.extend(patches.iter().cloned());
         }
         items.extend(snapshot.approvals.iter().map(|(_, asked)| asked.clone()));
         items.extend(snapshot.credential_wait.iter().cloned());
-        items.retain(|item| face.receives(item));
+        items.retain(|item| face.receives(item) && !waiting);
         let sender = mailbox.map(|actions| actions.tagged(origin(id)));
         let scopes = match self.actions {
             Some(_) => Scopes::Held(BTreeSet::from([TranscriptScope::Root])),
@@ -524,6 +545,7 @@ impl<P: ProtocolExtension> HostService<P> {
             gapped: BTreeSet::new(),
             snapshot_held: items.len(),
             dropped: false,
+            waiting,
         };
         for observation in items {
             attachment.seq += 1;
@@ -1036,7 +1058,7 @@ impl<P: ProtocolExtension> Attachment<P> {
         class: ObservationClass,
         capacity: usize,
     ) {
-        if self.dropped || !self.face.receives(&observation) {
+        if self.dropped || self.waiting || !self.face.receives(&observation) {
             return;
         }
         let droppable = class == ObservationClass::Event(Delivery::Droppable);
