@@ -293,6 +293,13 @@ impl RootLedger<'_> {
             return Err(error.into());
         }
         *self.session = candidate;
+        // The command is recorded: a loss notice it carries is delivered.
+        if let Some(runtime) = crate::topology_runtime::lookup(&super::rebind::durable_tree_id(
+            self.rows,
+            self.session,
+        )) {
+            runtime.driver().confirm_loss_notice(intent.base_text);
+        }
         Ok(Prepared {
             prompt: intent.base_text.to_owned(),
             message_ids: batch.map_or_else(Vec::new, |batch| batch.message_ids),

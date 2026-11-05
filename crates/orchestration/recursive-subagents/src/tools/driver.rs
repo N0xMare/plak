@@ -58,6 +58,9 @@ pub struct TreeDriver {
     publication_owner: Option<String>,
     capacity_retry_interval: std::time::Duration,
     checkout_sizes: Arc<Mutex<std::collections::BTreeMap<String, CheckoutSize>>>,
+    /// The children whose loss this process already named to their parent
+    /// (spec 03 section 14.1): one notice per host generation, never stored.
+    loss_noticed: Arc<Mutex<loss_notice::LossNotices>>,
 }
 
 type RetirementRecovery = Arc<dyn Fn() + Send + Sync>;
@@ -66,6 +69,7 @@ mod custody;
 use custody::DriverCustody;
 mod host_shutdown;
 pub use host_shutdown::HostShutdown;
+mod loss_notice;
 
 /// One writer turn's work, with its result already handed off.
 type ErasedWork = Box<dyn FnOnce(&mut storage::TreeMutationGuard<'_>) + Send>;
@@ -209,6 +213,7 @@ impl TreeDriver {
             publication_owner: None,
             capacity_retry_interval: std::time::Duration::from_secs(5),
             checkout_sizes: Arc::new(Mutex::new(std::collections::BTreeMap::new())),
+            loss_noticed: Arc::default(),
         }
     }
 

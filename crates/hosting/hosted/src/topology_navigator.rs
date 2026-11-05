@@ -598,9 +598,12 @@ pub(crate) fn mail_row(text: &str) -> Option<String> {
 /// sentence and escaped blocks (`result_mail::select`), so the boundary is the
 /// last frame whose remainder parses as whole blocks to the end: operator text
 /// may carry the frame and even an unterminated block before it, and an
-/// escaped body cannot contain a `<child_message` opener. Returns `None` for
-/// text that carries no batch.
+/// escaped body cannot contain a `<child_message` opener. A loss notice the
+/// host appended after the batch is not part of it and is left out (the
+/// transcript renders it as its own row). Returns `None` for text that
+/// carries no batch.
 pub(crate) fn split_child_mail(text: &str) -> Option<(String, Vec<String>)> {
+    let text = crate::agent_tree::split_loss_notice(text).map_or(text, |(before, _)| before);
     let frame = format!("\n\n{}", crate::runtime::result_mail::CHILD_MAIL_FRAME);
     text.rmatch_indices(&frame).find_map(|(start, _)| {
         let rows = child_mail_rows(&text[start + frame.len()..])?;

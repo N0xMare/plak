@@ -366,3 +366,51 @@ fn the_open_holds_or_continues_a_held_root_by_policy() {
         assert_eq!(notes > 0, !continues, "{policy:?}");
     }
 }
+
+/// The root's continuation after a loss is its next turn, so its recorded
+/// command names the child the lost host interrupted.
+#[test]
+fn the_roots_continuation_names_the_child_a_lost_host_interrupted() {
+    let root = tempfile::tempdir().unwrap();
+    let (config, _) = scripted_host_with(root.path(), script(serde_json::json!([])));
+    let id = config.session.id.clone();
+    let (tree, child) = held_child_tree(&id, config.cwd.clone());
+    let _runtime = crate::topology_runtime::insert_root(id.clone(), tree, None)
+        .block()
+        .unwrap();
+    let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let mut host = super::RootActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
+    host.role
+        .config
+        .store
+        .save(&mut host.role.config.session)
+        .unwrap();
+    lose_root(&host);
+    let (text, _, _) = host
+        .block(async |host| host.root_loss_resume_delivery().await)
+        .unwrap()
+        .expect("the root's continuation");
+    assert_eq!(text, crate::runtime::root_loss::ROOT_LOSS_RESUME_TEXT);
+    let intents = host
+        .role
+        .config
+        .store
+        .load_intents(&host.role.config.session.id)
+        .unwrap();
+    let submission = intents
+        .submissions
+        .iter()
+        .find(|submission| crate::runtime::root_loss::is_root_loss_command(&submission.command_id))
+        .expect("the continuation's submission");
+    assert!(
+        submission.canonical_command.starts_with(&format!(
+            "{}\n\n[harness]\n<agent_notice agent_id=\"{child}\"",
+            crate::runtime::root_loss::ROOT_LOSS_RESUME_TEXT
+        )),
+        "{}",
+        submission.canonical_command
+    );
+    drop(host);
+    crate::topology_runtime::force_release(&id).block();
+}

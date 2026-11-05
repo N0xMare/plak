@@ -277,6 +277,10 @@ an export.
   `pending` or `running`). The open sends one warning listing everything the
   lost host left held, the root's turn and each held agent with what it was
   doing, instead of one for the root and another counting the agents.
+- After a lost host, a parent's next turn is told which of its sub-agents the
+  loss interrupted, once per host run, in a `[harness]` note after its
+  prompt and mail: each agent, and whether it waits for your resume or
+  continues by itself. A handed-off agent is not named.
 - `/reload` onto a build without an install manifest (a development or
   cargo-installed build) no longer falls back to an unverified resume on a
   busy machine; the reload probe answers without hashing the build.

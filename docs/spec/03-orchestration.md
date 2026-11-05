@@ -3698,6 +3698,31 @@ the tree's hub when it opens. Each run ends with that continuation pass, after
 every recovery it made, and reports the children still held in one live tree
 notice that is never stored.
 
+**What the parent learns.** A loss sends no result mail. Besides its
+`wait_agent` rows (§4), a parent's next command after a loss names each of its
+children a lost host interrupted (cause `owner_lost`, with a continuation
+held, pending or running), once per host generation, in the process-notice
+encoding: a `[harness]` block appended after the command's text and mail, one
+`<agent_notice agent_id="c1" cause="owner_lost" continuation="held">` element
+per child (`held`, or `continuing` when consent is recorded or the
+continuation runs) saying the host was lost, the attempt and its work are
+kept, no result was sent, and whether it waits for the operator or continues
+by itself; sixteen are named and the rest counted. A handed-off child
+continues by itself and is not named. The root's next command is an
+operator prompt, a wake that carries mail (a wake with no mail takes
+nothing and parks), or its own continuation after a loss; a child parent's is
+any command the host prepares for it. Nothing is stored: the host's tree
+driver holds which children it already named, in memory, so the next host
+generation names those still interrupted again. A child counts as named only
+once the command that carries the notice is recorded and committed, so a
+command that is never recorded (a refused admission, an interrupted wake, a
+refused child command) loses nothing and the next command carries it; one
+with no room left under the prompt bound does not carry it either. Once
+recorded, the notice is part of the command's exact text, so an exact
+resubmission carries it again. A child whose turn was running when its host
+died is marked owner-lost by the open's recovery run, so a command prepared
+before that run marked it does not name it yet; the next one does.
+
 **The root's continuation after a loss.** A root turn its lost host left
 running is closed by the root's next exact open, whose terminal is an
 abandonment with cause `process_lost`. The root records that loss as an

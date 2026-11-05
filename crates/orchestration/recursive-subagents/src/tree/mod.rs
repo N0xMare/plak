@@ -874,6 +874,7 @@ mod intents;
 mod lifecycle;
 mod lineage;
 mod loss_continuation;
+mod loss_notice;
 mod mail;
 pub mod observer;
 mod operator_intents;
@@ -917,6 +918,7 @@ pub use lineage::{
     ForkedFrom, MAX_REFERENCED_EPOCHS, NodeLineId, NodePlacement, NodeWorkspace, TreeEpochs,
 };
 pub use loss_continuation::{LossContinuation, LossContinuationState};
+pub use loss_notice::{LossNoticeKey, LossNoticeSummary, split_loss_notice};
 pub use observer::{NodeDetach, TopologyObserver};
 pub use park::WaitingOn;
 /// The recording VCS double, for the topology crates' tests at the cut.

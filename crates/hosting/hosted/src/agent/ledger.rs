@@ -207,6 +207,7 @@ fn prepare_in(
     prompt: &str,
     kind: CommandKind,
     batch: &OwnedBatch,
+    loss_notice: impl FnOnce(&crate::agent_tree::ProductAgentTree, usize) -> Option<String>,
 ) -> Result<Prepared, String> {
     if let Some(stored) = tree.command(command_id) {
         let exact = stored.recipient == recipient
@@ -255,6 +256,14 @@ fn prepare_in(
         instruction: kind.is_instruction(),
     };
     gather_batch(tree, recipient, batch, &mut prepared);
+    // A parent's next command carries the children a lost host interrupted
+    // (spec 03 section 14.1), once per host generation.
+    if let Some(notice) = loss_notice(
+        tree,
+        crate::sessions::MAX_PROMPT_BYTES.saturating_sub(prepared.prompt.len()),
+    ) {
+        prepared.prompt.push_str(&notice);
+    }
     // Wakes and corrective rounds name their attempt; other commands
     // serve the attempt current at submission.
     let attempt_id = command_attempt(command_id)
@@ -381,10 +390,22 @@ async fn prepare(
         recipient.to_owned(),
         prompt.to_owned(),
     );
-    persist_context(&driver.for_agent(recipient), move |tree| {
-        prepare_in(tree, &command_id, &recipient_id, &prompt, kind, &batch)
+    let noticer = driver.clone();
+    let prepared = persist_context(&driver.for_agent(recipient), move |tree| {
+        prepare_in(
+            tree,
+            &command_id,
+            &recipient_id,
+            &prompt,
+            kind,
+            &batch,
+            |tree, room| noticer.offer_loss_notice(Some(tree), &recipient_id, room),
+        )
     })
-    .await
+    .await?;
+    // Recorded and committed: a loss notice the command carries is delivered.
+    driver.confirm_loss_notice(&prepared.prompt);
+    Ok(prepared)
 }
 
 /// Whether a command is consumed below retention (spec 03 §14.1). A duplicate

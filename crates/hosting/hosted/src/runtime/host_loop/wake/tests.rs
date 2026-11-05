@@ -1540,6 +1540,7 @@ fn prompt_whose_mail_alone_overflows(
         &host.role.config.topology_rows(),
         &host.role.config.session,
         &text,
+        super::super::super::result_mail::LossNotice::WithMail,
     )
     .unwrap();
     assert_eq!(batch.map(|batch| batch.message_ids.len()), Some(5));

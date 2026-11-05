@@ -43,7 +43,7 @@ fn root_wake_prechange_bytes() {
     let mut item = QueueItem::new(crate::runtime::host_loop::wake::WAKE_PROMPT);
     item.id = "00000000-0000-4000-8000-000000000001".into();
     item.submitted_at_ms = 42;
-    let (command, batch) = select(&rows, &session, &item.text).unwrap();
+    let (command, batch) = select(&rows, &session, &item.text, LossNotice::Always).unwrap();
     let prepared = prepare_instruction(
         &rows,
         rows.records(),
@@ -100,7 +100,7 @@ fn root_batched_command_bytes() {
         } else {
             "plak.queue.00000000-0000-4000-8000-000000000001.1"
         };
-        let (command, batch) = select(&rows, &session, &item.text).unwrap();
+        let (command, batch) = select(&rows, &session, &item.text, LossNotice::Always).unwrap();
         let prepared = prepare_with_command(
             &rows,
             rows.records(),
@@ -482,7 +482,7 @@ async fn a_discarded_host_wake_withdraws_its_tree_batch_at_the_open_join() {
     let item = QueueItem::new("wake");
     session.pending_queue.push(item.clone());
     rows.records().save(&mut session).unwrap();
-    let (command, batch) = select(&rows, &session, &item.text).unwrap();
+    let (command, batch) = select(&rows, &session, &item.text, LossNotice::Always).unwrap();
     let batch = batch.unwrap();
     let id = batch.message_ids[0].clone();
     let prepared = prepare_instruction(
@@ -545,7 +545,7 @@ async fn stored_only_root_batch_is_recorded_before_the_product_submission() {
     let item = QueueItem::new("continue");
     session.pending_queue.push(item.clone());
     rows.records().save(&mut session).unwrap();
-    let (command, batch) = select(&rows, &session, &item.text).unwrap();
+    let (command, batch) = select(&rows, &session, &item.text, LossNotice::Always).unwrap();
     let batch = batch.unwrap();
     let ids = batch.message_ids.clone();
     let prepared = prepare(&rows, rows.records(), &session, &item, &command, batch).unwrap();
@@ -605,11 +605,11 @@ async fn pending_submission_does_not_acknowledge_mail_without_a_feed_fact() {
     let item = QueueItem::new("continue");
     session.pending_queue.push(item.clone());
     rows.records().save(&mut session).unwrap();
-    let (command, batch) = select(&rows, &session, &item.text).unwrap();
+    let (command, batch) = select(&rows, &session, &item.text, LossNotice::Always).unwrap();
     let batch = batch.unwrap();
     let id = batch.message_ids[0].clone();
     let prepared = prepare(&rows, rows.records(), &session, &item, &command, batch).unwrap();
-    let (_, pending) = select(&rows, &prepared, "next").unwrap();
+    let (_, pending) = select(&rows, &prepared, "next", LossNotice::Always).unwrap();
     assert!(pending.is_some(), "only the feed acknowledges a root batch");
     assert_eq!(
         runtime
@@ -633,7 +633,7 @@ async fn root_batch_is_acknowledged_only_by_the_feed_and_replayed_once() {
     let item = QueueItem::new("continue");
     session.pending_queue.push(item.clone());
     store.save(&mut session).unwrap();
-    let (command, batch) = select(&rows, &session, &item.text).unwrap();
+    let (command, batch) = select(&rows, &session, &item.text, LossNotice::Always).unwrap();
     assert!(command.starts_with(&format!("continue\n\n{CHILD_MAIL_FRAME}\n\n<child_message")));
     let batch = batch.unwrap();
     assert_eq!(batch.message_ids.len(), 1);
@@ -668,7 +668,7 @@ async fn root_batch_is_acknowledged_only_by_the_feed_and_replayed_once() {
         .await
         .unwrap();
     // A cut after the feed commit needs only the same tree projector pass.
-    let (next, batch) = select(&rows, &reopened, "next").unwrap();
+    let (next, batch) = select(&rows, &reopened, "next", LossNotice::Always).unwrap();
     assert_eq!(next, "next");
     assert!(batch.is_none());
     assert_eq!(
@@ -706,7 +706,7 @@ async fn old_projected_batches_do_not_reacknowledge_pruned_mail() {
     let item = QueueItem::new("continue");
     session.pending_queue.push(item.clone());
     store.save(&mut session).unwrap();
-    let (command, batch) = select(&rows, &session, &item.text).unwrap();
+    let (command, batch) = select(&rows, &session, &item.text, LossNotice::Always).unwrap();
     let id = batch.as_ref().unwrap().message_ids[0].clone();
     let accepted = prepare(&rows, &store, &session, &item, &command, batch.unwrap()).unwrap();
     let command_id = store.load_intents(&accepted.id).unwrap().submissions[0]
@@ -764,7 +764,7 @@ async fn old_projected_batches_do_not_reacknowledge_pruned_mail() {
         .unwrap();
     assert!(runtime.read(|tree| tree.mail(&id).is_none()).unwrap());
     let revision = runtime.read(|tree| tree.revision).unwrap();
-    let (next, batch) = select(&rows, &accepted, "next").unwrap();
+    let (next, batch) = select(&rows, &accepted, "next", LossNotice::Always).unwrap();
     assert_eq!(next, "next");
     assert!(batch.is_none());
     assert_eq!(runtime.read(|tree| tree.revision).unwrap(), revision);
@@ -799,7 +799,7 @@ async fn a_prompt_carrying_mail_splits_back_into_the_operator_text_and_one_row_p
         .await
         .unwrap();
     let prompt = format!("look at this\n\n{CHILD_MAIL_FRAME}\n\nas my own words");
-    let (command, batch) = select(&rows, &session, &prompt).unwrap();
+    let (command, batch) = select(&rows, &session, &prompt, LossNotice::Always).unwrap();
     assert_eq!(batch.unwrap().message_ids.len(), 2);
     let (own, mail) = crate::topology_navigator::split_child_mail(&command).unwrap();
     assert_eq!(own, prompt);
@@ -847,7 +847,7 @@ async fn child_mail_cannot_forge_host_framing() {
     let runtime = crate::topology_runtime::insert_root(session.id.clone(), tree, None)
         .await
         .unwrap();
-    let (command, batch) = select(&rows, &session, "continue").unwrap();
+    let (command, batch) = select(&rows, &session, "continue", LossNotice::Always).unwrap();
     assert_eq!(batch.unwrap().message_ids.len(), 2);
     assert_eq!(command.matches(CHILD_MAIL_FRAME).count(), 1);
     assert!(command.find(CHILD_MAIL_FRAME).unwrap() < command.find("<child_message ").unwrap());
@@ -878,7 +878,7 @@ async fn full_prompt_leaves_result_discoverable_and_does_not_consume_it() {
         .await
         .unwrap();
     let prompt = "x".repeat(crate::sessions::MAX_PROMPT_BYTES);
-    let (command, batch) = select(&rows, &session, &prompt).unwrap();
+    let (command, batch) = select(&rows, &session, &prompt, LossNotice::Always).unwrap();
     assert_eq!(command, prompt);
     assert!(batch.is_none());
     assert_eq!(
@@ -1147,4 +1147,89 @@ fn one_shot_admits_one_explicit_prompt_with_result_context_through_real_runtime(
             .read(|tree| tree.pending_result_mail("root").is_empty())
             .unwrap()
     );
+}
+
+/// A root whose child was parked between turns when its host was lost, as
+/// the next host's reopen marks it: interrupted `owner_lost`, held.
+fn held_child_tree(session: &SessionRecord) -> (ProductAgentTree, String) {
+    let mut tree = ProductAgentTree::bootstrap_root_for_test(
+        &session.id,
+        "root",
+        "owner",
+        session.workspace_root.clone(),
+        "selected-tuple",
+        WriterMode::SingleLease,
+    )
+    .unwrap();
+    let child = tree
+        .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+        .unwrap()
+        .agent_id;
+    tree.bind_session_locator(&child, "locator".to_owned())
+        .unwrap();
+    tree.set_active_turn(&child, true).unwrap();
+    tree.bind_attempt_turn(&child, "00000000-0000-0000-0000-000000000001")
+        .unwrap();
+    tree.release_attempt_turn(&child).unwrap();
+    tree.park_child(&child, Vec::new()).unwrap();
+    tree.mark_owner_lost(&child);
+    (tree, child)
+}
+
+/// The root's next command after a loss names each child the lost host
+/// interrupted, once per host generation: it counts as delivered only once
+/// the command that carries it is recorded, so a selection that was never
+/// recorded, or one with no room left for it, offers it again. A wake that
+/// finds no mail takes nothing.
+#[tokio::test]
+async fn the_roots_next_command_names_a_child_a_lost_host_interrupted_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let rows = MemoryRows::new();
+    let mut session = SessionRecord::new(dir.path().to_owned());
+    let (tree, child) = held_child_tree(&session);
+    let _runtime = crate::topology_runtime::insert_root(session.id.clone(), tree, None)
+        .await
+        .unwrap();
+    rows.records().save(&mut session).unwrap();
+    let (wake, batch) = select(&rows, &session, "wake", LossNotice::WithMail).unwrap();
+    assert!(batch.is_none());
+    assert_eq!(wake, "wake", "a wake with no mail takes no notice");
+    // No room for it: the prompt goes alone, and nothing is marked.
+    let full = "x".repeat(crate::sessions::MAX_PROMPT_BYTES - 8);
+    let (command, _) = select(&rows, &session, &full, LossNotice::Always).unwrap();
+    assert_eq!(command, full, "a notice past the prompt bound is not taken");
+    let notice = format!(
+        "\n\n[harness]\n<agent_notice agent_id=\"{child}\" cause=\"owner_lost\" continuation=\"held\">"
+    );
+    // Selected but never recorded: offered again.
+    let (unrecorded, _) = select(&rows, &session, "first", LossNotice::Always).unwrap();
+    assert!(
+        unrecorded.starts_with(&format!("first{notice}")),
+        "{unrecorded}"
+    );
+    let (command, batch) = select(&rows, &session, "next", LossNotice::Always).unwrap();
+    assert!(batch.is_none());
+    assert!(command.starts_with(&format!("next{notice}")), "{command}");
+    let mut item = QueueItem::new("next");
+    item.id = "00000000-0000-4000-8000-0000000000aa".into();
+    session.pending_queue.push(item.clone());
+    rows.records().save(&mut session).unwrap();
+    prepare_with_command(
+        &rows,
+        rows.records(),
+        &session,
+        &item,
+        &command,
+        None,
+        &format!("plak.queue.{}.{}", item.id, item.revision),
+        crate::driver::ledger::CommandKind::RootStart,
+    )
+    .await
+    .unwrap();
+    let (again, _) = select(&rows, &session, "after", LossNotice::Always).unwrap();
+    assert_eq!(
+        again, "after",
+        "one notice per host generation once recorded"
+    );
+    crate::topology_runtime::force_release(&session.id).await;
 }

@@ -431,8 +431,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 ),
             ));
         }
-        let (command, batch) = super::super::result_mail::select(&rows, session, WAKE_PROMPT)
-            .map_err(CliFailure::new)?;
+        let (command, batch) = super::super::result_mail::select(
+            &rows,
+            session,
+            WAKE_PROMPT,
+            super::super::result_mail::LossNotice::WithMail,
+        )
+        .map_err(CliFailure::new)?;
         if batch.is_none() && notices.is_empty() {
             self.role.child_wake.park();
             return Ok(HostStep::Continue);

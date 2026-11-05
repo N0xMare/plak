@@ -207,10 +207,20 @@ impl crate::sessions::projector::ProductTreeJoin for RootBatchJoin<'_> {
     }
 }
 
+/// Whether a root command carries the root's loss notice (spec 03 section
+/// 14.1): an operator's prompt always does, a wake only with the mail that
+/// wakes it, so a wake that finds no mail and parks takes nothing.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum LossNotice {
+    Always,
+    WithMail,
+}
+
 pub(super) fn select(
     rows: &dyn TopologyRows,
     session: &SessionRecord,
     prompt: &str,
+    notice: LossNotice,
 ) -> Result<(String, Option<ResultMailBatch>), String> {
     let tree_id = super::rebind::durable_tree_id(rows, session);
     let read = |tree: &crate::agent_tree::ProductAgentTree| {
@@ -239,12 +249,41 @@ pub(super) fn select(
         command.push_str(&addition);
         ids.push(mail.message_id);
     }
+    if (notice == LossNotice::Always || !ids.is_empty())
+        && let Some(runtime) = crate::topology_runtime::lookup(&tree_id)
+        && let Some(text) = runtime.driver().offer_loss_notice(
+            None,
+            &recipient,
+            crate::sessions::MAX_PROMPT_BYTES.saturating_sub(command.len()),
+        )
+    {
+        command.push_str(&text);
+    }
     let batch = (!ids.is_empty()).then_some(ResultMailBatch {
         tree_id,
         recipient,
         message_ids: ids,
     });
     Ok((command, batch))
+}
+
+/// `text` with the root's loss notice, for a host-authored root command
+/// that does not select mail (the root's continuation after a loss).
+pub(super) fn with_root_loss_notice(
+    rows: &dyn TopologyRows,
+    session: &SessionRecord,
+    text: &str,
+) -> String {
+    let tree_id = super::rebind::durable_tree_id(rows, session);
+    let notice = crate::topology_runtime::lookup(&tree_id).and_then(|runtime| {
+        let root = runtime.read(|tree| tree.root_agent_id.clone()).ok()?;
+        runtime.driver().offer_loss_notice(
+            None,
+            &root,
+            crate::sessions::MAX_PROMPT_BYTES.saturating_sub(text.len()),
+        )
+    });
+    notice.map_or_else(|| text.to_owned(), |notice| format!("{text}{notice}"))
 }
 
 pub(super) async fn prepare_instruction(

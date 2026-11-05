@@ -976,3 +976,83 @@ async fn command_prepared_without_results_does_not_gain_new_results_on_retry() {
     );
     crate::topology_runtime::force_release(&id).await;
 }
+
+/// A child that is itself a parent: its next command names the grandchild
+/// a lost host interrupted, a re-prepare under the same id returns the
+/// identical text, and the command after it does not name it again.
+#[tokio::test]
+async fn a_child_parents_next_command_names_its_held_grandchild_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let id = uuid::Uuid::new_v4().to_string();
+    let mut tree = ProductAgentTree::bootstrap_root_for_test(
+        &id,
+        "root",
+        "owner",
+        dir.path().to_owned(),
+        "selected",
+        WriterMode::SingleLease,
+    )
+    .unwrap();
+    let mut snapshot = tree.current_epoch().clone();
+    snapshot.max_depth = 2;
+    snapshot.digest = snapshot.compute_digest();
+    tree.install_snapshot(snapshot);
+    let child = tree
+        .spawn_agent("root", &SpawnAgentRequest::test_orchestrate(), None)
+        .unwrap()
+        .agent_id;
+    let grandchild = tree
+        .spawn_agent(&child, &SpawnAgentRequest::test_review(), None)
+        .unwrap()
+        .agent_id;
+    tree.bind_session_locator(&grandchild, "locator".to_owned())
+        .unwrap();
+    tree.set_active_turn(&grandchild, true).unwrap();
+    tree.bind_attempt_turn(&grandchild, "00000000-0000-0000-0000-000000000001")
+        .unwrap();
+    tree.release_attempt_turn(&grandchild).unwrap();
+    tree.park_child(&grandchild, Vec::new()).unwrap();
+    tree.mark_owner_lost(&grandchild);
+    let runtime = crate::topology_runtime::insert_root(id.clone(), tree, None)
+        .await
+        .unwrap();
+    let prepare = |command_id: &'static str| {
+        let driver = runtime.driver().clone();
+        let child = child.clone();
+        async move {
+            ChildLedger::new(&driver, &child)
+                .prepare(CommandIntent {
+                    command_id,
+                    kind: CommandKind::Followup,
+                    base_text: "continue",
+                    batch: BatchRule::Results,
+                })
+                .await
+                .unwrap()
+        }
+    };
+    let first = prepare("command-one").await;
+    assert!(
+        first.prompt.starts_with(&format!(
+            "continue\n\n[harness]\n<agent_notice agent_id=\"{grandchild}\" cause=\"owner_lost\" \
+             continuation=\"held\">"
+        )),
+        "{}",
+        first.prompt
+    );
+    assert_eq!(
+        runtime
+            .read(|tree| tree.command("command-one").unwrap().text.clone())
+            .unwrap(),
+        first.prompt,
+        "the recorded text carries the notice"
+    );
+    let again = prepare("command-one").await;
+    assert_eq!(
+        again.prompt, first.prompt,
+        "an exact re-prepare is identical"
+    );
+    let next = prepare("command-two").await;
+    assert_eq!(next.prompt, "continue", "named once per host generation");
+    crate::topology_runtime::force_release(&id).await;
+}

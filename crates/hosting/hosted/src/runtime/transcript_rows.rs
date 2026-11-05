@@ -5,6 +5,8 @@ use crate::sessions::projector::{ReadActor, ReadItem, ReadPart};
 use crate::sessions::{NoticeScope, ThinkingRow, TranscriptRow};
 
 mod history;
+#[cfg(test)]
+mod loss_notice_tests;
 mod tool_rows;
 pub(super) use history::canonical_items;
 pub(crate) use tool_rows::{projected_tool_row, settle_tool_row};
@@ -91,6 +93,13 @@ fn flush(
     }
     match actor {
         ReadActor::User => {
+            // A command reads as the operator's text, then the child mail
+            // its batch carried, then the loss notice the host appended:
+            // neither is the operator's words.
+            let (value, loss) = match crate::agent_tree::split_loss_notice(&value) {
+                Some((before, loss)) => (before.to_owned(), Some(loss)),
+                None => (value, None),
+            };
             let (own, mail) = crate::topology_navigator::split_child_mail(&value)
                 .unwrap_or_else(|| (value, Vec::new()));
             if !own.trim().is_empty() {
@@ -102,6 +111,12 @@ fn flush(
             rows.extend(mail.into_iter().map(|mail| {
                 CanonicalRow::Row(Box::new(TranscriptRow::info(NoticeScope::Tree, mail)))
             }));
+            if let Some(loss) = loss {
+                rows.push(CanonicalRow::Row(Box::new(TranscriptRow::info(
+                    NoticeScope::Tree,
+                    loss.row(),
+                ))));
+            }
         }
         ReadActor::Assistant => {
             rows.push(CanonicalRow::Row(Box::new(TranscriptRow::assistant(value))));

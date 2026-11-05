@@ -258,6 +258,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     &self.role.config.topology_rows(),
                     &self.role.config.session,
                     super::wake::WAKE_PROMPT,
+                    super::super::result_mail::LossNotice::WithMail,
                 )
                 .map_err(CliFailure::new)?;
                 if !matches!(

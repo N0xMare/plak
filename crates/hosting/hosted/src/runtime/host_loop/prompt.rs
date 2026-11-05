@@ -344,6 +344,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 &self.role.config.topology_rows(),
                 &self.role.config.session,
                 &user_text,
+                super::super::result_mail::LossNotice::Always,
             );
             #[cfg(test)]
             let selected = self.role.prep_hooks.mail_error.take().map_or(selected, Err);

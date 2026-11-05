@@ -115,7 +115,9 @@ When the session opens, one warning lists everything the lost host left held
 (the root's turn and each held agent with what it was doing), and `Ctrl+R`
 resumes all of it. A parent's `wait_agent` rows say why a child stopped
 (`cause`, for example `owner_lost`) and whether its continuation is `held`,
-`pending` or `running`.
+`pending` or `running`, and the parent's next turn gets one `[harness]` note
+naming the children the loss interrupted (once per run of Plak; a handed-off
+child is not named).
 With `[host] resume_after_loss = "continue"` such children continue once by
 themselves. One whose wake was still pending rejoins that wake instead. JSONL roots and roots with
 auto-continue disabled must use `wait_agent` to learn child results before

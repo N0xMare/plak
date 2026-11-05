@@ -3357,6 +3357,90 @@ fn a_reload_with_a_deaf_child_on_an_idle_root_continues_the_child_once() {
     terminal.quit();
 }
 
+/// A child whose request was in flight when its host was killed on an idle
+/// root: the reopen under the default hold names it in one attention notice,
+/// sent once the open's scan run has marked it, and never twice. The root's
+/// next prompt then carries the loss notice, which a `/reload` projects as a
+/// notice row, never as the operator's words.
+#[test]
+fn a_crashed_running_child_is_named_once_and_its_notice_never_reads_as_user_text() {
+    let fixture = Fixture::new(&recovery_answer_script());
+    let child_script = fixture.root.join("child-script.json");
+    write_json(
+        &child_script,
+        &gated_child(&fixture.root.join("child-gate-never")),
+    );
+    fixture.write_script(&product_child_root(
+        &child_script,
+        &json!([
+            {"output": {"tool": {"name": "spawn_agent", "arguments": {
+                "template": "review",
+                "tier": "read_only",
+                "description": "reviewer",
+                "prompt": "review the diff",
+                "output_schema_json": "{\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"],\"additionalProperties\":false}"
+            }}}, "finish": "tool_calls"},
+            {"output": {"text": "the child is running"}}
+        ]),
+    ));
+    enable_subagents(&fixture);
+    let fake_bin = fixture.root.join("fake-bin-crashed-child");
+    std::fs::create_dir_all(&fake_bin).expect("fake bin");
+    install_this_build(&fixture, &fake_bin);
+    let mut first = Terminal::spawn_sized(&fixture, Launch::OnPath(&fake_bin), 40, 220);
+    first.wait_ready();
+    first.send(b"start a reviewer\r");
+    first.wait_screen("the child is running");
+    first.wait_absent("Esc stop");
+    wait_for_child_dispatches(&fixture, 1);
+    let session = fixture.session_ids()[0].clone();
+    assert!(!first.kill_hard().success());
+    fixture.write_script(&product_child_root(
+        &child_script,
+        &json!([{"output": {"text": "the root answered after the crash"}}]),
+    ));
+    let held = "a lost host interrupted is held: c1";
+    let deadline = Instant::now() + WAIT;
+    let mut reopened = loop {
+        let mut terminal = Terminal::spawn_sized(&fixture, Launch::Resume(&session), 40, 220);
+        let limit = Instant::now() + Duration::from_secs(30);
+        while !terminal.screen().contains(held) && terminal.is_alive() && Instant::now() < limit {
+            std::thread::sleep(Duration::from_millis(40));
+        }
+        if terminal.screen().contains(held) {
+            break terminal;
+        }
+        let last = terminal.screen();
+        if terminal.is_alive() {
+            let _ = terminal.kill_hard();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the reopen never named the crashed child; nodes {:?}; the last screen was:\n{last}",
+            agent_node_rows(&fixture)
+        );
+        std::thread::sleep(Duration::from_millis(500));
+    };
+    std::thread::sleep(Duration::from_secs(2));
+    assert_eq!(
+        reopened.screen().matches("a lost host interrupted").count(),
+        1,
+        "one attention notice:\n{}",
+        reopened.screen()
+    );
+    reopened.send(b"what happened\r");
+    reopened.wait_screen("the root answered after the crash");
+    reopened.wait_absent("Esc stop");
+    reopened.send(b"/reload\r");
+    let frame = reopened.wait_where("the reloaded transcript", |frame| {
+        frame.contains("a lost host interrupted c1 (held)") && frame.contains("/ commands")
+    });
+    assert!(!frame.contains("[harness]"), "{frame}");
+    assert!(!frame.contains("agent_notice"), "{frame}");
+    assert!(frame.contains("what happened"), "{frame}");
+    reopened.quit();
+}
+
 /// `(agent, status, active_turn)` of every durable tree node.
 fn agent_node_rows(fixture: &Fixture) -> Vec<(String, String, bool)> {
     let Some(state) = std::fs::read_dir(fixture.home().join("state"))

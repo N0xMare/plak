@@ -108,7 +108,7 @@ async fn root_batch_capacity_refusal_is_typed_and_exact_retry_is_not_duplicated(
     use super::super::{record_root_batch, withdraw_root_batch};
     use crate::driver::ledger::{CommandKind, LedgerError};
     use crate::error::StoreRefusal;
-    use crate::runtime::result_mail::{prepare_with_command, select};
+    use crate::runtime::result_mail::{LossNotice, prepare_with_command, select};
     for live in [false, true] {
         let dir = tempfile::tempdir().unwrap();
         let rows = Rows::default();
@@ -140,7 +140,7 @@ async fn root_batch_capacity_refusal_is_typed_and_exact_retry_is_not_duplicated(
                 |runtime| runtime.read(Clone::clone).unwrap(),
             )
         };
-        let (command, batch) = select(&rows, &session, &item.text).unwrap();
+        let (command, batch) = select(&rows, &session, &item.text, LossNotice::Always).unwrap();
         let batch = batch.unwrap();
         let id = format!("plak.queue.{}.{}", item.id, item.revision);
         let prepare = || {
@@ -217,7 +217,7 @@ async fn another_hosts_custody_stays_typed_through_the_ledger_and_the_projector(
     use crate::agent_tree::{CustodyHost, HostInstance};
     use crate::driver::ledger::CommandKind;
     use crate::error::{CliFailure, ReadFailure, StoreRefusal};
-    use crate::runtime::result_mail::{prepare_with_command, select};
+    use crate::runtime::result_mail::{LossNotice, prepare_with_command, select};
     let dir = tempfile::tempdir().unwrap();
     let rows = Rows::default();
     let mut session = SessionRecord::new(dir.path().to_owned());
@@ -272,7 +272,7 @@ async fn another_hosts_custody_stays_typed_through_the_ledger_and_the_projector(
         assert_eq!(line["code"], "tree_hosted_elsewhere");
     };
 
-    let (command, batch) = select(&rows, &session, &item.text).unwrap();
+    let (command, batch) = select(&rows, &session, &item.text, LossNotice::Always).unwrap();
     assert!(batch.is_some(), "the child's result rides the prompt");
     let id = format!("plak.queue.{}.{}", item.id, item.revision);
     let error = prepare_with_command(

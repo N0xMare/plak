@@ -202,12 +202,19 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         let item = candidate
             .enqueue_live(text)
             .map_err(|_| CliFailure::new("the continuation was refused by the queue"))?;
+        // The continuation is the root's next turn, so it carries the
+        // children the lost host interrupted.
+        let command_text = crate::runtime::result_mail::with_root_loss_notice(
+            &rows,
+            &self.role.config.session,
+            text,
+        );
         self.role.config.session = crate::runtime::result_mail::prepare_with_command(
             &rows,
             self.role.config.store.as_ref(),
             &candidate,
             &item,
-            text,
+            &command_text,
             None,
             &command,
             crate::driver::ledger::CommandKind::HostWake,
