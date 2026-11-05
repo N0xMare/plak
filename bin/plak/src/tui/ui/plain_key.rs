@@ -85,7 +85,7 @@ impl App {
                 let now = Instant::now();
                 match classify_esc(
                     self.input.trim().is_empty(),
-                    self.busy,
+                    self.root_stoppable(),
                     self.cancel_pending,
                     self.esc_clear_arm.as_ref(),
                     now,
@@ -109,7 +109,7 @@ impl App {
                     }
                     EscOutcome::Ignore => {
                         self.esc_clear_arm = None;
-                        (!self.busy).then_some(UserAction::Interrupt)
+                        (!self.root_stoppable()).then_some(UserAction::Interrupt)
                     }
                 }
             }

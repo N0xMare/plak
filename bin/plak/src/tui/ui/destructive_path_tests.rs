@@ -929,3 +929,155 @@ fn settings_reset_enter_confirms_and_esc_cancels() {
         "d, Enter sent {sent:?}"
     );
 }
+
+/// An idle app that sent `text` as a prompt, still unanswered by the host.
+fn sent_prompt(text: &str) -> (App, UserAction, crate::surface_protocol::UserActionReceiver) {
+    let (sender, receiver) = crate::tui::user_action_channel();
+    let mut app = App::new(launch_basic(), true);
+    app.set_input(text.into());
+    let action = app.submit_line(false).expect("prompt");
+    super::terminal::dispatch_action(&mut app, &action, Some(&sender));
+    (app, action, receiver)
+}
+
+/// Steps `stage..until` of the host's answer to an idle prompt before its
+/// busy edge: step 0 accepts and admits it, step 1 lands its row.
+fn answer_prompt_from(app: &mut App, action: &UserAction, stage: usize, until: usize) {
+    let item = queue_item("q1", 1, "stop me");
+    for step in stage..until {
+        if step == 0 {
+            app.apply_host_event(HostEvent::DraftAccepted(action.clone()));
+            app.apply_host_event(HostEvent::PromptAdmitted(item.clone()));
+        } else {
+            app.apply_host_event(HostEvent::PromptStarted(Some(item.clone())));
+            app.apply_host_event(HostEvent::UserMessage {
+                text: "stop me".into(),
+                sent_at_ms: None,
+            });
+        }
+    }
+}
+
+/// A prompt the operator just sent counts as a running turn for `Esc` until
+/// its busy edge (spec 02 §5.3), wherever that window stands: in the
+/// mailbox, accepted by the host, or with its row already drawn. `Esc`
+/// opens the stop pop-up instead of sending the idle interrupt, and the stop
+/// then behaves as a busy one does.
+#[test]
+fn esc_on_a_sent_prompt_before_its_busy_edge_asks_to_stop_it() {
+    for stage in 0..3 {
+        let (mut app, action, _receiver) = sent_prompt("stop me");
+        answer_prompt_from(&mut app, &action, 0, stage);
+        assert!(!app.busy);
+        assert_eq!(app.handle_key(key(KeyCode::Esc)), None, "stage {stage}");
+        assert!(app.destructive_confirm.is_some(), "stage {stage}");
+        assert_eq!(
+            super::test_support::confirm_action(&mut app),
+            Some(UserAction::Interrupt),
+            "stage {stage}"
+        );
+        assert!(app.cancel_pending, "stage {stage}");
+        // A second Esc while that stop is in flight is a no-op.
+        assert_eq!(app.handle_key(key(KeyCode::Esc)), None, "stage {stage}");
+        assert!(app.destructive_confirm.is_none(), "stage {stage}");
+        answer_prompt_from(&mut app, &action, stage, 2);
+        assert!(app.cancel_pending, "stage {stage}");
+        app.apply_host_event(HostEvent::SetBusy(true));
+        assert!(app.cancel_pending, "stage {stage}");
+        app.apply_host_event(HostEvent::SetBusy(false));
+        assert!(!app.cancel_pending, "stage {stage}");
+        // Settled and idle, Esc is the idle interrupt again.
+        assert_eq!(
+            app.handle_key(key(KeyCode::Esc)),
+            Some(UserAction::Interrupt),
+            "stage {stage}"
+        );
+    }
+}
+
+/// `Ctrl+C` on an empty draft treats the same window as a running turn
+/// (spec 02 §5.3): it opens the stop pop-up, a further press while that stop
+/// is in flight arms the quit escalation, and once the prompt settles idle
+/// `Ctrl+C` is the idle ladder again, arming quit without asking to stop.
+#[test]
+fn ctrl_c_on_a_sent_prompt_before_its_busy_edge_asks_to_stop_it() {
+    for stage in 0..3 {
+        let (mut app, action, _receiver) = sent_prompt("stop me");
+        answer_prompt_from(&mut app, &action, 0, stage);
+        assert!(!app.busy);
+        assert_eq!(
+            app.handle_key(key_ctrl(KeyCode::Char('c'))),
+            None,
+            "stage {stage}"
+        );
+        assert!(app.destructive_confirm.is_some(), "stage {stage}");
+        assert!(app.quit_arm.is_none(), "stage {stage}");
+        assert_eq!(
+            super::test_support::confirm_action(&mut app),
+            Some(UserAction::Interrupt),
+            "stage {stage}"
+        );
+        assert!(app.cancel_pending, "stage {stage}");
+        assert_eq!(
+            app.handle_key(key_ctrl(KeyCode::Char('c'))),
+            None,
+            "stage {stage}"
+        );
+        assert!(app.quit_arm.is_some(), "stage {stage}");
+        assert!(!app.should_quit, "stage {stage}");
+        answer_prompt_from(&mut app, &action, stage, 2);
+        app.apply_host_event(HostEvent::SetBusy(true));
+        app.apply_host_event(HostEvent::SetBusy(false));
+        assert!(!app.cancel_pending, "stage {stage}");
+        assert!(app.quit_arm.is_none(), "stage {stage}");
+        assert_eq!(
+            app.handle_key(key_ctrl(KeyCode::Char('c'))),
+            None,
+            "stage {stage}"
+        );
+        assert!(app.destructive_confirm.is_none(), "stage {stage}");
+        assert!(app.quit_arm.is_some(), "stage {stage}");
+    }
+}
+
+/// The host can refuse a sent prompt before any busy edge. A stop pop-up
+/// open for it closes, a stop already pressed is settled by the refusal,
+/// and the next `Esc` is the idle interrupt again.
+#[test]
+fn a_refused_prompt_ends_its_pending_stop_without_a_busy_edge() {
+    // Refused at the mailbox: the draft returns to the composer.
+    let (mut app, action, _receiver) = sent_prompt("refused at once");
+    assert_eq!(app.handle_key(key(KeyCode::Esc)), None);
+    assert!(app.destructive_confirm.is_some());
+    app.apply_host_event(HostEvent::DraftRejected(action));
+    assert!(app.destructive_confirm.is_none());
+    assert_eq!(app.input, "refused at once");
+    app.input.clear();
+    assert_eq!(
+        app.handle_key(key(KeyCode::Esc)),
+        Some(UserAction::Interrupt)
+    );
+
+    // Accepted into the queue, then held there unanswered (a storage
+    // refusal pauses the drain): no row and no busy edge ever come.
+    let (mut app, action, _receiver) = sent_prompt("held in the queue");
+    assert_eq!(app.handle_key(key(KeyCode::Esc)), None);
+    assert_eq!(
+        super::test_support::confirm_action(&mut app),
+        Some(UserAction::Interrupt)
+    );
+    assert!(app.cancel_pending);
+    let item = queue_item("q1", 1, "held in the queue");
+    app.apply_host_event(HostEvent::DraftAccepted(action));
+    app.apply_host_event(HostEvent::PromptAdmitted(item.clone()));
+    assert!(app.cancel_pending);
+    app.apply_host_event(HostEvent::QueueSnapshot {
+        items: vec![item],
+        drain: QueueDrainState::RestoredPaused,
+    });
+    assert!(!app.cancel_pending);
+    assert_eq!(
+        app.handle_key(key(KeyCode::Esc)),
+        Some(UserAction::Interrupt)
+    );
+}

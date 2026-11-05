@@ -142,7 +142,9 @@ retried every 60 s, so it resumes without a prompt once the store answers.
 - `Esc` while busy opens the stop pop-up: `[ Cancel ]`, `[ Stop turn ]` and,
   with background processes running, `[ Stop turn + processes ]` (see
   [the confirmation pop-up](#activity)). `Ctrl+C` on an empty draft while busy
-  opens the same pop-up.
+  opens the same pop-up. A prompt you just sent counts as busy for `Esc` and
+  `Ctrl+C` even before the turn shows as running, so either key right after
+  `Enter` asks before it stops anything; a stopped prompt ends with `⊘ interrupted`.
 
 What you send shows at once as a dim row ending in `sending…` until the host
 has saved it: an idle prompt just under the transcript, a follow-up or a

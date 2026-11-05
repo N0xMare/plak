@@ -584,6 +584,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
                 pending_resume: None,
                 transient_resumes_used: 0,
                 pending_storage_admission: None,
+                echoed_prompt: None,
                 last_tree_revision,
                 job_events: super::super::job_events::JobEvents::default(),
                 last_tree_observed_at,

@@ -63,6 +63,40 @@ fn every_stop_stage_has_identical_tui_and_jsonl_terminal_records() {
     }
 }
 
+fn interrupted_rows(observed: &[HostEvent<TestExtension>]) -> usize {
+    observed
+        .iter()
+        .filter(|event| matches!(event, HostEvent::Row(TranscriptRow::Interrupted)))
+        .count()
+}
+
+/// The operator already sees an idle prompt's echoed row when a stop ends
+/// its preparation: the row is ended by the marker a stopped turn leaves,
+/// before the final busy-false, never left bare. The prompt stays queued.
+#[test]
+fn a_stopped_echoed_prompt_ends_with_the_interrupted_marker() {
+    for stage in [
+        preparation::Stage::Refresh,
+        preparation::Stage::Settle,
+        preparation::Stage::Tree,
+        preparation::Stage::Context,
+        preparation::Stage::Dispatch,
+    ] {
+        let observed = preparation_tests::stopped_preparation(stage, false, false);
+        assert_eq!(interrupted_rows(&observed), 1, "{stage:?}: {observed:?}");
+        let marker = observed
+            .iter()
+            .position(|event| matches!(event, HostEvent::Row(TranscriptRow::Interrupted)));
+        let idle = observed
+            .iter()
+            .rposition(|event| matches!(event, HostEvent::SetBusy(false)));
+        assert!(
+            matches!((marker, idle), (Some(marker), Some(idle)) if marker < idle),
+            "{stage:?}: {observed:?}"
+        );
+    }
+}
+
 fn wake_delivery(host: &mut RootActor<'_, TestExtension>) -> SessionQueueItem {
     let item = host.role.config.session.enqueue_live("host wake").unwrap();
     host.role.config.session = crate::runtime::result_mail::prepare_instruction(
@@ -84,7 +118,7 @@ fn stopped_host_wake_keeps_operator_items_behind_it_durably_paused() {
     let root = tempfile::tempdir().unwrap();
     let (config, _) = fresh_injected_attached_host(root.path());
     let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
-    let (wire, _events) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
         RootActor::open_blocking(config, &receiver, crate::runtime::Sender::over(wire), None)
             .unwrap();
@@ -150,6 +184,9 @@ fn stopped_host_wake_keeps_operator_items_behind_it_durably_paused() {
         matches!(&intents.pause_causes.last().unwrap().value, sessions::projector::HostPauseCause::UnrecordedRefusal { reason } if reason.contains("preparation stopped"))
     );
     assert_eq!(host.role.config.session.root_turn_count, 0);
+    // No row was echoed for the wake, so none is ended.
+    let observed: Vec<_> = events.try_iter().collect();
+    assert_eq!(interrupted_rows(&observed), 0, "{observed:?}");
     host.block(async |host| host.release().await).unwrap();
 }
 

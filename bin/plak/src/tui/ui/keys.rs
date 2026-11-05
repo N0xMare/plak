@@ -440,7 +440,7 @@ impl App {
                 let draft_empty = self.input.trim().is_empty();
                 match classify_ctrl_c(
                     draft_empty,
-                    self.busy,
+                    self.root_stoppable(),
                     self.cancel_pending,
                     self.quit_arm.as_ref(),
                     now,

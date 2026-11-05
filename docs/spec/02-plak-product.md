@@ -4846,7 +4846,14 @@ resumable. Its buttons are `[ Cancel ]`, `[ Stop turn ]` (the interrupt: the
 turn and agents only) and, with running background processes,
 `[ Stop turn + processes ]`, which also requests user-attributed process stops
 through the host action channel; the pop-up then says
-`N background processes keep running unless you stop them too`. It follows the
+`N background processes keep running unless you stop them too`. A prompt or
+follow-up the operator sent counts as mid-turn, for Esc and `Ctrl+C` alike,
+from the moment it is sent until the host's busy edge for it:
+unacknowledged, acknowledged, or with its row already echoed. Esc then opens
+the same pop-up and never sends the idle interrupt, which would stop the
+prompt unconfirmed. A host refusal that ends
+the prompt before any busy edge closes the pop-up and settles a stop already
+pressed for it. It follows the
 pop-up's rules (§5.7): focus starts on `[ Stop turn ]`, `Enter` presses the
 focused button at once, `Esc` cancels, and over the composer a printable key
 closes it into the draft instead of confirming. Background processes never
@@ -4866,8 +4873,8 @@ while the stop is pending. A stop after attachment cannot undo the fork; the
 notice says that it attached before the stop could be applied.
 
 `Ctrl+C` is a ladder: a non-empty draft is cleared and that is all; an empty
-draft with a turn running opens the same `Stop this turn?` pop-up as a busy
-`Esc` (a further `Ctrl+C` cancels the pop-up, as any `Ctrl` chord does); a
+draft with a turn running, or a sent prompt before its busy edge, opens the
+same `Stop this turn?` pop-up as a busy `Esc` (a further `Ctrl+C` cancels the pop-up, as any `Ctrl` chord does); a
 cancel already in flight and unsettled escalates to a quit confirmed by a
 second press within 1000 ms; and idle with an empty draft, the first press arms
 and a second within 1000 ms quits. It reaches every modal, including a secret
@@ -4896,7 +4903,9 @@ partly committed operation. Interrupt stops at the next checkpoint, before
 scheduled compaction or root dispatch. Quit stays in the ordinary FIFO but
 also prevents preparation from starting a turn ahead of it. Stopped preparation
 leaves the exact prompt and images queued, durably pauses drain and returns
-to idle; it neither admits nor cancels or abandons a root turn. Other ordinary
+to idle; it neither admits nor cancels or abandons a root turn. An idle
+prompt whose row the host already echoed is ended by a `⊘ interrupted` row,
+as a stopped turn is, never left as a bare prompt row. Other ordinary
 intents remain deferred in arrival order. A later explicit retry starts with
 a fresh interrupt watch. Paid canonical operations already dispatched still
 run to their own receipts. A stopped one-shot reports interruption without
@@ -5070,7 +5079,8 @@ encoding is added. The pending wait owns no turn and never blocks input: a
 user prompt, steer, Esc, quit, or session-switching action cancels it, with
 ordinary input dispatch preserved. Queued user work outranks continuation.
 After modal and selection precedence, idle TUI Esc on an empty draft sends the
-existing interrupt intent; with no automatic work to pause the host makes no
+existing interrupt intent (a sent prompt before its busy edge is not idle,
+§5.3); with no automatic work to pause the host makes no
 state or visible change. An Esc that arms or performs a draft clear, or that
 cancels a queue edit, edits the draft and never sends the interrupt. Busy-turn Escape confirmation is unchanged.
 Readiness admits one host instruction, with command identity

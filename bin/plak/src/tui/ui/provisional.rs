@@ -128,9 +128,24 @@ impl App {
                     .iter()
                     .position(|accepted| !matches!(accepted.action, UserAction::Steer(_)))
             });
-        if let Some(index) = index {
-            self.accepted_drafts.remove(index);
+        if let Some(index) = index
+            && self.accepted_drafts.remove(index).is_some()
+            && !self.busy
+        {
+            self.prompt_row_awaiting_busy = true;
         }
+    }
+
+    /// Whether Esc stops the root as it stops a running turn (spec 02
+    /// section 5.3): a turn runs, or a prompt the operator sent has not
+    /// reached its busy edge yet. Until that edge an Esc must not read as
+    /// idle, or the idle interrupt would stop the prompt unconfirmed.
+    pub(super) fn root_stoppable(&self) -> bool {
+        self.busy
+            || self.prompt_row_awaiting_busy
+            || self
+                .provisional_drafts()
+                .any(|action| matches!(action, UserAction::Prompt(_) | UserAction::FollowUp(_)))
     }
 
     /// `PromptAdmitted` names the queue item of the oldest accepted prompt not

@@ -90,6 +90,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 return Ok(HostStep::Continue);
             }
         }
+        let echoed = self.take_echoed_prompt(queued_delivery.as_ref());
         let before_recovery = self.role.recovery;
         let before_drain = self.role.config.session.queue_drain_state;
         let _ = self.role.events.send(ContentEvent::SetBusy(true));
@@ -100,6 +101,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             Ok(PromptOutcome::Stopped(stopped)) => Some(*stopped),
             _ => None,
         };
+        if stopped.is_some() && echoed {
+            self.end_stopped_echo();
+        }
         if !matches!(outcome, Ok(PromptOutcome::Dispatched(_)))
             && !self.role.events.root_boundary().1
         {
@@ -142,6 +146,24 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             PromptOutcome::Dispatched(step) => step,
             PromptOutcome::Stopped(_) | PromptOutcome::Refused => HostStep::Continue,
         })
+    }
+
+    /// Whether `delivery` is the idle prompt whose row the host echoed.
+    fn take_echoed_prompt(&mut self, delivery: Option<&SessionQueueItem>) -> bool {
+        self.role
+            .echoed_prompt
+            .take()
+            .is_some_and(|id| delivery.is_some_and(|item| item.id == id))
+    }
+
+    /// The operator already sees the stopped prompt's row: a stop before its
+    /// admission ends it with the marker a stopped turn leaves, never as a
+    /// bare prompt. The prompt itself stays queued.
+    fn end_stopped_echo(&self) {
+        let _ = self
+            .role
+            .events
+            .send(ContentEvent::Row(TranscriptRow::Interrupted));
     }
 
     async fn discard_undispatched_wake(

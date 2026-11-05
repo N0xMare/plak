@@ -298,6 +298,11 @@ an export.
   notices with their own identities, after the imported rows. A repair or
   refusal note stays where it happened in the transcript instead of trailing
   the newest turn.
+- `Esc` right after `Enter`, before the turn shows as running, no longer
+  stops the prompt silently. A sent prompt counts as busy for `Esc` and `Ctrl+C`
+  until the host reports it busy, so either opens `Stop this turn?`; a host refusal before
+  then closes the pop-up. A prompt stopped before its turn was admitted now
+  ends with `⊘ interrupted` instead of a bare prompt row, and stays queued.
 
 ### Plakous
 

@@ -321,6 +321,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                                     crate::session_store::StorageAdmission::Refused(_)
                                 );
                                 self.role.pending_storage_admission = Some(capacity);
+                                self.role.echoed_prompt = echo.then(|| item.id.clone());
                                 admit_idle_immediate_prompt(
                                     &self.role.events,
                                     &self.role.config.session,

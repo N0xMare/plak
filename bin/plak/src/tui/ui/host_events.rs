@@ -24,6 +24,7 @@ impl App {
         self.request_slot_wait = None;
         self.credential_wait = None;
         self.cancel_pending = false;
+        self.prompt_row_awaiting_busy = false;
         self.busy = false;
         self.phase = HostPhase::Idle;
         self.status_detail = None;
@@ -112,6 +113,11 @@ impl App {
     /// Apply a host event (status / transcript / structured blocks).
     pub(crate) fn apply_host_event(&mut self, event: HostEvent) {
         self.apply_host_event_state(event);
+        // A stop pressed for a sent prompt the host then refused without a
+        // busy edge has nothing left to settle.
+        if self.cancel_pending && !self.root_stoppable() {
+            self.cancel_pending = false;
+        }
         // An open pop-up whose target stopped being active closes.
         self.retire_stale_confirm();
     }
@@ -1067,6 +1073,12 @@ impl App {
                     self.phase_started = Some(self.now());
                 }
                 self.phase = phase;
+                if matches!(
+                    phase,
+                    HostPhase::Idle | HostPhase::Interrupted | HostPhase::Error
+                ) {
+                    self.prompt_row_awaiting_busy = false;
+                }
                 self.status_detail = detail.as_ref().map(|detail| {
                     crate::host_status_text::status_detail(
                         detail,
@@ -1279,6 +1291,7 @@ impl App {
                     self.composer_chrome.sent_steers.clear();
                 }
                 self.busy = busy;
+                self.prompt_row_awaiting_busy = false;
                 if busy && self.turn_started.is_none() {
                     self.turn_started = Some(self.now());
                     self.phase_started = Some(self.now());

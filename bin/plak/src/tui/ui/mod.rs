@@ -722,6 +722,9 @@ pub(crate) struct App {
     /// A cancel intent was emitted for the running turn and has not settled.
     /// A stuck cancel or idle empty draft lets the Ctrl+C ladder escalate to quit (§6.1).
     cancel_pending: bool,
+    /// The row of a prompt the operator sent landed while idle; the host's
+    /// busy edge for it has not.
+    prompt_row_awaiting_busy: bool,
     /// One internally coherent host-authoritative context snapshot.
     context_usage: ContextUsage,
     /// Latest authoritative terminal provider-usage observation.
@@ -1018,6 +1021,7 @@ impl App {
             quit_arm: None,
             esc_clear_arm: None,
             cancel_pending: false,
+            prompt_row_awaiting_busy: false,
             context_usage: unknown_context_usage(),
             last_turn_usage: None,
             last_turn: None,

@@ -530,10 +530,10 @@ impl App {
             })
         };
         match action {
-            UserAction::Interrupt => self.busy && !self.cancel_pending,
+            UserAction::Interrupt => self.root_stoppable() && !self.cancel_pending,
             UserAction::StopProcesses {
                 interrupt: true, ..
-            } => self.busy && !self.cancel_pending,
+            } => self.root_stoppable() && !self.cancel_pending,
             UserAction::InterruptTopologyNode { agent_id }
             | UserAction::CloseTopologyNode { agent_id } => agent_active(agent_id),
             UserAction::StopAllTopology => self.open_agents() > 0,
@@ -590,7 +590,9 @@ impl App {
                             ..
                         }
                     ) {
-                        self.busy && !self.cancel_pending && self.background_processes > 0
+                        self.root_stoppable()
+                            && !self.cancel_pending
+                            && self.background_processes > 0
                     } else {
                         self.confirm_target_active(action)
                     }

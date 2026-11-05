@@ -151,6 +151,9 @@ struct RootRole<'a, P: plakous_host_protocol::ProtocolExtension> {
     pending_start: Option<SessionQueueItem>,
     /// The idle prompt's one capacity sample, shared by echo and admission.
     pending_storage_admission: Option<crate::session_store::StorageAdmission>,
+    /// The queue item of the idle prompt whose row the host echoed before
+    /// running it.
+    echoed_prompt: Option<String>,
     pending_resume: Option<transient::PendingResume>,
     transient_resumes_used: u8,
     last_tree_revision: TreeSnapshotPush,

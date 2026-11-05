@@ -418,6 +418,8 @@ enum Launch<'a> {
     /// Started as `plak` found on a `PATH` whose first entry is the given
     /// directory, so a `plak` placed there later is what `/reload` finds.
     OnPath(&'a Path),
+    /// A fresh session with these extra environment variables.
+    WithEnv(&'a [(&'a str, &'a str)]),
 }
 
 impl Terminal {
@@ -452,7 +454,10 @@ impl Terminal {
             _ => (CommandBuilder::new(env!("CARGO_BIN_EXE_plak")), inherited),
         };
         match launch {
-            Launch::Fresh | Launch::OnPath(_) | Launch::Faulted { resume: None, .. } => {}
+            Launch::Fresh
+            | Launch::OnPath(_)
+            | Launch::WithEnv(_)
+            | Launch::Faulted { resume: None, .. } => {}
             Launch::Faulted {
                 resume: Some(id), ..
             }
@@ -467,6 +472,11 @@ impl Terminal {
         command.env("PLAK_HOME", fixture.home());
         if let Launch::Faulted { faults, .. } = launch {
             command.env("PLAK_TEST_FAULTS", faults);
+        }
+        if let Launch::WithEnv(env) = launch {
+            for (name, value) in env {
+                command.env(name, value);
+            }
         }
         command.env("PLAK_TEST_MODEL", "offline-loopback-v1");
         command.env("PLAK_TEST_SCRIPT", fixture.script());
@@ -1623,6 +1633,109 @@ fn esc_cancels_a_busy_turn_and_esc_esc_clears_an_undoable_draft() {
         frame.contains("after the cancel") && frame.contains("the answer after the stall")
     });
     terminal.quit();
+}
+
+/// Every round answers after a stall a cancel ends. A turn stopped before
+/// its dispatch never takes a round, so the next prompt answers the same way
+/// whether or not the stop reached the provider.
+fn stalls_then_answers_alike() -> Value {
+    json!({
+        "version": 1,
+        "repeat_last_step": true,
+        "steps": [{"output": {"text": "the stalled answer"}, "stall_ms": 6_000}]
+    })
+}
+
+/// Text a stop must never show: a cancel whose reply the runtime lost.
+fn assert_no_unknown_outcome(frame: &str, what: &str) {
+    for needle in [
+        "acknowledgement was lost",
+        "outcome unknown",
+        "unknown outcome",
+    ] {
+        assert!(
+            !frame.to_lowercase().contains(needle),
+            "{what} shows `{needle}`:\n{frame}"
+        );
+    }
+}
+
+/// Esc right after Enter, wherever it lands before or after the prompt's
+/// busy edge, opens the stop pop-up as a busy Esc does (spec 02 §5.3); it
+/// never sends the idle interrupt that stopped the prompt unconfirmed. The
+/// confirmed stop ends the prompt's row with `⊘ interrupted`, whether it
+/// stopped preparation or cancelled the dispatched turn, and the next prompt
+/// answers.
+#[test]
+fn esc_right_after_enter_asks_then_stops_the_turn_and_the_next_prompt_answers() {
+    for delay_ms in [0, 5, 50] {
+        let fixture = Fixture::new(&stalls_then_answers_alike());
+        let mut terminal = Terminal::spawn_ready(&fixture);
+        terminal.send(b"stop this at once\r");
+        std::thread::sleep(Duration::from_millis(delay_ms));
+        terminal.send(b"\x1b");
+        terminal.wait_where(&format!("{delay_ms} ms: the stop pop-up"), |frame| {
+            frame.contains("Stop this turn?")
+        });
+        // Focus starts on Stop turn, so Enter confirms it.
+        terminal.send(b"\r");
+        let stopped = terminal.wait_where(&format!("{delay_ms} ms: the stopped turn"), |frame| {
+            frame.contains("⊘ interrupted")
+                && !frame.contains("cancelling…")
+                && !frame.contains("waiting for model")
+        });
+        assert!(
+            stopped.contains("stop this at once"),
+            "{delay_ms} ms: the stopped prompt keeps its row:\n{stopped}"
+        );
+        assert!(
+            !stopped.contains("the stalled answer"),
+            "{delay_ms} ms: the stopped turn answered:\n{stopped}"
+        );
+        assert_no_unknown_outcome(&stopped, &format!("{delay_ms} ms: the stopped turn"));
+        terminal.send(b"after the stop\r");
+        let answered = terminal.wait_where(&format!("{delay_ms} ms: the next answer"), |frame| {
+            frame.contains("after the stop") && frame.contains("the stalled answer")
+        });
+        assert_no_unknown_outcome(&answered, &format!("{delay_ms} ms: the next turn"));
+        terminal.quit();
+    }
+}
+
+/// The host can refuse a sent prompt before its busy edge ever comes: here
+/// storage is below the admission floor, so the prompt stays queued and no
+/// turn starts. An Esc right after Enter may open the stop pop-up while the
+/// prompt is unanswered; the refusal closes it, leaves the refusal's own
+/// state and no `⊘ interrupted`, and the next Esc is idle again.
+#[test]
+fn esc_right_after_a_refused_prompt_leaves_the_refusal() {
+    for delay_ms in [0, 5, 50] {
+        let fixture = Fixture::new(&stalls_then_answers_alike());
+        let mut terminal = Terminal::spawn(
+            &fixture,
+            Launch::WithEnv(&[("PLAK_TEST_STORAGE_CAPACITY", "refused")]),
+        );
+        terminal.wait_ready();
+        terminal.send(b"refuse this one\r");
+        std::thread::sleep(Duration::from_millis(delay_ms));
+        terminal.send(b"\x1b");
+        let refused = terminal.wait_where(&format!("{delay_ms} ms: the refusal"), |frame| {
+            frame.contains("new turns refused") && !frame.contains("Stop this turn?")
+        });
+        assert!(
+            !refused.contains("⊘ interrupted") && !refused.contains("cancelling…"),
+            "{delay_ms} ms: a refused prompt was never stopped:\n{refused}"
+        );
+        assert_no_unknown_outcome(&refused, &format!("{delay_ms} ms: the refusal"));
+        terminal.send(b"\x1b");
+        std::thread::sleep(Duration::from_millis(300));
+        let idle = terminal.screen();
+        assert!(
+            !idle.contains("Stop this turn?"),
+            "{delay_ms} ms: an idle Esc after the refusal asked to stop:\n{idle}"
+        );
+        terminal.quit();
+    }
 }
 
 /// Waits until the caret column satisfies `predicate` and returns the caret.
