@@ -97,7 +97,7 @@ fn a_remote_face_is_refused_a_local_only_intent_over_the_socket() {
     let check = SessionIntent::Extension(SurfaceIntent::CheckBuild);
     assert!(matches!(
         sender.send(check.clone()),
-        Err(IntentSendError::Refused(refused)) if refused == check
+        Err(client::SendError::Refused(IntentSendError::Refused(refused))) if refused == check
     ));
     while let Ok(delivery) = intents.try_recv() {
         assert!(
@@ -117,4 +117,27 @@ fn hello() -> Hello {
         caps: Vec::new(),
         locality: ClientLocality::default(),
     }
+}
+
+/// The peer decides: only this user's uid is admitted, and a peer whose
+/// credentials cannot be read is refused.
+#[test]
+fn only_this_users_peer_is_admitted() {
+    assert!(peer_is(Ok(501), 501).is_ok());
+    assert_eq!(
+        peer_is(Ok(502), 501).unwrap_err().kind(),
+        io::ErrorKind::PermissionDenied
+    );
+    assert_eq!(
+        peer_is(Err(io::Error::other("no credentials")), 501)
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::PermissionDenied
+    );
+    let (ours, theirs) = UnixStream::pair().unwrap();
+    assert_eq!(
+        peer_uid(&ours).unwrap(),
+        rustix::process::geteuid().as_raw()
+    );
+    drop(theirs);
 }

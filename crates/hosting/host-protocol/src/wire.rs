@@ -474,6 +474,9 @@ pub enum HostFrame<P: ProtocolExtension> {
 pub enum WireError {
     /// The line is over [`MAX_LINE_BYTES`].
     TooLarge,
+    /// The blobs held would be over their bounds ([`MAX_PENDING_BLOBS`],
+    /// [`MAX_PENDING_BLOB_BYTES`], [`MAX_BLOB_BYTES`]).
+    BlobLimit,
     /// The line is not a frame.
     Malformed(String),
 }
@@ -482,6 +485,11 @@ impl std::fmt::Display for WireError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::TooLarge => write!(formatter, "the frame is over {MAX_LINE_BYTES} bytes"),
+            Self::BlobLimit => write!(
+                formatter,
+                "the blobs held are over their bounds: {MAX_PENDING_BLOBS} blobs, \
+                 {MAX_PENDING_BLOB_BYTES} bytes in all, {MAX_BLOB_BYTES} bytes each"
+            ),
             Self::Malformed(detail) => write!(formatter, "malformed frame: {detail}"),
         }
     }
@@ -701,7 +709,7 @@ impl BlobAssembler {
             || pending + bytes.len() > MAX_PENDING_BLOB_BYTES
         {
             self.discard();
-            return Err(WireError::TooLarge);
+            return Err(WireError::BlobLimit);
         }
         let held = self.partial.entry(chunk.id.clone()).or_default();
         if u64::try_from(held.len()).ok() != Some(chunk.offset) {
@@ -710,7 +718,7 @@ impl BlobAssembler {
         }
         if held.len() + bytes.len() > MAX_BLOB_BYTES {
             self.partial.remove(&chunk.id);
-            return Err(WireError::TooLarge);
+            return Err(WireError::BlobLimit);
         }
         held.extend_from_slice(&bytes);
         if chunk.last

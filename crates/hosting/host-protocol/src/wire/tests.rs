@@ -368,7 +368,7 @@ fn blobs_held_are_bounded_and_dropped_when_unnamed() {
     }
     assert_eq!(
         assembler.push(chunk("one-more", 1)),
-        Err(WireError::TooLarge)
+        Err(WireError::BlobLimit)
     );
 
     let mut assembler = BlobAssembler::default();
@@ -390,7 +390,7 @@ fn blobs_held_are_bounded_and_dropped_when_unnamed() {
             break;
         }
     }
-    assert_eq!(refused, Some(WireError::TooLarge));
+    assert_eq!(refused, Some(WireError::BlobLimit));
 
     // A frame that names no blob drops them: they cannot be named later.
     let mut intent = SessionIntent::<Core>::Interrupt;

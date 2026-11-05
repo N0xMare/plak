@@ -18,7 +18,8 @@ pub use crate::surface_protocol::PlakExtension;
 
 /// Connects to the host socket at `path` after checking that the socket
 /// and its directory belong to this user, the directory is closed to
-/// everyone else, and the file is a socket.
+/// everyone else, and the file is a socket; once connected, the peer must
+/// be this user's process.
 ///
 /// # Errors
 ///
@@ -45,7 +46,42 @@ pub fn host_socket(path: &Path) -> io::Result<Transport> {
         )));
     }
     let stream = UnixStream::connect(path)?;
+    // The path checks name what is wrong; the peer's credentials decide,
+    // since a directory above the socket's may be another user's to swap.
+    peer_is(peer_uid(&stream), user)?;
     Ok(Transport::new(stream.try_clone()?, stream))
+}
+
+/// The uid of `stream`'s peer (`SO_PEERCRED`, or `getpeereid` on macOS).
+fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
+    let probe = stream.try_clone()?;
+    probe.set_nonblocking(true)?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .build()?;
+    let uid = runtime.block_on(async {
+        let probe = tokio::net::UnixStream::from_std(probe)?;
+        probe.peer_cred().map(|peer| peer.uid())
+    });
+    // The probe shared the stream's open file; the client reads it blocking.
+    stream.set_nonblocking(false)?;
+    uid
+}
+
+/// Refuses a peer that is not `user`, or whose credentials could not be
+/// read.
+fn peer_is(peer: io::Result<u32>, user: u32) -> io::Result<()> {
+    match peer {
+        Ok(peer) if peer == user => Ok(()),
+        Ok(peer) => Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("the host socket's peer is uid {peer}, not this user's {user}"),
+        )),
+        Err(error) => Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("the host socket's peer could not be read: {error}"),
+        )),
+    }
 }
 
 #[cfg(test)]

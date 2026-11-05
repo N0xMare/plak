@@ -15,9 +15,16 @@
 //! A face sends with [`WireSender`]: an intent goes as a request on the
 //! current attachment, waiting for one while the client re-attaches, and
 //! its refusal comes back as the [`IntentSendError`] a mailbox would give,
-//! with the intent. A session request ([`WireSender::request_session`])
-//! names a `request_id` of the client's own; its answer arrives as a
-//! [`SessionAnswer`].
+//! with the intent ([`SendError`]). A session request
+//! ([`WireSender::request_session`]) names a `request_id` of the client's
+//! own; its answer arrives as a [`SessionAnswer`].
+//!
+//! One writer thread alone writes the transport, from a queue of encoded
+//! lines: the reader thread and the face never block on a write, so a
+//! large request does not hold up what the host says meanwhile. A face that
+//! falls 4096 observations behind is treated as the host treats
+//! a slow attachment: the client lets its attachment go and attaches
+//! again.
 //!
 //! The client is one connection: when the transport ends, the receiver
 //! reports `Disconnected` once it is drained, and a new connection is a
@@ -26,7 +33,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io::{Read, Write};
 use std::sync::mpsc::{self, RecvTimeoutError, TryRecvError};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -44,6 +51,11 @@ use crate::{IntentSendError, ProtocolExtension, SessionIntent, SessionObservatio
 /// How long a send waits for the host to answer it, or for an attachment
 /// while the client re-attaches.
 const ANSWER_DEADLINE: Duration = Duration::from_secs(30);
+
+/// How many observations the receiver holds for a face that has not taken
+/// them. Past it the face fell behind: as the host drops a slow
+/// attachment, the client lets its attachment go and attaches again.
+const QUEUE_BOUND: usize = 4096;
 
 /// The two halves of a byte transport to a host: a pipe pair, a child's
 /// stdio, a unix socket.
@@ -94,6 +106,29 @@ impl std::error::Error for ConnectError {
             Self::Io(error) => Some(error),
             Self::Wire(error) => Some(error),
             Self::Refused(_) | Self::Closed => None,
+        }
+    }
+}
+
+/// Why a sent intent was not taken, with the intent.
+#[derive(Debug)]
+pub enum SendError<P: ProtocolExtension> {
+    /// It was not taken, as a mailbox refuses an intent: the host refused
+    /// it, or the client could not send it.
+    Refused(IntentSendError<P>),
+    /// It was sent, but no verdict came: the connection ended first, or
+    /// none came within the answer deadline. The host may yet take it, so
+    /// sending it again may run it twice.
+    OutcomeUnknown(SessionIntent<P>),
+}
+
+impl<P: ProtocolExtension> SendError<P> {
+    /// The intent that was sent.
+    #[must_use]
+    pub fn into_intent(self) -> SessionIntent<P> {
+        match self {
+            Self::Refused(refused) => refused.into_action(),
+            Self::OutcomeUnknown(intent) => intent,
         }
     }
 }
@@ -155,7 +190,9 @@ impl<P: ProtocolExtension> Drop for Connection<P> {
 type Notify = Arc<dyn Fn() + Send + Sync>;
 
 struct Inner<P: ProtocolExtension> {
-    writer: Mutex<Box<dyn Write + Send>>,
+    /// Encoded lines for the writer thread, which alone writes the
+    /// transport: a large request never holds up the reader or the face.
+    outbox: mpsc::Sender<String>,
     state: Mutex<State<P>>,
     changed: Condvar,
     notify: Mutex<Option<Notify>>,
@@ -175,6 +212,8 @@ struct State<P: ProtocolExtension> {
     waiting: BTreeMap<RequestId, mpsc::Sender<Outcome>>,
     /// Session requests by their frame's id.
     sessions: BTreeMap<RequestId, String>,
+    /// The root attach was refused `backpressure` once and asked again.
+    attach_retried: bool,
     /// Transcripts whose fresh baseline has not arrived since the client
     /// lost their content.
     gaps: BTreeSet<TranscriptScope>,
@@ -207,8 +246,9 @@ where
 {
     let Transport { reader, writer } = transport;
     let mut lines = Lines::new(reader);
+    let (outbox, outgoing) = mpsc::channel();
     let inner = Arc::new(Inner {
-        writer: Mutex::new(writer),
+        outbox,
         state: Mutex::new(State {
             next_request: 1,
             next_session_request: 1,
@@ -222,6 +262,7 @@ where
             answers: VecDeque::new(),
             waiting: BTreeMap::new(),
             sessions: BTreeMap::new(),
+            attach_retried: false,
             gaps: BTreeSet::from([TranscriptScope::Root]),
             snapshots: SnapshotAssembler::default(),
             blobs: BlobAssembler::default(),
@@ -231,6 +272,8 @@ where
         changed: Condvar::new(),
         notify: Mutex::new(None),
     });
+    let writing = Arc::downgrade(&inner);
+    thread::spawn(move || write_lines(writer, &outgoing, &writing));
     inner
         .write(&ClientFrame::<P>::Hello(hello))
         .map_err(ConnectError::Io)?;
@@ -269,16 +312,19 @@ where
     ///
     /// # Errors
     ///
-    /// The intent back, as a mailbox refuses it: [`IntentSendError::Saturated`]
-    /// for backpressure, [`IntentSendError::Duplicate`] for one in flight,
-    /// [`IntentSendError::Disconnected`] once the connection is gone or no
-    /// attachment came in time, and [`IntentSendError::Refused`] for the
-    /// host's refusal of it for this connection's role or face.
+    /// The intent back. [`SendError::Refused`] as a mailbox refuses it:
+    /// [`IntentSendError::Saturated`] for backpressure,
+    /// [`IntentSendError::Duplicate`] for one in flight,
+    /// [`IntentSendError::Disconnected`] when it was never sent (the
+    /// connection is gone, or no attachment came in time) or the host's
+    /// attachment was gone, and [`IntentSendError::Refused`] for the host's
+    /// refusal of it for this connection's role or face.
+    /// [`SendError::OutcomeUnknown`] when it was sent and no verdict came.
     #[allow(
         clippy::result_large_err,
         reason = "the refusal hands the rejected intent back so the caller can restore it"
     )]
-    pub fn send(&self, intent: SessionIntent<P>) -> Result<(), IntentSendError<P>> {
+    pub fn send(&self, intent: SessionIntent<P>) -> Result<(), SendError<P>> {
         let Some((id, Some(answer))) = self.request(None, |attachment, id| {
             let mut sent = intent.clone();
             let taken = take_images(&mut sent, &format!("r{id}"));
@@ -294,21 +340,21 @@ where
             });
             frames
         }) else {
-            return Err(IntentSendError::Disconnected(intent));
+            return Err(SendError::Refused(IntentSendError::Disconnected(intent)));
         };
         let outcome = answer.recv_timeout(ANSWER_DEADLINE);
         lock(&self.connection.inner.state).waiting.remove(&id);
         match outcome {
             Ok(Outcome::Ok(_)) => Ok(()),
-            Ok(Outcome::Refused(refusal)) => Err(match refusal {
+            Ok(Outcome::Refused(refusal)) => Err(SendError::Refused(match refusal {
                 RequestRefusal::Backpressure => IntentSendError::Saturated(intent),
                 RequestRefusal::OneInFlight => IntentSendError::Duplicate(intent),
                 RequestRefusal::Disconnected | RequestRefusal::NotAttached => {
                     IntentSendError::Disconnected(intent)
                 }
                 _ => IntentSendError::Refused(intent),
-            }),
-            Err(_) => Err(IntentSendError::Disconnected(intent)),
+            })),
+            Err(_) => Err(SendError::OutcomeUnknown(intent)),
         }
     }
 
@@ -500,10 +546,29 @@ impl<P: ProtocolExtension> Inner<P> {
         self.write_line(&lines)
     }
 
+    /// Queues `line` for the writer thread; it never blocks.
     fn write_line(&self, line: &str) -> std::io::Result<()> {
-        let mut writer = lock(&self.writer);
-        writer.write_all(line.as_bytes())?;
-        writer.flush()
+        self.outbox.send(line.to_owned()).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "the connection's writer stopped",
+            )
+        })
+    }
+
+    /// Ends the connection for `reason`: every waiting sender's answer
+    /// channel closes, and the face is woken.
+    fn close(&self, reason: String) {
+        let mut state = lock(&self.state);
+        if !state.closed {
+            state.closed = true;
+            state.ended = Some(reason);
+        }
+        state.attachment = None;
+        state.waiting.clear();
+        drop(state);
+        self.changed.notify_all();
+        self.wake();
     }
 
     /// Asks to attach `state.root`.
@@ -555,15 +620,7 @@ impl<P: ProtocolExtension> Inner<P> {
                 self.wake();
             }
         }
-        let mut state = lock(&self.state);
-        state.closed = true;
-        state.ended = Some(ended);
-        state.attachment = None;
-        // Every waiting sender sees its answer channel close.
-        state.waiting.clear();
-        drop(state);
-        self.changed.notify_all();
-        self.wake();
+        self.close(ended);
     }
 
     fn wake(&self) {
@@ -571,6 +628,69 @@ impl<P: ProtocolExtension> Inner<P> {
         if let Some(notify) = notify {
             notify();
         }
+    }
+
+    /// Takes the host's answer to the root attach in flight.
+    fn attached(&self, state: &mut State<P>, outcome: Outcome) -> std::io::Result<()>
+    where
+        P::Intent: Serialize,
+    {
+        match outcome {
+            Outcome::Ok(Answer::Attached { attachment }) => {
+                state.attachment = Some(attachment);
+                state.attach_retried = false;
+                Ok(())
+            }
+            // The session left the root this client knew.
+            Outcome::Refused(RequestRefusal::Moved { node }) => {
+                state.root = node;
+                self.attach(state)
+            }
+            // Once more, for a mailbox that was full a moment ago.
+            Outcome::Refused(RequestRefusal::Backpressure) if !state.attach_retried => {
+                state.attach_retried = true;
+                self.attach(state)
+            }
+            Outcome::Ok(answer) => Err(std::io::Error::other(format!(
+                "the host answered the attach of the session's root with {answer:?}"
+            ))),
+            Outcome::Refused(refusal) => Err(std::io::Error::other(format!(
+                "the host refused the attach of the session's root: {refusal:?}"
+            ))),
+        }
+    }
+
+    /// Queues `observation` for the face. A face that fell behind by
+    /// [`QUEUE_BOUND`] loses what it had not taken: the client lets its
+    /// attachment go and attaches again, reading the root transcript as
+    /// lost until the new attachment's baseline.
+    fn deliver(
+        &self,
+        state: &mut State<P>,
+        observation: SessionObservation<P>,
+    ) -> std::io::Result<bool>
+    where
+        P::Intent: Serialize,
+    {
+        if state.queue.len() >= QUEUE_BOUND {
+            state.queue.clear();
+            if let Some(attachment) = state.attachment.take() {
+                let id = state.next_request;
+                state.next_request += 1;
+                self.write(&ClientFrame::Request {
+                    id,
+                    op: Op::Detach { attachment },
+                })?;
+            }
+            state.gaps.insert(TranscriptScope::Root);
+            self.attach(state)?;
+            return Ok(true);
+        }
+        if let SessionObservation::PresentationSnapshot(snapshot) = &observation {
+            state.gaps.remove(&snapshot.scope);
+        }
+        state.queue.push_back(observation);
+        Ok(true)
     }
 
     /// Takes one host frame; whether the face has something new. `Err` when
@@ -583,20 +703,7 @@ impl<P: ProtocolExtension> Inner<P> {
             HostFrame::Response { id, outcome } => {
                 if state.attaching == Some(id) {
                     state.attaching = None;
-                    return match outcome {
-                        Outcome::Ok(Answer::Attached { attachment }) => {
-                            state.attachment = Some(attachment);
-                            Ok(false)
-                        }
-                        // The session left the root this client knew.
-                        Outcome::Refused(RequestRefusal::Moved { node }) => {
-                            state.root = node;
-                            self.attach(state).map(|()| false)
-                        }
-                        Outcome::Ok(_) | Outcome::Refused(_) => Err(std::io::Error::other(
-                            "the host refused the attach of the session's root",
-                        )),
-                    };
+                    return self.attached(state, outcome).map(|()| false);
                 }
                 if let Some(request_id) = state.sessions.remove(&id) {
                     state.answers.push_back(SessionAnswer {
@@ -623,6 +730,10 @@ impl<P: ProtocolExtension> Inner<P> {
                 ..
             } => {
                 if state.attachment != Some(attachment) {
+                    // Its images' blobs are no one's now.
+                    if !blobs.is_empty() {
+                        state.blobs.discard();
+                    }
                     return Ok(false);
                 }
                 if !blobs.is_empty() {
@@ -631,11 +742,7 @@ impl<P: ProtocolExtension> Inner<P> {
                         .restore_observation_images(&mut observation, &blobs)
                         .map_err(std::io::Error::other)?;
                 }
-                if let SessionObservation::PresentationSnapshot(snapshot) = &observation {
-                    state.gaps.remove(&snapshot.scope);
-                }
-                state.queue.push_back(observation);
-                Ok(true)
+                self.deliver(state, observation)
             }
             HostFrame::Snapshot(page) => {
                 if state.attachment != Some(page.attachment) {
@@ -645,11 +752,7 @@ impl<P: ProtocolExtension> Inner<P> {
                 else {
                     return Ok(false);
                 };
-                state.gaps.remove(&snapshot.scope);
-                state
-                    .queue
-                    .push_back(SessionObservation::PresentationSnapshot(snapshot));
-                Ok(true)
+                self.deliver(state, SessionObservation::PresentationSnapshot(snapshot))
             }
             HostFrame::Blob(chunk) => {
                 state.blobs.push(chunk).map_err(std::io::Error::other)?;
@@ -675,6 +778,26 @@ impl<P: ProtocolExtension> Inner<P> {
             HostFrame::Bye | HostFrame::Welcome(_) | HostFrame::Refused(_) => {
                 Err(std::io::Error::other("the host closed the connection"))
             }
+        }
+    }
+}
+
+/// Writes the connection's queued lines, in order, until every queue
+/// sender is gone; a transport that fails ends the connection.
+fn write_lines<P: ProtocolExtension>(
+    mut writer: Box<dyn Write + Send>,
+    lines: &mpsc::Receiver<String>,
+    inner: &Weak<Inner<P>>,
+) {
+    for line in lines {
+        if let Err(error) = writer
+            .write_all(line.as_bytes())
+            .and_then(|()| writer.flush())
+        {
+            if let Some(inner) = inner.upgrade() {
+                inner.close(format!("the transport failed to write: {error}"));
+            }
+            return;
         }
     }
 }

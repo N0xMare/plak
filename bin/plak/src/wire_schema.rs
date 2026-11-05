@@ -44,3 +44,6 @@ pub(crate) fn print(stdout: &mut dyn Write) -> CliResult<ProcessOutcome> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests;
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]
+mod variant_tests;

@@ -4064,7 +4064,8 @@ verdicts) are addressed, the session profile and workspace chrome states.
   client a frontend embeds, over any byte transport (a child `plak agent
   --wire v2`'s stdio, a socket pair, the host's socket; Plak's
   `wire_transport::host_socket` connects to that socket only in a
-  directory private to the user and only when it is the user's socket).
+  directory private to the user, when it is the user's socket, and only
+  to a peer of the user's own uid).
   It says hello, attaches the welcomed root and follows the host on a
   thread of its own: a refusal `moved` or a `moved` frame attaches the root
   it names, a `resync_required` attaches the root again, and either reads
@@ -4075,9 +4076,23 @@ verdicts) are addressed, the session profile and workspace chrome states.
   client attaches again, and its refusal comes back as the in-process
   mailbox's (`backpressure` as saturated, `one_in_flight` as duplicate,
   `disconnected` or `not_attached` as disconnected, any other as refused),
-  with the intent. A session request names a client id of its own, and
-  its settled answer is the new root or the refusal. The client is one
-  connection: a transport that ends is the receiver's disconnect, with why.
+  with the intent. An intent that was sent but got no verdict, because the
+  connection ended first or none came within 30 seconds, is returned as
+  of unknown outcome: the host may yet run it, so sending it again may run
+  it twice. A session request names a client id of its own, and its
+  settled answer is the new root or the refusal. One writer thread alone
+  writes the transport, so neither the face nor the reader ever waits on a
+  write, however large. The receiver holds at most 4096 observations a
+  face has not taken; past that the face fell behind, and as the host
+  drops a slow attachment the client detaches, attaches again and reads
+  the root transcript as lost until its next baseline. A root attach
+  refused `backpressure` is asked once more. An unreadable or unknown
+  frame, a mid-stream `welcome`, `refused` or `bye`, a root attach refused
+  anything else, or a transport that fails ends the connection: the
+  receiver reports the disconnect once drained, with why. The client is one
+  connection; a new one is a new connect. `wire_transport::host_socket`
+  checks the path for a clear error, then the connected peer's uid
+  (`SO_PEERCRED`, or `getpeereid` on macOS), which must be the user's.
 
 ### 4.5 The web endpoint
 
