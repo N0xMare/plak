@@ -28,9 +28,17 @@ fn holds() -> &'static Mutex<HashMap<(String, String), Held>> {
     HOLDS.get_or_init(Mutex::default)
 }
 
+/// This process's instance, drawn at its first use and the same for its
+/// life: custody names it, and a host binds every runner connection with it,
+/// so it can be read before the custody host is bound without fixing it.
+pub fn process_instance() -> HostInstance {
+    static INSTANCE: OnceLock<HostInstance> = OnceLock::new();
+    *INSTANCE.get_or_init(HostInstance::generate)
+}
+
 /// Names this process's host before its first custody take: its stable host
-/// id, the machine it runs on and its binary's build id. The process
-/// instance is drawn here.
+/// id, the machine it runs on and its binary's build id. The instance is
+/// [`process_instance`].
 ///
 /// # Errors
 ///
@@ -47,7 +55,7 @@ pub fn bind_custody_host(
         bound_now = true;
         CustodyHost {
             host_id: host_id.clone(),
-            instance: HostInstance::generate(),
+            instance: process_instance(),
             binary: binary.clone(),
             host_name: host_name.clone(),
         }
@@ -66,7 +74,7 @@ pub fn bind_custody_host(
 pub fn custody_host() -> &'static CustodyHost {
     HOST.get_or_init(|| CustodyHost {
         host_id: "local".to_owned(),
-        instance: HostInstance::generate(),
+        instance: process_instance(),
         binary: None,
         host_name: machine_name(),
     })

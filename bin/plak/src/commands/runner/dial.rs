@@ -4,7 +4,7 @@
 
 use std::process::Stdio;
 
-use plakous::runner::protocol::{Bind, Hello, VersionTriple};
+use plakous::runner::protocol::{Hello, VersionTriple};
 use plakous::runner::{CallJournal, ClientWindows, FileCallJournal, RunnerClient};
 use plakous_hosted::error::{CliFailure, CliResult};
 
@@ -107,12 +107,7 @@ pub(crate) async fn dial(
         return Err(CliFailure::new("ssh did not give a link"));
     };
     let stream = tokio::io::join(stdout, stdin);
-    let bind = Bind {
-        host_id: super::home::host_id(paths)?,
-        host_instance: super::host_instance(),
-        version: version(),
-        inspect,
-    };
+    let bind = super::bind(super::home::host_id(paths)?, inspect);
     let journal: Option<std::sync::Arc<dyn CallJournal>> = if inspect {
         None
     } else {

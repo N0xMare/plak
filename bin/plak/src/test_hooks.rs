@@ -95,7 +95,6 @@ pub(crate) fn install() -> Result<(), String> {
 mod child_runner {
     use std::sync::{Arc, OnceLock};
 
-    use plakous::runner::protocol::Bind;
     use plakous::runner::{CallJournal, ClientWindows, FileCallJournal, RunnerClient};
     use plakous::tools::runner::{RunnerBackend, select_process_runner};
     use plakous_offline_crash_harness::script::ChildRunnerPlan;
@@ -146,12 +145,7 @@ mod child_runner {
             FileCallJournal::open(plan.home.join("host-calls"))
                 .map_err(|error| format!("the child runner's call journal failed: {error}"))?,
         );
-        let bind = Bind {
-            host_id: plan.host_id.clone(),
-            host_instance: crate::commands::runner::host_instance(),
-            version: crate::commands::runner::version(),
-            inspect: false,
-        };
+        let bind = crate::commands::runner::bind(plan.host_id.clone(), false);
         let (client, hello) = runtime
             .block_on(RunnerClient::connect_journaled(
                 tokio::io::join(stdout, stdin),

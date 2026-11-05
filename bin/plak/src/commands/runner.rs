@@ -33,16 +33,21 @@ use dial::ssh_command;
 pub(crate) use dial::{STRICT_SSH_OPTIONS, version};
 use home::RunnerHome;
 
-/// This process's host instance, the same for its life: a runner holds the
-/// lines whose transfers it accepted from it, and every connection this
-/// process makes to a runner binds with it (spec 01 §8.4). The `host_id`
-/// names the home and is shared by all its processes; this names one of
-/// them.
-pub(crate) fn host_instance() -> String {
-    static INSTANCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    INSTANCE
-        .get_or_init(|| uuid::Uuid::new_v4().hyphenated().to_string())
-        .clone()
+/// This process's bind as the home's `host_id`. Its `host_instance` is the
+/// process instance tree custody names, the same for the process's life, so
+/// a runner's line holder and a tree's custodian are one process. A runner
+/// holds the lines whose transfers it accepted from that instance, and every
+/// connection this process makes to a runner binds with it, one per runner,
+/// since a second bind of an instance ends its older connection (spec 01
+/// §8.4). The `host_id` names the home and is shared by all its processes;
+/// the instance names one of them.
+pub(crate) fn bind(host_id: String, inspect: bool) -> Bind {
+    Bind {
+        host_id,
+        host_instance: plakous_recursive_subagents::tree::process_instance().to_string(),
+        version: version(),
+        inspect,
+    }
 }
 
 /// How long `connect` waits for a daemon it started to listen.
@@ -402,12 +407,7 @@ async fn ps_local(paths: &PlakPaths, stdout: &mut dyn std::io::Write) -> CliResu
         writeln!(stdout, "no runner is running").map_err(|_| CliFailure::new("stdout failed"))?;
         return Ok(());
     };
-    let bind = Bind {
-        host_id: host_id(paths)?,
-        host_instance: host_instance(),
-        version: version(),
-        inspect: true,
-    };
+    let bind = bind(host_id(paths)?, true);
     let (client, _) = RunnerClient::connect(stream, bind, ClientWindows::default())
         .await
         .map_err(|error| CliFailure::new(format!("the runner: {error}")))?;

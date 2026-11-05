@@ -155,7 +155,7 @@ impl RunnerHome {
 
 /// This home's stable host identity, created on first use: a runner pairs
 /// with it, and every process of the home presents it. Owner leases are per
-/// process instance ([`super::host_instance`]).
+/// process instance ([`super::bind`]).
 pub(crate) fn host_id(paths: &PlakPaths) -> CliResult<String> {
     let host_id = read_or_create_id(paths.home(), "host-id", "")?;
     // It is sent to runners and interpolated into a remote command line.

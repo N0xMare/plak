@@ -655,7 +655,7 @@ widens it.
   cleared.
 - **The host identity names a home, not a process.** Every host process of
   the home, of every state key, binds its `host_id`; a process binds its own
-  `host_instance`. Ownership of a line's processes is fenced by the line's L0
+  `host_instance`, its tree-custody instance. Ownership of a line's processes is fenced by the line's L0
   lease, which is the only fence: a host mints an owner only from the lease it
   holds, so a sibling process of the home takes a line only by taking its
   head's lease (released, handed off, or after `HolderGone`). The fence is not

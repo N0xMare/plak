@@ -112,3 +112,21 @@ fn a_shell_that_leaves_its_group_is_still_given_up_on_at_the_deadline() {
         started.elapsed()
     );
 }
+
+/// A runner connection binds with the process's custody instance, read
+/// before custody is bound without fixing it, so a line's holder on a
+/// runner and a tree's custodian are one process.
+#[test]
+fn a_runner_bind_names_the_process_custody_instance() {
+    use plakous_recursive_subagents::tree::{bind_custody_host, custody_host, machine_name};
+
+    let held = bind("host-1".to_owned(), false);
+    assert_eq!(
+        bind("host-1".to_owned(), true).host_instance,
+        held.host_instance
+    );
+    bind_custody_host("host-1", machine_name(), None)
+        .expect("reading the instance leaves custody unbound");
+    assert_eq!(custody_host().host_id, "host-1");
+    assert_eq!(held.host_instance, custody_host().instance.to_string());
+}

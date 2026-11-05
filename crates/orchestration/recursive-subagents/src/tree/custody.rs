@@ -19,7 +19,7 @@ mod custodian;
 mod liveness;
 pub use custodian::{
     CustodyHold, acquire_custody, bind_custody_host, custody_host, holder_runs_here, machine_name,
-    release_custody_hold, with_custody,
+    process_instance, release_custody_hold, with_custody,
 };
 
 /// One host process image: its process id and a nonce drawn at start, so a

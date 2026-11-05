@@ -5651,7 +5651,8 @@ runner for a session yet.
   accepted, ordered by `(generation, fence)`, and the line's holder: the host
   instance (`Bind`'s `host_instance`) whose transfer it last accepted. A host
   instance is one host process: it binds every connection it makes to a
-  runner with the same instance, keeping one connection per runner, while
+  runner with the same instance, keeping one connection per runner (Plak's
+  is the process's tree-custody instance, chapter 03 §14), while
   `host_id` names the home and is shared by every process of it, of every
   state key. The host sends `TransferOwner {
   from, to }` after the new owner's lease is granted and before that owner's
