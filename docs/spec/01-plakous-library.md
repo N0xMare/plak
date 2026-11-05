@@ -334,7 +334,23 @@ the same command identity can be retried once capacity clears. `Shutdown`
 `LedgerFull` require recovery and reopening, not in-process retry.
 For convenience API callers, `LedgerFull` maps to a definite `AgentErrorKind::Session`
 refusal, not `OutcomeUnknown`; no command was admitted.
-A lost actor reply is `OutcomeUnknown`. Quiescent publications prune settled command evidence
+A lost actor reply is `OutcomeUnknown`. The actor never loses one. Its exit
+law, when its loop ends (shutdown, a fatal error, a panic, or a
+recovery-requiring terminal), runs in this order:
+
+1. It closes its ingress; a later send is refused `Shutdown` at once.
+2. It settles every root still active or queued, publishing each terminal.
+3. It answers every control the ingress accepted, including a send that
+   reserved its slot before the close, with a typed refusal that records
+   nothing. It stops only once the ingress is closed, empty and no sender
+   holds a slot.
+
+In that answer a cancel gets `Stale` only when its turn is no longer admitted,
+so its terminal is published; a cancel for a turn whose settlement failed gets
+`Shutdown`. A session endpoint request gets `Unavailable`, and every other
+control gets `Shutdown`.
+
+Quiescent publications prune settled command evidence
 at the 2048-record high-water mark, retaining the most recent 256 commands,
 the latest accepted root, still-owned or unsettled roots, and the operations
 needed for dedupe and recovery.

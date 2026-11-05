@@ -370,6 +370,10 @@ fn loss_resume_note(
                 "{} did not start ({reason}); its continuation is kept",
                 short_agent(agent_id)
             )),
+            LossResume::Ended(reason) => parts.push(format!(
+                "{} did not start ({reason})",
+                short_agent(agent_id)
+            )),
         }
     }
     if !started.is_empty() {

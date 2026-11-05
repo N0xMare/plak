@@ -129,6 +129,8 @@ pub(super) struct ArtifactModel {
     pub(super) script_tools_by_ordinary_call: AtomicBool,
     pub(super) ordinary_calls: AtomicUsize,
     pub(super) reject_round_dispatch: AtomicBool,
+    /// Ends every ordinary round with an unknown provider outcome.
+    pub(super) unknown_round_outcome: AtomicBool,
     pub(super) provider_pause_calls: BTreeSet<usize>,
     pub(super) assistant_continuation_calls: Mutex<BTreeSet<usize>>,
     pub(super) report_usage: bool,
@@ -267,6 +269,7 @@ impl ArtifactModel {
             script_tools_by_ordinary_call: AtomicBool::new(false),
             ordinary_calls: AtomicUsize::new(0),
             reject_round_dispatch: AtomicBool::new(false),
+            unknown_round_outcome: AtomicBool::new(false),
             provider_pause_calls: BTreeSet::new(),
             assistant_continuation_calls: Mutex::new(BTreeSet::new()),
             report_usage: false,
@@ -1041,6 +1044,14 @@ impl LanguageModel for ArtifactModel {
             let call = self.calls.fetch_add(1, Ordering::AcqRel);
             if !compaction_request && self.reject_round_dispatch.load(Ordering::Acquire) {
                 return Box::pin(async move { Err(rejection) });
+            }
+            if !compaction_request && self.unknown_round_outcome.load(Ordering::Acquire) {
+                return Box::pin(async {
+                    Err(ModelError::new(
+                        ModelErrorKind::OutcomeUnknown,
+                        "the provider's outcome is unknown",
+                    ))
+                });
             }
             let compaction_call = if paid_compaction_request {
                 let start = self.compaction_starts.fetch_add(1, Ordering::AcqRel) + 1;

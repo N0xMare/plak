@@ -603,6 +603,31 @@ pub fn projected_terminal_failure_runtime_binding(
     Ok(SessionRuntimeBinding::new(builder))
 }
 
+/// [`projected_terminal_failure_runtime_binding`] whose model plays `script`
+/// round by round instead of failing, so a product host reopens it.
+///
+/// # Errors
+///
+/// Returns an error when the model, the coding packs, or the projection is invalid.
+pub fn projected_scripted_runtime_binding(
+    workspace: &Path,
+    controller: BoundaryController,
+    script: Arc<ScriptPlan>,
+) -> HarnessResult<SessionRuntimeBinding> {
+    let account = b"offline-loopback-account";
+    let descriptor = descriptor(account)?;
+    let mut model = LoopbackModel::with_descriptor(controller, account, true, descriptor.clone())?;
+    model.scenario = LoopbackScenario::Scripted(script);
+    let builder = projected_coding_builder(
+        workspace,
+        Arc::new(model),
+        &descriptor,
+        account,
+        plakous::tools::CodingPresentation::Codex,
+    )?;
+    Ok(SessionRuntimeBinding::new(builder))
+}
+
 /// The scripted model over the standard coding packs, presented in pi's
 /// vocabulary under an exact V2 Direct projection.
 ///

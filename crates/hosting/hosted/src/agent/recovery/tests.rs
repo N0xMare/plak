@@ -4610,7 +4610,7 @@ async fn an_interrupt_after_admission_and_before_bind_binds_nothing() {
     assert!(
         matches!(
             resumed.as_slice(),
-            [(agent, crate::agent::children::LossResume::Deferred(_))] if agent == &id
+            [(agent, crate::agent::children::LossResume::Ended(_))] if agent == &id
         ),
         "{resumed:?}"
     );
@@ -4651,7 +4651,11 @@ async fn an_interrupt_before_bind_binds_nothing_after_the_admitted_turn_dispatch
             );
             Box::pin(async move {
                 interrupt().await;
-                continuation_ended_in_feed(&runtime, &sessions, &target).await;
+                let outcome = continuation_ended_in_feed(&runtime, &sessions, &target).await;
+                assert_eq!(
+                    outcome,
+                    plakous::sessions::feed::FeedTurnOutcome::RecoveryRequired
+                );
             })
         }),
     );
@@ -4661,9 +4665,11 @@ async fn an_interrupt_before_bind_binds_nothing_after_the_admitted_turn_dispatch
     assert!(
         matches!(
             resumed.as_slice(),
-            [(agent, crate::agent::children::LossResume::Deferred(_))] if agent == &id
+            [(agent, crate::agent::children::LossResume::Ended(reason))]
+                if agent == &id
+                    && reason.ends_with(crate::agent::children::ADMITTED_TURN_REACHED_PROVIDER)
         ),
-        "{resumed:?}"
+        "the note says the turn reached its provider: {resumed:?}"
     );
     fixture
         .runtime
@@ -4682,13 +4688,78 @@ async fn an_interrupt_before_bind_binds_nothing_after_the_admitted_turn_dispatch
     crate::topology_runtime::force_release(&fixture.tree_id).await;
 }
 
+/// A child Start whose admitted turn is cancelled before the Start binds it,
+/// as an operator's stop can land, has that cancel answered and its turn
+/// ended cancelled, wherever in the window the cancel lands.
+#[tokio::test]
+async fn a_child_start_cancelled_before_its_bind_ends_cancelled() {
+    for delay_ms in [0_u64, 5, 20] {
+        let fixture = Fixture::new(&format!("cancel-before-bind-{delay_ms}"));
+        let id = owner_lost_child(&fixture).await;
+        let (workspace, evidence) = (fixture.root.path().to_path_buf(), fixture.evidence.clone());
+        let _held = fixture.binding.install(Arc::new(move |_, _, _| {
+            let controller =
+                BoundaryController::quiet_from_evidence_path(CrashBoundary::None, &evidence)
+                    .map_err(|error| error.to_string())?;
+            let script: plakous_offline_crash_harness::script::ScriptPlan =
+                serde_json::from_value(json!({
+                    "version": plakous_offline_crash_harness::script::SCRIPT_VERSION,
+                    "steps": [{"output": {"text": "never answered"}, "stall_ms": 120_000}],
+                }))
+                .map_err(|error| error.to_string())?;
+            plakous_offline_crash_harness::projected_scripted_runtime_binding(
+                &workspace,
+                controller,
+                Arc::new(script),
+            )
+            .map_err(|error| error.to_string())
+        }));
+        let settled = Arc::new(Mutex::new(None));
+        let seen = Arc::clone(&settled);
+        crate::agent::park::hooks::set_after_child_admission(
+            &id,
+            Arc::new(move |control| {
+                let seen = Arc::clone(&seen);
+                Box::pin(async move {
+                    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                    let settlement = crate::interrupt::settle_cancel(
+                        control.cancel(),
+                        plakous_host_protocol::limits::HOST_CANCEL_SETTLE_TIMEOUT,
+                    )
+                    .await;
+                    *seen.lock().unwrap() = Some(settlement);
+                })
+            }),
+        );
+        let resumed =
+            crate::agent::children::operator_resume_after_loss(&fixture.runtime, Some(&id))
+                .await
+                .unwrap();
+        assert_eq!(
+            *settled.lock().unwrap(),
+            Some(crate::interrupt::CancelSettlement::Settled),
+            "{delay_ms} ms: {resumed:?}"
+        );
+        let outcome = continuation_ended_in_feed(&fixture.runtime, &fixture.sessions(), &id).await;
+        assert!(
+            matches!(
+                outcome,
+                plakous::sessions::feed::FeedTurnOutcome::Cancelled { .. }
+            ),
+            "{delay_ms} ms: {outcome:?}"
+        );
+        crate::agent::park::hooks::clear_after_child_admission(&id);
+        crate::topology_runtime::force_release(&fixture.tree_id).await;
+    }
+}
+
 /// Waits until the child's feed records the terminal of the turn the
-/// continuation's command started: here, an unknown provider outcome.
+/// continuation's command started, and returns its outcome.
 async fn continuation_ended_in_feed(
     runtime: &ProductTopologyRuntime,
     sessions: &Arc<AgentSessions>,
     id: &str,
-) {
+) -> plakous::sessions::feed::FeedTurnOutcome {
     let (locator, command) = runtime
         .read(|tree| {
             let command = tree
@@ -4707,26 +4778,27 @@ async fn continuation_ended_in_feed(
     let session_id = locator.parse::<SessionLocator>().unwrap().session_id();
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
-            let feed = read_tree_feed(sessions, session_id, 0)
-                .await
-                .unwrap();
-            if feed
+            let feed = read_tree_feed(sessions, session_id, 0).await.unwrap();
+            let outcome = feed
                 .records
                 .iter()
                 .flat_map(plakous::sessions::feed::FeedRecord::facts)
-                .any(|fact| {
-                    matches!(fact, plakous::sessions::feed::FeedFact::TurnTerminal {
-                        command_id, outcome: plakous::sessions::feed::FeedTurnOutcome::RecoveryRequired, ..
-                    } if command_id.as_str() == command)
-                })
-            {
-                return;
+                .find_map(|fact| match fact {
+                    plakous::sessions::feed::FeedFact::TurnTerminal {
+                        command_id,
+                        outcome,
+                        ..
+                    } if command_id.as_str() == command => Some(*outcome),
+                    _ => None,
+                });
+            if let Some(outcome) = outcome {
+                return outcome;
             }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
     })
     .await
-    .expect("the continuation's turn ends before the host releases it");
+    .expect("the continuation's turn ends")
 }
 
 /// An owed child's owner-lost mark withdraws what never ran but keeps a

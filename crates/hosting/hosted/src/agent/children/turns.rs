@@ -104,6 +104,30 @@ pub(in crate::agent) const LOSS_CONTINUATION_ENDED: &str = "the continuation aft
 
 /// Whether `error` is an admission check's refusal for a hold that ended:
 /// nothing started or bound, and nothing is at fault.
+pub(in crate::agent) const ADMITTED_TURN_REACHED_PROVIDER: &str =
+    "its admitted turn had already reached its provider when the hold ended";
+
+/// Whether the child's feed shows `turn` dispatched a provider request.
+async fn reached_provider(
+    sessions: &plakous::sessions::AgentSessions,
+    session_id: plakous::model::SessionId,
+    turn: TurnId,
+) -> bool {
+    use plakous::sessions::feed::{FeedFact, FeedOperationKind, FeedOperationState, FeedRecord};
+    crate::agent::read_tree_feed(sessions, session_id, 0)
+        .await
+        .is_ok_and(|feed| {
+            feed.records.iter().flat_map(FeedRecord::facts).any(|fact| {
+                matches!(fact, FeedFact::OperationAdvanced {
+                    turn_id: Some(id),
+                    kind: FeedOperationKind::ProviderAttempt { .. },
+                    state: FeedOperationState::Dispatched,
+                    ..
+                } if *id == turn)
+            })
+        })
+}
+
 pub(in crate::agent) fn hold_ended(error: &str) -> bool {
     error == crate::agent::park::REOPEN_HOLD_ENDED || error == LOSS_CONTINUATION_ENDED
 }
@@ -431,6 +455,10 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
         }
     };
     acknowledged.await;
+    #[cfg(test)]
+    if let Some(control) = submission.control.clone() {
+        crate::agent::park::hooks::after_child_admission(agent_id, control).await;
+    }
     // A resubmission whose original was recorded below the feed's retention
     // started nothing now: it settles consumed (spec 03 section 14.1).
     match crate::agent::ledger::consumed_below_retention(
@@ -531,6 +559,10 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
         // itself evidence that the command was admitted.
         let projection =
             crate::agent::ledger::project_child_feed(runtime, agent_id, &attached).await;
+        let (sessions, session_id) = (
+            Arc::clone(&attached.sessions),
+            attached.locator().session_id(),
+        );
         // The release cancels the admitted turn and publishes its terminal.
         let released = release_startup(runtime, agent_id, startup, attached).await;
         if hold_ended(&error) {
@@ -562,6 +594,13 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
                 .await
                 .map_err(String::from)
                 .map_err(ChildStartFailure::from)?;
+            // A turn that reached its provider may have been billed for work
+            // the interrupt no longer wants; the operator reads that here.
+            let error = if reached_provider(&sessions, session_id, turn_id).await {
+                format!("{error}; {ADMITTED_TURN_REACHED_PROVIDER}")
+            } else {
+                error
+            };
             return Err(ChildStartFailure::HoldEndedAfterAdmission(error));
         }
         return Err(error.into());

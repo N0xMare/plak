@@ -110,3 +110,44 @@ pub(in crate::agent) fn set_after_loss_continuation_admission(agent_id: &str, ho
 pub(in crate::agent) async fn after_loss_continuation_admission(agent_id: &str) {
     run(&AFTER_LOSS_CONTINUATION_ADMISSION, agent_id).await;
 }
+
+/// Work a test runs with an admitted child turn's control.
+pub(in crate::agent) type ControlHook = Arc<
+    dyn Fn(plakous::agent::TurnControl) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync,
+>;
+
+static AFTER_CHILD_ADMISSION: Mutex<Option<HashMap<String, ControlHook>>> = Mutex::new(None);
+
+/// Runs `hook` with the turn a child Start's command admitted, before the
+/// Start binds that turn.
+pub(in crate::agent) fn set_after_child_admission(agent_id: &str, hook: ControlHook) {
+    AFTER_CHILD_ADMISSION
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get_or_insert_with(HashMap::new)
+        .insert(agent_id.to_owned(), hook);
+}
+
+pub(in crate::agent) fn clear_after_child_admission(agent_id: &str) {
+    if let Some(hooks) = AFTER_CHILD_ADMISSION
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_mut()
+    {
+        hooks.remove(agent_id);
+    }
+}
+
+pub(in crate::agent) async fn after_child_admission(
+    agent_id: &str,
+    control: plakous::agent::TurnControl,
+) {
+    let hook = AFTER_CHILD_ADMISSION
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+        .and_then(|hooks| hooks.get(agent_id).cloned());
+    if let Some(hook) = hook {
+        hook(control).await;
+    }
+}

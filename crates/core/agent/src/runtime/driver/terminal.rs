@@ -146,11 +146,13 @@ impl Driver {
         while let Some(command) = self.roots.pop_front() {
             let result =
                 contain_cleanup_panic(self.publish_terminal_fallback(&command, cause)).await;
-            if let Err(error) = &result {
-                command.shared.publish_terminal_failure(error.clone());
+            // A turn whose terminal could not be published stays known, so a
+            // cancel queued for it is refused `Shutdown`, not `Stale`.
+            match &result {
+                Ok(()) => remove_known_turn(&self.known_turns, command.turn_id),
+                Err(error) => command.shared.publish_terminal_failure(error.clone()),
             }
             results.push(result);
-            remove_known_turn(&self.known_turns, command.turn_id);
         }
         combine_cleanup_results(results)
     }

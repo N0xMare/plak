@@ -1152,3 +1152,30 @@ async fn interrupt_then_overlapping_close_and_stop_all_return_before_retirement_
         .unwrap();
     assert!(vcs.calls_of(FakeOp::Seal).is_empty());
 }
+
+/// A continuation whose hold ended after its admission is not kept, so its
+/// Resume note says only that it did not start; a deferred one is kept.
+#[test]
+fn a_resume_note_keeps_only_a_deferred_continuation() {
+    use crate::agent::children::LossResume;
+    let note = loss_resume_note(
+        None,
+        &[
+            (
+                "c1".to_owned(),
+                LossResume::Deferred("the lease is held".to_owned()),
+            ),
+            (
+                "c2".to_owned(),
+                LossResume::Ended("an interrupt won the race".to_owned()),
+            ),
+        ],
+    );
+    assert_eq!(
+        note.text(),
+        Some(
+            "#c1 did not start (the lease is held); its continuation is kept; \
+             #c2 did not start (an interrupt won the race)"
+        )
+    );
+}

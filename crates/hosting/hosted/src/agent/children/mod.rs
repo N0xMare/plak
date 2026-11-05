@@ -73,12 +73,14 @@ pub(super) use reopen::{
 };
 #[cfg(test)]
 pub(super) use reopen::{SESSION_LEASE_HOLD_HINT, reconcile_reopened_results};
+#[cfg(test)]
+pub(super) use turns::{
+    ADMITTED_TURN_REACHED_PROVIDER, ChildCommand, start_child_turn_owned_with_ack,
+};
 pub(super) use turns::{
     CHILD_COMMAND_CONSUMED, ChildStartFailure, ChildTurnIdentity, StartAdmission, end_attempt_work,
     mutate_child, release_startup, start_child_turn,
 };
-#[cfg(test)]
-pub(super) use turns::{ChildCommand, start_child_turn_owned_with_ack};
 #[cfg(test)]
 use waiter::finalize_child_turn;
 #[cfg(test)]

@@ -30,6 +30,20 @@ pub(crate) enum LossResume {
     /// Consent is recorded, or could not be; the turn did not start. A
     /// recorded continuation is resubmitted by the next run.
     Deferred(String),
+    /// The runtime admitted the continuation's Start, but a close or an
+    /// interrupt ended the hold before its turn bound: nothing is kept.
+    Ended(String),
+}
+
+impl LossResume {
+    /// A continuation Start that failed: one whose hold ended after its
+    /// admission is not kept; any other is deferred.
+    fn not_started(failure: ChildStartFailure) -> Self {
+        match failure {
+            ChildStartFailure::HoldEndedAfterAdmission(reason) => Self::Ended(reason),
+            failure => Self::Deferred(String::from(failure)),
+        }
+    }
 }
 
 /// The instruction of a continuation turn, by what stopped the node.
@@ -143,7 +157,7 @@ async fn resume_after_loss(
                     withdraw_ended_continuation(runtime, agent_id).await;
                     LossResume::NotHeld
                 }
-                Err(failure) => LossResume::Deferred(String::from(failure)),
+                Err(failure) => LossResume::not_started(failure),
             }
         }
         ChildReopen::RecoveryRequired(_) => LossResume::Deferred(

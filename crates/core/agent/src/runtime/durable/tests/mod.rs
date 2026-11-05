@@ -11,6 +11,7 @@ mod admitted_round;
 mod artifact_prefix_tests;
 #[path = "../atomic_transition_tests.rs"]
 mod atomic_transition_tests;
+mod cancel_ack;
 mod cancelled_steer;
 mod cleanup_precedence;
 mod clip_budget;

@@ -52,6 +52,8 @@ impl PreparedAgent {
         let checkpoint_owner = self.authority.start_on(&self.executor);
         let authority = checkpoint_owner.reader();
         let provider_dispatch_gate = Arc::new(AsyncMutex::new(()));
+        #[cfg(test)]
+        let exit_probe = Arc::new(super::exit_probe::ExitProbe::default());
         let command_nonce = Arc::new(AtomicU64::new(1));
         let (completion_sender, completion) = watch::channel(None);
         let mut command_ledger = self.initial_command_ledger;
@@ -232,6 +234,8 @@ impl PreparedAgent {
             provider_dispatch_gate: Arc::clone(&provider_dispatch_gate),
             control_sender: controls.clone(),
             control_receiver,
+            #[cfg(test)]
+            exit_probe: Arc::clone(&exit_probe),
             steering: VecDeque::new(),
             tool_preempt: watch::channel(plakous_tools::ToolPreempt::None).0,
             dispatch_preempts: Arc::new(Mutex::new(Vec::new())),
@@ -303,6 +307,8 @@ impl PreparedAgent {
             inner: Arc::new(AgentInner {
                 #[cfg(test)]
                 provider_dispatch_gate,
+                #[cfg(test)]
+                exit_probe,
                 credential_wait,
                 job_stop: Mutex::new(crate::runtime::JobStopState::Idle),
                 executor: self.executor.clone(),

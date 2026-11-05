@@ -276,6 +276,8 @@ enum JobStopState {
 struct AgentInner {
     #[cfg(test)]
     provider_dispatch_gate: Arc<tokio::sync::Mutex<()>>,
+    #[cfg(test)]
+    exit_probe: Arc<driver::exit_probe::ExitProbe>,
     credential_wait: Arc<Mutex<Option<CredentialWait>>>,
     job_stop: Mutex<JobStopState>,
     executor: crate::executor::Executor,

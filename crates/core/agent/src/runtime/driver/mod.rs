@@ -18,10 +18,11 @@ use crate::tool_runtime::{
     AuthorizedToolInvocation, EffectDispatchIntent, PendingEffectDecision, ToolRuntime,
 };
 use crate::{
-    ActorControl, AgentError, AgentErrorKind, CheckpointId, CommandId, DurableOperationState,
-    EffectDecisionRef, EffectDecisionResolution, EventContext, EventHub, EventPipeline,
-    StoreAdmission, SubscriptionLimits, TelemetryContext, TelemetryEmitter, ToolAuditIdentity,
-    ToolCallAttemptIdentity, ToolCallObservation, ToolCallerLineageView,
+    ActorControl, AgentError, AgentErrorKind, AgentSessionEndpointError, CheckpointId, CommandId,
+    ControlError, ControlErrorKind, DurableOperationState, EffectDecisionRef,
+    EffectDecisionResolution, EventContext, EventHub, EventPipeline, StoreAdmission,
+    SubscriptionLimits, TelemetryContext, TelemetryEmitter, ToolAuditIdentity,
+    ToolCallAttemptIdentity, ToolCallObservation, ToolCallerLineageView, TurnCommand,
 };
 use admitted_round::AdmittedRound;
 use futures_util::FutureExt;
@@ -48,6 +49,8 @@ mod compaction;
 mod composition;
 mod context;
 mod effects;
+#[cfg(test)]
+pub(crate) mod exit_probe;
 mod model;
 pub(super) use model::completed_history_prefix;
 mod notices;
@@ -109,6 +112,8 @@ struct Driver {
     provider_dispatch_gate: Arc<AsyncMutex<()>>,
     control_sender: mpsc::Sender<ActorControl>,
     control_receiver: mpsc::Receiver<ActorControl>,
+    #[cfg(test)]
+    exit_probe: Arc<exit_probe::ExitProbe>,
     steering: VecDeque<QueuedSteering>,
     tool_preempt: tokio::sync::watch::Sender<plakous_tools::ToolPreempt>,
     dispatch_preempts: Arc<Mutex<Vec<tokio::sync::watch::Sender<plakous_tools::ToolPreempt>>>>,
@@ -208,9 +213,69 @@ impl Driver {
             Ok(result) => result,
             Err(_) => Err(actor_panic_error()),
         };
+        #[cfg(test)]
+        self.exit_probe.at_exit().await;
+        // Exit law: close the ingress, settle every remaining root, then
+        // answer what is queued. A `Stale` cancel then names a turn whose
+        // terminal is published.
+        self.control_receiver.close();
         let settlement = Box::pin(contain_cleanup_panic(self.settle_roots(&mut run_result))).await;
+        self.refuse_queued_controls().await;
         let cleanup = Box::pin(contain_cleanup_panic(self.cleanup_session())).await;
         combine_cleanup_results([run_result, settlement, cleanup])
+    }
+
+    /// Answers each control left in the closed ingress with a typed refusal
+    /// that records nothing; a dropped reply reads as an unknown outcome.
+    /// `recv` returns `None` only once no sender still holds a permit, so a
+    /// send that reserved before the close is answered too.
+    async fn refuse_queued_controls(&mut self) {
+        while let Some(control) = self.control_receiver.recv().await {
+            self.refuse_control(control);
+        }
+    }
+
+    /// Whether `turn_id` is still admitted: a turn leaves `known_turns` only
+    /// once its terminal is published, so one whose settlement failed stays.
+    fn still_admitted(&self, turn_id: TurnId) -> bool {
+        self.known_turns
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains_key(&turn_id)
+    }
+
+    fn refuse_control(&self, control: ActorControl) {
+        let stopped = || ControlError::new(ControlErrorKind::Shutdown, "agent stopped");
+        match control {
+            ActorControl::Notice { reply, .. } | ActorControl::Background { reply, .. } => {
+                let _ = reply.send(Err(stopped()));
+            }
+            ActorControl::RecordJobTerminals { reply } => {
+                let _ = reply.send(Err(AgentError::new(
+                    AgentErrorKind::Shutdown,
+                    "agent stopped",
+                )));
+            }
+            ActorControl::Command { command, reply } => {
+                let error = match command {
+                    TurnCommand::Cancel { turn_id, .. } if !self.still_admitted(turn_id) => {
+                        ControlError::new(ControlErrorKind::Stale, "turn is no longer admitted")
+                    }
+                    _ => stopped(),
+                };
+                let _ = reply.send(self.unrecorded_rejection(
+                    command.command_id().clone(),
+                    command.target_turn_id(),
+                    error,
+                ));
+            }
+            ActorControl::ContextStatus { reply, .. } => {
+                let _ = reply.send(Err(AgentSessionEndpointError::Unavailable));
+            }
+            ActorControl::CompactSession { reply, .. } => {
+                let _ = reply.send(Err(AgentSessionEndpointError::Unavailable));
+            }
+        }
     }
 
     #[allow(
@@ -231,6 +296,8 @@ impl Driver {
                 return Ok(());
             };
             self.active_root = Some(command.clone());
+            #[cfg(test)]
+            self.exit_probe.strike()?;
             if self.shutdown.is_cancelled() {
                 self.commit_and_publish_terminal(
                     &command,
