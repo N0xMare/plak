@@ -15,7 +15,8 @@ FROM rust:1.99.0-alpine AS base
 RUN apk add --no-cache bash bubblewrap clang22-dev coreutils curl findutils gcc git jujutsu \
       just lld make musl-dev musl-utils openssl-dev perl pkgconf procps python3 tar \
       util-linux xz \
- && rustup component add clippy rustfmt
+ && rustup component add clippy rustfmt \
+ && rustup target add wasm32-unknown-unknown
 
 # Registry sources for the workspace, the compile-contract fixtures and
 # cargo-deny, so the container builds with CARGO_NET_OFFLINE=true. Some crate
