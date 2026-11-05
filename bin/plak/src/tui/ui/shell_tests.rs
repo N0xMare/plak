@@ -388,7 +388,10 @@ fn a_prompt_after_a_not_ready_settle_goes_to_the_host_not_the_local_hold() {
 fn terminal_handoffs_remain_typed_and_quit_the_shell() {
     for handoff in [
         SessionRequest::EditConfig,
-        SessionRequest::ResumeSession { id: "s-1".into() },
+        SessionRequest::ResumeSession {
+            id: "s-1".into(),
+            held_reload_requests: Vec::new(),
+        },
     ] {
         let mut app = App::new(launch_basic(), true);
         request_terminal_handoff(&mut app, None, handoff.clone());

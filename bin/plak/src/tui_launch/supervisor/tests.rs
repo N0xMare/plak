@@ -204,3 +204,48 @@ fn failed_exec_removes_only_the_receipt_and_keeps_the_export() {
     assert!(!path.with_extension("handoff").exists());
     remove_failed_handoff_receipt(None);
 }
+
+/// A round that resumes another session settles the reload requests its
+/// face still held for the session it left; a resume of that same session,
+/// or any other request, settles none.
+#[test]
+fn a_round_resuming_another_session_settles_the_reload_requests_it_held() {
+    let root = tempfile::tempdir().unwrap();
+    let paths = product_paths::PlakPaths::explicit(root.path().join("home"));
+    paths.ensure_layout().unwrap();
+    let left = uuid::Uuid::new_v4().to_string();
+    let next = uuid::Uuid::new_v4().to_string();
+    let held = |session: &str| -> crate::reload_request::ReloadRequest {
+        serde_json::from_value(serde_json::json!({
+            "request_id": uuid::Uuid::new_v4().to_string(),
+            "session_id": session,
+            "expect_binary": "build-1",
+        }))
+        .unwrap()
+    };
+    let outcome = |request: &crate::reload_request::ReloadRequest| {
+        std::fs::read(crate::reload_request::outcome_path(
+            &paths,
+            &request.request_id,
+        ))
+        .ok()
+        .map(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).unwrap())
+    };
+    let requests = vec![held(&left), held(&left)];
+    let resume = |id: &str| tui::SessionRequest::ResumeSession {
+        id: id.to_owned(),
+        held_reload_requests: requests.clone(),
+    };
+    settle_left_reload_requests(&paths, &resume(&left));
+    settle_left_reload_requests(&paths, &tui::SessionRequest::EditConfig);
+    assert!(
+        requests.iter().all(|request| outcome(request).is_none()),
+        "a resume of the same session, or another request, settles nothing"
+    );
+    settle_left_reload_requests(&paths, &resume(&next));
+    for request in &requests {
+        let settled = outcome(request).unwrap();
+        assert_eq!(settled["outcome"], "refused");
+        assert_eq!(settled["reason"], "not taken: the session switched");
+    }
+}

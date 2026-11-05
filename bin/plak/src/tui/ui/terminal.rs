@@ -899,7 +899,10 @@ pub(super) fn dispatch_action(
             request_terminal_handoff(
                 app,
                 actions,
-                SessionRequest::ResumeSession { id: id.clone() },
+                SessionRequest::ResumeSession {
+                    id: id.clone(),
+                    held_reload_requests: app.held_reload_requests(),
+                },
             );
         }
         UserAction::RefreshReadiness => {

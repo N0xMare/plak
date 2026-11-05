@@ -451,6 +451,10 @@ pub enum SessionRequest {
     ResumeSession {
         /// Exact durable product session id.
         id: String,
+        /// The reload requests this round's face had taken and not yet run.
+        /// A request belongs to its session, so the launch settles them once
+        /// the round's host has ended (spec 02 §5.1).
+        held_reload_requests: Vec<crate::reload_request::ReloadRequest>,
     },
     /// Release the session for a reload, then replace this process with the
     /// installed `plak` resuming it, so a rebuilt binary takes over.

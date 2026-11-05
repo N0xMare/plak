@@ -1096,6 +1096,7 @@ fn finish_tui_round(
             request: handoff,
             attached_session,
         }) => {
+            settle_left_reload_requests(paths, &handoff);
             if matches!(
                 &handoff,
                 tui::SessionRequest::EditConfig
@@ -1131,6 +1132,26 @@ fn finish_tui_round(
     Ok(None)
 }
 
+/// A round that resumes another session leaves its face's reload requests
+/// behind: they belong to the session it left, whose host has ended, so
+/// they are settled `not taken` (spec 02 §5.1). A reload carries its own
+/// request in its handoff, and a resume of the same session leaves none.
+fn settle_left_reload_requests(paths: &product_paths::PlakPaths, handoff: &tui::SessionRequest) {
+    let tui::SessionRequest::ResumeSession {
+        id,
+        held_reload_requests,
+    } = handoff
+    else {
+        return;
+    };
+    for request in held_reload_requests
+        .iter()
+        .filter(|request| request.session_id != *id)
+    {
+        crate::reload_request::settle_switched(paths, &request.request_id);
+    }
+}
+
 pub(crate) fn handle_tui_handoff(
     services: &Services,
     paths: &product_paths::PlakPaths,
@@ -1162,7 +1183,7 @@ pub(crate) fn handle_tui_handoff(
         }
         // The supervisor settles a retry before it reaches here.
         tui::SessionRequest::RetryAttach { .. } => {}
-        tui::SessionRequest::ResumeSession { id } => {
+        tui::SessionRequest::ResumeSession { id, .. } => {
             let next = carry::switch_to(services, store, &id, reload_note)?;
             let requested = resolved_workspace_path(&record.workspace_root)?;
             let recorded = resolved_workspace_path(&next.workspace_root)?;

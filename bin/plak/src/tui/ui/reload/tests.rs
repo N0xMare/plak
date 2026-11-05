@@ -97,7 +97,10 @@ fn a_held_reload_request_is_dropped_when_the_session_switches() {
             app.service_reload_request();
             assert!(app.reload_requests.active.is_some() && app.pending_reload);
         }
+        // A round that hands the terminal back reports what it still held.
+        assert_eq!(app.held_reload_requests().len(), 1, "{started}");
         bind(&mut app, &next);
+        assert!(app.held_reload_requests().is_empty(), "{started}");
         assert!(app.reload_requests.pending.is_none(), "{started}");
         assert!(app.reload_requests.active.is_none(), "{started}");
         assert!(app.reload_requests.accepts.is_empty(), "{started}");

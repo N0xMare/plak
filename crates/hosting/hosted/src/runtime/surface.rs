@@ -421,3 +421,61 @@ pub(super) fn dispatch<P: ProtocolExtension>(
     };
     handler.dispatch(intent, facts, events)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Counts the sessions it was told the host left.
+    #[derive(Default)]
+    struct Leaving(Mutex<Vec<String>>);
+
+    impl SurfaceHandler<Core> for Leaving {
+        fn leaving_session(&self, session_id: &str) {
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(session_id.to_owned());
+        }
+
+        fn dispatch(
+            &self,
+            _intent: <Core as ProtocolExtension>::Intent,
+            _facts: SurfaceFacts<'_>,
+            _events: &Sender<Core>,
+        ) -> SurfaceEffect {
+            SurfaceEffect::default()
+        }
+
+        fn publish_template_readiness(&self, _catalog: &[ProviderSection], _events: &Sender<Core>) {
+        }
+
+        fn readiness_read(&self) -> ReadinessRead {
+            Box::new(|| Ok((Vec::new(), Vec::new())))
+        }
+    }
+
+    /// A same-session reopen or rebind leaves nothing: only a switch to
+    /// another session tells the surface, so a request for the session the
+    /// host still serves is never settled.
+    #[test]
+    fn only_a_switch_to_another_session_tells_the_surface() {
+        let handler = Leaving::default();
+        leaving_session::<Core>(Some(&handler), "same", "same");
+        assert!(
+            handler
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty()
+        );
+        leaving_session::<Core>(Some(&handler), "left", "next");
+        assert_eq!(
+            *handler
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            ["left"]
+        );
+    }
+}

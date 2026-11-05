@@ -232,6 +232,15 @@ impl App {
         self.reload_requests.pending = Some(request);
     }
 
+    /// The reload requests this face took and has not run or settled.
+    pub(super) fn held_reload_requests(&self) -> Vec<crate::reload_request::ReloadRequest> {
+        [&self.reload_requests.pending, &self.reload_requests.active]
+            .into_iter()
+            .flatten()
+            .cloned()
+            .collect()
+    }
+
     /// A reload request belongs to its session: on a switch to `session`,
     /// the requests this face holds for another one are dropped, never run.
     /// The host that served that session settled them `not taken` before

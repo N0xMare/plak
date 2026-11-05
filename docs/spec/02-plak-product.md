@@ -4429,8 +4429,12 @@ session: when the host leaves the session for another in place (`/new`,
 session it leaves (accepted, offered or still waiting) as `not taken: the
 session switched` before the switch completes, and withdraws that session's
 announcement; none reaches the next session, and the TUI drops any it holds
-for another session. An outcome the host cannot write is logged
-(`plak.reload`) and the request dropped, never carried over. The TUI notes `reload
+for another session. A round that hands the terminal back to resume another
+session reports the requests its TUI still held, and the launch settles them
+the same way once the old host has ended; a reload carries its own request in
+its handoff instead, and a switch back to the same session settles nothing. An
+outcome that cannot be written is logged (`plak.reload`) and the request
+dropped, never carried over. The TUI notes `reload
 requested onto build <binary-id>; it runs when this session is idle`, and performs it at the next idle boundary: never during a turn, so a
 request from the agent's own turn runs after that turn ends. If sub-agents or
 background processes are live at that boundary it refuses instead of waiting

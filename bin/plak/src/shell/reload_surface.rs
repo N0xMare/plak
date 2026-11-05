@@ -128,22 +128,7 @@ impl ReloadChannel {
         settled.extend(waiting.map(|waiting| waiting.request_id));
         drop(channel);
         for request_id in settled {
-            let outcome = ReloadOutcome::Refused {
-                reason: format!("not taken: {SESSION_SWITCHED}"),
-            };
-            match crate::reload_request::try_record(&self.paths, &request_id, &outcome) {
-                Ok(()) => tracing::info!(
-                    target: "plak.reload",
-                    %request_id,
-                    "reload request not taken: the session switched"
-                ),
-                Err(error) => tracing::warn!(
-                    target: "plak.reload",
-                    %request_id,
-                    %error,
-                    "reload request dropped: the session switched and its outcome could not be recorded"
-                ),
-            }
+            crate::reload_request::settle_switched(&self.paths, &request_id);
         }
     }
 
@@ -170,9 +155,6 @@ impl Drop for ReloadChannel {
         }
     }
 }
-
-/// Why a request for the session a host left is not taken.
-const SESSION_SWITCHED: &str = "the session switched";
 
 /// Records that no face took `request`.
 fn not_taken(paths: &PlakPaths, request: &ReloadRequest, why: &str) {

@@ -1217,6 +1217,7 @@ fn new_launch_exact_selection_keeps_selected_binding_instead_of_defaults() {
         &mut former_attachment,
         tui::SessionRequest::ResumeSession {
             id: selected.id.clone(),
+            held_reload_requests: Vec::new(),
         },
         &mut None,
     )
@@ -1588,7 +1589,10 @@ fn recoverable_selected_attach_failure_restores_former_exact_attachment() {
         &mut resume,
         &mut resume_pending,
         &mut rollback,
-        tui::SessionRequest::ResumeSession { id: selected.id },
+        tui::SessionRequest::ResumeSession {
+            id: selected.id,
+            held_reload_requests: Vec::new(),
+        },
         &mut None,
     )
     .expect("stage exact selected attachment");
@@ -1645,7 +1649,10 @@ fn failed_in_process_resume_switch_keeps_last_attached_rollback_authority() {
         &mut resume,
         &mut resume_pending,
         &mut rollback,
-        tui::SessionRequest::ResumeSession { id: failed.id },
+        tui::SessionRequest::ResumeSession {
+            id: failed.id,
+            held_reload_requests: Vec::new(),
+        },
         &mut None,
     )
     .expect("stage failed selection");
@@ -1660,6 +1667,7 @@ fn failed_in_process_resume_switch_keeps_last_attached_rollback_authority() {
         &mut rollback,
         tui::SessionRequest::ResumeSession {
             id: next.id.clone(),
+            held_reload_requests: Vec::new(),
         },
         &mut None,
     )
@@ -1704,6 +1712,7 @@ fn exact_session_selection_preserves_record_and_refuses_workspace_mismatch() {
         &mut active,
         tui::SessionRequest::ResumeSession {
             id: selected.id.clone(),
+            held_reload_requests: Vec::new(),
         },
         &mut None,
     )
@@ -1726,7 +1735,10 @@ fn exact_session_selection_preserves_record_and_refuses_workspace_mismatch() {
         &paths,
         &store::session_records::SqliteSessionStore::new(paths.clone()),
         &mut active,
-        tui::SessionRequest::ResumeSession { id: mismatched.id },
+        tui::SessionRequest::ResumeSession {
+            id: mismatched.id,
+            held_reload_requests: Vec::new(),
+        },
         &mut None,
     )
     .expect_err("workspace mismatch refused");

@@ -646,7 +646,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plak", "src/tui/ui/host_events.rs"): {"warn"},
     # A reload request dropped or settled at a session switch logs its id.
     ("plak", "src/tui/ui/reload.rs"): {"info"},
-    ("plak", "src/shell/reload_surface.rs"): {"info", "warn"},
+    ("plak", "src/reload_request.rs"): {"info", "warn"},
     # Fold integrity refusals: fixed diagnostics and the affected agent id only.
     # An effect run as neither a stage nor an unstaged scope is a defect.
     ("plakous-recursive-subagents", "src/remote_vcs.rs"): {"debug", "debug_assert"},

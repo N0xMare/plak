@@ -440,6 +440,28 @@ pub fn try_record(
     publish(&outcome_path(paths, request_id), &bytes)
 }
 
+/// Settles `request_id`, whose session its host or face left for another,
+/// as `not taken: the session switched`. An outcome that cannot be written
+/// is logged and the request dropped, never carried to the next session.
+pub fn settle_switched(paths: &PlakPaths, request_id: &str) {
+    let outcome = ReloadOutcome::Refused {
+        reason: "not taken: the session switched".to_owned(),
+    };
+    match try_record(paths, request_id, &outcome) {
+        Ok(()) => tracing::info!(
+            target: "plak.reload",
+            %request_id,
+            "reload request not taken: the session switched"
+        ),
+        Err(error) => tracing::warn!(
+            target: "plak.reload",
+            %request_id,
+            %error,
+            "reload request dropped: the session switched and its outcome could not be recorded"
+        ),
+    }
+}
+
 /// The request the reload handoff that started this process named, taken
 /// once by the first attach.
 static HANDED_OFF: std::sync::Mutex<Option<ReloadRequest>> = std::sync::Mutex::new(None);
