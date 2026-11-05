@@ -172,6 +172,13 @@ with open(os.environ['GATE_CALLS'], 'a') as log:
                              git_nosystem=os.environ.get('GIT_CONFIG_NOSYSTEM'),
                              target_rustflags=os.environ.get(
                                  'CARGO_TARGET_HOST_TRIPLE_RUSTFLAGS'))) + '\n')
+if args[0] == 'doc' and os.environ.get('GATE_DOC_WAITS_FOR'):
+    import time
+    deadline = time.monotonic() + 5
+    while not Path(os.environ['GATE_DOC_WAITS_FOR']).exists():
+        if time.monotonic() > deadline:
+            raise SystemExit('doc ran alone')
+        time.sleep(0.02)
 failure = json.loads(os.environ.get('GATE_CARGO_FAILURES', '{}')).get(args[0], 0)
 if args == ['fetch', '--locked', '--offline'] and os.environ.get('GATE_COLD_CACHE'):
     failure = 1
@@ -206,11 +213,14 @@ if sys.argv[1] == '-' or sys.argv[1].endswith('vcs_listing.py'):
     os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
 with open(os.environ['GATE_CALLS'], 'a') as log:
     log.write(json.dumps(dict(python=sys.argv[1:], git_global=os.environ.get('GIT_CONFIG_GLOBAL'),
+                              target_dir=os.environ.get('CARGO_TARGET_DIR'),
                               rustflags=os.environ.get('RUSTFLAGS'),
                               encoded_rustflags=os.environ.get('CARGO_ENCODED_RUSTFLAGS'),
                               rustc_wrapper=os.environ.get('RUSTC_WRAPPER'),
                               target_rustflags=os.environ.get('CARGO_TARGET_HOST_TRIPLE_RUSTFLAGS'),
                               git_nosystem=os.environ.get('GIT_CONFIG_NOSYSTEM'))) + '\n')
+if sys.argv[1].endswith('check_public_compile.py') and os.environ.get('GATE_DOC_WAITS_FOR'):
+    open(os.environ['GATE_DOC_WAITS_FOR'], 'w').close()
 failure = json.loads(os.environ.get('GATE_PYTHON_FAILURES', '{}')).get(
     os.path.basename(sys.argv[1]), 0)
 if failure:
@@ -489,6 +499,45 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
             ['static', 'contracts', 'tooling'],
         )
         self.assertNotIn('gate passed', result.stdout)
+
+    def test_contracts_and_package_run_beside_rustdoc_when_no_test_lane_is_selected(self):
+        # The fake rustdoc waits for the contracts checker to have started:
+        # run one after the other, rustdoc would fail.
+        self.commit_fixture()
+        self.env['GATE_DOC_WAITS_FOR'] = str(self.root / 'contracts-started')
+        result, calls, scripts = self.run_gate(
+            '--steps', 'static,rustdoc,contracts,tooling,package'
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(
+            [
+                line.split()[2]
+                for line in result.stdout.splitlines()
+                if line.startswith('== time: ')
+            ],
+            ['static', 'rustdoc', 'contracts', 'package', 'tooling'],
+        )
+        self.assertEqual(len(self.publish_calls()), 1)
+        self.assertEqual(scripts.count(['tools/gate/check_public_compile.py']), 1)
+        # Tooling waits for the overlapping groups to end.
+        self.assertLess(
+            scripts.index(['tools/gate/check_public_compile.py']),
+            next(
+                i for i, script in enumerate(scripts) if script[0].endswith('run_tooling_tests.py')
+            ),
+        )
+
+    def test_contracts_run_after_a_selected_test_lane(self):
+        result, calls, scripts = self.run_gate('--steps', 'tests-serial,contracts')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        records = [json.loads(line) for line in self.log.read_text().splitlines()]
+        lane = max(i for i, row in enumerate(records) if row.get('args', [''])[0] == 'nextest')
+        contracts = next(
+            i
+            for i, row in enumerate(records)
+            if row.get('python') == ['tools/gate/check_public_compile.py']
+        )
+        self.assertGreater(contracts, lane)
 
     def test_failed_test_lanes_do_not_skip_contracts_or_tooling(self):
         self.env['GATE_CARGO_FAILURES'] = json.dumps({'nextest': 8})
@@ -928,10 +977,23 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         records = [json.loads(line) for line in self.log.read_text().splitlines()]
         fmt = next(i for i, row in enumerate(records) if row.get('args', [''])[0] == 'fmt')
         self.assertEqual(records[fmt + 1]['args'], ['fetch', '--locked', '--offline'])
-        self.assertEqual(records[fmt + 2]['python'], ['tools/gate/check_workspace.py'])
-        self.assertEqual(records[fmt + 3]['python'], ['tools/gate/check_features.py'])
-        self.assertEqual(records[fmt + 4]['python'], ['tools/release/gate_evidence.py', 'audit'])
-        self.assertEqual(records[fmt + 5]['args'][0], 'clippy')
+        # The structure checkers run in order beside clippy, after the fetch.
+        after_fetch = records[fmt + 2 :]
+        self.assertEqual(
+            [row['python'] for row in after_fetch if 'python' in row],
+            [
+                ['tools/gate/check_workspace.py'],
+                ['tools/gate/check_features.py'],
+                ['tools/release/gate_evidence.py', 'audit'],
+            ],
+        )
+        features = next(
+            row for row in after_fetch if row.get('python') == ['tools/gate/check_features.py']
+        )
+        self.assertTrue(features['target_dir'].endswith('feature-check'), features)
+        self.assertEqual(
+            [row['args'][0] for row in after_fetch if 'args' in row], ['clippy'] * len(CLIPPIES)
+        )
         clippies = [row['args'] for row in records if row.get('args', [''])[0] == 'clippy']
         self.assertEqual(clippies[0][:3], ['clippy', '--locked', '--workspace'])
         self.assertEqual([args[args.index('-p') + 1] for args in clippies[1:]], list(SUPPORTED))
@@ -950,7 +1012,12 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         online = next(
             i for i, row in enumerate(records) if row.get('args') == ['fetch', '--locked']
         )
-        self.assertEqual(records[online + 1]['python'], ['tools/gate/check_workspace.py'])
+        workspace = next(
+            i
+            for i, row in enumerate(records)
+            if row.get('python') == ['tools/gate/check_workspace.py']
+        )
+        self.assertGreater(workspace, online)
 
     def test_failed_fetch_fails_static_but_runs_the_remaining_checks(self):
         self.env['GATE_CARGO_FAILURES'] = json.dumps({'fetch': 1})

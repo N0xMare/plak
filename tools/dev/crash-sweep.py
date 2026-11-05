@@ -49,13 +49,15 @@ def main() -> int:
     )
     if built:
         return built
+    # `--workspace` keeps the feature resolution of the build above: `-p plak`
+    # resolves plak's features alone and recompiled about twenty crates (and
+    # the product binary the sweep launches) into a second artifact set.
     return subprocess.call(
         [
             "cargo",
             "test",
             "--locked",
-            "-p",
-            "plak",
+            "--workspace",
             "--all-features",
             "--test",
             "integration",

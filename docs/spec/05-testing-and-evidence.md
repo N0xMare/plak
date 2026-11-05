@@ -629,6 +629,16 @@ rejects unknown or empty groups, and implies no other group; test groups still
 prepare their real Monty-worker prerequisite. Independent runners must use
 separate checkout, target and temporary roots. Each group prints a
 `== group: <name> ==` banner and a `== time: <name> <seconds> s ==` line.
+Two groups build only in directories of their own and assert nothing about
+wall time: `contracts` (its fixture cache) and `package` (the dry run's
+`package` target). When no test lane is selected they start as `static` ends
+and run beside the groups after it, and their banners, output and time lines
+appear when they finish; `tooling`, whose process tests have short timeouts,
+starts only after they end. With a test lane selected every group runs alone,
+since a test lane's wall-clock budgets must not share the host with compiles.
+Within `static`, the structure checkers run beside clippy, the feature
+checker's library checks building into `feature-check/` under the target
+directory, and their output follows clippy's.
 
 Worker branches iterate and finish with `just fast <packages>` plus the groups
 their change needs. The integration batch, install and publication gates are

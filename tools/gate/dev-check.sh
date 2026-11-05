@@ -484,26 +484,49 @@ run_group() {
         || failed_steps="${failed_steps:+$failed_steps }ruff"
       ruff format --check tools tests/tooling tests/live eval \
         || failed_steps="${failed_steps:+$failed_steps }ruff-format"
+      structure_log='' structure_status=''
       if [[ "$tier" == platform ]]; then
         echo "skip structure checkers: platform-independent (check/full on Linux)"
       else
         echo "== dependencies: fetch locked (offline first) =="
         cargo fetch --locked --offline || cargo fetch --locked \
           || failed_steps="${failed_steps:+$failed_steps }fetch"
-        echo "== structure: workspace =="
-        python3 tools/gate/check_workspace.py || failed_steps="${failed_steps:+$failed_steps }workspace"
-        echo "== structure: features (static) =="
-        python3 tools/gate/check_features.py || failed_steps="${failed_steps:+$failed_steps }features"
-        echo "== structure: evidence allowlist =="
-        python3 tools/release/gate_evidence.py audit || failed_steps="${failed_steps:+$failed_steps }evidence"
+        # The structure checkers run beside clippy: they need the fetched
+        # dependencies but no build of clippy's, and the feature checker's
+        # library checks build into a directory of their own, so neither
+        # waits on the other's Cargo build lock. Their output follows
+        # clippy's. No wall-clock assertion runs in this group.
+        structure_log="$(mktemp "$TMPDIR/plak-structure.XXXXXX")"
+        structure_status="$(mktemp "$TMPDIR/plak-structure-status.XXXXXX")"
+        (
+          failed=''
+          echo "== structure: workspace =="
+          python3 tools/gate/check_workspace.py || failed="${failed:+$failed }workspace"
+          echo "== structure: features (static) =="
+          CARGO_TARGET_DIR="$target_dir/feature-check" python3 tools/gate/check_features.py \
+            || failed="${failed:+$failed }features"
+          echo "== structure: evidence allowlist =="
+          python3 tools/release/gate_evidence.py audit || failed="${failed:+$failed }evidence"
+          printf '%s' "$failed" >"$structure_status"
+        ) >"$structure_log" 2>&1 &
+        structure_pid=$!
       fi
       # Workspace, then each supported package alone (tools/gate/clippy.sh).
       clippy_status="$(mktemp "$TMPDIR/plak-clippy.XXXXXX")"
+      clippy_failed=''
       if ! tools/gate/clippy.sh --status-file "$clippy_status"; then
         s="$(cat "$clippy_status")"
-        failed_steps="${failed_steps:+$failed_steps }${s:-clippy}"
+        clippy_failed="${s:-clippy}"
       fi
       rm -f "$clippy_status"
+      if [[ -n "$structure_log" ]]; then
+        wait "$structure_pid" || true
+        cat "$structure_log"
+        s="$(cat "$structure_status")"
+        if [[ -n "$s" ]]; then failed_steps="${failed_steps:+$failed_steps }$s"; fi
+        rm -f "$structure_log" "$structure_status"
+      fi
+      if [[ -n "$clippy_failed" ]]; then failed_steps="${failed_steps:+$failed_steps }$clippy_failed"; fi
       if [[ -n "$failed_steps" ]]; then
         echo "== failed static steps: $failed_steps =="
         return 1
@@ -615,11 +638,64 @@ run_timed() {
   fi
 }
 
+# Groups that build only in directories of their own (the contract fixtures'
+# cache, the publish dry run's package target) and assert nothing about wall
+# time run beside the others, from the end of static, when no test lane is
+# selected: a test lane's wall-clock budgets must not share the host with
+# their compiles. Their output follows the group they ran beside; tooling,
+# which has short process timeouts, waits for them first.
+overlapping=()
+if [[ ",$selection," != *",tests-"* ]]; then
+  for group in contracts package; do
+    if [[ ",$selection," == *",$group,"* ]]; then overlapping+=("$group"); fi
+  done
+fi
+background=()
+overlapped=' '
+start_overlapping() {
+  local group log state
+  for group in ${overlapping[@]+"${overlapping[@]}"}; do
+    log="$(mktemp "$TMPDIR/plak-group-$group.XXXXXX")"
+    state="$(mktemp "$TMPDIR/plak-group-state-$group.XXXXXX")"
+    (
+      gate_status=0 failed_groups='' skipped_checks=''
+      run_timed "$group"
+      printf '%s\n%s\n' "$gate_status" "$failed_groups" >"$state"
+      printf '%s' "$skipped_checks" >>"$state"
+    ) >"$log" 2>&1 &
+    background+=("$group:$!:$log:$state")
+    overlapped+="$group "
+  done
+  overlapping=()
+}
+finish_overlapping() {
+  local entry group pid log state status rest
+  for entry in ${background[@]+"${background[@]}"}; do
+    IFS=: read -r group pid log state <<<"$entry"
+    wait "$pid" || true
+    cat "$log"
+    status="$(sed -n '1p' "$state")"
+    rest="$(sed -n '3,$p' "$state")"
+    if [[ -n "$rest" ]]; then skipped_checks+="$rest"$'\n'; fi
+    if [[ "${status:-1}" -ne 0 ]]; then
+      failed_groups="${failed_groups:+$failed_groups }$group"
+      if [[ "$gate_status" -eq 0 ]]; then gate_status=$status; fi
+    fi
+    rm -f "$log" "$state"
+  done
+  background=()
+}
+if [[ ",$selection," != *",static,"* ]]; then start_overlapping; fi
 for group in "${all_groups[@]}"; do
-  if [[ ",$selection," == *",$group,"* ]]; then
-    run_timed "$group"
-  fi
+  if [[ ",$selection," != *",$group,"* ]]; then continue; fi
+  case "$overlapped" in
+    *" $group "*) continue ;;
+  esac
+  if [[ "$group" == tooling ]]; then finish_overlapping; fi
+  run_timed "$group"
+  if [[ "$group" == static ]]; then start_overlapping; fi
 done
+finish_overlapping
 while IFS= read -r skipped; do
   if [[ -n "$skipped" ]]; then echo "== skipped: $skipped =="; fi
 done <<<"$skipped_checks"
