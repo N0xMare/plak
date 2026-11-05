@@ -1197,9 +1197,13 @@ fn selector() -> Option<std::ffi::OsString> {
     std::env::var_os("PLAK_TEST_MODEL")
 }
 
+/// The terminal application's hooks.
 #[cfg(feature = "tui")]
-pub(crate) fn tui_pilot_root() -> Option<std::ffi::OsString> {
-    std::env::var_os("PLAK_TEST_TUI_PILOT")
+pub(crate) mod tui {
+    /// The pilot sidecar's root.
+    pub(crate) fn pilot_root() -> Option<std::ffi::OsString> {
+        std::env::var_os("PLAK_TEST_TUI_PILOT")
+    }
 }
 
 fn resolve(model: &std::ffi::OsStr) -> Result<OfflineSelection, String> {

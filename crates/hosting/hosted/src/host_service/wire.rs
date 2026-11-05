@@ -35,9 +35,11 @@ use serde::de::DeserializeOwned;
 
 use super::{HostService, Outbound, TreeNodes};
 use crate::error::{CliFailure, CliResult};
+use lines::Next;
 use served::{ServedSession, Shared};
 
-/// How often a connection polls its input and the session's observations.
+/// How often a connection with a stop hook looks at it, and how often the
+/// handshake looks at its own; nothing else is polled.
 const POLL: Duration = Duration::from_millis(20);
 /// How far an attachment may fall behind before it is dropped.
 const ATTACHMENT_CAPACITY: usize = 4096;
@@ -146,7 +148,7 @@ where
 ///
 /// A lost output.
 pub fn handshake<P: ProtocolExtension>(
-    lines: &mpsc::Receiver<Result<String, WireError>>,
+    lines: &Lines,
     welcome: Welcome,
     stdout: &mut dyn Write,
     stopped: &dyn Fn() -> bool,
@@ -160,7 +162,7 @@ where
 
 /// [`handshake`] with the hello due within `wait`.
 fn handshake_within<P: ProtocolExtension>(
-    lines: &mpsc::Receiver<Result<String, WireError>>,
+    lines: &Lines,
     welcome: Welcome,
     stdout: &mut dyn Write,
     stopped: &dyn Fn() -> bool,
@@ -265,8 +267,8 @@ pub struct WireConnection<P: ProtocolExtension, W: Write> {
     leave: Leave,
     face: Face,
     quit_sent: bool,
-    /// Whether the process was asked to stop.
-    stopped: Box<dyn Fn() -> bool + Send + Sync>,
+    /// Whether the process was asked to stop, when something can ask it.
+    stopped: Option<Box<dyn Fn() -> bool + Send + Sync>>,
     /// The session the connection serves, when the transport named it.
     served: Option<Shared<P>>,
     /// The served session's generation this connection's service handle is
@@ -284,7 +286,15 @@ pub struct WireConnection<P: ProtocolExtension, W: Write> {
     /// the attachment that asked.
     session_request: Option<(RequestId, String, AttachmentId)>,
     lost_transcripts: LostTranscripts,
+    /// The next root attach need not ask the session for a root baseline.
+    baseline_follows: bool,
+    /// Wakes [`Self::serve`], once it serves, for a publication from
+    /// outside the session.
+    wake: Waker,
 }
+
+/// The hook that wakes a serving connection, installed when it serves.
+type Waker = std::sync::Arc<std::sync::Mutex<Option<Box<dyn Fn() + Send + Sync>>>>;
 
 /// How many roots a connection remembers telling its client: an attach of
 /// an older one is unknown, as a root never told is.
@@ -442,7 +452,7 @@ where
             leave,
             face: Face::Remote,
             quit_sent: false,
-            stopped: Box::new(|| false),
+            stopped: None,
             served: None,
             generation: 0,
             mails: BTreeMap::new(),
@@ -451,6 +461,8 @@ where
             next_mail: 0,
             session_request: None,
             lost_transcripts: LostTranscripts::default(),
+            baseline_follows: false,
+            wake: Waker::default(),
         }
     }
 
@@ -462,11 +474,22 @@ where
         self
     }
 
+    /// This connection, whose first root attach asks the session for no
+    /// root baseline when `follows`: the caller takes nothing from the
+    /// session before that attach, and the session publishes its root
+    /// baseline when it opens, so that baseline reaches the attachment (an
+    /// embedded face connected to the session it started).
+    #[must_use]
+    pub const fn session_baseline_follows(mut self, follows: bool) -> Self {
+        self.baseline_follows = follows;
+        self
+    }
+
     /// This connection, ending as a leaving client does once `stopped`
     /// turns true (the process was asked to stop).
     #[must_use]
     pub fn with_stop(mut self, stopped: impl Fn() -> bool + Send + Sync + 'static) -> Self {
-        self.stopped = Box::new(stopped);
+        self.stopped = Some(Box::new(stopped));
         self
     }
 
@@ -498,6 +521,25 @@ where
         self.generation = generation;
         self.session = Some(session);
         self
+    }
+
+    /// A publisher of this connection's service for observations from
+    /// outside the session ([`HostService::publisher`]); a connection that
+    /// follows its session's switches publishes through it to the service
+    /// it was made on only. Each publication wakes the connection once it
+    /// serves.
+    #[must_use]
+    pub fn publisher(&self) -> super::FacePublisher<P> {
+        let wake = std::sync::Arc::clone(&self.wake);
+        self.service.publisher().waking(move || {
+            if let Some(wake) = wake
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_ref()
+            {
+                wake();
+            }
+        })
     }
 
     /// The session this connection serves and its root, both of the same
@@ -556,52 +598,73 @@ where
     /// does a process asked to stop, and a connection whose session switched
     /// to one whose root cannot be found.
     ///
+    /// The session's observations wake the connection through `lines`
+    /// ([`ObservationReceiver::set_notify`]), so it blocks on that one
+    /// channel and forwards what the session says the moment it says it.
+    /// Only a stop hook ([`Self::with_stop`]) is polled.
+    ///
     /// # Errors
     ///
     /// A lost output.
-    pub fn serve(
-        mut self,
-        lines: &mpsc::Receiver<Result<String, WireError>>,
-        events: &ObservationReceiver<P>,
-    ) -> CliResult<()> {
+    pub fn serve(mut self, lines: &Lines, events: &ObservationReceiver<P>) -> CliResult<()> {
+        events.set_notify(lines.waker());
+        *self
+            .wake
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Box::new(lines.waker()));
+        let wait = self.stopped.is_some().then_some(POLL);
         let mut reading = true;
         loop {
             let mut lost = false;
-            while let Ok(event) = events.try_recv() {
-                lost |= !self.observe(event)?;
+            let mut ended = false;
+            loop {
+                match events.try_recv() {
+                    Ok(event) => lost |= !self.observe(event)?,
+                    Err(mpsc::TryRecvError::Empty) => break,
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        ended = true;
+                        break;
+                    }
+                }
+            }
+            // A session that ended on its own ends the connection while its
+            // client still reads, as one its client left does.
+            if ended {
+                return self.end();
             }
             self.lost_transcripts.check(&self.service, events);
             self.flush()?;
-            if reading && (lost || (self.stopped)()) {
+            let stopped = self.stopped.as_ref().is_some_and(|stopped| stopped());
+            if reading && (lost || stopped) {
                 reading = false;
                 self.leave();
             }
-            if reading {
-                match lines.recv_timeout(POLL) {
-                    Ok(line) => reading = self.frame(line)?,
-                    Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                    Err(mpsc::RecvTimeoutError::Disconnected) => {
-                        reading = false;
-                        self.leave();
-                    }
-                }
-                self.flush()?;
+            if !reading {
+                // The client is gone: only the session's end is awaited.
+                lines.woken(wait);
                 continue;
             }
-            match events.recv_timeout(POLL) {
-                Ok(event) => {
-                    self.observe(event)?;
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    if let Some(served) = &self.served {
-                        served::lock(served).end();
-                    }
+            match lines.next(wait) {
+                Next::Line(line) => {
+                    reading = self.frame(line)?;
                     self.flush()?;
-                    return write_frame(&mut self.stdout, &HostFrame::<P>::Bye);
+                }
+                Next::Woken => {}
+                Next::Closed => {
+                    reading = false;
+                    self.leave();
                 }
             }
         }
+    }
+
+    /// The session ended: what it said last goes out, then `bye`.
+    fn end(&mut self) -> CliResult<()> {
+        if let Some(served) = &self.served {
+            served::lock(served).end();
+        }
+        self.flush()?;
+        write_frame(&mut self.stdout, &HostFrame::<P>::Bye)
     }
 
     /// The client left: the session quits, or the connection detaches,
@@ -728,7 +791,8 @@ where
                     self.tell(&root);
                     return refused(RequestRefusal::Moved { node: root });
                 }
-                match self.service.attach(&node, self.face) {
+                let ask = !std::mem::take(&mut self.baseline_follows);
+                match self.service.attach_asking(&node, self.face, ask) {
                     Ok(attachment) => {
                         self.attachment = Some(attachment);
                         // A child attach leaves the replay owed to the next
@@ -1062,9 +1126,11 @@ where
     }
 }
 
+mod lines;
 mod served;
 mod session;
 
+pub use lines::{Line, LineSender, Lines, lines};
 pub use session::WireSession;
 
 #[cfg(test)]

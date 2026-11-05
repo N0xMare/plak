@@ -44,7 +44,7 @@ fn an_admitted_connection_is_refused_unavailable_and_a_stop_ends_the_host() {
     });
 
     let mut client = std::os::unix::net::UnixStream::connect(&socket).unwrap();
-    client.write_all(b"{\"hello\":{\"proto\":2}}\n").unwrap();
+    client.write_all(b"{\"hello\":{\"proto\":3}}\n").unwrap();
     let mut line = String::new();
     BufReader::new(&client).read_line(&mut line).unwrap();
     let frame: plakous_host_protocol::wire::HostFrame<PlakExtension> =

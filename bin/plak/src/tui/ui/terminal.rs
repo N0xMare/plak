@@ -616,6 +616,20 @@ pub(super) fn drain_host_events(
 ) -> HostDrain {
     app.note_transcript_gaps(events);
     let mut drain = HostDrain::default();
+    while let Some(unsent) = events.try_unsent() {
+        use super::unsent::Unsent;
+        use plakous_host_protocol::client::SendError;
+        drain.batched = true;
+        app.unsent_action(match unsent {
+            SendError::Refused(error) => Unsent::Refused(error),
+            SendError::RefusedForRole { row, intent } => Unsent::ForRole {
+                row,
+                action: intent,
+            },
+            SendError::OutcomeUnknown(intent) => Unsent::Unknown(intent),
+        });
+    }
+    app.rearm_due(app.now());
     for _ in 0..budget {
         match events.try_recv() {
             Ok(event) => {
@@ -670,7 +684,7 @@ pub(super) fn run_app(
     }
     #[cfg(feature = "test-hooks")]
     let mut pilot =
-        PilotSidecar::from_root(crate::test_hooks::tui_pilot_root()).map_err(TuiError::Io)?;
+        PilotSidecar::from_root(crate::test_hooks::tui::pilot_root()).map_err(TuiError::Io)?;
     let mut input_watch = crate::tui::wake::InputWatch::default();
     let mut input_seen = crate::tui::wake::Input::Quiet;
     let mut promptable_sent = false;
@@ -998,16 +1012,7 @@ pub(super) fn send_user_action(
             true
         }
         Err(error) => {
-            let reason = match &error {
-                crate::tui::UserActionSendError::Saturated(_) => "host control queue is full",
-                crate::tui::UserActionSendError::Disconnected(_) => "product host is disconnected",
-                crate::tui::UserActionSendError::Duplicate(_) => {
-                    "that session operation is already queued or running"
-                }
-                crate::tui::UserActionSendError::Refused(_) => {
-                    "another attachment holds the session's agent view"
-                }
-            };
+            let reason = refusal_reason(&error);
             match error.into_action() {
                 UserAction::Prompt(draft)
                 | UserAction::FollowUp(draft)
@@ -1029,6 +1034,26 @@ pub(super) fn send_user_action(
             )));
             false
         }
+    }
+}
+
+pub(super) fn refusal_reason(error: &crate::tui::UserActionSendError) -> String {
+    match error {
+        crate::tui::UserActionSendError::Saturated(_) => "host control queue is full",
+        crate::tui::UserActionSendError::Disconnected(_) => "product host is disconnected",
+        crate::tui::UserActionSendError::Duplicate(_) => {
+            "that session operation is already queued or running"
+        }
+        crate::tui::UserActionSendError::Refused(_) => "the session refused it",
+    }
+    .to_owned()
+}
+
+/// The text of a refusal for `row` of the role table.
+pub(super) fn role_refusal_reason(row: &str) -> String {
+    match row {
+        "transcript" => "another attachment holds the session's agent view".to_owned(),
+        row => format!("this face may not send that ({row})"),
     }
 }
 

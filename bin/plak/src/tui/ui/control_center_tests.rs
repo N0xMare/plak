@@ -7,9 +7,10 @@ use super::test_support::{
     usage_body_text, usage_fixture, usage_offline_fixture,
 };
 use super::{App, format_turn_usage};
+use crate::config::user_action_channel;
 use crate::tui::blocks::ScrollBlock;
 use crate::tui::presentation::{ContextUsage, PreparedInputUsage};
-use crate::tui::{HostEvent, QueueDrainState, SettingsView, UserAction, user_action_channel};
+use crate::tui::{HostEvent, QueueDrainState, SettingsView, UserAction};
 use crate::tui::{SurfaceIntent, SurfaceObservation};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
 use plakous_host_protocol::status::{DiagnosticText, HostPhase, HostStatusDetail};

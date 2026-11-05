@@ -4,7 +4,8 @@ use std::collections::BTreeMap;
 
 use super::App;
 use super::test_support::{launch_basic, pin_clock, restore_snapshot, serialize_frame, tool_item};
-use crate::tui::{HostEvent, UserAction, user_action_channel};
+use crate::config::user_action_channel;
+use crate::tui::{HostEvent, UserAction};
 use plakous_host_protocol::views::presentation::PresentationSnapshot;
 use plakous_host_protocol::views::transcript::{
     Lane, RowKey, TranscriptItem, TranscriptPatch, TranscriptRow, TranscriptScope,
@@ -1083,7 +1084,7 @@ fn a_repeated_busy_baseline_does_not_clear_the_live_preview() {
 fn losing_the_last_patch_requests_resync_without_waiting_for_a_later_revision() {
     let mut app = App::new(launch_basic(), true);
     app.apply_host_event(restore_snapshot(1, vec![TranscriptRow::assistant("kept")]));
-    let (events, receiver) = crate::tui::host_event_channel();
+    let (events, receiver) = crate::config::host_event_channel();
     for index in 0..plakous_host_protocol::limits::OBSERVATION_QUEUE_CAPACITY - 1 {
         events
             .send(HostEvent::JobStarted {

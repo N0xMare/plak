@@ -192,6 +192,15 @@ impl App {
         }
     }
 
+    /// Asks again for `tree_id`'s acknowledgements, which the session did
+    /// not take the last ask of.
+    pub(super) fn agent_acknowledgements_unsent(&mut self, tree_id: String) {
+        if self.agent_acks.asked.as_ref() == Some(&tree_id) {
+            self.agent_acks.asked = None;
+            self.agent_acks.request.get_or_insert(tree_id);
+        }
+    }
+
     pub(super) fn handle_tree_navigator_key(&mut self, code: KeyCode) -> Option<UserAction> {
         if self.tree_navigator.is_none() {
             if code == KeyCode::Esc {

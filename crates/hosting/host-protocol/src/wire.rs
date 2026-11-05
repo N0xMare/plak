@@ -39,8 +39,9 @@ use crate::observation::{ObservationClass, SessionObservation};
 use crate::views::PresentationSnapshot;
 use crate::views::transcript::{TranscriptItem, TranscriptScope};
 
-/// The wire protocol version; a peer with another is refused.
-pub const WIRE_VERSION: u32 = 2;
+/// The wire protocol version; a peer with another is refused. 3 drops
+/// `hello`'s locality.
+pub const WIRE_VERSION: u32 = 3;
 
 /// The most bytes one line holds, newline included.
 pub const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
@@ -86,18 +87,6 @@ pub struct NodeAddress {
     pub agent_id: String,
 }
 
-/// Where the client runs, for what only the client's machine can do.
-#[derive(
-    Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema,
-)]
-#[serde(deny_unknown_fields)]
-pub struct ClientLocality {
-    /// The client reached the host over ssh.
-    pub ssh: bool,
-    /// The client can open a browser for a login.
-    pub can_open_browser: bool,
-}
-
 /// The client's first frame.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -108,8 +97,6 @@ pub struct Hello {
     pub binary_id: String,
     /// Optional functions the client supports.
     pub caps: Vec<String>,
-    /// Where the client runs.
-    pub locality: ClientLocality,
 }
 
 /// The host's answer to an admitted [`Hello`].

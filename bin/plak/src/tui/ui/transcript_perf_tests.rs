@@ -5,7 +5,8 @@ use std::time::Instant;
 
 use super::test_support::{launch_basic, pin_clock};
 use super::{App, ContentPosition};
-use crate::surface_protocol::{ContentEvent, HostEventReceiver, PlakExtension};
+use crate::surface_protocol::{ContentEvent, PlakExtension};
+use crate::tui::HostEventReceiver;
 use crate::tui::blocks::ScrollBlock;
 use plakous_host_protocol::views::PresentationSnapshot;
 use plakous_host_protocol::views::transcript::{
@@ -29,7 +30,7 @@ impl Probe {
         pin_clock(&mut app);
         app.render_prefs.reduced_motion = true;
         app.render_prefs.group_tool_calls = false;
-        let (events, receiver) = crate::tui::host_event_channel();
+        let (events, receiver) = crate::config::host_event_channel();
         let sender = Sender::over(events);
         let mut items = vec![TranscriptItem {
             key: RowKey::new(0, Lane::Runtime, 0),

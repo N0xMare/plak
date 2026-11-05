@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use plak::wire_transport::PlakExtension;
 use plakous_host_protocol::client;
-use plakous_host_protocol::wire::{ClientLocality, Hello, WIRE_VERSION};
+use plakous_host_protocol::wire::{Hello, WIRE_VERSION};
 use plakous_host_protocol::{Draft, SessionIntent, SessionObservation};
 use serde_json::json;
 
@@ -47,7 +47,6 @@ fn the_wire_client_drives_plak_agent_over_stdio() {
         proto: WIRE_VERSION,
         binary_id: "wire-client-test".into(),
         caps: Vec::new(),
-        locality: ClientLocality::default(),
     };
     let (sender, receiver, welcome) =
         client::connect::<PlakExtension>(transport, hello).expect("welcomed");

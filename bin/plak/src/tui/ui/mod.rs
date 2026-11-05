@@ -545,6 +545,9 @@ pub(crate) struct App {
     next_build_check: Instant,
     /// When the outstanding build check was sent, if one is.
     build_check_sent: Option<Instant>,
+    /// Background intents the session did not take, each armed again when
+    /// its instant comes ([`unsent`]).
+    rearms: Vec<(Instant, UserAction)>,
     /// `/reload` was accepted; the loop starts the installed-build probe.
     pending_reload: bool,
     /// The running installed-build probe; the loop hands off when it answers.
@@ -931,6 +934,7 @@ impl App {
             newer_build_installed: false,
             next_build_check: Instant::now(),
             build_check_sent: None,
+            rearms: Vec::new(),
             pending_reload: false,
             reload_probe: None,
             reload_probe_answer: None,
@@ -1230,6 +1234,10 @@ mod tree;
 )]
 mod typing_grace_tests;
 mod typing_guard;
+mod unsent;
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]
+mod unsent_tests;
 use self::terminal::display_workspace;
 
 #[cfg(test)]

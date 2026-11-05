@@ -94,6 +94,7 @@ impl App {
             self.call_details.next_ask(now),
             ages,
             self.new_after_stop_wake(now),
+            self.next_rearm(),
         ]
         .into_iter()
         .flatten()

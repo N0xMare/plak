@@ -2,6 +2,7 @@
 //! preparation, and the presentation values every round reads. The rounds
 //! themselves are the session supervisor's ([`supervisor`]).
 
+pub(crate) mod face;
 pub(crate) mod supervisor;
 
 use std::io::{self, IsTerminal as _, Write as _};

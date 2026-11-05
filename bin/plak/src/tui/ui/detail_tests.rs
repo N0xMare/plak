@@ -8,9 +8,10 @@ use super::test_support::{
     transcript_fixture,
 };
 use super::{App, DisplayMode};
+use crate::config::user_action_channel;
 use crate::tui::blocks::{RowTarget, ScrollBlock};
 use crate::tui::presentation::ActivityKind;
-use crate::tui::{HostEvent, UserAction, user_action_channel};
+use crate::tui::{HostEvent, UserAction};
 use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
 use plakous_host_protocol::views::transcript::{
     AgentMilestone, AutoContinue, CarriedFrom, MilestoneEvent, NoticeScope, ToolItem,

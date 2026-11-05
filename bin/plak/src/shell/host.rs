@@ -133,22 +133,18 @@ pub fn spawn_shell_host(
     crate::surface_protocol::HostEventReceiver,
     plakous_hosted::runtime::HostWorkerHandle,
 ) {
-    spawn_shell_host_with_clear_publication(config, None)
+    crate::surface_protocol::face_of(spawn_shell_host_with_clear_publication(config, None))
 }
 
-/// The same, with the `/new` publication cell the TUI reads back.
+/// The same as the session's mailbox ends, for the launcher to serve, with
+/// the `/new` publication cell the TUI reads back.
 #[must_use]
 pub fn spawn_shell_host_with_clear_publication(
     config: ShellHostConfig<PlakExtension>,
     clear_publication: Option<Arc<std::sync::Mutex<Option<String>>>>,
-) -> (
-    crate::surface_protocol::FaceActionSender,
-    crate::surface_protocol::HostEventReceiver,
-    plakous_hosted::runtime::HostWorkerHandle,
-) {
+) -> plakous_hosted::runtime::HostWorker<PlakExtension> {
     let (action_tx, action_rx) = crate::surface_protocol::user_action_channel();
     let (event_tx, event_rx) = plakous_host_protocol::observation_channel();
-    let (action_tx, event_rx) = plakous_hosted::host_service::face(action_tx, event_rx);
     let event_tx = Sender::over(event_tx);
     let handle = plakous_hosted::runtime::HostWorkerHandle::spawn(move || {
         run_shell_host_loop(config, action_rx, event_tx, clear_publication);

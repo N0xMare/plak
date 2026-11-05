@@ -11,8 +11,8 @@ use plakous_host_protocol::intent::{Core, Draft, DraftImage, SessionIntent};
 use plakous_host_protocol::observation::{ObservationClass, SessionObservation};
 use plakous_host_protocol::views::PresentationSnapshot;
 use plakous_host_protocol::wire::{
-    Answer, BlobAssembler, ClientFrame, ClientLocality, HandshakeRefusal, Hello, HostFrame,
-    LineReader, NodeAddress, Op, Outcome, RequestRefusal, SnapshotAssembler, WIRE_VERSION, Welcome,
+    Answer, BlobAssembler, ClientFrame, HandshakeRefusal, Hello, HostFrame, LineReader,
+    NodeAddress, Op, Outcome, RequestRefusal, SnapshotAssembler, WIRE_VERSION, Welcome,
     admit_hello, decode_line, encode_line, page_snapshot, take_images,
 };
 
@@ -194,7 +194,6 @@ fn hello(proto: u32) -> Client {
         proto,
         binary_id: "client".into(),
         caps: Vec::new(),
-        locality: ClientLocality::default(),
     })
 }
 

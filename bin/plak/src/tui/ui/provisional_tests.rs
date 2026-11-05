@@ -4,7 +4,8 @@
 use super::App;
 use super::terminal::dispatch_action;
 use super::test_support::{launch_basic, pin_clock, queue_item, serialize_frame};
-use crate::tui::{HostEvent, QueueDrainState, UserAction, user_action_channel};
+use crate::config::user_action_channel;
+use crate::tui::{HostEvent, QueueDrainState, UserAction};
 use plakous_host_protocol::views::transcript::{
     Lane, RowKey, TranscriptItem, TranscriptPatch, TranscriptRow, TranscriptScope,
 };

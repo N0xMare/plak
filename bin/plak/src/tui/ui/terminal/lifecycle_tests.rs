@@ -102,10 +102,10 @@ fn worker_failure_child() -> ! {
     }
     assert!(terminal_panic::take_background_panic_report().is_none());
     assert_eq!(terminal.close(), [] as [String; 0]);
-    let (actions, _input) = crate::tui::user_action_channel();
-    crate::commands::support::exit_restored_tui(
+    let (actions, _input) = crate::surface_protocol::user_action_channel();
+    crate::tui_launch::face::exit_restored_tui(
         worker,
-        actions,
+        crate::tui_launch::face::RoundMailbox::unattached(actions),
         crate::tui::report_background_panic,
     );
 }

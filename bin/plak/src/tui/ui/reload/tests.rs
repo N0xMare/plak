@@ -1,5 +1,6 @@
 use super::*;
-use crate::tui::{SurfaceIntent, UserAction, user_action_channel};
+use crate::config::user_action_channel;
+use crate::tui::{SurfaceIntent, UserAction};
 
 fn outcome(paths: &crate::home::paths::PlakPaths, request_id: &str) -> Option<String> {
     std::fs::read_to_string(crate::reload_request::outcome_path(paths, request_id)).ok()

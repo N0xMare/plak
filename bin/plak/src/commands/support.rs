@@ -46,54 +46,6 @@ pub fn join_tui_host_worker(
 /// [`QUIT_NOTICE`] until the operator pressed Ctrl-C.
 pub const VOLUNTARY_QUIT_GRACE: Duration = Duration::from_secs(1);
 
-/// Session-owned process-group stops are supplied at this boundary.
-fn stop_background_processes_for_interactive_exit(
-    _host_mailbox: &crate::surface_protocol::FaceActionSender,
-) {
-}
-
-/// Voluntary TUI quit after the terminal is cooked and the resume hint is
-/// flushed. The host is asked to interrupt and shut down, then this process
-/// exits when that work finishes or when [`VOLUNTARY_QUIT_GRACE`] ends,
-/// whichever comes first. It does not print [`QUIT_NOTICE`] and it does not
-/// wait out session release.
-///
-/// The mailbox is forgotten rather than dropped when the grace wins: dropping
-/// the last sender is `Disconnected`, which the host also treats as Quit.
-/// A panicked join invokes the product's content-free report callback.
-pub fn exit_restored_tui(
-    worker: plakous_hosted::runtime::HostWorkerHandle,
-    host_mailbox: crate::surface_protocol::FaceActionSender,
-    report_worker_failure: fn(),
-) -> ! {
-    stop_background_processes_for_interactive_exit(&host_mailbox);
-    host_mailbox.request_abandon_and_release();
-    let deadline = Instant::now() + crate::tui_timing::remaining_exit_budget();
-    while !worker.is_finished() && Instant::now() < deadline {
-        thread::sleep(Duration::from_millis(5));
-    }
-    let outcome = worker.quit_outcome();
-    if worker.is_finished() {
-        if worker.join().is_err() {
-            report_worker_failure();
-        }
-    } else {
-        std::mem::forget(worker);
-    }
-    std::mem::forget(host_mailbox);
-    crate::tui_timing::exiting();
-    // A quit the signal watcher requested reports the signalled status, the
-    // same one a CLI turn stopped by `SIGTERM` or `SIGHUP` reports.
-    let code = if outcome == plakous_hosted::runtime::HostQuitOutcome::Escalated {
-        130
-    } else if crate::signals::stop_reason().is_some() {
-        crate::signals::SIGNALLED_EXIT_CODE
-    } else {
-        0
-    };
-    std::process::exit(code);
-}
-
 /// Product state roots for a session of `context`, the product context of
 /// its workspace, with the caller's extra telemetry sink attached. The
 /// roots' roster source reads that context's configuration, so a trusted

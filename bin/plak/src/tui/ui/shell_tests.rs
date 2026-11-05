@@ -10,15 +10,13 @@ use super::test_support::{
     tree_snapshot, typed, visual_fixture,
 };
 use super::{App, QUITTING_STATUS, format_status_elapsed, user_phase, user_status_detail};
+use crate::config::user_action_channel;
 use crate::tui::blocks::ScrollBlock;
 use crate::tui::control::{is_drop_command, is_quit_command, local_echo_line, route_submit};
 use crate::tui::presentation::ActivityKind;
 use crate::tui::quit_guard::{CtrlCOutcome, classify_ctrl_c};
 use crate::tui::redraw::{FrameWork, RedrawReason, RedrawSchedule, RedrawState, RedrawWait};
-use crate::tui::{
-    HostEvent, QueueDrainState, SessionRequest, TuiError, TuiLaunch, UserAction,
-    user_action_channel,
-};
+use crate::tui::{HostEvent, QueueDrainState, SessionRequest, TuiError, TuiLaunch, UserAction};
 use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, ModifierKeyCode, MouseButton, MouseEvent,
     MouseEventKind,
@@ -1159,7 +1157,7 @@ fn a_cancelled_or_errored_terminal_keeps_the_recorded_elapsed() {
 #[test]
 fn a_bounded_host_drain_leaves_the_rest_for_the_next_frame() {
     let mut app = App::new(launch_basic(), true);
-    let (sender, receiver) = crate::tui::host_event_channel();
+    let (sender, receiver) = crate::config::host_event_channel();
     for index in 0..10 {
         sender
             .send(HostEvent::Row(

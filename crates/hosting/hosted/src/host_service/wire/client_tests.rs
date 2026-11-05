@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use plakous_host_protocol::client::{self, SessionAnswer, SessionChange, Transport};
 use plakous_host_protocol::views::PresentationSnapshot;
 use plakous_host_protocol::views::transcript::{NoticeScope, TranscriptScope};
-use plakous_host_protocol::wire::{ClientLocality, Hello, LineReader};
+use plakous_host_protocol::wire::{Hello, LineReader};
 use plakous_host_protocol::{Core, IntentReceiver, ObservationSender};
 
 use super::*;
@@ -40,7 +40,6 @@ fn hello() -> Hello {
         proto: WIRE_VERSION,
         binary_id: "client".into(),
         caps: Vec::new(),
-        locality: ClientLocality::default(),
     }
 }
 
@@ -129,7 +128,7 @@ impl Served {
 /// lines and its flushes, until it ends; why it ended.
 fn drive(
     connection: &mut WireConnection<Core, UnixStream>,
-    lines: &mpsc::Receiver<Result<String, WireError>>,
+    lines: &Lines,
     welcome: Welcome,
     out: &mut UnixStream,
     stop: &AtomicBool,
@@ -162,9 +161,9 @@ fn drive(
     }
 }
 
-fn lines_of(stream: UnixStream) -> mpsc::Receiver<Result<String, WireError>> {
+fn lines_of(stream: UnixStream) -> Lines {
     use std::io::Read as _;
-    let (sender, lines) = mpsc::sync_channel(64);
+    let (sender, lines) = lines(64);
     std::thread::spawn(move || {
         let mut stream = stream;
         let mut reader = LineReader::default();

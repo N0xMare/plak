@@ -7,10 +7,11 @@ use super::test_support::{
     usage_offline_fixture,
 };
 use super::{App, user_phase};
+use crate::config::user_action_channel;
 use crate::tui::ProviderRowPresentation as _;
 use crate::tui::blocks::ScrollBlock;
 use crate::tui::presentation::{ContextUsage, SessionLedgerView};
-use crate::tui::{HostEvent, SurfaceObservation, UserAction, user_action_channel};
+use crate::tui::{HostEvent, SurfaceObservation, UserAction};
 use crossterm::event::KeyCode;
 use plakous_host_protocol::status::{DiagnosticText, HostPhase, HostStatusDetail};
 use ratatui::Terminal;

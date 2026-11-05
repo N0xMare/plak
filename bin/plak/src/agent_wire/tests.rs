@@ -1,5 +1,3 @@
-use std::sync::mpsc;
-
 use plakous_host_protocol::intent::{Draft, DraftImage};
 use plakous_host_protocol::observation::ObservationClass;
 use plakous_host_protocol::wire::{
@@ -74,7 +72,7 @@ fn fake_session(
 fn the_adapter_attaches_the_root_and_carries_intents_and_events() {
     let (actions, intents) = user_action_channel();
     let (observations, events) = plakous_host_protocol::observation_channel();
-    let (client, lines) = mpsc::sync_channel(64);
+    let (client, lines) = wire::lines(64);
     let image = DraftImage {
         name: "a.png".into(),
         media_type: "image/png".into(),
@@ -173,14 +171,13 @@ fn the_adapter_attaches_the_root_and_carries_intents_and_events() {
 fn the_handshake_refuses_another_version() {
     let welcome = || session_welcome("b".into(), 1, "s1".into(), root());
     for (proto, admitted) in [(WIRE_VERSION, true), (WIRE_VERSION + 1, false)] {
-        let (client, lines) = mpsc::sync_channel(1);
+        let (client, lines) = wire::lines(1);
         client
             .send(Ok(line(&ClientFrame::Hello(
                 plakous_host_protocol::wire::Hello {
                     proto,
                     binary_id: "c".into(),
                     caps: Vec::new(),
-                    locality: plakous_host_protocol::wire::ClientLocality::default(),
                 },
             ))))
             .unwrap();
@@ -326,7 +323,7 @@ fn only_a_local_face_may_probe_or_check_the_installed_build() {
     for face in [None, Some(Face::Remote), Some(Face::Local)] {
         let (actions, intents) = user_action_channel();
         let (observations, events) = plakous_host_protocol::observation_channel();
-        let (client, lines) = mpsc::sync_channel(8);
+        let (client, lines) = wire::lines(8);
         let intent = |id, intent| ClientFrame::Request {
             id,
             op: Op::Intent {

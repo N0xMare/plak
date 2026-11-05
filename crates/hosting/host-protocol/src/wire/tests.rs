@@ -10,10 +10,6 @@ fn hello(proto: u32) -> Hello {
         proto,
         binary_id: "b1".into(),
         caps: Vec::new(),
-        locality: ClientLocality {
-            ssh: true,
-            can_open_browser: false,
-        },
     }
 }
 

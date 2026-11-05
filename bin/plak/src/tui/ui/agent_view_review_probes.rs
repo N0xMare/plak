@@ -3,9 +3,10 @@
 
 use super::App;
 use super::test_support::{key, launch_basic, left_mouse, restore_snapshot, say, tool_item};
+use crate::config::user_action_channel;
 use crate::tui::blocks::{DisplayMode, ScrollBlock};
 use crate::tui::presentation::ActivityKind;
-use crate::tui::{HostEvent, UserAction, user_action_channel};
+use crate::tui::{HostEvent, UserAction};
 use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
 use plakous_host_protocol::views::transcript::{ToolItem, TranscriptRow};
 use plakous_host_protocol::views::{CallDetail, CallDetailOutcome, CallDetailSource};

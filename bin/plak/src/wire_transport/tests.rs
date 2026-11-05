@@ -3,9 +3,9 @@ use std::os::unix::net::UnixListener;
 use std::sync::mpsc;
 use std::time::Duration;
 
+use plakous_host_protocol::SessionIntent;
 use plakous_host_protocol::client;
-use plakous_host_protocol::wire::{ClientLocality, Hello, LineReader, WIRE_VERSION, WireError};
-use plakous_host_protocol::{IntentSendError, SessionIntent};
+use plakous_host_protocol::wire::{Hello, LineReader, WIRE_VERSION};
 use plakous_hosted::host_service::wire::{Face, WireSession, handshake, session_welcome};
 
 use super::*;
@@ -35,9 +35,9 @@ fn the_host_socket_must_be_this_users_and_private() {
     assert_eq!(refused(&path), Some(io::ErrorKind::PermissionDenied));
 }
 
-fn lines_of(stream: UnixStream) -> mpsc::Receiver<Result<String, WireError>> {
+fn lines_of(stream: UnixStream) -> plakous_hosted::host_service::wire::Lines {
     use std::io::Read as _;
-    let (sender, lines) = mpsc::sync_channel(64);
+    let (sender, lines) = plakous_hosted::host_service::wire::lines(64);
     std::thread::spawn(move || {
         let mut stream = stream;
         let mut reader = LineReader::default();
@@ -95,10 +95,19 @@ fn a_remote_face_is_refused_a_local_only_intent_over_the_socket() {
     });
     let (sender, receiver, _) = client::connect::<PlakExtension>(transport, hello()).unwrap();
     let check = SessionIntent::Extension(SurfaceIntent::CheckBuild);
-    assert!(matches!(
-        sender.send(check.clone()),
-        Err(client::SendError::Refused(IntentSendError::Refused(refused))) if refused == check
-    ));
+    sender.send(check.clone()).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let refused = loop {
+        if let Some(refused) = receiver.try_unsent() {
+            break refused;
+        }
+        assert!(std::time::Instant::now() < deadline, "no verdict came");
+        std::thread::sleep(Duration::from_millis(1));
+    };
+    assert!(
+        matches!(&refused, client::SendError::RefusedForRole { intent, .. } if *intent == check),
+        "{refused:?}"
+    );
     while let Ok(delivery) = intents.try_recv() {
         assert!(
             !matches!(*delivery, SessionIntent::Extension(_)),
@@ -115,7 +124,6 @@ fn hello() -> Hello {
         proto: WIRE_VERSION,
         binary_id: "client".into(),
         caps: Vec::new(),
-        locality: ClientLocality::default(),
     }
 }
 

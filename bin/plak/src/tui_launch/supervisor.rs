@@ -21,14 +21,15 @@ const RELOAD_RELEASE_BOUND: Duration = plakous_host_protocol::limits::HOST_CANCE
 
 use plakous::agent::ReasoningEffort;
 
+use super::face::{RoundFace, RoundMailbox, exit_restored_tui, round_face};
 use super::{supported_provider_rows, tui_presentation_bundle, tui_presentation_values};
 use crate::commands::host_config::{
     TuiAttachEligibility, TuiAttacher, build_host_config, deferred_attach_refusal_reason,
     tui_attach_eligibility,
 };
 use crate::commands::support::{
-    HOST_WORKER_JOIN_TIMEOUT, edit_config_file, exit_restored_tui, join_host_worker_bounded,
-    join_tui_host_worker, resolved_workspace_path,
+    HOST_WORKER_JOIN_TIMEOUT, edit_config_file, join_host_worker_bounded, join_tui_host_worker,
+    resolved_workspace_path,
 };
 use crate::shell::services::Services;
 use crate::{
@@ -57,7 +58,7 @@ fn settle_tui_round(
     ui: Result<tui::TuiOutcome, tui::TuiError>,
     persistent_tui: &mut Option<tui::PersistentTerminal>,
     join: plakous_hosted::runtime::HostWorkerHandle,
-    host_mailbox: surface_protocol::FaceActionSender,
+    host_mailbox: RoundMailbox,
     label: &str,
     store: &dyn store::session_records::SessionRecordStore,
     session_id: &str,
@@ -340,8 +341,9 @@ pub(crate) fn apply_tui_handoff_after_host(
 fn run_persistent_tui(
     terminal: &mut Option<tui::PersistentTerminal>,
     launch: tui::TuiLaunch,
-    actions: &surface_protocol::FaceActionSender,
-    events: surface_protocol::HostEventReceiver,
+    actions: tui::FaceActionSender,
+    events: tui::HostEventReceiver,
+    publisher: plakous_hosted::host_service::FacePublisher<surface_protocol::PlakExtension>,
     lookup: &LookupPublication,
 ) -> Result<tui::TuiOutcome, tui::TuiError> {
     if terminal.is_none() {
@@ -352,11 +354,11 @@ fn run_persistent_tui(
             "persistent TUI terminal was not initialized".into(),
         ));
     };
-    lookup.attach(events.publisher());
-    // Keep the caller's sender. Dropping the last sender is Disconnected, and
-    // the host treats that as Quit; which shutdown the round requests on the
-    // mailbox is `settle_tui_round`'s call once the terminal is cooked.
-    let outcome = terminal.run(launch, Some(actions.clone()), Some(events));
+    lookup.attach(publisher);
+    // The round's mailbox keeps the face: its leaving quits the session, and
+    // which shutdown the round requests on the mailbox is
+    // `settle_tui_round`'s call once the terminal is cooked.
+    let outcome = terminal.run(launch, Some(actions), Some(events));
     lookup.detach();
     outcome
 }
@@ -437,7 +439,7 @@ const RESUME_PICKER_SHELL_REASON: &str = "pick a session to resume · Esc keeps 
 /// Asks the host for the cwd-scoped session list. The TUI itself marks the
 /// request outstanding through `TuiLaunch::open_resume_picker`; only that pair
 /// opens the picker when `HostEvent::ResumeSessions` arrives.
-fn request_resume_picker(action_tx: &surface_protocol::FaceActionSender) -> CliResult<()> {
+fn request_resume_picker(action_tx: &tui::FaceActionSender) -> CliResult<()> {
     action_tx
         .send(surface_protocol::UserAction::ResumeSession { id: None })
         .map_err(|_| CliFailure::new("resume picker host is unavailable"))
@@ -716,7 +718,13 @@ pub(super) fn run_tui_rounds(
             let prep_resume_picker = state.open_resume_picker;
             let deferred_resume_publication = resume_publication.clone();
             let prep_needs_setup = product_onboarding::needs_setup(&cfg);
-            let (action_tx, event_rx, join) = surface_protocol::face_of(
+            let RoundFace {
+                actions: action_tx,
+                events: event_rx,
+                mailbox,
+                publisher,
+                join,
+            } = round_face(
                 product_host::spawn_deferred_host_with_clear_publication(
                     move || {
                         prepare_deferred_tui_host(
@@ -735,7 +743,8 @@ pub(super) fn run_tui_rounds(
                     },
                     Some(Arc::clone(&clear_publication)),
                 ),
-            );
+                &state.record.id,
+            )?;
             let mut launch = launch_base;
             if state.open_resume_picker {
                 request_resume_picker(&action_tx)?;
@@ -745,15 +754,16 @@ pub(super) fn run_tui_rounds(
             let ui = run_persistent_tui(
                 &mut state.persistent_tui,
                 launch,
-                &action_tx,
+                action_tx,
                 event_rx,
+                publisher,
                 &lookup,
             );
             let ui = settle_tui_round(
                 ui,
                 &mut state.persistent_tui,
                 join,
-                action_tx,
+                mailbox,
                 "TUI controller",
                 store.as_ref(),
                 &state.record.id,
@@ -768,7 +778,14 @@ pub(super) fn run_tui_rounds(
             ui
         } else {
             match attach {
-                Ok((action_tx, event_rx, join)) => {
+                Ok(worker) => {
+                    let RoundFace {
+                        actions: action_tx,
+                        events: event_rx,
+                        mailbox,
+                        publisher,
+                        join,
+                    } = round_face(worker, &state.record.id)?;
                     let mut launch = launch_base;
                     launch.agent_enabled = true;
                     if state.open_resume_picker {
@@ -779,15 +796,16 @@ pub(super) fn run_tui_rounds(
                     let ui = run_persistent_tui(
                         &mut state.persistent_tui,
                         launch,
-                        &action_tx,
+                        action_tx,
                         event_rx,
+                        publisher,
                         &lookup,
                     );
                     let ui = settle_tui_round(
                         ui,
                         &mut state.persistent_tui,
                         join,
-                        action_tx,
+                        mailbox,
                         "attached session",
                         store.as_ref(),
                         &state.record.id,
@@ -844,7 +862,13 @@ pub(super) fn run_tui_rounds(
                             .opt_str("model", model_id.as_deref())
                             .str("reason", reason.kind()),
                     );
-                    let (action_tx, event_rx, join) =
+                    let RoundFace {
+                        actions: action_tx,
+                        events: event_rx,
+                        mailbox,
+                        publisher,
+                        join,
+                    } = round_face(
                         shell::host::spawn_shell_host_with_clear_publication(
                             product_host::ShellHostConfig {
                                 surface: Some(shell::settings::ProductSurface::boxed(&paths)),
@@ -866,7 +890,9 @@ pub(super) fn run_tui_rounds(
                                 ),
                             },
                             Some(Arc::clone(&clear_publication)),
-                        );
+                        ),
+                        &state.record.id,
+                    )?;
                     let mut launch = launch_base;
                     launch.agent_enabled = false;
                     if state.open_resume_picker {
@@ -877,15 +903,16 @@ pub(super) fn run_tui_rounds(
                     let ui = run_persistent_tui(
                         &mut state.persistent_tui,
                         launch,
-                        &action_tx,
+                        action_tx,
                         event_rx,
+                        publisher,
                         &lookup,
                     );
                     settle_tui_round(
                         ui,
                         &mut state.persistent_tui,
                         join,
-                        action_tx,
+                        mailbox,
                         "shell session",
                         store.as_ref(),
                         &state.record.id,

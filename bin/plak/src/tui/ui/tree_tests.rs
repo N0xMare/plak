@@ -6,8 +6,9 @@ use super::test_support::{
     compose_transcript_app, key, key_ctrl, launch_basic, open_tree, serialize_frame, tree_node,
     tree_snapshot,
 };
+use crate::config::user_action_channel;
 use crate::tui::TreeNavigator;
-use crate::tui::{HostEvent, UserAction, user_action_channel};
+use crate::tui::{HostEvent, UserAction};
 use crossterm::event::KeyCode;
 use plakous_host_protocol::status::HostPhase;
 use plakous_host_protocol::topology::{

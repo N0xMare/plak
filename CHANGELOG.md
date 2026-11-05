@@ -103,6 +103,17 @@ an export.
 
 ### Plak
 
+- The TUI speaks wire v2 to its session: each round's supervisor serves a
+  local-face connection of the session's host service over a socket pair
+  in the process, and the TUI is a `plakous_host_protocol::client` of it.
+  Only two process-local signals stay beside the frames: the
+  abandon-and-release request on the session's mailbox, set once the
+  session has its verdict on everything the TUI sent, and the launcher's
+  `/new` and resume publication cells. The in-process face is gone. The
+  TUI's sends never wait for the session: a refusal comes back later, and
+  the TUI restores the draft and names the reason (the role-table row of a
+  role refusal, or that no answer came and the session may still run it).
+  A round whose connection fails releases its session and joins it.
 - A tree's genesis roster reads the session's own workspace: a trusted
   project's templates in its `[roster] working_set` are on the root's spawn
   menu. Before, the roster read the home alone, so a trusted project's
@@ -488,6 +499,29 @@ an export.
   `host_service::wire::session_root_of`; `WireConnection::serving` takes a
   root resolver). Embedder break: the new frame and the `serving`
   signature.
+- Wire v2 for an embedded face: `HostService::publisher` and
+  `WireConnection::publisher` publish to a service from outside its
+  session (`FaceReceiver::publisher` is now that of its service), waking
+  its connection; a connection whose session ends on its own sends `bye`
+  while its client still reads; and the client's first attach reads no
+  transcript as lost (it no longer starts with the root marked as needing
+  a baseline). `WireConnection::serve`, `handshake` and the stdio and web
+  acceptors take `wire::Lines` (`wire::lines`), one channel of the client's
+  lines and the session mailbox's wakes, so a connection forwards what the
+  session says at once instead of on a 20 ms poll.
+  `WireConnection::session_baseline_follows` and
+  `HostService::attach_asking` let an embedded face's first attach skip
+  asking for a root baseline the session publishes anyway.
+- `plakous_host_protocol::client`: `WireSender::send` no longer blocks;
+  refusals and unknown outcomes come back through
+  `WireReceiver::try_unsent`, and `WireSender::settle` waits for every
+  verdict. `SendError::RefusedForRole` names the role-table row. What a
+  face has not taken waits in an observation mailbox with the session
+  mailbox's rules instead of a 4096-entry queue that dropped everything;
+  a re-attach reads every held transcript as lost and opens the face's
+  agent transcript again. Wire break: `hello` has no `locality`
+  (`ClientLocality` is gone), and `WIRE_VERSION` is 3, so a peer of the
+  previous version is refused `version_mismatch`.
 - The TUI's installed-build check and its reload-request channel move to
   the session's host: every five seconds the TUI sends the product
   surface's `check_build`, and the host answers whether a newer build is

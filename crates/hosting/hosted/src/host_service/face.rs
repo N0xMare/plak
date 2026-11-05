@@ -166,6 +166,17 @@ impl<P: ProtocolExtension> HostService<P> {
     fn leave(&self, attachment: AttachmentId) {
         self.lock().remove(attachment, None);
     }
+
+    /// A publisher of this service for observations from outside the
+    /// session ([`FacePublisher`]): they reach its attachments as the
+    /// session's do, a wire connection's on its next flush.
+    #[must_use]
+    pub fn publisher(&self) -> FacePublisher<P> {
+        FacePublisher {
+            service: self.clone(),
+            wake: None,
+        }
+    }
 }
 
 /// Publishes to a face from outside its session: a product publisher of
@@ -174,12 +185,16 @@ impl<P: ProtocolExtension> HostService<P> {
 /// read.
 pub struct FacePublisher<P: ProtocolExtension> {
     service: HostService<P>,
+    /// Wakes the wire connection that serves the service, which waits for
+    /// nothing but its own channel.
+    wake: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl<P: ProtocolExtension> Clone for FacePublisher<P> {
     fn clone(&self) -> Self {
         Self {
             service: self.service.clone(),
+            wake: self.wake.clone(),
         }
     }
 }
@@ -188,6 +203,16 @@ impl<P: ProtocolExtension> FacePublisher<P> {
     /// Publishes `observation`.
     pub fn publish(&self, observation: SessionObservation<P>) {
         self.service.observe(observation);
+        if let Some(wake) = &self.wake {
+            wake();
+        }
+    }
+
+    /// This publisher, waking a connection with `wake` after each
+    /// publication.
+    pub(super) fn waking(mut self, wake: impl Fn() + Send + Sync + 'static) -> Self {
+        self.wake = Some(std::sync::Arc::new(wake));
+        self
     }
 }
 
@@ -216,9 +241,7 @@ impl<P: ProtocolExtension> FaceReceiver<P> {
     /// the session ([`FacePublisher`]).
     #[must_use]
     pub fn publisher(&self) -> FacePublisher<P> {
-        FacePublisher {
-            service: self.service.clone(),
-        }
+        self.service.publisher()
     }
 
     /// Takes what a [`FacePublisher`] queued; whether there was any.

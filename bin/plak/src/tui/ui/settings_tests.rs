@@ -5,9 +5,10 @@ use super::terminal::dispatch_action;
 use super::test_support::{
     key, launch_basic, left_click, left_mouse, serialize_frame, settings_fixture, settings_row,
 };
+use crate::config::user_action_channel;
 use crate::tui::blocks::RenderPrefs;
 use crate::tui::theme::ThemeId;
-use crate::tui::{HostEvent, SettingsView, UserAction, user_action_channel};
+use crate::tui::{HostEvent, SettingsView, UserAction};
 use crate::tui::{SurfaceIntent, SurfaceObservation};
 use crossterm::event::{KeyCode, MouseEventKind};
 use ratatui::Terminal;

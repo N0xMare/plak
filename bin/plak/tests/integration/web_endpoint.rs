@@ -20,9 +20,7 @@ use std::path::PathBuf;
 use std::process::{Child, Stdio};
 use std::sync::mpsc;
 
-use plakous_host_protocol::wire::{
-    ClientFrame, ClientLocality, Hello, NodeAddress, Op, WIRE_VERSION, encode_line,
-};
+use plakous_host_protocol::wire::{ClientFrame, Hello, NodeAddress, Op, WIRE_VERSION, encode_line};
 use plakous_host_protocol::{Core, Draft, SessionIntent};
 use serde_json::{Value, json};
 use tungstenite::protocol::{Role, WebSocketConfig};
@@ -263,7 +261,6 @@ fn hello(socket: &mut WebSocket<UnixStream>) -> NodeAddress {
             proto: WIRE_VERSION,
             binary_id: "web-test".into(),
             caps: Vec::new(),
-            locality: ClientLocality::default(),
         }),
     );
     let welcome = next_frame(socket);

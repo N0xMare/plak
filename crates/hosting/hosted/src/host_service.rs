@@ -519,6 +519,22 @@ impl<P: ProtocolExtension> HostService<P> {
     /// [`RequestRefusal::NodeClosed`] and [`RequestRefusal::NodeRetiring`]
     /// for a child that is closed or retiring.
     pub fn attach(&self, node: &NodeAddress, face: Face) -> Result<AttachmentId, RequestRefusal> {
+        self.attach_asking(node, face, true)
+    }
+
+    /// As [`Self::attach`], except that a root attach with no baseline kept
+    /// asks the session for one only when `ask`: a caller that knows the
+    /// session's next root baseline reaches the attachment need not.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::attach`].
+    pub fn attach_asking(
+        &self,
+        node: &NodeAddress,
+        face: Face,
+        ask: bool,
+    ) -> Result<AttachmentId, RequestRefusal> {
         if node.tree_id != self.root.tree_id {
             return Err(RequestRefusal::UnknownNode);
         }
@@ -528,8 +544,8 @@ impl<P: ProtocolExtension> HostService<P> {
         let Some(mailbox) = self.mailbox() else {
             return Err(RequestRefusal::Disconnected);
         };
-        let (id, ask) = self.admit(Some(mailbox), face);
-        if let Some(sender) = ask {
+        let (id, asked) = self.admit(Some(mailbox), face);
+        if let Some(sender) = asked.filter(|_| ask) {
             // No baseline is kept: the session's fresh root snapshot reaches
             // every attachment holding the root, this one included. An
             // attach the session cannot be asked for one fails.

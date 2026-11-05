@@ -238,9 +238,7 @@ impl TuiAttacher for OfflineAttacher {
         if let Err(error) = &attached {
             let _ = std::fs::write(paths.home().join("pty-attach-error.txt"), error.message());
         }
-        attached
-            .map(crate::surface_protocol::face_of)
-            .map_err(|failure| failure.host_failure())
+        attached.map_err(|failure| failure.host_failure())
     }
 }
 

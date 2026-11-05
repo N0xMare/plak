@@ -3,8 +3,9 @@
 
 use super::App;
 use super::test_support::{left_mouse, say, tool_line, transcript_fixture};
+use crate::config::user_action_channel;
+use crate::tui::HostEvent;
 use crate::tui::presentation::ActivityKind;
-use crate::tui::{HostEvent, user_action_channel};
 use crossterm::event::{MouseButton, MouseEventKind};
 use plakous_host_protocol::views::transcript::{AgentMilestone, MilestoneEvent, TranscriptRow};
 use plakous_host_protocol::views::{CallDetail, CallDetailOutcome, CallDetailSource};

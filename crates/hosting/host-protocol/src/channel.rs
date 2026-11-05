@@ -1012,7 +1012,7 @@ fn admission_event<P: ProtocolExtension>(event: &SessionObservation<P>) -> bool 
     )
 }
 
-fn transcript_observation<P: ProtocolExtension>(event: &SessionObservation<P>) -> bool {
+pub(crate) fn transcript_observation<P: ProtocolExtension>(event: &SessionObservation<P>) -> bool {
     match event {
         SessionObservation::Row(TranscriptRow::Notice(_)) => false,
         SessionObservation::Row(_)

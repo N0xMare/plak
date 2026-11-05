@@ -16,10 +16,11 @@ use super::{
     App, DisplayMode, MAX_LIVE_TRANSCRIPT_BLOCKS, MAX_LIVE_TRANSCRIPT_BYTES,
     TRANSCRIPT_TRUNCATION_MARKER, TranscriptChange,
 };
+use crate::config::user_action_channel;
 use crate::tui::blocks::RenderPrefs;
 use crate::tui::blocks::ScrollBlock;
 use crate::tui::presentation::{ActivityKind, ActivityState};
-use crate::tui::{HostEvent, QueueDrainState, SettingsView, UserAction, user_action_channel};
+use crate::tui::{HostEvent, QueueDrainState, SettingsView, UserAction};
 use crate::tui::{SurfaceIntent, SurfaceObservation};
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use plakous_host_protocol::status::{DiagnosticText, HostPhase, HostStatusDetail};

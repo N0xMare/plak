@@ -7,9 +7,10 @@ use super::test_support::{
     FIXED_NOW, key, launch_basic, left_click, left_mouse, open_tree, say, serialize_frame,
     tool_item, tree_node, tree_snapshot,
 };
+use crate::config::user_action_channel;
 use crate::tui::blocks::ScrollBlock;
 use crate::tui::presentation::ActivityKind;
-use crate::tui::{HostEvent, UserAction, user_action_channel};
+use crate::tui::{HostEvent, UserAction};
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEventKind};
 use plakous_host_protocol::views::transcript::{ToolItem, TranscriptRow};
 use plakous_host_protocol::views::{CallDetail, CallDetailOutcome, CallDetailSource, TreeView};

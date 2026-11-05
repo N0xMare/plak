@@ -1054,6 +1054,54 @@ fn input_to_paint_probe() {
     terminal.quit();
 }
 
+/// The send-to-host-row probe: p50 and p99 from Enter on an idle shell to
+/// the host's own row for that prompt on screen, the round trip through the
+/// TUI's face, the session and back. Not a gate: run it on an idle host with
+/// `just nextest run -p plak --test integration --run-ignored only
+/// --no-capture -E 'test(send_to_host_row_probe)'` and compare runs.
+#[test]
+#[ignore = "opt-in latency probe; compare runs on one idle host"]
+fn send_to_host_row_probe() {
+    const SENDS: usize = 100;
+    let fixture = Fixture::new(&json!({
+        "version": 1,
+        "repeat_last_step": true,
+        "steps": [{"output": {"text": "probe answer"}}]
+    }));
+    let mut terminal = Terminal::spawn_ready(&fixture);
+    let mut latencies = Vec::with_capacity(SENDS);
+    for send in 0..SENDS {
+        let prompt = format!("probe send {send:03}");
+        terminal.type_draft(&prompt);
+        // Long enough for the loop to park on the drafted frame.
+        std::thread::sleep(Duration::from_millis(100));
+        let enter = Instant::now();
+        terminal.send(b"\r");
+        while !host_row_shows(&terminal, &prompt) {
+            assert!(
+                enter.elapsed() < WAIT,
+                "the host's row for `{prompt}` never painted:\n{}",
+                terminal.screen()
+            );
+            std::thread::sleep(Duration::from_micros(100));
+        }
+        latencies.push(enter.elapsed());
+        let deadline = Instant::now() + WAIT;
+        while provider_outcomes(&fixture) <= send {
+            assert!(Instant::now() < deadline, "send {send} never finished");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    eprintln!(
+        "send-to-host-row: p50 {:?}, p99 {:?}, max {:?} over {SENDS} sends",
+        percentile(&mut latencies, 50),
+        percentile(&mut latencies, 99),
+        percentile(&mut latencies, 100),
+    );
+    terminal.quit();
+}
+
 // ---------------------------------------------------------------------------
 // Case 3: compaction mid-session
 // ---------------------------------------------------------------------------

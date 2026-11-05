@@ -12,19 +12,28 @@
 //! Snapshot pages are assembled and event images restored before the face
 //! sees them.
 //!
-//! A face sends with [`WireSender`]: an intent goes as a request on the
-//! current attachment, waiting for one while the client re-attaches, and
-//! its refusal comes back as the [`IntentSendError`] a mailbox would give,
-//! with the intent ([`SendError`]). A session request
+//! A face sends with [`WireSender`], which never blocks: an intent goes as
+//! a request on the current attachment, or waits in the client for the
+//! next one while it re-attaches. The host's refusal, or no verdict within
+//! [`ANSWER_DEADLINE`], comes back on the receiver with the intent
+//! ([`WireReceiver::try_unsent`], [`SendError`]). [`WireSender::settle`]
+//! waits for every sent intent's verdict. A session request
 //! ([`WireSender::request_session`]) names a `request_id` of the client's
 //! own; its answer arrives as a [`SessionAnswer`].
 //!
 //! One writer thread alone writes the transport, from a queue of encoded
 //! lines: the reader thread and the face never block on a write, so a
-//! large request does not hold up what the host says meanwhile. A face that
-//! falls 4096 observations behind is treated as the host treats
-//! a slow attachment: the client lets its attachment go and attaches
-//! again.
+//! large request does not hold up what the host says meanwhile.
+//!
+//! What the face has not taken waits in an observation mailbox with the
+//! session's own rules ([`crate::observation_channel`]): a state supersedes
+//! its older value, deltas coalesce, and only what a later baseline repays
+//! is dropped, its transcript then read as lost. An observation the mailbox
+//! cannot hold even so is a real overflow: the client lets its attachment
+//! go and attaches again. Every re-attach (that one, `resync_required`,
+//! an overflow the host saw) reads each transcript the attachment held as
+//! lost until its fresh baseline, and opens again the agent transcript the
+//! face had open.
 //!
 //! The client is one connection: when the transport ends, the receiver
 //! reports `Disconnected` once it is drained, and a new connection is a
@@ -40,22 +49,21 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+use crate::channel::transcript_observation;
 use crate::views::transcript::TranscriptScope;
 use crate::wire::{
     Answer, AttachmentId, BlobAssembler, ClientFrame, HandshakeRefusal, Hello, HostFrame,
     LineReader, NodeAddress, Op, Outcome, RequestId, RequestRefusal, SnapshotAssembler, Welcome,
     WireError, decode_host_line, encode_line, take_images,
 };
-use crate::{IntentSendError, ProtocolExtension, SessionIntent, SessionObservation};
+use crate::{
+    IntentSendError, ObservationReceiver, ObservationSender, ProtocolExtension, SessionIntent,
+    SessionObservation, observation_channel,
+};
 
-/// How long a send waits for the host to answer it, or for an attachment
-/// while the client re-attaches.
-const ANSWER_DEADLINE: Duration = Duration::from_secs(30);
-
-/// How many observations the receiver holds for a face that has not taken
-/// them. Past it the face fell behind: as the host drops a slow
-/// attachment, the client lets its attachment go and attaches again.
-const QUEUE_BOUND: usize = 4096;
+/// How long a sent intent waits for the host's verdict, or for an
+/// attachment while the client re-attaches, before it is given back.
+pub const ANSWER_DEADLINE: Duration = Duration::from_secs(30);
 
 /// The two halves of a byte transport to a host: a pipe pair, a child's
 /// stdio, a unix socket.
@@ -114,10 +122,20 @@ impl std::error::Error for ConnectError {
 #[derive(Debug)]
 pub enum SendError<P: ProtocolExtension> {
     /// It was not taken, as a mailbox refuses an intent: the host refused
-    /// it, or the client could not send it.
+    /// it for backpressure or as one in flight, its attachment was gone or
+    /// none came in time, or the host refused it otherwise
+    /// ([`IntentSendError::Refused`]).
     Refused(IntentSendError<P>),
+    /// The host refused it for this attachment's role or face; `row` is its
+    /// row in the role table.
+    RefusedForRole {
+        /// The intent's row.
+        row: String,
+        /// The intent.
+        intent: SessionIntent<P>,
+    },
     /// It was sent, but no verdict came: the connection ended first, or
-    /// none came within the answer deadline. The host may yet take it, so
+    /// none came within [`ANSWER_DEADLINE`]. The host may yet take it, so
     /// sending it again may run it twice.
     OutcomeUnknown(SessionIntent<P>),
 }
@@ -128,8 +146,21 @@ impl<P: ProtocolExtension> SendError<P> {
     pub fn into_intent(self) -> SessionIntent<P> {
         match self {
             Self::Refused(refused) => refused.into_action(),
-            Self::OutcomeUnknown(intent) => intent,
+            Self::RefusedForRole { intent, .. } | Self::OutcomeUnknown(intent) => intent,
         }
+    }
+
+    /// The host's refusal of `intent`, as the mailbox's.
+    fn of(refusal: RequestRefusal, intent: SessionIntent<P>) -> Self {
+        Self::Refused(match refusal {
+            RequestRefusal::Backpressure => IntentSendError::Saturated(intent),
+            RequestRefusal::OneInFlight => IntentSendError::Duplicate(intent),
+            RequestRefusal::Disconnected | RequestRefusal::NotAttached => {
+                IntentSendError::Disconnected(intent)
+            }
+            RequestRefusal::RefusedForRole { row } => return Self::RefusedForRole { row, intent },
+            _ => IntentSendError::Refused(intent),
+        })
     }
 }
 
@@ -196,6 +227,14 @@ struct Inner<P: ProtocolExtension> {
     state: Mutex<State<P>>,
     changed: Condvar,
     notify: Mutex<Option<Notify>>,
+    /// What the face has not taken yet.
+    observations: ObservationReceiver<P>,
+}
+
+/// An intent sent and not yet answered.
+struct Sent<P: ProtocolExtension> {
+    intent: SessionIntent<P>,
+    at: Instant,
 }
 
 struct State<P: ProtocolExtension> {
@@ -206,10 +245,18 @@ struct State<P: ProtocolExtension> {
     attachment: Option<AttachmentId>,
     /// The attach in flight.
     attaching: Option<RequestId>,
-    queue: VecDeque<SessionObservation<P>>,
+    /// The face's mailbox, until the connection ends.
+    mailbox: Option<ObservationSender<P>>,
     answers: VecDeque<SessionAnswer>,
-    /// Requests whose sender waits for their outcome.
-    waiting: BTreeMap<RequestId, mpsc::Sender<Outcome>>,
+    /// Intents sent on an attachment, by request id, until their verdict.
+    sent: BTreeMap<RequestId, Sent<P>>,
+    /// Intents waiting for the next attachment, in the order sent.
+    unsent: VecDeque<Sent<P>>,
+    /// Intents the host did not take, for the face.
+    refused: VecDeque<SendError<P>>,
+    /// The agent transcript the face opened on the attachment, which a
+    /// re-attach opens again.
+    agent: Option<String>,
     /// Session requests by their frame's id.
     sessions: BTreeMap<RequestId, String>,
     /// The root attach was refused `backpressure` once and asked again.
@@ -222,6 +269,34 @@ struct State<P: ProtocolExtension> {
     closed: bool,
     /// Why the connection ended, once it has.
     ended: Option<String>,
+}
+
+impl<P: ProtocolExtension> State<P> {
+    /// Gives back every intent whose verdict is overdue at `now`: one never
+    /// sent is refused `disconnected`, one sent has an unknown outcome.
+    fn expire(&mut self, now: Instant) {
+        let overdue = |sent: &Sent<P>| now.duration_since(sent.at) >= ANSWER_DEADLINE;
+        while self.unsent.front().is_some_and(overdue) {
+            if let Some(sent) = self.unsent.pop_front() {
+                self.refused
+                    .push_back(SendError::Refused(IntentSendError::Disconnected(
+                        sent.intent,
+                    )));
+            }
+        }
+        let late: Vec<RequestId> = self
+            .sent
+            .iter()
+            .filter(|(_, sent)| overdue(sent))
+            .map(|(id, _)| *id)
+            .collect();
+        for id in late {
+            if let Some(sent) = self.sent.remove(&id) {
+                self.refused
+                    .push_back(SendError::OutcomeUnknown(sent.intent));
+            }
+        }
+    }
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -247,6 +322,7 @@ where
     let Transport { reader, writer } = transport;
     let mut lines = Lines::new(reader);
     let (outbox, outgoing) = mpsc::channel();
+    let (mailbox, observations) = observation_channel();
     let inner = Arc::new(Inner {
         outbox,
         state: Mutex::new(State {
@@ -258,12 +334,16 @@ where
             },
             attachment: None,
             attaching: None,
-            queue: VecDeque::new(),
+            mailbox: Some(mailbox),
             answers: VecDeque::new(),
-            waiting: BTreeMap::new(),
+            sent: BTreeMap::new(),
+            unsent: VecDeque::new(),
+            refused: VecDeque::new(),
+            agent: None,
             sessions: BTreeMap::new(),
             attach_retried: false,
-            gaps: BTreeSet::from([TranscriptScope::Root]),
+            // Not yet having a baseline is not having lost one.
+            gaps: BTreeSet::new(),
             snapshots: SnapshotAssembler::default(),
             blobs: BlobAssembler::default(),
             closed: false,
@@ -271,6 +351,7 @@ where
         }),
         changed: Condvar::new(),
         notify: Mutex::new(None),
+        observations,
     });
     let writing = Arc::downgrade(&inner);
     thread::spawn(move || write_lines(writer, &outgoing, &writing));
@@ -307,54 +388,55 @@ impl<P: ProtocolExtension> WireSender<P>
 where
     P::Intent: Serialize,
 {
-    /// Sends `intent` on the current attachment and waits for the host to
-    /// take it; while the client re-attaches it waits for the attachment.
+    /// Sends `intent` without waiting: on the current attachment, or on the
+    /// next one while the client re-attaches. The host's verdict comes
+    /// later: a refusal, or none within [`ANSWER_DEADLINE`], is given back
+    /// on the receiver ([`WireReceiver::try_unsent`]).
     ///
     /// # Errors
     ///
-    /// The intent back. [`SendError::Refused`] as a mailbox refuses it:
-    /// [`IntentSendError::Saturated`] for backpressure,
-    /// [`IntentSendError::Duplicate`] for one in flight,
-    /// [`IntentSendError::Disconnected`] when it was never sent (the
-    /// connection is gone, or no attachment came in time) or the host's
-    /// attachment was gone, and [`IntentSendError::Refused`] for the host's
-    /// refusal of it for this connection's role or face.
-    /// [`SendError::OutcomeUnknown`] when it was sent and no verdict came.
+    /// The intent back, [`IntentSendError::Disconnected`], when the
+    /// connection is gone and it was never sent.
     #[allow(
         clippy::result_large_err,
         reason = "the refusal hands the rejected intent back so the caller can restore it"
     )]
     pub fn send(&self, intent: SessionIntent<P>) -> Result<(), SendError<P>> {
-        let Some((id, Some(answer))) = self.request(None, |attachment, id| {
-            let mut sent = intent.clone();
-            let taken = take_images(&mut sent, &format!("r{id}"));
-            let mut frames: Vec<ClientFrame<P>> =
-                taken.chunks.into_iter().map(ClientFrame::Blob).collect();
-            frames.push(ClientFrame::Request {
-                id,
-                op: Op::Intent {
-                    attachment,
-                    intent: sent,
-                    blobs: taken.ids,
-                },
-            });
-            frames
-        }) else {
+        let inner = &self.connection.inner;
+        let mut state = lock(&inner.state);
+        if state.closed {
             return Err(SendError::Refused(IntentSendError::Disconnected(intent)));
+        }
+        let sent = Sent {
+            intent,
+            at: Instant::now(),
         };
-        let outcome = answer.recv_timeout(ANSWER_DEADLINE);
-        lock(&self.connection.inner.state).waiting.remove(&id);
-        match outcome {
-            Ok(Outcome::Ok(_)) => Ok(()),
-            Ok(Outcome::Refused(refusal)) => Err(SendError::Refused(match refusal {
-                RequestRefusal::Backpressure => IntentSendError::Saturated(intent),
-                RequestRefusal::OneInFlight => IntentSendError::Duplicate(intent),
-                RequestRefusal::Disconnected | RequestRefusal::NotAttached => {
-                    IntentSendError::Disconnected(intent)
-                }
-                _ => IntentSendError::Refused(intent),
-            })),
-            Err(_) => Err(SendError::OutcomeUnknown(intent)),
+        match state.attachment {
+            Some(attachment) => inner.write_intent(&mut state, attachment, sent),
+            None => state.unsent.push_back(sent),
+        }
+        Ok(())
+    }
+
+    /// Waits up to `timeout` for the host's verdict on every intent sent so
+    /// far; whether none is left waiting.
+    #[must_use]
+    pub fn settle(&self, timeout: Duration) -> bool {
+        let inner = &self.connection.inner;
+        let deadline = Instant::now() + timeout;
+        let mut state = lock(&inner.state);
+        loop {
+            if state.closed || (state.sent.is_empty() && state.unsent.is_empty()) {
+                return true;
+            }
+            let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+                return false;
+            };
+            state = inner
+                .changed
+                .wait_timeout(state, left)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
         }
     }
 
@@ -370,7 +452,7 @@ where
             request_id
         };
         let named = request_id.clone();
-        self.request(Some(request_id.clone()), move |attachment, id| {
+        self.request(request_id.clone(), move |attachment, id| {
             let op = match change {
                 SessionChange::RetryAttach => Op::RetryAttach {
                     attachment,
@@ -393,15 +475,14 @@ where
     }
 
     /// Writes the frames `build` makes for the current attachment and the
-    /// next request id, once there is an attachment. The request waits for
-    /// its outcome on the returned receiver, or, as the session request
-    /// `session`, for its [`SessionAnswer`]. `None` when the connection is
-    /// gone or no attachment came in time.
+    /// next request id, once there is an attachment; the session request
+    /// `session`'s [`SessionAnswer`] arrives on the receiver. `None` when
+    /// the connection is gone or no attachment came in time.
     fn request(
         &self,
-        session: Option<String>,
+        session: String,
         build: impl FnOnce(AttachmentId, RequestId) -> Vec<ClientFrame<P>>,
-    ) -> Option<(RequestId, Option<mpsc::Receiver<Outcome>>)> {
+    ) -> Option<RequestId> {
         let inner = &self.connection.inner;
         let deadline = Instant::now() + ANSWER_DEADLINE;
         let mut state = lock(&inner.state);
@@ -421,25 +502,16 @@ where
         };
         let id = state.next_request;
         state.next_request += 1;
-        let answered = if let Some(request_id) = session {
-            state.sessions.insert(id, request_id);
-            None
-        } else {
-            let (answer, answered) = mpsc::channel();
-            state.waiting.insert(id, answer);
-            Some(answered)
-        };
+        state.sessions.insert(id, session);
         // Registered before it is written, so its answer always finds it;
         // written without the state lock, so the reader thread goes on
         // reading while a large request is written.
         drop(state);
         if inner.write_all(&build(attachment, id)).is_err() {
-            let mut state = lock(&inner.state);
-            state.waiting.remove(&id);
-            state.sessions.remove(&id);
+            lock(&inner.state).sessions.remove(&id);
             return None;
         }
-        Some((id, answered))
+        Some(id)
     }
 }
 
@@ -451,12 +523,7 @@ impl<P: ProtocolExtension> WireReceiver<P> {
     /// `Empty` when none is ready, `Disconnected` once the connection is
     /// gone and everything it delivered was taken.
     pub fn try_recv(&self) -> Result<SessionObservation<P>, TryRecvError> {
-        let mut state = lock(&self.connection.inner.state);
-        match state.queue.pop_front() {
-            Some(observation) => Ok(observation),
-            None if state.closed => Err(TryRecvError::Disconnected),
-            None => Err(TryRecvError::Empty),
-        }
+        self.connection.inner.observations.try_recv()
     }
 
     /// As [`crate::ObservationReceiver::recv_timeout`].
@@ -469,31 +536,28 @@ impl<P: ProtocolExtension> WireReceiver<P> {
         &self,
         timeout: Duration,
     ) -> Result<SessionObservation<P>, RecvTimeoutError> {
-        let deadline = Instant::now() + timeout;
-        let mut state = lock(&self.connection.inner.state);
-        loop {
-            if let Some(observation) = state.queue.pop_front() {
-                return Ok(observation);
-            }
-            if state.closed {
-                return Err(RecvTimeoutError::Disconnected);
-            }
-            let Some(left) = deadline.checked_duration_since(Instant::now()) else {
-                return Err(RecvTimeoutError::Timeout);
-            };
-            state = self
-                .connection
-                .inner
-                .changed
-                .wait_timeout(state, left)
-                .unwrap_or_else(PoisonError::into_inner)
-                .0;
-        }
+        self.connection.inner.observations.recv_timeout(timeout)
     }
 
     /// As [`crate::ObservationReceiver::try_iter`].
     pub fn try_iter(&self) -> impl Iterator<Item = SessionObservation<P>> + '_ {
         std::iter::from_fn(|| self.try_recv().ok())
+    }
+
+    /// The next intent sent with this connection that the host did not
+    /// take, oldest first: refused, never sent (the connection ended, or no
+    /// attachment came within [`ANSWER_DEADLINE`]), or sent with no verdict
+    /// within [`ANSWER_DEADLINE`].
+    #[must_use]
+    pub fn try_unsent(&self) -> Option<SendError<P>> {
+        let mut state = lock(&self.connection.inner.state);
+        state.expire(Instant::now());
+        let refused = state.refused.pop_front();
+        drop(state);
+        if refused.is_some() {
+            self.connection.inner.changed.notify_all();
+        }
+        refused
     }
 
     /// Installs the hook that wakes a face waiting outside this receiver:
@@ -504,12 +568,17 @@ impl<P: ProtocolExtension> WireReceiver<P> {
         *lock(&self.connection.inner.notify) = Some(Arc::new(notify));
     }
 
-    /// Whether `scope`'s transcript lost content (the attachment ended
-    /// with `moved` or `resync_required`) and its fresh baseline has not
-    /// arrived yet.
+    /// Whether `scope`'s transcript lost content (the attachment ended,
+    /// or the mailbox dropped what a baseline repays) and its fresh
+    /// baseline has not arrived yet.
     #[must_use]
     pub fn transcript_resnapshot_required_for(&self, scope: &TranscriptScope) -> bool {
         lock(&self.connection.inner.state).gaps.contains(scope)
+            || self
+                .connection
+                .inner
+                .observations
+                .transcript_resnapshot_required_for(scope)
     }
 
     /// Why the connection ended, once it has.
@@ -556,8 +625,9 @@ impl<P: ProtocolExtension> Inner<P> {
         })
     }
 
-    /// Ends the connection for `reason`: every waiting sender's answer
-    /// channel closes, and the face is woken.
+    /// Ends the connection for `reason`: an intent sent and unanswered has
+    /// an unknown outcome, one never sent is refused `disconnected`, the
+    /// mailbox ends once drained, and the face is woken.
     fn close(&self, reason: String) {
         let mut state = lock(&self.state);
         if !state.closed {
@@ -565,10 +635,54 @@ impl<P: ProtocolExtension> Inner<P> {
             state.ended = Some(reason);
         }
         state.attachment = None;
-        state.waiting.clear();
+        let sent = std::mem::take(&mut state.sent);
+        let unsent = std::mem::take(&mut state.unsent);
+        state.refused.extend(
+            sent.into_values()
+                .map(|sent| SendError::OutcomeUnknown(sent.intent))
+                .chain(
+                    unsent
+                        .into_iter()
+                        .map(|sent| SendError::Refused(IntentSendError::Disconnected(sent.intent))),
+                ),
+        );
+        state.mailbox = None;
         drop(state);
         self.changed.notify_all();
         self.wake();
+    }
+
+    /// Writes `sent` as a request on `attachment`, its images as blobs just
+    /// before it, and keeps it until its verdict.
+    fn write_intent(&self, state: &mut State<P>, attachment: AttachmentId, sent: Sent<P>)
+    where
+        P::Intent: Serialize,
+    {
+        let id = state.next_request;
+        state.next_request += 1;
+        let mut intent = sent.intent.clone();
+        let taken = take_images(&mut intent, &format!("r{id}"));
+        let mut frames: Vec<ClientFrame<P>> =
+            taken.chunks.into_iter().map(ClientFrame::Blob).collect();
+        frames.push(ClientFrame::Request {
+            id,
+            op: Op::Intent {
+                attachment,
+                intent,
+                blobs: taken.ids,
+            },
+        });
+        // A transport whose writer stopped ends the connection, which gives
+        // the intent back.
+        if self.write_all(&frames).is_ok() {
+            state.sent.insert(id, sent);
+        } else {
+            state
+                .refused
+                .push_back(SendError::Refused(IntentSendError::Disconnected(
+                    sent.intent,
+                )));
+        }
     }
 
     /// Asks to attach `state.root`.
@@ -639,6 +753,23 @@ impl<P: ProtocolExtension> Inner<P> {
             Outcome::Ok(Answer::Attached { attachment }) => {
                 state.attachment = Some(attachment);
                 state.attach_retried = false;
+                // The face's agent transcript, which the last attachment's
+                // end closed, opens on this one first.
+                if let Some(agent_id) = state.agent.clone() {
+                    let id = state.next_request;
+                    state.next_request += 1;
+                    self.write(&ClientFrame::Request {
+                        id,
+                        op: Op::Intent {
+                            attachment,
+                            intent: SessionIntent::OpenAgentTranscript { agent_id },
+                            blobs: Vec::new(),
+                        },
+                    })?;
+                }
+                for sent in std::mem::take(&mut state.unsent) {
+                    self.write_intent(state, attachment, sent);
+                }
                 Ok(())
             }
             // The session left the root this client knew.
@@ -660,10 +791,10 @@ impl<P: ProtocolExtension> Inner<P> {
         }
     }
 
-    /// Queues `observation` for the face. A face that fell behind by
-    /// [`QUEUE_BOUND`] loses what it had not taken: the client lets its
-    /// attachment go and attaches again, reading the root transcript as
-    /// lost until the new attachment's baseline.
+    /// Queues `observation` in the face's mailbox. One the mailbox drops
+    /// as a later baseline repays it leaves its transcript read as lost;
+    /// any other it cannot hold is a real overflow, and the client attaches
+    /// again.
     fn deliver(
         &self,
         state: &mut State<P>,
@@ -672,25 +803,65 @@ impl<P: ProtocolExtension> Inner<P> {
     where
         P::Intent: Serialize,
     {
-        if state.queue.len() >= QUEUE_BOUND {
-            state.queue.clear();
-            if let Some(attachment) = state.attachment.take() {
-                let id = state.next_request;
-                state.next_request += 1;
-                self.write(&ClientFrame::Request {
-                    id,
-                    op: Op::Detach { attachment },
-                })?;
-            }
-            state.gaps.insert(TranscriptScope::Root);
-            self.attach(state)?;
-            return Ok(true);
-        }
+        let Some(mailbox) = &state.mailbox else {
+            return Ok(false);
+        };
         if let SessionObservation::PresentationSnapshot(snapshot) = &observation {
             state.gaps.remove(&snapshot.scope);
         }
-        state.queue.push_back(observation);
-        Ok(true)
+        match mailbox.send(observation) {
+            Ok(()) => Ok(true),
+            Err(dropped) if transcript_observation(&dropped) => Ok(true),
+            Err(_) => {
+                if let Some(attachment) = state.attachment.take() {
+                    let id = state.next_request;
+                    state.next_request += 1;
+                    self.write(&ClientFrame::Request {
+                        id,
+                        op: Op::Detach { attachment },
+                    })?;
+                }
+                self.attach_again(state)?;
+                Ok(true)
+            }
+        }
+    }
+
+    /// Attaches the same root again, reading every transcript the last
+    /// attachment held as lost until its fresh baseline.
+    fn attach_again(&self, state: &mut State<P>) -> std::io::Result<()>
+    where
+        ClientFrame<P>: Serialize,
+    {
+        state.gaps.insert(TranscriptScope::Root);
+        if let Some(agent) = &state.agent {
+            state.gaps.insert(TranscriptScope::Agent(agent.clone()));
+        }
+        self.attach(state)
+    }
+
+    /// Takes the host's verdict on the intent sent as `id`; whether the
+    /// face has something new.
+    fn verdict(state: &mut State<P>, id: RequestId, outcome: Outcome) -> bool {
+        let Some(sent) = state.sent.remove(&id) else {
+            return false;
+        };
+        match outcome {
+            Outcome::Ok(_) => {
+                match &sent.intent {
+                    SessionIntent::OpenAgentTranscript { agent_id } => {
+                        state.agent = Some(agent_id.clone());
+                    }
+                    SessionIntent::CloseAgentTranscript => state.agent = None,
+                    _ => {}
+                }
+                false
+            }
+            Outcome::Refused(refusal) => {
+                state.refused.push_back(SendError::of(refusal, sent.intent));
+                true
+            }
+        }
     }
 
     /// Takes one host frame; whether the face has something new. `Err` when
@@ -718,10 +889,7 @@ impl<P: ProtocolExtension> Inner<P> {
                     });
                     return Ok(true);
                 }
-                if let Some(waiting) = state.waiting.remove(&id) {
-                    let _ = waiting.send(outcome);
-                }
-                Ok(false)
+                Ok(Self::verdict(state, id, outcome))
             }
             HostFrame::Event {
                 attachment,
@@ -762,8 +930,7 @@ impl<P: ProtocolExtension> Inner<P> {
                 if state.attachment != Some(attachment) {
                     return Ok(false);
                 }
-                state.gaps.insert(TranscriptScope::Root);
-                self.attach(state).map(|()| false)
+                self.attach_again(state).map(|()| false)
             }
             HostFrame::Moved {
                 attachment, node, ..
@@ -771,7 +938,9 @@ impl<P: ProtocolExtension> Inner<P> {
                 if state.attachment != Some(attachment) {
                     return Ok(false);
                 }
+                // Another session: the face's agent view was the old one's.
                 state.root = node;
+                state.agent = None;
                 state.gaps.insert(TranscriptScope::Root);
                 self.attach(state).map(|()| false)
             }

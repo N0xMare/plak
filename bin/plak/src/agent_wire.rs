@@ -6,15 +6,15 @@
 //! and image bytes as blobs.
 
 use std::io::{Read, Write};
-use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use plakous_host_protocol::SessionIntent;
-use plakous_host_protocol::wire::{HandshakeRefusal, LineReader, WireError};
+use plakous_host_protocol::wire::{HandshakeRefusal, LineReader};
 use plakous_hosted::error::{CliFailure, CliResult, ProcessOutcome};
 use plakous_hosted::host_service::wire::{
-    Face, WireConnection, handshake, refuse, session_root, session_root_of, session_welcome,
+    self, Face, Lines, WireConnection, handshake, refuse, session_root, session_root_of,
+    session_welcome,
 };
 use plakous_hosted::runtime::{HostConfig, spawn_host_worker};
 
@@ -108,7 +108,7 @@ pub(crate) fn refuse_unavailable(stdout: &mut dyn Write, failure: &CliFailure) -
 }
 
 /// This process's generation: it differs on every start.
-fn host_generation() -> u64 {
+pub(crate) fn host_generation() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| {
@@ -116,12 +116,10 @@ fn host_generation() -> u64 {
         })
 }
 
-/// Lines from `input`, read on a thread of their own; the channel closes at
-/// the end of input.
-pub(crate) fn read_lines(
-    mut input: impl Read + Send + 'static,
-) -> mpsc::Receiver<Result<String, WireError>> {
-    let (sender, lines) = mpsc::sync_channel(64);
+/// Lines from `input`, read on a thread of their own; they end at the end
+/// of input.
+pub(crate) fn read_lines(mut input: impl Read + Send + 'static) -> Lines {
+    let (sender, lines) = wire::lines(64);
     thread::spawn(move || {
         let mut reader = LineReader::default();
         let mut buffer = vec![0_u8; 64 * 1024];

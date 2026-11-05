@@ -26,10 +26,10 @@ pub(super) struct ReloadRequests {
     pending: Option<crate::reload_request::ReloadRequest>,
     active: Option<crate::reload_request::ReloadRequest>,
     /// Requests taken from the host's offer and not yet acknowledged to it.
-    accepts: Vec<String>,
+    pub(super) accepts: Vec<String>,
     /// Requests whose acknowledgement this face's host took: only these
     /// are its to record.
-    handed_over: std::collections::BTreeSet<String>,
+    pub(super) handed_over: std::collections::BTreeSet<String>,
     /// `(request id, reason)` per refusal not yet sent to the host.
     refusals: Vec<(String, String)>,
 }
@@ -330,6 +330,25 @@ impl App {
                     &crate::reload_request::ReloadOutcome::Refused { reason },
                 );
             }
+        }
+    }
+
+    /// Arms again a reload answer the host did not take after its send
+    /// returned: an acknowledgement was not handed over and is sent again,
+    /// as is a refusal, on the next frame.
+    pub(super) fn reload_answer_unsent(&mut self, action: crate::tui::UserAction) {
+        use crate::tui::{SurfaceIntent, UserAction};
+        match action {
+            UserAction::Extension(SurfaceIntent::AcceptReloadRequest { request_id }) => {
+                self.reload_requests.handed_over.remove(&request_id);
+                self.reload_requests.accepts.push(request_id);
+            }
+            UserAction::Extension(SurfaceIntent::RefuseReloadRequest { request_id, reason }) => {
+                // Only a request this host took is its to record.
+                self.reload_requests.handed_over.insert(request_id.clone());
+                self.reload_requests.refusals.push((request_id, reason));
+            }
+            _ => {}
         }
     }
 

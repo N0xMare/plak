@@ -18,8 +18,6 @@ pub(crate) use crate::config::{
     ProfilesView, SettingsTheme, SettingsView, SurfaceIntent, SurfaceObservation, UserAction,
     UserActionSendError, WorkspaceChrome,
 };
-#[cfg(test)]
-pub(crate) use crate::config::{host_event_channel, user_action_channel};
 
 #[cfg(feature = "test-support")]
 pub(crate) mod benchmark;

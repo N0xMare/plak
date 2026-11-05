@@ -5,7 +5,7 @@
 
 use std::collections::VecDeque;
 use std::io::Write;
-use std::sync::{Arc, Mutex, PoisonError, mpsc};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
@@ -244,7 +244,7 @@ async fn drive(socket: &mut Socket, served: &Served) -> Ended {
         Ok(Err(ended)) => return ended,
         Err(_) => return Ended::Policy("no hello"),
     };
-    let (lines, first) = mpsc::sync_channel(1);
+    let (lines, first) = plakous_hosted::host_service::wire::lines(1);
     let _ = lines.send(Ok(hello));
     drop(lines);
     let stop = served.stop;

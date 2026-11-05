@@ -208,13 +208,11 @@ pub(crate) fn credential_gate_refusal(
 
 /// Attempt to resolve a gated native model and spawn the multi-turn host worker.
 ///
-/// Returns channels + join handle when ready; `Err(reason)` falls back to shell TUI
-/// with an operator-visible attach failure reason.
-pub type HostedAgentChannels = (
-    crate::surface_protocol::FaceActionSender,
-    crate::surface_protocol::HostEventReceiver,
-    plakous_hosted::runtime::HostWorkerHandle,
-);
+/// Returns the session's mailbox ends + join handle when ready, for the
+/// launcher to serve to the TUI; `Err(reason)` falls back to shell TUI with
+/// an operator-visible attach failure reason.
+pub type HostedAgentChannels =
+    plakous_hosted::runtime::HostWorker<crate::surface_protocol::PlakExtension>;
 
 pub trait TuiAttacher {
     /// Whether this attacher can be constructed inside Plak's deferred controller.
@@ -312,9 +310,7 @@ pub fn try_spawn_hosted_agent(
         &native_models,
     )
     .map_err(|failure| failure.host_failure())?;
-    product_host::spawn_host_worker(config)
-        .map(crate::surface_protocol::face_of)
-        .map_err(|failure| failure.host_failure())
+    product_host::spawn_host_worker(config).map_err(|failure| failure.host_failure())
 }
 
 #[allow(

@@ -239,7 +239,9 @@ answered (§5.4), which never stands in for host state. The binary owns
 and observations. Hosted sessions carry these through the generic bounded
 protocol mailboxes and dispatch extension intents to the binary's handler.
 The observation mailbox calls a consumer's notifier on each empty to
-non-empty edge, so the TUI never polls for host observations (§5.8). The
+non-empty edge. The embedded TUI's connection waits on its client's lines and
+those wakes in one channel, and the wire client wakes the TUI on each
+observation it takes, so neither polls for host observations (§4.4, §5.8). The
 intent mailbox resolves an async readiness wait that a busy turn selects on
 beside its event stream, so an intent arriving mid-turn is taken at once
 rather than at the next 20 ms delta-coalescing tick; the idle host still
@@ -3764,8 +3766,8 @@ latency, and nothing else. Prompt text never reaches a span.
 Wire v2 is the framed protocol every frontend will speak to a host; it
 replaces the JSONL host of §4.3, which stays byte-identical until it is
 removed. Its types live in `plakous-host-protocol` (`wire`, the observation
-classes, and serde on every intent and observation). No supported frontend
-speaks it yet. The hidden, unsupported `plak agent --wire v2` speaks it on
+classes, and serde on every intent and observation). The embedded TUI
+speaks it to its session (below). The hidden, unsupported `plak agent --wire v2` speaks it on
 stdio through the session's host service: one attachment at a time, on the
 session's root node or a child of its tree, every observation sent to it
 with its class, the attach's baseline asked for as a resync of its scope. Plak's
@@ -3783,14 +3785,13 @@ verdicts) are addressed, the session profile and workspace chrome states.
   revision and scope, in order, the last one completing it; the receiver
   validates the reassembled snapshot as the host does before it emits one.
 - **Handshake.** The client's first frame is `hello` (protocol version,
-  binary id, capabilities, and its locality: reached over ssh, can open a
-  browser). The host answers `welcome` (version, binary id, host
+  binary id and capabilities). The host answers `welcome` (version, binary id, host
   generation, capabilities, and the session it serves: its id, its tree id
   and its root node's address, which an attach to the root names; the tree
   id is the session's durable tree, not always the session id) or
   `refused` with `version_mismatch`, `malformed`, `busy` or `unavailable`
   (the session could not be opened, with why), and closes. The version must
-  match exactly. The session opens before the welcome is sent, so any
+  match exactly; it is 3 (`WIRE_VERSION`; 3 dropped `hello`'s locality). The session opens before the welcome is sent, so any
   failure before dispatch, `plak agent --wire v2` included, is that
   `unavailable` frame and never a JSONL record. Its detail is the failure's
   own text only for an authenticated peer (stdio's parent process, a web
@@ -3799,7 +3800,8 @@ verdicts) are addressed, the session profile and workspace chrome states.
   sessions. A client that sends no `hello` within 10 seconds is refused
   `malformed` and the opened session is quit and joined, so a silent peer
   never holds it; a terminating signal during the wait, or later, ends the
-  connection the same way. A connection serves the session its welcome
+  connection the same way. A session that ends on its own ends its
+  connection with `bye`, whether or not the client still reads. A connection serves the session its welcome
   names until that session switches to another (`/new`, a resume, a
   rebind): the host then ends the attachment with `moved {attachment,
   node, request_id?}`, naming the new session's root and, when a session
@@ -3821,8 +3823,8 @@ verdicts) are addressed, the session profile and workspace chrome states.
   leaving client's does.
 - **Local faces.** A connection's acceptor marks it a local face (stdio's
   `plak agent --wire v2`) or a remote one (the web endpoint); a connection
-  is remote unless marked. The TUI reaches its host in process, not through
-  a wire acceptor. A remote face is refused, `refused_for_role` with row
+  is remote unless marked; the embedded TUI's connection, which its
+  launcher accepts in process, is a local face. A remote face is refused, `refused_for_role` with row
   `local_face`, the intents that exec or hand off the host's own build or
   answer with the installed build's path and probe output: `check_build`,
   `probe_reload`, `accept_reload_request` and `refuse_reload_request`
@@ -4027,8 +4029,8 @@ verdicts) are addressed, the session profile and workspace chrome states.
   does not hold `unknown_node`; a `quit` still detaches. Every control but
   the interrupt goes through the root session's mailbox, so it is taken
   while the root runs a turn and waits while it runs a workflow.
-- **Faces.** The TUI, `plak agent` JSONL v1, an attached session command
-  and the shell host are in-process attachments of their session's service
+- **Faces.** `plak agent` JSONL v1 and an attached session command are
+  in-process attachments of their session's service
   (`plakous_hosted::host_service::face`, `HostService::attach_face`). The
   faces' service (`HostService::for_faces`) holds the session's mailbox
   without being one of its senders, so
@@ -4047,7 +4049,7 @@ verdicts) are addressed, the session profile and workspace chrome states.
   into the face's queue, which holds the root transcript and the agent
   transcript the face opened and is unbounded, so the face receives what
   the service routed to it, in order, with its own correlation (a JSONL
-  command id, or none from the TUI) back in each `IntentStarted` it owns.
+  command id) back in each `IntentStarted` it owns.
   The session's observation mailbox stays the bound a slow face meets,
   with its own loss and resnapshot rules. A face attaches before the
   session's first observation and asks it nothing; its attachment ends
@@ -4056,8 +4058,7 @@ verdicts) are addressed, the session profile and workspace chrome states.
   sender's correlation on the face's mailbox) through unchanged, as no
   attachment's. A JSONL v1 command whose intent the service refuses gets
   an `error` record with its id, and the stream goes on. A face's service
-  names no root node yet, since the deferred TUI launch learns its tree
-  only on the host worker. The session's background processes are the
+  names no root node. The session's background processes are the
   state observation `processes {views, running}`: every live and recently
   ended process row of the session's job registry that its tree shows, and
   how many of those visible rows are running or stopping (a running process
@@ -4078,17 +4079,61 @@ verdicts) are addressed, the session profile and workspace chrome states.
   and `job_terminal`'s output are redacted as a row's are, while JSONL v1
   (§4.3.2) keeps them as the runtime displays them. A child
   attachment gets none, and JSONL v1 never projects
-  it. The face sends the intent
+  it. The TUI sends the intent
   `promptable` once after its first painted frame: it sets the flag that
   gates passive maintenance and never enters the session's queue, so it
   has no answer window; it is refused to a child attachment
   (`refused_for_role`, row `readiness`), and `plak agent` never sends it.
-  Two TUI signals are process-local and not intents or observations, each
-  with its reason: the abandon-and-release request after the terminal is
-  restored, which is this process's exit; and the launcher's `/new` and
-  resume publication cells, which hand one launch round to the next and
-  outlive any attachment. Both belong to the session supervisor, the product
-  side of an interactive launch that owns its rounds: the TUI hands the
+- **The embedded TUI.** The TUI speaks only wire v2 to its session, through
+  `client` over a socket pair inside its process. Each round, the session
+  supervisor (the product side of an interactive launch that owns its
+  rounds) serves one connection of the session's own host service on a
+  thread: a local face that quits the session when it leaves, as stdio's
+  does, and that names no tree, so a switch inside the host (`/new`,
+  `/resume`, a rebind) reaches the TUI as the session's own observations,
+  not as `moved`. The connection answers the client's root attach before it
+  takes any of the session's observations, so the TUI sees what the session
+  said from its start. That attach asks the session for no root baseline:
+  the session publishes one when it opens, and it reaches the attachment,
+  unless the session's mailbox had already lost root content, when the
+  attach asks as any attach without a kept baseline does. The connection
+  blocks on one channel that carries its client's lines and the session
+  mailbox's wakes, so it forwards what the session says the moment it says
+  it; only a connection with a stop hook (stdio's signal watch) looks at
+  that hook on a 20 ms timer. The launch's pre-bind lookup progress is a
+  `lookup_status` observation the supervisor publishes to the connection's
+  service, so it reaches the TUI as a frame too. The TUI's sends never wait
+  for the session: the client gives an intent the session refused, or one
+  with no verdict, back to the TUI later. What the user wrote comes back: a
+  draft or a queued edit is restored beside what the composer holds now (two
+  in a row keep both), its pending record dropped, and a `/new` the session
+  never acknowledged is no longer pending, each with a row that says why:
+  the refusal (for this face's role, its role-table row, as `transcript`:
+  another attachment holds the session's agent view), or that no answer came
+  and the session may still run it. A refused reload check ends as failed.
+  Every other intent is the TUI's own background work (a resync, the build
+  check, the composer chrome, an agent view, a reload answer): it paints
+  nothing and is armed again a second later, so its own sender sends it
+  again; an agent view the session would not open is no longer counted as
+  served. What the TUI has not taken waits in the client under the session
+  mailbox's own rules (a state supersedes its older value, deltas coalesce,
+  and only what a later baseline repays is dropped, its transcript read as
+  lost until that baseline); an observation the client can neither hold nor
+  drop is an overflow, and the client attaches again. Every byte between the
+  TUI and its session is a frame, apart from two process-local signals of
+  the supervisor, each with its reason. Abandon-and-release (and its
+  planned-handoff form for a reload) is a flag on the session's mailbox, not
+  an intent: it is this process's exit, decided after the terminal is
+  restored, and it must outrank queued work and hold when the mailbox or the
+  connection is full, so it is set on the mailbox itself, before the
+  supervisor lets the TUI's connection go, whose leaving would otherwise
+  quit the session the joined way first. Before it sets the flag the
+  supervisor waits up to a second for the session's verdict on every intent
+  the TUI sent, so the flag never outranks an intent still on its way. The
+  `/new` and resume publication cells are written by the host for the
+  supervisor's next round, not for the TUI, and they outlive any connection.
+  A round whose connection cannot be made asks its session to abandon and
+  release, and joins it within the product's error bound. The TUI hands the
   terminal back with a session request (retry the attach, resume another
   session, rebind, release for a reload, or the config editor), and the
   supervisor settles the round in today's order (the terminal restored
@@ -4117,25 +4162,35 @@ verdicts) are addressed, the session profile and workspace chrome states.
   to a peer of the user's own uid).
   It says hello, attaches the welcomed root and follows the host on a
   thread of its own: a refusal `moved` or a `moved` frame attaches the root
-  it names, a `resync_required` attaches the root again, and either reads
-  the root transcript as lost until its next baseline snapshot arrives.
+  it names and reads the root transcript as lost until its next baseline
+  snapshot arrives. A `resync_required`, or an overflow of the client's own
+  mailbox, attaches the same root again and reads every transcript the
+  attachment held as lost until its baseline: the root, and the agent
+  transcript the face opened, which the client opens again on the new
+  attachment before anything the face sends. The first attach reads
+  nothing as lost: a client that has shown nothing has lost nothing.
   Snapshot pages are reassembled and event images restored, so a face
   receives the session's observations in the in-process receiver's shape.
-  An intent is sent on the current attachment, waiting for one while the
-  client attaches again, and its refusal comes back as the in-process
-  mailbox's (`backpressure` as saturated, `one_in_flight` as duplicate,
-  `disconnected` or `not_attached` as disconnected, any other as refused),
-  with the intent. An intent that was sent but got no verdict, because the
-  connection ended first or none came within 30 seconds, is returned as
-  of unknown outcome: the host may yet run it, so sending it again may run
-  it twice. A session request names a client id of its own, and its
-  settled answer is the new root or the refusal. One writer thread alone
-  writes the transport, so neither the face nor the reader ever waits on a
-  write, however large. The receiver holds at most 4096 observations a
-  face has not taken; past that the face fell behind, and as the host
-  drops a slow attachment the client detaches, attaches again and reads
-  the root transcript as lost until its next baseline. A root attach
-  refused `backpressure` is asked once more. An unreadable or unknown
+  What a face has not taken waits in an observation mailbox with the
+  session mailbox's rules and bound (512): a state supersedes its older
+  value, deltas coalesce, a row or patch it cannot hold is dropped and its
+  transcript read as lost, and an observation it can neither hold nor drop
+  is an overflow, after which the client detaches and attaches again.
+  Sending never blocks: an intent goes on the current attachment, or waits
+  in the client for the next while it attaches again, and the host's
+  verdict comes later. A refusal is given back with the intent as the
+  in-process mailbox's (`backpressure` as saturated, `one_in_flight` as
+  duplicate, `disconnected` or `not_attached` as disconnected,
+  `refused_for_role` with its row, any other as refused); an intent no
+  attachment took within 30 seconds is given back as disconnected; one
+  sent with no verdict, because the connection ended first or none came
+  within 30 seconds, is given back as of unknown outcome: the host may yet
+  run it, so sending it again may run it twice. `settle` waits, bounded,
+  for every verdict. A session request names a client id of its own, and
+  its settled answer is the new root or the refusal. One writer thread
+  alone writes the transport, so neither the face nor the reader ever
+  waits on a write, however large. A root attach refused `backpressure` is
+  asked once more. An unreadable or unknown
   frame, a mid-stream `welcome`, `refused` or `bye`, a root attach refused
   anything else, or a transport that fails ends the connection: the
   receiver reports the disconnect once drained, with why. The client is one
@@ -6935,17 +6990,17 @@ keyboard parity. Redraw is state-driven with a true idle: the frame timer is
 armed by demand, and with no spinner, stream, camera tween, or pending
 snapshot the loop parks and consumes no CPU. The loop has one wait point, a
 `poll` over the terminal input descriptor and a wake pipe, and a park has no
-polling ceiling. The pipe is written by the host observation mailbox's
-notifier, on each empty to non-empty edge and when the host's last sender
-leaves, by the stop-signal watcher on `SIGTERM` and `SIGHUP`, on `SIGWINCH`,
+polling ceiling. The pipe is written by the face's notifier: the wire
+client's reader on each observation, refused intent or session answer it
+takes and when the connection ends, by the stop-signal watcher on `SIGTERM` and `SIGHUP`, on `SIGWINCH`,
 and once when the background binary identity is ready, so a host observation,
 a stop or a resize reaches a parked loop at once. The loop drains terminal
 input and the mailbox before every wait, so the descriptor wait never misses
 an event the terminal reader already parsed. A park ends early only at a
 deadline the shell armed itself: a wheel gesture settling, an unanswered
 call-detail ask, an Agents row ageing, and the installed-build check, which
-re-arms every five seconds, so a parked shell wakes once every five seconds
-for one `stat`. The terminal reader takes an edge-triggered 1 KiB per arrival,
+re-arms every five seconds, so a parked shell wakes every five seconds for
+that check: its timer and the answer's arrival. The terminal reader takes an edge-triggered 1 KiB per arrival,
 so a larger burst can leave bytes it reads only when more input arrives. A
 readable wake that yields no event stops the wait on the descriptor: the loop
 waits on the pipe for 20 ms, then looks at the descriptor without waiting,

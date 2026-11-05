@@ -1043,7 +1043,7 @@ fn pending_steer_has_a_visible_row_even_with_a_full_queue() {
 #[test]
 fn turn_end_requests_fresh_product_workspace_facts() {
     let mut app = App::new(launch_basic(), true);
-    let (sender, receiver) = crate::tui::user_action_channel();
+    let (sender, receiver) = crate::config::user_action_channel();
     app.maybe_refresh_composer_chrome(Some(&sender));
     assert_eq!(
         receiver.try_recv().unwrap(),

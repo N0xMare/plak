@@ -75,7 +75,7 @@ fn an_attach_is_answered_before_its_events_and_numbers_them_from_one() {
     observations
         .send(SessionObservation::SetBusy(true))
         .unwrap();
-    let (client, lines) = mpsc::sync_channel(8);
+    let (client, lines) = lines(8);
     for frame in [
         ClientFrame::<Core>::Request {
             id: 1,
@@ -156,7 +156,7 @@ fn host_frames(stdout: &[u8]) -> Vec<HostFrame<plakous_host_protocol::Core>> {
 #[test]
 fn the_hello_wait_ends_at_its_deadline_or_a_stop() {
     use plakous_host_protocol::Core;
-    let (_client, lines) = mpsc::sync_channel(1);
+    let (_client, lines) = lines(1);
     let mut stdout = Vec::new();
     assert!(
         !handshake_within::<Core>(
@@ -350,7 +350,7 @@ fn a_stop_ends_the_connection() {
     use plakous_host_protocol::Core;
     let (actions, intents) = plakous_host_protocol::intent_channel::<Core>();
     let (published, events) = plakous_host_protocol::observation_channel::<Core>();
-    let (_client, lines) = mpsc::sync_channel::<Result<String, WireError>>(1);
+    let (_client, lines) = lines(1);
     published.send(binding("s1")).unwrap();
     let session = std::thread::spawn(move || {
         let quit = intents
@@ -1460,16 +1460,14 @@ fn an_attach_after_a_clear_holds_no_process_of_the_cleared_session() {
         output: String::new(),
     }]);
     let _ = sender.send(crate::surface_protocol::ContentEvent::ClearView);
-    drop(sender);
-    let (client, lines) = mpsc::sync_channel(4);
-    client.send(attach_line(1, "t1")).unwrap();
-    client
-        .send(Ok(encode_line(&ClientFrame::<Core>::Bye).unwrap()))
-        .unwrap();
     let mut stdout = Vec::new();
-    WireConnection::new(root(), &mut stdout, actions)
-        .serve(&lines, &events)
-        .unwrap();
+    let mut connection = WireConnection::new(root(), &mut stdout, actions);
+    while let Ok(event) = events.try_recv() {
+        assert!(connection.observe(event).unwrap());
+    }
+    assert!(connection.frame(attach_line(1, "t1")).unwrap());
+    connection.flush().unwrap();
+    drop(connection);
     let held: Vec<_> = host_frames(&stdout)
         .into_iter()
         .filter_map(|frame| match frame {
@@ -1536,4 +1534,23 @@ fn a_jobs_lifecycle_reaches_a_wire_face_redacted() {
         "gh auth login --with-token <<EOF\\n[redacted]\\nEOF"
     );
     assert_eq!(shown[1], plakous::tools::JOB_TAIL_FRAGMENT);
+}
+
+/// A session that ends while its client still reads ends the connection
+/// with `bye` at once: the connection does not wait for the client to
+/// leave first.
+#[test]
+fn a_session_that_ends_ends_its_connection() {
+    use plakous_host_protocol::Core;
+    let (actions, _intents) = plakous_host_protocol::intent_channel::<Core>();
+    let (observations, events) = plakous_host_protocol::observation_channel::<Core>();
+    let (client, lines) = lines(4);
+    client.send(attach_line(1, "t1")).unwrap();
+    drop(observations);
+    let mut stdout = Vec::new();
+    WireConnection::new(root(), &mut stdout, actions)
+        .serve(&lines, &events)
+        .unwrap();
+    assert!(matches!(host_frames(&stdout).last(), Some(HostFrame::Bye)));
+    drop(client);
 }

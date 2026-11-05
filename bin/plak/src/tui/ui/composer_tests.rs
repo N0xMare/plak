@@ -7,9 +7,10 @@ use super::test_support::{
     transcript_fixture, typed, visual_fixture,
 };
 use super::{App, DisplayMode};
+use crate::config::user_action_channel;
 use crate::tui::blocks::{ScrollBlock, layout_anchor};
 use crate::tui::presentation::{ActivityKind, ContextUsage, PreparedInputUsage};
-use crate::tui::{HostEvent, QueueDrainState, UserAction, user_action_channel};
+use crate::tui::{HostEvent, QueueDrainState, UserAction};
 use crossterm::event::KeyEvent;
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEventKind};
 use ratatui::Terminal;

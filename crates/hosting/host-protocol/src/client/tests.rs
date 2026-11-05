@@ -3,14 +3,13 @@ use std::os::unix::net::UnixStream;
 
 use super::*;
 use crate::Core;
-use crate::wire::{ClientLocality, WIRE_VERSION, decode_line};
+use crate::wire::{WIRE_VERSION, decode_line};
 
 fn hello() -> Hello {
     Hello {
         proto: WIRE_VERSION,
         binary_id: "client".into(),
         caps: Vec::new(),
-        locality: ClientLocality::default(),
     }
 }
 
@@ -129,7 +128,8 @@ fn the_client_follows_the_host() {
         receiver.recv_timeout(Duration::from_secs(10)).unwrap(),
         SessionObservation::SetBusy(true)
     );
-    assert!(receiver.transcript_resnapshot_required_for(&TranscriptScope::Root));
+    // Nothing was shown before the first attachment, so nothing was lost.
+    assert!(!receiver.transcript_resnapshot_required_for(&TranscriptScope::Root));
     for page in crate::wire::page_snapshot(crate::views::PresentationSnapshot::empty(3), 2).unwrap()
     {
         host.send(&HostFrame::Snapshot(page));
@@ -140,10 +140,7 @@ fn the_client_follows_the_host() {
     ));
     assert!(!receiver.transcript_resnapshot_required_for(&TranscriptScope::Root));
 
-    let sending = thread::spawn({
-        let sender = sender.clone();
-        move || sender.send(SessionIntent::Interrupt)
-    });
+    sender.send(SessionIntent::Interrupt).unwrap();
     let (id, op) = host.request();
     assert!(matches!(op, Op::Intent { attachment: 2, .. }));
     host.send(&HostFrame::Response {
@@ -151,10 +148,8 @@ fn the_client_follows_the_host() {
         outcome: Outcome::Refused(RequestRefusal::Backpressure),
     });
     assert!(matches!(
-        sending.join().unwrap(),
-        Err(SendError::Refused(IntentSendError::Saturated(
-            SessionIntent::Interrupt
-        )))
+        unsent(&receiver),
+        SendError::Refused(IntentSendError::Saturated(SessionIntent::Interrupt))
     ));
 
     host.send(&HostFrame::Moved {
@@ -171,6 +166,18 @@ fn the_client_follows_the_host() {
     });
     drop((sender, receiver));
     assert!(matches!(host.read(), ClientFrame::Bye));
+}
+
+/// The next intent the host did not take, within a liveness bound.
+fn unsent(receiver: &WireReceiver<Core>) -> SendError<Core> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Some(unsent) = receiver.try_unsent() {
+            return unsent;
+        }
+        assert!(Instant::now() < deadline, "no intent came back");
+        thread::sleep(Duration::from_millis(1));
+    }
 }
 
 /// A connected client and its scripted host, attached as `attachment`.
@@ -207,10 +214,10 @@ fn event(attachment: AttachmentId, busy: bool) -> HostFrame<Core> {
 fn a_large_send_does_not_hold_up_the_face() {
     let (mut host, sender, receiver) = attached(1);
     let large = SessionIntent::Prompt(crate::Draft::from("x".repeat(4 * 1024 * 1024)));
-    let sending = thread::spawn({
-        let large = large.clone();
-        move || sender.send(large)
-    });
+    let started = Instant::now();
+    sender.send(large).unwrap();
+    // Sending never waits for the transport.
+    assert!(started.elapsed() < Duration::from_secs(1));
     // The writer is blocked on the full transport by now.
     thread::sleep(Duration::from_secs(1));
     host.send(&event(1, true));
@@ -239,35 +246,195 @@ fn a_large_send_does_not_hold_up_the_face() {
         id,
         outcome: Outcome::Ok(Answer::Accepted),
     });
-    assert!(sending.join().unwrap().is_ok());
+    assert!(sender.settle(Duration::from_secs(10)));
+    assert!(receiver.try_unsent().is_none());
     let (_, op) = host.request();
     assert_eq!(op, Op::Attach { node: node("t2") });
 }
 
-/// A face that falls [`QUEUE_BOUND`] observations behind loses them: the
-/// client lets its attachment go and attaches again, the root transcript
-/// read as lost.
+/// Transcript rows a slow face cannot hold are dropped as a baseline
+/// repays them: the root transcript reads as lost, and the client keeps its
+/// attachment.
 #[test]
-fn a_face_that_falls_behind_is_attached_again() {
-    let (mut host, _sender, receiver) = attached(1);
-    for _ in 0..=QUEUE_BOUND {
-        host.send(&event(1, true));
+fn rows_a_slow_face_cannot_hold_leave_the_transcript_lost() {
+    let (mut host, sender, receiver) = attached(1);
+    for index in 0..=crate::limits::OBSERVATION_QUEUE_CAPACITY {
+        let observation = SessionObservation::Row(crate::views::transcript::TranscriptRow::user(
+            format!("row {index}"),
+        ));
+        host.send(&HostFrame::Event {
+            attachment: 1,
+            seq: 1,
+            class: observation.class(),
+            observation,
+            blobs: Vec::new(),
+        });
+    }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !receiver.transcript_resnapshot_required_for(&TranscriptScope::Root) {
+        assert!(
+            Instant::now() < deadline,
+            "the dropped row read as nothing lost"
+        );
+        thread::sleep(Duration::from_millis(1));
+    }
+    // The next request is the face's own, on the same attachment.
+    sender.send(SessionIntent::Interrupt).unwrap();
+    let (_, op) = host.request();
+    assert!(matches!(op, Op::Intent { attachment: 1, .. }), "{op:?}");
+}
+
+/// An observation the mailbox cannot hold or drop is a real overflow: the
+/// client lets its attachment go and attaches again, every transcript the
+/// attachment held (the root, and the agent the face opened) read as lost,
+/// and the agent's transcript opened again on the new attachment.
+#[test]
+fn a_real_overflow_attaches_again_and_opens_the_agent_again() {
+    let (mut host, sender, receiver) = attached(1);
+    sender
+        .send(SessionIntent::OpenAgentTranscript {
+            agent_id: "a1".into(),
+        })
+        .unwrap();
+    let (id, _) = host.request();
+    host.send(&HostFrame::Response {
+        id,
+        outcome: Outcome::Ok(Answer::Accepted),
+    });
+    assert!(sender.settle(Duration::from_secs(10)));
+    for _ in 0..=crate::limits::OBSERVATION_QUEUE_CAPACITY {
+        let observation = SessionObservation::DraftRejected(SessionIntent::Interrupt);
+        host.send(&HostFrame::Event {
+            attachment: 1,
+            seq: 1,
+            class: observation.class(),
+            observation,
+            blobs: Vec::new(),
+        });
     }
     let (_, op) = host.request();
     assert_eq!(op, Op::Detach { attachment: 1 });
     let (id, op) = host.request();
     assert_eq!(op, Op::Attach { node: node("t1") });
-    assert!(receiver.transcript_resnapshot_required_for(&TranscriptScope::Root));
-    assert!(matches!(receiver.try_recv(), Err(TryRecvError::Empty)));
+    for scope in [TranscriptScope::Root, TranscriptScope::Agent("a1".into())] {
+        assert!(
+            receiver.transcript_resnapshot_required_for(&scope),
+            "{scope:?}"
+        );
+    }
     host.send(&HostFrame::Response {
         id,
         outcome: Outcome::Ok(Answer::Attached { attachment: 2 }),
     });
-    host.send(&event(2, false));
+    let (_, op) = host.request();
     assert_eq!(
-        receiver.recv_timeout(Duration::from_secs(5)).unwrap(),
-        SessionObservation::SetBusy(false)
+        op,
+        Op::Intent {
+            attachment: 2,
+            intent: SessionIntent::OpenAgentTranscript {
+                agent_id: "a1".into()
+            },
+            blobs: Vec::new(),
+        }
     );
+}
+
+/// A `resync_required` re-attach reads the agent transcript the face had
+/// open as lost too and opens it again; a `moved` names another session,
+/// whose agent view the face never opened.
+#[test]
+fn a_resync_reads_every_held_transcript_as_lost() {
+    let (mut host, sender, receiver) = attached(1);
+    sender
+        .send(SessionIntent::OpenAgentTranscript {
+            agent_id: "a1".into(),
+        })
+        .unwrap();
+    let (id, _) = host.request();
+    host.send(&HostFrame::Response {
+        id,
+        outcome: Outcome::Ok(Answer::Accepted),
+    });
+    assert!(sender.settle(Duration::from_secs(10)));
+    host.send(&HostFrame::ResyncRequired { attachment: 1 });
+    let (id, op) = host.request();
+    assert_eq!(op, Op::Attach { node: node("t1") });
+    let agent = TranscriptScope::Agent("a1".into());
+    assert!(receiver.transcript_resnapshot_required_for(&agent));
+    host.send(&HostFrame::Response {
+        id,
+        outcome: Outcome::Ok(Answer::Attached { attachment: 2 }),
+    });
+    let (_, op) = host.request();
+    assert!(
+        matches!(
+            &op,
+            Op::Intent {
+                attachment: 2,
+                intent: SessionIntent::OpenAgentTranscript { .. },
+                ..
+            }
+        ),
+        "{op:?}"
+    );
+    let mut snapshot = crate::views::PresentationSnapshot::empty(1);
+    snapshot.scope = agent.clone();
+    for page in crate::wire::page_snapshot(snapshot, 2).unwrap() {
+        host.send(&HostFrame::Snapshot(page));
+    }
+    assert!(matches!(
+        receiver.recv_timeout(Duration::from_secs(10)).unwrap(),
+        SessionObservation::PresentationSnapshot(_)
+    ));
+    assert!(!receiver.transcript_resnapshot_required_for(&agent));
+
+    host.send(&HostFrame::Moved {
+        attachment: 2,
+        node: node("t2"),
+        request_id: None,
+    });
+    let (id, op) = host.request();
+    assert_eq!(op, Op::Attach { node: node("t2") });
+    host.send(&HostFrame::Response {
+        id,
+        outcome: Outcome::Ok(Answer::Attached { attachment: 3 }),
+    });
+    sender.send(SessionIntent::Interrupt).unwrap();
+    let (_, op) = host.request();
+    assert!(
+        matches!(
+            &op,
+            Op::Intent {
+                attachment: 3,
+                intent: SessionIntent::Interrupt,
+                ..
+            }
+        ),
+        "{op:?}"
+    );
+}
+
+/// An intent sent while the client re-attaches waits for the attachment
+/// and goes on it, in order.
+#[test]
+fn an_intent_sent_while_attaching_goes_on_the_next_attachment() {
+    let (mut host, sender, _receiver) = attached(1);
+    host.send(&HostFrame::ResyncRequired { attachment: 1 });
+    let (id, op) = host.request();
+    assert_eq!(op, Op::Attach { node: node("t1") });
+    sender.send(SessionIntent::Interrupt).unwrap();
+    sender.send(SessionIntent::Quit).unwrap();
+    host.send(&HostFrame::Response {
+        id,
+        outcome: Outcome::Ok(Answer::Attached { attachment: 2 }),
+    });
+    for expected in [SessionIntent::Interrupt, SessionIntent::Quit] {
+        let (_, op) = host.request();
+        assert!(
+            matches!(&op, Op::Intent { attachment: 2, intent, .. } if *intent == expected),
+            "{op:?}"
+        );
+    }
 }
 
 /// A root attach refused `backpressure` is asked once more; a second
@@ -329,13 +496,35 @@ fn a_stale_events_blobs_are_dropped() {
 /// may have run: its outcome is unknown, not a refusal.
 #[test]
 fn an_unanswered_send_has_an_unknown_outcome() {
-    let (mut host, sender, _receiver) = attached(1);
-    let sending = thread::spawn(move || sender.send(SessionIntent::Interrupt));
+    let (mut host, sender, receiver) = attached(1);
+    sender.send(SessionIntent::Interrupt).unwrap();
     let (_, op) = host.request();
     assert!(matches!(op, Op::Intent { .. }));
     host.stream.shutdown(std::net::Shutdown::Both).unwrap();
     assert!(matches!(
-        sending.join().unwrap(),
-        Err(SendError::OutcomeUnknown(SessionIntent::Interrupt))
+        unsent(&receiver),
+        SendError::OutcomeUnknown(SessionIntent::Interrupt)
+    ));
+    assert!(matches!(
+        sender.send(SessionIntent::Interrupt),
+        Err(SendError::Refused(IntentSendError::Disconnected(_)))
+    ));
+}
+
+/// A refusal for the attachment's role names its row.
+#[test]
+fn a_role_refusal_names_its_row() {
+    let (mut host, sender, receiver) = attached(1);
+    sender.send(SessionIntent::Interrupt).unwrap();
+    let (id, _) = host.request();
+    host.send(&HostFrame::Response {
+        id,
+        outcome: Outcome::Refused(RequestRefusal::RefusedForRole {
+            row: "control".into(),
+        }),
+    });
+    assert!(matches!(
+        unsent(&receiver),
+        SendError::RefusedForRole { row, intent: SessionIntent::Interrupt } if row == "control"
     ));
 }
