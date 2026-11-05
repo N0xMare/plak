@@ -933,6 +933,65 @@ fn paging_to_the_head_of_a_long_transcript_and_back_moves_on_every_key() {
     terminal.quit();
 }
 
+/// Input-to-paint latencies of `presses` alternating keystrokes into the
+/// composer, a character and its backspace, each measured from the pty
+/// write to the first screen change after it.
+fn input_to_paint(terminal: &mut Terminal, presses: usize) -> Vec<Duration> {
+    let mut latencies = Vec::with_capacity(presses);
+    for press in 0..presses {
+        let key: &[u8] = if press % 2 == 0 { b"x" } else { b"\x7f" };
+        let before = terminal.screen();
+        let started = Instant::now();
+        terminal.send(key);
+        while terminal.screen() == before {
+            assert!(
+                started.elapsed() <= KEY_BOUND,
+                "press {press} did not paint within {KEY_BOUND:?}\n{before}"
+            );
+            std::thread::sleep(Duration::from_micros(100));
+        }
+        latencies.push(started.elapsed());
+        // Settle, so one press's paint is not the next one's.
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    latencies
+}
+
+/// The `p`th percentile of `latencies`, nearest rank.
+fn percentile(latencies: &mut [Duration], p: usize) -> Duration {
+    latencies.sort_unstable();
+    let rank = (latencies.len() * p).div_ceil(100).max(1);
+    latencies[rank - 1]
+}
+
+/// The input-to-paint probe: p50 and p99 of a keystroke's paint on an idle
+/// shell and over a long transcript. Not a gate: run it on an idle host
+/// with `just nextest run -p plak --test integration --run-ignored only
+/// --no-capture -E 'test(input_to_paint_probe)'` and compare runs.
+#[test]
+#[ignore = "opt-in latency probe; compare runs on one idle host"]
+fn input_to_paint_probe() {
+    const PRESSES: usize = 400;
+    let fixture = Fixture::new(&numbered_lines(400));
+    let mut terminal = Terminal::spawn_ready(&fixture);
+    let mut idle = input_to_paint(&mut terminal, PRESSES);
+    terminal.send(b"fill the transcript\r");
+    terminal.wait_screen("transcript line 00399");
+    let mut long = input_to_paint(&mut terminal, PRESSES);
+    for (name, latencies) in [
+        ("idle shell", &mut idle),
+        ("400-line transcript", &mut long),
+    ] {
+        eprintln!(
+            "input-to-paint, {name}: p50 {:?}, p99 {:?}, max {:?} over {PRESSES} presses",
+            percentile(latencies, 50),
+            percentile(latencies, 99),
+            percentile(latencies, 100),
+        );
+    }
+    terminal.quit();
+}
+
 // ---------------------------------------------------------------------------
 // Case 3: compaction mid-session
 // ---------------------------------------------------------------------------
