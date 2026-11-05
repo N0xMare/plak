@@ -1073,6 +1073,59 @@ impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for Scripted
     }
 }
 
+/// The tools of an offline scripted root whose children are real product
+/// child sessions, each bound by `child`: the root's parent is parked on its
+/// attached hub as a root attach parks it, so a spawn, a release, a reopen
+/// and a continuation all take the product's own child route.
+///
+/// # Errors
+/// The hub's tree is unreadable or the topology tools do not compile.
+pub async fn scripted_root_topology(
+    runtime: Arc<crate::topology_runtime::ProductTopologyRuntime>,
+    tree_id: &str,
+    workspace: &std::path::Path,
+    state_roots: crate::agent::ProductStateRoots,
+    child: Arc<ScriptedChildBinding>,
+    continue_after_loss: bool,
+) -> CliResult<Vec<plakous::tools::ToolRegistration>> {
+    // An `OpenRouter` hub root: its tools use that pack's spelling, and a
+    // child bound to `openrouter` reads no native login.
+    let parent = crate::agent::SpawnParent::Api(crate::agent::ApiTopologyParent {
+        prompt_host_facts: plakous_host_protocol::PromptHostFacts::default(),
+        created_output_bound: None,
+        product_home: None,
+        tool_selection: crate::tool_plan::NodeToolSelection::default(),
+        workspace_root: workspace.to_path_buf(),
+        cwd: workspace.to_path_buf(),
+        plan_state_authority: tree_id.to_owned(),
+        composition: CompositionSelection::Direct,
+        topology_tree_id: Some(tree_id.to_owned()),
+        topology_caller_id: None,
+        state_roots: state_roots
+            .with_child_runtime_factory(Arc::new(ScriptedChildRuntimeFactory(child))),
+        model: "offline/parent".to_owned(),
+        effort: None,
+        target: crate::binding::ApiTarget::OpenRouter {
+            wire: crate::binding::ResolvedProtocol::Chat,
+        },
+        scheduled_compaction: false,
+        max_model_rounds: crate::agent::NATIVE_RUN_MAX_MODEL_ROUNDS,
+        topology_enabled: true,
+        continue_after_loss,
+    });
+    crate::agent::build::topology::park_rejoin_parent(&runtime, tree_id, &parent).await;
+    let caller = runtime
+        .read(|tree| tree.root_agent_id.clone())
+        .map_err(|error| CliFailure::new(error.message))?;
+    Ok(
+        crate::agent::build::topology::topology_extensions_from_runtime(
+            runtime, &parent, &caller, None,
+        )?
+        .registrations()
+        .to_vec(),
+    )
+}
+
 struct ScriptedChildRuntimeFactory(Arc<ScriptedChildBinding>);
 impl crate::agent::children::runtime_factory::ChildRuntimeFactory for ScriptedChildRuntimeFactory {
     fn bind<'a>(

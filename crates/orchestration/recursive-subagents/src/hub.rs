@@ -338,6 +338,11 @@ async fn publish_release(
                 if tree.revision != tree.stored_revision {
                     writer.save(tree).map_err(|error| error.message)?;
                 }
+                // A release page that would only move the feed cursor (the
+                // turn waiter already folded everything else) is left for the
+                // next open to read again: whether the waiter's fold beat the
+                // session's release is timing, and the rows must not say.
+                let feed = feed.filter(|feed| !moves_only_cursor(tree, feed, &agent));
                 writer
                     .fold_and_commit(tree, |tree| {
                         if let Some(feed) = feed {
@@ -364,6 +369,36 @@ async fn publish_release(
         (Some(failure), Ok(())) => Err(failure),
         (None, publication) => publication,
     }
+}
+
+/// Whether applying `feed` would change nothing of `agent_id`'s node,
+/// attempt or commands, only its cursor. (A release page rereads the
+/// terminal the turn waiter already applied, so the projection may report
+/// it again; the rows say whether anything is new.)
+fn moves_only_cursor(
+    tree: &ProductAgentTree,
+    feed: &crate::tree::TreeFeed,
+    agent_id: &str,
+) -> bool {
+    let rows = |tree: &ProductAgentTree| {
+        (
+            tree.node(agent_id).ok().cloned(),
+            tree.attempt(agent_id).cloned(),
+            tree.commands()
+                .values()
+                .filter(|command| command.recipient == agent_id)
+                .cloned()
+                .collect::<Vec<_>>(),
+        )
+    };
+    let mut probe = tree.clone();
+    let Ok(projection) = feed.apply(&mut probe, agent_id) else {
+        return false;
+    };
+    projection.terminal_usages.is_empty()
+        && projection.conflicts.is_empty()
+        && projection.refused_intents.is_empty()
+        && rows(&probe) == rows(tree)
 }
 
 fn retirement_needs_recovery(driver: &TreeDriver, agent_id: &str) -> bool {

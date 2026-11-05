@@ -6,6 +6,7 @@ use plak::store::session_records::SessionRecordStore as _;
 use plakous_recursive_subagents::protocol::CandidateId;
 use serde_json::{Value, json};
 pub(super) mod c1;
+pub(super) mod child;
 pub(super) mod handoff;
 mod residency;
 pub(super) mod runner;
@@ -21,6 +22,20 @@ fn uncertain_mcp_tool_pilot_proves_live_shape() {
 #[test]
 fn handoff_resume_pilot_records_the_handoff_before_its_release() {
     let shape = "handoff_resume";
+    let (seed, session) = super::driver::setup(shape);
+    super::driver::pilot(&seed, &session, shape);
+}
+
+#[test]
+fn handoff_resume_child_pilot_records_the_child_handoff_before_its_release() {
+    let shape = "handoff_resume_child";
+    let (seed, session) = super::driver::setup(shape);
+    super::driver::pilot(&seed, &session, shape);
+}
+
+#[test]
+fn owner_lost_child_continue_pilot_quits_without_a_handoff() {
+    let shape = "owner_lost_child_continue";
     let (seed, session) = super::driver::setup(shape);
     super::driver::pilot(&seed, &session, shape);
 }
@@ -143,6 +158,8 @@ pub(super) struct Lifecycle {
     /// Provider dispatches already on disk when this drive started waiting.
     pub(super) baseline_dispatches: usize,
     pub(super) saw_baseline: bool,
+    /// The commit trace's length and when it last changed.
+    pub(super) trace_quiet: Option<(usize, std::time::Instant)>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -211,6 +228,26 @@ pub(super) const REGISTRY: &[Shape] = &[
         setup: no_setup,
         lifecycle: handoff::lifecycle,
         assert_live: handoff::assert_live,
+    },
+    Shape {
+        name: "handoff_resume_child",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: child::script,
+        configure: child::configure_handoff,
+        setup: no_setup,
+        lifecycle: child::handoff_lifecycle,
+        assert_live: child::assert_handoff_live,
+    },
+    Shape {
+        name: "owner_lost_child_continue",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: child::script,
+        configure: child::configure_owner_lost,
+        setup: no_setup,
+        lifecycle: child::owner_lost_lifecycle,
+        assert_live: child::assert_owner_lost_live,
     },
     Shape {
         name: "busy_quit_escalates",
@@ -554,7 +591,7 @@ fn assert_busy_quit(fixture: &Fixture, outcome: &AgentOutcome, state: &summary::
     assert!(!views.state.open_turns.is_empty());
 }
 
-fn face_idle_after(records: &[Value], boundary: impl Fn(&Value) -> bool) -> bool {
+pub(super) fn face_idle_after(records: &[Value], boundary: impl Fn(&Value) -> bool) -> bool {
     let Some(completed) = records.iter().rposition(boundary) else {
         return false;
     };

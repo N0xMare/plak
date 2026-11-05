@@ -208,9 +208,12 @@ fn seeded_create_cut(
 /// binder per runtime would restart the child ordinal, and a failure or hold
 /// dial would land on the wrong child.
 fn tree_registrations(
-    driver: &plakous_hosted::agent_tree_tools::TreeDriver,
-    binder: Arc<ScriptedChildBinder>,
+    prepared: &PreparedTree,
 ) -> Result<Vec<plakous::tools::ToolRegistration>, String> {
+    if let Some(tools) = &prepared.product_tools {
+        return Ok(tools.clone());
+    }
+    let (driver, binder) = (&prepared.driver, Arc::clone(&prepared.binder));
     let caller_id = driver
         .read(|tree| tree.root_agent_id.clone())
         .map_err(|_| "offline scripted tree lock".to_owned())?;
@@ -225,10 +228,14 @@ fn tree_registrations(
     .map_err(|error| error.message().to_owned())
 }
 
-/// One scripted tree and the child binder every runtime of that selection shares.
+/// One scripted tree and the child binder every runtime of that selection
+/// shares, or the product's own child route when the script names a
+/// product child script.
 struct PreparedTree {
     driver: plakous_hosted::agent_tree_tools::TreeDriver,
     binder: Arc<ScriptedChildBinder>,
+    runtime: Arc<plakous_hosted::topology_runtime::ProductTopologyRuntime>,
+    product_tools: Option<Vec<plakous::tools::ToolRegistration>>,
 }
 
 /// Builds the one tree a `tree` script's runtimes all compile against, and
@@ -289,6 +296,13 @@ fn prepare_scripted_tree(
         WriterMode::SingleLease,
     )
     .map_err(|error| format!("offline scripted tree: {}", error.message))?;
+    if plan.product_child_script.is_some() {
+        tree.pin_bind_hints_for_test(crate::roster_input::product_bind_hints());
+        tree.pin_template(
+            "review",
+            plakous_hosted::orchestration::RosterBinding::leaf("openrouter", "offline/child"),
+        );
+    }
     let inner: Arc<dyn TreeStore> = if plan.durable_tree {
         paths
             .ensure_layout()
@@ -347,7 +361,67 @@ fn prepare_scripted_tree(
         child_process_quiescent: plan.child_process_quiescent,
         state_roots,
     });
-    Ok(PreparedTree { driver, binder })
+    Ok(PreparedTree {
+        driver,
+        binder,
+        runtime,
+        product_tools: None,
+    })
+}
+
+/// Puts a `product_child_script` tree's children on the product's own
+/// child route: the root's tools come from its parked parent.
+fn attach_product_children(
+    prepared: &mut PreparedTree,
+    plan: &ScriptPlan,
+    tree_id: &str,
+    workspace: &Path,
+    state_roots: &product_agent::ProductStateRoots,
+    evidence: &Path,
+    continue_after_loss: bool,
+) -> Result<(), crate::CliFailure> {
+    let Some(script) = &plan.product_child_script else {
+        return Ok(());
+    };
+    prepared.product_tools = Some(run_to_end(
+        plakous_hosted::runtime::test_kit::scripted_root_topology(
+            Arc::clone(&prepared.runtime),
+            tree_id,
+            workspace,
+            state_roots.clone(),
+            product_child_binding(
+                script.clone(),
+                evidence.with_file_name("child-evidence.jsonl"),
+            ),
+            continue_after_loss,
+        ),
+    )??);
+    Ok(())
+}
+
+/// A product child's binding: a real scripted session over `script`, read
+/// whenever the child binds (a spawn, or a reopen on a later build), whose
+/// provider requests append to `evidence`.
+fn product_child_binding(
+    script: PathBuf,
+    evidence: PathBuf,
+) -> Arc<plakous_hosted::runtime::ScriptedChildBinding> {
+    Arc::new(move |_, path, _| {
+        let workspace = Path::new(path);
+        std::fs::create_dir_all(workspace).map_err(|error| error.to_string())?;
+        let plan = ScriptPlan::read(&script).map_err(|error| error.message().to_owned())?;
+        let controller =
+            BoundaryController::quiet_from_evidence_path(CrashBoundary::None, &evidence)
+                .map_err(|error| error.to_string())?;
+        // The product reopens a child only over a coding projection; the
+        // pi pack is the one an `OpenRouter` parent's child compiles.
+        plakous_offline_crash_harness::scripted_pi_runtime_binding(
+            workspace,
+            controller,
+            &Arc::new(plan),
+        )
+        .map_err(|error| error.to_string())
+    })
 }
 
 /// Attaches a scripted tree as a production root attach does, through the
@@ -1204,7 +1278,7 @@ impl OfflineSelection {
         // runtime has to be visible to the next one the host builds, and a
         // fresh tree would give each its own root.
         let prepared = if plan.tree {
-            Some(prepare_scripted_tree(
+            let mut prepared = prepare_scripted_tree(
                 paths,
                 cwd,
                 &session.id,
@@ -1212,7 +1286,18 @@ impl OfflineSelection {
                 state_roots.session_records(),
                 state_roots.clone(),
                 face == OfflineFace::Verify,
-            )?)
+            )?;
+            attach_product_children(
+                &mut prepared,
+                &plan,
+                &session.id,
+                cwd,
+                state_roots,
+                &self.evidence,
+                product_config::SessionPolicy::load(paths)?.resume_after_loss
+                    == plakous_hosted::runtime::ResumeAfterLoss::Continue,
+            )?;
+            Some(prepared)
         } else {
             None
         };
@@ -1225,7 +1310,7 @@ impl OfflineSelection {
                 controller.clone(),
                 Arc::clone(&plan),
                 Arc::clone(&cursor),
-                tree_registrations(&prepared.driver, Arc::clone(&prepared.binder))?,
+                tree_registrations(prepared)?,
             )
         } else if plan.code_mode {
             let sidecar = crate::sidecars::js_host::locate().map_err(|reason| {
@@ -1258,12 +1343,7 @@ impl OfflineSelection {
         let telemetry = state_roots.telemetry_emitter();
         let runtime = Arc::new(move |role: product_host::RuntimeRole| {
             if role == product_host::RuntimeRole::Compact {
-                let tree_tools = runtime_tree
-                    .as_ref()
-                    .map(|prepared| {
-                        tree_registrations(&prepared.driver, Arc::clone(&prepared.binder))
-                    })
-                    .transpose()?;
+                let tree_tools = runtime_tree.as_ref().map(tree_registrations).transpose()?;
                 let sidecar = if plan.code_mode && tree_tools.is_none() {
                     Some(crate::sidecars::js_host::locate().map_err(|reason| {
                         format!("offline Code Mode needs the JavaScript sidecar: {reason}")
@@ -1291,7 +1371,7 @@ impl OfflineSelection {
                     runtime_controller.clone(),
                     Arc::clone(&plan),
                     Arc::clone(&cursor),
-                    tree_registrations(&prepared.driver, Arc::clone(&prepared.binder))?,
+                    tree_registrations(prepared)?,
                 )
             } else if plan.code_mode {
                 // The product's own sidecar discovery, so the test binds what
@@ -1330,7 +1410,9 @@ impl OfflineSelection {
             runtime,
             rebind_target: target,
             observe: Arc::new(seeded_create_cut(self.evidence.with_file_name("carry-cut"))),
-            child_runtime: None,
+            child_runtime: self.plan.product_child_script.clone().map(|script| {
+                product_child_binding(script, self.evidence.with_file_name("child-evidence.jsonl"))
+            }),
             rebind_builds: std::sync::Mutex::new(Vec::new()),
         });
         let policy = product_config::SessionPolicy::load(paths)?;

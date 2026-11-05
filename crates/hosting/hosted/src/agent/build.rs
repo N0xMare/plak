@@ -16,7 +16,7 @@ mod policy;
 mod profile;
 mod session;
 mod tools;
-mod topology;
+pub(crate) mod topology;
 
 pub(super) use binding::coding_session_runtime_binding_for;
 #[cfg(test)]

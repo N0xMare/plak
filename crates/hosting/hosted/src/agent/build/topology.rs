@@ -715,7 +715,7 @@ pub(in crate::agent) fn rejoin_parent(
         .cloned()
 }
 
-pub(in crate::agent) fn topology_extensions_from_runtime(
+pub(crate) fn topology_extensions_from_runtime(
     runtime: Arc<crate::topology_runtime::ProductTopologyRuntime>,
     parent: &SpawnParent,
     caller_id: &str,
@@ -929,4 +929,18 @@ pub fn api_topology_parent(
         continue_after_loss: false,
         created_output_bound: None,
     }
+}
+
+/// Parks `parent` on its attached hub as the root's rejoin spec, with the
+/// root's loss policy and the retirement recovery hook: what a root attach
+/// leaves for the hub's later child recoveries and reopens.
+pub(crate) async fn park_rejoin_parent(
+    runtime: &crate::topology_runtime::ProductTopologyRuntime,
+    tree_id: &str,
+    parent: &SpawnParent,
+) {
+    // The custody-take scan's recovery runs read the root's loss policy.
+    runtime.set_continue_after_loss(parent.continues_after_loss());
+    runtime.remember_rejoin_spec(Arc::new(parent.clone()));
+    crate::agent::recovery::install_retirement_recovery(runtime, tree_id).await;
 }

@@ -228,6 +228,14 @@ pub struct ScriptPlan {
     /// Complete the real process child's turn before its live handle is bound.
     #[serde(default)]
     pub child_process_quiescent: bool,
+    /// Children spawn through the product's own child route (its binder,
+    /// live slot, release and reopen), each a real session over this script
+    /// document. The child binding reads it whenever it binds, so a test can
+    /// rewrite it between builds. Every template binds `openrouter`, which
+    /// reads no native login. Requires [`Self::durable_tree`] and excludes
+    /// the scripted child dials.
+    #[serde(default)]
+    pub product_child_script: Option<std::path::PathBuf>,
     /// The first child whose zero-based bind ordinal reaches this value
     /// returns recovery-required instead of running.
     ///
@@ -551,6 +559,56 @@ impl ScriptPlan {
         Ok(plan)
     }
 
+    /// Refuses a tree dial without the tree, or the store, it changes.
+    fn validate_tree_dials(&self) -> Result<(), ScriptError> {
+        // These dials change the tree the product persists. On a loopback or
+        // Code Mode script they would be ignored, and a green run would be
+        // about a tree that was never there.
+        let tree_dials = [
+            ("durable_tree", self.durable_tree),
+            (
+                "disk_full_at_child_locator",
+                self.disk_full_at_child_locator,
+            ),
+            ("child_hold_ms", self.child_hold_ms != 0),
+            ("child_hold_after", self.child_hold_after != 0),
+            ("child_process", self.child_process),
+            ("child_process_quiescent", self.child_process_quiescent),
+            (
+                "fail_child_after_successes",
+                self.fail_child_after_successes.is_some(),
+            ),
+            ("product_child_script", self.product_child_script.is_some()),
+        ]
+        .into_iter()
+        .filter_map(|(name, asked)| asked.then_some(name))
+        .collect::<Vec<_>>();
+        if !tree_dials.is_empty() && !self.tree {
+            return Err(ScriptError(format!(
+                "offline script tree dials require tree: {}",
+                tree_dials.join(", ")
+            )));
+        }
+        if self.product_child_script.is_some()
+            && (!self.durable_tree
+                || self.child_hold_ms != 0
+                || self.child_process
+                || self.fail_child_after_successes.is_some()
+                || self.disk_full_at_child_locator)
+        {
+            return Err(ScriptError(
+                "offline script product_child_script requires durable_tree and no scripted child dial"
+                    .to_owned(),
+            ));
+        }
+        if self.disk_full_at_child_locator && !self.durable_tree {
+            return Err(ScriptError(
+                "offline script disk_full_at_child_locator requires durable_tree".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Admits a script document.
     ///
     /// # Errors
@@ -603,38 +661,7 @@ impl ScriptPlan {
                     .to_owned(),
             ));
         }
-        // These dials change the tree the product persists. On a loopback or
-        // Code Mode script they would be ignored, and a green run would be
-        // about a tree that was never there.
-        let tree_dials = [
-            ("durable_tree", self.durable_tree),
-            (
-                "disk_full_at_child_locator",
-                self.disk_full_at_child_locator,
-            ),
-            ("child_hold_ms", self.child_hold_ms != 0),
-            ("child_hold_after", self.child_hold_after != 0),
-            ("child_process", self.child_process),
-            ("child_process_quiescent", self.child_process_quiescent),
-            (
-                "fail_child_after_successes",
-                self.fail_child_after_successes.is_some(),
-            ),
-        ]
-        .into_iter()
-        .filter_map(|(name, asked)| asked.then_some(name))
-        .collect::<Vec<_>>();
-        if !tree_dials.is_empty() && !self.tree {
-            return Err(ScriptError(format!(
-                "offline script tree dials require tree: {}",
-                tree_dials.join(", ")
-            )));
-        }
-        if self.disk_full_at_child_locator && !self.durable_tree {
-            return Err(ScriptError(
-                "offline script disk_full_at_child_locator requires durable_tree".to_owned(),
-            ));
-        }
+        self.validate_tree_dials()?;
         if self
             .identity_namespace
             .is_some_and(|namespace| namespace > 0x0000_ffff_ffff_ffff)

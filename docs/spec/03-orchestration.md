@@ -5263,8 +5263,14 @@ after the live slot clears. Headless run exit joins both kinds of owner under
 the same allowance, including when no live child remains. At expiry it returns
 a bounded failure and retains
 fault evidence, while release workers retain ownership until they return and
-may publish their released locator afterward. No new `recover_node` run starts
-on the closed hub. Explicit process-exit abandonment, not ordinary joined shutdown,
+may publish their released locator afterward. It then lets the turn waiters
+of released children, which fold each released turn's terminal into the tree,
+finish within one more two-second allowance (only when it released children),
+so a shutdown's last tree saves never depend on whether a waiter beat the end
+of custody; and a release page that would only move a released child's feed
+cursor (its waiter already folded the rest) is not saved, the next open reading
+it again. No new
+`recover_node` run starts on the closed hub. Explicit process-exit abandonment, not ordinary joined shutdown,
 aborts these workers.
 Every task the tree runs for its children belongs to the tree, never to a
 root, so no root's release touches it. Work that owns a child's session or

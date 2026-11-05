@@ -967,10 +967,7 @@ async fn attach_native_source(
     };
     let topology_owner = claim_root_topology_owner(&tree_id, is_root);
     if let Some(topology) = crate::topology_runtime::lookup(&tree_id) {
-        // The custody-take scan's recovery runs read the root's loss policy.
-        topology.set_continue_after_loss(reattach_parent.continues_after_loss());
-        topology.remember_rejoin_spec(Arc::new(reattach_parent.clone()));
-        crate::agent::recovery::install_retirement_recovery(&topology, &tree_id).await;
+        super::topology::park_rejoin_parent(&topology, &tree_id, &reattach_parent).await;
     }
     // A reattach recompiles nothing, so it has no moved budget to report.
     let result = attach_runtime_source(
@@ -1216,10 +1213,7 @@ async fn attach_api_source(
     if topology_attach == crate::topology_runtime::TopologyHubAttach::AttachRoot
         && let Some(topology) = crate::topology_runtime::lookup(&tree_id)
     {
-        // The custody-take scan's recovery runs read the root's loss policy.
-        topology.set_continue_after_loss(reattach_parent.continues_after_loss());
-        topology.remember_rejoin_spec(Arc::new(reattach_parent.clone()));
-        crate::agent::recovery::install_retirement_recovery(&topology, &tree_id).await;
+        super::topology::park_rejoin_parent(&topology, &tree_id, &reattach_parent).await;
     }
     if is_root
         && topology_attach == crate::topology_runtime::TopologyHubAttach::AttachRoot

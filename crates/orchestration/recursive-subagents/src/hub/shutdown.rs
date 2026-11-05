@@ -86,7 +86,16 @@ pub(super) async fn shutdown_runtime(
 ) -> Result<(), TopologyShutdownError> {
     let mut failure = close_runtime_admission(&runtime).await;
     let tasks = runtime.driver.tasks();
+    let waiters = Arc::clone(&runtime);
+    let released_children = {
+        let live = runtime.live.lock().await;
+        live.residents().next().is_some() || live.releasings().next().is_some()
+    };
     join_runtime_children(runtime, &mut failure).await;
+    // Only a child this shutdown released has a turn waiter left to fold.
+    if released_children {
+        join_turn_waiters(&waiters).await;
+    }
     // The tree's tasks end with the tree, never with one root's release: what
     // the bounded joins above left running is aborted and joined here.
     if !tasks.close(HOST_SHUTDOWN_DETACH_TIMEOUT).await {
@@ -97,6 +106,21 @@ pub(super) async fn shutdown_runtime(
         Ok(())
     } else {
         Err(failure)
+    }
+}
+
+/// A released child's turn waiter folds its turn's terminal into the tree.
+/// It gets one release allowance, so a shutdown's last tree saves do not
+/// depend on whether it beat the end of custody.
+async fn join_turn_waiters(runtime: &ProductTopologyRuntime) {
+    let deadline = tokio::time::Instant::now() + HOST_SHUTDOWN_RELEASE_TIMEOUT;
+    while runtime
+        .driver
+        .read(crate::tree::ProductAgentTree::has_turn_waiters)
+        .unwrap_or(false)
+        && tokio::time::Instant::now() < deadline
+    {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     }
 }
 

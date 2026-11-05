@@ -76,10 +76,12 @@ fn class_counts(table: &mut String, rows: &[Value]) {
         "FENCED",
         "HANDED_OFF",
         "NOT_HANDED_OFF",
+        "CONTINUED",
+        "HELD",
         "UNCLASSIFIED",
         "DIVERGENT",
     ];
-    let mut counts = std::collections::BTreeMap::<(String, u64), [usize; 10]>::new();
+    let mut counts = std::collections::BTreeMap::<(String, u64), [usize; 12]>::new();
     for row in rows {
         let outcome = row["outcome"].as_str().unwrap().split('{').next().unwrap();
         let index = classes.iter().position(|class| *class == outcome).unwrap();
@@ -90,7 +92,7 @@ fn class_counts(table: &mut String, rows: &[Value]) {
             ))
             .or_default()[index] += 1;
     }
-    table.push_str("\n## Class Counts\n\n| Shape | Repeat | COMPLETED_ONCE | ABANDONED | REQUEUED | REFUSED | NOT_ADMITTED | FENCED | HANDED_OFF | NOT_HANDED_OFF | UNCLASSIFIED | DIVERGENT |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n");
+    table.push_str("\n## Class Counts\n\n| Shape | Repeat | COMPLETED_ONCE | ABANDONED | REQUEUED | REFUSED | NOT_ADMITTED | FENCED | HANDED_OFF | NOT_HANDED_OFF | CONTINUED | HELD | UNCLASSIFIED | DIVERGENT |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n");
     for ((shape, repeat), counts) in counts {
         write!(table, "| {shape} | {repeat} |").unwrap();
         for count in counts {

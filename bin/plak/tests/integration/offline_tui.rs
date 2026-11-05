@@ -3084,6 +3084,102 @@ fn a_reload_during_a_running_turn_hands_it_to_the_new_build_once() {
     terminal.quit();
 }
 
+/// Provider requests the product children dispatched, across processes.
+fn child_dispatches(fixture: &Fixture) -> usize {
+    std::fs::read_to_string(fixture.evidence().with_file_name("child-evidence.jsonl"))
+        .unwrap_or_default()
+        .lines()
+        .filter(|line| line.contains("provider_dispatched"))
+        .count()
+}
+
+fn wait_for_child_dispatches(fixture: &Fixture, count: usize) {
+    let deadline = Instant::now() + WAIT;
+    while child_dispatches(fixture) < count {
+        assert!(
+            Instant::now() < deadline,
+            "the child dispatched {} of {count} requests",
+            child_dispatches(fixture)
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// A root whose children are real product child sessions over
+/// `child_script`, spawned through the product's own child route.
+fn product_child_root(child_script: &Path, steps: &Value) -> Value {
+    json!({
+        "version": 1,
+        "tree": true,
+        "durable_tree": true,
+        "product_child_script": child_script,
+        "repeat_last_step": true,
+        "steps": steps
+    })
+}
+
+/// A child whose one request streams a prefix, then waits on `gate`.
+fn gated_child(gate: &Path) -> Value {
+    json!({
+        "version": 1,
+        "repeat_last_step": true,
+        "steps": [{"stream": [{"text": "child working"}, {"gate": {"file": gate}}],
+                   "output": {"text": "child done"}}]
+    })
+}
+
+/// `/reload` while a real child's turn runs on an idle root hands the child
+/// off (spec 02 §5.1): the new build continues it once, through the
+/// product's child route, and a second continuation never follows.
+#[test]
+fn a_reload_during_a_running_child_turn_continues_the_child_once_on_the_new_build() {
+    let fixture = Fixture::new(&recovery_answer_script());
+    let child_script = fixture.root.join("child-script.json");
+    let first_gate = fixture.root.join("child-gate-first");
+    let second_gate = fixture.root.join("child-gate-second");
+    write_json(&child_script, &gated_child(&first_gate));
+    fixture.write_script(&product_child_root(
+        &child_script,
+        &json!([
+            {"output": {"tool": {"name": "spawn_agent", "arguments": {
+                "template": "review",
+                "tier": "read_only",
+                "description": "reviewer",
+                "prompt": "review the diff",
+                "output_schema_json": "{\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"],\"additionalProperties\":false}"
+            }}}, "finish": "tool_calls"},
+            {"output": {"text": "the child is running"}}
+        ]),
+    ));
+    enable_subagents(&fixture);
+    let fake_bin = fixture.root.join("fake-bin-child-handoff");
+    std::fs::create_dir_all(&fake_bin).expect("fake bin");
+    install_this_build(&fixture, &fake_bin);
+    let mut terminal = Terminal::spawn(&fixture, Launch::OnPath(&fake_bin));
+    terminal.wait_ready();
+    fixture.wait_for_identity_cache();
+    terminal.send(b"start a reviewer\r");
+    terminal.wait_screen("the child is running");
+    terminal.wait_absent("Esc stop");
+    wait_for_child_dispatches(&fixture, 1);
+    let session = fixture.session_ids()[0].clone();
+    // The new build's child request waits on its own gate, so the
+    // continuation is still running when it is counted.
+    write_json(&child_script, &gated_child(&second_gate));
+    fixture.write_script(&product_child_root(
+        &child_script,
+        &json!([{"output": {"text": "the root answered after the reload"}}]),
+    ));
+    terminal.send(b"/reload\r");
+    wait_for_child_dispatches(&fixture, 2);
+    std::thread::sleep(Duration::from_secs(2));
+    assert_eq!(child_dispatches(&fixture), 2, "the child continued once");
+    assert_eq!(fixture.session_ids(), [session], "the same session resumed");
+    assert!(terminal.is_alive());
+    std::fs::write(&second_gate, b"").expect("release the continued child");
+    terminal.quit();
+}
+
 fn write_json(path: &Path, value: &Value) {
     std::fs::write(path, serde_json::to_vec_pretty(value).expect("json")).expect("json file");
 }

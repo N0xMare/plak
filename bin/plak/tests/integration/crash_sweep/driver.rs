@@ -189,7 +189,7 @@ fn lifecycle(
     command
         .args(["agent", "--session", session])
         .env(TRACE_ENV, fixture.root.join("commit-trace.jsonl"));
-    if shape == "handoff_resume" {
+    if matches!(shape, "handoff_resume" | "handoff_resume_child") {
         std::fs::write(fixture.root.join(shapes::handoff::QUIT_AS_HANDOFF), b"").unwrap();
     }
     if shape == "capacity_overflow" {
@@ -505,6 +505,17 @@ fn cut_after_kill(
 ) -> Value {
     if shape == "handoff_resume" {
         return shapes::handoff::after_kill(fixture, session, commits, |label| {
+            traced_reopen(fixture, session, label, None)
+                .unwrap_or_else(|outcome| panic!("{label} refused: {:?}", outcome.lines))
+        });
+    }
+    let child = match shape {
+        "handoff_resume_child" => Some(shapes::child::Variant::Handoff),
+        "owner_lost_child_continue" => Some(shapes::child::Variant::OwnerLost),
+        _ => None,
+    };
+    if let Some(variant) = child {
+        return shapes::child::after_kill(fixture, session, commits, variant, |label| {
             traced_reopen(fixture, session, label, None)
                 .unwrap_or_else(|outcome| panic!("{label} refused: {:?}", outcome.lines))
         });

@@ -372,6 +372,12 @@ impl ProductAgentTree {
         self.turn_waiters.contains_key(agent_id)
     }
 
+    /// Whether any host turn waiter is still running.
+    #[must_use]
+    pub fn has_turn_waiters(&self) -> bool {
+        !self.turn_waiters.is_empty()
+    }
+
     /// Children that had a started turn when the host crashed (`load_tree` pauses).
     pub fn inflight_join_targets(&self) -> Vec<(String, String, String, String)> {
         self.nodes

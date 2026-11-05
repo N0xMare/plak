@@ -1820,8 +1820,18 @@ later saves return the classified `disk_full` category and no backend text;
 the child row lands before the fault, independent of projector save counts),
 `child_hold_ms` / `child_hold_after` (later children stay running after the
 locator is published), and `fail_child_after_successes` (a later bind returns
-recovery-required). Those dials are refused unless `tree` is set, and
-`disk_full_at_child_locator` requires `durable_tree`. They are fixture controls,
+recovery-required). Those dials stand in for the child session. With
+`product_child_script` instead, children are real product child sessions: the
+scripted root's parent is parked on its attached hub as a root attach parks
+it, so spawn, live slot, release, reopen and continuation all take the
+product's own child route, and each child binds the named script document
+(read whenever it binds, so a test rewrites it between builds) over the pi
+coding projection, against a roster whose `review` template binds
+`openrouter`. A child's provider requests append to `child-evidence.jsonl`
+beside the root's evidence. Those dials are refused unless `tree` is set,
+`disk_full_at_child_locator` requires `durable_tree`, and
+`product_child_script` requires `durable_tree` and none of the scripted child
+dials. They are fixture controls,
 not product configuration. A scripted stall observes cancellation unless the
 script sets `stall_ignores_cancellation`. On an attached offline face,
 `PLAK_TEST_PROVIDER_RELEASE` selects a file gate at the first physical provider
@@ -2104,6 +2114,24 @@ the pilot proves the released head is still Working and requires abandonment
 on reopen. Every indexed startup, admission, escalation and release commit is
 cut, with the same outcome/verdict table and convergence checks. A prompt cut
 before admission resumes normally from its restored queue, then completes once.
+`handoff_resume` quits a running root turn as a planned handoff (the agent
+face's quit, made one by a fixture file): a cut after the handoff row is
+durable relaunches into one continuation by itself, any earlier cut into
+nothing continued, and a second relaunch continues nothing more.
+`handoff_resume_child` and `owner_lost_child_continue` run the same laws on
+a real product child (`product_child_script`): the root spawns a child, the
+child's request waits, and the root's turn ends with it running. The first
+quits as a handoff; a cut after the child's handoff row relaunches into one
+continuation of the child, any earlier cut leaves its loss held. The second
+runs under `resume_after_loss = "continue"`, opens the child's gate once the
+root answered and quits plainly once the child's attempt ended, so no live
+turn races the release; a cut that loses the child's running request
+continues it at most once. Either way each continuation is one accepted
+continuation command and one request, counted while it runs, and a second
+relaunch dispatches nothing for the root or the child. Their lifecycles
+let the root answer only after every store stayed still for a second behind
+the child's dispatch, and quit only once the tree folded the child's
+acceptance, so both twins release the same feed.
 The opt-in `uncertain_mcp_tool` shape drives the fake MCP server's escaped
 result into an uncertain tool outcome; its pilot's host recovers the fenced
 root in place before quit, so its cuts cover that reopen's commits, including
