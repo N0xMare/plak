@@ -235,6 +235,7 @@ impl<P: ProtocolExtension> HostService<P> {
         };
         sender.send(ask).map_err(|error| refusal_of(&error))?;
         state.next_attachment += 1;
+        let waiting = state.holding;
         state.attachments.insert(
             id,
             Attachment {
@@ -247,7 +248,9 @@ impl<P: ProtocolExtension> HostService<P> {
                 gapped: BTreeSet::new(),
                 snapshot_held: 0,
                 dropped: false,
-                waiting: false,
+                // As a root attachment made before an unresolved
+                // opening's binding, it takes nothing until that binding.
+                waiting,
             },
         );
         *state.agent_holders.entry(agent.to_owned()).or_default() += 1;

@@ -286,6 +286,10 @@ pub struct WireConnection<P: ProtocolExtension, W: Write> {
     lost_transcripts: LostTranscripts,
 }
 
+/// How many roots a connection remembers telling its client: an attach of
+/// an older one is unknown, as a root never told is.
+const TOLD_ROOTS: usize = 16;
+
 /// The client correlation a session request's intent carries, before its
 /// client's id.
 const SESSION_REQUEST: &str = "session-request:";
@@ -468,9 +472,13 @@ where
             .map(|session| (session, self.service.root().clone()))
     }
 
-    /// Records that the client was told of `root`.
+    /// Records that the client was told of `root`, keeping the last
+    /// [`TOLD_ROOTS`] of them.
     fn tell(&mut self, root: &NodeAddress) {
         if !self.told.contains(root) {
+            if self.told.len() == TOLD_ROOTS {
+                self.told.remove(0);
+            }
             self.told.push(root.clone());
         }
     }

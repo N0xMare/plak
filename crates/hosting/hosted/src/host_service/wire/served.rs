@@ -218,7 +218,10 @@ impl<P: ProtocolExtension> ServedSession<P> {
     /// (the open failed) is the served session's.
     pub(super) fn end(&mut self) {
         if std::mem::take(&mut self.unresolved) {
+            // The opening never said whose it was: the attachments it held
+            // end now rather than wait for a binding that will not come.
             self.service.hold_attachments(false);
+            self.service.resync_attachments();
         }
         let held = self.held.take().unwrap_or_default();
         self.pass(held);

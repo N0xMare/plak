@@ -744,6 +744,84 @@ fn overflowed_opening_resolved_by(next: &str, root_after: &NodeAddress) {
     );
 }
 
+/// Overflows the held opening of `connection`, attached as attachment 1,
+/// and flushes the resync.
+fn overflow_the_opening<W: Write>(connection: &mut WireConnection<plakous_host_protocol::Core, W>) {
+    use plakous_host_protocol::views::transcript::NoticeScope;
+    assert!(
+        connection
+            .observe(SessionObservation::SessionOpening)
+            .unwrap()
+    );
+    for index in 0..=ATTACHMENT_CAPACITY {
+        let row = TranscriptRow::info(NoticeScope::Host, format!("opening {index}"));
+        assert!(connection.observe(SessionObservation::Row(row)).unwrap());
+    }
+    connection.flush().unwrap();
+}
+
+/// A child attachment made before an overflowed opening's binding waits as
+/// a root one does, and the session's end with the opening still
+/// unresolved ends every waiting attachment with `resync_required`.
+#[test]
+fn waiting_attachments_include_children_and_end_with_the_session() {
+    use plakous_host_protocol::Core;
+    let (actions, _intents) = plakous_host_protocol::intent_channel::<Core>();
+    let mut stdout = Vec::new();
+    let mut connection = WireConnection::new(root(), &mut stdout, actions)
+        .serving("s1", |id| Some(root_named(&format!("tree-{id}"))));
+    assert!(connection.request(1, Op::Attach { node: root() }).is_some());
+    overflow_the_opening(&mut connection);
+    connection.service = connection
+        .service
+        .clone()
+        .with_nodes(std::sync::Arc::new(OpenChildren));
+    let child = NodeAddress {
+        tree_id: "t1".into(),
+        agent_id: "c1".into(),
+    };
+    assert!(matches!(
+        connection.request(2, Op::Attach { node: child }),
+        Some(Outcome::Ok(Answer::Attached { attachment: 2 }))
+    ));
+    let served = connection.served.clone().unwrap();
+    served::lock(&served).end();
+    connection.flush().unwrap();
+    drop(connection);
+    let frames = host_frames(&stdout);
+    assert!(
+        !frames
+            .iter()
+            .any(|frame| matches!(frame, HostFrame::Event { attachment: 2, .. })),
+        "{frames:?}"
+    );
+    assert!(
+        frames
+            .iter()
+            .any(|frame| matches!(frame, HostFrame::ResyncRequired { attachment: 2 })),
+        "{frames:?}"
+    );
+}
+
+/// A connection remembers the last 16 roots it told its client; an attach
+/// of an older one is unknown.
+#[test]
+fn a_connection_remembers_its_last_told_roots() {
+    use plakous_host_protocol::Core;
+    let (actions, _intents) = plakous_host_protocol::intent_channel::<Core>();
+    let mut stdout = Vec::new();
+    let mut connection = WireConnection::<Core, _>::new(root(), &mut stdout, actions);
+    for index in 0..TOLD_ROOTS {
+        connection.tell(&root_named(&format!("tree-{index}")));
+    }
+    assert!(
+        !connection.told.contains(&root()),
+        "the welcome's went first"
+    );
+    assert!(connection.told.contains(&root_named("tree-1")));
+    assert_eq!(connection.told.len(), TOLD_ROOTS);
+}
+
 /// Every child of the tree takes attachments.
 struct OpenChildren;
 
