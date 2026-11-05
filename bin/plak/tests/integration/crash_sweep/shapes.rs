@@ -6,6 +6,7 @@ use plak::store::session_records::SessionRecordStore as _;
 use plakous_recursive_subagents::protocol::CandidateId;
 use serde_json::{Value, json};
 pub(super) mod c1;
+pub(super) mod handoff;
 mod residency;
 pub(super) mod runner;
 mod sw3a;
@@ -13,6 +14,13 @@ mod sw3a;
 #[test]
 fn uncertain_mcp_tool_pilot_proves_live_shape() {
     let shape = "uncertain_mcp_tool";
+    let (seed, session) = super::driver::setup(shape);
+    super::driver::pilot(&seed, &session, shape);
+}
+
+#[test]
+fn handoff_resume_pilot_records_the_handoff_before_its_release() {
+    let shape = "handoff_resume";
     let (seed, session) = super::driver::setup(shape);
     super::driver::pilot(&seed, &session, shape);
 }
@@ -193,6 +201,16 @@ pub(super) const REGISTRY: &[Shape] = &[
         setup: no_setup,
         lifecycle: uncertain_mcp_lifecycle,
         assert_live: assert_uncertain_mcp,
+    },
+    Shape {
+        name: "handoff_resume",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: handoff::script,
+        configure: no_configure,
+        setup: no_setup,
+        lifecycle: handoff::lifecycle,
+        assert_live: handoff::assert_live,
     },
     Shape {
         name: "busy_quit_escalates",

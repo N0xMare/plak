@@ -139,7 +139,7 @@ fn the_root_records_its_loss_and_consent_in_the_product_store() {
     assert_eq!(root_loss_state(store, &session).unwrap(), None);
     let lost = LostRootTurn {
         turn_id: "lost-turn".to_owned(),
-        terminal_seq: 0,
+        applied_seq: 0,
     };
     assert!(record_root_owner_lost(store, &session, &lost).unwrap());
     assert!(
@@ -183,7 +183,7 @@ fn the_loss_waits_for_the_views_to_apply_the_lost_terminal() {
     let store: &dyn SessionRecordStore = rows.records();
     let lost = LostRootTurn {
         turn_id: "lost-turn".to_owned(),
-        terminal_seq: 7,
+        applied_seq: 7,
     };
     assert!(!record_root_owner_lost(store, &session, &lost).unwrap());
     assert_eq!(
@@ -268,7 +268,7 @@ fn the_scan_keeps_only_a_process_lost_terminal_with_nothing_admitted_after() {
         for (seq, fact) in facts.iter().enumerate() {
             fold_lost_turn(&mut lost, u64::try_from(seq).unwrap() + 1, fact);
         }
-        lost.map(|lost: LostRootTurn| (lost.turn_id, lost.terminal_seq))
+        lost.map(|lost: LostRootTurn| (lost.turn_id, lost.applied_seq))
     };
     let lost = [
         accepted(1),

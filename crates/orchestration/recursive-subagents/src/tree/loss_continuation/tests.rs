@@ -109,8 +109,8 @@ fn a_held_continuation_ends_by_interrupt_close_or_a_later_turn() {
     assert_eq!(interrupted.loss_continuation(&child), None);
     assert_eq!(
         view(&interrupted, &child).interrupt_cause,
-        None,
-        "an operator interrupt records no cause today"
+        Some(InterruptCauseView::Parent),
+        "a parent's interrupt records its cause"
     );
 
     let (_root, mut closed, child) = reopened_after_loss();
@@ -236,4 +236,126 @@ fn a_continuation_whose_command_has_a_fact_is_not_pending() {
     assert!(tree.record_loss_continuation(&child, 2).is_err());
     let reopened = ProductAgentTree::reopen(tree.to_persisted());
     assert_eq!(reopened.loss_continuation(&child), None);
+}
+
+/// A tree with a child whose turn is running, one parked between turns,
+/// and one a lost host left held.
+fn working_children() -> (tempfile::TempDir, ProductAgentTree, [String; 3]) {
+    let (root, mut tree) = tree();
+    let mut spawn = || {
+        tree.spawn_agent("root", &spawn_req(), None)
+            .unwrap()
+            .agent_id
+    };
+    let [running, parked, held] = [spawn(), spawn(), spawn()];
+    for (child, turn) in [
+        (&running, "00000000-0000-0000-0000-000000000001"),
+        (&parked, "00000000-0000-0000-0000-000000000002"),
+        (&held, "00000000-0000-0000-0000-000000000003"),
+    ] {
+        tree.bind_session_locator(child, "locator".to_owned())
+            .unwrap();
+        tree.set_active_turn(child, true).unwrap();
+        tree.bind_attempt_turn(child, turn).unwrap();
+    }
+    for child in [&parked, &held] {
+        tree.release_attempt_turn(child).unwrap();
+        tree.park_child(child, Vec::new()).unwrap();
+    }
+    tree.mark_owner_lost(&held);
+    (root, tree, [running, parked, held])
+}
+
+/// A planned handoff interrupts each running or parked child with cause
+/// `handoff`, keeps its attempt, and leaves a child held after a loss held
+/// as it was. The next host reads the same rows: nothing is marked again,
+/// and each handed-off child is held as a handoff, which continues by
+/// itself.
+#[test]
+fn a_handoff_interrupts_running_and_parked_children_and_keeps_a_hold() {
+    let (_root, mut tree, [running, parked, held]) = working_children();
+    let mut handed_off = tree.record_handoff().unwrap();
+    handed_off.sort();
+    let mut expected = vec![running.clone(), parked.clone()];
+    expected.sort();
+    assert_eq!(handed_off, expected);
+    for child in [&running, &parked] {
+        assert_eq!(tree.node(child).unwrap().status, NodeStatus::Interrupted);
+        assert_eq!(tree.attempt(child).unwrap().status, AttemptStatus::Running);
+        let continuation = tree.loss_continuation(child).unwrap();
+        assert_eq!(continuation.cause, ContinuationCause::Handoff);
+        assert_eq!(continuation.state, LossContinuationState::Held);
+        assert_eq!(
+            view(&tree, child).interrupt_cause,
+            Some(InterruptCauseView::Handoff)
+        );
+    }
+    assert_eq!(
+        tree.loss_continuation(&held).unwrap().cause,
+        ContinuationCause::OwnerLost
+    );
+    let mut reopened = ProductAgentTree::reopen(tree.to_persisted());
+    reopened.apply_reopen_law();
+    for child in [&running, &parked] {
+        assert_eq!(
+            reopened.loss_continuation(child).map(|held| held.cause),
+            Some(ContinuationCause::Handoff),
+            "the reopen law marks a handed-off child nothing new"
+        );
+    }
+    assert_eq!(reopened.record_handoff().unwrap(), Vec::<String>::new());
+}
+
+/// A turn admitted after the handoff and lost again is an owner loss: the
+/// child is held for consent, so a handoff continues by itself once.
+#[test]
+fn a_turn_lost_after_its_handoff_continuation_is_held_as_an_owner_loss() {
+    let (_root, mut tree, [_, parked, _]) = working_children();
+    tree.record_handoff().unwrap();
+    let command = tree.record_loss_continuation(&parked, 1).unwrap();
+    let attempt = tree.node(&parked).unwrap().attempt_id.clone();
+    tree.record_command(AgentCommand::intent(
+        command.clone(),
+        &parked,
+        attempt,
+        AgentCommandKind::Resume,
+        "continue",
+        Vec::new(),
+    ))
+    .unwrap();
+    let accepted = tree.commands.get_mut(&command).unwrap();
+    accepted.fact = Some(CommandFact::Accepted);
+    accepted.accepted_seq = Some(1_000);
+    accepted.turn_id = Some("00000000-0000-0000-0000-000000000009".to_owned());
+    tree.lose_owner_in_fold(&parked);
+    let continuation = tree.loss_continuation(&parked).unwrap();
+    assert_eq!(continuation.cause, ContinuationCause::OwnerLost);
+    assert_eq!(continuation.state, LossContinuationState::Held);
+}
+
+/// Each interrupt records why: a parent's `interrupt_agent` records
+/// `parent`, the root's Ctrl-C `cascade`, and a run's exit `stopped`.
+#[test]
+fn interrupts_record_their_cause() {
+    for (cause, expected) in [
+        (None, InterruptCauseView::Parent),
+        (Some(InterruptCause::Cascade), InterruptCauseView::Cascade),
+        (Some(InterruptCause::Stopped), InterruptCauseView::Stopped),
+    ] {
+        let (_root, mut tree, [running, ..]) = working_children();
+        match cause {
+            None => {
+                tree.interrupt_agent("root", &close_req(&running), None)
+                    .unwrap();
+            }
+            Some(InterruptCause::Cascade) => {
+                tree.interrupt_running_descendants().unwrap();
+            }
+            Some(cause) => {
+                tree.interrupt_running_descendants_for(cause).unwrap();
+            }
+        }
+        assert_eq!(view(&tree, &running).interrupt_cause, Some(expected));
+        assert_eq!(tree.loss_continuation(&running), None);
+    }
 }

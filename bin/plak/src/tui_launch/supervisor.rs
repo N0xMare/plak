@@ -109,9 +109,12 @@ fn settle_tui_round(
                 ..
             })
         ) {
-            record_reload_handoff(session_id);
+            // A reload is a planned handoff: the host records each node with
+            // work in flight as handed off before it releases (spec 03 §14.1).
+            host_mailbox.request_handoff_and_release();
+        } else {
+            host_mailbox.request_abandon_and_release();
         }
-        host_mailbox.request_abandon_and_release();
         if join_host_worker_bounded(join, tui_timing::remaining_exit_budget(), label).is_err() {
             tui::report_background_panic();
         }
@@ -148,12 +151,6 @@ fn settle_tui_round(
         ))),
     }
 }
-
-/// Records the planned handoff of `session_id`'s running work before a
-/// reload releases it, so the reloaded build continues it exactly once
-/// (M5.4's handoff record). Until that writer lands nothing is recorded, as
-/// before: this is the one call site it replaces.
-fn record_reload_handoff(_session_id: &str) {}
 
 /// Pair the host worker's verdict with terminal restoration: either one
 /// failing fails the round, and both failures keep both reasons.

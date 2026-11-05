@@ -21,7 +21,8 @@ use super::{
 
 impl ProductAgentTree {
     /// Interrupts one descendant's running turn. The node stays
-    /// alive and re-steerable; only the turn ends.
+    /// alive and re-steerable; only the turn ends. The interrupt records
+    /// cause `parent`: an agent's `interrupt_agent`.
     ///
     /// # Errors
     ///
@@ -33,7 +34,12 @@ impl ProductAgentTree {
         request: &AttemptScopedRequest,
         operation_id: Option<&str>,
     ) -> Result<NodeStatus, TopologyError> {
-        self.interrupt_agent_for(caller_id, request, operation_id, None)
+        self.interrupt_agent_for(
+            caller_id,
+            request,
+            operation_id,
+            Some(super::InterruptCause::Parent),
+        )
     }
 
     /// [`Self::interrupt_agent`], recording why: an operator's interrupt

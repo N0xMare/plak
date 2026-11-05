@@ -133,11 +133,8 @@ fn run_agent_stdio_stopping_on(
 
     let mut busy = false;
     #[cfg(feature = "test-hooks")]
-    let idle_gate = crate::test_hooks::assistant_done_release();
-    #[cfg(feature = "test-hooks")]
-    let mut wait_for_idle = false;
-    #[cfg(feature = "test-hooks")]
-    let mut wait_for_input = false;
+    let (idle_gate, mut wait_for_idle, mut wait_for_input) =
+        (crate::test_hooks::assistant_done_release(), false, false);
     let mut attached = false;
     let mut hello_sent = false;
     let mut shutting_down = false;
@@ -407,7 +404,15 @@ fn run_agent_stdio_stopping_on(
                                 quit_id = Some(cmd_id.clone());
                                 shutting_down = true;
                                 shutdown_started = Instant::now();
-                                begin_shutdown(&actions, busy)?;
+                                #[cfg(feature = "test-hooks")]
+                                let handoff = crate::test_hooks::quit_as_handoff();
+                                #[cfg(not(feature = "test-hooks"))]
+                                let handoff = false;
+                                if handoff {
+                                    actions.request_handoff_and_release();
+                                } else {
+                                    begin_shutdown(&actions, busy)?;
+                                }
                             } else if let AgentCommand::Prompt { steer: true, .. } = &command {
                                 if busy {
                                     if let Some(action) = command.into_user_action(busy) {

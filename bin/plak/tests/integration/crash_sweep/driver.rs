@@ -189,6 +189,9 @@ fn lifecycle(
     command
         .args(["agent", "--session", session])
         .env(TRACE_ENV, fixture.root.join("commit-trace.jsonl"));
+    if shape == "handoff_resume" {
+        std::fs::write(fixture.root.join(shapes::handoff::QUIT_AS_HANDOFF), b"").unwrap();
+    }
     if shape == "capacity_overflow" {
         command.env(
             "PLAK_TEST_PROVIDER_RELEASE",
@@ -500,6 +503,12 @@ fn cut_after_kill(
     before: &summary::Summary,
     baseline: &summary::Summary,
 ) -> Value {
+    if shape == "handoff_resume" {
+        return shapes::handoff::after_kill(fixture, session, commits, |label| {
+            traced_reopen(fixture, session, label, None)
+                .unwrap_or_else(|outcome| panic!("{label} refused: {:?}", outcome.lines))
+        });
+    }
     let rehearsal = summary::rehearse(fixture, session);
     let dispatch_before = invariants::dispatches(fixture);
     let summaries_before = invariants::summary_dispatches(fixture);

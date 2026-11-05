@@ -34,6 +34,9 @@ pub(crate) const ROOT_LOSS_RESUME_PREFIX: &str = "plak:resume-loss:root:";
 /// The host instruction a root continuation after a loss runs.
 pub(crate) const ROOT_LOSS_RESUME_TEXT: &str = "Your previous turn was interrupted because the host running it was lost. Continue the current task from the last completed step: check what already happened before you act, and do not repeat completed actions.";
 
+/// The host instruction a root continuation after a planned handoff runs.
+pub(crate) const ROOT_HANDOFF_RESUME_TEXT: &str = "Your previous turn was interrupted when the host running it handed this session over to a new host. Continue the current task from the last completed step: check what already happened before you act, and do not repeat completed actions.";
+
 /// Where the root's continuation after a loss stands.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum RootLossState {
@@ -76,13 +79,15 @@ impl LossScan {
     }
 }
 
-/// A root turn the feed shows closed by a new owner after its process was
-/// lost, with no root turn admitted after it.
+/// A root turn the feed shows stopped by a lost or a releasing host, with
+/// no root turn admitted after it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct LostRootTurn {
     pub(crate) turn_id: String,
-    /// The sequence of the record that carried its terminal.
-    pub(crate) terminal_seq: u64,
+    /// The feed sequence the views must have applied before the interrupt
+    /// is recorded: the lost turn's terminal, or a handed-off turn's
+    /// admission. Either is past the turn's own submission.
+    pub(crate) applied_seq: u64,
 }
 
 /// Whether `command_id` is a root continuation after a loss.
@@ -278,7 +283,7 @@ fn fold_lost_turn(lost: &mut Option<LostRootTurn>, seq: u64, fact: &FeedFact) {
             )
             .then(|| LostRootTurn {
                 turn_id: turn_id.to_string(),
-                terminal_seq: seq,
+                applied_seq: seq,
             });
         }
         _ => {}
@@ -289,6 +294,7 @@ fn fold_lost_turn(lost: &mut Option<LostRootTurn>, seq: u64, fact: &FeedFact) {
 /// at the applied cursor, and says whether it wrote one. It waits for the
 /// views to have applied the lost turn's terminal, so that the turn's own
 /// submission is older than the loss; until then the next open records it.
+/// A turn a planned handoff already recorded is not recorded again.
 ///
 /// # Errors
 /// A product store read or write refused.
@@ -296,6 +302,54 @@ pub(crate) fn record_root_owner_lost(
     store: &dyn SessionRecordStore,
     session: &SessionRecord,
     lost: &LostRootTurn,
+) -> Result<bool, String> {
+    record_root_interrupt(store, session, lost, RootInterruptCause::OwnerLost)
+}
+
+/// Records a planned handoff of the root's running turn `turn` (spec 03
+/// section 14.1): the releasing host writes it before it releases, once its
+/// views applied the turn's admission, so the next open continues the turn
+/// once by itself. Says whether it wrote one.
+///
+/// # Errors
+/// A product store read or write refused.
+pub(crate) fn record_root_handoff(
+    store: &dyn SessionRecordStore,
+    session: &SessionRecord,
+    turn: &LostRootTurn,
+) -> Result<bool, String> {
+    record_root_interrupt(store, session, turn, RootInterruptCause::Handoff)
+}
+
+/// Records the operator's stop of the running root turn `turn_id`, before
+/// its cancel is requested, and says whether it wrote one. A host lost
+/// before the turn's terminal then leaves a stop on that turn: the next
+/// open records no loss for it, so nothing continues it, under either
+/// policy.
+///
+/// # Errors
+/// A product store read or write refused.
+pub(crate) fn record_root_stop(
+    store: &dyn SessionRecordStore,
+    session: &SessionRecord,
+    turn_id: &str,
+    cause: RootInterruptCause,
+) -> Result<bool, String> {
+    let turn = LostRootTurn {
+        turn_id: turn_id.to_owned(),
+        applied_seq: 0,
+    };
+    record_root_interrupt(store, session, &turn, cause)
+}
+
+/// Writes one root interrupt anchored on `lost`'s turn. Any root interrupt
+/// already anchored on that turn is final: a stop recorded before a loss
+/// keeps the loss from being recorded, so a stop is never continued.
+fn record_root_interrupt(
+    store: &dyn SessionRecordStore,
+    session: &SessionRecord,
+    lost: &LostRootTurn,
+    cause: RootInterruptCause,
 ) -> Result<bool, String> {
     let anchor = RootStopAnchor::Turn {
         turn_id: lost.turn_id.clone(),
@@ -312,18 +366,131 @@ pub(crate) fn record_root_owner_lost(
     let applied = store
         .load_views(&session.id)?
         .map_or(0, |views| views.cursor.get());
-    if applied < lost.terminal_seq {
+    if applied < lost.applied_seq {
         return Ok(false);
     }
     store
         .write_root_loss(
             &session.id,
+            RootLossIntent::Interrupt(RootInterrupt { anchor, cause }),
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(true)
+}
+
+/// The root turn a planned handoff hands over, if the feed after `scan`
+/// ends with one: the last root turn admitted, still unfinished or ended by
+/// the releasing host's cancel. A turn that completed, failed or was fenced
+/// is not handed over.
+///
+/// # Errors
+/// A feed read refused.
+pub(crate) async fn handed_off_root_turn(
+    sessions: &AgentSessions,
+    scan: LossScan,
+) -> Result<Option<LostRootTurn>, String> {
+    let mut cursor = scan.after;
+    let mut running = None;
+    loop {
+        let page = sessions
+            .feed_page(FeedPageRequest::after(FeedCursor::new(
+                scan.session,
+                cursor,
+            )))
+            .await
+            .map_err(|error| error.to_string())?;
+        let FeedPage::Records { records, .. } = page else {
+            return Ok(None);
+        };
+        if records.is_empty() {
+            return Ok(running);
+        }
+        for record in records {
+            cursor = record.header().seq;
+            for fact in record.facts() {
+                match fact {
+                    FeedFact::CommandAccepted {
+                        kind: FeedCommandKind::Root { .. },
+                        turn_id: Some(turn_id),
+                        ..
+                    } => {
+                        running = Some(LostRootTurn {
+                            turn_id: turn_id.to_string(),
+                            applied_seq: cursor.get(),
+                        });
+                    }
+                    FeedFact::TurnTerminal {
+                        turn_id, outcome, ..
+                    } if !matches!(outcome, FeedTurnOutcome::Cancelled { .. })
+                        && running
+                            .as_ref()
+                            .is_some_and(|turn| turn.turn_id == turn_id.to_string()) =>
+                    {
+                        running = None;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
+/// Whether the root's latest loss was a planned handoff, which continues by
+/// itself.
+///
+/// # Errors
+/// A product store read refused.
+pub(crate) fn root_loss_is_handoff(
+    store: &dyn SessionRecordStore,
+    session: &SessionRecord,
+) -> Result<bool, String> {
+    Ok(latest_loss(&store.load_intents(&session.id)?)
+        .is_some_and(|loss| loss.cause == RootContinuationCause::Handoff))
+}
+
+/// A stop of the root (the operator's interrupt, or a stop of everything)
+/// while it holds a continuation after a loss, or has one pending: one root
+/// interrupt with `cause` naming the same stopped turn, so stops stay
+/// stopped, then the pending continuation's prepared submission and its
+/// queue item are withdrawn. Says whether it stopped one.
+///
+/// # Errors
+/// A product store read or write refused.
+pub(crate) fn stop_root_continuation(
+    store: &dyn SessionRecordStore,
+    session: &mut SessionRecord,
+    cause: RootInterruptCause,
+) -> Result<bool, String> {
+    let intents = store.load_intents(&session.id)?;
+    let Some(loss) = latest_loss(&intents) else {
+        return Ok(false);
+    };
+    let views = store
+        .load_views(&session.id)?
+        .unwrap_or_else(SessionViews::empty);
+    let pending = match state(&loss, &intents, &views) {
+        Some(RootLossState::Held) => None,
+        Some(RootLossState::Pending(command)) => Some(command),
+        Some(RootLossState::Running) | None => return Ok(false),
+    };
+    store
+        .write_root_loss(
+            &session.id,
             RootLossIntent::Interrupt(RootInterrupt {
-                anchor,
-                cause: RootInterruptCause::OwnerLost,
+                anchor: loss.anchor,
+                cause,
             }),
         )
         .map_err(|error| error.to_string())?;
+    if let Some(command) = pending
+        && let Some(submission) = intents.submission(&command)
+    {
+        let item = submission.queue_item_id.clone();
+        session.pending_queue.retain(|queued| queued.id != item);
+        store
+            .discard_submission(session, &command, None)
+            .map_err(|error| error.to_string())?;
+    }
     Ok(true)
 }
 

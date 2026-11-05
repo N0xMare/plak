@@ -24,14 +24,14 @@ use crate::sessions::projector::{RootInterruptCause, RootStopAnchor};
 type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
 type UserAction = crate::surface_protocol::UserAction<TestExtension>;
 
-struct Lost {
-    store: Arc<dyn SessionRecordStore>,
-    state_roots: crate::agent::ProductStateRoots,
-    id: String,
-    evidence: PathBuf,
+pub(super) struct Lost {
+    pub(super) store: Arc<dyn SessionRecordStore>,
+    pub(super) state_roots: crate::agent::ProductStateRoots,
+    pub(super) id: String,
+    pub(super) evidence: PathBuf,
 }
 
-fn dispatches(evidence: &Path) -> usize {
+pub(super) fn dispatches(evidence: &Path) -> usize {
     read_evidence(evidence)
         .unwrap()
         .iter()
@@ -42,10 +42,35 @@ fn dispatches(evidence: &Path) -> usize {
 /// A root turn whose host exits by lease alone while its provider request
 /// stalls past cancellation: the next exact open closes it as lost.
 fn lose_a_root_turn(root: &Path) -> Lost {
+    release_a_running_root_turn(root, Release::Lost, true, |config| config)
+}
+
+/// How the host running the turn lets go.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum Release {
+    /// Lease alone, as a crash leaves it.
+    Lost,
+    /// A planned handoff.
+    Handoff,
+    /// The operator's stop, then lease alone before the cancel settled.
+    StopThenLost,
+}
+
+/// A root turn whose host lets go mid-request. A `deaf` stall outlasts the
+/// cancel, so the release abandons the turn by lease; otherwise the cancel
+/// settles first.
+pub(super) fn release_a_running_root_turn(
+    root: &Path,
+    release: Release,
+    deaf: bool,
+    configure: impl FnOnce(
+        crate::runtime::HostConfig<TestExtension>,
+    ) -> crate::runtime::HostConfig<TestExtension>,
+) -> Lost {
     let plan: Arc<ScriptPlan> = Arc::new(
         serde_json::from_value(serde_json::json!({
             "version": SCRIPT_VERSION,
-            "stall_ignores_cancellation": true,
+            "stall_ignores_cancellation": deaf,
             "steps": [{"stream": [{"text": "lost prefix"}, {"stall": 30000}]}]
         }))
         .unwrap(),
@@ -54,7 +79,7 @@ fn lose_a_root_turn(root: &Path) -> Lost {
     let id = config.session.id.clone();
     let store = Arc::clone(&config.store);
     let state_roots = config.state_roots.clone();
-    let (actions, events, host) = spawn_host_worker(config).unwrap();
+    let (actions, events, host) = spawn_host_worker(configure(config)).unwrap();
     let mut seen = Vec::new();
     send_attached_action(&actions, UserAction::Prompt("first".into()));
     wait_for(
@@ -63,7 +88,18 @@ fn lose_a_root_turn(root: &Path) -> Lost {
         "the lost turn's prefix",
         |event| matches!(event, HostEvent::AssistantDelta(text) if text.contains("lost prefix")),
     );
-    actions.request_abandon_and_release();
+    match release {
+        Release::Lost => actions.request_abandon_and_release(),
+        Release::Handoff => actions.request_handoff_and_release(),
+        Release::StopThenLost => {
+            send_attached_action(&actions, UserAction::Interrupt);
+            wait_for(&events, &mut seen, "the stop", |event| {
+                matches!(event, HostEvent::Status { phase, .. }
+                    if matches!(phase, plakous_host_protocol::status::HostPhase::Interrupting))
+            });
+            actions.request_abandon_and_release();
+        }
+    }
     let _ = host.join().unwrap();
     Lost {
         store,
@@ -74,7 +110,7 @@ fn lose_a_root_turn(root: &Path) -> Lost {
 }
 
 /// The next host process for the lost session, answering with `steps`.
-fn next_host(
+pub(super) fn next_host(
     root: &Path,
     lost: &Lost,
     steps: serde_json::Value,
@@ -87,18 +123,18 @@ fn next_host(
     config
 }
 
-fn held_notice(event: &HostEvent) -> bool {
+pub(super) fn held_notice(event: &HostEvent) -> bool {
     matches!(event, HostEvent::Row(plakous_host_protocol::views::transcript::TranscriptRow::Notice(notice))
         if notice.text.contains("the turn the lost host was running is held"))
 }
 
-fn idle(event: &HostEvent) -> bool {
+pub(super) fn idle(event: &HostEvent) -> bool {
     matches!(event, HostEvent::Status { phase, .. }
         if matches!(phase, plakous_host_protocol::status::HostPhase::Idle))
 }
 
 /// Opens the next host, waits for it to settle idle, and quits it.
-fn open_and_quit(config: crate::runtime::HostConfig<TestExtension>) -> Vec<HostEvent> {
+pub(super) fn open_and_quit(config: crate::runtime::HostConfig<TestExtension>) -> Vec<HostEvent> {
     let (actions, events, host) = spawn_host_worker(config).unwrap();
     let mut seen = Vec::new();
     wait_for(&events, &mut seen, "the open", idle);

@@ -115,6 +115,14 @@ impl ProductAgentTree {
         let (interrupt, cause) = self.latest_interrupt(agent_id, &attempt.attempt_id)?;
         let cause = match cause? {
             InterruptCause::OwnerLost => ContinuationCause::OwnerLost,
+            // A handoff covers the turn it interrupted: a turn admitted after
+            // it and lost again is an owner loss, held for consent, so a
+            // handoff continues by itself once.
+            InterruptCause::Handoff
+                if self.turn_admitted_after(agent_id, &attempt.attempt_id, interrupt) =>
+            {
+                ContinuationCause::OwnerLost
+            }
             InterruptCause::Handoff => ContinuationCause::Handoff,
             _ => return None,
         };
@@ -252,6 +260,24 @@ impl ProductAgentTree {
     }
 
     /// The turn of the attempt's latest accepted command.
+    /// Whether a command of the attempt was accepted after the interrupt
+    /// intent `interrupt` was recorded, by feed position.
+    fn turn_admitted_after(&self, agent_id: &str, attempt_id: &AttemptId, interrupt: &str) -> bool {
+        let Some(recorded) = self
+            .operations
+            .get(interrupt)
+            .and_then(|operation| operation.fold)
+        else {
+            return false;
+        };
+        self.commands.values().any(|command| {
+            command.recipient == agent_id
+                && command.attempt_id.as_ref() == Some(attempt_id)
+                && command.fact == Some(CommandFact::Accepted)
+                && command.accepted_seq.is_some_and(|seq| seq > recorded.seq)
+        })
+    }
+
     fn last_accepted_turn(&self, agent_id: &str, attempt_id: &AttemptId) -> Option<&str> {
         self.commands
             .values()

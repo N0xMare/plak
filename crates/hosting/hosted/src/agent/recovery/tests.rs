@@ -4882,3 +4882,119 @@ async fn mail_after_an_ended_prepared_continuation_needs_no_reopen() {
         .unwrap();
     crate::topology_runtime::force_release(&fixture.tree_id).await;
 }
+
+/// What a planned handoff hands over, for the host-level handoff tests.
+impl Fixture {
+    /// A child whose turn is running, one parked between turns, and one
+    /// parked whose attempt spent its `max_turns`, each with a session the
+    /// next host can reopen.
+    pub(crate) async fn handoff_children(&self) -> [String; 3] {
+        self.runtime
+            .mutate_then_emit(false, |tree| {
+                tree.pin_bind_hints_for_test(crate::orchestration::BindHints::from_names(
+                    &["claude"],
+                    &[],
+                ));
+                tree.pin_template(
+                    "review",
+                    crate::orchestration::RosterBinding::leaf("claude", "test-model"),
+                );
+                let mut spent = crate::orchestration::RosterBinding::leaf("claude", "test-model");
+                spent.max_turns = Some(1);
+                tree.pin_template("spent", spent);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let running = self.spawn();
+        let parked = self.spawn();
+        let spent = self
+            .runtime
+            .mutate_then_emit(false, |tree| {
+                tree.spawn_agent(
+                    "root",
+                    &SpawnAgentRequest::test_named("spent", Tier::ReadOnly, "spent", "work"),
+                    None,
+                )
+                .map(|spawned| spawned.agent_id)
+                .map_err(|error| error.message)
+            })
+            .await
+            .unwrap();
+        let sessions = self.sessions();
+        for id in [&running, &parked, &spent] {
+            let (held, handle, _) = self.start_failing_turn(&sessions, id).await;
+            Self::await_unknown_outcome(&handle).await;
+            self.bind_turn(id, &held.locator(), handle.turn_id());
+            held.release().await.unwrap();
+        }
+        for id in [&parked, &spent] {
+            let id = id.clone();
+            self.runtime
+                .mutate_then_emit(false, move |tree| {
+                    tree.release_attempt_turn(&id)
+                        .and_then(|()| tree.park_child(&id, Vec::new()))
+                        .map_err(|error| error.message)
+                })
+                .await
+                .unwrap();
+        }
+        [running, parked, spent]
+    }
+
+    /// The next host's custody take: the reopen law, then one recovery run
+    /// with its continuation pass.
+    pub(crate) async fn next_host_take(&self) {
+        self.runtime
+            .mutate_then_emit(false, |tree| {
+                tree.apply_reopen_law();
+                Ok(())
+            })
+            .await
+            .unwrap();
+        recover_tree(&self.tree_id).await;
+    }
+
+    /// Each child's continuation cause as the stored rows derive it, with
+    /// `None` for a child that holds no continuation.
+    pub(crate) fn stored_continuation_causes(
+        &self,
+    ) -> std::collections::BTreeMap<String, Option<crate::agent_tree::ContinuationCause>> {
+        let Some(stored) = self.store.load(&self.tree_id).unwrap() else {
+            return std::collections::BTreeMap::new();
+        };
+        let tree = ProductAgentTree::reopen(stored);
+        tree.nodes()
+            .keys()
+            .filter(|id| **id != tree.root_agent_id)
+            .map(|id| {
+                (
+                    id.clone(),
+                    tree.loss_continuation(id).map(|held| held.cause),
+                )
+            })
+            .collect()
+    }
+
+    /// Continuation decisions, and the continuation commands with their facts.
+    pub(crate) fn continuations(
+        &self,
+    ) -> (usize, Vec<(String, Option<crate::agent_tree::CommandFact>)>) {
+        (continuation_decisions(self), continuation_commands(self))
+    }
+
+    /// Waits until each continuation command carries a fact.
+    pub(crate) async fn continuations_settled(&self, count: usize) {
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                let commands = continuation_commands(self);
+                if commands.len() == count && commands.iter().all(|(_, fact)| fact.is_some()) {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("the continuations are admitted");
+    }
+}

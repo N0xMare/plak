@@ -32,6 +32,16 @@ pub(crate) enum LossResume {
     Deferred(String),
 }
 
+/// The instruction of a continuation turn, by what stopped the node.
+fn continuation_instruction(cause: crate::agent_tree::ContinuationCause) -> String {
+    if cause == crate::agent_tree::ContinuationCause::Handoff {
+        crate::child_prompts::PLAK_CHILD_HANDOFF_RESUME_TEMPLATE
+    } else {
+        crate::child_prompts::PLAK_CHILD_LOSS_RESUME_TEMPLATE
+    }
+    .to_owned()
+}
+
 /// Resumes `agent_id`'s continuation after a loss: records consent (one
 /// durable decision for the attempt and the stopped turn) and starts its
 /// turn. A pending decision is not recorded again; its command is
@@ -54,12 +64,13 @@ async fn resume_after_loss(
     // on consent that is not durable.
     let recorded = runtime
         .mutate_then_emit(false, move |tree| {
-            let held = tree
+            let Some(cause) = tree
                 .loss_continuation(&id)
-                .is_some_and(|continuation| continuation.state != LossContinuationState::Running);
-            if !held {
+                .filter(|continuation| continuation.state != LossContinuationState::Running)
+                .map(|continuation| continuation.cause)
+            else {
                 return Ok(None);
-            }
+            };
             let command_id = tree
                 .record_loss_continuation(&id, decided_at_ms)
                 .map_err(|error| error.message)?;
@@ -67,10 +78,11 @@ async fn resume_after_loss(
             let Some(locator) = node.session_locator.clone() else {
                 return Err("the child has no session to continue".to_owned());
             };
-            Ok(Some((command_id, locator, node.path.display().to_string())))
+            let path = node.path.display().to_string();
+            Ok(Some((command_id, locator, path, cause)))
         })
         .await;
-    let (command_id, locator, path) = match recorded {
+    let (command_id, locator, path, cause) = match recorded {
         Ok(Some(recorded)) => recorded,
         Ok(None) => {
             withdraw_ended_continuation(runtime, agent_id).await;
@@ -121,10 +133,7 @@ async fn resume_after_loss(
                 agent_id,
                 *session,
                 command,
-                ChildCommand::fresh(
-                    crate::child_prompts::PLAK_CHILD_LOSS_RESUME_TEMPLATE.to_owned(),
-                    CommandKind::Resume,
-                ),
+                ChildCommand::fresh(continuation_instruction(cause), CommandKind::Resume),
                 StartAdmission::LossContinuation(command_id),
             )
             .await
@@ -164,9 +173,9 @@ async fn withdraw_ended_continuation(runtime: &ProductTopologyRuntime, agent_id:
 }
 
 /// The continuation pass a recovery run ends with: each recorded but
-/// unadmitted continuation is resubmitted, and when the attached root
-/// continues after a loss (`resume_after_loss = "continue"`) each held one
-/// is resumed, once.
+/// unadmitted continuation is resubmitted, each one a planned handoff left
+/// is resumed by itself, and when the attached root continues after a loss
+/// (`resume_after_loss = "continue"`) each held one is resumed, once.
 pub(in crate::agent) async fn continue_after_loss(
     parent: &SpawnParent,
     runtime: &Arc<ProductTopologyRuntime>,
@@ -179,7 +188,9 @@ pub(in crate::agent) async fn continue_after_loss(
     for (agent_id, continuation) in continuations {
         let due = match continuation.state {
             LossContinuationState::Pending => true,
-            LossContinuationState::Held => continues,
+            LossContinuationState::Held => {
+                continues || continuation.cause == crate::agent_tree::ContinuationCause::Handoff
+            }
             LossContinuationState::Running => false,
         };
         if due {

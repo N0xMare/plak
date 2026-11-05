@@ -12,13 +12,18 @@ use crate::runtime::admission::{
     QueuePersistAction, report_queue_persist_failed as queue_persist_failed,
 };
 use crate::runtime::root_loss::{
-    ROOT_LOSS_RESUME_TEXT, RootLossState, record_root_consent, root_loss_state,
+    ROOT_HANDOFF_RESUME_TEXT, ROOT_LOSS_RESUME_TEXT, RootLossState, record_root_consent,
+    root_loss_is_handoff, root_loss_state,
 };
 use crate::sessions::{NoticeScope, TranscriptRow};
 
 /// The live notice of a root a lost host left held.
 pub(super) const ROOT_LOSS_HELD_NOTE: &str =
     "the turn the lost host was running is held; nothing continues until you resume it";
+
+/// The live notice of a stop that ended the root's continuation.
+pub(super) const ROOT_LOSS_STOPPED_NOTE: &str =
+    "stopped: the turn the lost host was running stays interrupted and nothing continues it";
 
 /// What the idle dispatcher admits next: a prompt text, its queue item and
 /// whether it was already echoed.
@@ -40,15 +45,22 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         )
     }
 
-    /// At open: a decision a crash left pending is resubmitted, and under
-    /// `resume_after_loss = "continue"` a held continuation runs by itself
-    /// and the restored queue drains.
+    fn root_loss_handoff(&self) -> bool {
+        root_loss_is_handoff(self.role.config.store.as_ref(), &self.role.config.session)
+            .unwrap_or(false)
+    }
+
+    /// At open: a decision a crash left pending is resubmitted, and a held
+    /// continuation a planned handoff left, or any held one under
+    /// `resume_after_loss = "continue"`, runs by itself and the restored
+    /// queue drains.
     pub(super) fn arm_root_loss_resume(&mut self) {
         match self.root_loss() {
             Some(RootLossState::Pending(_)) => self.role.root_loss_resume_due = true,
             Some(RootLossState::Held)
                 if self.role.config.resume_after_loss
-                    == crate::runtime::ResumeAfterLoss::Continue =>
+                    == crate::runtime::ResumeAfterLoss::Continue
+                    || self.root_loss_handoff() =>
             {
                 self.role.root_loss_resume_due = true;
                 self.resume_restored_queue();
@@ -67,6 +79,37 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     ));
             }
             _ => {}
+        }
+    }
+
+    /// A stop of the root while it holds a continuation after a loss, or
+    /// has one pending, ends it: stops stay stopped (spec 03 §14.1).
+    pub(super) fn stop_root_continuation(
+        &mut self,
+        cause: crate::sessions::projector::RootInterruptCause,
+    ) {
+        self.role.root_loss_resume_due = false;
+        match crate::runtime::root_loss::stop_root_continuation(
+            self.role.config.store.as_ref(),
+            &mut self.role.config.session,
+            cause,
+        ) {
+            Ok(true) => {
+                emit_queue_snapshot(&self.role.events, &self.role.config.session);
+                let _ = self
+                    .role
+                    .events
+                    .send(crate::surface_protocol::ContentEvent::Row(
+                        TranscriptRow::info(NoticeScope::Recovery, ROOT_LOSS_STOPPED_NOTE),
+                    ));
+            }
+            Ok(false) => {}
+            Err(error) => {
+                let _ = self.role.events.notice(TranscriptRow::error(
+                    NoticeScope::Recovery,
+                    format!("the stop could not be recorded: {error}"),
+                ));
+            }
         }
     }
 
@@ -110,6 +153,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             return Ok(None);
         }
         let rows = self.role.config.topology_rows();
+        let text = if self.root_loss_handoff() {
+            ROOT_HANDOFF_RESUME_TEXT
+        } else {
+            ROOT_LOSS_RESUME_TEXT
+        };
         let Some(command) =
             record_root_consent(self.role.config.store.as_ref(), &self.role.config.session)
                 .map_err(CliFailure::new)?
@@ -135,14 +183,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         }
         let mut candidate = self.role.config.session.clone();
         let item = candidate
-            .enqueue_live(ROOT_LOSS_RESUME_TEXT)
+            .enqueue_live(text)
             .map_err(|_| CliFailure::new("the continuation was refused by the queue"))?;
         self.role.config.session = crate::runtime::result_mail::prepare_with_command(
             &rows,
             self.role.config.store.as_ref(),
             &candidate,
             &item,
-            ROOT_LOSS_RESUME_TEXT,
+            text,
             None,
             &command,
             crate::driver::ledger::CommandKind::HostWake,

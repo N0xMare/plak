@@ -138,6 +138,8 @@ mod factory;
 #[cfg(test)]
 pub(crate) mod fault_store;
 #[cfg(test)]
+mod handoff_tests;
+#[cfg(test)]
 mod intent_wake_tests;
 mod rebind;
 mod reconcile;

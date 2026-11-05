@@ -16,6 +16,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         reason = "Host release drains terminal publication and pending cancellations before dropping runtime and topology ownership."
     )]
     async fn release_attachment(&mut self) -> CliResult<()> {
+        // Taken first, whether or not this release succeeds: a later
+        // release never inherits a planned handoff.
+        let handoff = self.role.actions.take_planned_handoff();
         self.role.pending_resume = None;
         self.quit_abandoned_turn =
             self.role.events.quit_receipt.outcome() == super::super::HostQuitOutcome::Escalated;
@@ -24,6 +27,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         let published = self.role.config.session.store_revision != 0;
         if !self.role.projection_finished {
             self.finish_projection(false).await?;
+        }
+        // The handoff record is durable before any lease is released.
+        if handoff {
+            self.record_planned_handoff().await;
         }
         if abandon && let Some(agent) = self.opened.agent() {
             agent.begin_abandon();

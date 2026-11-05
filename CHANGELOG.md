@@ -236,6 +236,15 @@ an export.
   paused queue, `/recover`, or JSONL `resume`/`recover`) continues it once with
   a new instruction turn, resumes every held agent and lets the restored queue
   drain. `resume_after_loss = "continue"` does that by itself at open.
+- A planned handoff (`/reload`) records each node with work in flight as
+  handed off before its host releases it, and the next host continues each
+  once by itself, whatever `resume_after_loss` says; a handoff it could not
+  record holds like a loss. `/reload` still refuses while a turn, a process or
+  a sub-agent runs, so it hands off nothing in flight yet. Interrupts now
+  record why (`operator`, `parent`, `cascade`, `stopped`), and tree rows carry
+  it. A stop is final: stopping a running root turn is recorded before its
+  cancel, so a host lost before the turn ended never continues it, and
+  stopping a root that holds a continuation after a lost host ends it.
 - Reopening a session no longer pauses the agent tree. A sub-agent whose turn
   lost its owner is interrupted (owner lost) on reopen, keeps its attempt and
   waits for mail or a followup; a parked sub-agent whose wake was still

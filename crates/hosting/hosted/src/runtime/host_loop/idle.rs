@@ -378,6 +378,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                         self.role.pending_start = None;
                         return Ok(HostStep::Continue);
                     }
+                    if one_shot.is_none() {
+                        self.stop_root_continuation(
+                            sessions::projector::RootInterruptCause::Operator,
+                        );
+                    }
                     if !cancelled_resume
                         && !self.has_automatic_continue_work()
                         && one_shot.is_none()
@@ -1007,6 +1012,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     | UserAction::RecoverTopologyNode { .. }
                     | UserAction::ResumeLossContinuation { .. }),
                 ) => {
+                    if matches!(action, UserAction::StopAllTopology) {
+                        self.stop_root_continuation(
+                            sessions::projector::RootInterruptCause::Stopped,
+                        );
+                    }
                     dispatch_topology_navigator(
                         &self.role.config.topology_rows(),
                         &self.role.config.state_roots,

@@ -211,6 +211,11 @@ pub static CHILD_PROMPT_PINS: &[PromptPin] = &[
         "f01fb5bb2b6107400d9df624783c76ced77a5c8d70d01bd79f048440216eeb76",
     ),
     PromptPin::new(
+        "child.child_handoff_resume_template",
+        PLAK_CHILD_HANDOFF_RESUME_TEMPLATE,
+        "091345d300c493140d75476640666707db6641350b3e6cb80850146d3666ba4f",
+    ),
+    PromptPin::new(
         "child.child_assignment_start_template_direct",
         PLAK_CHILD_ASSIGNMENT_START_TEMPLATE_DIRECT,
         "cc2e1169792c46cfadc9b2514ab2077fe65cd624e50878da345d39950fe8a65d",
@@ -305,6 +310,11 @@ impl TransientResume<'_> {
 /// child was lost, mid-turn or while it waited between turns (an owner-lost interrupt the operator resumed, or
 /// one `resume_after_loss = "continue"` resumes).
 pub const PLAK_CHILD_LOSS_RESUME_TEMPLATE: &str = "The host running this assignment was lost, which interrupted your work: a turn in progress, or your wait between turns. Continue the same assignment from the last completed step: check what already happened before you act, and do not repeat completed actions. This is a new turn, not a replay of anything that was lost. Keep the same turn_token and result schema; call submit_result when the assignment is done.";
+
+/// The instruction of a continuation turn after a planned handoff (a
+/// reload, a host restart or an upgrade) interrupted the child, mid-turn or
+/// while it waited between turns; the new host runs it once by itself.
+pub const PLAK_CHILD_HANDOFF_RESUME_TEMPLATE: &str = "The host running this assignment handed it over to a new host, which interrupted your work: a turn in progress, or your wait between turns. Continue the same assignment from the last completed step: check what already happened before you act, and do not repeat completed actions. This is a new turn, not a replay of anything that was interrupted. Keep the same turn_token and result schema; call submit_result when the assignment is done.";
 
 /// Transient continuation instruction; `{failure}` is sanitized canonical text.
 pub const PLAK_CHILD_TRANSIENT_RESUME_TEMPLATE: &str = "The previous turn failed: {failure}\n\nContinue the same assignment from the last completed step. Do not repeat completed actions. This is a new turn, not a replay of the failed request. Keep the same turn_token and result schema; call submit_result when the assignment is done.";

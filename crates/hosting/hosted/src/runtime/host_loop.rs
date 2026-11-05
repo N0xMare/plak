@@ -192,6 +192,9 @@ enum HostStep {
     },
 }
 
+mod handoff;
+#[cfg(test)]
+pub(in crate::runtime) use handoff::hooks as handoff_hooks;
 mod idle;
 mod loss_resume;
 mod open;

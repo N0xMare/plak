@@ -133,6 +133,7 @@ impl<P: ProtocolExtension> ObservationSink<P> for ObservationSender<P> {
 struct IntentQueue<P: ProtocolExtension> {
     promptable: AtomicBool,
     abandon_and_release: AtomicBool,
+    planned_handoff: AtomicBool,
     queue: Mutex<VecDeque<QueuedIntent<P>>>,
     urgent: AtomicU8,
     shutdown_requested: AtomicBool,
@@ -406,7 +407,21 @@ impl<P: ProtocolExtension> Drop for IntentSender<P> {
 impl<P: ProtocolExtension> IntentSender<P> {
     /// Requests process-exit abandonment rather than joined host shutdown.
     /// Call only after restoring the terminal; this outranks queued product work.
+    /// It is never a planned handoff: it disarms one requested earlier.
     pub fn request_abandon_and_release(&self) {
+        self.0.planned_handoff.store(false, Ordering::Release);
+        self.request_release();
+    }
+    /// [`Self::request_abandon_and_release`] as a planned handoff (`/reload`,
+    /// a host restart or an upgrade): the host records each node with work
+    /// in flight as handed off before it releases, so the next host
+    /// continues it once by itself. The flag is armed with the release
+    /// request itself and the host consumes it.
+    pub fn request_handoff_and_release(&self) {
+        self.0.planned_handoff.store(true, Ordering::Release);
+        self.request_release();
+    }
+    fn request_release(&self) {
         self.0.shutdown_requested.store(true, Ordering::Release);
         self.0.abandon_and_release.store(true, Ordering::Release);
         self.0.urgent.fetch_or(PENDING_QUIT, Ordering::Release);
@@ -604,6 +619,13 @@ impl<P: ProtocolExtension> IntentReceiver<P> {
         self.0.abandon_and_release.load(Ordering::Acquire)
     }
 
+    /// Takes a planned handoff the release request armed: `true` once, for
+    /// the release that records it.
+    #[must_use]
+    pub fn take_planned_handoff(&self) -> bool {
+        self.0.planned_handoff.swap(false, Ordering::AcqRel)
+    }
+
     /// Whether the product has painted its first interactive frame.
     #[must_use]
     pub fn is_promptable(&self) -> bool {
@@ -790,6 +812,7 @@ pub fn intent_channel<P: ProtocolExtension>() -> (IntentSender<P>, IntentReceive
         shutdown_requested: AtomicBool::new(false),
         promptable: AtomicBool::new(false),
         abandon_and_release: AtomicBool::new(false),
+        planned_handoff: AtomicBool::new(false),
         queue: Mutex::new(VecDeque::with_capacity(INTENT_QUEUE_CAPACITY)),
         urgent: AtomicU8::new(0),
         nonrepeatable: AtomicU8::new(0),

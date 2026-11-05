@@ -330,6 +330,22 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                     });
                 }
                 Ok(UserAction::Interrupt) => {
+                    // The operator's stop is durable before its cancel: a
+                    // host lost before the turn's terminal leaves a stop,
+                    // which nothing continues (spec 03 §14.1).
+                    if self.host.session.store_revision != 0
+                        && let Err(error) = crate::runtime::root_loss::record_root_stop(
+                            self.host.store,
+                            self.host.session,
+                            &self.control.turn_id().to_string(),
+                            crate::sessions::projector::RootInterruptCause::Operator,
+                        )
+                    {
+                        let _ = self.host.events.notice(TranscriptRow::error(
+                            NoticeScope::Host,
+                            format!("the stop was not recorded: {error}"),
+                        ));
+                    }
                     match self.request_cancel().await {
                         Ok(CancellationStatus::AlreadyTerminal) => self.cancel_accepted = true,
                         Ok(

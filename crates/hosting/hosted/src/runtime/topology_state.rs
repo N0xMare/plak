@@ -200,10 +200,16 @@ async fn interrupt_root(tree_id: &str, exiting: bool) -> Result<usize, String> {
     let Some(runtime) = lookup(tree_id) else {
         return Ok(0);
     };
+    // A run's exit is a stop of its tree; the root's Ctrl-C cascades.
+    let cause = if exiting {
+        crate::agent_tree::InterruptCause::Stopped
+    } else {
+        crate::agent_tree::InterruptCause::Cascade
+    };
     let mut interrupted = runtime
-        .mutate_then_emit(false, |tree| {
+        .mutate_then_emit(false, move |tree| {
             let interrupted = tree
-                .interrupt_running_descendants()
+                .interrupt_running_descendants_for(cause)
                 .map_err(|error| error.message)?;
             tree.mark_root_interrupted();
             Ok(interrupted)

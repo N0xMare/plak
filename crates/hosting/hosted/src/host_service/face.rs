@@ -86,6 +86,11 @@ impl<P: ProtocolExtension> FaceSender<P> {
     pub fn request_abandon_and_release(&self) {
         self.actions.request_abandon_and_release();
     }
+
+    /// As [`IntentSender::request_handoff_and_release`].
+    pub fn request_handoff_and_release(&self) {
+        self.actions.request_handoff_and_release();
+    }
 }
 
 /// What a face receives: the session's observations as its attachment

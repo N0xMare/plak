@@ -166,6 +166,15 @@ mod child_runner {
     }
 }
 
+/// A `quit-as-handoff` file beside the evidence log makes the agent face's
+/// `quit` a planned handoff (`request_handoff_and_release`), as a reload's
+/// release is: the crash sweep's `handoff_resume` shape cuts its record and
+/// release.
+pub(crate) fn quit_as_handoff() -> bool {
+    matches!(selected(), Some(Ok(selection))
+        if selection.evidence.with_file_name("quit-as-handoff").exists())
+}
+
 pub(crate) fn assistant_done_release() -> Option<PathBuf> {
     if std::env::var("PLAK_TEST_MODEL").as_deref() != Ok(SELECTOR) {
         return None;

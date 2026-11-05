@@ -276,10 +276,53 @@ impl ProductAgentTree {
     /// `interrupted` with its attempt left open, exactly as `interrupt_agent`
     /// leaves it, so later mail resumes it and nothing it did is lost. The
     /// caller cancels the returned agents' live turns with the mutex released.
+    /// Each interrupt records cause `cascade`.
     ///
     /// # Errors
     /// Refuses malformed recorded intent data.
     pub fn interrupt_running_descendants(&mut self) -> Result<Vec<String>, TopologyError> {
+        self.interrupt_running_descendants_for(super::InterruptCause::Cascade)
+    }
+
+    /// [`Self::interrupt_running_descendants`], recording `cause`: `stopped`
+    /// when an embedded run's exit stops the tree. A child held after a loss
+    /// is not running, but the stop still records an interrupt on it, which
+    /// ends its hold: stops stay stopped.
+    ///
+    /// # Errors
+    /// Refuses malformed recorded intent data.
+    pub fn interrupt_running_descendants_for(
+        &mut self,
+        cause: super::InterruptCause,
+    ) -> Result<Vec<String>, TopologyError> {
+        let interrupted = self.interrupt_working_children(cause, true)?;
+        if !interrupted.is_empty() {
+            self.bump();
+        }
+        Ok(interrupted)
+    }
+
+    /// A planned handoff (spec 03 section 14.1): before the releasing host
+    /// lets go, each child that is running or parked is interrupted with
+    /// cause `handoff`, its attempt kept, so the next host continues it once
+    /// by itself. A child held after a loss keeps its hold. Returns the
+    /// children handed off.
+    ///
+    /// # Errors
+    /// Refuses malformed recorded intent data.
+    pub fn record_handoff(&mut self) -> Result<Vec<String>, TopologyError> {
+        let handed_off = self.interrupt_working_children(super::InterruptCause::Handoff, false)?;
+        if !handed_off.is_empty() {
+            self.bump();
+        }
+        Ok(handed_off)
+    }
+
+    fn interrupt_working_children(
+        &mut self,
+        cause: super::InterruptCause,
+        end_holds: bool,
+    ) -> Result<Vec<String>, TopologyError> {
         let root = self.root_agent_id.clone();
         let mut interrupted = Vec::new();
         let ids: Vec<String> = self.nodes.keys().cloned().collect();
@@ -296,26 +339,21 @@ impl ProductAgentTree {
                     node.attempt_id.clone(),
                     super::operator_intents::Decision::Interrupt {
                         effective: true,
-                        cause: None,
+                        cause: Some(cause),
                     },
                 )?;
                 interrupted.push(id);
-            } else if id != root && self.loss_continuation(&id).is_some() {
-                // A child held after a loss is not running, but the stop
-                // still ends its hold: stops stay stopped.
+            } else if end_holds && id != root && self.loss_continuation(&id).is_some() {
                 let attempt = self.nodes.get(&id).and_then(|node| node.attempt_id.clone());
                 self.record_operator_intent(
                     &id,
                     attempt,
                     super::operator_intents::Decision::Interrupt {
                         effective: false,
-                        cause: None,
+                        cause: Some(cause),
                     },
                 )?;
             }
-        }
-        if !interrupted.is_empty() {
-            self.bump();
         }
         Ok(interrupted)
     }

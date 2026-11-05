@@ -15,7 +15,7 @@ fn lose_root<P: plakous_host_protocol::ProtocolExtension>(host: &super::RootActo
             &host.role.config.session,
             &crate::runtime::root_loss::LostRootTurn {
                 turn_id: "lost-turn".to_owned(),
-                terminal_seq: 0,
+                applied_seq: 0,
             },
         )
         .unwrap()
