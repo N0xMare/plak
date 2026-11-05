@@ -684,6 +684,28 @@ pub(super) fn record_emitted_tree_revision(
     }
 }
 
+/// Finishes the custody-attach scan of the session's tree (design section
+/// 6.6): the first root open since this process took the tree's custody
+/// starts a background `recover_node` run over its children, under the
+/// attached root's loss policy. A later open of a tree already in custody
+/// starts none. Every path that takes a tree for a root runs it: a host's
+/// open, and a profile switch onto another tree.
+pub(super) fn finish_custody_attach_scan<P: plakous_host_protocol::ProtocolExtension>(
+    config: &super::HostConfig<P>,
+    events: &Sender<P>,
+) {
+    let tree_id = durable_tree_id(&config.topology_rows(), &config.session);
+    let hub = crate::topology_runtime::lookup(&tree_id);
+    if let Some(runtime) = &hub {
+        runtime.set_continue_after_loss(
+            config.resume_after_loss == crate::runtime::ResumeAfterLoss::Continue,
+        );
+    }
+    if hub.is_none_or(|runtime| runtime.finish_attach_scan()) {
+        start_child_recovery(events, &config.session.id, tree_id, false, None);
+    }
+}
+
 /// Starts one `recover_node` run over `tree_id`'s children. Must run on the
 /// host's executor. Its report reaches the user as one system note when it
 /// finishes, so the host loop never waits on it.

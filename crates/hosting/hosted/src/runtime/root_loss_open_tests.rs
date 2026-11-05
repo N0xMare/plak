@@ -457,3 +457,40 @@ fn a_fenced_root_turn_records_no_loss_and_holds_nothing() {
     assert_eq!(root_loss_state(lost.store.as_ref(), &record).unwrap(), None);
     assert_eq!(dispatches(&lost.evidence), 1, "nothing continued");
 }
+
+/// A host's open takes its tree for the root and finishes the
+/// custody-attach scan, so no later open of the tree in this custody runs
+/// it again. Every take path runs it (the profile switch's is pinned in the
+/// rebind tests).
+#[test]
+fn a_hosts_open_runs_the_custody_attach_scan() {
+    use crate::agent_tree::ProductAgentTree;
+    use crate::agent_tree_protocol::WriterMode;
+    use crate::runtime::test_kit::BlockOn as _;
+
+    let root = tempfile::tempdir().unwrap();
+    let (config, _) = scripted_host_with(root.path(), script(serde_json::json!([])));
+    let tree_id = super::rebind::durable_tree_id(&config.topology_rows(), &config.session);
+    // The scripted runtime attaches no tree of its own; the hub stands in
+    // for the one a product open attaches.
+    let tree = ProductAgentTree::bootstrap_root_for_test(
+        tree_id.clone(),
+        "root",
+        "owner",
+        root.path().to_path_buf(),
+        "selected-tuple",
+        WriterMode::SingleLease,
+    )
+    .unwrap();
+    let hub = crate::topology_runtime::insert_root(tree_id.clone(), tree, None)
+        .block()
+        .unwrap();
+    let (actions, events, host) = spawn_host_worker(config).unwrap();
+    let mut seen = Vec::new();
+    wait_for(&events, &mut seen, "the open", idle);
+    send_attached_action(&actions, UserAction::Quit);
+    host.join().unwrap().unwrap();
+    // Idle is published before the open's last steps; the join orders them.
+    assert!(!hub.finish_attach_scan(), "the open finished the scan");
+    crate::topology_runtime::force_release(&tree_id).block();
+}

@@ -1534,6 +1534,10 @@ fn fork_now_onto_an_api_root_branches_onto_its_own_tree() {
     assert_eq!(rebound, Rebound::Switched);
     let target_id = config.session.id.clone();
     assert_ne!(target_id, source_id);
+    // The switch took its own tree for the root, so it ran the
+    // custody-attach scan.
+    let hub = crate::topology_runtime::lookup(&target_id).expect("the switch took its tree");
+    assert!(!hub.finish_attach_scan(), "the switch finished the scan");
     assert_eq!(
         config.session.source_product_session_id.as_deref(),
         Some(source_id.as_str())

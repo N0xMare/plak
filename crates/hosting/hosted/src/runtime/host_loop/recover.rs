@@ -169,24 +169,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         Ok(HostStep::Continue)
     }
 
-    /// Finishes the tree's custody-attach scan (design section 6.6): the
-    /// first root open since this process took the tree's custody starts a
-    /// background `recover_node` run over the children, after the attach
-    /// recovered the children it owed one. A later open of a tree already in
-    /// custody starts none; `/recover` and a recovery of the root start
-    /// their own.
+    /// Finishes the tree's custody-attach scan at the host's open (design
+    /// section 6.6).
     pub(super) fn finish_attach_scan(&self) {
-        let tree_id = durable_tree_id(&self.role.config.topology_rows(), &self.role.config.session);
-        let hub = crate::topology_runtime::lookup(&tree_id);
-        // The run the open starts reads the attached root's loss policy.
-        if let Some(runtime) = &hub {
-            runtime.set_continue_after_loss(
-                self.role.config.resume_after_loss == crate::runtime::ResumeAfterLoss::Continue,
-            );
-        }
-        if hub.is_none_or(|runtime| runtime.finish_attach_scan()) {
-            self.spawn_tree_recovery();
-        }
+        super::super::tree::finish_custody_attach_scan(&self.role.config, &self.role.events);
     }
 
     /// Starts a `recover_node` run over this tree's children in the

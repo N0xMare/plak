@@ -548,6 +548,11 @@ pub(super) async fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
     .await;
     config.state_roots.set_inherited_skills(None);
     config.state_roots.set_pending_epoch(None);
+    // A switch onto another tree takes it for this root, so it runs the
+    // custody-attach scan as a host's open does.
+    if matches!(rebound, Ok(Rebound::Switched | Rebound::Succeeded)) {
+        super::tree::finish_custody_attach_scan(config, events);
+    }
     rebound
 }
 
