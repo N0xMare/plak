@@ -31,6 +31,18 @@ use dial::ssh_command;
 pub(crate) use dial::{STRICT_SSH_OPTIONS, version};
 use home::RunnerHome;
 
+/// This process's host instance, the same for its life: a runner holds the
+/// lines whose transfers it accepted from it, and every connection this
+/// process makes to a runner binds with it (spec 01 §8.4). The `host_id`
+/// names the home and is shared by all its processes; this names one of
+/// them.
+pub(crate) fn host_instance() -> String {
+    static INSTANCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    INSTANCE
+        .get_or_init(|| uuid::Uuid::new_v4().hyphenated().to_string())
+        .clone()
+}
+
 /// How long `connect` waits for a daemon it started to listen.
 const START_WAIT: Duration = Duration::from_secs(10);
 
@@ -349,7 +361,7 @@ async fn ps_local(paths: &PlakPaths, stdout: &mut dyn std::io::Write) -> CliResu
     };
     let bind = Bind {
         host_id: home::host_id(paths)?,
-        host_instance: uuid::Uuid::new_v4().hyphenated().to_string(),
+        host_instance: host_instance(),
         version: version(),
         inspect: true,
     };

@@ -1,6 +1,8 @@
-//! Re-adoption of a runner's lines by a returning host (spec 01 §8.5): a
-//! host with the same identity that comes back, within its owner lease or
-//! after it, takes over each line the runner still holds for it.
+//! Re-adoption of a runner's lines by a returning host (spec 01 §8.4): a
+//! host process of the same home that comes back, within the old holder's
+//! owner lease or after it, takes over each line of its store the runner
+//! still holds. It takes a line with a newer owner, which only the holder of
+//! the line's head lease can mint, so a live holder is never taken over.
 //!
 //! For each line the host opens the line's head lease-only (no driver,
 //! route or credential, so it works while the session cannot fully open),
@@ -14,7 +16,7 @@ use std::str::FromStr as _;
 
 use plakous::model::LineId;
 use plakous::runner::RunnerClient;
-use plakous::sessions::{AgentSessions, SessionOperationId};
+use plakous::sessions::{AgentSessions, AgentSessionsErrorKind, SessionOperationId};
 use plakous::tools::runner::{RunnerFailure, decode_jobs_snapshot};
 use plakous::tools::{JobStatus, LineOwner};
 
@@ -40,8 +42,15 @@ pub struct ReadoptFailure {
     pub reason: String,
 }
 
-/// Re-adopts every line `client`'s runner holds for this host. Each line is
-/// independent: one that fails (its head is held by another owner, or the
+/// The host-mode start sweep: re-adopts every line `client`'s runner holds
+/// for this home that `sessions`' store knows. Only the process that will
+/// serve the lines runs it: a host process at its start, never an embedded
+/// instance, which re-adopts a session's line by opening that session (its
+/// first runner call transfers the line to the session's newer owner) and
+/// never sweeps. The runner lists the lines of every process of the home,
+/// of every state key: a line this store does not know is another store's,
+/// and is skipped, never transferred, stopped or reported. Each known line
+/// is independent: one that fails (its head is held by another owner, or the
 /// runner refused the transfer) is reported and the rest go on.
 ///
 /// # Errors
@@ -55,6 +64,14 @@ pub async fn readopt_lines(
     let mut readopted = Vec::new();
     let mut failed = Vec::new();
     for status in client.lines().await? {
+        if let Ok(line) = LineId::from_str(&status.line)
+            && sessions
+                .line_head(line)
+                .await
+                .is_err_and(|error| error.kind() == AgentSessionsErrorKind::NotFound)
+        {
+            continue;
+        }
         match readopt_line(client, sessions, operation_prefix, &status.line).await {
             Ok(line) => readopted.push(line),
             Err(reason) => failed.push(ReadoptFailure {

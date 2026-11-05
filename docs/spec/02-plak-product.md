@@ -314,7 +314,9 @@ absolute against the launch directory at the edge.
   runners/<name>/runner.json  a paired runner's identity and version, 0600
   runners/<name>/calls/       the keyed calls this host sent the runner and has no answer for (chapter 01 §8.4)
   runner/                     this machine's runner home, 0700 (an existing one is closed to 0700):
-                              runner.toml (07 §3.7), runner-id, owners.json (the owner floors),
+                              runner.toml (07 §3.7), runner-id, owners.json (the owner floors:
+                              each line's newest accepted owner and its holder instance; a
+                              file the runner cannot read refuses its start),
                               run/ (0700: the 0600 daemon socket and the 0600 lock file the daemon
                               holds for its life), serve.log (0600, the detached daemon's stderr)
 ```

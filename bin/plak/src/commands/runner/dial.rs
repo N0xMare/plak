@@ -109,7 +109,7 @@ pub(crate) async fn dial(
     let stream = tokio::io::join(stdout, stdin);
     let bind = Bind {
         host_id: super::home::host_id(paths)?,
-        host_instance: uuid::Uuid::new_v4().hyphenated().to_string(),
+        host_instance: super::host_instance(),
         version: version(),
         inspect,
     };

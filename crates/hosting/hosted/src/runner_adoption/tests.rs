@@ -151,6 +151,28 @@ async fn start_job_and_lose_the_link(directory: &Path, workspace: &Path, owner: 
     drop(client);
 }
 
+/// Another store of the same home (another state key's host) sweeps the
+/// same runner: the line is not its own, so it is skipped, neither
+/// transferred nor reported, and stays held by its owner at `fence`.
+async fn another_store_skips_the_line(directory: &Path, client: &RunnerClient, fence: u64) {
+    let other = AgentSessions::new(
+        SessionBackend::sqlite(directory.join("other-runtime.sqlite3")).unwrap(),
+    )
+    .unwrap();
+    let (sibling, _) = bind(directory, "instance-3").await;
+    let (readopted, failed) =
+        crate::runner_adoption::readopt_lines(&sibling, &other, "plak:readopt")
+            .await
+            .unwrap();
+    assert_eq!((readopted, failed), (Vec::new(), Vec::new()));
+    let lines = client.lines().await.unwrap();
+    assert!(lines[0].adopted);
+    assert_eq!(
+        lines[0].owner.as_ref().map(|owner| owner.fence),
+        Some(fence)
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_returning_host_readopts_its_line_under_a_lease_only_head() {
     let directory = tempfile::tempdir().unwrap();
@@ -253,6 +275,8 @@ async fn a_returning_host_readopts_its_line_under_a_lease_only_head() {
         panic!("the head opens");
     };
     session.release().await.unwrap();
+
+    another_store_skips_the_line(directory.path(), &client, adopted.owner.fence()).await;
     adopted_jobs
         .stop_jobs(
             plakous::tools::JobStopReason::User,

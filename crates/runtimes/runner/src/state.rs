@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use plakous_runner_protocol::{LineOwner, Refusal, Request, RequestClass, RunnerFrame};
 
-use crate::floors::OwnerFloors;
+use crate::floors::{Floor, OwnerFloors};
 
 /// How long an answered or tombstoned key is kept without an acknowledgement.
 pub(crate) const RETENTION: Duration = Duration::from_secs(24 * 60 * 60);
@@ -75,14 +75,22 @@ pub(crate) enum Admission {
     Answer(RunnerFrame),
 }
 
-/// The owner a line accepts, and whether it holds the line now.
+/// The owner a line accepts, the host instance holding it, and whether that
+/// instance holds it now.
 #[derive(Clone, Debug)]
 struct Owned {
     owner: LineOwner,
-    /// False once the host's owner lease expired or the runner restarted,
-    /// until a transfer re-adopts the line: of the same owner again, or a
-    /// newer one. Calls of an orphaned line are refused until then.
+    /// False once the holder's owner lease expired or the runner restarted,
+    /// until a transfer re-adopts the line: by the holder, of the same owner
+    /// again, or by any instance of its host, of a newer one. Calls of an
+    /// orphaned line are refused until then.
     adopted: bool,
+    /// The host instance whose transfer was last accepted for the line: the
+    /// only one whose effect calls and controls it accepts, and whose own
+    /// lease orphans it. After a restart it is the holder its floor
+    /// recorded, so the floor owner is accepted again only from that
+    /// instance.
+    holder: String,
 }
 
 /// The owner and op tables of one runner instance, for every host.
@@ -101,12 +109,13 @@ impl Tables {
         let owners = floors
             .load()
             .into_iter()
-            .map(|(host, owner)| {
+            .map(|(host, Floor { owner, holder })| {
                 (
                     (host, owner.line.clone()),
                     Owned {
                         owner,
                         adopted: false,
+                        holder,
                     },
                 )
             })
@@ -118,14 +127,18 @@ impl Tables {
         }
     }
 
-    /// Records an owner change. The new owner must be the line's accepted
-    /// owner or a newer one. The accepted owner again is a retry and is
-    /// accepted; a newer one is accepted only from the accepted owner
-    /// (`from`, a compare-and-swap) or onto a line with none, and is
-    /// recorded first when floors are kept.
+    /// Records an owner change from `instance` of `host`, which becomes the
+    /// line's holder. The new owner must be the line's accepted owner or a
+    /// newer one. The accepted owner again (a retry, or re-adopting an
+    /// orphan) is accepted only from the line's holder: another instance
+    /// takes the line over only with a newer owner, which only the holder of
+    /// the line's head lease can present. A newer owner is accepted only
+    /// from the accepted owner (`from`, a compare-and-swap) or onto a line
+    /// with none, and is recorded first when floors are kept.
     pub(crate) fn transfer(
         &mut self,
         host: &str,
+        instance: &str,
         control_id: String,
         from: Option<&LineOwner>,
         to: LineOwner,
@@ -140,9 +153,15 @@ impl Tables {
                 detail: "a transfer names one line".into(),
             };
         }
+        let held_elsewhere = self
+            .owners
+            .get(&line)
+            .is_some_and(|owned| owned.holder != instance);
         match &current {
-            Some(current) if *current == to => {}
-            Some(current) if !to.is_newer_than(current) || from != Some(current) => {
+            Some(current) if *current == to && !held_elsewhere => {}
+            Some(current)
+                if *current == to || !to.is_newer_than(current) || from != Some(current) =>
+            {
                 return RunnerFrame::StaleOwner {
                     request_id: None,
                     control_id: Some(control_id),
@@ -154,7 +173,13 @@ impl Tables {
         }
         if current.as_ref() != Some(&to)
             && let Some(floors) = &self.floors
-            && let Err(error) = floors.record(host, &to)
+            && let Err(error) = floors.record(
+                host,
+                &Floor {
+                    owner: to.clone(),
+                    holder: instance.to_owned(),
+                },
+            )
         {
             return RunnerFrame::TransferRefused {
                 control_id,
@@ -166,16 +191,18 @@ impl Tables {
             Owned {
                 owner: to,
                 adopted: true,
+                holder: instance.to_owned(),
             },
         );
         RunnerFrame::TransferAccepted { control_id }
     }
 
-    /// Marks every line of `host` as no longer held: its owner lease
-    /// expired.
-    pub(crate) fn orphan(&mut self, host: &str) {
+    /// Marks every line `instance` of `host` holds as no longer held: its
+    /// owner lease expired. Other instances' lines stay held. An orphaned
+    /// line keeps its owner: it is not free to take.
+    pub(crate) fn orphan(&mut self, host: &str, instance: &str) {
         for ((owner_host, _), owned) in &mut self.owners {
-            if owner_host == host {
+            if owner_host == host && owned.holder == instance {
                 owned.adopted = false;
             }
         }
@@ -245,7 +272,7 @@ impl Tables {
         {
             return Admission::Answer(RunnerFrame::Expired { request_id: id });
         }
-        if let Some(refusal) = self.fence(host, request) {
+        if let Some(refusal) = self.fence(host, instance, request) {
             return Admission::Answer(refusal);
         }
         let Some(key) = key else {
@@ -276,10 +303,31 @@ impl Tables {
     /// The refusal of a request whose owner is not the line's accepted
     /// owner holding it: an older one is stale, and a newer one, or the
     /// accepted one of an orphaned line, is transferred first.
-    fn fence(&self, host: &str, request: &Request) -> Option<RunnerFrame> {
+    fn fence(&self, host: &str, instance: &str, request: &Request) -> Option<RunnerFrame> {
         let owner = request.owner.as_ref()?;
         let id = request.request_id.clone();
+        // An effect call or control that would run is accepted only from the
+        // line's holder: another instance of the host transfers first, which
+        // needs a newer owner. A replay runs nothing (it answers a stored key
+        // or tombstones an unseen one) and an observation has no effect, so
+        // neither is held to the holder.
+        let owned_work = !request.replay
+            && matches!(
+                request.class,
+                RequestClass::EffectCall { .. } | RequestClass::OwnerControl { .. }
+            );
         match self.owners.get(&(host.to_owned(), owner.line.clone())) {
+            Some(current)
+                if current.owner == *owner
+                    && current.adopted
+                    && owned_work
+                    && current.holder != instance =>
+            {
+                Some(RunnerFrame::Refused {
+                    request_id: Some(id),
+                    refusal: Refusal::OwnerNotTransferred,
+                })
+            }
             Some(current) if current.owner == *owner && current.adopted => None,
             Some(current) if current.owner == *owner => Some(RunnerFrame::Refused {
                 request_id: Some(id),

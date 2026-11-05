@@ -5648,20 +5648,38 @@ runner for a session yet.
   values never cross the link; runner secrets cross by name only
   (`runner_secrets` in the spawn payload) and are resolved on the runner.
 - **Owners.** The runner keeps, per host and line, the newest owner it has
-  accepted, ordered by `(generation, fence)`. The host sends `TransferOwner {
+  accepted, ordered by `(generation, fence)`, and the line's holder: the host
+  instance (`Bind`'s `host_instance`) whose transfer it last accepted. A host
+  instance is one host process: it binds every connection it makes to a
+  runner with the same instance, keeping one connection per runner, while
+  `host_id` names the home and is shared by every process of it, of every
+  state key. The host sends `TransferOwner {
   from, to }` after the new owner's lease is granted and before that owner's
-  first request. A `to` equal to the accepted owner is accepted whatever
-  `from` says, so a transfer whose acknowledgement was lost can be sent again.
+  first request; every owner a host mints is durable in its store first, so
+  the runner is never ahead of the store and a crash between the two leaves a
+  successor whose own newer owner takes the line. A `to` equal to the
+  accepted owner is accepted from the line's holder whatever `from` says, so a
+  transfer whose acknowledgement was lost can be sent again; from any other
+  instance it is answered `StaleOwner`, so a sibling process of the home never
+  takes a line by presenting an owner it could read from the store.
   A newer `to` is a compare-and-swap: it is accepted only when `from` is the
   accepted owner (or the line has none); otherwise, and for an older `to`, the
   runner answers `StaleOwner` with the owner it keeps, and a host whose `to`
   is newer (a fresher lease) transfers again from that owner, once. A `from`
   of another line is refused (`TransferRefused`). A runner that keeps owner
-  floors records the new owner durably before it accepts it, and refuses the
-  transfer (`TransferRefused`, nothing changed) when it cannot; a restarted
-  runner starts from that record, so no owner older than one it accepted is
-  ever accepted again, and the recorded owners are not held until their host
-  transfers each line again. The fence applies to
+  floors records the new owner and its holder durably before it accepts it,
+  and refuses the transfer (`TransferRefused`, nothing changed) when it
+  cannot; a restarted runner starts from that record, so no owner older than
+  one it accepted is ever accepted again, the recorded owners are not held
+  until each line is transferred again, and the recorded owner itself is
+  accepted again only from its recorded holder (any instance may present a
+  newer owner, as always). A floors file the runner cannot read, including
+  one of an earlier format, refuses the runner's start, naming the file;
+  removing it starts the runner with no floors. On a held line, an effect call
+  or owner control that would run is accepted only from the holder's
+  connections, and any other instance of the host is refused
+  `OwnerNotTransferred`; a replay and an observation are not held to the
+  holder, since a replay runs nothing and an observation has no effect. The fence applies to
   work that has not run: a new key or an unkeyed request whose owner is older
   than the accepted owner is refused `StaleOwner`, and one whose owner is newer
   but was never transferred, or is the accepted owner of a line that is not
@@ -5695,15 +5713,20 @@ runner for a session yet.
   runner machine's own host identity (a local `plak runner ps`) every host's;
   on any other inspecting one the inspector's own host's, with each job's
   command and output cleared. Each names its host, line, accepted owner,
-  whether that owner holds it (`adopted`) and its jobs in the
+  whether its holder holds it (`adopted`) and its jobs in the
   `jobs.snapshot` schema.
-- **Owner leases.** A host holds its lines while it has a connection and for
-  the owner lease (300 s) after its last one ends; its services end with their
-  connection. Past the lease its lines are orphaned: their jobs keep running
-  within their own runtime caps and are listed as orphans, and the runner
-  refuses the line's calls until the same `host_id` transfers it again, of
-  the same owner or a newer one, and so re-adopts it. A different `host_id`
-  never re-adopts a line.
+- **Owner leases.** Leases are per host instance. An instance holds the lines
+  it is the holder of while it has a connection and for the owner lease
+  (300 s) after its last one ends; other instances of the same `host_id`
+  neither extend nor end it, and its services end with their connection.
+  Past the lease only its lines are orphaned: their jobs keep running within
+  their own runtime caps and are listed as orphans, and the runner refuses the
+  line's calls until the line is transferred again, by its holder of the same
+  owner or by any instance of the `host_id` of a newer one, and so re-adopted.
+  An orphaned line keeps its owner and is not free to take: a crash successor
+  (a new instance whose lease of the line's head is the proof that the holder
+  is gone) takes it with its newer owner at once, inside or past the lease. A
+  different `host_id` never re-adopts a line.
 - **Daemon.** The daemon serves one `RunnerService` on a socket of mode 0600
   in a 0700 directory, named after the protocol version and a hash of the
   version triple, and closes a connection from another user before its hello.
@@ -5744,7 +5767,7 @@ The at-most-once law across restarts:
   line; a runner without floors accepts any first owner after a restart, and
   the fence rests on the host's lease authority alone. Either way the runner
   only reduces late effects, and runtime commit fencing prevents split brain.
-- **Host restart** (the same `host_id`, a new `host_instance`) against the same
+- **Host restart** (a new process of the same home: the same `host_id`, a new `host_instance`) against the same
   runner instance. The successor replays each call it may have sent: an
   answered key returns its stored answer and does not run again, a running key
   answers `InProgress` and then its answer, and a key the runner never saw
@@ -5758,9 +5781,18 @@ The at-most-once law across restarts:
   since a runner restart forgot them.
 - **Both restarted.** Every outstanding call is of unknown outcome.
 - **Jobs across a host restart.** A job keeps running on the runner when the
-  host process that started it is lost. A successor host (the same `host_id`)
-  that transfers the line to a newer owner reads the line's jobs, polls them
-  from any cursor and stops them; the lost owner is fenced off the line. A
+  host process that started it is lost. A successor host process of the same
+  home that transfers the line to a newer owner reads the line's jobs, polls
+  them from any cursor and stops them; the lost owner is fenced off the line.
+  Only the process that will serve a line re-adopts it. A host process sweeps
+  at its start every line the runner lists for the home that its own store
+  knows, and skips the rest (another state key's lines), never transferring,
+  stopping or reporting them; an embedded instance never sweeps, and re-adopts
+  a session's line only by opening that session, whose first runner request
+  transfers the line to the session's newer owner, so its exit never stops a
+  line it did not open. No product process runs the sweep yet; it is
+  `plakous_hosted::runner_adoption::readopt_lines`, exercised by its tests,
+  for the host mode to call. A
   host re-adopts its lines by holding each line's head lease-only (§5.1),
   transferring the line to that lease's `(generation, fence)`, recording the
   terminals of the line's ended jobs into the head's line terminal table

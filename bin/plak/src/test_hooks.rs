@@ -148,7 +148,7 @@ mod child_runner {
         );
         let bind = Bind {
             host_id: plan.host_id.clone(),
-            host_instance: uuid::Uuid::new_v4().hyphenated().to_string(),
+            host_instance: crate::commands::runner::host_instance(),
             version: crate::commands::runner::version(),
             inspect: false,
         };

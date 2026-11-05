@@ -941,14 +941,15 @@ async fn a_key_spent_under_another_host_instance_is_of_unknown_outcome() {
         .execute_literal_process(shell("true"), unkeyed())
         .await;
     drop(first);
-    // The successor host process sends the same key again after the first
-    // acknowledged it: the call ran, so its outcome is unknown, not refused.
+    // The successor host process, under the newer owner its own lease
+    // mints, sends the same key again after the first acknowledged it: the
+    // call ran, so its outcome is unknown, not refused.
     let second = Loopback::join(service, bind("instance-2"), windows())
         .await
         .unwrap();
     let after = runner_environment(scope(), root.path(), ".", config(), second.backend()).unwrap();
     let error = after
-        .execute_literal_process(shell("echo x >> log"), effect(owner(1, 1), 1))
+        .execute_literal_process(shell("echo x >> log"), effect(owner(1, 2), 1))
         .await
         .unwrap_err();
     assert_eq!(error.kind(), ExecutionBackendErrorKind::RecoveryRequired);
@@ -1233,4 +1234,250 @@ async fn a_runner_stream_gap_aborts_the_stream_on_the_host() {
         .unwrap();
     assert_eq!(stream, 7);
     assert!(reason.contains("skipped"), "{reason}");
+}
+
+// Ownership across host processes of one home (spec 01 §8.4): every process
+// binds the home's `host_id` with its own `host_instance`. A line is held by
+// the instance whose transfer the runner last accepted.
+
+const OTHER_LINE: &str = "00000000-0000-0000-0000-0000000000a2";
+
+fn wire_owner_of(line: &str, fence: u64) -> plakous_runner_protocol::LineOwner {
+    plakous_runner_protocol::LineOwner {
+        line: line.into(),
+        fence,
+        ..wire_owner()
+    }
+}
+
+fn transfer(
+    control: &str,
+    from: Option<plakous_runner_protocol::LineOwner>,
+    to: plakous_runner_protocol::LineOwner,
+) -> HostFrame {
+    HostFrame::TransferOwner(TransferOwner {
+        control_id: control.into(),
+        from,
+        to,
+    })
+}
+
+fn accepted(control: &str) -> RunnerFrame {
+    RunnerFrame::TransferAccepted {
+        control_id: control.into(),
+    }
+}
+
+fn keyed_for(
+    request_id: &str,
+    call: &str,
+    owner: plakous_runner_protocol::LineOwner,
+    operation: &Operation,
+) -> HostFrame {
+    let HostFrame::Request(mut request) = keyed(request_id, call, operation, false) else {
+        unreachable!()
+    };
+    request.owner = Some(owner);
+    HostFrame::Request(request)
+}
+
+fn not_transferred(request_id: &str) -> RunnerFrame {
+    RunnerFrame::Refused {
+        request_id: Some(request_id.into()),
+        refusal: Refusal::OwnerNotTransferred,
+    }
+}
+
+fn floored(root: &Path, floors: &Path) -> RunnerService {
+    RunnerService::with_options(
+        host(root),
+        RunnerIdentity {
+            runner_id: RunnerId::new("loopback").unwrap(),
+            version: version(),
+            boot_id: "boot-1".into(),
+            binary_id: None,
+        },
+        plakous_runner::RunnerOptions {
+            floors: Some(Arc::new(
+                plakous_runner::FileOwnerFloors::open(floors).unwrap(),
+            )),
+            ..plakous_runner::RunnerOptions::default()
+        },
+    )
+    .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn conformance_same_owner_transfer_from_a_non_holder_is_stale() {
+    let root = tempfile::tempdir().unwrap();
+    let service = service(root.path());
+    let mut holder = Raw::bound(&service, "instance-1").await;
+    assert_eq!(
+        holder.ask(transfer("t1", None, wire_owner())).await,
+        accepted("t1")
+    );
+    let mut sibling = Raw::bound(&service, "instance-2").await;
+    assert_eq!(
+        sibling
+            .ask(transfer("t2", Some(wire_owner()), wire_owner()))
+            .await,
+        RunnerFrame::StaleOwner {
+            request_id: None,
+            control_id: Some("t2".into()),
+            current: wire_owner(),
+        }
+    );
+    // A newer owner, which only the line's lease holder can mint, takes it.
+    let newer = wire_owner_of(LINE, 2);
+    assert_eq!(
+        sibling
+            .ask(transfer("t3", Some(wire_owner()), newer.clone()))
+            .await,
+        accepted("t3")
+    );
+    // The former holder's retry of its own owner is now stale too.
+    assert!(matches!(
+        holder
+            .ask(transfer("t4", Some(wire_owner()), wire_owner()))
+            .await,
+        RunnerFrame::StaleOwner { .. }
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn conformance_owned_requests_from_a_non_holder_are_not_transferred() {
+    let root = tempfile::tempdir().unwrap();
+    let service = service(root.path());
+    let append = operation(&service, root.path(), shell("echo x >> log")).await;
+    let mut holder = Raw::bound(&service, "instance-1").await;
+    assert_eq!(
+        holder.ask(transfer("t1", None, wire_owner())).await,
+        accepted("t1")
+    );
+    let mut sibling = Raw::bound(&service, "instance-2").await;
+    let call = "00000000-0000-0000-0000-000000000003";
+    assert_eq!(
+        sibling
+            .ask(keyed_for("s1", call, wire_owner(), &append))
+            .await,
+        not_transferred("s1")
+    );
+    let stop = HostFrame::Request(Request {
+        request_id: "s2".into(),
+        class: RequestClass::OwnerControl {
+            control_id: "c1".into(),
+        },
+        owner: Some(wire_owner()),
+        deadline_ms: None,
+        digest: "digest-c".into(),
+        replay: false,
+        age_ms: None,
+        operation: Operation {
+            verb: plakous_runner_protocol::verbs::JOBS_STOP.into(),
+            payload: json!({ "grace_ms": 0 }),
+        },
+    });
+    assert_eq!(sibling.ask(stop).await, not_transferred("s2"));
+    assert_eq!(appended(root.path()), 0, "nothing ran for the sibling");
+    // The holder's own call under the same key runs.
+    assert!(matches!(
+        holder
+            .ask(keyed_for("h1", call, wire_owner(), &append))
+            .await,
+        RunnerFrame::Result { .. }
+    ));
+    assert_eq!(appended(root.path()), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn conformance_expiry_orphans_only_the_holder_lines() {
+    let root = tempfile::tempdir().unwrap();
+    let service = RunnerService::with_limits(
+        host(root.path()),
+        RunnerIdentity {
+            runner_id: RunnerId::new("loopback").unwrap(),
+            version: version(),
+            boot_id: "boot-1".into(),
+            binary_id: None,
+        },
+        RunnerLimits {
+            owner_lease: Duration::from_millis(100),
+            ..RunnerLimits::default()
+        },
+    )
+    .unwrap();
+    let append = operation(&service, root.path(), shell("echo x >> log")).await;
+    let mut holder = Raw::bound(&service, "instance-1").await;
+    assert_eq!(
+        holder.ask(transfer("t1", None, wire_owner())).await,
+        accepted("t1")
+    );
+    let mut sibling = Raw::bound(&service, "instance-2").await;
+    let other = wire_owner_of(OTHER_LINE, 1);
+    assert_eq!(
+        sibling.ask(transfer("t2", None, other.clone())).await,
+        accepted("t2")
+    );
+    drop(holder);
+    // Past the holder's lease, though its sibling stayed connected.
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let _ = service.is_idle();
+    let mut returned = Raw::bound(&service, "instance-1").await;
+    let call = |n: u8| format!("00000000-0000-0000-0000-0000000000{n:02x}");
+    assert_eq!(
+        returned
+            .ask(keyed_for("h1", &call(1), wire_owner(), &append))
+            .await,
+        not_transferred("h1"),
+        "the holder's line is orphaned"
+    );
+    assert!(matches!(
+        sibling.ask(keyed_for("s1", &call(2), other, &append)).await,
+        RunnerFrame::Result { .. }
+    ));
+    // The holder re-adopts its orphan with its own owner.
+    assert_eq!(
+        returned.ask(transfer("t3", None, wire_owner())).await,
+        accepted("t3")
+    );
+    assert!(matches!(
+        returned
+            .ask(keyed_for("h2", &call(3), wire_owner(), &append))
+            .await,
+        RunnerFrame::Result { .. }
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn conformance_after_restart_floor_owner_is_refused_from_a_sibling() {
+    let root = tempfile::tempdir().unwrap();
+    let floors = root.path().join("owners.json");
+    let first = floored(root.path(), &floors);
+    let mut holder = Raw::bound(&first, "instance-1").await;
+    assert_eq!(
+        holder.ask(transfer("t1", None, wire_owner())).await,
+        accepted("t1")
+    );
+    drop(holder);
+    drop(first);
+
+    // A restarted runner: a sibling binding first cannot take the line with
+    // the floor owner; the floor's holder can, and any newer owner can.
+    let restarted = floored(root.path(), &floors);
+    let mut sibling = Raw::bound(&restarted, "instance-2").await;
+    assert!(matches!(
+        sibling.ask(transfer("t2", None, wire_owner())).await,
+        RunnerFrame::StaleOwner { .. }
+    ));
+    let mut holder = Raw::bound(&restarted, "instance-1").await;
+    assert_eq!(
+        holder.ask(transfer("t3", None, wire_owner())).await,
+        accepted("t3")
+    );
+    assert_eq!(
+        sibling
+            .ask(transfer("t4", Some(wire_owner()), wire_owner_of(LINE, 2)))
+            .await,
+        accepted("t4")
+    );
 }

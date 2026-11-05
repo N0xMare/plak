@@ -653,6 +653,23 @@ widens it.
   only under the runner machine's own host identity (a local `plak runner
   ps`), and otherwise only its own host's, with job commands and output
   cleared.
+- **The host identity names a home, not a process.** Every host process of
+  the home, of every state key, binds its `host_id`; a process binds its own
+  `host_instance`. Ownership of a line's processes is fenced by the line's L0
+  lease, which is the only fence: a host mints an owner only from the lease it
+  holds, so a sibling process of the home takes a line only by taking its
+  head's lease (released, handed off, or after `HolderGone`). The fence is not
+  a capability: knowing a line's owner, which any process of the home can read
+  from the store, authorizes nothing, so observations stay readable to the
+  home. Protection rests on the holder rules (a line's effect calls, controls
+  and same-owner transfers are accepted only from its holder instance), on
+  `Cancel`, `Preempt` and `Ack` bound to the instance that sent the key, and
+  on hosts minting owners only from the lease. `host_instance` is
+  self-asserted in `Bind`, so the holder rules guard against bugs, not
+  against the home's own user: processes of the same user are trusted, as
+  everywhere else. A copied home presents the same `host_id`; two machines
+  sharing one are outside this boundary, since each could fence the other's
+  lines through its own copy of a store.
 - **Roots are consent, not containment.** A runner serves only a workspace
   under one of its `roots`, and never one inside or around the runner
   machine's product home (`PLAK_HOME`, which holds the runner home, its

@@ -1,7 +1,9 @@
 //! The owner floor a runner keeps across restarts: the newest owner it
-//! accepted for each host's line (spec 01 §8.4). A restarted runner refuses
-//! an owner older than its floor, so a host that lost a line to a newer head
-//! cannot act on it through a runner restart.
+//! accepted for each host's line, and the host instance that holds it (spec
+//! 01 §8.4). A restarted runner refuses an owner older than its floor, so a
+//! host that lost a line to a newer head cannot act on it through a runner
+//! restart, and accepts the floor owner itself only from its holder, so a
+//! sibling process of the host cannot take the line by presenting it.
 
 use std::collections::BTreeMap;
 use std::io::{self, Write as _};
@@ -9,25 +11,37 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
 use plakous_runner_protocol::LineOwner;
+use serde::{Deserialize, Serialize};
+
+/// One line's floor: the newest owner accepted for it and the host instance
+/// whose transfer it accepted.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Floor {
+    /// The accepted owner.
+    pub owner: LineOwner,
+    /// The host instance holding the line.
+    pub holder: String,
+}
 
 /// Where a runner records accepted owners.
 pub trait OwnerFloors: Send + Sync {
-    /// Every recorded owner, with its host.
-    fn load(&self) -> Vec<(String, LineOwner)>;
+    /// Every recorded floor, with its host.
+    fn load(&self) -> Vec<(String, Floor)>;
 
-    /// Records `owner` as `host`'s floor for its line. It returns only once
+    /// Records `floor` as `host`'s floor for its line. It returns only once
     /// the record is durable; the runner accepts the owner after that.
     ///
     /// # Errors
     ///
     /// The record cannot be written.
-    fn record(&self, host: &str, owner: &LineOwner) -> io::Result<()>;
+    fn record(&self, host: &str, floor: &Floor) -> io::Result<()>;
 }
 
 /// Owner floors in one JSON file, replaced atomically on every change.
 pub struct FileOwnerFloors {
     path: PathBuf,
-    floors: Mutex<BTreeMap<String, BTreeMap<String, LineOwner>>>,
+    floors: Mutex<BTreeMap<String, BTreeMap<String, Floor>>>,
 }
 
 impl FileOwnerFloors {
@@ -35,11 +49,24 @@ impl FileOwnerFloors {
     ///
     /// # Errors
     ///
-    /// The file exists but cannot be read or decoded.
+    /// The file exists but cannot be read or decoded, including a file of
+    /// an earlier format: the error names the file and the remedy. There is
+    /// no fallback, since dropping floors silently would drop the fence they
+    /// keep.
     pub fn open(path: impl Into<PathBuf>) -> io::Result<Self> {
         let path = path.into();
         let floors = match std::fs::read(&path) {
-            Ok(bytes) => serde_json::from_slice(&bytes).map_err(io::Error::other)?,
+            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|error| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "the runner's owner floors {} cannot be read ({error}); removing the \
+                         file starts the runner with no floors, so any first owner of a line \
+                         is accepted once",
+                        path.display()
+                    ),
+                )
+            })?,
             Err(error) if error.kind() == io::ErrorKind::NotFound => BTreeMap::new(),
             Err(error) => return Err(error),
         };
@@ -57,24 +84,24 @@ impl FileOwnerFloors {
 }
 
 impl OwnerFloors for FileOwnerFloors {
-    fn load(&self) -> Vec<(String, LineOwner)> {
+    fn load(&self) -> Vec<(String, Floor)> {
         let floors = self.floors.lock().unwrap_or_else(PoisonError::into_inner);
         floors
             .iter()
             .flat_map(|(host, lines)| {
                 lines
                     .values()
-                    .map(move |owner| (host.clone(), owner.clone()))
+                    .map(move |floor| (host.clone(), floor.clone()))
             })
             .collect()
     }
 
-    fn record(&self, host: &str, owner: &LineOwner) -> io::Result<()> {
+    fn record(&self, host: &str, floor: &Floor) -> io::Result<()> {
         let mut floors = self.floors.lock().unwrap_or_else(PoisonError::into_inner);
         let mut next = floors.clone();
         next.entry(host.to_owned())
             .or_default()
-            .insert(owner.line.clone(), owner.clone());
+            .insert(floor.owner.line.clone(), floor.clone());
         write_atomically(
             &self.path,
             &serde_json::to_vec(&next).map_err(io::Error::other)?,

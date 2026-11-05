@@ -68,9 +68,9 @@ struct Inner {
     /// instance that last sent the key, so an answer that outlives its
     /// connection reaches that instance's reconnection.
     hosts: Mutex<HashMap<(String, String), Connection>>,
-    /// Each host's owner lease: its connections, and since when it has
-    /// none.
-    leases: Mutex<HashMap<String, HostLease>>,
+    /// Each host instance's owner lease: its connections, and since when it
+    /// has none. An expired lease is removed.
+    leases: Mutex<HashMap<(String, String), HostLease>>,
     next_connection: AtomicU64,
     /// Connections open now, bound or not.
     open: AtomicU64,
@@ -99,14 +99,15 @@ struct Running {
     preempt: watch::Sender<ToolPreempt>,
 }
 
-/// One host's owner lease. Its lines are held while it has a connection
-/// and for the lease after the last one ends; then their jobs keep running
-/// as orphans until a newer owner of the same host takes each line over.
+/// One host instance's owner lease. The lines it holds are held while it has
+/// a connection and for the lease after the last one ends; then their jobs
+/// keep running as orphans until the same instance returns or a newer owner
+/// of the same host takes each line over. Other instances of the host
+/// neither extend nor end it.
 #[derive(Default)]
 struct HostLease {
     connections: usize,
     released: Option<Instant>,
-    expired: bool,
 }
 
 struct Hosted {
@@ -395,7 +396,7 @@ impl RunnerService {
     }
 
     /// Makes a bound connection its host instance's current one, draining
-    /// the older one, and holds the host's owner lease while it lives.
+    /// the older one, and holds that instance's owner lease while it lives.
     fn enter(
         &self,
         host: &str,
@@ -418,15 +419,16 @@ impl RunnerService {
             previous.closer.cancel();
         }
         let mut leases = lock(&self.inner.leases);
-        let lease = leases.entry(host.to_owned()).or_default();
+        let lease = leases
+            .entry((host.to_owned(), instance.to_owned()))
+            .or_default();
         lease.connections += 1;
         lease.released = None;
-        lease.expired = false;
         connection
     }
 
     /// The connection is over: answers no longer go to it, its services end,
-    /// and the host's owner lease starts running out with its last one.
+    /// and its instance's owner lease starts running out with its last one.
     fn leave(&self, host: &str, instance: &str, connection: u64) {
         {
             let mut hosts = lock(&self.inner.hosts);
@@ -440,7 +442,7 @@ impl RunnerService {
         }
         {
             let mut leases = lock(&self.inner.leases);
-            if let Some(lease) = leases.get_mut(host) {
+            if let Some(lease) = leases.get_mut(&(host.to_owned(), instance.to_owned())) {
                 lease.connections = lease.connections.saturating_sub(1);
                 if lease.connections == 0 {
                     lease.released = Some(Instant::now());
@@ -486,34 +488,34 @@ impl RunnerService {
         }
     }
 
-    /// Ends the owner lease of every host whose last connection ended more
-    /// than the lease ago: its lines are no longer held, and their jobs keep
-    /// running as orphans until a newer owner of the same host takes each
-    /// line over.
+    /// Ends the owner lease of every host instance whose last connection
+    /// ended more than the lease ago: the lines it holds are no longer held,
+    /// and their jobs keep running as orphans until it returns or a newer
+    /// owner of the same host takes each line over.
     fn expire_leases(&self, now: Instant) {
-        let expired: Vec<String> = {
+        let expired: Vec<(String, String)> = {
             let mut leases = lock(&self.inner.leases);
-            leases
-                .iter_mut()
+            let expired = leases
+                .iter()
                 .filter(|(_, lease)| {
-                    !lease.expired
-                        && lease.connections == 0
+                    lease.connections == 0
                         && lease
                             .released
                             .is_some_and(|at| now.duration_since(at) >= self.inner.owner_lease)
                 })
-                .map(|(host, lease)| {
-                    lease.expired = true;
-                    host.clone()
-                })
-                .collect()
+                .map(|(holder, _)| holder.clone())
+                .collect::<Vec<_>>();
+            for holder in &expired {
+                leases.remove(holder);
+            }
+            expired
         };
         if expired.is_empty() {
             return;
         }
         let mut tables = lock(&self.inner.tables);
-        for host in expired {
-            tables.orphan(&host);
+        for (host, instance) in expired {
+            tables.orphan(&host, &instance);
         }
     }
 
@@ -607,6 +609,7 @@ impl RunnerService {
             HostFrame::TransferOwner(transfer) => {
                 let answer = lock(&self.inner.tables).transfer(
                     host,
+                    instance,
                     transfer.control_id,
                     transfer.from.as_ref(),
                     transfer.to,

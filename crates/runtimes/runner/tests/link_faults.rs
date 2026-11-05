@@ -12,6 +12,18 @@
 //!   owner lease runs out and the line is orphaned; the same host identity
 //!   returns as a new process, replays the journaled call (which ran once),
 //!   transfers the line to a newer owner and reads the job to its end.
+//! - `host_crash_with_a_sibling_connected_orphans_only_its_lines`: another
+//!   process of the same home stays bound while a host is killed holding a
+//!   line. The sibling cannot stop the line's job with the owner it can read,
+//!   the line is orphaned at the dead holder's lease though the sibling is
+//!   connected, and a successor takes it with a newer owner.
+//! - `runner_restart_sibling_races_floor_owner`: after a runner restart a
+//!   sibling binds first and presents the floor owner; it is refused, and the
+//!   floor's holder takes its line back.
+//! - `crash_after_takeover_before_transfer`: a successor's newer owner was
+//!   durable in its store but never reached the runner before it crashed.
+//!   Nothing on the runner is ahead of the store, so the next successor's
+//!   newer owner takes the line; nothing wedges.
 
 #![allow(clippy::unwrap_used, reason = "integration tests")]
 #![cfg(unix)]
@@ -399,6 +411,104 @@ async fn host_killed_mid_call_is_recovered_and_readopted_by_its_host_id() {
     let stale = RunnerSessions::new(&backend, &environment, owner(1, 1));
     assert_eq!(
         stale.jobs().await.unwrap_err().kind(),
+        ExecutionBackendErrorKind::IdentityMismatch
+    );
+    kill(runner);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn host_crash_with_a_sibling_connected_orphans_only_its_lines() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::create_dir(workspace(directory.path())).unwrap();
+    let runner = spawn("daemon", directory.path(), Duration::from_millis(300));
+    let host = spawn("host", directory.path(), Duration::ZERO);
+    wait_for(&directory.path().join("host-ready")).await;
+    // A sibling process of the same home, bound throughout.
+    let (sibling, environment, backend) = connect(directory.path(), "instance-2", false).await;
+    kill(host);
+
+    // The owner is readable from the shared store, but it authorizes nothing:
+    // the sibling is not the line's holder.
+    let read_owner = RunnerSessions::new(&backend, &environment, owner(1, 1));
+    assert_eq!(
+        read_owner
+            .stop_jobs(plakous_tools::JobStopReason::User, Duration::ZERO)
+            .await
+            .unwrap_err()
+            .kind(),
+        ExecutionBackendErrorKind::IdentityMismatch
+    );
+
+    // Past the dead holder's lease the line is orphaned, though the sibling
+    // stayed connected.
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    let lines = sibling.lines().await.unwrap();
+    assert_eq!(lines.len(), 1);
+    assert!(!lines[0].adopted, "the dead holder's line is orphaned");
+
+    // A successor, holding the line's lease with a newer owner, takes it.
+    let (_successor, environment, backend) = connect(directory.path(), "instance-3", false).await;
+    let sessions = RunnerSessions::new(&backend, &environment, owner(1, 2));
+    let job = ended(&sessions).await;
+    assert_eq!(job.status, JobStatus::Exited(Some(0)));
+    kill(runner);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn runner_restart_sibling_races_floor_owner() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::create_dir(workspace(directory.path())).unwrap();
+    let first = spawn("daemon", directory.path(), Duration::from_secs(300));
+    let (holder, environment, backend) = connect(directory.path(), "instance-1", false).await;
+    let sessions = RunnerSessions::new(&backend, &environment, owner(1, 1));
+    let id = sessions
+        .start(job("sleep 3"), effect(owner(1, 1), 1))
+        .await
+        .unwrap();
+    sessions.promote(id).await.unwrap();
+    assert_eq!(sessions.jobs().await.unwrap().len(), 1);
+
+    kill(first);
+    let second = spawn("daemon", directory.path(), Duration::from_secs(300));
+    // The sibling binds to the restarted runner first, with the floor owner.
+    let (_sibling, sibling_environment, sibling_backend) =
+        connect(directory.path(), "instance-2", false).await;
+    let racing = RunnerSessions::new(&sibling_backend, &sibling_environment, owner(1, 1));
+    assert_eq!(
+        racing.jobs().await.unwrap_err().kind(),
+        ExecutionBackendErrorKind::IdentityMismatch
+    );
+    // The floor's holder returns and takes its line back.
+    holder
+        .reconnect(connect_socket(directory.path()).await)
+        .await
+        .unwrap();
+    let jobs = sessions.jobs().await.unwrap();
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(jobs[0].status, JobStatus::OutcomeUnknown);
+    kill(second);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn crash_after_takeover_before_transfer() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::create_dir(workspace(directory.path())).unwrap();
+    let runner = spawn("daemon", directory.path(), Duration::from_secs(300));
+    let host = spawn("host", directory.path(), Duration::ZERO);
+    wait_for(&directory.path().join("host-ready")).await;
+    kill(host);
+    // A successor took the line's lease in its store, minting owner (1, 2),
+    // and crashed before its transfer: the runner never saw that owner. The
+    // next successor's lease mints (1, 3), newer than anything the runner
+    // accepted, so it takes the line from the dead holder's floor.
+    let (_successor, environment, backend) = connect(directory.path(), "instance-3", false).await;
+    let sessions = RunnerSessions::new(&backend, &environment, owner(1, 3));
+    let job = ended(&sessions).await;
+    assert_eq!(job.status, JobStatus::Exited(Some(0)));
+    // The owner the crashed successor minted is older now, and fenced off.
+    let crashed = RunnerSessions::new(&backend, &environment, owner(1, 2));
+    assert_eq!(
+        crashed.jobs().await.unwrap_err().kind(),
         ExecutionBackendErrorKind::IdentityMismatch
     );
     kill(runner);

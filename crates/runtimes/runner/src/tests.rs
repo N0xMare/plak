@@ -48,7 +48,7 @@ fn result(id: &str) -> RunnerFrame {
 fn transferred(tables: &mut Tables, owner: &LineOwner) {
     let from = tables.owner(HOST, &owner.line).map(|(current, _)| current);
     assert_eq!(
-        tables.transfer(HOST, "t".into(), from.as_ref(), owner.clone()),
+        tables.transfer(HOST, INSTANCE, "t".into(), from.as_ref(), owner.clone()),
         RunnerFrame::TransferAccepted {
             control_id: "t".into()
         }
@@ -186,7 +186,7 @@ fn owners_are_ordered_by_generation_then_fence_and_must_be_transferred() {
         })
     );
     assert_eq!(
-        tables.transfer(HOST, "t2".into(), Some(&successor), first),
+        tables.transfer(HOST, INSTANCE, "t2".into(), Some(&successor), first),
         RunnerFrame::StaleOwner {
             request_id: None,
             control_id: Some("t2".into()),
@@ -195,7 +195,7 @@ fn owners_are_ordered_by_generation_then_fence_and_must_be_transferred() {
     );
     // The accepted owner again is a retry of a lost acknowledgement.
     assert_eq!(
-        tables.transfer(HOST, "t3".into(), None, successor.clone()),
+        tables.transfer(HOST, INSTANCE, "t3".into(), None, successor.clone()),
         RunnerFrame::TransferAccepted {
             control_id: "t3".into()
         }
@@ -211,7 +211,7 @@ fn owners_are_ordered_by_generation_then_fence_and_must_be_transferred() {
     );
     // Each host fences its own lines.
     assert_eq!(
-        tables.transfer("host-b", "t4".into(), None, owner(1, 1)),
+        tables.transfer("host-b", INSTANCE, "t4".into(), None, owner(1, 1)),
         RunnerFrame::TransferAccepted {
             control_id: "t4".into()
         }
@@ -318,7 +318,13 @@ fn a_transfer_to_a_newer_owner_is_a_compare_and_swap_from_the_accepted_one() {
     let first = owner(1, 1);
     // A line with no owner takes any first owner.
     assert_eq!(
-        tables.transfer(HOST, "t1".into(), Some(&owner(0, 9)), first.clone()),
+        tables.transfer(
+            HOST,
+            INSTANCE,
+            "t1".into(),
+            Some(&owner(0, 9)),
+            first.clone()
+        ),
         RunnerFrame::TransferAccepted {
             control_id: "t1".into()
         }
@@ -327,7 +333,7 @@ fn a_transfer_to_a_newer_owner_is_a_compare_and_swap_from_the_accepted_one() {
     // From an owner the runner does not accept: refused, naming the one it
     // does.
     assert_eq!(
-        tables.transfer(HOST, "t2".into(), None, successor.clone()),
+        tables.transfer(HOST, INSTANCE, "t2".into(), None, successor.clone()),
         RunnerFrame::StaleOwner {
             request_id: None,
             control_id: Some("t2".into()),
@@ -335,14 +341,14 @@ fn a_transfer_to_a_newer_owner_is_a_compare_and_swap_from_the_accepted_one() {
         }
     );
     assert_eq!(
-        tables.transfer(HOST, "t3".into(), Some(&first), successor.clone()),
+        tables.transfer(HOST, INSTANCE, "t3".into(), Some(&first), successor.clone()),
         RunnerFrame::TransferAccepted {
             control_id: "t3".into()
         }
     );
     // The accepted owner again is a retry, whatever `from` says.
     assert_eq!(
-        tables.transfer(HOST, "t4".into(), Some(&first), successor.clone()),
+        tables.transfer(HOST, INSTANCE, "t4".into(), Some(&first), successor.clone()),
         RunnerFrame::TransferAccepted {
             control_id: "t4".into()
         }
@@ -350,7 +356,7 @@ fn a_transfer_to_a_newer_owner_is_a_compare_and_swap_from_the_accepted_one() {
     let mut other_line = owner(5, 5);
     other_line.line = "line-2".into();
     assert!(matches!(
-        tables.transfer(HOST, "t5".into(), Some(&successor), other_line),
+        tables.transfer(HOST, INSTANCE, "t5".into(), Some(&successor), other_line),
         RunnerFrame::TransferRefused { .. }
     ));
 }
@@ -406,11 +412,11 @@ fn a_keys_answer_and_acknowledgement_belong_to_the_instance_that_last_sent_it() 
 struct RefusingFloors;
 
 impl crate::floors::OwnerFloors for RefusingFloors {
-    fn load(&self) -> Vec<(String, LineOwner)> {
+    fn load(&self) -> Vec<(String, crate::floors::Floor)> {
         Vec::new()
     }
 
-    fn record(&self, _: &str, _: &LineOwner) -> std::io::Result<()> {
+    fn record(&self, _: &str, _: &crate::floors::Floor) -> std::io::Result<()> {
         Err(std::io::Error::other("disk full"))
     }
 }
@@ -471,8 +477,215 @@ fn owner_floors_outlive_a_restart_and_an_unrecorded_owner_is_not_accepted() {
 
     let mut refusing = Tables::with_floors(std::sync::Arc::new(RefusingFloors));
     assert!(matches!(
-        refusing.transfer(HOST, "t".into(), None, owner(1, 1)),
+        refusing.transfer(HOST, INSTANCE, "t".into(), None, owner(1, 1)),
         RunnerFrame::TransferRefused { .. }
     ));
     assert_eq!(refusing.owner(HOST, "line-1"), None);
+}
+
+const SIBLING: &str = "instance-b";
+
+fn control(id: &str, owner: &LineOwner) -> Request {
+    Request {
+        class: RequestClass::OwnerControl {
+            control_id: format!("control-{id}"),
+        },
+        operation: Operation {
+            verb: verbs::JOBS_STOP.into(),
+            payload: json!({}),
+        },
+        ..effect(id, owner, "d", false)
+    }
+}
+
+fn transfer_from(
+    tables: &mut Tables,
+    instance: &str,
+    from: Option<&LineOwner>,
+    to: &LineOwner,
+) -> RunnerFrame {
+    tables.transfer(HOST, instance, "t".into(), from, to.clone())
+}
+
+fn accepted() -> RunnerFrame {
+    RunnerFrame::TransferAccepted {
+        control_id: "t".into(),
+    }
+}
+
+fn stale(current: &LineOwner) -> RunnerFrame {
+    RunnerFrame::StaleOwner {
+        request_id: None,
+        control_id: Some("t".into()),
+        current: current.clone(),
+    }
+}
+
+fn not_transferred(id: &str) -> Admission {
+    Admission::Answer(RunnerFrame::Refused {
+        request_id: Some(id.into()),
+        refusal: Refusal::OwnerNotTransferred,
+    })
+}
+
+#[test]
+fn a_sibling_cannot_signal_or_call_on_a_held_line() {
+    let mut tables = Tables::default();
+    let now = Instant::now();
+    let head = owner(1, 1);
+    transferred(&mut tables, &head);
+    assert_eq!(
+        tables.admit(HOST, SIBLING, &effect("s1", &head, "d", false), now),
+        not_transferred("s1")
+    );
+    assert_eq!(
+        tables.admit(HOST, SIBLING, &control("s2", &head), now),
+        not_transferred("s2")
+    );
+    // A replay runs nothing: an unseen key is tombstoned whoever asks.
+    assert_eq!(
+        tables.admit(HOST, SIBLING, &effect("s3", &head, "e", true), now),
+        Admission::Answer(RunnerFrame::NotSeen {
+            request_id: "s3".into()
+        })
+    );
+    assert!(matches!(
+        tables.admit(HOST, INSTANCE, &control("h1", &head), now),
+        Admission::Run(Some(_))
+    ));
+}
+
+#[test]
+fn only_the_holder_transfers_the_same_owner_again() {
+    let mut tables = Tables::default();
+    let head = owner(1, 1);
+    transferred(&mut tables, &head);
+    tables.orphan(HOST, INSTANCE);
+    assert_eq!(tables.owner(HOST, &head.line), Some((head.clone(), false)));
+    // Orphaned is not free to take: a sibling with the same owner is stale.
+    assert_eq!(
+        transfer_from(&mut tables, SIBLING, Some(&head), &head),
+        stale(&head)
+    );
+    assert_eq!(tables.owner(HOST, &head.line), Some((head.clone(), false)));
+    // The holder returning re-adopts it.
+    assert_eq!(
+        transfer_from(&mut tables, INSTANCE, None, &head),
+        accepted()
+    );
+    assert_eq!(tables.owner(HOST, &head.line), Some((head, true)));
+}
+
+#[test]
+fn a_sibling_takes_a_line_only_with_a_newer_owner() {
+    let mut tables = Tables::default();
+    let now = Instant::now();
+    let head = owner(1, 1);
+    transferred(&mut tables, &head);
+    let newer = owner(1, 2);
+    assert_eq!(
+        transfer_from(&mut tables, SIBLING, Some(&head), &newer),
+        accepted()
+    );
+    assert!(matches!(
+        tables.admit(HOST, INSTANCE, &effect("h1", &head, "d", false), now),
+        Admission::Answer(RunnerFrame::StaleOwner { .. })
+    ));
+    assert_eq!(
+        tables.admit(HOST, INSTANCE, &control("h2", &newer), now),
+        not_transferred("h2")
+    );
+    assert!(matches!(
+        tables.admit(HOST, SIBLING, &control("s1", &newer), now),
+        Admission::Run(Some(_))
+    ));
+}
+
+#[test]
+fn an_expired_lease_orphans_only_its_instance_lines() {
+    let mut tables = Tables::default();
+    let held = owner(1, 1);
+    let sibling_line = LineOwner {
+        line: "line-2".into(),
+        ..owner(1, 1)
+    };
+    transferred(&mut tables, &held);
+    assert_eq!(
+        transfer_from(&mut tables, SIBLING, None, &sibling_line),
+        accepted()
+    );
+    tables.orphan(HOST, SIBLING);
+    assert_eq!(tables.owner(HOST, "line-1"), Some((held, true)));
+    assert_eq!(tables.owner(HOST, "line-2"), Some((sibling_line, false)));
+}
+
+/// A transfer the runner floored and then lost the acknowledgement of, in a
+/// restart, is retried by its holder and accepted; a sibling racing the
+/// restart with the floor owner is refused and never becomes the holder.
+#[test]
+fn after_a_restart_the_floor_owner_is_accepted_only_from_its_holder() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("owners.json");
+    let floors = std::sync::Arc::new(crate::floors::FileOwnerFloors::open(&path).unwrap());
+    let mut tables = Tables::with_floors(floors);
+    let head = owner(1, 1);
+    transferred(&mut tables, &head);
+    drop(tables);
+
+    let floors = std::sync::Arc::new(crate::floors::FileOwnerFloors::open(&path).unwrap());
+    let mut restarted = Tables::with_floors(floors);
+    assert_eq!(
+        transfer_from(&mut restarted, SIBLING, None, &head),
+        stale(&head)
+    );
+    assert_eq!(
+        restarted.admit(
+            HOST,
+            SIBLING,
+            &effect("s1", &head, "d", false),
+            Instant::now()
+        ),
+        not_transferred("s1")
+    );
+    assert_eq!(
+        transfer_from(&mut restarted, INSTANCE, None, &head),
+        accepted()
+    );
+    assert_eq!(
+        restarted.owner(HOST, &head.line),
+        Some((head.clone(), true))
+    );
+    // A newer owner, which only the line's lease holder can mint, is
+    // accepted from anyone and becomes the floor with its holder.
+    let newer = owner(1, 2);
+    assert_eq!(
+        transfer_from(&mut restarted, SIBLING, Some(&head), &newer),
+        accepted()
+    );
+    drop(restarted);
+    let floors = std::sync::Arc::new(crate::floors::FileOwnerFloors::open(&path).unwrap());
+    let mut again = Tables::with_floors(floors);
+    assert_eq!(
+        transfer_from(&mut again, INSTANCE, None, &newer),
+        stale(&newer)
+    );
+    assert_eq!(transfer_from(&mut again, SIBLING, None, &newer), accepted());
+}
+
+#[test]
+fn a_floors_file_of_an_earlier_format_is_refused_by_name() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("owners.json");
+    std::fs::write(
+        &path,
+        serde_json::to_vec(&json!({ "host-a": { "line-1": owner(1, 1) } })).unwrap(),
+    )
+    .unwrap();
+    let Err(error) = crate::floors::FileOwnerFloors::open(&path) else {
+        panic!("an earlier format must not load");
+    };
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    let message = error.to_string();
+    assert!(message.contains(&path.display().to_string()), "{message}");
+    assert!(message.contains("removing the file"), "{message}");
 }

@@ -23,7 +23,7 @@ mod state;
 mod streams;
 
 pub use client::{ClientWindows, ConnectError, RecoveredCall, RunnerClient};
-pub use floors::{FileOwnerFloors, OwnerFloors};
+pub use floors::{FileOwnerFloors, Floor, OwnerFloors};
 pub use journal::{CallJournal, FileCallJournal, JournalEntry};
 pub use loopback::{Loopback, LoopbackError};
 pub use service::{
