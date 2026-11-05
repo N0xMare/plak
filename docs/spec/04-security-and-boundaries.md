@@ -1614,10 +1614,12 @@ running interactive session to reload onto the installed build (chapter 02
   with its path, its configuration errors and the carry's capacity), are
   for a local face only: a wire v2 connection whose acceptor did not mark
   it local (the web endpoint, however its client authenticated) is refused
-  them `refused_for_role` with row `local_face`, and nothing is run. stdio's
-  `plak agent --wire v2` is local; the TUI reaches its host in process, not
-  through a wire acceptor. A
-  request that replaces one the host has not yet taken gives the replaced one
+  them `refused_for_role` with row `local_face`, and nothing is run, and its
+  attachments never receive what answers them or announces a request (the
+  build status, the probe's answers, a handed-over request) nor the
+  launch's lookup progress, whether as it happens or replayed on attach.
+  stdio's `plak agent --wire v2` is local; the TUI reaches its host in
+  process, not through a wire acceptor. A request that replaces one the host has not yet taken gives the replaced one
   a `superseded` outcome. Outcomes nobody collected are pruned after seven
   days.
 - A request names the installed build it expects. The requester refuses

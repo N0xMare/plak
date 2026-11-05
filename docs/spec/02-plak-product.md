@@ -3780,7 +3780,11 @@ verdicts) are addressed, the session profile and workspace chrome states.
   `local_face`, the intents that exec or hand off the host's own build or
   answer with the installed build's path and probe output: `check_build`,
   `probe_reload`, `accept_reload_request` and `refuse_reload_request`
-  (chapter 04 §4.6).
+  (chapter 04 §4.6). Nor is a remote face's attachment delivered, or
+  replayed on attach, the observations only a local face may receive:
+  `build_status`, `reload_probed`, `reload_probe_failed`,
+  `reload_requested` and `lookup_status`. They are skipped before they are
+  numbered, so the attachment's sequence shows no gap for them.
 - **Requests.** A `request` carries a client-chosen id and an `op`:
   `attach` (a node, by tree and agent id), `detach`, `intent` (an
   attachment and a session intent) or `ping`. It gets exactly one

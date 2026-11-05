@@ -1509,7 +1509,9 @@ fn a_refused_command_is_its_own_error_record() {
     let service =
         plakous_hosted::host_service::HostService::for_faces(actions.clone(), root.clone(), 16);
     let (face, _events) = service.attach_face(actions, events);
-    let remote = service.attach(&root).unwrap();
+    let remote = service
+        .attach(&root, plakous_hosted::host_service::wire::Face::Remote)
+        .unwrap();
     service
         .intent(
             remote,

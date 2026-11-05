@@ -550,6 +550,20 @@ impl ObservationExtension for SurfaceObservation {
         }
     }
 
+    /// What answers or announces a local-face-only intent, and the
+    /// launch's lookup progress: each names this machine's installed build
+    /// or what the launch is reaching.
+    fn local_only(&self) -> bool {
+        matches!(
+            self,
+            Self::BuildStatus { .. }
+                | Self::ReloadRequested(_)
+                | Self::ReloadProbed { .. }
+                | Self::ReloadProbeFailed
+                | Self::LookupStatus { .. }
+        )
+    }
+
     fn kind_label(&self) -> &'static str {
         match self {
             Self::SettingsView(_) => "settings_view",

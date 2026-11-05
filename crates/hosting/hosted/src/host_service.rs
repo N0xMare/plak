@@ -60,6 +60,8 @@ use plakous_host_protocol::{
     SessionObservation, WeakIntentSender,
 };
 
+use self::wire::Face;
+
 pub use child::{ChildNodes, ControlDone, NodeState};
 pub use face::{FacePublisher, FaceReceiver, FaceSender, face};
 pub use tree_nodes::TreeNodes;
@@ -103,6 +105,8 @@ pub enum Outbound<P: ProtocolExtension> {
 
 /// One attachment's state.
 struct Attachment<P: ProtocolExtension> {
+    /// Its connection's face: a remote one takes no local-only observation.
+    face: Face,
     /// The session's mailbox sender tagged with this attachment, or `None`
     /// for a face, which holds its own.
     sender: Option<IntentSender<P>>,
@@ -373,9 +377,11 @@ impl<P: ProtocolExtension> HostService<P> {
         }
     }
 
-    /// Attaches to `node`, queueing the attach snapshot first. A child
-    /// node's attachment holds that node's transcript only, and its attach
-    /// snapshot is that transcript's baseline ([`ChildNodes`]).
+    /// Attaches to `node` for a connection of `face`, queueing the attach
+    /// snapshot first. A child node's attachment holds that node's
+    /// transcript only, and its attach snapshot is that transcript's
+    /// baseline ([`ChildNodes`]). A remote face's attachment never takes a
+    /// local-only observation, in its snapshot or after.
     ///
     /// # Errors
     ///
@@ -383,17 +389,17 @@ impl<P: ProtocolExtension> HostService<P> {
     /// session's root nor one of its tree's children;
     /// [`RequestRefusal::NodeClosed`] and [`RequestRefusal::NodeRetiring`]
     /// for a child that is closed or retiring.
-    pub fn attach(&self, node: &NodeAddress) -> Result<AttachmentId, RequestRefusal> {
+    pub fn attach(&self, node: &NodeAddress, face: Face) -> Result<AttachmentId, RequestRefusal> {
         if node.tree_id != self.root.tree_id {
             return Err(RequestRefusal::UnknownNode);
         }
         if node.agent_id != self.root.agent_id {
-            return self.attach_child(&node.agent_id);
+            return self.attach_child(&node.agent_id, face);
         }
         let Some(mailbox) = self.mailbox() else {
             return Err(RequestRefusal::Disconnected);
         };
-        let (id, ask) = self.admit(Some(mailbox));
+        let (id, ask) = self.admit(Some(mailbox), face);
         if let Some(sender) = ask {
             // No baseline is kept: the session's fresh root snapshot reaches
             // every attachment holding the root, this one included. An
@@ -411,7 +417,11 @@ impl<P: ProtocolExtension> HostService<P> {
     /// Adds an attachment with the attach snapshot queued, and the sender
     /// to ask the session for a root baseline through when none is kept.
     /// With no `mailbox` it is a face's, which sends its own intents.
-    fn admit(&self, mailbox: Option<IntentSender<P>>) -> (AttachmentId, Option<IntentSender<P>>) {
+    fn admit(
+        &self,
+        mailbox: Option<IntentSender<P>>,
+        face: Face,
+    ) -> (AttachmentId, Option<IntentSender<P>>) {
         let mut state = self.lock();
         let id = state.next_attachment;
         state.next_attachment += 1;
@@ -424,6 +434,7 @@ impl<P: ProtocolExtension> HostService<P> {
         }
         items.extend(snapshot.approvals.iter().map(|(_, asked)| asked.clone()));
         items.extend(snapshot.credential_wait.iter().cloned());
+        items.retain(|item| face.receives(item));
         let sender = mailbox.map(|actions| actions.tagged(origin(id)));
         let scopes = match self.actions {
             Some(_) => Scopes::Held(BTreeSet::from([TranscriptScope::Root])),
@@ -431,6 +442,7 @@ impl<P: ProtocolExtension> HostService<P> {
         };
         let ask = sender.clone().filter(|_| needs_baseline);
         let mut attachment = Attachment {
+            face,
             sender,
             node: None,
             queue: VecDeque::new(),
@@ -951,7 +963,7 @@ impl<P: ProtocolExtension> Attachment<P> {
         class: ObservationClass,
         capacity: usize,
     ) {
-        if self.dropped {
+        if self.dropped || !self.face.receives(&observation) {
             return;
         }
         let droppable = class == ObservationClass::Event(Delivery::Droppable);

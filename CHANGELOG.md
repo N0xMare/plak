@@ -363,6 +363,11 @@ an export.
   Plak's installed-build check and probe and the reload-request
   handover) as `refused_for_role` `local_face`. Embedder break: the
   `connect` signature and the new trait method (defaults to false).
+- A remote face's attachment is never delivered, nor replayed on attach,
+  an observation only a local face may receive
+  (`ObservationExtension::local_only`: Plak's build status, reload
+  probe answers, handed-over reload requests and lookup progress).
+  Embedder break: `HostService::attach` takes the connection's `Face`.
 - The TUI's last direct product reads move behind the protocol: the
   reload target is the session host's `probe_reload` (answered by
   `reload_probed` with the target and the host build's refusal, or

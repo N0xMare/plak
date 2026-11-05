@@ -86,7 +86,7 @@ fn the_attach_snapshot_re_emits_states_baseline_pending_approvals_and_the_wait()
     ] {
         service.observe(observation);
     }
-    let id = service.attach(&root()).unwrap();
+    let id = service.attach(&root(), Face::Remote).unwrap();
     assert_eq!(
         observations(service.take(id)),
         [
@@ -110,7 +110,7 @@ fn the_attach_snapshot_re_emits_states_baseline_pending_approvals_and_the_wait()
         approval_id: "a2".into(),
         resolution: "denied".into(),
     });
-    let later = service.attach(&root()).unwrap();
+    let later = service.attach(&root(), Face::Remote).unwrap();
     let snapshot = observations(service.take(later));
     assert!(!snapshot.iter().any(|item| matches!(
         item,
@@ -123,7 +123,7 @@ fn the_attach_snapshot_re_emits_states_baseline_pending_approvals_and_the_wait()
 #[test]
 fn an_attach_without_a_baseline_asks_for_one() {
     let (service, intents) = service(16);
-    let id = service.attach(&root()).unwrap();
+    let id = service.attach(&root(), Face::Remote).unwrap();
     let delivery = intents.try_recv().unwrap();
     assert!(matches!(
         *delivery,
@@ -148,8 +148,8 @@ fn observations_reach_the_attachments_their_class_names() {
     service.observe(Observation::PresentationSnapshot(
         PresentationSnapshot::empty(1),
     ));
-    let first = service.attach(&root()).unwrap();
-    let second = service.attach(&root()).unwrap();
+    let first = service.attach(&root(), Face::Remote).unwrap();
+    let second = service.attach(&root(), Face::Remote).unwrap();
     service.take(first);
     service.take(second);
 
@@ -203,8 +203,8 @@ fn observations_reach_the_attachments_their_class_names() {
 #[test]
 fn a_slow_attachment_is_dropped_only_for_what_it_may_not_lose() {
     let (service, _intents) = service(3);
-    let slow = service.attach(&root()).unwrap();
-    let fast = service.attach(&root()).unwrap();
+    let slow = service.attach(&root(), Face::Remote).unwrap();
+    let fast = service.attach(&root(), Face::Remote).unwrap();
 
     service.observe(Observation::AssistantDelta("a".into()));
     service.observe(Observation::SetBusy(true));
@@ -238,7 +238,7 @@ fn a_slow_attachment_is_dropped_only_for_what_it_may_not_lose() {
 #[test]
 fn an_evicted_droppable_event_leaves_a_sequence_gap() {
     let (service, _intents) = service(3);
-    let id = service.attach(&root()).unwrap();
+    let id = service.attach(&root(), Face::Remote).unwrap();
     service.observe(Observation::SetBusy(true));
     service.observe(approval("p1"));
     service.observe(Observation::AssistantDelta("lost".into()));
@@ -260,13 +260,16 @@ fn an_evicted_droppable_event_leaves_a_sequence_gap() {
 fn attach_and_intent_refusals_are_typed() {
     let (service, intents) = service(4);
     assert_eq!(
-        service.attach(&NodeAddress {
-            tree_id: "t1".into(),
-            agent_id: "c1".into(),
-        }),
+        service.attach(
+            &NodeAddress {
+                tree_id: "t1".into(),
+                agent_id: "c1".into(),
+            },
+            Face::Remote
+        ),
         Err(RequestRefusal::UnknownNode)
     );
-    let id = service.attach(&root()).unwrap();
+    let id = service.attach(&root(), Face::Remote).unwrap();
     drop(intents);
     assert_eq!(
         service.intent(id, SessionIntent::Prompt(Draft::from("x"))),
@@ -279,8 +282,8 @@ fn attach_and_intent_refusals_are_typed() {
 #[test]
 fn a_client_correlation_comes_back_and_unowned_answers_reach_all() {
     let (service, intents) = service(16);
-    let first = service.attach(&root()).unwrap();
-    let second = service.attach(&root()).unwrap();
+    let first = service.attach(&root(), Face::Remote).unwrap();
+    let second = service.attach(&root(), Face::Remote).unwrap();
     service.take(first);
     service.take(second);
     while intents.try_recv().is_ok() {}
@@ -313,7 +316,7 @@ fn a_lost_transcript_is_repaid_with_a_fresh_baseline() {
     service.observe(Observation::PresentationSnapshot(
         PresentationSnapshot::empty(5),
     ));
-    let id = service.attach(&root()).unwrap();
+    let id = service.attach(&root(), Face::Remote).unwrap();
     service.take(id);
     service
         .intent(
@@ -364,7 +367,7 @@ fn a_snapshot_larger_than_the_capacity_is_delivered_whole() {
     for id in ["a1", "a2", "a3", "a4"] {
         service.observe(approval(id));
     }
-    let id = service.attach(&root()).unwrap();
+    let id = service.attach(&root(), Face::Remote).unwrap();
     service.observe(approval("a5"));
     service.observe(approval("a6"));
     let taken = observations(service.take(id));
@@ -385,7 +388,7 @@ fn a_reopened_session_forgets_what_the_earlier_one_held() {
     service.observe(Observation::PresentationSnapshot(
         PresentationSnapshot::empty(1),
     ));
-    let id = service.attach(&root()).unwrap();
+    let id = service.attach(&root(), Face::Remote).unwrap();
     assert_eq!(
         observations(service.take(id)),
         [
@@ -403,7 +406,7 @@ fn a_superseding_state_keeps_the_order_of_events() {
     service.observe(Observation::PresentationSnapshot(
         PresentationSnapshot::empty(1),
     ));
-    let id = service.attach(&root()).unwrap();
+    let id = service.attach(&root(), Face::Remote).unwrap();
     service.take(id);
     service.observe(Observation::SetBusy(true));
     service.observe(approval("p1"));
@@ -433,8 +436,8 @@ fn agent_transcripts_are_shared_across_attachments() {
     service.observe(Observation::PresentationSnapshot(
         PresentationSnapshot::empty(1),
     ));
-    let first = service.attach(&root()).unwrap();
-    let second = service.attach(&root()).unwrap();
+    let first = service.attach(&root(), Face::Remote).unwrap();
+    let second = service.attach(&root(), Face::Remote).unwrap();
     let open = || SessionIntent::OpenAgentTranscript {
         agent_id: "c1".into(),
     };
@@ -477,7 +480,10 @@ fn agent_transcripts_are_shared_across_attachments() {
 fn an_attach_that_cannot_ask_for_a_baseline_fails() {
     let (service, intents) = service(4);
     drop(intents);
-    assert_eq!(service.attach(&root()), Err(RequestRefusal::Disconnected));
+    assert_eq!(
+        service.attach(&root(), Face::Remote),
+        Err(RequestRefusal::Disconnected)
+    );
     assert_eq!(service.detach(1), Err(RequestRefusal::NotAttached));
 }
 
@@ -558,7 +564,10 @@ fn the_service_does_not_keep_the_session_open() {
     let (actions, _face) = service.attach_face(actions, events);
     drop(actions);
     assert!(shut_down.load(std::sync::atomic::Ordering::Acquire));
-    assert_eq!(service.attach(&root()), Err(RequestRefusal::Disconnected));
+    assert_eq!(
+        service.attach(&root(), Face::Remote),
+        Err(RequestRefusal::Disconnected)
+    );
 }
 
 /// The session serves one agent transcript: a face's open of another while
@@ -570,7 +579,7 @@ fn a_faces_agent_view_is_one_of_the_services() {
     let (_published, events) = observation_channel::<Core>();
     let service = HostService::for_faces(actions.clone(), root(), 16);
     let (face_actions, face) = service.attach_face(actions, events);
-    let remote = service.attach(&root()).unwrap();
+    let remote = service.attach(&root(), Face::Remote).unwrap();
     while intents.try_recv().is_ok() {}
     service
         .intent(
@@ -672,10 +681,10 @@ fn every_attach_gets_a_fresh_id_and_a_sequence_from_one() {
             })
             .collect()
     };
-    let first = service.attach(&root()).unwrap();
+    let first = service.attach(&root(), Face::Remote).unwrap();
     assert_eq!(seqs(service.take(first)), [1]);
     service.detach(first).unwrap();
-    let second = service.attach(&root()).unwrap();
+    let second = service.attach(&root(), Face::Remote).unwrap();
     assert_ne!(second, first);
     assert_eq!(seqs(service.take(second)), [1]);
 }
@@ -685,12 +694,12 @@ fn every_attach_gets_a_fresh_id_and_a_sequence_from_one() {
 #[test]
 fn a_detached_requester_takes_no_more_answers() {
     let (service, _intents) = service(16);
-    let first = service.attach(&root()).unwrap();
+    let first = service.attach(&root(), Face::Remote).unwrap();
     service.observe(Observation::IntentStarted(Some(format!(
         "attachment:{first}"
     ))));
     service.detach(first).unwrap();
-    let second = service.attach(&root()).unwrap();
+    let second = service.attach(&root(), Face::Remote).unwrap();
     service.take(second);
     service.observe(Observation::DraftRestored(Draft::from("after")));
     assert_eq!(

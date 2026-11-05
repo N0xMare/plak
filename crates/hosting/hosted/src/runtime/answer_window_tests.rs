@@ -7,6 +7,7 @@ use plakous_host_protocol::{
 };
 
 use super::Sender;
+use crate::host_service::wire::Face;
 use crate::host_service::{HostService, Outbound};
 
 type Observation = plakous_host_protocol::SessionObservation<Core>;
@@ -93,8 +94,8 @@ fn a_late_answer_reaches_its_requester_through_the_service() {
         agent_id: "t1".into(),
     };
     let service = HostService::new(actions, root.clone(), 64);
-    let first = service.attach(&root).unwrap();
-    let second = service.attach(&root).unwrap();
+    let first = service.attach(&root, Face::Remote).unwrap();
+    let second = service.attach(&root, Face::Remote).unwrap();
     while intents.try_recv().is_ok() {}
     let (channel, received) = observation_channel::<Core>();
     let events = Sender::over(channel);

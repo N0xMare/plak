@@ -142,6 +142,13 @@ impl<P: ProtocolExtension> SessionObservation<P> {
             Self::Extension(extension) => extension.wire_class(),
         }
     }
+
+    /// Whether only a local face may receive this observation
+    /// ([`crate::ObservationExtension::local_only`]).
+    #[must_use]
+    pub fn local_only(&self) -> bool {
+        matches!(self, Self::Extension(extension) if extension.local_only())
+    }
 }
 
 /// An error row is the record of a failure; any other row is repaired by a

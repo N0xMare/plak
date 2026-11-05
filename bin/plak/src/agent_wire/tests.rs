@@ -268,10 +268,13 @@ fn a_child_face_reads_its_nodes_usage() {
     let (actions, intents) = user_action_channel();
     let service = HostService::new(actions, root(), 16).with_nodes(std::sync::Arc::new(Open));
     let child = service
-        .attach(&NodeAddress {
-            tree_id: "t1".into(),
-            agent_id: "c1".into(),
-        })
+        .attach(
+            &NodeAddress {
+                tree_id: "t1".into(),
+                agent_id: "c1".into(),
+            },
+            Face::Remote,
+        )
         .unwrap();
     while intents.try_recv().is_ok() {}
     for usage in [SurfaceIntent::OpenUsage, SurfaceIntent::RereadUsage] {
@@ -373,4 +376,193 @@ fn only_a_local_face_may_probe_or_check_the_installed_build() {
             Some(Face::Local) => assert_eq!((reached, refused), (2, 0), "{taken:?}"),
         }
     }
+}
+
+/// A connection's frames, readable while the connection writes them.
+#[derive(Clone, Default)]
+struct SharedOutput(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl Write for SharedOutput {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl SharedOutput {
+    fn frames(&self) -> Vec<Host> {
+        frames(&self.0.lock().unwrap())
+    }
+}
+
+fn binding(session: &str) -> SessionObservation<PlakExtension> {
+    SessionObservation::Binding {
+        session_id: Some(session.to_owned()),
+        account: None,
+        model: None,
+        effort: None,
+        extra: None,
+        composition: plakous_host_protocol::CompositionSelection::FollowCatalog,
+        protocol: plakous_host_protocol::ProtocolSelection::Auto,
+        effective_presentation: "direct".to_owned(),
+    }
+}
+
+fn marker(text: &str) -> SessionObservation<PlakExtension> {
+    use plakous_host_protocol::views::transcript::{NoticeScope, TranscriptRow};
+    SessionObservation::Row(TranscriptRow::info(NoticeScope::Host, text))
+}
+
+/// Publishes `observations` and a marker row, then flushes each connection
+/// until its output shows the marker.
+fn publish_until_marked(
+    published: &crate::surface_protocol::HostEventSender,
+    observations: Vec<SessionObservation<PlakExtension>>,
+    mark: &str,
+    connections: [(&mut Adapter<SharedOutput>, &SharedOutput); 2],
+) {
+    for observation in observations {
+        published.send(observation).unwrap();
+    }
+    published.send(marker(mark)).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    for (connection, out) in connections {
+        loop {
+            connection.flush().unwrap();
+            let seen = out.frames().iter().any(|frame| {
+                matches!(frame, HostFrame::Event { observation, .. }
+                    if *observation == marker(mark))
+            });
+            if seen {
+                break;
+            }
+            assert!(Instant::now() < deadline, "{mark}: {:?}", out.frames());
+            thread::sleep(Duration::from_millis(2));
+        }
+    }
+}
+
+/// How many of `frames` are events of a local-only observation.
+fn local_only_events(frames: &[Host]) -> usize {
+    frames
+        .iter()
+        .filter(|frame| {
+            matches!(frame, HostFrame::Event { observation, .. } if observation.local_only())
+        })
+        .count()
+}
+
+/// Asserts each attachment's events in `frames` are numbered from one with
+/// no gap; returns how many attachments had events.
+fn numbered_without_gaps(frames: &[Host]) -> usize {
+    let mut numbered = std::collections::BTreeMap::<AttachmentId, Vec<u64>>::new();
+    for frame in frames {
+        if let HostFrame::Event {
+            attachment, seq, ..
+        } = frame
+        {
+            numbered.entry(*attachment).or_default().push(*seq);
+        }
+    }
+    for seqs in numbered.values() {
+        let expected: Vec<u64> = (1..=u64::try_from(seqs.len()).unwrap()).collect();
+        assert_eq!(*seqs, expected, "{frames:?}");
+    }
+    numbered.len()
+}
+
+/// A remote face's attachment never receives an observation only a local
+/// face may: not the launch's lookup progress (a state, kept for later
+/// attaches), not a build status that answers no attachment (an addressed
+/// answer that falls back to every root attachment), neither before a
+/// session switch, nor in the next attachment's snapshot or replay, nor
+/// after. Its events stay numbered without a gap. A local face on the same
+/// session receives each of them.
+#[test]
+fn a_remote_face_never_receives_a_local_only_observation() {
+    use plakous_hosted::host_service::wire::WireSession;
+    let root_of = |id: &str| NodeAddress {
+        tree_id: format!("tree-{id}"),
+        agent_id: format!("tree-{id}"),
+    };
+    let (actions, _intents) = user_action_channel();
+    let (published, events) = plakous_host_protocol::observation_channel();
+    let session = WireSession::start(root_of("s1"), "s1".to_owned(), actions, events, move |id| {
+        Some(root_of(id))
+    });
+    let (local_out, remote_out) = (SharedOutput::default(), SharedOutput::default());
+    let mut local = session.connect(local_out.clone(), Face::Local, || false);
+    let mut remote = session.connect(remote_out.clone(), Face::Remote, || false);
+    let attach = |id, tree: &str| {
+        Ok(line(&ClientFrame::Request {
+            id,
+            op: Op::Attach {
+                node: root_of(tree),
+            },
+        }))
+    };
+    let lookup = |text: &str| {
+        SessionObservation::Extension(SurfaceObservation::LookupStatus {
+            text: Some(text.to_owned()),
+        })
+    };
+    let build = SessionObservation::Extension(SurfaceObservation::BuildStatus {
+        newer_installed: true,
+    });
+    assert!(local.frame(attach(1, "s1")).unwrap());
+    assert!(remote.frame(attach(1, "s1")).unwrap());
+    publish_until_marked(
+        &published,
+        vec![binding("s1"), lookup("before"), build.clone()],
+        "first",
+        [(&mut local, &local_out), (&mut remote, &remote_out)],
+    );
+    // The switch: its opening carries both kinds again, then the next
+    // session's binding moves every attachment.
+    for observation in [
+        SessionObservation::SessionOpening,
+        lookup("opening"),
+        build.clone(),
+        binding("s2"),
+    ] {
+        published.send(observation).unwrap();
+    }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while session.session_id() != "s2" {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    local.flush().unwrap();
+    remote.flush().unwrap();
+    assert!(remote.frame(attach(2, "s2")).unwrap());
+    assert!(local.frame(attach(2, "s2")).unwrap());
+    publish_until_marked(
+        &published,
+        vec![lookup("after"), build],
+        "second",
+        [(&mut local, &local_out), (&mut remote, &remote_out)],
+    );
+
+    let remote_frames = remote_out.frames();
+    assert_eq!(local_only_events(&remote_frames), 0, "{remote_frames:?}");
+    assert_eq!(
+        numbered_without_gaps(&remote_frames),
+        2,
+        "{remote_frames:?}"
+    );
+    let local_frames = local_out.frames();
+    for text in ["before", "after"] {
+        assert!(
+            local_frames
+                .iter()
+                .any(|frame| matches!(frame, HostFrame::Event { observation, .. }
+                if *observation == lookup(text))),
+            "{text}: {local_frames:?}"
+        );
+    }
+    assert!(local_only_events(&local_frames) >= 4, "{local_frames:?}");
 }

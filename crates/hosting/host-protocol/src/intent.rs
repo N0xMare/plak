@@ -48,6 +48,12 @@ pub trait ObservationExtension: Clone + fmt::Debug + Eq + Send + 'static {
     {
         crate::observation::default_extension_class(self)
     }
+    /// Whether only a local face may receive it (an answer to a
+    /// [`ProtocolExtension::local_only`] intent, or what names the host's
+    /// own build); by default none is.
+    fn local_only(&self) -> bool {
+        false
+    }
 }
 
 /// The closed protocol with no extension traffic.

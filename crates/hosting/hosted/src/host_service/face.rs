@@ -15,6 +15,7 @@ use plakous_host_protocol::{
     SessionObservation,
 };
 
+use super::wire::Face;
 use super::{HostService, Outbound, origin};
 
 /// What a face sends with: the session's mailbox sender, tagged with the
@@ -158,7 +159,7 @@ impl<P: ProtocolExtension> HostService<P> {
         actions: IntentSender<P>,
         events: ObservationReceiver<P>,
     ) -> (FaceSender<P>, FaceReceiver<P>) {
-        let (attachment, _) = self.admit(None);
+        let (attachment, _) = self.admit(None, Face::Local);
         let sender = FaceSender {
             actions: actions.tagged(origin(attachment)),
             service: self.clone(),
@@ -215,7 +216,7 @@ impl<P: ProtocolExtension> FaceReceiver<P> {
     #[must_use]
     pub fn new(events: ObservationReceiver<P>) -> Self {
         let service = HostService::serving(None, unnamed(), usize::MAX);
-        let (attachment, _) = service.admit(None);
+        let (attachment, _) = service.admit(None, Face::Local);
         Self {
             events,
             service,

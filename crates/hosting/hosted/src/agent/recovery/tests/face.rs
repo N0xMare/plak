@@ -14,6 +14,7 @@ use plakous_host_protocol::{
 use super::Fixture;
 use crate::agent_tree::InterruptCause;
 use crate::agent_tree_protocol::{AttemptScopedRequest, AttemptStatus, NodeStatus};
+use crate::host_service::wire::Face;
 use crate::host_service::{HostService, TreeNodes};
 
 /// A child whose bound turn the lost owner left: owed its `recover_node`.
@@ -104,7 +105,9 @@ async fn a_face_steer_to_an_owed_child_stays_durable_until_recover_node() {
     let (fixture, id) = owed_child("face-owed-mail").await;
     let dispatched = fixture.dispatches();
     let (service, intents, node) = face_service(&fixture, &id);
-    let child = service.attach(&node).expect("an owed child is open");
+    let child = service
+        .attach(&node, Face::Remote)
+        .expect("an owed child is open");
     let _transcript = intents.try_recv().unwrap();
     service
         .intent(child, SessionIntent::Steer(Draft::from("while owed")))
@@ -180,7 +183,9 @@ async fn a_face_steer_to_an_owed_child_stays_durable_until_recover_node() {
 async fn a_face_interrupt_of_an_owed_child_takes_effect() {
     let (fixture, id) = owed_child("face-owed-interrupt").await;
     let (service, intents, node) = face_service(&fixture, &id);
-    let child = service.attach(&node).expect("an owed child is open");
+    let child = service
+        .attach(&node, Face::Remote)
+        .expect("an owed child is open");
     let _transcript = intents.try_recv().unwrap();
     service.intent(child, SessionIntent::Interrupt).unwrap();
     assert!(
@@ -232,7 +237,10 @@ async fn a_face_interrupt_of_an_owed_child_takes_effect() {
         })
         .await
         .unwrap();
-    assert_eq!(service.attach(&node), Err(RequestRefusal::NodeClosed));
+    assert_eq!(
+        service.attach(&node, Face::Remote),
+        Err(RequestRefusal::NodeClosed)
+    );
     assert_eq!(
         service.intent(child, SessionIntent::Interrupt),
         Err(RequestRefusal::NodeClosed)

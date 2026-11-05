@@ -219,15 +219,27 @@ pub enum Leave {
 }
 
 /// Whether a connection's transport is a local face of the host (stdio's
-/// parent, the TUI over the host's own socket) or a remote one (the web
-/// endpoint). A remote face is refused the intents only a local face may
-/// send ([`ProtocolExtension::local_only`]).
+/// parent, an in-process face) or a remote one (the web endpoint). A remote
+/// face is refused the intents only a local face may send
+/// ([`ProtocolExtension::local_only`]) and is never delivered, nor replayed
+/// on attach, an observation only a local face may receive
+/// ([`plakous_host_protocol::ObservationExtension::local_only`]).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Face {
     /// A process of this user on this machine.
     Local,
     /// A client reached over the network, however authenticated.
     Remote,
+}
+
+impl Face {
+    /// Whether this face may receive `observation`.
+    pub(super) fn receives<P: ProtocolExtension>(
+        self,
+        observation: &SessionObservation<P>,
+    ) -> bool {
+        self == Self::Local || !observation.local_only()
+    }
 }
 
 /// The connection's state after the handshake: one attachment at a time
@@ -525,7 +537,7 @@ where
                 if let Some(guard) = &guard {
                     self.follow(guard);
                 }
-                match self.service.attach(&node) {
+                match self.service.attach(&node, self.face) {
                     Ok(attachment) => {
                         self.attachment = Some(attachment);
                         if let Some(guard) = guard.as_mut()

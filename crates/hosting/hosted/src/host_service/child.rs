@@ -26,6 +26,7 @@ use plakous_host_protocol::views::transcript::{NoticeScope, TranscriptRow, Trans
 use plakous_host_protocol::wire::{AttachmentId, RequestRefusal};
 use plakous_host_protocol::{IntentSender, ProtocolExtension, SessionIntent, SessionObservation};
 
+use super::wire::Face;
 use super::{Attachment, HostService, Scopes, origin, refusal_of};
 
 /// Where a child node of the session's tree stands.
@@ -199,7 +200,11 @@ fn route<P: ProtocolExtension>(
 impl<P: ProtocolExtension> HostService<P> {
     /// Attaches to the child `agent`: the attachment holds its transcript,
     /// whose baseline the session is asked for.
-    pub(super) fn attach_child(&self, agent: &str) -> Result<AttachmentId, RequestRefusal> {
+    pub(super) fn attach_child(
+        &self,
+        agent: &str,
+        face: Face,
+    ) -> Result<AttachmentId, RequestRefusal> {
         let Some(nodes) = &self.nodes else {
             return Err(RequestRefusal::UnknownNode);
         };
@@ -233,6 +238,7 @@ impl<P: ProtocolExtension> HostService<P> {
         state.attachments.insert(
             id,
             Attachment {
+                face,
                 sender: Some(sender),
                 node: Some(agent.to_owned()),
                 queue: VecDeque::new(),

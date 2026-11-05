@@ -83,29 +83,32 @@ fn only_an_open_child_of_the_sessions_tree_attaches() {
     nodes.set("closed", NodeState::Closed);
     nodes.set("retiring", NodeState::Retiring);
     assert_eq!(
-        service.attach(&node("closed")),
+        service.attach(&node("closed"), Face::Remote),
         Err(RequestRefusal::NodeClosed)
     );
     assert_eq!(
-        service.attach(&node("retiring")),
+        service.attach(&node("retiring"), Face::Remote),
         Err(RequestRefusal::NodeRetiring)
     );
     assert_eq!(
-        service.attach(&node("nobody")),
+        service.attach(&node("nobody"), Face::Remote),
         Err(RequestRefusal::UnknownNode)
     );
     assert_eq!(
-        service.attach(&NodeAddress {
-            tree_id: "t2".into(),
-            agent_id: "c1".into(),
-        }),
+        service.attach(
+            &NodeAddress {
+                tree_id: "t2".into(),
+                agent_id: "c1".into(),
+            },
+            Face::Remote
+        ),
         Err(RequestRefusal::UnknownNode)
     );
     assert!(intents.try_recv().is_err(), "a refused attach asks nothing");
     let (actions, _intents) = intent_channel::<Core>();
     let rootless = HostService::new(actions, root(), 16);
     assert_eq!(
-        rootless.attach(&node("c1")),
+        rootless.attach(&node("c1"), Face::Remote),
         Err(RequestRefusal::UnknownNode)
     );
 }
@@ -122,7 +125,7 @@ fn a_child_attach_takes_its_nodes_scope_and_only_that() {
         PresentationSnapshot::empty(5),
     ));
     service.observe(approval("a1"));
-    let child = service.attach(&node("c1")).unwrap();
+    let child = service.attach(&node("c1"), Face::Remote).unwrap();
     let (asked, started) = next(&intents);
     assert_eq!(
         asked,
@@ -136,7 +139,7 @@ fn a_child_attach_takes_its_nodes_scope_and_only_that() {
             "attachment:{child}"
         ))))
     );
-    let second = service.attach(&node("c1")).unwrap();
+    let second = service.attach(&node("c1"), Face::Remote).unwrap();
     assert_eq!(
         next(&intents).0,
         SessionIntent::ResyncTranscript {
@@ -232,7 +235,7 @@ fn controls() -> Vec<(SessionIntent<Core>, SessionIntent<Core>)> {
 #[test]
 fn a_child_attachments_intents_are_its_nodes_controls() {
     let (service, intents, _) = child_service();
-    let child = service.attach(&node("c1")).unwrap();
+    let child = service.attach(&node("c1"), Face::Remote).unwrap();
     let _ = next(&intents);
     for (intent, control) in controls() {
         service
@@ -327,7 +330,7 @@ fn a_child_attachments_intents_are_its_nodes_controls() {
 #[test]
 fn controls_of_a_closed_retiring_or_unknown_node_are_refused() {
     let (service, intents, nodes) = child_service();
-    let child = service.attach(&node("c1")).unwrap();
+    let child = service.attach(&node("c1"), Face::Remote).unwrap();
     let _ = next(&intents);
     for (state, refusal) in [
         (NodeState::Retiring, RequestRefusal::NodeRetiring),
@@ -351,7 +354,7 @@ fn controls_of_a_closed_retiring_or_unknown_node_are_refused() {
     assert!(!service.attached(child));
     nodes.set("c1", NodeState::OutOfReach);
     assert_eq!(
-        service.attach(&node("c1")),
+        service.attach(&node("c1"), Face::Remote),
         Err(RequestRefusal::OutOfReach),
         "attach and controls agree on the operator's reach"
     );
@@ -364,9 +367,9 @@ fn controls_of_a_closed_retiring_or_unknown_node_are_refused() {
 #[test]
 fn only_a_childs_marked_answers_reach_it() {
     let (service, intents, _) = child_service();
-    let face = service.attach(&root()).unwrap();
-    let first = service.attach(&node("c1")).unwrap();
-    let second = service.attach(&node("c1")).unwrap();
+    let face = service.attach(&root(), Face::Remote).unwrap();
+    let first = service.attach(&node("c1"), Face::Remote).unwrap();
+    let second = service.attach(&node("c1"), Face::Remote).unwrap();
     while intents.try_recv().is_ok() {}
     service.take(face);
     service.take(first);
@@ -422,13 +425,16 @@ fn only_a_childs_marked_answers_reach_it() {
 fn a_second_agent_view_is_refused_while_one_is_held() {
     let (service, intents, nodes) = child_service();
     nodes.set("c2", NodeState::Open);
-    let face = service.attach(&root()).unwrap();
-    let child = service.attach(&node("c1")).unwrap();
+    let face = service.attach(&root(), Face::Remote).unwrap();
+    let child = service.attach(&node("c1"), Face::Remote).unwrap();
     while intents.try_recv().is_ok() {}
     let transcript = RequestRefusal::RefusedForRole {
         row: "transcript".into(),
     };
-    assert_eq!(service.attach(&node("c2")), Err(transcript.clone()));
+    assert_eq!(
+        service.attach(&node("c2"), Face::Remote),
+        Err(transcript.clone())
+    );
     assert_eq!(
         service.intent(
             face,
@@ -463,7 +469,7 @@ fn a_second_agent_view_is_refused_while_one_is_held() {
         .intent(face, SessionIntent::CloseAgentTranscript)
         .unwrap();
     assert_eq!(next(&intents).0, SessionIntent::CloseAgentTranscript);
-    let other = service.attach(&node("c2")).unwrap();
+    let other = service.attach(&node("c2"), Face::Remote).unwrap();
     assert_eq!(
         next(&intents).0,
         SessionIntent::OpenAgentTranscript {
@@ -480,8 +486,8 @@ fn a_second_agent_view_is_refused_while_one_is_held() {
 #[test]
 fn a_childs_interrupt_runs_on_its_node_not_the_root_mailbox() {
     let (service, intents, nodes) = child_service();
-    let face = service.attach(&root()).unwrap();
-    let child = service.attach(&node("c1")).unwrap();
+    let face = service.attach(&root(), Face::Remote).unwrap();
+    let child = service.attach(&node("c1"), Face::Remote).unwrap();
     while intents.try_recv().is_ok() {}
     service.take(face);
     service.take(child);
