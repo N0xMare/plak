@@ -235,6 +235,13 @@ pub enum Op<P: ProtocolExtension> {
         /// Why exact reopen cannot continue, or the operator's own reason.
         cause: String,
     },
+    /// Stop the session `session`: its turn and the work under it end, as
+    /// `/stop` ends them. A host-level request, naming the session rather
+    /// than an attachment, so a session nobody attaches can be stopped.
+    StopSession {
+        /// The durable session id.
+        session: String,
+    },
 }
 
 /// The answer to an admitted request.
@@ -252,6 +259,8 @@ pub enum Answer {
     Accepted,
     /// Liveness.
     Pong,
+    /// The session stopped.
+    Stopped,
     /// The session request switched the session to the one rooted at
     /// `node`; the requester's `moved` follows.
     Moved {
@@ -306,6 +315,11 @@ pub enum RequestRefusal {
     /// The request could not be read.
     Malformed {
         /// What was wrong.
+        detail: String,
+    },
+    /// This host does not do what the request asks yet.
+    Unsupported {
+        /// What it does not do.
         detail: String,
     },
 }

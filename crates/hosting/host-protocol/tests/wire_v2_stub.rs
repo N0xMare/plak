@@ -125,6 +125,12 @@ fn stub_host(stream: UnixStream) {
                     id,
                     outcome: Outcome::Ok(Answer::Pong),
                 }),
+                Op::StopSession { .. } => end.send(&Host::Response {
+                    id,
+                    outcome: Outcome::Refused(RequestRefusal::Unsupported {
+                        detail: "the stub does not stop sessions".to_owned(),
+                    }),
+                }),
                 Op::RetryAttach { .. } | Op::ResumeSession { .. } | Op::Rebind { .. } => {
                     end.send(&Host::Response {
                         id,

@@ -1340,3 +1340,101 @@ fn a_lost_transcript_resyncs_its_holders_once_per_loss() {
     losses.check(&service, &events);
     assert!(ended(second), "a later loss ends its holders again");
 }
+
+/// What one `quit` intent on the root attachment answers, and whether it
+/// asked the session to quit.
+fn quit_on_root(leave: Leave) -> (Option<Outcome>, bool) {
+    let (actions, intents) = plakous_host_protocol::intent_channel::<plakous_host_protocol::Core>();
+    let service = HostService::new(actions.clone(), root(), ATTACHMENT_CAPACITY)
+        .with_nodes(std::sync::Arc::new(TreeNodes::new(root().tree_id)));
+    let mut stdout = Vec::new();
+    let mut connection = WireConnection::on_service(service, &mut stdout, actions, leave);
+    let Some(Outcome::Ok(Answer::Attached { attachment })) =
+        connection.request(1, Op::Attach { node: root() })
+    else {
+        panic!("attached");
+    };
+    let outcome = connection.request(
+        2,
+        Op::Intent {
+            attachment,
+            intent: SessionIntent::Quit,
+            blobs: Vec::new(),
+        },
+    );
+    if outcome == Some(Outcome::Ok(Answer::Detached)) {
+        assert_eq!(connection.attachment, None);
+    }
+    drop(connection);
+    let mut quit = false;
+    while let Ok(delivery) = intents.try_recv() {
+        quit |= matches!(*delivery, SessionIntent::Quit);
+    }
+    (outcome, quit)
+}
+
+/// In a host (connections that detach when they leave) the session outlives
+/// its clients: quitting the root attachment detaches it and the session is
+/// never asked to quit. On stdio, the connection's only client, quitting
+/// quits the session as before.
+#[test]
+fn a_quit_on_the_root_detaches_in_a_host_and_quits_on_stdio() {
+    let (hosted, quit) = quit_on_root(Leave::Detach);
+    assert_eq!(hosted, Some(Outcome::Ok(Answer::Detached)));
+    assert!(!quit, "the host's session was asked to quit");
+    let (stdio, quit) = quit_on_root(Leave::Quit);
+    assert_eq!(stdio, Some(Outcome::Ok(Answer::Accepted)));
+    assert!(quit, "stdio's session was not asked to quit");
+}
+
+/// `stop_session` is refused, unsupported, until the host writes stop
+/// records; nothing reaches the session.
+#[test]
+fn stop_session_is_refused_unsupported_for_now() {
+    let (actions, intents) = plakous_host_protocol::intent_channel::<plakous_host_protocol::Core>();
+    let mut stdout = Vec::new();
+    let mut connection = WireConnection::new(root(), &mut stdout, actions);
+    assert!(matches!(
+        connection.request(
+            1,
+            Op::StopSession {
+                session: "s1".to_owned()
+            }
+        ),
+        Some(Outcome::Refused(RequestRefusal::Unsupported { .. }))
+    ));
+    assert!(intents.try_recv().is_err());
+}
+
+/// A child attachment's quit is its detach on any connection, and answers
+/// `detached` as a host's root quit does: one answer for one meaning.
+#[test]
+fn a_childs_quit_answers_detached() {
+    use plakous_host_protocol::Core;
+    let (actions, _intents) = plakous_host_protocol::intent_channel::<Core>();
+    let service = HostService::new(actions.clone(), root(), ATTACHMENT_CAPACITY)
+        .with_nodes(std::sync::Arc::new(OpenChildren));
+    let mut stdout = Vec::new();
+    let mut connection = WireConnection::on_service(service, &mut stdout, actions, Leave::Quit);
+    let child = NodeAddress {
+        tree_id: "t1".into(),
+        agent_id: "c1".into(),
+    };
+    let Some(Outcome::Ok(Answer::Attached { attachment })) =
+        connection.request(1, Op::Attach { node: child })
+    else {
+        panic!("attached");
+    };
+    assert_eq!(
+        connection.request(
+            2,
+            Op::Intent {
+                attachment,
+                intent: SessionIntent::Quit,
+                blobs: Vec::new(),
+            },
+        ),
+        Some(Outcome::Ok(Answer::Detached))
+    );
+    assert_eq!(connection.attachment, None);
+}

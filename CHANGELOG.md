@@ -388,6 +388,15 @@ an export.
   has since switched, is refused `moved` with the served session's root
   (`RequestRefusal::Moved`), not `unknown_node`: a connection welcomed
   before a switch learns where the session went.
+- Wire v2 quit and stop: a `quit` intent on a root attachment of `plak web`
+  (a host whose connections detach) detaches that attachment, answered
+  `detached`, and the session runs on; on `plak agent --wire v2` it still
+  quits the session. A child attachment's quit-as-detach now answers
+  `detached` too, not `accepted`. The new `stop_session {session}` op
+  (`Op::StopSession`, answered `stopped`, `Answer::Stopped`) is refused
+  `unsupported` (`RequestRefusal::Unsupported`) until stop records are
+  written. The wire version stays 2. Embedder break: the new `Op`,
+  `Answer` and `RequestRefusal` variants.
 - Wire v2 session requests: `retry_attach`, `resume_session` and `rebind`
   ops (`Op::RetryAttach`, `Op::ResumeSession`, `Op::Rebind`), each naming
   its requester attachment and a client `request_id`, answered `moved`

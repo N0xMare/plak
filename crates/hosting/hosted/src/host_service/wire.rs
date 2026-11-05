@@ -657,6 +657,11 @@ where
             op @ (Op::RetryAttach { .. } | Op::ResumeSession { .. } | Op::Rebind { .. }) => {
                 self.session_request(id, op)
             }
+            // Stopping a session writes its stop records, which this host
+            // does not yet do.
+            Op::StopSession { session: _ } => refused(RequestRefusal::Unsupported {
+                detail: "stop_session is not available on this host yet".to_owned(),
+            }),
             Op::Attach { node } => {
                 // An attach and the replay it takes are one step against
                 // the session's observations.
@@ -715,47 +720,72 @@ where
             }
             Op::Intent {
                 attachment,
-                mut intent,
+                intent,
                 blobs,
-            } => {
-                if self.attachment != Some(attachment) {
-                    return refused(RequestRefusal::NotAttached);
+            } => self.intent_request(id, attachment, intent, &blobs),
+        }
+    }
+
+    /// An intent from `attachment`: its answer, or `None` for a child's
+    /// mail, answered once the mail is written.
+    fn intent_request(
+        &mut self,
+        id: RequestId,
+        attachment: AttachmentId,
+        mut intent: SessionIntent<P>,
+        blobs: &[String],
+    ) -> Option<Outcome> {
+        let refused = |refusal| Some(Outcome::Refused(refusal));
+        if self.attachment != Some(attachment) {
+            return refused(RequestRefusal::NotAttached);
+        }
+        if self.face == Face::Remote
+            && matches!(&intent, SessionIntent::Extension(extension) if P::local_only(extension))
+        {
+            return refused(RequestRefusal::RefusedForRole {
+                row: "local_face".to_owned(),
+            });
+        }
+        if let Err(error) = self.blobs.restore_images(&mut intent, blobs) {
+            return refused(RequestRefusal::Malformed {
+                detail: error.to_string(),
+            });
+        }
+        let quit = matches!(intent, SessionIntent::Quit);
+        // A host's session outlives its clients: quitting a root
+        // attachment detaches it, and only a stop ends the session.
+        if quit && self.leave == Leave::Detach && !self.service.is_child(attachment) {
+            self.attachment = None;
+            self.unanswered();
+            return match self.service.detach(attachment) {
+                Ok(()) => Some(Outcome::Ok(Answer::Detached)),
+                Err(refusal) => refused(refusal),
+            };
+        }
+        let mail = (is_mail(&intent) && self.service.is_child(attachment)).then(|| {
+            self.next_mail += 1;
+            format!("mail-{}", self.next_mail)
+        });
+        match self
+            .service
+            .intent_correlated(attachment, intent, mail.as_deref())
+        {
+            Ok(()) => {
+                if let Some(mail) = mail {
+                    self.mails.insert(mail, id);
+                    return None;
                 }
-                if self.face == Face::Remote
-                    && matches!(&intent, SessionIntent::Extension(extension) if P::local_only(extension))
-                {
-                    return refused(RequestRefusal::RefusedForRole {
-                        row: "local_face".to_owned(),
-                    });
-                }
-                if let Err(error) = self.blobs.restore_images(&mut intent, &blobs) {
-                    return refused(RequestRefusal::Malformed {
-                        detail: error.to_string(),
-                    });
-                }
-                let mail = (is_mail(&intent) && self.service.is_child(attachment)).then(|| {
-                    self.next_mail += 1;
-                    format!("mail-{}", self.next_mail)
-                });
-                match self
-                    .service
-                    .intent_correlated(attachment, intent, mail.as_deref())
-                {
-                    Ok(()) => {
-                        if let Some(mail) = mail {
-                            self.mails.insert(mail, id);
-                            return None;
-                        }
-                        // A child attachment's quit is its detach.
-                        if !self.service.attached(attachment) {
-                            self.attachment = None;
-                            self.unanswered();
-                        }
-                        Some(Outcome::Ok(Answer::Accepted))
+                // A child attachment's quit is its detach.
+                if !self.service.attached(attachment) {
+                    self.attachment = None;
+                    self.unanswered();
+                    if quit {
+                        return Some(Outcome::Ok(Answer::Detached));
                     }
-                    Err(refusal) => refused(refusal),
                 }
+                Some(Outcome::Ok(Answer::Accepted))
             }
+            Err(refusal) => refused(refusal),
         }
     }
 

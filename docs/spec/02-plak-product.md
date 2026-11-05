@@ -3806,18 +3806,30 @@ verdicts) are addressed, the session profile and workspace chrome states.
   numbered, so the attachment's sequence shows no gap for them.
 - **Requests.** A `request` carries a client-chosen id and an `op`:
   `attach` (a node, by tree and agent id), `detach`, `intent` (an
-  attachment and a session intent), `ping`, or a session request. It gets
-  exactly one `response` with that id: `attached`, `detached`, `accepted`
-  (the intent entered the node's mailbox; what it does arrives as
-  observations), `pong` or `moved` (a session request's switch, with the
-  new root), or a refusal: `backpressure`, `one_in_flight`, `disconnected`,
+  attachment and a session intent), `ping`, a session request, or
+  `stop_session {session}`. It gets exactly one `response` with that id:
+  `attached`, `detached` (a `detach`, or a `quit` intent that detached its
+  attachment), `accepted` (the intent entered the node's mailbox; what it
+  does arrives as observations), `pong`, `stopped` or `moved` (a session
+  request's switch, with the new root), or a refusal: `backpressure`, `one_in_flight`, `disconnected`,
   `refused_for_role` (with its role-table row), `unknown_node`, `moved`
   (with the served session's root: the attach named a root the connection
   told its client of, in its welcome or a `moved`, of a session that has
   since switched, so the client attaches that node instead), `node_closed`, `node_retiring`,
   `out_of_reach`, `mail_refused` (with the tree's reason), `not_attached`,
-  `session_unavailable` (with why) or `malformed`. A refused request did
-  nothing.
+  `session_unavailable` (with why), `malformed` or `unsupported` (with what
+  the host does not do yet). A refused request did nothing.
+- **Quit and stop.** A `quit` intent never ends a session that outlives its
+  clients. On a child attachment it is that attachment's detach, on any
+  connection. On a root attachment of a host whose connections detach when
+  they leave (`plak web`, and `plak host` when it serves sessions) it is the
+  attachment's detach too, and the session runs on; only on `plak agent
+  --wire v2`, whose one connection is the session's only client, does it
+  quit the session. Either detach answers `detached`. Stopping a session's
+  work is its own request, `stop_session {session}`, which names the
+  session rather than an attachment and answers `stopped`; until stop
+  records are written (the root's `interrupt{stopped}`), every host refuses
+  it `unsupported`.
 - **Session requests.** `retry_attach` (re-resolve the binding and open the
   session again), `resume_session {session}` (switch to one of the user's
   sessions) and `rebind {cause}` (carry the history into a new session on
@@ -3966,7 +3978,8 @@ verdicts) are addressed, the session profile and workspace chrome states.
   unrun (it stopped) is answered as refused (`the agent tree's executor
   stopped`). A face's stop is that
   interrupt or the node's close (`close_topology_node` naming the attached
-  node); a `quit` detaches the attachment and the node runs on.
+  node); a `quit` detaches the attachment, answered `detached`, and the
+  node runs on.
   `background` backgrounds the top-level process calls in flight in the
   node's running turn, through that turn's own control
   (`background_topology_node`), and a process stop stops the node's own
@@ -4106,7 +4119,8 @@ The hidden maintainer command `plak web --listen <unix:path|127.0.0.1:port>
   shared service (`WireSession`, fed by one pump that is the session's only
   observation consumer); a connection that leaves, by `bye`, close, or any
   of the above, detaches, and the session runs on for the next connection. A
-  `quit` intent on the root attachment still quits the session. A login
+  `quit` intent on the root attachment detaches it as well (§4.4, quit and
+  stop). A login
   holds at most 4 connections and opens at most 30 a minute.
 - **Static files.** `--ui <dir>` must hold `csp.json`
   (`{"header": "...", "report_only_header": "..."}`, the second optional),
@@ -4854,7 +4868,9 @@ what stops (the root turn, the running agents, which stay resumable, the
 processes). Idle with nothing running it quits at once, and so does the
 ladder's second press over a stuck cancel. A bare
 `quit`, `exit` or `:q` without the slash is an ordinary prompt, idle or
-mid-turn.
+mid-turn. The TUI embeds its session, so its quit stops the session's work;
+a wire client of a host detaches instead and stops a session only by
+`stop_session` (§4.4).
 
 `SIGTERM` and `SIGHUP` are quit requests. A watcher thread armed before the
 terminal is taken records the signal and wakes the event loop (§5.8), which

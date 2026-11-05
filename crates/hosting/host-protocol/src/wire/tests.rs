@@ -147,6 +147,12 @@ fn session_requests_round_trip_as_lines() {
                 cause: "the binding changed".into(),
             },
         },
+        Client::Request {
+            id: 7,
+            op: Op::StopSession {
+                session: "s2".into(),
+            },
+        },
     ] {
         let line = encode_line(&frame).unwrap();
         assert_eq!(decode_line::<Client>(&line).unwrap(), frame);
@@ -165,6 +171,16 @@ fn session_requests_round_trip_as_lines() {
             id: 6,
             outcome: Outcome::Refused(RequestRefusal::SessionUnavailable {
                 detail: "no launcher".into(),
+            }),
+        },
+        Host::Response {
+            id: 7,
+            outcome: Outcome::Ok(Answer::Stopped),
+        },
+        Host::Response {
+            id: 7,
+            outcome: Outcome::Refused(RequestRefusal::Unsupported {
+                detail: "not yet".into(),
             }),
         },
         Host::Moved {
