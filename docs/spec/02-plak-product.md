@@ -2199,9 +2199,11 @@ which no store reaches). Every later snapshot and patch of the scope keeps that
 notice in place until the face clears the view, opens another session or
 retires the agent scope, so it outlives the resync that replaced the invalid
 view and scrolls away with its history rather than trailing the newest turn.
-A face that refuses an invalid snapshot keeps its last good view, requests one
-resync and shows one refusal note per cause, which that session's later
-snapshots keep after the row it followed.
+Rows of a later record follow it; a notice written at that same anchor before
+another record is applied takes a lower ordinal and sorts before it. A face
+that refuses an invalid snapshot keeps its last good view, requests one resync
+and shows one refusal note per cause, which that session's later snapshots keep
+after the last committed row it followed.
 This repairs only disposable presentation state; it never repairs stored or
 canonical authority.
 A runtime-derived row's anchor is its record's sequence, lane 0, and its ordinal

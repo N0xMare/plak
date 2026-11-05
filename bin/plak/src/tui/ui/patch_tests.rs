@@ -1300,3 +1300,44 @@ fn a_committed_row_sharing_a_call_id_stays_a_block_of_its_own() {
         .collect();
     assert_eq!(subjects, ["m1 · c1 completed", "m1 · c2 completed"]);
 }
+
+#[test]
+fn a_refusal_note_after_a_live_row_stays_in_place_once_that_row_commits() {
+    use crate::tui::blocks::ScrollBlock;
+    let mut app = scoped_app(&TranscriptScope::Root);
+    let kept = RowKey::new(2, Lane::Runtime, 0);
+    let live = RowKey::new(1_u64 << 63, Lane::Product, 0);
+    app.apply_host_event(HostEvent::PresentationSnapshot(snapshot(
+        1,
+        &BTreeMap::from([
+            (kept, TranscriptRow::assistant("kept")),
+            (live, TranscriptRow::assistant("live answer")),
+        ]),
+    )));
+    let mut invalid = snapshot(
+        2,
+        &BTreeMap::from([(kept, TranscriptRow::assistant("kept"))]),
+    );
+    invalid.items.push(invalid.items[0].clone());
+    app.apply_host_event(HostEvent::PresentationSnapshot(invalid));
+    // The live row commits, and a later row follows it.
+    app.apply_host_event(HostEvent::PresentationSnapshot(snapshot(
+        3,
+        &BTreeMap::from([
+            (kept, TranscriptRow::assistant("kept")),
+            (
+                RowKey::new(3, Lane::Runtime, 0),
+                TranscriptRow::assistant("live answer"),
+            ),
+            (
+                RowKey::new(4, Lane::Runtime, 0),
+                TranscriptRow::assistant("later"),
+            ),
+        ]),
+    )));
+    assert!(
+        matches!(&app.pane.blocks[1], ScrollBlock::Error(text) if text.starts_with("invalid presentation snapshot refused")),
+        "the note follows the last committed row it followed, not the end"
+    );
+    assert_eq!(app.pane.blocks.len(), 4);
+}

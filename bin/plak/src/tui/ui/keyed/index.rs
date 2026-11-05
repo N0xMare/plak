@@ -54,6 +54,19 @@ impl BlockIndex {
         self.slots.range(..at).next_back().map(|(_, key)| *key)
     }
 
+    /// The key of the last committed row before `at`, skipping live
+    /// (provisional) rows: a note anchored on it keeps its place once the
+    /// live rows settle.
+    pub(in crate::tui::ui) fn committed_anchor(&self, at: usize) -> Option<RowKey> {
+        let at = self.head + at;
+        self.visit(1);
+        self.slots
+            .range(..at)
+            .rev()
+            .map(|(_, key)| *key)
+            .find(|key| key.anchor < 1_u64 << 63)
+    }
+
     pub(in crate::tui::ui) fn after(&self, key: Option<RowKey>, end: usize) -> usize {
         self.visit(1);
         key.map_or(0, |key| {

@@ -120,7 +120,7 @@ pub(super) struct Refusal {
     /// The root session whose presentation refused it.
     pub(super) session: Option<String>,
     pub(super) note: String,
-    /// The last keyed row the note followed when it was shown.
+    /// The last committed row the note followed when it was shown.
     pub(super) anchor: Option<RowKey>,
 }
 

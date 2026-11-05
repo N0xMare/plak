@@ -1520,6 +1520,7 @@ fn a_carried_first_commit_writes_its_earlier_notices_after_the_import_as_notices
         carried.bind_plakous_locator(locator()).unwrap();
         carried.link_carried_forward(&uuid::Uuid::new_v4().to_string(), "previous-build");
         let imported = vec![
+            TranscriptRow::Truncated,
             TranscriptRow::user("imported prompt"),
             TranscriptRow::assistant("imported answer"),
         ];
@@ -1551,13 +1552,20 @@ fn a_carried_first_commit_writes_its_earlier_notices_after_the_import_as_notices
             [
                 (true, 0, 0, imported[0].clone()),
                 (true, 0, 1, imported[1].clone()),
-                (false, 0, 2, notice.clone())
+                (true, 0, 2, imported[2].clone()),
+                (false, 0, 3, notice.clone())
             ]
         );
+        // The document's truncation marker leads the reloaded transcript.
         let loaded = store.load(&carried.id).unwrap();
         assert_eq!(
             loaded.transcript.to_vec(),
-            [imported[0].clone(), imported[1].clone(), notice]
+            [
+                imported[0].clone(),
+                imported[1].clone(),
+                imported[2].clone(),
+                notice
+            ]
         );
     });
 }

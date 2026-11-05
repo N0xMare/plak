@@ -356,7 +356,7 @@ impl App {
                             rows = snapshot.items.len(),
                             "invalid presentation snapshot refused"
                         );
-                        let anchor = self.pane.keyed.local_anchor(self.pane.blocks.len());
+                        let anchor = self.pane.keyed.committed_anchor(self.pane.blocks.len());
                         self.pane.blocks.push(ScrollBlock::Error(note.clone()));
                         self.pane.refusals.push(super::pane::Refusal {
                             session: namespace,

@@ -528,12 +528,9 @@ mod memory {
             .map_or(0, |views| views.cursor.get());
         let mut intents = state.intents.get(&session.id).cloned().unwrap_or_default();
         if first_commit && session.carried_forward_from().is_some() {
-            let imported = session
-                .transcript
-                .imported_rows()
-                .into_iter()
-                .filter(|row| !matches!(row, crate::sessions::TranscriptRow::Truncated));
-            for (ordinal, row) in imported.enumerate() {
+            // The marker of a truncated document is imported too, as the
+            // SQLite store imports it.
+            for (ordinal, row) in session.transcript.imported_rows().into_iter().enumerate() {
                 intents
                     .notices
                     .push(crate::sessions::projector::OperatorNotice::imported(
