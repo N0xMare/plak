@@ -47,6 +47,33 @@ fn an_owner_lost_child_holds_its_continuation() {
     assert_eq!(again.loss_continuations().len(), 1);
 }
 
+/// A parent's `wait_agent` row says why its child stopped and where the
+/// continuation stands, in the same words the operator's rows use; a child
+/// that was never interrupted carries neither.
+#[test]
+fn a_wait_row_carries_the_cause_and_the_continuation() {
+    let (_root, mut tree, child) = reopened_after_loss();
+    let row = serde_json::to_value(tree.wait_row(&child).unwrap()).unwrap();
+    assert_eq!(row["cause"], "owner_lost");
+    assert_eq!(row["continuation"], "held");
+    tree.record_loss_continuation(&child, 7).unwrap();
+    let row = serde_json::to_value(tree.wait_row(&child).unwrap()).unwrap();
+    assert_eq!(row["continuation"], "pending");
+    // Resumed and running again: its latest interrupt is stale, so the row
+    // no longer says why it stopped.
+    tree.nodes.get_mut(&child).unwrap().status = NodeStatus::Running;
+    assert_eq!(tree.interrupt_cause_of(&child), None);
+    let row = serde_json::to_value(tree.wait_row(&child).unwrap()).unwrap();
+    assert!(row.get("cause").is_none(), "{row}");
+    let (_other, mut other) = test_support::tree();
+    let fresh = other
+        .spawn_agent("root", &spawn_req(), None)
+        .unwrap()
+        .agent_id;
+    let row = serde_json::to_value(other.wait_row(&fresh).unwrap()).unwrap();
+    assert!(row.get("cause").is_none() && row.get("continuation").is_none());
+}
+
 /// Consent is one durable decision: recording it again returns the same
 /// command, and reopens of its rows read the same pending continuation,
 /// whose command a later owner-lost mark keeps instead of withdrawing.

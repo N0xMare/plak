@@ -1198,6 +1198,7 @@ async fn an_explicit_recovery_with_nothing_pending_answers_before_it_returns() {
         session.id.clone(),
         true,
         Some("nothing to recover: no turn in this session was interrupted".to_owned()),
+        HeldNotice::Name { root: None },
     );
 
     assert_eq!(
@@ -1231,7 +1232,14 @@ async fn the_held_after_loss_notice_is_live_and_never_stored() {
         matches!(event, HostEvent::Row(TranscriptRow::Notice(row))
             if row.remedy == Some(plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeAfterLoss {}))
     };
-    let _ = start_child_recovery(&events, &session.id, session.id.clone(), false, None);
+    let _ = start_child_recovery(
+        &events,
+        &session.id,
+        session.id.clone(),
+        false,
+        None,
+        HeldNotice::Name { root: None },
+    );
     let found = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             if received.try_iter().any(|event| held(&event)) {

@@ -3,9 +3,9 @@ use plakous_host_protocol::selection::CompositionSelection;
 use super::lineage::{NodeLineId, NodePlacement};
 use super::{
     AdoptOutcome, AttemptId, AttemptStatus, BTreeMap, BTreeSet, CandidateId, Deserialize,
-    MessagePriority, MessagePurpose, NodeStatus, PathBuf, RefreshReport, Serialize,
-    SpawnAgentRequest, SpawnIdentity, SubmitNudgeBudget, TemplateName, Tier, TopologyError,
-    TopologyErrorCode, WaitingOn, WorkspaceMode, WorkspaceStatus,
+    InterruptCause, LossContinuationState, MessagePriority, MessagePurpose, NodeStatus, PathBuf,
+    RefreshReport, Serialize, SpawnAgentRequest, SpawnIdentity, SubmitNudgeBudget, TemplateName,
+    Tier, TopologyError, TopologyErrorCode, WaitingOn, WorkspaceMode, WorkspaceStatus,
 };
 
 /// What one accepted message did to the child's turn: the wire
@@ -528,6 +528,14 @@ pub struct WaitAgentRow {
     /// What a parked child waits on; absent unless it is parked.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub waiting_on: Option<WaitingOn>,
+    /// Why an interrupted child stopped (`owner_lost`, `handoff`,
+    /// `operator`, `parent`, `cascade` or `stopped`); absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cause: Option<InterruptCause>,
+    /// Where its continuation after a lost or handed-off host stands
+    /// (`held`, `pending` or `running`); absent when it has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub continuation: Option<LossContinuationState>,
 }
 
 /// What a child's own `submit_result` returns to it.

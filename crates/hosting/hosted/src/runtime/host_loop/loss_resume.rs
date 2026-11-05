@@ -53,32 +53,48 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     /// At open: a decision a crash left pending is resubmitted, and a held
     /// continuation a planned handoff left, or any held one under
     /// `resume_after_loss = "continue"`, runs by itself and the restored
-    /// queue drains.
+    /// queue drains. Under hold, one attention notice names what the lost
+    /// host left held: the root's turn and each child, with the one Resume.
+    /// The open's scan run sends it once it has marked every child the lost
+    /// host left (a child whose turn was running is marked there, not at
+    /// load); with no run to carry it, the open sends it itself.
     pub(super) fn arm_root_loss_resume(&mut self) {
-        match self.root_loss() {
-            Some(RootLossState::Pending(_)) => self.role.root_loss_resume_due = true,
-            Some(RootLossState::Held)
-                if self.role.config.resume_after_loss
-                    == crate::runtime::ResumeAfterLoss::Continue
-                    || self.root_loss_handoff() =>
-            {
+        let continues =
+            self.role.config.resume_after_loss == crate::runtime::ResumeAfterLoss::Continue;
+        let root_held = match self.root_loss() {
+            Some(RootLossState::Pending(_)) => {
+                self.role.root_loss_resume_due = true;
+                false
+            }
+            Some(RootLossState::Held) if continues || self.root_loss_handoff() => {
                 self.role.root_loss_resume_due = true;
                 self.resume_restored_queue();
+                false
             }
-            // One live notice: it is shown again by the next open while the
-            // hold stands, and never stored.
-            Some(RootLossState::Held) => {
-                let _ = self
-                    .role
-                    .events
-                    .send(crate::surface_protocol::ContentEvent::Row(
-                        TranscriptRow::warning(NoticeScope::Recovery, ROOT_LOSS_HELD_NOTE)
-                            .with_remedy(
-                            plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeAfterLoss {},
-                        ),
-                    ));
-            }
-            _ => {}
+            Some(RootLossState::Held) => true,
+            _ => false,
+        };
+        let root = root_held.then_some(ROOT_LOSS_HELD_NOTE);
+        let notice = if continues {
+            crate::runtime::tree::HeldNotice::Silent
+        } else {
+            crate::runtime::tree::HeldNotice::Name { root }
+        };
+        if self.finish_attach_scan(notice) || continues {
+            return;
+        }
+        let tree_id = durable_tree_id(&self.role.config.topology_rows(), &self.role.config.session);
+        // Live only: it is shown again by the next open while the hold
+        // stands, and never stored.
+        if let Some(note) = crate::runtime::tree::loss_attention_note(&tree_id, root) {
+            let _ = self
+                .role
+                .events
+                .send(crate::surface_protocol::ContentEvent::Row(
+                    TranscriptRow::warning(NoticeScope::Recovery, note).with_remedy(
+                        plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeAfterLoss {},
+                    ),
+                ));
         }
     }
 

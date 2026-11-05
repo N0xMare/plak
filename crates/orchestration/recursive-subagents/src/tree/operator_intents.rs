@@ -88,6 +88,19 @@ pub fn interrupt_cause(
 }
 
 impl ProductAgentTree {
+    /// Why an interrupted node stopped: the cause its current attempt's
+    /// latest interrupt recorded. `None` for a node that is not interrupted
+    /// or whose interrupt recorded no cause.
+    #[must_use]
+    pub fn interrupt_cause_of(&self, agent_id: &str) -> Option<InterruptCause> {
+        let node = self.nodes.get(agent_id)?;
+        if node.status != NodeStatus::Interrupted {
+            return None;
+        }
+        self.latest_interrupt(agent_id, node.attempt_id.as_ref()?)?
+            .1
+    }
+
     /// The latest interrupt intent of `attempt_id` on `agent_id`, by fold
     /// position: its operation id and the cause it recorded (`None` for one
     /// that recorded no cause).

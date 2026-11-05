@@ -14,7 +14,8 @@ use super::{
 };
 
 /// Where a node's continuation after a loss stands.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum LossContinuationState {
     /// No decision yet: the node waits for the operator's Resume.
     Held,

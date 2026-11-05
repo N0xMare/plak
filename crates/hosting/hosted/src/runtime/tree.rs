@@ -684,16 +684,35 @@ pub(super) fn record_emitted_tree_revision(
     }
 }
 
-/// Finishes the custody-attach scan of the session's tree (design section
-/// 6.6): the first root open since this process took the tree's custody
-/// starts a background `recover_node` run over its children, under the
-/// attached root's loss policy. A later open of a tree already in custody
-/// starts none. Every path that takes a tree for a root runs it: a host's
-/// open, and a profile switch onto another tree.
+/// Whether a `recover_node` run ends with the attention notice naming what a
+/// lost host left held (spec 02 §5.5), and the root's own sentence when the
+/// root's turn is held too.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum HeldNotice {
+    /// The run says nothing about holds.
+    Silent,
+    /// The run's end names the held children, after `root` when given.
+    Name { root: Option<&'static str> },
+}
+
+impl HeldNotice {
+    /// The run's end names the held children.
+    pub(super) const CHILDREN: Self = Self::Name { root: None };
+}
+
+/// Finishes the custody-attach scan of the session's tree: the first root
+/// open since this process took the tree's custody starts a background
+/// `recover_node` run over its children, under the attached root's loss
+/// policy. A later open of a tree already in custody starts none. Every path
+/// that takes a tree for a root runs it: a host's open, and a profile switch
+/// onto another tree. `notice` is what the run's end says about holds.
+/// Returns whether a run started, so a caller whose notice the run did not
+/// take says it itself.
 pub(super) fn finish_custody_attach_scan<P: plakous_host_protocol::ProtocolExtension>(
     config: &super::HostConfig<P>,
     events: &Sender<P>,
-) {
+    notice: HeldNotice,
+) -> bool {
     let tree_id = durable_tree_id(&config.topology_rows(), &config.session);
     let hub = crate::topology_runtime::lookup(&tree_id);
     if let Some(runtime) = &hub {
@@ -701,9 +720,11 @@ pub(super) fn finish_custody_attach_scan<P: plakous_host_protocol::ProtocolExten
             config.resume_after_loss == crate::runtime::ResumeAfterLoss::Continue,
         );
     }
-    if hub.is_none_or(|runtime| runtime.finish_attach_scan()) {
-        start_child_recovery(events, &config.session.id, tree_id, false, None);
-    }
+    hub.is_none_or(|runtime| runtime.finish_attach_scan())
+        && matches!(
+            start_child_recovery(events, &config.session.id, tree_id, false, None, notice),
+            crate::agent::TreeRecoveryStart::Started { .. }
+        )
 }
 
 /// Starts one `recover_node` run over `tree_id`'s children. Must run on the
@@ -712,17 +733,19 @@ pub(super) fn finish_custody_attach_scan<P: plakous_host_protocol::ProtocolExten
 ///
 /// `explicit` is the operator's `/recover`: it also says that a run started
 /// (when it has children to try), and `nothing` is the note for a run that
-/// found nothing to do.
+/// found nothing to do. `held_notice` is what the run's end says about the
+/// holds a lost host left.
 pub(super) fn start_child_recovery<P: plakous_host_protocol::ProtocolExtension>(
     events: &Sender<P>,
     session_id: &str,
     tree_id: String,
     explicit: bool,
     nothing: Option<String>,
+    held_notice: HeldNotice,
 ) -> crate::agent::TreeRecoveryStart {
     // The run reports after the host may have switched sessions.
     let finished = events.pinned_to(session_id);
-    let held_notice = events.pinned_to(session_id);
+    let held_sender = events.pinned_to(session_id);
     let held_tree = tree_id.clone();
     // The automatic run starts on every custody take and reports the children it still
     // could not settle each time, so its report is live only; the operator's
@@ -757,12 +780,21 @@ pub(super) fn start_child_recovery<P: plakous_host_protocol::ProtocolExtension>(
                 }
             }
         }
-        // One live notice names the children a lost host left held for the
-        // operator's Resume (spec 02 §5.5). It is never stored: the held
-        // state is derived from the tree and shown again on the next run.
-        if let Some(note) = held_after_loss_note(&held_tree) {
-            let _ = held_notice.send(ContentEvent::Row(
-                TranscriptRow::warning(NoticeScope::Tree, note).with_remedy(
+        // One live notice names what a lost host left held for the
+        // operator's Resume (spec 02 §5.5), once the run has marked every
+        // child it lost: a child whose turn was running is marked here, not
+        // at load. It is never stored: the held state is derived from the
+        // tree and shown again on the next run.
+        if let HeldNotice::Name { root } = held_notice
+            && let Some(note) = loss_attention_note(&held_tree, root)
+        {
+            let scope = if root.is_some() {
+                NoticeScope::Recovery
+            } else {
+                NoticeScope::Tree
+            };
+            let _ = held_sender.send(ContentEvent::Row(
+                TranscriptRow::warning(scope, note).with_remedy(
                     plakous_host_protocol::notice_remedy::NoticeRemedy::ResumeAfterLoss {},
                 ),
             ));
@@ -787,24 +819,87 @@ pub(super) fn start_child_recovery<P: plakous_host_protocol::ProtocolExtension>(
     started
 }
 
-/// The held-continuation notice for `tree_id`'s children, when any is held.
-fn held_after_loss_note(tree_id: &str) -> Option<String> {
-    let runtime = crate::topology_runtime::lookup(tree_id)?;
-    let held = runtime
-        .read(|tree| {
-            tree.loss_continuations()
-                .into_iter()
-                .filter(|(_, continuation)| {
-                    continuation.state == crate::agent_tree::LossContinuationState::Held
-                })
-                .count()
+/// How many held children the attention notice names before it counts the
+/// rest.
+const ATTENTION_NAMED: usize = 6;
+/// The byte bound on each named child's description.
+const ATTENTION_DESCRIPTION_BYTES: usize = 48;
+
+/// The one attention notice after a lost host (spec 02 §5.5): what it left
+/// held, the root's turn (`root`, its own sentence) first, then each child
+/// a loss interrupted whose continuation waits for the operator's Resume,
+/// with what it was doing. A handed-off child continues by itself and is not
+/// named. `None` when nothing is held.
+pub(super) fn loss_attention_note(tree_id: &str, root: Option<&str>) -> Option<String> {
+    let held = crate::topology_runtime::lookup(tree_id)
+        .and_then(|runtime| runtime.read(held_after_loss).ok())
+        .unwrap_or_default();
+    attention_text(root, &held)
+}
+
+/// Each child held after a loss, with its description, in tree order.
+fn held_after_loss(tree: &crate::agent_tree::ProductAgentTree) -> Vec<(String, String)> {
+    tree.loss_continuations()
+        .into_iter()
+        .filter(|(_, continuation)| {
+            continuation.state == crate::agent_tree::LossContinuationState::Held
+                && continuation.cause != crate::agent_tree::ContinuationCause::Handoff
         })
-        .ok()?;
-    match held {
-        0 => None,
-        1 => Some("1 agent interrupted by a lost host is held".to_owned()),
-        held => Some(format!("{held} agents interrupted by a lost host are held")),
+        .filter_map(|(agent_id, _)| {
+            let description = tree.node(&agent_id).ok()?.description.clone();
+            Some((agent_id, description))
+        })
+        .collect()
+}
+
+fn attention_text(root: Option<&str>, held: &[(String, String)]) -> Option<String> {
+    if held.is_empty() {
+        return root.map(str::to_owned);
     }
+    let mut named = held
+        .iter()
+        .take(ATTENTION_NAMED)
+        .map(|(agent_id, description)| {
+            let description = description.split_whitespace().collect::<Vec<_>>().join(" ");
+            if description.is_empty() {
+                agent_id.clone()
+            } else {
+                format!(
+                    "{agent_id} ({})",
+                    clip_description(&description, ATTENTION_DESCRIPTION_BYTES)
+                )
+            }
+        })
+        .collect::<Vec<_>>();
+    if held.len() > ATTENTION_NAMED {
+        named.push(format!("{} more", held.len() - ATTENTION_NAMED));
+    }
+    let agents = if held.len() == 1 { "agent" } else { "agents" };
+    let list = named.join(", ");
+    Some(match root {
+        Some(_) => format!(
+            "the turn the lost host was running is held, and so are {} {agents} it \
+             interrupted: {list}; nothing continues until you resume",
+            held.len()
+        ),
+        None => format!(
+            "{} {agents} a lost host interrupted {} held: {list}; nothing continues until you \
+             resume",
+            held.len(),
+            if held.len() == 1 { "is" } else { "are" }
+        ),
+    })
+}
+
+fn clip_description(description: &str, bound: usize) -> String {
+    if description.len() <= bound {
+        return description.to_owned();
+    }
+    let mut end = bound;
+    while !description.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", description[..end].trim_end())
 }
 
 fn take_nothing(nothing: &std::sync::Mutex<Option<String>>) -> Option<String> {

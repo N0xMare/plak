@@ -612,7 +612,6 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
         );
         host.publish_pending_continuation();
         host.publish_projected_usage();
-        host.finish_attach_scan();
         host.arm_root_loss_resume();
         Ok(host)
     }

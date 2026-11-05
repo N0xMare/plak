@@ -6761,9 +6761,18 @@ held (or recorded and not started; chapter 03 §14.1): it sends
 `ResumeLossContinuation` for that agent at once, with no pop-up, the footer
 names `r resume` only then, and the inspector's status reads `held after the
 lost host · r resumes` (`continuation pending`, or `continuing after the lost
-host` while it runs). After a recovery run that leaves children held, one live
-tree warning names how many, with the `ResumeAfterLoss` remedy; it is never
-stored. A key the
+host` while it runs). Under `resume_after_loss = "hold"` the root's open sends
+one live attention warning with the `ResumeAfterLoss` remedy for everything a
+lost host left held: the root's turn first, then each held child a loss
+interrupted, by id and its clipped description (six named, the rest counted;
+a handed-off child continues by itself and is not named). The open's
+custody-attach recovery run sends it when it finishes, because a child whose
+turn was running when its host died is marked owner-lost by that run, not at
+load; with no run to carry it (a tree this process already held), the open
+sends it itself. It is sent once either way. A later recovery
+run that leaves children held (an operator retry, `/recover`, or a profile
+switch's custody take) sends the same warning for the children. Neither is
+ever stored. A key the
 list does not map does nothing. `y` copies the agent id, `R` requests a fresh
 snapshot and re-reads acknowledgements, and `Esc` dismisses the list (`q` does
 nothing). A footer that would need more rows than it has reads every key in

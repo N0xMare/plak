@@ -134,11 +134,7 @@ fn project_interrupt_cause(
     tree: &ProductAgentTree,
     node: &super::NodeRecord,
 ) -> Option<InterruptCauseView> {
-    if node.status != super::NodeStatus::Interrupted {
-        return None;
-    }
-    let attempt = node.attempt_id.as_ref()?;
-    Some(match tree.latest_interrupt(&node.agent_id, attempt)?.1? {
+    Some(match tree.interrupt_cause_of(&node.agent_id)? {
         super::InterruptCause::Operator => InterruptCauseView::Operator,
         super::InterruptCause::Parent => InterruptCauseView::Parent,
         super::InterruptCause::Cascade => InterruptCauseView::Cascade,

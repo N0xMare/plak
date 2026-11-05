@@ -1001,6 +1001,8 @@ rolled up:
 | `failure` | `{ kind, message }` from the fault the host recorded |
 | `usage` | `elapsed_ms`, `turns`, `tool_calls`, `input_tokens`, `output_tokens` |
 | `waiting_on` | while the child is parked (§5.2), or waiting for a transient continuation: `network: true` names live route readiness; otherwise `{ processes: ["p3"], agents: ["c2"] }`, its own running processes and its children that are still live work; both lists empty is the explicit parked marker (an arrival already woke it); absent while a wake is admitted or the attempt is ending; process-local |
+| `cause` | on an interrupted child, why it stopped: `owner_lost`, `handoff`, `operator`, `parent`, `cascade` or `stopped` (the cause its current attempt's latest interrupt recorded, §14) |
+| `continuation` | on a child a lost or handed-off host interrupted, where its continuation stands: `held` (waiting for the operator's Resume), `pending` (consent recorded, the turn not yet admitted) or `running`; absent once it ends (§14.1) |
 
 A wait returns when a watched child **settles, asks a question, replies, or
 sends urgent mail**. Deferred finding/coordinate mail does not wake it; it

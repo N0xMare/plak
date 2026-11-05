@@ -235,6 +235,10 @@ impl ProductAgentTree {
                 .filter(|row| row.status.is_stopped())
                 .map(|row| row.usage),
             waiting_on: self.waiting_on(id).cloned(),
+            cause: self.interrupt_cause_of(id),
+            continuation: self
+                .loss_continuation(id)
+                .map(|continuation| continuation.state),
         })
     }
 

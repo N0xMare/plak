@@ -13,6 +13,8 @@ fn row(agent_id: &str, output: Option<usize>) -> WaitAgentRow {
         failure: None,
         usage: None,
         waiting_on: None,
+        cause: None,
+        continuation: None,
     }
 }
 

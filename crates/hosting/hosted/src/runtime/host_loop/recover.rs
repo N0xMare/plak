@@ -169,10 +169,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         Ok(HostStep::Continue)
     }
 
-    /// Finishes the tree's custody-attach scan at the host's open (design
-    /// section 6.6).
-    pub(super) fn finish_attach_scan(&self) {
-        super::super::tree::finish_custody_attach_scan(&self.role.config, &self.role.events);
+    /// Finishes the tree's custody-attach scan at the host's open. Its run
+    /// ends with the open's one attention notice (`notice`), once it marked
+    /// every child the lost host left; returns whether it took the notice.
+    pub(super) fn finish_attach_scan(&self, notice: super::super::tree::HeldNotice) -> bool {
+        super::super::tree::finish_custody_attach_scan(&self.role.config, &self.role.events, notice)
     }
 
     /// Starts a `recover_node` run over this tree's children in the
@@ -182,7 +183,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         let tree_id = durable_tree_id(&self.role.config.topology_rows(), &self.role.config.session);
         let events = self.role.events.clone();
         let session_id = self.role.config.session.id.clone();
-        super::super::tree::start_child_recovery(&events, &session_id, tree_id, false, None);
+        super::super::tree::start_child_recovery(
+            &events,
+            &session_id,
+            tree_id,
+            false,
+            None,
+            super::super::tree::HeldNotice::Name { root: None },
+        );
     }
 
     /// An explicit `/recover` with no interrupted root turn: starts a
@@ -194,8 +202,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         let events = self.role.events.clone();
         let session_id = self.role.config.session.id.clone();
         let for_pass = nothing.clone();
-        let started =
-            super::super::tree::start_child_recovery(&events, &session_id, tree_id, true, for_pass);
+        let started = super::super::tree::start_child_recovery(
+            &events,
+            &session_id,
+            tree_id,
+            true,
+            for_pass,
+            super::super::tree::HeldNotice::Name { root: None },
+        );
         log_ev(
             self.role.log.as_ref(),
             &self.role.config,

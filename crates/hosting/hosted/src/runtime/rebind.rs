@@ -551,7 +551,7 @@ pub(super) async fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
     // A switch onto another tree takes it for this root, so it runs the
     // custody-attach scan as a host's open does.
     if matches!(rebound, Ok(Rebound::Switched | Rebound::Succeeded)) {
-        super::tree::finish_custody_attach_scan(config, events);
+        super::tree::finish_custody_attach_scan(config, events, super::tree::HeldNotice::CHILDREN);
     }
     rebound
 }
