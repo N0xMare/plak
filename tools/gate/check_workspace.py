@@ -729,7 +729,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-hosted", "src/sessions.rs"): {"thread_local"},
     ("plak", "src/store/mod.rs"): {"params"},
     ("plak", "src/store/views.rs"): {"params", "debug_assert"},
-    ("plak", "src/store/tree.rs"): {"params"},
+    ("plak", "src/store/tree.rs"): {"params", "warn"},
     ("plakous-recursive-subagents-store", "src/admission.rs"): {"params"},
     ("plakous-recursive-subagents-store", "src/rows.rs"): {"params"},
     ("plakous-recursive-subagents-store", "src/rows/codec.rs"): {"params"},

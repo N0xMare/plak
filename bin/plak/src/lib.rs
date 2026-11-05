@@ -681,7 +681,8 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
                         .cloned()
                         .zip(services.session_records().ok())
                 },
-            )?;
+            )?
+            .with_process_jobs(services.process_jobs());
             execute_application_command(
                 command,
                 &services,

@@ -351,6 +351,8 @@ pub struct PlakousApplication {
     state_home: PathBuf,
     extra_telemetry_sink: Option<Arc<dyn plakous_hosted::agent::ExtraTelemetrySink>>,
     exchange_observer: Option<Arc<dyn plakous::exchange_observation::ExchangeObserver>>,
+    /// The process's one job registry, shared by every state root it opens.
+    jobs: plakous_hosted::agent::ProcessJobs,
     _credential_telemetry: Option<crate::telemetry_sink::CredentialTelemetryGuard>,
 }
 
@@ -390,8 +392,17 @@ impl PlakousApplication {
             state_home,
             extra_telemetry_sink,
             exchange_observer,
+            jobs: plakous_hosted::agent::ProcessJobs::default(),
             _credential_telemetry: credential_telemetry,
         })
+    }
+
+    /// This application, opening its state roots on `jobs`, the process's
+    /// one job registry.
+    #[must_use]
+    pub fn with_process_jobs(mut self, jobs: &plakous_hosted::agent::ProcessJobs) -> Self {
+        self.jobs = jobs.clone();
+        self
     }
 
     /// An accounts-and-catalog handle that will never open product state
@@ -466,6 +477,7 @@ impl PlakousApplication {
             self.state_home.clone(),
             self.extra_telemetry_sink.clone(),
             self.session_records()?,
+            &self.jobs,
         )?;
         let roots = roots.with_exchange_observer(self.exchange_observer.clone());
         Ok(roots)

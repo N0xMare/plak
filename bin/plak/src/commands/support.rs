@@ -98,13 +98,15 @@ pub fn exit_restored_tui(
 /// sink attached.
 ///
 /// The binary owns the OTLP bridge. The composition root builds the sink once and
-/// passes it to every state root it opens. This construction also captures HOME
-/// once to supply the conventional product-state protection paths.
+/// passes it to every state root it opens, with the process's one job
+/// registry (`jobs`). This construction also captures HOME once to supply the
+/// conventional product-state protection paths.
 pub fn product_state_roots_from(
     product: PathBuf,
     state_home: PathBuf,
     extra_telemetry_sink: Option<Arc<dyn plakous_hosted::agent::ExtraTelemetrySink>>,
     session_records: Arc<dyn crate::store::session_records::SessionRecordStore>,
+    jobs: &plakous_hosted::agent::ProcessJobs,
 ) -> CliResult<product_agent::ProductStateRoots> {
     // One canonical product home for both: `ProductStateRoots` canonicalises
     // its own copy, and the telemetry writer registry is keyed by the path the
@@ -141,6 +143,7 @@ pub fn product_state_roots_from(
             &named_secret_paths,
         ))
         .with_exchange_observer(exchange_observer)
+        .with_process_jobs(jobs)
         .with_job_output_root(job_outputs)
         .with_api_models(
             plakous_hosted::platform::ApiModelLists::Live,

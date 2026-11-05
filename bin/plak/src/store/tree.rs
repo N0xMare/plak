@@ -15,25 +15,66 @@ use crate::home::paths::PlakPaths;
 use plakous_hosted::runtime::TreeWriteError;
 use plakous_hosted::{CliFailure, CliResult};
 
-/// Names this process's custody host before its first take: the local
-/// per-user host on this machine, with this binary's build id when it is
+/// Names this process's custody host before its first take: the home's
+/// stable host id (`<home>/host-id`, created on first use, the identity
+/// runners pair with), this machine, and this binary's build id when it is
 /// known without hashing the image (an install manifest or the home's
 /// identity cache names it), so opening the tree store never pays for a hash.
-fn bind_custody_host() {
-    static BOUND: std::sync::Once = std::sync::Once::new();
-    BOUND.call_once(|| {
-        let _ = plakous_recursive_subagents::tree::bind_custody_host(
-            "local",
-            plakous_recursive_subagents::tree::machine_name(),
-            crate::build_identity::known_binary_id().filter(|binary| !binary.is_empty()),
-        );
-    });
+/// Every process of a home presents the same host id; the custody instance
+/// tells them apart, and liveness compares only the machine and the
+/// instance. A process binds the host id of the first home it opens a tree
+/// store for.
+///
+/// # Errors
+///
+/// A host id that cannot be read or created, with its remedy; the process
+/// then has no host to take custody as, so its tree store does not open. A
+/// process that already took custody as the unbound default `local` (a take
+/// through a store opened some other way) keeps it, since the identity is
+/// fixed for its life, and says so in the log.
+pub(crate) fn bind_custody_host(paths: &PlakPaths) -> Result<(), String> {
+    static BOUND: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    if BOUND.get().is_some() {
+        return Ok(());
+    }
+    let file = paths.home().join("host-id");
+    let host_id = crate::commands::runner::host_id(paths).map_err(|error| {
+        format!(
+            "{}; fix or remove {} (a new host id is made at the next use), then pair this \
+             home's runners again with `plak runner pair`",
+            error.message(),
+            file.display()
+        )
+    })?;
+    let bound = plakous_recursive_subagents::tree::bind_custody_host(
+        host_id.clone(),
+        plakous_recursive_subagents::tree::machine_name(),
+        crate::build_identity::known_binary_id().filter(|binary| !binary.is_empty()),
+    );
+    match bound {
+        // Another home's id bound first: the first home this process opens
+        // a tree store for names its host.
+        Ok(()) => {}
+        Err(bound) if bound.host_id != UNBOUND_HOST_ID => {}
+        Err(_) => {
+            tracing::warn!(
+                target: "plak::custody",
+                host_id = %host_id,
+                "tree custody was taken as `local` before this process bound the home's host id"
+            );
+        }
+    }
+    let _ = BOUND.set(());
+    Ok(())
 }
+
+/// The custody host id a take uses when nothing bound one.
+const UNBOUND_HOST_ID: &str = "local";
 
 /// The tree store for this home, opened on its own file.
 pub fn open_tree_store(paths: &PlakPaths) -> Result<SqliteTreeStore, String> {
-    bind_custody_host();
     paths.ensure_layout()?;
+    bind_custody_host(paths)?;
     SqliteTreeStore::open(&paths.subagents_database()).map_err(|error| error.message().to_owned())
 }
 

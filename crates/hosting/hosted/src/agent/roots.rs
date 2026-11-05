@@ -142,6 +142,12 @@ mod api;
 #[path = "roots/api_unavailable.rs"]
 mod api;
 
+/// The job registry a host process's sessions share: whatever workspace a
+/// session is in, its state roots see the process's one set of promoted
+/// jobs.
+#[derive(Clone, Default)]
+pub struct ProcessJobs(Arc<crate::jobs::JobRegistry>);
+
 #[derive(Clone)]
 pub struct ProductStateRoots {
     child_runtime: Arc<dyn super::children::runtime_factory::ChildRuntimeFactory>,
@@ -337,6 +343,20 @@ impl ProductStateRoots {
                 .as_deref()
                 .map(<[u8]>::to_vec),
         }
+    }
+
+    /// Shares `jobs`, the process's job registry, in place of one of these
+    /// roots' own.
+    #[must_use]
+    pub fn with_process_jobs(mut self, jobs: &ProcessJobs) -> Self {
+        self.job_registry = Arc::clone(&jobs.0);
+        self
+    }
+
+    /// Whether these roots hold `jobs`, the process's job registry.
+    #[must_use]
+    pub fn shares_jobs(&self, jobs: &ProcessJobs) -> bool {
+        Arc::ptr_eq(&self.job_registry, &jobs.0)
     }
 
     /// Binds the private directory promoted jobs spool their output files under.

@@ -290,6 +290,8 @@ fn prepare_scripted_tree(
         paths
             .ensure_layout()
             .map_err(|error| format!("offline scripted tree layout: {error}"))?;
+        crate::store::tree::bind_custody_host(paths)
+            .map_err(|error| format!("offline scripted tree custody host: {error}"))?;
         Arc::new(
             plakous_recursive_subagents_store::SqliteTreeStore::open(&paths.subagents_database())
                 .map_err(|error| format!("offline scripted tree store: {}", error.message()))?,

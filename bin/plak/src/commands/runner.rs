@@ -11,6 +11,8 @@
 mod dial;
 mod home;
 
+pub(crate) use home::host_id;
+
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -154,7 +156,7 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
             extension: Some(extension),
             hosts: Some(hosts),
             probe_paths: Some(probe_paths),
-            local_host: Some(home::host_id(paths)?),
+            local_host: Some(host_id(paths)?),
             secrets: Some(Arc::new(runner_secret(paths.clone()))),
             floors: Some(Arc::new(floors)),
             path: crate::environment::inherited_path(),
@@ -356,7 +358,7 @@ async fn ps_local(paths: &PlakPaths, stdout: &mut dyn std::io::Write) -> CliResu
         return Ok(());
     };
     let bind = Bind {
-        host_id: home::host_id(paths)?,
+        host_id: host_id(paths)?,
         host_instance: host_instance(),
         version: version(),
         inspect: true,
@@ -398,7 +400,7 @@ async fn pair(paths: &PlakPaths, name: &str, stdout: &mut dyn std::io::Write) ->
         ));
     }
     let destination = configured(paths, name)?;
-    let host_id = home::host_id(paths)?;
+    let host_id = host_id(paths)?;
     let status = ssh_command(&destination, &["plak", "runner", "allow", &host_id])
         .stdin(std::process::Stdio::null())
         .status()

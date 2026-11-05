@@ -130,11 +130,11 @@ pub(crate) use recovery::{
     TerminalExchange, TreeRecoveryStart, operator_child_recover, read_tree_feed,
     start_tree_recovery, wait_evidence_in,
 };
-pub use roots::ProductStateRoots;
 pub use roots::TelemetryHealth;
 pub use roots::{
     ExtraTelemetrySink, ProductTelemetry, RosterSource, TelemetrySinkFactory, TreeStoreFactory,
 };
+pub use roots::{ProcessJobs, ProductStateRoots};
 
 // Test-only reach into the submodules' private items (`use super::*`).
 #[cfg(test)]

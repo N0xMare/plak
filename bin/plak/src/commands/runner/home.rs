@@ -175,40 +175,62 @@ pub(crate) fn validate_host_id(host_id: &str) -> CliResult<()> {
 
 fn read_or_create_id(directory: &Path, name: &str, prefix: &str) -> CliResult<String> {
     let path = directory.join(name);
-    match std::fs::read_to_string(&path) {
+    if let Some(id) = read_id(&path)? {
+        return Ok(id);
+    }
+    private_directory(directory)?;
+    let id = format!("{prefix}{}", uuid::Uuid::new_v4().hyphenated());
+    // Written whole and synced under a name no other first use shares, then
+    // linked into place, which fails when a concurrent first use won: a crash
+    // leaves no partial id, and every racer returns the id the file holds.
+    let staged = directory.join(format!(".{name}.{}", uuid::Uuid::new_v4().simple()));
+    let linked = stage_and_link(&staged, &path, format!("{id}\n").as_bytes());
+    let _ = std::fs::remove_file(&staged);
+    let created = |error: std::io::Error| {
+        CliFailure::new(format!("{} could not be created: {error}", path.display()))
+    };
+    match linked {
+        Ok(()) => {
+            std::fs::File::open(directory)
+                .and_then(|directory| directory.sync_all())
+                .map_err(created)?;
+            Ok(id)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            read_id(&path)?.ok_or_else(|| CliFailure::new(format!("{} vanished", path.display())))
+        }
+        Err(error) => Err(created(error)),
+    }
+}
+
+/// The id `path` holds, or `None` when there is no file yet.
+fn read_id(path: &Path) -> CliResult<Option<String>> {
+    match std::fs::read_to_string(path) {
         Ok(text) => {
             let id = text.trim().to_owned();
             if id.is_empty() {
                 return Err(CliFailure::new(format!("{} is empty", path.display())));
             }
-            return Ok(id);
+            Ok(Some(id))
         }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => {
-            return Err(CliFailure::new(format!(
-                "{} could not be read: {error}",
-                path.display()
-            )));
-        }
-    }
-    private_directory(directory)?;
-    let id = format!("{prefix}{}", uuid::Uuid::new_v4().hyphenated());
-    // Written whole to a temporary file, then linked into place, which fails
-    // when a concurrent first use won: a crash leaves no partial id.
-    let staged = directory.join(format!(".{name}.{}", uuid::Uuid::new_v4().simple()));
-    write_private(&staged, format!("{id}\n").as_bytes())?;
-    let linked = std::fs::hard_link(&staged, &path);
-    let _ = std::fs::remove_file(&staged);
-    match linked {
-        Ok(()) => Ok(id),
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            read_or_create_id(directory, name, prefix)
-        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(CliFailure::new(format!(
-            "{} could not be created: {error}",
+            "{} could not be read: {error}",
             path.display()
         ))),
     }
+}
+
+/// Creates `staged` (mode 0600, never an existing file), writes and syncs
+/// `bytes`, then links it as `path`.
+fn stage_and_link(staged: &Path, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let mut file = options.open(staged)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    std::fs::hard_link(staged, path)
 }
 
 /// Creates `directory` with mode 0700, or closes an existing one of this
@@ -319,3 +341,7 @@ pub(crate) fn admitted_workspace(roots: &[PathBuf], excluded: &Path, candidate: 
             .is_ok_and(|root| candidate.starts_with(root))
     })
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]
+mod tests;

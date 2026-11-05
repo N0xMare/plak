@@ -882,3 +882,35 @@ mod hub_reload {
         force_release(&tree_id).await;
     }
 }
+
+/// A home whose host id cannot be read opens no tree store: the process has
+/// no host to take custody as, and never falls back to another identity.
+#[test]
+fn a_home_without_a_readable_host_id_opens_no_tree_store() {
+    let root = tempdir().unwrap();
+    let paths = PlakPaths::explicit(root.path().join("home"));
+    paths.ensure_layout().unwrap();
+    std::fs::write(paths.home().join("host-id"), "not-a-uuid\n").unwrap();
+    let refused = open_tree_store(&paths).map(|_| ()).unwrap_err();
+    assert!(refused.contains("host id"), "{refused}");
+    assert!(refused.contains("fix or remove"), "{refused}");
+    assert!(!paths.subagents_database().exists());
+}
+
+/// A process whose custody identity was already fixed as the unbound
+/// default (a take before any bind) keeps it for its life: the open goes
+/// on, and the fallback is logged rather than silent.
+#[test]
+fn a_process_that_took_custody_unbound_keeps_it() {
+    let root = tempdir().unwrap();
+    let paths = PlakPaths::explicit(root.path().join("home"));
+    assert_eq!(
+        plakous_recursive_subagents::tree::custody_host().host_id,
+        "local"
+    );
+    open_tree_store(&paths).unwrap();
+    assert_eq!(
+        plakous_recursive_subagents::tree::custody_host().host_id,
+        "local"
+    );
+}

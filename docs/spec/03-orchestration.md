@@ -3291,9 +3291,20 @@ current tree writes; it reads as `live` (§14.1).
 
 **Custody.** `agent_tree_custody` holds one fenced claim per tree, naming one
 host process by its stable `host_id`, its typed process instance, its binary id
-and its machine. That `host_id` is `local` until the custody integration binds
-the home's `host-id` (chapter 02 §2.1), the identity runners pair with and key
-owner leases by, as the process's host identity (the HOST D1 step). It is not
+and its machine. That `host_id` is the home's `host-id` (chapter 02 §2.1),
+the identity runners pair with and key owner leases by: a Plak process binds
+it as its host identity before it opens its first tree store, creating it on
+first use, and a process that cannot read or create it opens no tree store;
+the refusal names the file and its remedy (fix or remove it, then pair the
+home's runners again). A process whose custody was already taken under the
+unbound default `local` (through a store opened some other way) keeps it for
+its life and logs that it did. Every process of
+one home presents the same `host_id`, so custody never tells two processes
+apart by it: the process instance does, and liveness compares only the
+machine and the instance. A runner's owner lease is still keyed by it, so two
+processes of one home are one owner to a runner. A process binds the host id of the first home it opens a tree store
+for. A record written before this binding names `local`; it reads as any other
+holder, and the next take under the next fence names the home's id. It is not
 tree content: no tree save or whole-tree replace changes it, and it has no
 foreign key, so it may precede the tree's rows. A take
 of an absent or released record claims it under the next fence. The holder's

@@ -286,7 +286,11 @@ the default `$HOME/.plak` is ever a project overlay. Nothing below the CLI edge 
 process working directory, so one process can hold the contexts of several
 workspaces, and nothing a face sends is resolved against it: a relative path
 on the command line (an export's `--out`, an import, `--ui`, `--cwd`) is made
-absolute against the launch directory at the edge.
+absolute against the launch directory at the edge. What a host process
+shares across its sessions is home-wide, never a workspace's: one job
+registry for every state root it opens, the per-account request budgets,
+the MCP pool (keyed by server, definition digest and workspace root), and
+one custody identity, the home's `host-id` (chapter 03 §14).
 
 ```text
 ~/.plak/
@@ -310,7 +314,7 @@ absolute against the launch directory at the edge.
   telemetry/telemetry-v21.sqlite3 disposable analytics, schema 21
   logs/plak.log               PLAK_LOG boundary spans
   binary-ids                  development-build identity cache, 0600 (§1), disposable
-  host-id                     this home's host identity for runners, 0600, made at first pairing or dial
+  host-id                     this home's host identity (runners, tree custody), 0600, made at first use
   runners/<name>/runner.json  a paired runner's identity and version, 0600
   runners/<name>/calls/       the keyed calls this host sent the runner and has no answer for (chapter 01 §8.4)
   runner/                     this machine's runner home, 0700 (an existing one is closed to 0700):

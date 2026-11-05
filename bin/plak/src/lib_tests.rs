@@ -2365,6 +2365,98 @@ fn command_and_attach_workers_share_one_lazy_product_store() {
     );
 }
 
+/// One process holds sessions of two workspaces, each with its own trusted
+/// project overlay, root template, MCP server and skill: each session's
+/// host binds only its own, and both share the process's one job registry
+/// and one custody host id. Nothing workspace-derived is cached for the
+/// process.
+#[test]
+fn two_workspaces_in_one_process_keep_their_own_contexts() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(temp.path()).unwrap();
+    let home = product_paths::PlakPaths::explicit(root.join("product"));
+    home.ensure_layout().unwrap();
+    let services = Services::for_home(home.clone());
+    let open = |name: &str| {
+        let workspace = root.join(name);
+        std::fs::create_dir_all(workspace.join(".plak/agents")).unwrap();
+        std::fs::create_dir_all(workspace.join(format!(".agents/skills/{name}-skill"))).unwrap();
+        std::fs::write(
+            workspace.join(format!(".agents/skills/{name}-skill/SKILL.md")),
+            format!("---\nname: {name}-skill\ndescription: {name}\n---\n"),
+        )
+        .unwrap();
+        std::fs::write(
+            workspace.join(".plak/config.toml"),
+            format!(
+                "[root]\nagent = \"{name}\"\n[mcp_servers.{name}mcp]\ntransport = \"stdio\"\ncommand = \"{name}-bin\"\n"
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            workspace.join(format!(".plak/agents/{name}.toml")),
+            format!(
+                "account = \"openrouter\"\nmodel = \"offline/{name}\"\ndescription = \"{name}\"\ntools = [\"mcp:{name}mcp\"]\n"
+            ),
+        )
+        .unwrap();
+        product_config::project_trust::trust(&home, &workspace).unwrap();
+        let context = services.paths().unwrap().for_workspace(&workspace);
+        let mut session = product_sessions::SessionRecord::new(workspace.clone());
+        session.account = Some("openrouter".into());
+        session.model = Some(format!("offline/{name}"));
+        session.composition = product_config::ProductCompositionSelection::Direct;
+        session.target_selection = product_config::ProductTargetSelection::OpenRouter {
+            wire: product_config::ProductWireBinding::resolve(
+                product_config::ProductProtocolSelection::Auto,
+            ),
+            routing: product_config::ProductOpenRouterRoutingSelection::GatewayManaged,
+        };
+        let config = build_host_config(
+            &context,
+            &services.state_roots().unwrap(),
+            session,
+            Some("openrouter"),
+            Some(&format!("offline/{name}")),
+            ReasoningEffort::Medium,
+            false,
+            &workspace,
+            &plakous_host_protocol::views::ReadyCatalog::default(),
+            None,
+            &[],
+        )
+        .unwrap();
+        store::tree::open_tree_store(&context).unwrap();
+        (workspace, config)
+    };
+    let (alpha_workspace, alpha) = open("alpha");
+    let (beta_workspace, beta) = open("beta");
+    for (workspace, config, own, other) in [
+        (&alpha_workspace, &alpha, "alpha", "beta"),
+        (&beta_workspace, &beta, "beta", "alpha"),
+    ] {
+        let template = config.root_template.as_ref().expect("root template");
+        assert_eq!(template.name, own);
+        assert_eq!(template.model, format!("offline/{own}"));
+        assert!(
+            template
+                .tool_sections
+                .contains_key(&format!("mcp_servers.{own}mcp"))
+        );
+        assert!(!template.tool_sections.keys().any(|key| key.contains(other)));
+        // Skills and instruction sources are discovered from the session's
+        // own workspace when its tools are built.
+        assert_eq!(&config.cwd, workspace);
+        assert_eq!(&config.session.workspace_root, workspace);
+        assert!(config.state_roots.shares_jobs(services.process_jobs()));
+    }
+    assert_eq!(
+        plakous_recursive_subagents::tree::custody_host().host_id,
+        commands::runner::host_id(&home).unwrap(),
+        "both sessions' trees are held under the home's one host id"
+    );
+}
+
 #[test]
 fn command_store_reopens_after_product_home_replacement() {
     let home = tempfile::tempdir().unwrap();
