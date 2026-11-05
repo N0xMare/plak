@@ -1109,6 +1109,32 @@ class LayerPolicyTests(unittest.TestCase):
             ],
         )
 
+    def test_module_rules_refuse_an_inline_crate_path_outside_may_use(self) -> None:
+        """`crate::a::b` written in code names what `use crate::a::b` would."""
+        package = synthetic_package("plak", "bin", "bin/plak", package_class="supported")
+        rules = {
+            "tui": {
+                "forbid-crates": ("plakous", "plakous-*"),
+                "allow-crates": ("plakous-host-protocol",),
+                "may-use": ("crate::tui", "crate::config::SettingsView"),
+            }
+        }
+        sources = {
+            "src/tui/inline.rs": (
+                "pub(crate) fn f(v: &crate::config::SettingsView) -> crate::store::Row {\n"
+                "    crate::carry::ReloadTarget::Fresh.into_row(v)\n"
+                "}\n"
+                "pub(in crate::tui) fn g() { crate::tui::theme::dark(); }"
+            ),
+        }
+        self.assertEqual(
+            workspace_policy.validate_module_rules(package, sources, rules),
+            [
+                "plak:src/tui/inline.rs: module 'tui' may not name 'crate::carry::ReloadTarget::Fresh'",
+                "plak:src/tui/inline.rs: module 'tui' may not name 'crate::store::Row'",
+            ],
+        )
+
     def test_module_rules_refuse_a_forbidden_crate_inside_a_use_brace_group(self) -> None:
         """`use {plakous_model::a, std::io}` names a forbidden crate once."""
         package = synthetic_package("plak", "bin", "bin/plak", package_class="supported")

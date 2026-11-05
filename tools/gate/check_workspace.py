@@ -2386,6 +2386,31 @@ def _path_root_identifiers(tokens: list[RustToken], spans: list[tuple[int, int]]
     return roots
 
 
+def _inline_crate_paths(tokens: list[RustToken], spans: list[tuple[int, int]]) -> set[str]:
+    """Every `crate::a::b` path written outside a `use` tree, as far as its
+    identifiers go (a generic argument, a call or a field ends it)."""
+    paths: set[str] = set()
+    for index, token in enumerate(tokens):
+        if token.kind != "identifier" or token.value != "crate":
+            continue
+        if any(start <= index < end for start, end in spans):
+            continue
+        if index > 0 and tokens[index - 1].value == "::":
+            continue
+        names = ["crate"]
+        cursor = index + 1
+        while (
+            cursor + 1 < len(tokens)
+            and tokens[cursor].value == "::"
+            and tokens[cursor + 1].kind == "identifier"
+        ):
+            names.append(tokens[cursor + 1].value)
+            cursor += 2
+        if len(names) > 1:
+            paths.add("::".join(names))
+    return paths
+
+
 def _identifier_values(tokens: list[RustToken]) -> list[str]:
     return [token.value for token in tokens if token.kind == "identifier"]
 
@@ -3836,8 +3861,9 @@ def validate_module_rules(
     A rule for module `m` covers every production source under `src/m/`. Such a
     file may `use` std/core/alloc, its own external dependencies, the paths
     listed in `may-use`, and nothing matching `forbid-crates` unless it is
-    listed in `allow-crates`; any other `crate::` path is an error. Inactive
-    until the module directory exists.
+    listed in `allow-crates`; any other `crate::` path is an error, whether
+    a `use` declares it or the code names it inline. Inactive until the
+    module directory exists.
     """
     errors: list[str] = []
     for module, rule in sorted(rules.items()):
@@ -3877,6 +3903,14 @@ def validate_module_rules(
                         errors.append(
                             f"{package.name}:{path}: module {module!r} may not use crate {root!r}"
                         )
+            # A path written inline names what a `use` would: the same
+            # `may-use` list governs both.
+            for full in sorted(_inline_crate_paths(tokens, spans)):
+                if not any(
+                    full == allowed or full.startswith(allowed + "::")
+                    for allowed in rule["may-use"]
+                ):
+                    errors.append(f"{package.name}:{path}: module {module!r} may not name {full!r}")
             for root in sorted(_path_root_identifiers(tokens, spans)):
                 crate = root.replace("_", "-")
                 if forbidden(crate):
