@@ -160,6 +160,9 @@ fn resolve(options: &[&str], destination: &str, path: &std::ffi::OsStr) -> Resul
     if let Some(group) = group {
         let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
     }
+    // A child that moved itself out of its group escapes the group's kill;
+    // killing it by pid keeps the reap bounded.
+    let _ = child.kill();
     let status = child.wait();
     let remaining =
         || deadline.saturating_duration_since(Instant::now()) + Duration::from_millis(100);

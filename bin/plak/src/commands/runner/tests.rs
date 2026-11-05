@@ -73,3 +73,42 @@ fn a_shell_that_hangs_or_fails_gives_no_answer_within_the_deadline() {
     let lines = shell(root.path(), "lines", "printf '/a\\n/b'");
     assert_eq!(login_shell_answer(&lines, Duration::from_secs(5)), None);
 }
+
+const REGROUP: &str = "PLAK_TEST_REGROUPING_SHELL";
+const REGROUP_CHILD: &str = "commands::runner::tests::regrouping_shell_child";
+
+/// The stand-in shell's body: it moves itself into its parent's process
+/// group, out of the one the probe made for it, and never answers.
+#[test]
+#[ignore = "process child entrypoint used only by the regrouping-shell probe"]
+fn regrouping_shell_child() {
+    if std::env::var_os(REGROUP).is_none() {
+        return;
+    }
+    let parent = rustix::process::getppid().unwrap();
+    let group = rustix::process::getpgid(Some(parent)).unwrap();
+    rustix::process::setpgid(None, Some(group)).unwrap();
+    std::thread::sleep(Duration::from_secs(20));
+}
+
+/// A shell that leaves the probe's process group escapes the group's kill;
+/// it is still killed by pid, so the probe returns at its deadline.
+#[test]
+fn a_shell_that_leaves_its_group_is_still_given_up_on_at_the_deadline() {
+    let root = tempfile::tempdir().unwrap();
+    let shell = shell(
+        root.path(),
+        "regrouping",
+        &format!(
+            "{REGROUP}=1 exec {} --ignored --exact {REGROUP_CHILD} --nocapture --test-threads=1",
+            std::env::current_exe().unwrap().display()
+        ),
+    );
+    let started = Instant::now();
+    assert_eq!(login_shell_answer(&shell, Duration::from_millis(500)), None);
+    assert!(
+        started.elapsed() < Duration::from_secs(4),
+        "{:?}",
+        started.elapsed()
+    );
+}

@@ -366,6 +366,9 @@ fn login_shell_answer(shell: &str, deadline: Duration) -> Option<String> {
     if let Some(group) = group {
         let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
     }
+    // A child that moved itself out of its group escapes the group's kill;
+    // killing it by pid keeps the reap bounded.
+    let _ = child.kill();
     let _ = child.wait();
     if exited != Some(true) {
         return None;
