@@ -81,6 +81,7 @@
 //! vocabulary; its wire spelling is `snake_case`.
 
 pub mod channel;
+pub mod client;
 pub mod envelope;
 pub mod intent;
 pub mod jsonl;

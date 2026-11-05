@@ -210,6 +210,35 @@ fn session_requests_round_trip_as_lines() {
 
 /// A line over the cap is refused when written and when read, and the
 /// reader skips it whole without holding it.
+/// Every host frame a client decodes goes through serde's buffered tagged
+/// content, which has no 128-bit integers: the context meter's numbers
+/// stay 64-bit so a usage event decodes.
+#[test]
+fn a_usage_event_decodes() {
+    use crate::views::presentation::ContextUsage;
+    let observation = SessionObservation::<Core>::Usage(ContextUsage {
+        breakdown: None,
+        prepared_input: None,
+        total_window: Some(272_000),
+        admitted_ceiling: None,
+        gauge_percent: Some(42),
+        display_percent: Some(42),
+        ceiling_excess: None,
+        evidence: "measured".into(),
+        non_guarantee: None,
+        status: "fits".into(),
+    });
+    let frame = Host::Event {
+        attachment: 1,
+        seq: 1,
+        class: observation.class(),
+        observation,
+        blobs: Vec::new(),
+    };
+    let line = encode_line(&frame).unwrap();
+    assert_eq!(decode_host_line::<Core>(&line).unwrap(), frame);
+}
+
 #[test]
 fn a_line_over_the_cap_is_refused_and_skipped() {
     let huge = Client::Request {

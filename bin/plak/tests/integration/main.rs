@@ -25,3 +25,5 @@ mod runner_contract;
 mod telemetry_contract;
 #[cfg(all(feature = "test-hooks", feature = "web"))]
 mod web_endpoint;
+#[cfg(feature = "test-hooks")]
+mod wire_client;

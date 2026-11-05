@@ -180,12 +180,13 @@ impl NonGuarantee {
 
 /// Half-up percent of `occupied` over `window`.
 #[must_use]
-pub fn window_percent(occupied: u64, window: u64) -> Option<u128> {
+pub fn window_percent(occupied: u64, window: u64) -> Option<u64> {
     if window == 0 {
         return None;
     }
     let total = u128::from(window);
-    Some((u128::from(occupied) * 100 + total / 2) / total)
+    let percent = (u128::from(occupied) * 100 + total / 2) / total;
+    Some(u64::try_from(percent).unwrap_or(u64::MAX))
 }
 
 /// Authoritative context-status disposition projected for the product.

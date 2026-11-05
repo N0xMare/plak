@@ -525,7 +525,7 @@ fn display_percent_is_the_compact_gauge_and_not_the_bound() {
     let gauge = projection.actionable_utilization().unwrap().gauge_percent();
     assert_eq!(
         usage.display_percent,
-        Some(u128::from(gauge)),
+        Some(u64::from(gauge)),
         "the composer and the compact gauge read one occupancy"
     );
     assert_eq!(

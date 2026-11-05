@@ -4057,7 +4057,27 @@ verdicts) are addressed, the session profile and workspace chrome states.
   `host_frame` (Plak's extension traffic included) and their shared
   `$defs`. It is derived from the serde types themselves (`schemars`), so it
   is exactly what this build encodes and decodes; a client checks its
-  frames against the build it speaks to, not against a copy.
+  frames against the build it speaks to, not against a copy. Every integer
+  a frame carries is 64-bit at most: a reader decodes a frame through
+  serde's tagged content, which has no 128-bit integers.
+- **Client.** `plakous-host-protocol`'s `client` is the typed wire v2
+  client a frontend embeds, over any byte transport (a child `plak agent
+  --wire v2`'s stdio, a socket pair, the host's socket; Plak's
+  `wire_transport::host_socket` connects to that socket only in a
+  directory private to the user and only when it is the user's socket).
+  It says hello, attaches the welcomed root and follows the host on a
+  thread of its own: a refusal `moved` or a `moved` frame attaches the root
+  it names, a `resync_required` attaches the root again, and either reads
+  the root transcript as lost until its next baseline snapshot arrives.
+  Snapshot pages are reassembled and event images restored, so a face
+  receives the session's observations in the in-process receiver's shape.
+  An intent is sent on the current attachment, waiting for one while the
+  client attaches again, and its refusal comes back as the in-process
+  mailbox's (`backpressure` as saturated, `one_in_flight` as duplicate,
+  `disconnected` or `not_attached` as disconnected, any other as refused),
+  with the intent. A session request names a client id of its own, and
+  its settled answer is the new root or the refusal. The client is one
+  connection: a transport that ends is the receiver's disconnect, with why.
 
 ### 4.5 The web endpoint
 

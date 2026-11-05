@@ -408,6 +408,15 @@ an export.
   lost ends its wire holders with `resync_required` once per loss.
   Embedder break: `HostService::move_attachments` takes the request id and
   `Outbound::Moved` carries it.
+- `plakous_host_protocol::client` is a typed wire v2 client over any byte
+  transport: hello and welcome, the root attach, `moved` and
+  `resync_required` followed on its own, intents refused as the in-process
+  mailbox refuses them, session requests and their answers, and the
+  session's observations in the in-process receiver's shape. Plak's
+  `wire_transport::host_socket` connects it to the host's socket only in a
+  directory private to the user. Wire fix: `ContextUsage::display_percent`
+  is a `u64` (was `u128`, which no wire v2 reader could decode inside a
+  tagged frame); embedder break for its readers.
 - The TUI's last direct product reads move behind the protocol: the
   reload target is the session host's `probe_reload` (answered by
   `reload_probed` with the target and the host build's refusal, or

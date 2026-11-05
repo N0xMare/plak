@@ -71,6 +71,7 @@ pub(crate) mod surface_protocol;
 pub(crate) mod terminal_application;
 pub(crate) mod tui_preferences;
 mod usage_remedy;
+pub mod wire_transport;
 /// Plak's own storage home: where the XDG layout puts each file, and the
 /// credentials kept under it.
 #[doc(hidden)]

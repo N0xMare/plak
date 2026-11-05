@@ -324,7 +324,10 @@ pub struct ContextUsage {
     /// fact when it sits under the window; never the meter denominator.
     pub admitted_ceiling: Option<AdmittedContextCeiling>,
     pub gauge_percent: Option<u8>,
-    pub display_percent: Option<u128>,
+    /// The meter's percent of the window. A `u64`, not wider: a wire v2
+    /// reader decodes it inside a tagged frame, where serde has no 128-bit
+    /// integers.
+    pub display_percent: Option<u64>,
     pub ceiling_excess: Option<ContextCeilingExcess>,
     pub evidence: String,
     pub non_guarantee: Option<String>,

@@ -19,7 +19,7 @@ pub const MIN_CONTENT_ROWS: u16 = 2;
 /// the denominator. Without a window the meter reads
 /// `awaiting context`; with a window and no occupancy yet it reads `0%/…`.
 #[must_use]
-pub fn format_context_meter(display_percent: Option<u128>, window: Option<u64>) -> String {
+pub fn format_context_meter(display_percent: Option<u64>, window: Option<u64>) -> String {
     match (display_percent, window) {
         (_, Some(window)) if window > 0 => {
             format!(
