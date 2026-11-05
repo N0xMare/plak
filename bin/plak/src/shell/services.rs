@@ -82,7 +82,33 @@ impl Services {
     pub(crate) const fn home(&self) -> &Home {
         &self.home
     }
+}
 
+/// These services for another thread of the process: the same home,
+/// product store, telemetry sink and job bound, so a session it opens is one
+/// this process's own commands would open.
+impl Clone for Services {
+    fn clone(&self) -> Self {
+        let session_records = OnceLock::new();
+        if let Some(store) = self.session_records.get() {
+            let _ = session_records.set(Arc::clone(store));
+        }
+        let extra_telemetry_sink = OnceLock::new();
+        if let Some(sink) = self.extra_telemetry_sink.get() {
+            let _ = extra_telemetry_sink.set(sink.clone());
+        }
+        Self {
+            clock: Arc::clone(&self.clock),
+            home: self.home.clone(),
+            session_records,
+            telemetry_sink_factory: self.telemetry_sink_factory,
+            extra_telemetry_sink,
+            jobs: self.jobs.clone(),
+        }
+    }
+}
+
+impl Services {
     pub(crate) fn now_unix_seconds(&self) -> u64 {
         self.clock.now().seconds()
     }

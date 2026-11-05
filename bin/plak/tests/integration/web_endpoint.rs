@@ -41,6 +41,8 @@ const CSP: &str = "default-src 'self'; frame-ancestors 'none'";
 struct Web {
     child: Option<Child>,
     socket: PathBuf,
+    /// Its stderr lines after the start line.
+    lines: mpsc::Receiver<String>,
 }
 
 impl Drop for Web {
@@ -70,6 +72,11 @@ fn start(fixture: &Fixture) -> Web {
 /// Starts `plak web` on the fixture's socket; `true` once it serves,
 /// `false` when it exited first.
 fn launch(fixture: &Fixture) -> (Web, bool) {
+    launch_with(fixture, &[])
+}
+
+/// [`launch`] with `extra` arguments to `plak web`.
+fn launch_with(fixture: &Fixture, extra: &[&str]) -> (Web, bool) {
     let config = fixture.home().join("config.toml");
     let mut text = std::fs::read_to_string(&config).unwrap();
     if !text.contains("\n[web]\n") {
@@ -91,16 +98,20 @@ fn launch(fixture: &Fixture) -> (Web, bool) {
         .arg(format!("unix:{}", socket.display()))
         .arg("--ui")
         .arg(&ui)
+        .args(extra)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
     let mut child = command.spawn().expect("plak web spawned");
     let stderr = child.stderr.take().unwrap();
     let (ready, started) = mpsc::channel();
+    let (forward, lines) = mpsc::channel();
     std::thread::spawn(move || {
         for line in BufReader::new(stderr).lines().map_while(Result::ok) {
             if line.starts_with("plak web: serving on ") {
                 let _ = ready.send(true);
+            } else {
+                let _ = forward.send(line);
             }
         }
         let _ = ready.send(false);
@@ -112,6 +123,7 @@ fn launch(fixture: &Fixture) -> (Web, bool) {
         Web {
             child: Some(child),
             socket,
+            lines,
         },
         served,
     )
@@ -164,7 +176,12 @@ fn exchange(stream: &mut UnixStream, method: &str, path: &str, headers: &[(&str,
 }
 
 fn connect(web: &Web) -> UnixStream {
-    UnixStream::connect(&web.socket).unwrap()
+    let stream = UnixStream::connect(&web.socket).unwrap();
+    // A read the endpoint never answers fails the test rather than hang it.
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(20)))
+        .unwrap();
+    stream
 }
 
 /// The headers `tailscale serve` sends a unix backend for a request from
@@ -504,4 +521,82 @@ fn an_oversized_frame_ends_only_its_connection() {
     let mut again = upgrade(&web, &cookie);
     let root = hello(&mut again);
     attach(&mut again, &root, 1);
+}
+
+/// A session nothing keeps resident releases itself after the idle
+/// release, and the next connection opens the same session again: its
+/// welcome names that session, and it takes the next prompt.
+#[test]
+fn an_idle_session_releases_and_the_next_connection_wakes_it() {
+    let fixture = Fixture::new(&json!({
+        "version": 1,
+        "steps": [{"output": {"text": ANSWER}}, {"output": {"text": ANSWER}}]
+    }));
+    let (mut web, ready) = launch_with(&fixture, &["--idle-release", "1"]);
+    assert!(ready, "plak web started");
+    let woke = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| wake(&mut web)));
+    if let Err(error) = woke {
+        let lines: Vec<String> = web.lines.try_iter().collect();
+        let text = error
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| error.downcast_ref::<&str>().map(|text| (*text).to_owned()))
+            .unwrap_or_default();
+        panic!("{text}; plak web said: {lines:#?}");
+    }
+    interrupt_and_wait(&mut web);
+}
+
+/// The wake test's body: a prompt, a release, and a wake that takes the
+/// next prompt.
+fn wake(web: &mut Web) {
+    let cookie = cookie(web);
+    let prompt = |socket: &mut WebSocket<UnixStream>, attachment: u64, text: &str, answer: &str| {
+        send(
+            socket,
+            &ClientFrame::Request {
+                id: 2,
+                op: Op::Intent {
+                    attachment,
+                    intent: SessionIntent::Prompt(Draft::from(text)),
+                    blobs: Vec::new(),
+                },
+            },
+        );
+        assert_eq!(response(socket, 2), json!({"ok": {"answer": "accepted"}}));
+        loop {
+            let frame = next_frame(socket);
+            if frame["frame"] == "event" && frame.to_string().contains(answer) {
+                break;
+            }
+        }
+    };
+    let mut socket = upgrade(web, &cookie);
+    let root = hello(&mut socket);
+    let attachment = attach(&mut socket, &root, 1);
+    prompt(&mut socket, attachment, "before the release", ANSWER);
+    socket.close(None).unwrap();
+    drop(socket);
+    // Released once idle, the session is opened again by the next
+    // connection, which says so; until then a connection only waits.
+    let mut woken = None;
+    let deadline = std::time::Instant::now() + WAIT;
+    while woken.is_none() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let mut again = upgrade(web, &cookie);
+        let root_again = hello(&mut again);
+        assert_eq!(root_again, root, "the same session is served");
+        if web
+            .lines
+            .try_iter()
+            .any(|line| line.starts_with("plak web: opening released session "))
+        {
+            woken = Some((again, root_again));
+        }
+    }
+    let (mut again, root_again) = woken.expect("the released session was opened again");
+    let attachment = attach(&mut again, &root_again, 1);
+    // The scripted model behind the reopened session answers as before.
+    prompt(&mut again, attachment, "after the wake", ANSWER);
+    drop(again);
 }

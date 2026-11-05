@@ -10,7 +10,9 @@
 //! `Origin` and the session cookie the gate issued. Everything refused gets
 //! the same `403`. The session is served through its shared host service
 //! (`WireSession`): a connection that leaves detaches, and the session runs
-//! until it ends or the process is stopped. A switch to another session
+//! until the process is stopped. Once nothing has kept it resident for the
+//! idle release it releases itself (`SessionSlot`), and the next connection
+//! opens it again. A switch to another session
 //! (`/new`, `/resume`, a rebind) moves every attachment to its root, and a
 //! later connection is welcomed to it. Everything a request needs is one
 //! `Served`, so a host serving many sessions mounts one per session.
@@ -22,14 +24,16 @@ mod socket;
 mod ui;
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use plakous_host_protocol::wire::Welcome;
 use plakous_hosted::error::{CliFailure, CliResult, ProcessOutcome};
+use plakous_hosted::host_service::AttachmentCount;
 use plakous_hosted::host_service::wire::{
-    WireConnection, WireSession, session_root, session_root_of, session_welcome,
+    OpenedSession, SessionSlot, WireConnection, WireSession, session_root, session_root_of,
+    session_welcome,
 };
-use plakous_hosted::runtime::spawn_host_worker;
+use plakous_hosted::runtime::{IDLE_RELEASE, IdleRelease, spawn_host_worker};
 
 use crate::command::WebCommand;
 use crate::product_config::ProductConfig;
@@ -44,7 +48,8 @@ const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(30);
 
 /// One served session and what every request to it shares.
 pub(crate) struct Served {
-    pub(crate) session: WireSession<PlakExtension>,
+    /// The served session, resident or released.
+    pub(crate) slot: SessionSlot<PlakExtension>,
     /// Whether the process was asked to stop since it began serving.
     pub(crate) stop: StopProbe,
     binary_id: String,
@@ -58,10 +63,11 @@ impl Served {
     pub(crate) fn welcome<W: std::io::Write>(
         &self,
         connection: &WireConnection<PlakExtension, W>,
+        served: &WireSession<PlakExtension>,
     ) -> Welcome {
         let (session, root) = connection
             .welcomed()
-            .unwrap_or_else(|| (self.session.session_id(), self.session.root()));
+            .unwrap_or_else(|| (served.session_id(), served.root()));
         session_welcome(self.binary_id.clone(), host_generation(), session, root)
     }
 }
@@ -95,27 +101,39 @@ pub(crate) fn run_web_command(
         .build()
         .map_err(|_| CliFailure::new("plak web could not start its runtime"))?;
     let (listener, socket_file) = runtime.block_on(listen::bind(&listen))?;
-    let host = match open_session(services, &command) {
-        Ok(host) => host,
+    let opened = match open_served(services, &command) {
+        Ok(opened) => opened,
         Err(failure) => {
             listen::cleanup(socket_file);
             return Err(failure);
         }
     };
-    let root = session_root(&host);
-    let session_id = host.session.id.clone();
-    let state_roots = host.state_roots.clone();
-    let (actions, events, worker) = match spawn_host_worker(host) {
-        Ok(worker) => worker,
-        Err(failure) => {
-            listen::cleanup(socket_file);
-            return Err(failure);
+    // A released session opens again by its id, in its own workspace.
+    let reopen = {
+        let (services, command) = (services.clone(), command.clone());
+        move |session: &str| {
+            eprintln!("plak web: opening released session {session}");
+            let opened = open_served(
+                &services,
+                &WebCommand {
+                    session: Some(session.to_owned()),
+                    ..command.clone()
+                },
+            );
+            match &opened {
+                Ok(_) => eprintln!("plak web: opened session {session}"),
+                Err(failure) => {
+                    eprintln!(
+                        "plak web: session {session} did not open: {}",
+                        failure.message()
+                    );
+                }
+            }
+            opened
         }
     };
     let served = Arc::new(Served {
-        session: WireSession::start(root, session_id, actions, events, move |id| {
-            session_root_of(&state_roots, id)
-        }),
+        slot: SessionSlot::new(opened, reopen),
         stop: StopProbe::armed(),
         binary_id: crate::build_identity::known_binary_id().unwrap_or_else(|| "unknown".into()),
         ui,
@@ -124,22 +142,40 @@ pub(crate) fn run_web_command(
     tracing::info!(target: "plak::web", listener = %listen, "plak web serving");
     eprintln!("plak web: serving on {listen}");
     runtime.block_on(listen::serve(listener, Arc::clone(&served)));
-    served.session.quit();
-    let deadline = Instant::now() + SHUTDOWN_DEADLINE;
-    while !worker.is_finished() {
-        if Instant::now() >= deadline {
-            return Err(CliFailure::new(
-                "plak web host worker exceeded its shutdown deadline",
-            ));
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    worker
-        .join()
-        .map_err(|_| CliFailure::new("plak web host worker failed"))??;
+    served
+        .slot
+        .quit(SHUTDOWN_DEADLINE)
+        .map_err(|failure| CliFailure::new(format!("plak web: {}", failure.message())))?;
     runtime.shutdown_timeout(Duration::from_secs(1));
     listen::cleanup(socket_file);
     Ok(ProcessOutcome::Success)
+}
+
+/// The session `command` names (or a new one) opened on a host worker that
+/// releases it once idle, for the slot to serve.
+fn open_served(
+    services: &Services,
+    command: &WebCommand,
+) -> CliResult<OpenedSession<PlakExtension>> {
+    let mut host = open_session(services, command)?;
+    let attachments = AttachmentCount::default();
+    host.idle_release = Some(IdleRelease {
+        after: command.idle_release.unwrap_or(IDLE_RELEASE),
+        attachments: attachments.clone(),
+    });
+    let root = session_root(&host);
+    let session_id = host.session.id.clone();
+    let state_roots = host.state_roots.clone();
+    let (actions, events, worker) = spawn_host_worker(host)?;
+    Ok(OpenedSession {
+        root,
+        session_id,
+        actions,
+        events,
+        worker,
+        attachments,
+        roots: Box::new(move |id| session_root_of(&state_roots, id)),
+    })
 }
 
 /// A headless session on the root template's binding, as `plak agent` opens

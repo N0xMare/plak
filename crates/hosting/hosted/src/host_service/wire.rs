@@ -1129,9 +1129,11 @@ where
 mod lines;
 mod served;
 mod session;
+mod slot;
 
 pub use lines::{Line, LineSender, Lines, lines};
 pub use session::WireSession;
+pub use slot::{OpenedSession, RootResolver, SessionSlot};
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]

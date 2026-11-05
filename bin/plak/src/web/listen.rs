@@ -200,15 +200,15 @@ pub(crate) fn cleanup(file: Option<SocketFile>) {
     }
 }
 
-/// Accepts and serves connections until the session ends or an interrupt
-/// arrives.
+/// Accepts and serves connections until an interrupt arrives; a session
+/// that released itself is woken by the next connection.
 pub(crate) async fn serve(listener: Bound, served: Arc<Served>) {
     let open = Arc::new(tokio::sync::Semaphore::new(MAX_CONNECTIONS));
     let mut watch = tokio::time::interval(WATCH);
     loop {
         tokio::select! {
             _ = watch.tick() => {
-                if served.session.ended() || served.stop.stopped() {
+                if served.stop.stopped() {
                     return;
                 }
             }

@@ -99,3 +99,62 @@ fn an_embedded_session_is_never_released_for_being_idle() {
     send_attached_action(&actions, UserAction::Quit);
     worker.join().unwrap().unwrap();
 }
+
+/// A host's slot serves a session until it releases itself, then holds it
+/// dormant, and the next trigger opens it again by the id it served: a
+/// release, a wake and a second release, with the opener asked once per
+/// wake for exactly that session.
+#[test]
+fn a_slot_wakes_a_released_session_by_its_id() {
+    use crate::host_service::wire::{OpenedSession, SessionSlot};
+    let root = tempfile::tempdir().unwrap();
+    let open = {
+        let root = root.path().to_path_buf();
+        move |name: &str| -> crate::CliResult<OpenedSession<TestExtension>> {
+            std::fs::create_dir_all(root.join(name)).unwrap();
+            let (mut config, _) = scripted_host_with(&root.join(name), answered_once());
+            let attachments = AttachmentCount::default();
+            config.idle_release = Some(IdleRelease {
+                after: Duration::from_millis(200),
+                attachments: attachments.clone(),
+            });
+            let session_id = config.session.id.clone();
+            let node = NodeAddress {
+                tree_id: session_id.clone(),
+                agent_id: session_id.clone(),
+            };
+            let (actions, events, worker) = spawn_host_worker(config)?;
+            Ok(OpenedSession {
+                root: node,
+                session_id,
+                actions,
+                events,
+                worker,
+                attachments,
+                roots: Box::new(|_| None),
+            })
+        }
+    };
+    let opened = open("first").unwrap();
+    let first = opened.session_id.clone();
+    let asked = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let slot = SessionSlot::new(opened, {
+        let (asked, open) = (Arc::clone(&asked), open.clone());
+        move |id: &str| {
+            asked.lock().unwrap().push(id.to_owned());
+            open("again")
+        }
+    });
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !slot.dormant() {
+        assert!(
+            Instant::now() < deadline,
+            "the idle session was not released"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let woken = slot.resident().unwrap();
+    assert_eq!(*asked.lock().unwrap(), [first]);
+    assert!(!woken.ended());
+    slot.quit(Duration::from_secs(30)).unwrap();
+}

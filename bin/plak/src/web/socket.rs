@@ -18,7 +18,9 @@ use hyper::upgrade::Upgraded;
 use hyper::{Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use plakous_host_protocol::wire::{HandshakeRefusal, MAX_LINE_BYTES};
-use plakous_hosted::host_service::wire::{Face, HELLO_DEADLINE, WireConnection, handshake, refuse};
+use plakous_hosted::host_service::wire::{
+    Face, HELLO_DEADLINE, WireConnection, WireSession, handshake, refuse,
+};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
@@ -248,28 +250,31 @@ async fn drive(socket: &mut Socket, served: &Served) -> Ended {
     let _ = lines.send(Ok(hello));
     drop(lines);
     let stop = served.stop;
-    // A connection that arrives after its session's service ended is
-    // refused in a v2 frame; it passed the gate, so the reason is its own.
-    if served.session.ended() {
-        let _ = refuse::<PlakExtension>(
-            &mut outbox.clone(),
-            HandshakeRefusal::Unavailable {
-                detail: "the session ended".to_owned(),
-            },
-        );
-        let _ = send_pending(socket, &outbox).await;
-        return Ended::SessionClosed;
-    }
+    // The connection is the session's trigger: a session that released
+    // itself is opened again for it. One that does not open is refused in
+    // a v2 frame; the connection passed the gate, so the reason is its own.
+    let session = match tokio::task::block_in_place(|| served.slot.resident()) {
+        Ok(session) => session,
+        Err(failure) => {
+            let _ = refuse::<PlakExtension>(
+                &mut outbox.clone(),
+                HandshakeRefusal::Unavailable {
+                    detail: failure.message().to_owned(),
+                },
+            );
+            let _ = send_pending(socket, &outbox).await;
+            return Ended::SessionClosed;
+        }
+    };
     // Connected before the welcome, which names the session and root of
     // the connection's own handle: a switch after it moves the connection.
-    let mut connection = served
-        .session
+    let mut connection = session
         // The web endpoint is never a local face, however its client
         // authenticated: it may not exec or hand off the host's build.
         .connect(outbox.clone(), Face::Remote, move || stop.stopped());
     let admitted = handshake::<PlakExtension>(
         &first,
-        served.welcome(&connection),
+        served.welcome(&connection, &session),
         &mut outbox.clone(),
         &move || stop.stopped(),
     );
@@ -279,7 +284,15 @@ async fn drive(socket: &mut Socket, served: &Served) -> Ended {
     if !matches!(admitted, Ok(true)) {
         return Ended::Policy("handshake refused");
     }
-    let ended = attached(socket, served, &mut connection, &outbox, &mut pong).await;
+    let ended = attached(
+        socket,
+        served,
+        &session,
+        &mut connection,
+        &outbox,
+        &mut pong,
+    )
+    .await;
     // Every way out detaches, so the session never holds a dead attachment.
     connection.leave();
     ended
@@ -291,11 +304,12 @@ type Connection = WireConnection<PlakExtension, Outbox>;
 async fn attached(
     socket: &mut Socket,
     served: &Served,
+    session: &WireSession<PlakExtension>,
     connection: &mut Connection,
     outbox: &Outbox,
     pong: &mut Option<Instant>,
 ) -> Ended {
-    let mut changes = served.session.changes();
+    let mut changes = session.changes();
     let mut pinger = tokio::time::interval(PING_EVERY);
     pinger.tick().await;
     let mut rate = Rate::new();
@@ -306,7 +320,9 @@ async fn attached(
         if let Err(ended) = send_pending(socket, outbox).await {
             return ended;
         }
-        if served.session.ended() || served.stop.stopped() {
+        // A session that released itself ends its connections; the next
+        // one wakes it.
+        if session.ended() || served.stop.stopped() {
             return Ended::SessionClosed;
         }
         tokio::select! {

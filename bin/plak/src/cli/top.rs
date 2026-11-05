@@ -290,12 +290,14 @@ impl TopCommand {
                 session,
                 cwd,
                 dev_login,
+                idle_release,
             } => Ok(Command::Web(crate::command::WebCommand {
                 listen,
                 ui,
                 session,
                 cwd,
                 dev_login,
+                idle_release: idle_release.map(std::time::Duration::from_secs),
             })),
             Self::Host => Ok(Command::Host),
             Self::Wire {

@@ -20,6 +20,9 @@ pub(crate) struct WebCommand {
     pub(crate) cwd: Option<PathBuf>,
     /// Dev mode on a loopback listener: every request is this login.
     pub(crate) dev_login: Option<String>,
+    /// How long the session stays resident with nothing to do; the
+    /// product's idle release when unset.
+    pub(crate) idle_release: Option<std::time::Duration>,
 }
 
 /// `path` against `launch` when it is relative and the launch directory is

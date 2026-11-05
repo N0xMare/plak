@@ -17,7 +17,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::sync::watch;
 
-use super::super::{HostService, TreeNodes};
+use super::super::{AttachmentCount, HostService, TreeNodes};
 use super::served::{self, ServedSession, Shared};
 use super::{ATTACHMENT_CAPACITY, Face, Leave, LostTranscripts, POLL, WireConnection};
 
@@ -47,8 +47,35 @@ impl<P: ProtocolExtension> WireSession<P> {
         P::Intent: Send,
         P::Observation: Send,
     {
+        Self::start_counted(
+            root,
+            session_id,
+            actions,
+            events,
+            roots,
+            &AttachmentCount::default(),
+        )
+    }
+
+    /// [`Self::start`], its service counting its attachments into
+    /// `attachments`, which the session's residency reads.
+    #[must_use]
+    pub fn start_counted(
+        root: NodeAddress,
+        session_id: String,
+        actions: IntentSender<P>,
+        events: ObservationReceiver<P>,
+        roots: impl Fn(&str) -> Option<NodeAddress> + Send + Sync + 'static,
+        attachments: &AttachmentCount,
+    ) -> Self
+    where
+        P: 'static,
+        P::Intent: Send,
+        P::Observation: Send,
+    {
         let service = HostService::new(actions.clone(), root.clone(), ATTACHMENT_CAPACITY)
-            .with_nodes(Arc::new(TreeNodes::new(root.tree_id)));
+            .with_nodes(Arc::new(TreeNodes::new(root.tree_id)))
+            .with_attachment_count(attachments);
         let served = ServedSession::shared(session_id, Box::new(roots), service);
         let (notify, changes) = watch::channel(0_u64);
         let ended = Arc::new(AtomicBool::new(false));

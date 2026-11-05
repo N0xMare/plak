@@ -21,6 +21,7 @@ pub(crate) fn run_web_command(
         command.session,
         command.cwd,
         command.dev_login,
+        command.idle_release,
     );
     Err(CliFailure::new(
         "plak web is not in this build; maintainer builds have it (feature web)",

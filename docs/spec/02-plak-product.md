@@ -3914,7 +3914,11 @@ verdicts) are addressed, the session profile and workspace chrome states.
   terminal, an attach or an intent racing the timer is never lost: it lands
   before the decision and keeps the session, or after the release and opens
   it again. An embedded face's session (the TUI, `plak agent`, `plak run`)
-  is never released for being idle.
+  is never released for being idle. A host serves each session through a
+  slot (`host_service::wire::SessionSlot`), resident (the host worker and the
+  wire service its connections share) or dormant (the session id): a released
+  session's worker is joined, and the next trigger opens it again by id. A
+  trigger while the release joins waits for it, then opens the session.
 - **Session requests.** `retry_attach` (re-resolve the binding and open the
   session again), `resume_session {session}` (switch to one of the user's
   sessions) and `rebind {cause}` (carry the history into a new session on
@@ -4277,8 +4281,13 @@ The hidden maintainer command `plak web --listen <unix:path|127.0.0.1:port>
   `--dev-login`, warns at start, and its origin is
   `http://127.0.0.1:<port>`. The process binds before it opens the session,
   prints `plak web: serving on <listener>` once it accepts, and serves until
-  the session ends, `SIGINT` or `SIGTERM`; then it quits the session and
-  removes the socket. The connection's `welcome` names the session, its tree
+  `SIGINT` or `SIGTERM`; then it quits the session and removes the socket.
+  Its session releases idle (§4.4, residency in a host; the hidden
+  `--idle-release <seconds>` sets the idle release, 300 s by default), and
+  the next connection opens it again by its id through the exact reopen,
+  printing `plak web: opening released session <id>`; a session that does
+  not open refuses that connection `unavailable`, and the endpoint serves
+  on. The connection's `welcome` names the session, its tree
   and its root node (§4.4). A stop ends every hello wait and connection as a
   leaving client does. When the session switches to another (`/new`,
   `/resume`, a rebind), every connection's attachment ends with `moved`

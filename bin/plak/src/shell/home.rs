@@ -24,7 +24,7 @@ pub(crate) fn launch_directory() -> Option<PathBuf> {
 }
 
 /// The product home and the Plakous state home, resolved once.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Home {
     paths: Result<PlakPaths, String>,
     state: Result<PathBuf, String>,

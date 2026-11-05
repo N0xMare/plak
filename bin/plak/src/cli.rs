@@ -464,6 +464,9 @@ enum TopCommand {
         /// Dev mode, loopback only: every request is this login.
         #[arg(long)]
         dev_login: Option<String>,
+        /// Seconds the session stays resident with nothing to do (300).
+        #[arg(long, hide = true)]
+        idle_release: Option<u64>,
     },
     /// The per-user host process: one per home and state key, on a
     /// private control socket (maintainer builds; hosts no session yet).
