@@ -577,8 +577,12 @@ where
                     let _ = self.service.detach(held);
                     self.unanswered();
                     // Moved, with its `moved` not yet sent.
-                    if guard.as_ref().is_some_and(|guard| guard.owes(held)) {
-                        self.moved = Some(held);
+                    if let Some(guard) = guard.as_mut()
+                        && guard.owes(held)
+                        && let Some(previous) = self.moved.replace(held)
+                        && previous != held
+                    {
+                        guard.forget(previous);
                     }
                 }
                 if let Some(guard) = &guard {
@@ -744,7 +748,14 @@ where
                 Outbound::Moved { node } => {
                     self.tell(&node);
                     self.attachment = None;
-                    self.moved = Some(attachment);
+                    // A connection moved again before attaching the root is
+                    // owed only the last switch's replay.
+                    if let Some(previous) = self.moved.replace(attachment)
+                        && previous != attachment
+                        && let Some(served) = &self.served
+                    {
+                        served::lock(served).forget(previous);
+                    }
                     self.unanswered();
                     for (id, outcome) in std::mem::take(&mut self.settled) {
                         write_frame(&mut self.stdout, &HostFrame::<P>::Response { id, outcome })?;

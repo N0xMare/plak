@@ -689,6 +689,65 @@ fn an_opening_too_long_to_hold_resyncs_the_old_attachments() {
     );
 }
 
+/// Every child of the tree takes attachments.
+struct OpenChildren;
+
+impl super::super::ChildNodes for OpenChildren {
+    fn state(&self, _agent_id: &str) -> super::super::NodeState {
+        super::super::NodeState::Open
+    }
+
+    fn interrupt(&self, _agent_id: &str, done: super::super::ControlDone) {
+        done(Ok(()));
+    }
+}
+
+/// A connection moved twice before it attaches the root again, its child
+/// attachment between, is owed only the last switch's replay: once it
+/// attaches the root, no connection is owed one and it is dropped.
+#[test]
+fn a_connection_moved_twice_is_owed_one_replay() {
+    use plakous_host_protocol::Core;
+    let (actions, _intents) = plakous_host_protocol::intent_channel::<Core>();
+    let mut stdout = Vec::new();
+    let mut connection = WireConnection::new(root(), &mut stdout, actions)
+        .serving("s1", |id| Some(root_named(&format!("tree-{id}"))));
+    assert!(connection.request(1, Op::Attach { node: root() }).is_some());
+    assert!(connection.observe(binding("s2")).unwrap());
+    let served = connection.served.clone().unwrap();
+    assert!(served::lock(&served).owes(1));
+    // The new tree's children, reached as its hub would.
+    connection.service = connection
+        .service
+        .clone()
+        .with_nodes(std::sync::Arc::new(OpenChildren));
+    let child = NodeAddress {
+        tree_id: "tree-s2".into(),
+        agent_id: "c1".into(),
+    };
+    assert!(matches!(
+        connection.request(2, Op::Attach { node: child }),
+        Some(Outcome::Ok(Answer::Attached { attachment: 2 }))
+    ));
+    assert!(served::lock(&served).owes(1), "a child attach owes on");
+    assert!(connection.observe(binding("s3")).unwrap());
+    assert!(
+        !served::lock(&served).owes(1),
+        "the first switch's is forgotten"
+    );
+    assert!(served::lock(&served).owes(2));
+    assert!(matches!(
+        connection.request(
+            3,
+            Op::Attach {
+                node: root_named("tree-s3")
+            }
+        ),
+        Some(Outcome::Ok(Answer::Attached { .. }))
+    ));
+    assert!(!served::lock(&served).owes(2));
+}
+
 /// Events past the capacity between `moved` and the next attach.
 fn overflow_after_a_switch<W: Write>(
     connection: &mut WireConnection<plakous_host_protocol::Core, W>,
