@@ -60,3 +60,51 @@ fn a_reload_refusal_follows_its_acknowledgement_or_is_recorded_here() {
     );
     assert!(outcome(&paths, &own).is_none(), "the host records it");
 }
+
+fn bind(app: &mut App, session: &str) {
+    app.apply_host_event(crate::tui::HostEvent::Binding {
+        session_id: Some(session.to_owned()),
+        account: app.account.clone(),
+        model: app.model.clone(),
+        effort: app.effort.clone(),
+        extra: app.model_extra.clone(),
+        composition: app.composition,
+        protocol: app.protocol,
+        effective_presentation: app.effective_presentation.clone(),
+    });
+}
+
+/// A reload request belongs to its session: one the face holds, waiting
+/// for an idle boundary or about to run, is dropped when the face switches
+/// to another session, and no reload starts there.
+#[test]
+fn a_held_reload_request_is_dropped_when_the_session_switches() {
+    for started in [false, true] {
+        let source = uuid::Uuid::new_v4().to_string();
+        let next = uuid::Uuid::new_v4().to_string();
+        let mut app = App::new(super::super::test_support::launch_basic(), true);
+        bind(&mut app, &source);
+        let request: crate::reload_request::ReloadRequest =
+            serde_json::from_value(serde_json::json!({
+                "request_id": uuid::Uuid::new_v4().to_string(),
+                "session_id": source,
+                "expect_binary": "build-1",
+            }))
+            .unwrap();
+        app.apply_reload_request(request);
+        assert!(app.reload_requests.pending.is_some());
+        if started {
+            app.service_reload_request();
+            assert!(app.reload_requests.active.is_some() && app.pending_reload);
+        }
+        bind(&mut app, &next);
+        assert!(app.reload_requests.pending.is_none(), "{started}");
+        assert!(app.reload_requests.active.is_none(), "{started}");
+        assert!(app.reload_requests.accepts.is_empty(), "{started}");
+        app.service_reload_request();
+        assert!(
+            !app.pending_reload,
+            "{started}: no reload starts for the session switched to"
+        );
+    }
+}

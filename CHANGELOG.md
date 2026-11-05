@@ -267,6 +267,11 @@ an export.
   key order. A repaired presentation now keeps one error notice per cause in
   that transcript and logs the cause to `plak.log`, and the TUI's note for a
   refused snapshot survives the resync that answers it.
+- A reload request (`plak session reload`) belongs to its session. An in-place
+  switch to another session (`/new`, `/resume`, a fork or a rebind) settles
+  the requests the host holds for the session it leaves as `not taken: the
+  session switched` before it completes; before, one the TUI had already taken
+  could run `/reload` on the session it switched to.
 - Rows that share a call id are kept apart everywhere: importing a document
   keeps every row, and a new tree result that reuses an imported result's call
   id shows as its own row while the turn runs, in the host and in the TUI,

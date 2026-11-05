@@ -467,6 +467,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
         let started = self.started;
 
         let previous = std::mem::replace(opened, replacement);
+        crate::runtime::surface::leaving_session(
+            config.surface.as_deref(),
+            &config.session.id,
+            &target_record.id,
+        );
         let source = std::mem::replace(&mut config.session, target_record);
         config.target = match (target.route, &config.target) {
             (RebindRoute::Api(record), _) => {

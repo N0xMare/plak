@@ -891,6 +891,7 @@ impl App {
                     // lifecycle projection: its correlation is session-scoped.
                     if self.session_id.as_deref() != Some(s.as_str()) {
                         self.reset_session_state();
+                        self.drop_reload_requests_of_other_sessions(&s);
                     }
                     self.session_id = Some(s);
                 }

@@ -232,6 +232,34 @@ impl App {
         self.reload_requests.pending = Some(request);
     }
 
+    /// A reload request belongs to its session: on a switch to `session`,
+    /// the requests this face holds for another one are dropped, never run.
+    /// The host that served that session settled them `not taken` before
+    /// it switched (spec 02 §5.1).
+    pub(super) fn drop_reload_requests_of_other_sessions(&mut self, session: &str) {
+        let requests = &mut self.reload_requests;
+        let mut dropped_active = false;
+        for (slot, active) in [(&mut requests.pending, false), (&mut requests.active, true)] {
+            if let Some(request) = slot.take_if(|request| request.session_id != session) {
+                tracing::info!(
+                    target: "plak.reload",
+                    request_id = %request.request_id,
+                    "reload request dropped: its session is no longer shown"
+                );
+                requests
+                    .accepts
+                    .retain(|accepted| *accepted != request.request_id);
+                dropped_active |= active;
+            }
+        }
+        // A reload the dropped request asked for and that has not started
+        // does not start; one already probing is refused when it lands,
+        // because the session it snapshotted changed.
+        if dropped_active && self.reload_probe.is_none() {
+            self.pending_reload = false;
+        }
+    }
+
     /// Hands the host the acknowledgements and refusals it records for
     /// their requesters. A full mailbox keeps them for the next frame; with
     /// no host left, a refusal is recorded here.

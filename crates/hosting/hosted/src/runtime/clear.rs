@@ -110,6 +110,7 @@ pub async fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
     );
     let source = config.session.clone();
     let previous = std::mem::replace(opened, new_session);
+    super::surface::leaving_session(config.surface.as_deref(), &source.id, &next.id);
     config.session = next;
     if let Some(resolved) = fresh_resolved
         && let HostTargetAuthority::Native {
@@ -415,6 +416,7 @@ async fn switch_onto_session<P: plakous_host_protocol::ProtocolExtension>(
             .map_err(|error| *error.failure)?;
     let source = config.session.clone();
     let previous = std::mem::replace(opened, replacement);
+    super::surface::leaving_session(config.surface.as_deref(), &source.id, &next.id);
     config.session = next;
     let mut release = None;
     publish_restored_frame_before_source_release(events, config, stderr_buf, || {

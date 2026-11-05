@@ -4423,7 +4423,14 @@ session's host takes a queued request for the session it serves on the
 TUI's installed-build check (every five seconds, one check outstanding at a
 time) and offers it to the TUI (`reload_requested`) on every check until
 the TUI acknowledges it (`accept_reload_request`); a request no face took
-before the host ended is refused `not taken`. The TUI notes `reload
+before the host ended is refused `not taken`. A request belongs to its
+session: when the host leaves the session for another in place (`/new`,
+`/resume`, a fork or a rebind), it records every request it holds for the
+session it leaves (accepted, offered or still waiting) as `not taken: the
+session switched` before the switch completes, and withdraws that session's
+announcement; none reaches the next session, and the TUI drops any it holds
+for another session. An outcome the host cannot write is logged
+(`plak.reload`) and the request dropped, never carried over. The TUI notes `reload
 requested onto build <binary-id>; it runs when this session is idle`, and performs it at the next idle boundary: never during a turn, so a
 request from the agent's own turn runs after that turn ends. If sub-agents or
 background processes are live at that boundary it refuses instead of waiting

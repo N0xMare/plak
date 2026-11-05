@@ -1088,6 +1088,10 @@ impl ProductSurface {
 }
 
 impl SurfaceHandler<PlakExtension> for ProductSurface {
+    fn leaving_session(&self, session_id: &str) {
+        self.reload.leave(session_id);
+    }
+
     fn child_wake_enabled(&self) -> Option<bool> {
         let text = match std::fs::read_to_string(self.paths.config_file()) {
             Ok(text) => text,

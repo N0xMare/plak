@@ -328,6 +328,12 @@ pub trait SurfaceHandler<P: ProtocolExtension>: Send {
         false
     }
 
+    /// The host is about to leave `session_id` for another session it serves
+    /// in place (`/new`, `/resume`, a fork or a rebind). State the product
+    /// keeps for that session settles here, before the switch completes:
+    /// nothing of it carries over to the next session.
+    fn leaving_session(&self, _session_id: &str) {}
+
     /// Whether the dispatch reads the session's frozen MCP tools
     /// ([`SurfaceSession::mcp`]); they are gathered only when it does.
     fn needs_session_tools(&self, _intent: &P::Intent) -> bool {
@@ -349,6 +355,19 @@ pub trait SurfaceHandler<P: ProtocolExtension>: Send {
 
 /// Optional driver-owned extension handler.
 pub type Surface<P = Core> = Option<Box<dyn SurfaceHandler<P>>>;
+
+/// Tells the surface the host leaves `from` for `to`, when they differ.
+pub(super) fn leaving_session<P: ProtocolExtension>(
+    surface: Option<&dyn SurfaceHandler<P>>,
+    from: &str,
+    to: &str,
+) {
+    if from != to
+        && let Some(handler) = surface
+    {
+        handler.leaving_session(from);
+    }
+}
 
 pub(super) fn needs_session_tools<P: ProtocolExtension>(
     surface: Option<&dyn SurfaceHandler<P>>,

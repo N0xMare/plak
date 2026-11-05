@@ -415,16 +415,29 @@ pub fn request(
 
 /// Records how `request_id` ended; best effort, never a refusal of its own.
 pub fn record(paths: &PlakPaths, request_id: &str, outcome: &ReloadOutcome) {
-    if uuid::Uuid::parse_str(request_id).is_err() || private_directory(paths).is_err() {
-        return;
+    let _ = try_record(paths, request_id, outcome);
+}
+
+/// [`record`], saying why the outcome could not be written.
+///
+/// # Errors
+/// Returns why: a request id that is not a UUID, an unusable channel
+/// directory or a failed write.
+pub fn try_record(
+    paths: &PlakPaths,
+    request_id: &str,
+    outcome: &ReloadOutcome,
+) -> Result<(), String> {
+    if uuid::Uuid::parse_str(request_id).is_err() {
+        return Err("the request id is not a UUID".to_owned());
     }
+    private_directory(paths)?;
     let file = OutcomeFile {
         version: VERSION,
         outcome: outcome.clone(),
     };
-    if let Ok(bytes) = serde_json::to_vec(&file) {
-        let _ = publish(&outcome_path(paths, request_id), &bytes);
-    }
+    let bytes = serde_json::to_vec(&file).map_err(|error| error.to_string())?;
+    publish(&outcome_path(paths, request_id), &bytes)
 }
 
 /// The request the reload handoff that started this process named, taken

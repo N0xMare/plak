@@ -279,6 +279,7 @@ pub(super) async fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
         }
     };
     let previous = std::mem::replace(opened, replacement);
+    super::surface::leaving_session(config.surface.as_deref(), &config.session.id, &target.id);
     config.session = target;
     let release_error = match watched(watch, previous.release()).await {
         Ok(_) => None,

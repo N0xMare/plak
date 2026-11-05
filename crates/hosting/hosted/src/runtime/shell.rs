@@ -207,6 +207,7 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
             });
         }
         UserAction::NewSession => {
+            let source = config.session.id.clone();
             if let Err(error) = commit_detached_clear(&mut config.session, |candidate| {
                 config.store.save(candidate).map_err(String::from)
             }) {
@@ -216,6 +217,7 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
                 ));
                 return ShellStep::Continue;
             }
+            super::surface::leaving_session(config.surface.as_deref(), &source, &config.session.id);
             send_shell_binding(events, config);
             let _ = events.send(ContentEvent::ClearView);
             let _ = events.replace_transcript(project_session_snapshot(&config.session));

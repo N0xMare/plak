@@ -102,6 +102,51 @@ impl ReloadChannel {
         }
     }
 
+    /// The host leaves `session` for another session (spec 02 §5.1): a
+    /// reload request belongs to its session, so every request for it this
+    /// host holds (offered, accepted and not yet settled, or still waiting in
+    /// the channel) is settled `not taken` now and none reaches the next
+    /// session. The announcement is withdrawn; the next check announces the
+    /// session the host serves then. An outcome that cannot be written is
+    /// logged and the request dropped.
+    pub(super) fn leave(&self, session: &str) {
+        let mut channel = self.lock();
+        if channel
+            .listener
+            .as_ref()
+            .is_none_or(|(id, _)| id != session)
+        {
+            return;
+        }
+        let waiting = channel
+            .listener
+            .as_ref()
+            .and_then(|(_, listener)| listener.take(&self.paths, session));
+        channel.listener = None;
+        let mut settled: Vec<String> = std::mem::take(&mut channel.accepted).into_iter().collect();
+        settled.extend(channel.offered.take().map(|offered| offered.request_id));
+        settled.extend(waiting.map(|waiting| waiting.request_id));
+        drop(channel);
+        for request_id in settled {
+            let outcome = ReloadOutcome::Refused {
+                reason: format!("not taken: {SESSION_SWITCHED}"),
+            };
+            match crate::reload_request::try_record(&self.paths, &request_id, &outcome) {
+                Ok(()) => tracing::info!(
+                    target: "plak.reload",
+                    %request_id,
+                    "reload request not taken: the session switched"
+                ),
+                Err(error) => tracing::warn!(
+                    target: "plak.reload",
+                    %request_id,
+                    %error,
+                    "reload request dropped: the session switched and its outcome could not be recorded"
+                ),
+            }
+        }
+    }
+
     /// Records the face's refusal of `request_id` for its requester, when
     /// this host handed that request over.
     pub(super) fn refuse(&self, request_id: &str, reason: String) {
@@ -125,6 +170,9 @@ impl Drop for ReloadChannel {
         }
     }
 }
+
+/// Why a request for the session a host left is not taken.
+const SESSION_SWITCHED: &str = "the session switched";
 
 /// Records that no face took `request`.
 fn not_taken(paths: &PlakPaths, request: &ReloadRequest, why: &str) {
