@@ -92,14 +92,20 @@ pub(super) fn abandonment_evidence_fold(
         .filter(|fold| fold.turn_abandonment && !fold.operations.is_empty());
     // A barrier this open closes is the one decision its restorable frame
     // names; any other decision record keeps its own rule.
-    let closed_decision = match barrier {
+    // So is a promoted server pause, whose response is already in history: its
+    // baton is finalized as a refusal finalizes it live. A tool batch, or a
+    // pause the lost owner never promoted, keeps its own rule and restores.
+    let (closed_decision, closed_continuation) = match barrier {
         super::DecisionBarrier::Close(_) => match decode_restored_continuation(checkpoint) {
             Ok(RestoredContinuationFrame::EffectDecision(frame)) => {
-                Some(frame.decision_operation.0)
+                (Some(frame.decision_operation.0), None)
             }
-            _ => None,
+            Ok(RestoredContinuationFrame::ServerPause(frame)) if frame.promoted => {
+                (None, Some(frame.continuation_operation.0))
+            }
+            _ => (None, None),
         },
-        super::DecisionBarrier::Restore => None,
+        super::DecisionBarrier::Restore => (None, None),
     };
     let facts = TurnFoldFacts {
         ledger,
@@ -108,6 +114,7 @@ pub(super) fn abandonment_evidence_fold(
         root_dispatched,
         batch_pending,
         closed_decision,
+        closed_continuation,
     };
     let mut barrier_closed = false;
     for obligation in obligations {
@@ -191,7 +198,10 @@ pub(super) fn abandonment_evidence_fold(
         match abandonment_rows::turn_row(&facts, obligation, record, root_operation.is_none()) {
             Some(TurnRow::Root) => root_operation = Some(operation),
             Some(TurnRow::Retained) => {}
-            Some(TurnRow::Settled) => settled_operations.push(operation),
+            Some(TurnRow::Settled) => {
+                barrier_closed |= closed_continuation == Some(operation.0);
+                settled_operations.push(operation);
+            }
             Some(TurnRow::CompletedUnadded) => {
                 settled_operations.push(operation);
                 uncommitted_effect_operations.push(operation);
@@ -238,9 +248,13 @@ pub(super) fn abandonment_evidence_fold(
                 })
         });
     let tool_round_completed = match (code_cell.is_none(), root_operation) {
-        (true, Some(operation)) => {
-            replay::finalized_round_boundary(ledger, turn_id, operation)?.is_some()
-        }
+        (true, Some(operation)) => replay::closing_round_boundary(
+            ledger,
+            turn_id,
+            operation,
+            closed_continuation.map(OperationId),
+        )?
+        .is_some(),
         _ => false,
     };
     let decision_unsent = match (code_cell.is_none(), root_operation) {
@@ -339,6 +353,9 @@ pub(super) fn abandonment_evidence_fold(
         compaction_operations,
         root,
         tool_round_completed,
+        closed_continuation: closed_continuation
+            .filter(|_| barrier_closed)
+            .map(OperationId),
         barrier_cause: match barrier {
             super::DecisionBarrier::Close(cause) if barrier_closed => Some(cause),
             _ => None,

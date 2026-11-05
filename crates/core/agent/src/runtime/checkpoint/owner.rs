@@ -1306,7 +1306,7 @@ pub(in crate::runtime) fn root_closure_report(
         )
         .with_completed_tool_round(completed_tool_round)
         .with_completed_model_round(matches!(closure, RootClosure::Abandon { fold, .. }
-            if fold.tool_round_completed && crate::runtime::durable::turn_recovery::model_round_boundary(checkpoint, fold.turn_id, fold.root_operation))),
+            if fold.tool_round_completed && crate::runtime::durable::turn_recovery::model_round_boundary(checkpoint, fold))),
     ))
 }
 

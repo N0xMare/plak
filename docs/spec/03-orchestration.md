@@ -3576,12 +3576,20 @@ retirement owns, or a turn waiter's recycle owns.
   planned handoff let go of that turn (no turn admitted after the handoff). Its history carries the
   abandonment note, never a requested cancel's, so neither the assignment nor
   the mail the turn carried is marked as something not to act on; that mail
-  was read once and stays read, and the continuation acts on it.
+  was read once and stays read, and the continuation acts on it. The same
+  option closes a promoted server pause (the paused response already in
+  history) the same way, with the same cause, claim `tool_round_completed`
+  and the model-round note.
 - **Restored, never rejoined:** an open that still restores the lost turn
-  (`RestoredWorking`: a hosted tool-batch or server-pause continuation) does
-  not rejoin it. The restored turn is cancelled first, within the host's
-  cancel bound, so its terminal is in the feed, and the child is then marked
-  as below. A child
+  (`RestoredWorking`: a hosted tool-batch continuation) does not rejoin it. The restored turn is
+  cancelled first, within the host's cancel bound, so its terminal is in the
+  feed, and the child is then marked as below. This residual still closes by
+  a requested cancel: its terminal is `Cancelled { cause: Requested }` and
+  the child's history gets the cancelled-prompt note "the user cancelled the
+  request above before it was answered. Do not continue or act on it unless
+  the user asks for it again.", which the continuation's own instruction then
+  follows; the mail that turn carried stays read once. A cancel that carries
+  the loss's cause is a separate chapter 01 item. A child
   already interrupted (a continuation, wake or mail Start the lost owner
   admitted before binding it, so not the turn its attempt binds, which its
   latest interrupt already covers) has its restored turn lost again: the

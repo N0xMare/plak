@@ -249,8 +249,9 @@ async fn mark_owner_lost(
 }
 
 /// The owner-lost mark for a child whose exact open restored a turn the
-/// lost owner left. A child's open closes an effect-decision barrier itself,
-/// so only a hosted continuation is restored here. The turn is cancelled
+/// lost owner left. A child's open closes an effect-decision barrier and a
+/// promoted server pause itself, so only a hosted tool batch or a pause the
+/// lost owner never promoted is restored here (spec 03 §14.1). The turn is cancelled
 /// first, so its terminal is in the feed the mark projects. On a child
 /// already interrupted (a continuation, wake or mail Start the lost owner
 /// admitted before binding it) the restored turn is lost again: the mark is

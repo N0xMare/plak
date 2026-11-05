@@ -223,6 +223,333 @@ async fn durable_promoted_server_pause_reopens_and_completes_without_replay() ->
     Ok(())
 }
 
+/// An open that closes effect-decision barriers also closes a lost owner's
+/// promoted server pause (spec 01 §5.5): its response is already in history,
+/// so the baton is finalized and the turn ends abandoned after its model
+/// round, with the cause the caller asserts. Nothing is replayed and nothing
+/// says the request was cancelled.
+#[tokio::test]
+async fn a_closing_open_abandons_a_lost_owners_promoted_server_pause() -> TestResult {
+    for (base, cause) in [
+        (9_160, crate::runtime::AbandonmentCause::ProcessLost),
+        (9_165, crate::runtime::AbandonmentCause::Interrupted),
+    ] {
+        close_a_promoted_server_pause(base, cause).await?;
+    }
+    Ok(())
+}
+
+async fn close_a_promoted_server_pause(
+    entry_base: u128,
+    cause: crate::runtime::AbandonmentCause,
+) -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let descriptor = durable_test_descriptor("test.route")?;
+    let model = Arc::new(
+        ArtifactModel::new(
+            descriptor.clone(),
+            artifact_authority(&descriptor, 1)?,
+            1,
+            entry_base,
+            false,
+        )
+        .with_provider_pauses([0]),
+    );
+    let store = Arc::new(TestCreateStore::default());
+    store.block_after_promoted_hosted();
+    let sessions = DurableSessionRuntime::current(
+        store.clone(),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("nonzero lease")?,
+    )?;
+    let original = sessions
+        .create(
+            "create:close-server-pause",
+            durable_artifact_test_builder(Arc::clone(&workspace), Arc::clone(&model)),
+        )
+        .await?;
+    let _turn = original
+        .start(
+            CommandId::new("root:close-server-pause")?,
+            "lose the host after a promoted server pause",
+        )
+        .await?
+        .into_turn()
+        .ok_or("root turn")?;
+    let address = loop {
+        let checkpoint = original.checkpoint();
+        if store.commits_blocked.load(Ordering::Acquire)
+            && matches!(
+                checkpoint.manifest().lifecycle(),
+                RuntimeLifecycle::Working {
+                    recovery_phase: WorkingRecoveryPhase::HostedContinuation,
+                    obligations,
+                    ..
+                } if obligations.len() == 2
+            )
+        {
+            assert!(matches!(
+                decode_hosted_continuation(&checkpoint)?,
+                RestoredContinuationFrame::ServerPause(frame) if frame.promoted
+            ));
+            break DurableSessionAddress::new(
+                original.session_id(),
+                original.branch_id(),
+                checkpoint.id(),
+            );
+        }
+        tokio::task::yield_now().await;
+    };
+    original.abort_driver_for_test();
+    tokio::task::yield_now().await;
+    store.resume_commits();
+    store.expire_active_lease();
+    let DurableRuntimeOpen::Opened(agent) = sessions
+        .open(
+            "open:close-server-pause",
+            address,
+            durable_artifact_test_builder(workspace, Arc::clone(&model))
+                .closing_effect_decision_barriers(cause),
+        )
+        .await?
+    else {
+        return Err("a closing open restored the promoted server pause".into());
+    };
+    let report = agent
+        .abandoned_turn()
+        .ok_or("the paused turn was not abandoned")?;
+    assert_eq!(
+        report.claim(),
+        crate::runtime::AbandonedTurnClaim::ToolRoundCompleted
+    );
+    assert_eq!(report.cause(), cause);
+    let checkpoint = agent.checkpoint();
+    let manifest = checkpoint.manifest();
+    assert!(matches!(manifest.lifecycle(), RuntimeLifecycle::Quiescent));
+    assert!(
+        manifest
+            .ledger()
+            .operations()
+            .into_iter()
+            .filter(|record| matches!(
+                record.kind(),
+                DurableOperationKind::ServerPauseContinuation { .. }
+            ))
+            .all(|record| matches!(record.state(), DurableOperationState::Finalized(_))),
+        "the baton is finalized"
+    );
+    let note = manifest
+        .canonical()
+        .history()
+        .segments()
+        .into_iter()
+        .last()
+        .and_then(|segment| segment.items().last())
+        .and_then(|item| item.blocks().first())
+        .and_then(|block| match block {
+            ContentBlock::Text(text) => Some(text.text().to_owned()),
+            _ => None,
+        })
+        .ok_or("no closing note")?;
+    assert!(
+        note.contains("abandoned after its model round completed"),
+        "{note}"
+    );
+    assert!(!note.contains("cancelled"), "{note}");
+    assert_eq!(
+        model.calls.load(Ordering::Acquire),
+        1,
+        "nothing was replayed"
+    );
+    agent.shutdown().await?;
+    Ok(())
+}
+
+/// This build never writes an unpromoted server pause: its decision, its
+/// frame and its response are one commit. A head cut back to one (P still
+/// Completed with its frame recorded, the response not promoted) restores
+/// under a closing open exactly as without the option; only a promoted pause
+/// closes (spec 01 §5.5).
+#[tokio::test]
+async fn a_closing_open_restores_an_unpromoted_server_pause() -> TestResult {
+    use crate::runtime::durable::turn_recovery::{DecisionBarrier, reopen_closes_working_turn_at};
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let descriptor = durable_test_descriptor("test.route")?;
+    let model = Arc::new(
+        ArtifactModel::new(
+            descriptor.clone(),
+            artifact_authority(&descriptor, 1)?,
+            1,
+            9_168,
+            false,
+        )
+        .with_provider_pauses([0]),
+    );
+    let store = Arc::new(TestCreateStore::default());
+    store.block_after_promoted_hosted();
+    let sessions = DurableSessionRuntime::current(
+        store.clone(),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("nonzero lease")?,
+    )?;
+    let original = sessions
+        .create(
+            "create:unpromoted-server-pause",
+            durable_artifact_test_builder(Arc::clone(&workspace), Arc::clone(&model)),
+        )
+        .await?;
+    let _turn = original
+        .start(
+            CommandId::new("root:unpromoted-server-pause")?,
+            "lose the host at a server pause",
+        )
+        .await?
+        .into_turn()
+        .ok_or("root turn")?;
+    let promoted = loop {
+        let checkpoint = original.checkpoint();
+        if store.commits_blocked.load(Ordering::Acquire)
+            && matches!(
+                checkpoint.manifest().lifecycle(),
+                RuntimeLifecycle::Working {
+                    recovery_phase: WorkingRecoveryPhase::HostedContinuation,
+                    obligations,
+                    ..
+                } if obligations.len() == 2
+            )
+        {
+            break checkpoint.as_ref().clone();
+        }
+        tokio::task::yield_now().await;
+    };
+    original.abort_driver_for_test();
+    let closing = DecisionBarrier::Close(crate::runtime::AbandonmentCause::ProcessLost);
+    assert!(reopen_closes_working_turn_at(&promoted, closing));
+    let RuntimeLifecycle::Working {
+        root: RuntimeWorkingRoot::Turn { turn_id, .. },
+        ..
+    } = promoted.manifest().lifecycle()
+    else {
+        return Err("a working turn".into());
+    };
+    let records = promoted
+        .manifest()
+        .ledger()
+        .operations()
+        .into_iter()
+        .map(|record| {
+            if !matches!(record.kind(), DurableOperationKind::Provider { .. })
+                || !matches!(record.state(), DurableOperationState::Finalized(_))
+            {
+                return Ok(record.clone());
+            }
+            let end = record
+                .transitions()
+                .iter()
+                .position(|transition| {
+                    matches!(transition.state(), DurableOperationState::Completed(_))
+                })
+                .ok_or("the provider's completed transition")?;
+            Ok(DurableOperationRecord::new(
+                record.operation_id(),
+                record.kind().clone(),
+                record.request().clone(),
+                record.transitions()[..=end].to_vec(),
+            )?)
+        })
+        .collect::<TestResult<Vec<_>>>()?;
+    let unpromoted = checkpoint_with_code_cell_records(&promoted, *turn_id, records)?;
+    assert!(matches!(
+        decode_hosted_continuation(&unpromoted)?,
+        RestoredContinuationFrame::ServerPause(frame) if !frame.promoted
+    ));
+    assert!(!reopen_closes_working_turn_at(&unpromoted, closing));
+    assert!(!reopen_closes_working_turn_at(
+        &unpromoted,
+        DecisionBarrier::Restore
+    ));
+    Ok(())
+}
+
+/// A tool-batch frame stays restorable under the same option: no closure
+/// row settles a provider program's customer calls, so the open restores it
+/// as before (spec 01 §5.5).
+#[tokio::test]
+async fn a_closing_open_still_restores_a_hosted_tool_batch() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let descriptor = durable_test_descriptor("test.route")?;
+    let model = Arc::new(
+        ArtifactModel::new(
+            descriptor.clone(),
+            artifact_authority(&descriptor, 1)?,
+            1,
+            9_178,
+            false,
+        )
+        .with_tool_first()
+        .with_programmatic_local_tool()?,
+    );
+    let registry = one_mutating_tool_registry()?;
+    let store = Arc::new(TestCreateStore::default());
+    store.block_after_promoted_hosted();
+    let sessions = DurableSessionRuntime::current(
+        store.clone(),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("nonzero lease")?,
+    )?;
+    let original = sessions
+        .create(
+            "create:closing-tool-batch",
+            durable_decision_builder(Arc::clone(&workspace), Arc::clone(&model), registry.clone())?
+                .tool_policy(Arc::new(AlwaysAllowPolicy)),
+        )
+        .await?;
+    let _turn = original.prompt("lose the host at a tool batch").await?;
+    let address = loop {
+        let checkpoint = original.checkpoint();
+        if store.commits_blocked.load(Ordering::Acquire)
+            && matches!(
+                checkpoint.manifest().lifecycle(),
+                RuntimeLifecycle::Working {
+                    recovery_phase: WorkingRecoveryPhase::HostedContinuation,
+                    obligations,
+                    ..
+                } if obligations.len() == 2
+            )
+        {
+            break DurableSessionAddress::new(
+                original.session_id(),
+                original.branch_id(),
+                checkpoint.id(),
+            );
+        }
+        tokio::task::yield_now().await;
+    };
+    original.abort_driver_for_test();
+    tokio::task::yield_now().await;
+    store.resume_commits();
+    store.expire_active_lease();
+    let DurableRuntimeOpen::RestoredWorking { agent, turn } = sessions
+        .open(
+            "open:closing-tool-batch",
+            address,
+            durable_decision_builder(workspace, Arc::clone(&model), registry)?
+                .tool_policy(Arc::new(AlwaysAllowPolicy))
+                .closing_effect_decision_barriers(crate::runtime::AbandonmentCause::ProcessLost),
+        )
+        .await?
+    else {
+        return Err("a closing open did not restore the hosted tool batch".into());
+    };
+    let result = turn.result().result().await?;
+    assert!(matches!(result.outcome(), TurnResultOutcome::Completed(_)));
+    agent.shutdown().await?;
+    Ok(())
+}
+
 /// A parked continuation frame carries the anchor across a process loss: the
 /// resumed round reports no usage, so the anchor the turn terminal records is
 /// the one restored from the frame.

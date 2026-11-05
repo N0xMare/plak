@@ -387,11 +387,15 @@ pub(in crate::runtime) fn reopen_abandons_working_turn(checkpoint: &RuntimeCheck
 /// continuation (`Continue`), for the model-round wording.
 pub(in crate::runtime) fn model_round_boundary(
     checkpoint: &RuntimeCheckpoint,
-    turn_id: TurnId,
-    root: OperationId,
+    fold: &AbandonedTurnRecoveryFold,
 ) -> bool {
-    replay::finalized_round_boundary(checkpoint.manifest().ledger(), turn_id, root)
-        .is_ok_and(|boundary| boundary == Some(replay::RoundBoundary::Model))
+    replay::closing_round_boundary(
+        checkpoint.manifest().ledger(),
+        fold.turn_id,
+        fold.root_operation,
+        fold.closed_continuation,
+    )
+    .is_ok_and(|boundary| boundary == Some(replay::RoundBoundary::Model))
 }
 
 /// The decided retry or overflow fold the turn's dispatched root rests on,

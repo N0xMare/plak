@@ -62,6 +62,9 @@ pub(super) struct TurnFoldFacts<'a> {
     /// The decision operation of the effect-decision barrier this open
     /// closes, when it closes one.
     pub(super) closed_decision: Option<u64>,
+    /// The baton of the promoted server pause this open closes, when it
+    /// closes one.
+    pub(super) closed_continuation: Option<u64>,
 }
 
 /// The row of one turn-owned obligation, or `None` when a turn cannot abandon
@@ -83,6 +86,11 @@ pub(super) fn turn_row(
             if facts.closed_decision == Some(record.operation_id()) =>
         {
             decision_row(action, state)
+        }
+        RecoveryObligationKind::HostedContinuation
+            if facts.closed_continuation == Some(record.operation_id()) =>
+        {
+            continuation_row(action, state)
         }
         RecoveryObligationKind::EffectDecision
         | RecoveryObligationKind::HostedContinuation
@@ -130,6 +138,18 @@ fn decision_row(action: RecoveryAction, state: &DurableOperationState) -> Option
         (RecoveryAction::RestoreEffectDecision, DurableOperationState::DecisionRequired(_))
         | (RecoveryAction::ProvenNotDispatched, DurableOperationState::Prepared) => {
             Some(TurnRow::EffectUnrun)
+        }
+        _ => None,
+    }
+}
+
+/// A promoted server pause a closing open does not restore: its response is
+/// already in history, so its baton only owes finalization, the way a
+/// definite refusal finalizes it live before the turn ends.
+fn continuation_row(action: RecoveryAction, state: &DurableOperationState) -> Option<TurnRow> {
+    match (action, state) {
+        (RecoveryAction::RestoreServerPause, DurableOperationState::ContinuationRequired(_)) => {
+            Some(TurnRow::Settled)
         }
         _ => None,
     }
@@ -298,7 +318,7 @@ pub(super) fn abandonment_segment(facts: &ClosureFacts<'_>) -> Result<HistorySeg
             },
         );
     }
-    if fold.tool_round_completed && model_round_boundary(source, turn_id, fold.root_operation) {
+    if fold.tool_round_completed && model_round_boundary(source, fold) {
         return abandoned_turn_segment_with_note(
             turn_id,
             "this turn was abandoned after its model round completed, before the next model request was prepared. The completed model response remains in this history; no next request was dispatched or retried.",
@@ -391,6 +411,26 @@ pub(super) fn finalize_retained_operations(
         }
         if matches!(record.state(), DurableOperationState::DecisionRequired(_)) {
             ledger = close_unmade_decision(&ledger, source, operation.0, checkpoint_id)?;
+            continue;
+        }
+        if let DurableOperationState::ContinuationRequired(evidence) = record.state() {
+            // Only the promoted pause's baton this closure closed is settled
+            // here; any other baton is restorable and never finalized by an
+            // abandonment.
+            if fold.closed_continuation != Some(*operation) {
+                return Err(AgentError::from_store(SessionStoreError::corrupt()));
+            }
+            let finalized =
+                finalized_operation_evidence(evidence, checkpoint_id, history_identity)?;
+            ledger = ledger
+                .transition_operation(
+                    operation.0,
+                    DurableOperationTransition::new(
+                        checkpoint_id,
+                        DurableOperationState::Finalized(finalized),
+                    ),
+                )
+                .map_err(runtime_manifest_error)?;
             continue;
         }
         if matches!(record.state(), DurableOperationState::Prepared) {
@@ -603,7 +643,7 @@ fn dispatched_root_cancellation(facts: &ClosureFacts<'_>) -> &'static str {
             "the turn was abandoned after its request was refused as over the context window; compaction did not start"
         }
         AbandonedTurnClaim::ToolRoundCompleted => {
-            if model_round_boundary(source, fold.turn_id, fold.root_operation) {
+            if model_round_boundary(source, fold) {
                 "the turn was interrupted after its model round completed, before the next model request"
             } else {
                 "the turn was interrupted after its tool round completed, before the next model request"

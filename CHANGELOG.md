@@ -257,7 +257,8 @@ an export.
 - Reopening a session no longer pauses the agent tree. A sub-agent whose turn
   lost its owner is interrupted (owner lost) on reopen, keeps its attempt and
   waits for mail or a followup; a lost turn the reopen finds still waiting
-  (at an approval, or admitted but not yet sent) is closed as abandoned,
+  (at an approval, admitted but not yet sent, or after a provider's server
+  pause it already recorded) is closed as abandoned,
   never rejoined, and a pending wake's mail returns unread for the
   continuation. Mail sent to a sub-agent still being reopened
   waits as for a busy slot and stays durable until its recovery settles. `--resume-tree`, the TUI resume

@@ -59,6 +59,7 @@ fn fold_with(
         compaction_operations: compaction.iter().copied().map(OperationId).collect(),
         root: AbandonedRoot::Dispatched,
         tool_round_completed: false,
+        closed_continuation: None,
         barrier_cause: None,
     }
 }

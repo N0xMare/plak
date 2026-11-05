@@ -478,7 +478,9 @@ impl AgentBuilder {
     /// at an effect decision instead of restoring it there: the turn ends
     /// abandoned with `cause`, the decision never made and its effect never
     /// started (spec 01 §5.5). A new owner that does not take over the
-    /// previous owner's pending decisions uses this.
+    /// previous owner's pending decisions uses this. A promoted server pause
+    /// (its response already in history) closes the same way, after its
+    /// model round; a tool-batch frame, or a pause never promoted, restores.
     ///
     /// The caller asserts `cause`; the open cannot tell a lost owner from a
     /// released one. `ProcessLost` only when the previous owner was lost,

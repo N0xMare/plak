@@ -466,6 +466,9 @@ pub(in crate::runtime) struct AbandonedTurnRecoveryFold {
     /// Whether the root command still awaits its terminal result.
     pub(in crate::runtime) root: AbandonedRoot,
     pub(in crate::runtime) tool_round_completed: bool,
+    /// The promoted server-pause baton this closure finalizes, when a
+    /// closing open closed one (§5.5).
+    pub(in crate::runtime) closed_continuation: Option<OperationId>,
     /// The cause the open's caller asserted for an effect-decision barrier
     /// it closed (§5.5); `None` derives the cause from `root`.
     pub(in crate::runtime) barrier_cause: Option<crate::runtime::AbandonmentCause>,

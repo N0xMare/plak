@@ -2294,7 +2294,26 @@ only when the previous owner was lost, `Interrupted` when it let go of the
 turn (a planned handoff). A new owner that does not take over the previous
 owner's pending decisions uses it. The option is best effort: when the rest
 of T has no closure row, the open restores T as if the option were not set.
-A tool-batch or server-pause frame is restored even then.
+
+The same open closes a **promoted** server-pause frame (P `Finalized` with
+`Continue`, the paused response already in history): the closure finalizes
+the pause's continuation baton with its own evidence, the way a definite
+refusal finalizes it live, and T then rests on the model-round boundary, so it
+abandons with the caller's `cause`, claim `ToolRoundCompleted` with the
+model-round note ("this turn was abandoned after its model round completed,
+before the next model request was prepared. The completed model response
+remains in this history; no next request was dispatched or retried."), and
+the report's `model_round_completed`. Two hosted frames are still restored
+under the option, and a caller that does not continue them has only
+`TurnControl::cancel`, which commits `Cancelled { cause: Requested }` and the
+cancelled-prompt note "the user cancelled the request above before it was
+answered. Do not continue or act on it unless the user asks for it again.":
+a tool-batch frame (a provider program awaiting customer tool calls whose
+results no closure row settles), and a server pause never promoted (P still
+`Completed` with the frame recorded and the response not in history). This
+build never writes the latter, because a pause's decision, frame and response
+are one commit (§3.5 item 5); a head that has one restores whether or not the
+option is set.
 Restore requires a decodable effect-decision, server-pause or tool-batch frame,
 or an explicit Code Cell workflow scope (commit recovery is checked first).
 Bare Finalization debt without a closure row is typed integrity, never Restore.
@@ -11725,7 +11744,8 @@ down. A fenced Code Cell is abandoned through its own evidence (a failure result
 for the outer call saying it may have run tools that changed the workspace) and
 then finalized, with the `RunningTool` claim. A checkpoint outstanding on
 anything else — a pending effect decision, a hosted continuation — keeps its own
-recovery rule, unless the open closes effect-decision barriers (§5.5). A
+recovery rule, unless the open closes effect-decision barriers, which also
+closes a promoted server pause (§5.5). A
 consumer learns a terminal result it never recorded from the
 session's change feed: the closing commit carries the `TurnTerminal` fact
 (and, for an abandonment, its claim and cause), and the result's content is the
@@ -11744,7 +11764,8 @@ stale answer is a lease-contention refusal, which waiting can change, not a
 recovery-required one. A Working head this build cannot close exists only as
 typed integrity, and that refusal says a retry will not change it. A pending
 effect decision or a hosted continuation is restored, not closed, except that
-an open closing effect-decision barriers abandons a pending decision (§5.5). A
+an open closing effect-decision barriers abandons a pending decision and a
+promoted server pause (§5.5). A
 turn cut
 inside a running tool, a joined process, a compaction or a Code Cell is
 abandonable, including a native Code Mode, JavaScript or Python cell whose

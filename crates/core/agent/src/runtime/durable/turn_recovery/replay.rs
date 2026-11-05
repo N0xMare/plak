@@ -88,6 +88,22 @@ pub(in crate::runtime) fn finalized_round_boundary(
     turn_id: TurnId,
     root: OperationId,
 ) -> Result<Option<RoundBoundary>, AgentError> {
+    closing_round_boundary(ledger, turn_id, root, None)
+}
+
+/// [`finalized_round_boundary`] for a closure that finalizes `closing`, a
+/// promoted server-pause baton a closing open does not restore (§5.5): the
+/// baton counts as finalized.
+///
+/// # Errors
+///
+/// A record whose outcome does not decode is typed integrity.
+pub(in crate::runtime) fn closing_round_boundary(
+    ledger: &RuntimeOperationLedger,
+    turn_id: TurnId,
+    root: OperationId,
+    closing: Option<OperationId>,
+) -> Result<Option<RoundBoundary>, AgentError> {
     let records = ledger.operations();
     if !records.iter().any(|record| {
         record.operation_id() == root.0
@@ -108,6 +124,7 @@ pub(in crate::runtime) fn finalized_round_boundary(
     };
     let closed = records.iter().all(|record| {
         record.operation_id() == root.0
+            || closing.is_some_and(|closing| record.operation_id() == closing.0)
             || matches!(record.state(), DurableOperationState::Finalized(_))
             || controls::same_turn_control(ledger, record, turn_id)
             || (boundary == RoundBoundary::Tool

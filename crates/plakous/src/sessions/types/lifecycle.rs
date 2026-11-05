@@ -36,7 +36,9 @@ impl OpenSessionRequest {
     /// effect decision instead of restoring it there: the turn ends abandoned
     /// with `cause`, the decision never made and its effect never started
     /// (spec 01 §5.5). For a new owner that does not take over the previous
-    /// owner's pending decisions.
+    /// owner's pending decisions. A promoted server pause (its response
+    /// already in history) closes the same way, after its model round; a
+    /// tool-batch frame, or a pause never promoted, restores.
     ///
     /// The caller asserts `cause`: `ProcessLost` only when the previous
     /// owner was lost, `Interrupted` when it let go of the turn (a planned
