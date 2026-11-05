@@ -529,7 +529,10 @@ impl ResolvedModelDescriptor {
     /// supplied observation is non-authoritative until its certificate,
     /// revision, exact scope, authority binding, and freshness all match.
     /// Missing or unproved facts produce typed unavailable status; this method
-    /// never guesses capacity, tokenization, or an output reservation.
+    /// never guesses capacity, tokenization, or an output reservation. A
+    /// projection decoded from a prepared-call record only references its
+    /// measured items and anchor, so its status is always
+    /// `MeasurementUnavailable`; only the live preparation is measured.
     ///
     /// # Errors
     ///
@@ -558,6 +561,19 @@ impl ResolvedModelDescriptor {
                 ContextUnavailable::ScopeDrift {
                     field: "prepared projection",
                 },
+            );
+        }
+        // A decoded record references the items and anchor it was measured
+        // from; measuring it without them would silently drop both.
+        if prepared.token_projection().is_recorded() {
+            return ContextStatus::unavailable(
+                descriptor_binding,
+                model_input_identity,
+                None,
+                None,
+                None,
+                None,
+                ContextUnavailable::MeasurementUnavailable,
             );
         }
         let Some(contract) = &self.context_contract else {

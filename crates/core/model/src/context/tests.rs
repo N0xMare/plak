@@ -446,8 +446,12 @@ fn large_item_anchor_encoding_is_compact_and_tool_arguments_are_not_images() {
     assert!(measured.upper_bound() > 10_000);
 }
 
-#[test]
-fn prepared_record_with_six_thousand_items_retains_only_an_anchor_reference() {
+/// A record prepared over six thousand measured items under a request anchor.
+fn anchored_item_record() -> (
+    ResolvedModelDescriptor,
+    ValidatedRequestPlan,
+    PreparedCallRecord,
+) {
     let descriptor = descriptor(
         CapacityRule::SharedWindow {
             total: SafeLimit::Exact(1_000_000),
@@ -520,20 +524,168 @@ fn prepared_record_with_six_thousand_items_retains_only_an_anchor_reference() {
     .expect("projection");
     let record = PreparedCallRecord::for_prepared(&descriptor, &plan, projection, &context)
         .expect("prepared record");
+    (descriptor, plan, record)
+}
+
+#[test]
+fn prepared_record_with_six_thousand_items_retains_only_item_and_anchor_references() {
+    let (_, _, record) = anchored_item_record();
     let encoded = serde_json::to_vec(&record).expect("encode");
-    assert!(encoded.len() < 1024 * 1024, "{} bytes", encoded.len());
+    assert!(encoded.len() < 16 * 1024, "{} bytes", encoded.len());
     let restored = serde_json::from_slice::<PreparedCallRecord>(&encoded).expect("restore");
     assert_eq!(restored, record);
     assert_eq!(serde_json::to_vec(&restored).expect("reencode"), encoded);
-    assert!(
-        !String::from_utf8(encoded)
-            .expect("utf8")
-            .contains("\"request_anchor\":")
-    );
+    let text = String::from_utf8(encoded.clone()).expect("utf8");
+    assert!(!text.contains("\"request_anchor\":"));
+    assert!(!text.contains("\"wire_input\":") && !text.contains("conversation_index"));
+    assert!(text.contains("\"wire_input_identity\":"));
     let oversized = ModelError::from(ModelPreparationError::from(
         crate::PreparedCallError::RecordTooLarge,
     ));
     assert_eq!(oversized.kind(), ModelErrorKind::ContextLimit);
+}
+
+#[test]
+fn the_persisted_item_reference_names_the_list_that_becomes_the_anchor() {
+    let (descriptor, _, record) = anchored_item_record();
+    let tokens = record.projection().token_projection();
+    let input = tokens.wire_input().expect("live items");
+    let reference = tokens.wire_input_identity().expect("item reference");
+    assert_eq!(reference, input.identity().expect("list identity"));
+    // After the response the driver's next anchor is built from this list.
+    let anchor = ContextRequestAnchor::new(
+        descriptor.semantic_binding_digest().expect("binding"),
+        descriptor.route().clone(),
+        descriptor.requested_model().clone(),
+        crate::Usage::new(40_000, 10, 0, 0, 0),
+        input.clone(),
+    )
+    .expect("anchor");
+    assert_eq!(anchor.input.identity().expect("anchor list"), reference);
+    // The reference and the whole measured, anchored record are pinned: a
+    // change to either encoding is an epoch bump, never a re-pin.
+    let encoded = serde_json::to_vec(&record).expect("encode");
+    let golden = Digest::sha256(DigestDomain::Blob, 1, &[&encoded]).expect("golden");
+    assert_eq!(
+        (reference.to_string(), encoded.len(), golden.to_string()),
+        (
+            "8824bfb591859b265431cd2ee21fc5959bb3acdef792b978f0828e82085a7e17".to_owned(),
+            5468,
+            "43ebee71ffaa1c09ad789f9038e145f5fa6077e154e565ab8ddb39eb4a12c4e1".to_owned()
+        )
+    );
+}
+
+#[test]
+fn decoded_prepared_record_refuses_measurement_instead_of_dropping_its_items() {
+    let (descriptor, plan, record) = anchored_item_record();
+    let encoded = serde_json::to_vec(&record).expect("encode");
+    let restored = serde_json::from_slice::<PreparedCallRecord>(&encoded).expect("restore");
+
+    // The live record measures exactly what it admitted; the decoded one
+    // holds neither its items nor its anchor and refuses to be measured.
+    let live = descriptor
+        .context_status(&plan, record.projection(), timestamp(2))
+        .expect("live status");
+    assert_eq!(live.identity(), record.context_status_identity());
+    let decoded = descriptor
+        .context_status(&plan, restored.projection(), timestamp(2))
+        .expect("decoded status");
+    assert_eq!(
+        decoded.kind(),
+        &ContextStatusKind::Unavailable(ContextUnavailable::MeasurementUnavailable)
+    );
+    assert!(
+        restored
+            .revalidate(&descriptor, &plan, timestamp(2))
+            .is_err()
+    );
+    record
+        .revalidate(&descriptor, &plan, timestamp(2))
+        .expect("live revalidation");
+
+    // Every retained byte, the item reference included, is authenticated.
+    let mut tampered: serde_json::Value = serde_json::from_slice(&encoded).expect("json");
+    let byte = &mut tampered["projection"]["token_projection"]["wire_input_identity"]["bytes"][0];
+    *byte = serde_json::json!((byte.as_u64().expect("digest byte") + 1) % 256);
+    assert!(serde_json::from_value::<PreparedCallRecord>(tampered).is_err());
+}
+
+#[test]
+fn prepared_record_bound_counts_the_referenced_item_list_as_embedded() {
+    let descriptor = descriptor(
+        CapacityRule::SharedWindow {
+            total: SafeLimit::Exact(100_000_000),
+        },
+        measurement_certificate(CountCertificateKind::ExactTokenizer),
+    );
+    let request = request(Some(128_000));
+    let (plan, _) = prepared(
+        &descriptor,
+        &request,
+        authority(b"account"),
+        Some(observation(10)),
+    );
+    let authority = RuntimeModelAuthority::new(
+        &descriptor,
+        authority(b"account"),
+        credential_authority(),
+        1,
+        timestamp(1),
+        Some(timestamp(100)),
+    )
+    .expect("authority");
+    let context = ModelPreparationContext::new(authority, timestamp(2));
+    let record = |count: usize| {
+        let messages = (0..count)
+            .map(|i| serde_json::json!({"role":"user","content":i.to_string()}))
+            .collect::<Vec<_>>();
+        let body = serde_json::to_vec(&serde_json::json!({"messages":messages})).expect("body");
+        let digest = Digest::sha256(DigestDomain::Blob, 1, &[&body]).expect("wire digest");
+        let size = u64::try_from(body.len()).expect("size");
+        let tokens = PreparedTokenProjection::new(digest, size, Some(observation(10)))
+            .expect("tokens")
+            .with_wire_input(&body, None, &context)
+            .expect("items");
+        let projection = PreparedModelProjection::new(
+            &descriptor,
+            &plan,
+            &context,
+            descriptor
+                .context_contract()
+                .expect("contract")
+                .protocol_family()
+                .clone(),
+            "test-lowering-1",
+            "projection-1",
+            "accounting-1",
+            digest,
+            size,
+            tokens,
+            PreparedCacheUse::None,
+            Some(
+                PreparedOutputLimit::enforced_wire_maximum(
+                    NonZeroU32::new(128_000).expect("output"),
+                    "max_output_tokens",
+                    digest,
+                    "test-lowering-1",
+                )
+                .expect("limit"),
+            ),
+        )
+        .expect("projection");
+        PreparedCallRecord::for_prepared(&descriptor, &plan, projection, &context)
+    };
+    let fitting = record(1_000).expect("a small item list fits");
+    assert!(serde_json::to_vec(&fitting).expect("encode").len() < 16 * 1024);
+    // Persisted, this record would be a few KiB; its anchor would not fit the
+    // 4 MiB context-state bound, so preparation refuses it as before.
+    let error = record(32_000).expect_err("the embedded list exceeds the record bound");
+    assert!(matches!(
+        error,
+        ModelPreparationError::PreparedCall(crate::PreparedCallError::RecordTooLarge)
+    ));
+    assert_eq!(ModelError::from(error).kind(), ModelErrorKind::ContextLimit);
 }
 
 #[test]

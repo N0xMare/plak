@@ -825,25 +825,25 @@ async fn fresh_schema_has_required_integrity_pragmas_and_reopens() {
         .expect_err("predecessor object codec must violate the current schema constraint");
     connection
         .execute(
-            "INSERT INTO runtime_objects(kind,codec,digest,byte_len) VALUES(19,35,zeroblob(32),1)",
+            "INSERT INTO runtime_objects(kind,codec,digest,byte_len) VALUES(19,36,zeroblob(32),1)",
             [],
         )
         .expect("provider-configuration object must satisfy the current schema constraint");
     connection
         .execute(
-            "INSERT INTO runtime_objects(kind,codec,digest,byte_len) VALUES(20,35,zeroblob(32),1)",
+            "INSERT INTO runtime_objects(kind,codec,digest,byte_len) VALUES(20,36,zeroblob(32),1)",
             [],
         )
         .expect("named-state object must satisfy the current schema constraint");
     connection
         .execute(
-            "INSERT INTO runtime_objects(kind,codec,digest,byte_len) VALUES(21,35,zeroblob(32),1)",
+            "INSERT INTO runtime_objects(kind,codec,digest,byte_len) VALUES(21,36,zeroblob(32),1)",
             [],
         )
         .expect_err("unknown object kind must violate the current schema constraint");
     connection
         .execute(
-            "DELETE FROM runtime_objects WHERE kind IN(19,20) AND codec=35 AND digest=zeroblob(32)",
+            "DELETE FROM runtime_objects WHERE kind IN(19,20) AND codec=36 AND digest=zeroblob(32)",
             [],
         )
         .expect("remove schema probe");

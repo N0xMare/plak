@@ -305,3 +305,151 @@ fn active_family_artifact_enforces_revision_domain_and_size_bounds()
     assert!(ActiveFamilyArtifact::new("provider name", 1, 1, binding, [1_u8]).is_err());
     Ok(())
 }
+
+fn measured_token_projection() -> Result<PreparedTokenProjection, Box<dyn std::error::Error>> {
+    let descriptor = authority_descriptor()?;
+    let authority = RuntimeModelAuthority::new(
+        &descriptor,
+        authority_binding(b"account-a")?,
+        authority_binding(b"credential-a")?,
+        1,
+        Timestamp::new(1, 0)?,
+        Some(Timestamp::new(100, 0)?),
+    )?;
+    let context = ModelPreparationContext::new(authority, Timestamp::new(2, 0)?);
+    let messages = (0..200)
+        .map(|index| serde_json::json!({"role": "user", "content": index.to_string()}))
+        .collect::<Vec<_>>();
+    let body = serde_json::to_vec(&serde_json::json!({"messages": messages}))?;
+    let digest = Digest::sha256(DigestDomain::Blob, 1, &[&body])?;
+    Ok(
+        PreparedTokenProjection::new(digest, u64::try_from(body.len())?, None)?
+            .with_wire_input(&body, None, &context)?,
+    )
+}
+
+#[test]
+fn persisted_token_projection_references_its_items_and_bounds_them_as_embedded()
+-> Result<(), Box<dyn std::error::Error>> {
+    let tokens = measured_token_projection()?;
+    let encoded = serde_json::to_vec(&tokens)?;
+    let text = std::str::from_utf8(&encoded)?;
+    assert!(!text.contains("conversation_index") && !text.contains("\"wire_input\":"));
+    assert!(
+        encoded.len() < 2048,
+        "{} bytes for 200 items",
+        encoded.len()
+    );
+
+    // The record bound is exactly the length the item list adds when embedded.
+    let mut embedded = serde_json::to_value(&tokens)?;
+    let fields = embedded.as_object_mut().ok_or("projection object")?;
+    fields.remove("wire_input_identity").ok_or("reference")?;
+    fields.insert(
+        "wire_input".to_owned(),
+        serde_json::to_value(tokens.wire_input())?,
+    );
+    let embedded = serde_json::to_vec(&embedded)?;
+    assert!(embedded.len() > encoded.len() + 200 * 100);
+    assert_eq!(tokens.embedded_record_bytes(encoded.len())?, embedded.len());
+
+    let decoded: PreparedTokenProjection = serde_json::from_slice(&encoded)?;
+    assert_eq!(decoded, tokens);
+    assert_eq!(decoded.identity(), tokens.identity());
+    assert_eq!(serde_json::to_vec(&decoded)?, encoded);
+    assert!(decoded.wire_input().is_none());
+    assert!(decoded.is_recorded() && !tokens.is_recorded());
+    assert_eq!(decoded.embedded_record_bytes(7)?, 7);
+    Ok(())
+}
+
+#[test]
+fn persisted_token_projection_refuses_an_inconsistent_reference()
+-> Result<(), Box<dyn std::error::Error>> {
+    let tokens = measured_token_projection()?;
+    let encoded = serde_json::to_value(&tokens)?;
+    let unmeasured = PreparedTokenProjection::new(tokens.wire_digest(), tokens.wire_size(), None)?;
+    let blob = Digest::sha256(DigestDomain::Blob, 1, &[b"not a measurement"])?;
+    let old_version = Digest::sha256(DigestDomain::TokenMeasurement, 4, &[b"items"])?;
+    let other_domain = Digest::sha256(DigestDomain::ContextAdmission, 5, &[b"items"])?;
+    let anchor = Digest::sha256(DigestDomain::TokenMeasurement, 5, &[b"anchor"])?;
+    let cases = [
+        // A measured identity cannot pass as an unmeasured projection's.
+        ("wire_input_identity", serde_json::Value::Null),
+        ("wire_input_identity", serde_json::to_value(blob)?),
+        ("wire_input_identity", serde_json::to_value(old_version)?),
+        ("wire_input_identity", serde_json::to_value(other_domain)?),
+        ("identity", serde_json::to_value(unmeasured.identity())?),
+        ("request_anchor_identity", serde_json::to_value(blob)?),
+        // The identity, the item reference and the anchor reference name
+        // distinct objects; a swap that makes two coincide is refused.
+        ("identity", encoded["wire_input_identity"].clone()),
+        (
+            "request_anchor_identity",
+            encoded["wire_input_identity"].clone(),
+        ),
+        ("request_anchor_identity", encoded["identity"].clone()),
+    ];
+    for (field, value) in cases {
+        let mut tampered = encoded.clone();
+        tampered[field] = value;
+        assert!(
+            serde_json::from_value::<PreparedTokenProjection>(tampered).is_err(),
+            "{field}"
+        );
+    }
+    // Alone, a measured projection cannot re-derive its identity; the
+    // enclosing record's identity authenticates these fields.
+    let accepted = serde_json::from_value::<PreparedTokenProjection>({
+        let mut anchored = encoded.clone();
+        anchored["request_anchor_identity"] = serde_json::to_value(anchor)?;
+        anchored
+    })?;
+    assert!(accepted.is_recorded());
+
+    // An unmeasured projection carries no anchor or bound authority.
+    let plain = serde_json::to_value(&unmeasured)?;
+    assert!(serde_json::from_value::<PreparedTokenProjection>(plain.clone()).is_ok());
+    for (field, value) in [
+        ("request_anchor_identity", serde_json::to_value(anchor)?),
+        ("require_input_bound", serde_json::Value::Bool(true)),
+    ] {
+        let mut tampered = plain.clone();
+        tampered[field] = value;
+        assert!(
+            serde_json::from_value::<PreparedTokenProjection>(tampered).is_err(),
+            "unmeasured {field}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn the_record_bound_admits_exactly_its_maximum() {
+    assert!(!recovery::exceeds_record_bound(
+        MAX_PREPARED_CALL_RECORD_BYTES
+    ));
+    assert!(recovery::exceeds_record_bound(
+        MAX_PREPARED_CALL_RECORD_BYTES + 1
+    ));
+}
+
+#[test]
+fn an_unmeasured_projection_counts_its_absent_list_as_the_embedded_encoding_did()
+-> Result<(), Box<dyn std::error::Error>> {
+    let tokens = PreparedTokenProjection::new(
+        Digest::sha256(DigestDomain::Blob, 1, &[b"unmeasured body"])?,
+        15,
+        None,
+    )?;
+    let encoded = serde_json::to_vec(&tokens)?;
+    let mut embedded = serde_json::to_value(&tokens)?;
+    let fields = embedded.as_object_mut().ok_or("projection object")?;
+    fields.remove("wire_input_identity").ok_or("reference")?;
+    fields.insert("wire_input".to_owned(), serde_json::Value::Null);
+    assert_eq!(
+        tokens.embedded_record_bytes(encoded.len())?,
+        serde_json::to_vec(&embedded)?.len()
+    );
+    Ok(())
+}

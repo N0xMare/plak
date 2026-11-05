@@ -59,6 +59,7 @@ mod residency;
 mod round_limit;
 mod scheduling_diagnostics;
 mod storage_outage;
+mod store_growth;
 mod terminal_enrichment;
 mod turn_fence_workflow;
 #[path = "../workflow_abandonment_tests.rs"]

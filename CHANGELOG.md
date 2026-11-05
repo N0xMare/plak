@@ -13,8 +13,16 @@ This release changes every persisted store at once (the 0.0.4 format cut), so
 a 0.0.4 build opens no 0.0.3 state; 0.0.3 sessions cross through `/reload` or
 an export.
 
-- State key `r27.e35.p36.t10` (runtime SQLite schema 27, runtime format epoch
-  35, product schema 36, agent tree schema 10; 0.0.3 used `r26.e34.p35.t9`).
+- State key `r27.e36.p36.t10` (runtime SQLite schema 27, runtime format epoch
+  36, product schema 36, agent tree schema 10; 0.0.3 used `r26.e34.p35.t9`).
+- Epoch 36: a prepared-call record no longer embeds its request's wire-input
+  item list (about 166 bytes per item, every round); it stores the list's
+  identity digest, so a long turn's records stop growing as rounds times
+  history (56% of a measured 3.4 GB store). The request anchor in context
+  state stays the one persisted copy. Measurement, the token-projection,
+  scope, status and admission identities, and the 4 MiB record bound (which
+  still counts the list as if embedded) are unchanged; a decoded record
+  refuses to be measured again.
 - Runtime schema 27 records agent lines: each line's head, every branch's line
   membership and `line_job_terminals`. Epoch 35 adds line membership and
   generation to the checkpoint topology, line-head job owners and the line

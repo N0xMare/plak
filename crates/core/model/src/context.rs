@@ -437,6 +437,21 @@ impl ContextWireInput {
         })
     }
 
+    /// Integrity identity of the complete item list, by which a persisted
+    /// prepared projection references the list instead of retaining it.
+    pub(crate) fn identity(&self) -> Result<Digest, ContextContractError> {
+        let bytes =
+            serde_json::to_vec(self).map_err(|error| ContextContractError::Serialization {
+                reason: error.to_string(),
+            })?;
+        Digest::sha256(
+            DigestDomain::TokenMeasurement,
+            5,
+            &[b"plakous-model/context-wire-input-v1", &bytes],
+        )
+        .map_err(Into::into)
+    }
+
     pub(crate) fn image_tokens(&self) -> u64 {
         self.items
             .iter()

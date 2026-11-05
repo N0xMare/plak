@@ -478,6 +478,12 @@ fn validate_provider_locator_material(bytes: &[u8]) -> Result<(), ModelCallRecov
     }
 }
 
+/// Whether a record of `bytes` (counted with its item list embedded) is over
+/// the recovery-record bound: exactly [`MAX_PREPARED_CALL_RECORD_BYTES`] fits.
+pub(super) const fn exceeds_record_bound(bytes: usize) -> bool {
+    bytes > MAX_PREPARED_CALL_RECORD_BYTES
+}
+
 /// Bounded serializable recovery record for one exact prepared call.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct PreparedCallRecord {
@@ -631,7 +637,13 @@ impl PreparedCallRecord {
         );
         let retained_bytes =
             serde_json::to_vec(&retained).map_err(|_| PreparedCallError::Serialization)?;
-        if retained_bytes.len() > MAX_PREPARED_CALL_RECORD_BYTES {
+        // The bound counts the measured item list as if embedded: that list
+        // becomes the request anchor, whose context-state bound is the same.
+        if exceeds_record_bound(
+            projection
+                .token_projection
+                .embedded_record_bytes(retained_bytes.len())?,
+        ) {
             return Err(PreparedCallError::RecordTooLarge);
         }
         let identity = Digest::sha256(
@@ -721,6 +733,8 @@ impl PreparedCallRecord {
 
     /// Rechecks all neutral prepared and admission evidence at the final
     /// pre-dispatch fence without obtaining a provider call capability.
+    /// A decoded record only references its measured items and anchor, so its
+    /// revalidation always fails; only the live preparation revalidates.
     ///
     /// # Errors
     ///
@@ -737,6 +751,7 @@ impl PreparedCallRecord {
     }
 
     /// Rechecks an undispatched request under a fresh same-class credential.
+    /// Like [`Self::revalidate`], this always fails for a decoded record.
     ///
     /// # Errors
     ///

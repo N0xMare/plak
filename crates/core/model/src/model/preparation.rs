@@ -504,7 +504,12 @@ pub struct PreparedTokenProjection {
     /// measured it. Presentation-only and outside the identity: the digest
     /// and size already bind the exact body the parts describe.
     input_parts: Option<crate::ContextInputParts>,
+    /// Item measurements of the same body, held only by the live preparation.
+    /// A round's record references them by `wire_input_identity`, so a
+    /// persisted projection costs O(1) in the request's item count.
+    #[serde(skip)]
     wire_input: Option<crate::ContextWireInput>,
+    wire_input_identity: Option<Digest>,
     #[serde(skip)]
     request_anchor: Option<crate::ContextRequestAnchor>,
     request_anchor_identity: Option<Digest>,
@@ -527,7 +532,7 @@ struct PreparedTokenProjectionWire {
     identity: Digest,
     #[serde(default)]
     input_parts: Option<crate::ContextInputParts>,
-    wire_input: Option<crate::ContextWireInput>,
+    wire_input_identity: Option<Digest>,
     request_anchor_identity: Option<Digest>,
     require_input_bound: bool,
 }
@@ -563,6 +568,7 @@ impl PreparedTokenProjection {
             identity,
             input_parts: None,
             wire_input: None,
+            wire_input_identity: None,
             request_anchor: None,
             request_anchor_identity: None,
             require_input_bound: false,
@@ -586,10 +592,10 @@ impl PreparedTokenProjection {
         image_maximum: Option<u64>,
         context: &ModelPreparationContext,
     ) -> Result<Self, ModelPreparationError> {
-        self.wire_input = Some(
-            crate::ContextWireInput::measure_wire(body, image_maximum)
-                .map_err(ContextAdmissionError::from)?,
-        );
+        let input = crate::ContextWireInput::measure_wire(body, image_maximum)
+            .map_err(ContextAdmissionError::from)?;
+        self.wire_input_identity = Some(input.identity().map_err(ContextAdmissionError::from)?);
+        self.wire_input = Some(input);
         self.input_parts = self.input_parts.map(|parts| {
             parts.with_image_tokens(
                 self.wire_input
@@ -629,10 +635,46 @@ impl PreparedTokenProjection {
         Ok(())
     }
 
-    /// Returns measured input items, when the dialect supplies them.
+    /// Returns measured input items, when the dialect supplies them and this
+    /// is the live preparation; a decoded projection only references them.
     #[must_use]
     pub const fn wire_input(&self) -> Option<&crate::ContextWireInput> {
         self.wire_input.as_ref()
+    }
+
+    /// Whether this projection was measured from items it no longer holds: a
+    /// decoded record references its item list (and any request anchor, which
+    /// decode admits only beside that reference) by identity. Such a
+    /// projection cannot be measured again.
+    pub(crate) const fn is_recorded(&self) -> bool {
+        self.wire_input_identity.is_some() && self.wire_input.is_none()
+    }
+
+    /// Returns the persisted reference to the measured item list.
+    #[cfg(test)]
+    pub(crate) const fn wire_input_identity(&self) -> Option<Digest> {
+        self.wire_input_identity
+    }
+
+    /// Length of `record_bytes`, a record serialized with this projection, if
+    /// it embedded the measured item list (or its absence) in place of the
+    /// reference. A decoded measured projection holds no list to count.
+    pub(super) fn embedded_record_bytes(
+        &self,
+        record_bytes: usize,
+    ) -> Result<usize, PreparedCallError> {
+        if self.is_recorded() {
+            return Ok(record_bytes);
+        }
+        let list = serde_json::to_vec(&self.wire_input)
+            .map_err(|_| PreparedCallError::Serialization)?
+            .len()
+            .saturating_add(br#""wire_input":"#.len());
+        let reference = serde_json::to_vec(&self.wire_input_identity)
+            .map_err(|_| PreparedCallError::Serialization)?
+            .len()
+            .saturating_add(br#""wire_input_identity":"#.len());
+        Ok(record_bytes.saturating_add(list).saturating_sub(reference))
     }
 
     /// Returns the completed-response anchor bound into this projection.
@@ -683,17 +725,42 @@ impl<'de> Deserialize<'de> for PreparedTokenProjection {
         let wire = PreparedTokenProjectionWire::deserialize(deserializer)?;
         let mut value = Self::new(wire.wire_digest, wire.wire_size, wire.observation)
             .map_err(serde::de::Error::custom)?;
-        value.wire_input = wire.wire_input;
-        value.request_anchor_identity = wire.request_anchor_identity;
-        value.require_input_bound = wire.require_input_bound;
-        value
-            .bind_input_identity()
-            .map_err(serde::de::Error::custom)?;
-        if value.identity != wire.identity {
+        let measured = |digest: Option<Digest>| {
+            digest.is_none_or(|digest| {
+                validate_prepared_digest(digest, DigestDomain::TokenMeasurement).is_ok()
+                    && digest.version() == 5
+            })
+        };
+        let consistent = match wire.wire_input_identity {
+            // An unmeasured projection binds no item, anchor or bound
+            // authority, so its identity is recomputed from the body facts.
+            None => {
+                value.identity == wire.identity
+                    && wire.request_anchor_identity.is_none()
+                    && !wire.require_input_bound
+            }
+            // A measured identity binds the item list this record references
+            // but does not carry, so it is not re-derived here: the enclosing
+            // record identity integrity-binds it with every retained byte. The
+            // three references name distinct objects and never coincide.
+            Some(reference) => {
+                measured(Some(reference))
+                    && measured(Some(wire.identity))
+                    && measured(wire.request_anchor_identity)
+                    && wire.identity != reference
+                    && wire.request_anchor_identity != Some(reference)
+                    && wire.request_anchor_identity != Some(wire.identity)
+            }
+        };
+        if !consistent {
             return Err(serde::de::Error::custom(
                 PreparedCallError::IntegrityMismatch,
             ));
         }
+        value.wire_input_identity = wire.wire_input_identity;
+        value.request_anchor_identity = wire.request_anchor_identity;
+        value.require_input_bound = wire.require_input_bound;
+        value.identity = wire.identity;
         Ok(value.with_input_parts(wire.input_parts))
     }
 }

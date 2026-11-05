@@ -1147,7 +1147,7 @@ that spells the string with escapes is refused because decoding a segment
 requires its bytes to equal their re-encoding. Canonical segment bytes and
 identities are therefore a function of the media bytes alone. The encoded
 text is bounded before decoding, and inline media bytes are bounded at 16 MiB
-like every canonical block. This is runtime checkpoint format epoch 35.
+like every canonical block. This is runtime checkpoint format epoch 36.
 
 Reconstructive components have a 4 MiB byte budget except `Operation`, whose
 budget is 64 MiB because it retains complete requests and outcomes. This is a
@@ -1942,7 +1942,7 @@ across boots. Historical receipts remain exact evidence, never fresh authority;
 old-boot renewal/release refuses as superseded. Binding rotation and subsequent
 branch acquisition are separate transactions.
 
-The runtime schema is **27** and the checkpoint format epoch is **35**; the
+The runtime schema is **27** and the checkpoint format epoch is **36**; the
 feed record encoding (§5.11) is part of that epoch, which it shares with the
 decision-fact encodings of the same release. Only
 the current exact schema and format epoch are supported. Every other runtime
@@ -2305,7 +2305,7 @@ Readers, including read-only SQLite inspection, read the report directly from
 the record and do not require the parent checkpoint to survive pruning.
 
 These encodings, and the exposed name on each canonical tool call (§6.5), are
-runtime checkpoint format epoch 35 (chapter 00). An earlier-epoch checkpoint
+runtime checkpoint format epoch 36 (chapter 00). An earlier-epoch checkpoint
 does not decode and is refused as an incompatible build (§5.4); sessions cross
 the bump only through the export document.
 
@@ -3568,7 +3568,7 @@ committed and the working bounds, the two parts of the request's encoding the
 view identity leaves out. Plan validation therefore never re-serializes the
 request or its history. The plan digest is recorded in prepared-call and
 response records and re-derived on recovery, so it is part of runtime
-checkpoint format epoch 35.
+checkpoint format epoch 36.
 
 **Read-only model lookup exchanges.** The shared bounded GET retry in
 `plakous-exchange` applies where the operator is waiting on a bind: `plak run`,
@@ -5377,7 +5377,7 @@ tool's restore bind the canonical name; provider replay sends the exposed name
 exactly, every kernel alike; views label a call by its exposed name, display
 telemetry records it, and classification follows the canonical name. Tool
 results correlate by call identity and record no name. This is part of
-runtime checkpoint format epoch 35.
+runtime checkpoint format epoch 36.
 V2 lowering preserves the canonical input contract's wire shape: structured
 targets receive semantic JSON, while bounded UTF-8 targets receive the exact
 validated text. In particular, Codex `apply_patch` sends its `*** Begin Patch`
@@ -7575,7 +7575,7 @@ runtime under the ordinary mutating write-ahead claim, so a crash after the
 claim settles `OutcomeUnknown` and is never replayed. Provider-hosted MCP and
 connectors stay in the stop class below. Its
 serialized variant names are part of the canonical history encoding and so of
-runtime checkpoint format epoch 35.
+runtime checkpoint format epoch 36.
 
 Caller lineage and `ToolExecutionOwner` are independent axes. A customer tool
 called by a provider program MAY retain a local or MCP owner and MUST traverse
@@ -9497,7 +9497,21 @@ every other strategy. Native provenance carries strategy revision 2. Its encoded
 prepared-call recovery-record bound are each 4 MiB. Item digests use compact
 hex strings, not digest structs with integer arrays. The full request anchor is
 stored once in context state; prepared records and continuation frames reference
-its identity digest without retaining lowered text or image payloads. An oversized
+its identity digest without retaining lowered text or image payloads. A prepared
+record likewise retains no wire-input item list: it persists the list's
+identity digest (`plakous-model/context-wire-input-v1`), so a round's record
+costs the same at any history length and the anchor built from that list is its
+one persisted copy. Only the live preparation holds the items; the
+token-projection, scope, status and admission identities are computed over the
+complete list as before, and the decoded record's measured token-projection
+identity is integrity-bound by the record identity, not re-derived; decode
+refuses an identity, item reference or anchor reference that coincides with
+another of the three. A decoded projection is
+recorded evidence, not a measurable one: context status over it, and so
+revalidation, is `MeasurementUnavailable` rather than a measure without its
+items or anchor. Decode admits an anchor reference only beside an item-list
+reference. The 4 MiB record bound counts the list as if embedded, which keeps
+the anchor it becomes within the context-state bound (exactly 4 MiB fits); an oversized
 prepared record is a ContextLimit-class preparation failure eligible for compaction. Both anchors are checkpointed: counts,
 lowered item digests and the exact
 route/model/binding authority survive verified resume, including parked
