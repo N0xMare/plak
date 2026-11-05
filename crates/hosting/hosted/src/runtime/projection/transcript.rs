@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 use plakous_host_protocol::ProtocolExtension;
 use plakous_host_protocol::views::PresentationSnapshot;
+use plakous_host_protocol::views::presentation::{PresentationError, row_bytes};
 use plakous_host_protocol::views::transcript::{
     Lane, RowKey, TranscriptItem, TranscriptPatch, TranscriptRow, TranscriptScope, TranscriptState,
 };
@@ -59,6 +60,10 @@ pub(in crate::runtime) struct Presentations {
     // monotonic across replacements, so a retired serve cannot share a baseline.
     states: BTreeMap<TranscriptScope, TranscriptState>,
     live: BTreeMap<TranscriptScope, live::LiveRows>,
+    /// Each scope's repair notices, one per cause, at the key each was first
+    /// shown at. Every later snapshot of the scope carries them, so a repair
+    /// stays readable until the face clears or retires the scope.
+    repairs: BTreeMap<TranscriptScope, BTreeMap<&'static str, TranscriptItem>>,
     pub(in crate::runtime) root_busy: bool,
     pub(in crate::runtime) root_terminal_status: bool,
 }
@@ -106,12 +111,13 @@ impl Presentations {
             snapshot.items.extend(carry);
             snapshot.items.sort_by_key(|item| item.key);
         }
-        if let Err(error) = snapshot.validate() {
+        let invalid = snapshot.validate().err();
+        if let Some(error) = &invalid {
             debug_assert!(false, "invalid transcript snapshot: {error:?}");
-            let _ = sink.send(ContentEvent::Row(TranscriptRow::error(
-                crate::sessions::NoticeScope::Host,
-                "invalid transcript presentation; rebuilt a bounded view",
-            )));
+            self.note_repair(&snapshot, error);
+        }
+        self.keep_repair_notices(&mut snapshot);
+        if invalid.is_some() || snapshot.validate().is_err() {
             snapshot = repair::snapshot(snapshot);
         }
         let Some(revision) = sink.next_presentation_revision() else {
@@ -128,6 +134,8 @@ impl Presentations {
                 .retain(|key, _| *key == TranscriptScope::Root || *key == scope);
             self.live
                 .retain(|key, _| *key == TranscriptScope::Root || *key == scope);
+            self.repairs
+                .retain(|key, _| *key == TranscriptScope::Root || *key == scope);
         }
         self.live
             .entry(scope.clone())
@@ -139,7 +147,7 @@ impl Presentations {
 
     pub(in crate::runtime) fn publish<P: ProtocolExtension>(
         &mut self,
-        snapshot: PresentationSnapshot,
+        mut snapshot: PresentationSnapshot,
         sink: &HostEventSender<P>,
     ) -> bool {
         if snapshot.validate().is_err() {
@@ -147,6 +155,10 @@ impl Presentations {
         }
         if sink.transcript_resnapshot_required_for(&snapshot.scope) {
             return self.snapshot(snapshot, sink);
+        }
+        self.keep_repair_notices(&mut snapshot);
+        if snapshot.validate().is_err() {
+            snapshot = repair::snapshot(snapshot);
         }
         let Some(before) = self
             .states
@@ -232,12 +244,72 @@ impl Presentations {
     pub(in crate::runtime) fn clear(&mut self) {
         self.states.clear();
         self.live.clear();
+        self.repairs.clear();
     }
 
     pub(in crate::runtime) fn close_agent(&mut self) {
         self.states
             .retain(|scope, _| *scope == TranscriptScope::Root);
         self.live.retain(|scope, _| *scope == TranscriptScope::Root);
+        self.repairs
+            .retain(|scope, _| *scope == TranscriptScope::Root);
+    }
+
+    /// Records the first repair of each cause in a scope: one host-log line
+    /// with the refused snapshot's shape, and one notice its presentation
+    /// keeps (spec 02 §2.6). Rows are never logged.
+    fn note_repair(&mut self, snapshot: &PresentationSnapshot, error: &PresentationError) {
+        let cause = repair_cause(error);
+        let notices = self.repairs.entry(snapshot.scope.clone()).or_default();
+        if notices.contains_key(cause) {
+            return;
+        }
+        let misordered = snapshot
+            .items
+            .windows(2)
+            .find(|pair| pair[0].key >= pair[1].key)
+            .map(|pair| (pair[0].key, pair[1].key));
+        tracing::warn!(
+            target: "plak.presentation",
+            scope = ?snapshot.scope,
+            ?error,
+            ?misordered,
+            rows = snapshot.items.len(),
+            bytes = snapshot
+                .items
+                .iter()
+                .map(|item| row_bytes(&item.row))
+                .fold(0_usize, usize::saturating_add),
+            "invalid transcript presentation repaired"
+        );
+        notices.insert(
+            cause,
+            TranscriptItem {
+                key: crate::sessions::provisional_key(),
+                row: TranscriptRow::error(
+                    crate::sessions::NoticeScope::Host,
+                    format!(
+                        "invalid transcript presentation ({cause}); showing a repaired view, \
+                         details in the host log"
+                    ),
+                ),
+            },
+        );
+    }
+
+    /// Adds the scope's repair notices to `snapshot` at their keys.
+    fn keep_repair_notices(&self, snapshot: &mut PresentationSnapshot) {
+        let Some(notices) = self.repairs.get(&snapshot.scope) else {
+            return;
+        };
+        for notice in notices.values() {
+            if let Err(at) = snapshot
+                .items
+                .binary_search_by_key(&notice.key, |item| item.key)
+            {
+                snapshot.items.insert(at, notice.clone());
+            }
+        }
     }
 
     pub(in crate::runtime) fn observe<P: ProtocolExtension, E: ProtocolExtension>(
@@ -249,6 +321,7 @@ impl Presentations {
         if matches!(scope, TranscriptScope::Agent(_)) && !self.states.contains_key(&scope) {
             self.states.retain(|key, _| *key == TranscriptScope::Root);
             self.live.retain(|key, _| *key == TranscriptScope::Root);
+            self.repairs.retain(|key, _| *key == TranscriptScope::Root);
         }
         let state = self.states.entry(scope.clone()).or_insert_with(|| {
             let mut state = TranscriptState::default();
@@ -361,6 +434,20 @@ impl Presentations {
             .collect();
         for scope in scopes {
             self.resync(&scope, sink);
+        }
+    }
+}
+
+const fn repair_cause(error: &PresentationError) -> &'static str {
+    match error {
+        PresentationError::UnsupportedSchema(_) => "unsupported schema",
+        PresentationError::ItemLimit => "row limit",
+        PresentationError::ByteLimit => "byte limit",
+        PresentationError::KeyOrder => "rows out of key order",
+        PresentationError::ConflictingKey => "conflicting key",
+        PresentationError::ScopeMismatch => "scope mismatch",
+        PresentationError::RevisionMismatch { .. } | PresentationError::NonAdvancingRevision => {
+            "revision mismatch"
         }
     }
 }

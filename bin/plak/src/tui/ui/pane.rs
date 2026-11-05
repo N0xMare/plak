@@ -24,6 +24,10 @@ pub(crate) struct TranscriptPane {
     pub(super) presentation_session: Option<String>,
     pub(super) presentation_ready: bool,
     pub(super) resync: Option<TranscriptScope>,
+    /// Notes of snapshots this pane refused, one per cause, with the session
+    /// namespace each was refused in. Every install of that session keeps
+    /// them, so a refusal stays readable past the resync that answers it.
+    pub(super) refusals: Vec<(Option<String>, String)>,
     resync_sent: Option<(u64, Instant)>,
     resync_after_revision: u64,
     /// Monotonic identity for every transcript content/layout mutation.
@@ -83,6 +87,7 @@ impl TranscriptPane {
             presentation_session: None,
             presentation_ready: false,
             resync: None,
+            refusals: Vec::new(),
             #[cfg(test)]
             keyed_rebuilds: 0,
             #[cfg(test)]

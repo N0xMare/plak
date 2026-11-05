@@ -36,9 +36,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
             return;
         };
         let mut transcript = sessions::ProductTranscript::stored(views.transcript(&intents));
-        for (notice, id) in self.host.session.transcript.pending_notice_items() {
-            transcript.record_notice_item(notice, id);
-        }
+        transcript.restore_pending_notices(
+            self.host.session.transcript.pending_notice_items(),
+            &intents,
+        );
         let mut items = transcript.items();
         items.insert(
             0,

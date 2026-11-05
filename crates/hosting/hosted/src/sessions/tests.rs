@@ -71,6 +71,114 @@ fn stored_transcript_keeps_projector_keys_through_tool_updates_and_live_notices(
     assert!(items.windows(2).all(|items| items[0].key < items[1].key));
 }
 
+fn child_result(subject: &str) -> TranscriptRow {
+    TranscriptRow::Tool(ToolItem {
+        call_id: "child-result:m1".into(),
+        name: "child_result".into(),
+        exposed_name: None,
+        kind: crate::activity::tool_activity_kind("child_result"),
+        state: "done".into(),
+        subject: Some(subject.into()),
+        detail: None,
+        started_at_ms: None,
+        finished_at_ms: None,
+        parent_call_id: None,
+        cell_id: None,
+        wait: None,
+    })
+}
+
+#[test]
+fn rows_sharing_a_call_id_keep_their_own_keys_stored_and_live() {
+    use super::projector::{Lane, RowKey};
+    // A carried session's imported result, then its own tree's first result:
+    // the successor tree numbers its mail from the start again.
+    let rows = vec![
+        (
+            RowKey::new(0, Lane::Product, 0),
+            TranscriptRow::user("before the carry"),
+        ),
+        (
+            RowKey::new(0, Lane::Product, 1),
+            child_result("m1 · c1 completed"),
+        ),
+        (
+            RowKey::new(0, Lane::Product, 2),
+            TranscriptRow::assistant("carried answer"),
+        ),
+        (
+            RowKey::new(5, Lane::Runtime, 0),
+            TranscriptRow::user("after the carry"),
+        ),
+        (
+            RowKey::new(6, Lane::Product, 0),
+            child_result("m1 · c2 completed"),
+        ),
+    ];
+    let stored: Vec<_> = ProductTranscript::stored(rows.clone())
+        .items()
+        .into_iter()
+        .map(|item| (item.key, item.row))
+        .collect();
+    assert_eq!(stored, rows);
+
+    let mut live = ProductTranscript::stored(rows[..4].to_vec());
+    live.record_named_notice(
+        "tree:successor:result:m1".into(),
+        child_result("m1 · c2 completed"),
+    );
+    let items = live.items();
+    assert!(items.windows(2).all(|items| items[0].key < items[1].key));
+    assert_eq!(items[1].row, child_result("m1 · c1 completed"));
+    assert_eq!(items[4].row, child_result("m1 · c2 completed"));
+    assert_eq!(
+        live.tool_activity("child-result:m1")
+            .unwrap()
+            .subject
+            .as_deref(),
+        Some("m1 · c2 completed"),
+        "the newest row owns the call id"
+    );
+}
+
+#[test]
+fn a_rebuilt_projection_restores_pending_notices_once_in_key_order() {
+    let root = tempfile::tempdir().unwrap();
+    let store = MemoryStore::new();
+    let mut record = SessionRecord::new(root.path().to_owned());
+    let committed = TranscriptRow::info(NoticeScope::Tree, "durable start");
+    record
+        .transcript
+        .record_named_notice("attempt:start".into(), committed.clone());
+    store.save(&mut record).unwrap();
+    record = store.load(&record.id).unwrap();
+    // A producer's retry of the committed notice, then two unsaved ones.
+    record
+        .transcript
+        .record_named_notice("attempt:start".into(), committed.clone());
+    let unsaved = [
+        TranscriptRow::info(NoticeScope::Tree, "first unsaved"),
+        TranscriptRow::info(NoticeScope::Tree, "second unsaved"),
+    ];
+    for row in &unsaved {
+        record.transcript.record_notice(row.clone());
+    }
+    let intents = store.load_intents(&record.id).unwrap();
+    let views = store
+        .load_views(&record.id)
+        .unwrap()
+        .unwrap_or_else(SessionViews::empty);
+    let mut rebuilt = ProductTranscript::stored(views.transcript(&intents));
+    let mut pending = record.transcript.pending_notice_items();
+    pending.reverse();
+    rebuilt.restore_pending_notices(pending, &intents);
+    let items = rebuilt.items();
+    assert!(items.windows(2).all(|items| items[0].key < items[1].key));
+    let rows: Vec<_> = items.into_iter().map(|item| item.row).collect();
+    assert_eq!(rows, [committed, unsaved[0].clone(), unsaved[1].clone()]);
+    assert_eq!(rebuilt.pending_notices(), unsaved);
+}
+
 fn submission(item: &QueueItem, command: &str) -> Submission {
     Submission {
         command_id: command.into(),

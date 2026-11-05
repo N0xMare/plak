@@ -881,6 +881,59 @@ fn invalid_view_repair_restores_key_order_uniqueness_and_bounds() {
 }
 
 #[test]
+fn a_repair_notice_stays_in_its_scope_once_per_cause_until_the_face_clears() {
+    let (sink, receiver) = observation_channel::<Core>();
+    let mut publisher = Presentations::default();
+    let mut consumer = TranscriptState::default();
+    let drain = |consumer: &mut TranscriptState| {
+        while let Ok(event) = receiver.try_recv() {
+            match event {
+                HostEvent::PresentationSnapshot(snapshot) => consumer.replace(snapshot).unwrap(),
+                HostEvent::TranscriptPatch(patch) => consumer.apply(patch).unwrap(),
+                _ => {}
+            }
+        }
+    };
+    let repairs = |rows: &BTreeMap<RowKey, TranscriptRow>| {
+        rows.values()
+            .filter(|row| {
+                row.text().is_some_and(|text| {
+                    text.starts_with("invalid transcript presentation (rows out of key order)")
+                })
+            })
+            .count()
+    };
+    // `snapshot` notes an invalid view this way after its debug assertion.
+    let invalid = snapshot(TranscriptScope::Root, &[(2, "second"), (1, "first")]);
+    let error = invalid.validate().unwrap_err();
+    assert_eq!(error, PresentationError::KeyOrder);
+    publisher.note_repair(&invalid, &error);
+    publisher.note_repair(&invalid, &error);
+
+    assert!(publisher.snapshot(snapshot(TranscriptScope::Root, &[(1, "first")]), &sink));
+    drain(&mut consumer);
+    assert_eq!(repairs(consumer.items()), 1);
+    assert!(publisher.publish(
+        snapshot(TranscriptScope::Root, &[(1, "first"), (2, "second")]),
+        &sink,
+    ));
+    drain(&mut consumer);
+    assert_eq!(consumer.items().len(), 3);
+    assert_eq!(repairs(consumer.items()), 1, "a later publication keeps it");
+    assert!(publisher.resync(&TranscriptScope::Root, &sink));
+    drain(&mut consumer);
+    assert_eq!(repairs(consumer.items()), 1);
+
+    let agent = TranscriptScope::Agent("c1".into());
+    assert!(publisher.snapshot(snapshot(agent.clone(), &[(1, "child")]), &sink));
+    assert_eq!(repairs(publisher.states[&agent].items()), 0);
+    assert_eq!(repairs(publisher.states[&TranscriptScope::Root].items()), 1);
+    publisher.clear();
+    assert!(publisher.snapshot(snapshot(TranscriptScope::Root, &[(1, "first")]), &sink));
+    assert_eq!(repairs(publisher.states[&TranscriptScope::Root].items()), 0);
+}
+
+#[test]
 fn randomized_publisher_mailbox_consumer_converges_across_scopes_and_clear() {
     for seed in 1_u64..=32 {
         let (sink, receiver) = observation_channel::<Core>();

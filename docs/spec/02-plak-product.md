@@ -2082,7 +2082,9 @@ thinking row without a recorded duration is sealed. Resync preserves live
 clocks; a sealed-thinking patch retires that live clock.
 An unsaved notice receives its provisional identity once; projector reloads
 carry that identity with the pending notice rather than allocating one from
-the rebuilt window length. Skipped headers and blank thinking rows claim no
+the rebuilt window length. A reload shows the pending notices after the
+committed rows, in key order, and drops a named pending notice whose identity
+the store already holds; that notice is shown once, at its committed key. Skipped headers and blank thinking rows claim no
 stored presentation key. A debug build asserts that the stored projection's
 retained keys are strictly increasing.
 
@@ -2182,8 +2184,17 @@ scoped: a root snapshot does not pay an agent's presentation debt. Replacing
 the one open agent view retires its previous scope's queued patches and gap
 bookkeeping. Presentation refreshes do not cancel a pending root continuation.
 Invalid keyed views fail a debug assertion at publication. A release build
-reports a host diagnostic and installs a sorted, deduplicated, bounded full
-snapshot, rather than silently leaving the face frozen on its prior revision.
+installs a sorted, deduplicated, bounded full snapshot, rather than silently
+leaving the face frozen on its prior revision, and reports the repair once per
+cause and scope: a `plak.presentation` host-log warning names the presentation
+error, the refused view's row count and bytes and its first misordered key
+pair (never row content), and a host error notice joins that scope's
+presentation at a provisional key. Every later snapshot and patch of the scope
+keeps that notice until the face clears the view, opens another session or
+retires the agent scope, so it outlives the resync that replaced the invalid
+view. A face that refuses an invalid snapshot keeps its last good view,
+requests one resync and shows one refusal note per cause, which that session's
+later snapshots keep.
 This repairs only disposable presentation state; it never repairs stored or
 canonical authority.
 A runtime-derived row's anchor is its record's sequence, lane 0, and its ordinal
@@ -2194,7 +2205,13 @@ intents by the same anchor. Imported rows are anchor 0, lane 1, in document
 order, ahead of every row of the new session's feed. A notice therefore follows every
 row the operator could already see and precedes every row derived from a later
 record, live and after any rebuild. A tool row replaced in place keeps the key
-of the record that created it. When the transcript bound drops a tool row,
+of the record that created it. Only a live tool observation replaces a row by
+call id: rows a store committed (projector rows, notices and imported rows)
+stay distinct rows under their own keys even when they name the same call id,
+because a carried session's successor tree numbers its mail from the start and
+its result notices can reuse an imported row's `child-result:` call id. The
+newest such row owns the call id for later live updates. When the transcript
+bound drops a tool row,
 its call bookkeeping becomes a settled tombstone until the owning turn ends.
 A late result neither restores that key below the retained floor nor counts
 the call again.

@@ -390,15 +390,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             return;
         };
         let unsaved = self.role.config.session.transcript.pending_notice_items();
-        self.role.config.session.transcript =
-            sessions::ProductTranscript::stored(views.transcript(&intents));
-        for (notice, id) in unsaved {
-            self.role
-                .config
-                .session
-                .transcript
-                .record_notice_item(notice, id);
-        }
+        let mut transcript = sessions::ProductTranscript::stored(views.transcript(&intents));
+        transcript.restore_pending_notices(unsaved, &intents);
+        self.role.config.session.transcript = transcript;
         self.role.config.session.root_turn_count = views.state.counters.root_turns;
         self.role.config.session.tool_call_count = views.state.counters.tool_calls;
         self.role.config.session.compaction_count = views.state.counters.compactions;
@@ -823,5 +817,7 @@ pub(in crate::runtime) mod loss_policy_tests;
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests;
+#[cfg(test)]
+pub(in crate::runtime) mod transcript_keys_tests;
 #[cfg(test)]
 mod tree_points_tests;

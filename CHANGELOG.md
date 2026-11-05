@@ -249,6 +249,13 @@ an export.
   input, compaction trigger facts, the first request's footprint, the turn's
   prepared-input high water and idle gaps. `plak telemetry status --views`
   lists queries for them.
+- A carried session no longer flashes `invalid transcript presentation` above
+  the chat after a send, a steer or a turn end. An imported row and a later
+  tree result that name the same `child-result:` call stay two rows in key
+  order; the result used to overwrite the imported row and break the view's
+  key order. A repaired presentation now keeps one error notice per cause in
+  that transcript and logs the cause to `plak.log`, and the TUI's note for a
+  refused snapshot survives the resync that answers it.
 
 ### Plakous
 

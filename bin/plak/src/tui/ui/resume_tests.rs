@@ -1000,7 +1000,7 @@ fn a_refused_restore_reports_its_bound_without_erasing_the_visible_transcript() 
     terminal.draw(|frame| app.draw(frame)).unwrap();
     let frame = serialize_frame(terminal.backend().buffer());
     assert!(frame.contains("retained·transcript"));
-    assert!(frame.contains("invalid·presentation·snapshot·refused:"));
+    assert!(frame.contains("invalid·presentation·snapshot·refused·(ItemLimit)"));
     assert!(frame.contains("ItemLimit"));
 }
 

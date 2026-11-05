@@ -639,9 +639,11 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-workspace", "src/occupancy_vcs/stage.rs"): {"task_local"},
     ("plakous-host-protocol", "src/observation.rs"): {"define_observations"},
     ("plakous-host-protocol", "src/observation/vocabulary.rs"): {"define_observations"},
-    # Disposable transcript projection invariants, with release-mode resync.
-    ("plakous-hosted", "src/runtime/projection/transcript.rs"): {"debug_assert"},
+    # Disposable transcript projection invariants, with release-mode resync. A
+    # repair or a refused snapshot logs its cause, scope and key shape, never rows.
+    ("plakous-hosted", "src/runtime/projection/transcript.rs"): {"debug_assert", "warn"},
     ("plakous-hosted", "src/sessions/transcript.rs"): {"debug_assert"},
+    ("plak", "src/tui/ui/host_events.rs"): {"warn"},
     # Fold integrity refusals: fixed diagnostics and the affected agent id only.
     # An effect run as neither a stage nor an unstaged scope is a defect.
     ("plakous-recursive-subagents", "src/remote_vcs.rs"): {"debug", "debug_assert"},

@@ -246,6 +246,7 @@ impl App {
         }
         self.restore_local_keyed_blocks(&mut blocks, &mut restore);
         Self::restore_open_notes(&mut blocks, &mut restore);
+        self.restore_refusals(&mut blocks);
         self.pane.blocks = blocks;
         let running = self.finish_keyed_restore(restore);
         self.refresh_keyed_item_details(running);
@@ -261,6 +262,22 @@ impl App {
         self.pane
             .selection
             .resolve_blocks(self.pane.transcript_cache.layout());
+    }
+
+    /// Keeps this session's refusal notes past a snapshot that replaced them.
+    fn restore_refusals(&mut self, blocks: &mut Vec<ScrollBlock>) {
+        let session = &self.pane.presentation_session;
+        self.pane
+            .refusals
+            .retain(|(refused_in, _)| refused_in == session);
+        for (_, note) in &self.pane.refusals {
+            if !blocks
+                .iter()
+                .any(|block| matches!(block, ScrollBlock::Error(text) if text == note))
+            {
+                blocks.push(ScrollBlock::Error(note.clone()));
+            }
+        }
     }
 
     fn refresh_keyed_item_details(&mut self, running: std::collections::BTreeSet<String>) {
@@ -319,9 +336,21 @@ impl App {
                     && self.pane.presentation.scope() == &snapshot.scope;
                 let scope = snapshot.scope.clone();
                 if let Err(error) = self.pane.presentation.replace(&snapshot) {
-                    self.pane.blocks.push(ScrollBlock::Error(format!(
-                        "invalid presentation snapshot refused: {error:?}"
-                    )));
+                    let note = format!(
+                        "invalid presentation snapshot refused ({error:?}); kept the last good view and requested a resync"
+                    );
+                    let refusal = (namespace, note);
+                    if !self.pane.refusals.contains(&refusal) {
+                        tracing::warn!(
+                            target: "plak.presentation",
+                            ?scope,
+                            ?error,
+                            rows = snapshot.items.len(),
+                            "invalid presentation snapshot refused"
+                        );
+                        self.pane.blocks.push(ScrollBlock::Error(refusal.1.clone()));
+                        self.pane.refusals.push(refusal);
+                    }
                     self.pane.resync.get_or_insert(scope);
                     self.mark_transcript_replaced();
                     return;

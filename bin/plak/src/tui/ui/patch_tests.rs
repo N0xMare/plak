@@ -1221,3 +1221,37 @@ fn expanded_live_tool_keeps_its_state_when_settlement_moves_its_key() {
         assert_eq!(actual, std::fs::read_to_string(path).unwrap());
     }
 }
+
+#[test]
+fn a_refused_snapshot_note_survives_the_resync_snapshot_once_per_cause() {
+    use crate::tui::blocks::ScrollBlock;
+    let mut app = scoped_app(&TranscriptScope::Root);
+    let kept = RowKey::new(2, Lane::Runtime, 0);
+    let rows = BTreeMap::from([(kept, TranscriptRow::assistant("kept"))]);
+    app.apply_host_event(HostEvent::PresentationSnapshot(snapshot(1, &rows)));
+    let mut invalid = snapshot(2, &rows);
+    invalid.items.push(invalid.items[0].clone());
+    app.apply_host_event(HostEvent::PresentationSnapshot(invalid.clone()));
+    invalid.revision = 3;
+    app.apply_host_event(HostEvent::PresentationSnapshot(invalid));
+    let refusals = |app: &App| {
+        app.pane
+            .blocks
+            .iter()
+            .filter(|block| {
+                matches!(block, ScrollBlock::Error(text)
+                    if text.starts_with("invalid presentation snapshot refused (KeyOrder)"))
+            })
+            .count()
+    };
+    assert_eq!(refusals(&app), 1, "one note per cause");
+    assert!(app.pane.resync.is_some());
+
+    let after = RowKey::new(3, Lane::Runtime, 0);
+    let mut resynced = rows;
+    resynced.insert(after, TranscriptRow::assistant("after the resync"));
+    app.apply_host_event(HostEvent::PresentationSnapshot(snapshot(4, &resynced)));
+    assert!(app.pane.keyed.get(after).is_some());
+    assert_eq!(refusals(&app), 1, "the resync snapshot keeps the note");
+    assert!(paint(&mut app).contains("invalid·presentation·snapshot·refused·(KeyOrder)"));
+}

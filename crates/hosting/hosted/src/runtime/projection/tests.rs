@@ -19,6 +19,8 @@ type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
 type UserAction = crate::surface_protocol::UserAction<TestExtension>;
 
 #[cfg(test)]
+mod carried_call_ids;
+#[cfg(test)]
 mod sealed_reasoning;
 #[cfg(test)]
 mod steer_live_only;
