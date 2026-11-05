@@ -98,8 +98,8 @@ pub fn exit_restored_tui(
 /// sink attached.
 ///
 /// The binary owns the OTLP bridge. The composition root builds the sink once and
-/// passes it to every state root it opens, with the process's one job
-/// registry (`jobs`). This construction also captures HOME once to supply the
+/// passes it to every state root it opens, under the process's one job
+/// bound (`jobs`). This construction also captures HOME once to supply the
 /// conventional product-state protection paths.
 pub fn product_state_roots_from(
     product: PathBuf,

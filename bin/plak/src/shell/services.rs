@@ -28,7 +28,7 @@ pub(crate) struct Services {
     session_records: OnceLock<Arc<crate::store::session_records::SqliteSessionStore>>,
     telemetry_sink_factory: Option<TelemetrySinkFactory>,
     extra_telemetry_sink: OnceLock<Option<Arc<dyn ExtraTelemetrySink>>>,
-    /// The process's one job registry, shared by every state root it opens.
+    /// The process's one job bound, shared by every state root it opens.
     jobs: plakous_hosted::agent::ProcessJobs,
 }
 
@@ -125,7 +125,7 @@ impl Services {
         )
     }
 
-    /// The process's one job registry.
+    /// The process's one job bound.
     pub(crate) const fn process_jobs(&self) -> &plakous_hosted::agent::ProcessJobs {
         &self.jobs
     }

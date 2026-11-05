@@ -2367,7 +2367,7 @@ fn command_and_attach_workers_share_one_lazy_product_store() {
 
 /// One process holds sessions of two workspaces, each with its own trusted
 /// project overlay, root template, MCP server and skill: each session's
-/// host binds only its own, and both share the process's one job registry
+/// host binds only its own, and both are under the process's one job bound
 /// and one custody host id. Nothing workspace-derived is cached for the
 /// process.
 #[test]

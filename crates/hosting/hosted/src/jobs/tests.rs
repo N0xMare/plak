@@ -1200,3 +1200,50 @@ fn stop_node_reaches_only_its_own_trees_node() -> TestResult {
     first.local().stop(first_job, JobStopReason::AttemptEnded)?;
     Ok(())
 }
+
+/// Two sessions of one process keep their own registries under the
+/// process's one bound: releasing one stops only its own jobs, and neither
+/// counts, lists nor stops the other's.
+#[test]
+fn releasing_one_session_leaves_the_other_sessions_jobs_running_and_unseen() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let capacity = Arc::new(JobHostCapacity::default());
+    let (one, two) = (
+        Arc::new(JobRegistry::under(Arc::clone(&capacity))),
+        Arc::new(JobRegistry::under(Arc::clone(&capacity))),
+    );
+    assert!(one.is_under(&capacity) && two.is_under(&capacity));
+    let mut services = Vec::new();
+    for (registry, session) in [
+        (&one, "00000000-0000-0000-0000-000000000781"),
+        (&two, "00000000-0000-0000-0000-000000000782"),
+    ] {
+        let host = registry.for_agent("root", session);
+        let service = host.attach(
+            keyed(session, "00000000-0000-0000-0000-000000000783")?,
+            sessions(root.path())?,
+        )?;
+        let id = start(service.local())?;
+        plakous_tools::internal::promote(service.local(), id)?;
+        services.push(service);
+    }
+    assert_eq!(one.snapshot().len(), 1);
+    assert_eq!(two.snapshot().len(), 1);
+    assert_ne!(one.snapshot()[0].id, two.snapshot()[0].id);
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(two.stop_all(Duration::from_millis(200)))?;
+    assert_eq!(two.running_count(), 0);
+    assert_eq!(one.running_count(), 1, "the other session's job still runs");
+    assert!(
+        services[0]
+            .jobs()
+            .iter()
+            .any(|job| job.status == JobStatus::Running)
+    );
+    one.stop_user(None)?;
+    one.settle_user_stops();
+    assert_eq!(one.running_count(), 0);
+    Ok(())
+}

@@ -287,10 +287,14 @@ process working directory, so one process can hold the contexts of several
 workspaces, and nothing a face sends is resolved against it: a relative path
 on the command line (an export's `--out`, an import, `--ui`, `--cwd`) is made
 absolute against the launch directory at the edge. What a host process
-shares across its sessions is home-wide, never a workspace's: one job
-registry for every state root it opens, the per-account request budgets,
+shares across its sessions is home-wide, never a workspace's: one bound on
+running process starts (128) over every session's jobs, the per-account
+request budgets,
 the MCP pool (keyed by server, definition digest and workspace root), and
-one custody identity, the home's `host-id` (chapter 03 §14).
+one custody identity, the home's `host-id` (chapter 03 §14). Each session's
+jobs stay its own: its state roots hold a job registry of their own, so one
+session's release, background count, `/processes` and stops never reach
+another session's jobs.
 
 ```text
 ~/.plak/

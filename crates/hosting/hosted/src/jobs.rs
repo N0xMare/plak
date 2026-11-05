@@ -108,7 +108,9 @@ fn release_stopping_rows(stopping: &mut HashMap<String, usize>, rows: &[String])
 #[derive(Default)]
 pub(crate) struct JobRegistry {
     services: Mutex<HashMap<plakous::model::LineId, LineService>>,
-    capacity: JobHostCapacity,
+    /// The bound on running process starts, shared with every registry of
+    /// the process.
+    capacity: Arc<JobHostCapacity>,
     events: Arc<Mutex<JobQueue>>,
     owners: Mutex<ProcessOwners>,
     recent: Mutex<HashMap<String, (BranchKey, ProcessView, Instant)>>,
@@ -213,6 +215,20 @@ impl JobQueue {
 }
 
 impl JobRegistry {
+    /// A registry of one session's jobs under `capacity`, the process's
+    /// bound on running process starts.
+    pub(crate) fn under(capacity: Arc<JobHostCapacity>) -> Self {
+        Self {
+            capacity,
+            ..Self::default()
+        }
+    }
+
+    /// Whether this registry is under `capacity`.
+    pub(crate) fn is_under(&self, capacity: &Arc<JobHostCapacity>) -> bool {
+        Arc::ptr_eq(&self.capacity, capacity)
+    }
+
     /// Names the private directory promoted jobs spool their output under.
     /// Only the first binding counts; it is opened on the first attach.
     pub(crate) fn set_output_root(&self, root: std::path::PathBuf) {
@@ -845,7 +861,7 @@ impl JobHost for JobRegistry {
             entry.owner = owner;
             entry.service.clone()
         } else {
-            fresh.bind_host_capacity(self.capacity.clone());
+            fresh.bind_host_capacity((*self.capacity).clone());
             if let Some(root) = output_root {
                 fresh.bind_job_outputs(root, owner.session_id, owner.branch_id);
             }

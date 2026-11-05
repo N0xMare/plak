@@ -142,11 +142,12 @@ mod api;
 #[path = "roots/api_unavailable.rs"]
 mod api;
 
-/// The job registry a host process's sessions share: whatever workspace a
-/// session is in, its state roots see the process's one set of promoted
-/// jobs.
+/// What a host process's sessions share of their jobs: the one bound on
+/// running process starts (128 for the process). Each session's state roots
+/// keep a job registry of their own, so one session's release, counts and
+/// `/processes` never reach another's jobs.
 #[derive(Clone, Default)]
-pub struct ProcessJobs(Arc<crate::jobs::JobRegistry>);
+pub struct ProcessJobs(Arc<plakous::tools::JobHostCapacity>);
 
 #[derive(Clone)]
 pub struct ProductStateRoots {
@@ -345,18 +346,18 @@ impl ProductStateRoots {
         }
     }
 
-    /// Shares `jobs`, the process's job registry, in place of one of these
-    /// roots' own.
+    /// These roots' own job registry, under `jobs`, the process's bound on
+    /// running process starts.
     #[must_use]
     pub fn with_process_jobs(mut self, jobs: &ProcessJobs) -> Self {
-        self.job_registry = Arc::clone(&jobs.0);
+        self.job_registry = Arc::new(crate::jobs::JobRegistry::under(Arc::clone(&jobs.0)));
         self
     }
 
-    /// Whether these roots hold `jobs`, the process's job registry.
+    /// Whether these roots' registry is under `jobs`, the process's bound.
     #[must_use]
     pub fn shares_jobs(&self, jobs: &ProcessJobs) -> bool {
-        Arc::ptr_eq(&self.job_registry, &jobs.0)
+        self.job_registry.is_under(&jobs.0)
     }
 
     /// Binds the private directory promoted jobs spool their output files under.

@@ -351,7 +351,7 @@ pub struct PlakousApplication {
     state_home: PathBuf,
     extra_telemetry_sink: Option<Arc<dyn plakous_hosted::agent::ExtraTelemetrySink>>,
     exchange_observer: Option<Arc<dyn plakous::exchange_observation::ExchangeObserver>>,
-    /// The process's one job registry, shared by every state root it opens.
+    /// The process's one job bound, shared by every state root it opens.
     jobs: plakous_hosted::agent::ProcessJobs,
     _credential_telemetry: Option<crate::telemetry_sink::CredentialTelemetryGuard>,
 }
@@ -397,8 +397,8 @@ impl PlakousApplication {
         })
     }
 
-    /// This application, opening its state roots on `jobs`, the process's
-    /// one job registry.
+    /// This application, opening its state roots under `jobs`, the
+    /// process's one job bound.
     #[must_use]
     pub fn with_process_jobs(mut self, jobs: &plakous_hosted::agent::ProcessJobs) -> Self {
         self.jobs = jobs.clone();
