@@ -3785,7 +3785,22 @@ that turn, once its views applied the turn's admission (so the turn's own
 submission is older than the interrupt; when they had not, nothing is written
 and the release logs `session.handoff_unrecorded`). The projection first puts
 the handoff's fold position past the acceptance of the turn it interrupts, so
-that turn never reads as one admitted after the handoff. Only the releasing host writes it; the face never touches
+that turn never reads as one admitted after the handoff. A child whose release
+outlasts the hub's two-second join (its turn ignores the cancel) keeps its
+`handoff` row and records nothing more: the shutdown's joiner never writes a
+retirement fault for a release its bound cut short, because that would end the
+node as `recovery_required`, which no loss or handoff law reaches, and a
+reload's orchestration carry would then drop it as finished; a retirement that
+did finish inside the bound with an error still records its fault. The
+retirement's own owner keeps its 65-second deadline (the cancel bound plus the
+session release bound), past which it records the fault itself; a host that
+exits or execs before then (a quit, `/reload`) leaves nothing. The next owner
+reads the unsettled turn as its own loss, or as the handoff it was. For a
+planned handoff such a release is no failure: the release says which children
+it handed off with their turn still running (a live warning, `handed off c1
+with its turn still running; the next host continues it once`) and exits
+cleanly. A plain quit that cuts a child short reports the release as failed,
+as before, and the next open reads that child as a loss. Only the releasing host writes it; the face never touches
 the stores. The next host continues each handed-off node once by itself,
 under either policy: a child through the continuation pass of its first
 recovery run, the root at its open, whose restored queue then drains. A

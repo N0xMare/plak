@@ -124,6 +124,18 @@ impl AttachedReleaseError {
     pub fn released_locator(&self) -> Option<SessionLocator> {
         self.released_locator
     }
+
+    /// The children whose release the tree's shutdown bound cut short, when
+    /// that is the whole failure and the parent's own release succeeded.
+    #[must_use]
+    pub fn only_children_cut_short(&self) -> Option<&[String]> {
+        if self.canonical.is_some() || self.released_locator.is_none() {
+            return None;
+        }
+        self.topology
+            .as_ref()
+            .and_then(crate::topology_runtime::TopologyShutdownError::only_cut_short)
+    }
 }
 
 impl std::fmt::Display for AttachedReleaseError {

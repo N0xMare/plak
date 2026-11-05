@@ -2793,7 +2793,7 @@ fn a_reload_whose_binding_changed_keeps_a_running_turn_here_and_continues_it_onc
         "steps": [{"output": {"text": "continued in this build"}}]
     }));
     terminal.send(b"/reload\r");
-    terminal.wait_screen("the handed-off work continues in this build");
+    terminal.wait_screen("this build reopens it");
     terminal.wait_screen("continued in this build");
     terminal.wait_absent("Esc stop");
     assert!(terminal.is_alive());
@@ -3291,6 +3291,89 @@ fn a_reload_during_a_running_child_turn_continues_the_child_once_on_the_new_buil
     assert!(terminal.is_alive());
     std::fs::write(&second_gate, b"").expect("release the continued child");
     terminal.quit();
+}
+
+/// A child whose stall ignores its cancel outlasts the host's release
+/// bound: `/reload` on an idle root still hands it off, and the new build
+/// continues it once in the same session. The release that could not
+/// settle it leaves it for the next owner, never as a dead node a carry
+/// would drop.
+#[test]
+fn a_reload_with_a_deaf_child_on_an_idle_root_continues_the_child_once() {
+    let fixture = Fixture::new(&recovery_answer_script());
+    let child_script = fixture.root.join("child-script.json");
+    let first_gate = fixture.root.join("child-gate-first");
+    let second_gate = fixture.root.join("child-gate-second");
+    let mut deaf = gated_child(&first_gate);
+    deaf["stall_ignores_cancellation"] = json!(true);
+    write_json(&child_script, &deaf);
+    fixture.write_script(&product_child_root(
+        &child_script,
+        &json!([
+            {"output": {"tool": {"name": "spawn_agent", "arguments": {
+                "template": "review",
+                "tier": "read_only",
+                "description": "reviewer",
+                "prompt": "review the diff",
+                "output_schema_json": "{\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"],\"additionalProperties\":false}"
+            }}}, "finish": "tool_calls"},
+            {"output": {"text": "the child is running"}}
+        ]),
+    ));
+    enable_subagents(&fixture);
+    let fake_bin = fixture.root.join("fake-bin-deaf-child-handoff");
+    std::fs::create_dir_all(&fake_bin).expect("fake bin");
+    install_this_build(&fixture, &fake_bin);
+    let mut terminal = Terminal::spawn(&fixture, Launch::OnPath(&fake_bin));
+    terminal.wait_ready();
+    fixture.wait_for_identity_cache();
+    terminal.send(b"start a reviewer\r");
+    terminal.wait_screen("the child is running");
+    terminal.wait_absent("Esc stop");
+    wait_for_child_dispatches(&fixture, 1);
+    let session = fixture.session_ids()[0].clone();
+    write_json(&child_script, &gated_child(&second_gate));
+    fixture.write_script(&product_child_root(
+        &child_script,
+        &json!([{"output": {"text": "the root answered after the reload"}}]),
+    ));
+    terminal.send(b"/reload\r");
+    let deadline = Instant::now() + WAIT;
+    while child_dispatches(&fixture) < 2 {
+        assert!(
+            Instant::now() < deadline,
+            "the deaf child was not continued: sessions {:?}, nodes {:?}\n{}",
+            fixture.session_ids(),
+            agent_node_rows(&fixture),
+            terminal.screen()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    std::thread::sleep(Duration::from_secs(2));
+    assert_eq!(child_dispatches(&fixture), 2, "the child continued once");
+    assert_eq!(fixture.session_ids(), [session], "the same session resumed");
+    assert!(terminal.is_alive());
+    std::fs::write(&second_gate, b"").expect("release the continued child");
+    terminal.quit();
+}
+
+/// `(agent, status, active_turn)` of every durable tree node.
+fn agent_node_rows(fixture: &Fixture) -> Vec<(String, String, bool)> {
+    let Some(state) = std::fs::read_dir(fixture.home().join("state"))
+        .expect("state dir")
+        .map(|entry| entry.expect("state entry").path().join("subagents.sqlite3"))
+        .find(|path| path.exists())
+    else {
+        return Vec::new();
+    };
+    let connection = rusqlite::Connection::open(state).expect("tree store");
+    let mut rows = connection
+        .prepare("SELECT agent_id, status, active_turn FROM agent_nodes ORDER BY agent_id")
+        .expect("node rows");
+    rows.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .expect("node rows")
+        .map(|row| row.expect("node row"))
+        .collect()
 }
 
 fn write_json(path: &Path, value: &Value) {

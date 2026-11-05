@@ -1232,6 +1232,21 @@ pub struct TopologyShutdownError {
     pub child_failures: Vec<(String, String)>,
     /// Failure to publish or access the tree itself.
     pub tree_failure: Option<String>,
+    /// Children whose release the shutdown's bound cut short: their turn was
+    /// still running, and their owner kept it. Nothing was recorded for them,
+    /// so their next owner decides them (spec 03 section 14.1).
+    pub cut_short: Vec<String>,
+}
+
+impl TopologyShutdownError {
+    /// The children the bound cut short, when that is the whole failure.
+    #[must_use]
+    pub fn only_cut_short(&self) -> Option<&[String]> {
+        (self.tree_failure.is_none()
+            && self.child_failures.is_empty()
+            && !self.cut_short.is_empty())
+        .then_some(self.cut_short.as_slice())
+    }
 }
 
 impl std::fmt::Display for TopologyShutdownError {
@@ -1242,6 +1257,12 @@ impl std::fmt::Display for TopologyShutdownError {
         }
         for (agent, error) in &self.child_failures {
             write!(f, "; child {agent}: {error}")?;
+        }
+        for agent in &self.cut_short {
+            write!(
+                f,
+                "; child {agent}: child retirement exceeded the shutdown bound; owner retained"
+            )?;
         }
         Ok(())
     }

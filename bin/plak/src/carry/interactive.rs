@@ -238,9 +238,10 @@ pub(crate) fn reload_refusal(
 /// Asks the destination again once this session has released its work,
 /// when its first answer compared nothing because a turn was running: the
 /// handoff settled the head, so it now answers. The note keeps the session
-/// open in this build, where the handed-off work continues, when the
-/// destination now refuses it or derives another binding: a carry's
-/// successor is another session, which a handoff does not reach.
+/// open in this build when the destination now refuses it or derives another
+/// binding: a carry's successor is another session, which a handoff does not
+/// reach. The note claims no handoff: a turn whose cancel outlasted its grace
+/// was held as a loss instead, and the reopen's own notices say which.
 pub(crate) fn reverify_released(
     target: &mut ReloadTarget,
     workspace: &Path,
@@ -256,12 +257,12 @@ pub(crate) fn reverify_released(
     match target.reopen.as_deref() {
         Some(ReopenProbe::Opens) => target.refusal(&crate::home::state::state_key()),
         Some(ReopenProbe::BindingChanged { change }) => Some(format!(
-            "reload kept this session open: the installed build would not reopen it exactly: its {change} differs; the handed-off work continues in this build"
+            "reload kept this session open: the installed build would not reopen it exactly: its {change} differs; this build reopens it"
         )),
         // Without a verdict now, an exec could leave the handed-off work
         // with no build that reopens it.
         Some(ReopenProbe::Unknown { .. }) | None => Some(
-            "reload kept this session open: the installed build could not confirm it would reopen it; the handed-off work continues in this build"
+            "reload kept this session open: the installed build could not confirm it would reopen it; this build reopens it"
                 .to_owned(),
         ),
         Some(ReopenProbe::Refused { .. }) => target.refusal(&crate::home::state::state_key()),

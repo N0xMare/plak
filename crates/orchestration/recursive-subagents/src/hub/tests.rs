@@ -1951,7 +1951,7 @@ async fn shutdown_deadline_bounds_joiners_but_keeps_release_owner() {
         .completion
         .clone();
     let result = shutdown_runtime(runtime.clone()).await.unwrap_err();
-    assert_eq!(result.child_failures.len(), 1);
+    assert_eq!(result.cut_short.len(), 1);
     assert!(runtime.live.lock().await.contains_key("root"));
     finish.notify_one();
     completion.await.expect("shutdown must not abandon release");
@@ -2001,7 +2001,7 @@ async fn last_lease_shutdown_joins_tree_work_but_keeps_a_stuck_release_owner() {
 
     let result = shutdown_runtime(runtime.clone()).await.unwrap_err();
 
-    assert_eq!(result.child_failures.len(), 1);
+    assert_eq!(result.cut_short.len(), 1);
     assert!(tree_tasks.is_closed() && tree_tasks.is_empty());
     for task in tree_work {
         assert!(task.await.unwrap_err().is_cancelled());
@@ -2060,6 +2060,82 @@ async fn process_exit_abandonment_aborts_a_stuck_release_owner() {
     let _ = cancel.await;
     assert!(runtime.driver().release_owners().is_empty());
     force_release(&tree_id).await;
+}
+
+/// A shutdown whose bound cuts one child's release short and whose other
+/// child's release finished with an error inside it: the finished error
+/// still records its fault and reports, and the one cut short reports only,
+/// with no fault that would end it as recovery-required.
+#[tokio::test(start_paused = true)]
+async fn a_shutdown_bound_records_a_finished_release_error_but_not_a_cut_short_release() {
+    use crate::protocol::{NodeStatus, SpawnAgentRequest};
+    let root = tempfile::tempdir().unwrap();
+    let runtime = Arc::new(ProductTopologyRuntime::new(
+        bootstrap("mixed-shutdown", root.path().to_path_buf()),
+        memory_store(),
+        Arc::new(plakous_workspace::occupancy_vcs::fake::FakeVcs::new()),
+        None,
+    ));
+    let spawn = || async {
+        runtime
+            .mutate_then_emit(false, |tree| {
+                tree.spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+                    .map(|child| child.agent_id)
+                    .map_err(|error| error.message)
+            })
+            .await
+            .unwrap()
+    };
+    let (stuck, failed) = (spawn().await, spawn().await);
+    let stuck_entered = Arc::new(tokio::sync::Notify::new());
+    let stuck_finish = Arc::new(tokio::sync::Notify::new());
+    assert!(
+        runtime
+            .try_occupy_live(
+                stuck.clone(),
+                Box::new(barrier_child(&stuck_entered, &stuck_finish)),
+            )
+            .await
+            .is_ok()
+    );
+    let failed_finish = Arc::new(tokio::sync::Notify::new());
+    failed_finish.notify_one();
+    assert!(
+        runtime
+            .try_occupy_live(
+                failed.clone(),
+                Box::new(BarrierChild {
+                    failure: Some("release refused".into()),
+                    ..barrier_child(&Arc::new(tokio::sync::Notify::new()), &failed_finish)
+                }),
+            )
+            .await
+            .is_ok()
+    );
+
+    let result = shutdown_runtime(runtime.clone()).await.unwrap_err();
+
+    assert_eq!(result.cut_short, std::slice::from_ref(&stuck), "{result:?}");
+    assert!(
+        result
+            .child_failures
+            .iter()
+            .any(|(id, error)| *id == failed && error.contains("release refused")),
+        "the finished release reports its own error: {result:?}"
+    );
+    assert!(
+        result.child_failures.iter().all(|(id, _)| *id != stuck),
+        "{result:?}"
+    );
+    assert_eq!(result.only_cut_short(), None);
+    let status = |agent: &str| {
+        runtime
+            .read(|tree| tree.node(agent).unwrap().status)
+            .unwrap()
+    };
+    assert_eq!(status(&failed), NodeStatus::RecoveryRequired);
+    assert_ne!(status(&stuck), NodeStatus::RecoveryRequired);
+    stuck_finish.notify_one();
 }
 
 fn barrier_child(

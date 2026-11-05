@@ -268,6 +268,9 @@ an export.
   session recovery is pending, with no remedy to call. You retry one child
   with `u` in the Agents tab or, from a JSONL client, `invoke_tool` with
   `recover_agent`, which stays an operator-only name.
+- `/reload` with a sub-agent whose request ignores its cancel no longer drops
+  that sub-agent into a new session: it is handed off and the new build
+  continues it once. The release names it instead of failing.
 - After a lost host, a parent's `wait_agent` rows say why a child stopped
   (`cause`: `owner_lost`, `handoff`, `operator`, `parent`, `cascade` or
   `stopped`) and where its continuation stands (`continuation`: `held`,

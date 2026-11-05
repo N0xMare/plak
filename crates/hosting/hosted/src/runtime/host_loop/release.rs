@@ -127,8 +127,19 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             (Some(stop), Some(trees)) => Some(format!("{stop}; {trees}")),
             (stop, trees) => stop.or(trees),
         };
+        // A planned handoff that let go of a child still running is no
+        // failure: its handoff row stands, and the next host continues it
+        // once (spec 03 §14.1). A plain quit's is a loss, and fails.
+        let handed_off_cut_short = match &released {
+            Ok(Err(error)) if handoff => error.only_children_cut_short().map(<[String]>::to_vec),
+            _ => None,
+        };
         let (locator, release_failure) = match released {
             Ok(Ok(locator)) => (Some(locator), None),
+            Ok(Err(error)) if let Some(children) = &handed_off_cut_short => {
+                self.note_cut_short_handoff(children);
+                (error.released_locator(), None)
+            }
             Ok(Err(error)) => (
                 error.released_locator(),
                 Some(CliFailure::new(error.to_string())),
@@ -214,6 +225,27 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             );
         }
         CliFailure::shutdown(release_failure, cleanup_failure)
+    }
+}
+
+impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
+    /// Says which children a planned handoff let go of while their turn was
+    /// still running: the next host continues each once.
+    fn note_cut_short_handoff(&self, children: &[String]) {
+        let names = children.join(", ");
+        super::log_ev(
+            self.role.log.as_ref(),
+            &self.role.config,
+            super::SessionEvent::new("session.handoff_cut_short").str("children", &names),
+        );
+        let _ = self.role.events.send(crate::surface_protocol::ContentEvent::Row(
+            crate::sessions::TranscriptRow::warning(
+                crate::sessions::NoticeScope::Tree,
+                format!(
+                    "handed off {names} with its turn still running; the next host continues it once"
+                ),
+            ),
+        ));
     }
 }
 

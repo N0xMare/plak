@@ -1405,10 +1405,12 @@ exec'd or carried (a carry's successor is another session, which the handoff
 does not reach, and an unverified exec could leave the handed-off work with no
 build that reopens it): the session stays open in this build, which continues
 the handed-off work once, with `reload kept this session open: the installed
-build would not reopen it exactly: its <change> differs; the handed-off work
-continues in this build`, `reload kept this session open: the installed build
-could not confirm it would reopen it; the handed-off work continues in this
-build`, or the `refused` note. The verdict is one of
+build would not reopen it exactly: its <change> differs; this build reopens
+it`, `reload kept this session open: the installed build could not confirm it
+would reopen it; this build reopens it`, or the `refused` note. The note claims
+no handoff: a running turn whose cancel outlasted the handoff grace was held as
+a loss instead (chapter 03 §14.1), and the reopen's own notices say what
+continues and what is held. The verdict is one of
 `opens`, `binding_changed` with the named change (chapter 01 §5.4), `refused`
 with the open's refusal, or `unknown`. It runs in the destination because only the
 destination derives its own binding; it reads the real home because the route,

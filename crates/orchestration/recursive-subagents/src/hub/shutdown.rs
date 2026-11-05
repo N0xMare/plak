@@ -35,7 +35,7 @@ async fn release_root(
         .await
         .map_err(|error| TopologyShutdownError {
             tree_failure: Some(error.to_string()),
-            child_failures: Vec::new(),
+            ..TopologyShutdownError::default()
         })?;
     if let Some(runtime) = runtime {
         shutdown_runtime(runtime).await?;
@@ -102,7 +102,10 @@ pub(super) async fn shutdown_runtime(
         tracing::warn!(target: "plak.topology", remaining = tasks.len(),
             "tree tasks did not stop within their join bound");
     }
-    if failure.tree_failure.is_none() && failure.child_failures.is_empty() {
+    if failure.tree_failure.is_none()
+        && failure.child_failures.is_empty()
+        && failure.cut_short.is_empty()
+    {
         Ok(())
     } else {
         Err(failure)
@@ -228,33 +231,20 @@ async fn join_runtime_children(
         if let Err(error) = runtime.driver.join_retirement_tasks().await {
             failure.tree_failure.get_or_insert(error);
         }
-        results
+        results.into_iter().map(Some).collect::<Vec<_>>()
     })
     .await
     {
         results
     } else {
-        failure.tree_failure.get_or_insert_with(|| {
-            "retirement completion exceeded the shutdown bound; owner retained".to_owned()
-        });
         retirements
             .iter()
-            .map(|_| Err("child retirement exceeded the shutdown bound; owner retained".to_owned()))
+            .map(|(_, retirement)| {
+                futures_util::FutureExt::now_or_never(retirement.completion.clone())
+            })
             .collect()
     };
-    for ((agent_id, retirement), result) in retirements.into_iter().zip(results) {
-        if let Err(error) = result {
-            record_retirement_fault(
-                &runtime.driver,
-                &agent_id,
-                retirement.expected_attempt.as_ref(),
-                RetirementFaultSource::Joiner,
-                &error,
-            )
-            .await;
-            failure.child_failures.push((agent_id, error));
-        }
-    }
+    record_retirement_results(&runtime, failure, retirements, results).await;
     let startup_results = match tokio::time::timeout(HOST_SHUTDOWN_DETACH_TIMEOUT, startup_task)
         .await
     {
@@ -278,6 +268,37 @@ async fn join_runtime_children(
             )
             .await;
             failure.child_failures.push((id, error));
+        }
+    }
+}
+
+/// A retirement that returned an error records its fault. One the shutdown's
+/// bound cut short records nothing and is reported as cut short: the child's
+/// turn is still its own, and its next owner reads it as that owner's loss,
+/// or continues it once when a handoff was recorded (spec 03 section 14.1).
+/// A retirement fault would end the node as recovery-required, which no loss
+/// or handoff law reaches.
+async fn record_retirement_results(
+    runtime: &ProductTopologyRuntime,
+    failure: &mut TopologyShutdownError,
+    retirements: Vec<(String, super::Retirement)>,
+    results: Vec<Option<Result<(), String>>>,
+) {
+    for ((agent_id, retirement), result) in retirements.into_iter().zip(results) {
+        match result {
+            Some(Ok(())) => {}
+            Some(Err(error)) => {
+                record_retirement_fault(
+                    &runtime.driver,
+                    &agent_id,
+                    retirement.expected_attempt.as_ref(),
+                    RetirementFaultSource::Joiner,
+                    &error,
+                )
+                .await;
+                failure.child_failures.push((agent_id, error));
+            }
+            None => failure.cut_short.push(agent_id),
         }
     }
 }
