@@ -575,7 +575,7 @@ async fn recovery_recorded_terminal_settles_uncertain_siblings_without_replacing
                     ])?;
                     for refusal in [
                         terminal_evidence_fold(&legacy).err(),
-                        abandonment_evidence_fold(&legacy).err(),
+                        abandonment_evidence_fold(&legacy, DecisionBarrier::Restore).err(),
                         local_terminal_recovery_fold(&legacy).err(),
                     ] {
                         assert_eq!(
@@ -595,7 +595,7 @@ async fn recovery_recorded_terminal_settles_uncertain_siblings_without_replacing
                         AgentErrorKind::OutcomeUnknown
                     );
                     assert_eq!(
-                        abandonment_evidence_fold(&changed)
+                        abandonment_evidence_fold(&changed, DecisionBarrier::Restore)
                             .err()
                             .ok_or("a recorded terminal has nothing to abandon")?
                             .kind(),

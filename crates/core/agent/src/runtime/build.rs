@@ -58,7 +58,7 @@ use crate::runtime::continuation::{
 use crate::runtime::control::{
     control_agent_error, event_error, run_environment, subscription_limits,
 };
-use crate::runtime::durable::turn_recovery::reopen_closes_working_turn;
+use crate::runtime::durable::turn_recovery::{DecisionBarrier, reopen_closes_working_turn_at};
 use crate::runtime::durable::workflow_closure::WorkflowClosureRuntime;
 use crate::runtime::terminal::queued_turn_machine;
 use crate::runtime::{
@@ -278,6 +278,7 @@ impl AgentBuilder {
             tool_scheduler: None,
             local_composition: None,
             post_compaction_note: None,
+            decision_barrier: DecisionBarrier::Restore,
             model_reresolver: None,
             request_slots: None,
             runner_backend: None,
@@ -470,6 +471,26 @@ impl AgentBuilder {
     #[must_use]
     pub fn post_compaction_note(mut self, note: PostCompactionNote) -> Self {
         self.post_compaction_note = Some(note);
+        self
+    }
+
+    /// Makes a durable reopen close a turn the previous owner left waiting
+    /// at an effect decision instead of restoring it there: the turn ends
+    /// abandoned with `cause`, the decision never made and its effect never
+    /// started (spec 01 §5.5). A new owner that does not take over the
+    /// previous owner's pending decisions uses this.
+    ///
+    /// The caller asserts `cause`; the open cannot tell a lost owner from a
+    /// released one. `ProcessLost` only when the previous owner was lost,
+    /// `Interrupted` when it let go of the turn, as a planned handoff does.
+    /// Best effort: a turn the open could not otherwise abandon is restored
+    /// as if this were not set.
+    #[must_use]
+    pub fn closing_effect_decision_barriers(
+        mut self,
+        cause: crate::runtime::AbandonmentCause,
+    ) -> Self {
+        self.decision_barrier = DecisionBarrier::Close(cause);
         self
     }
 
@@ -725,9 +746,9 @@ impl PreparedAgent {
         let config = builder.config.validate()?;
         // This build closes such a turn itself, so it leaves no continuation
         // frame to restore.
-        let local_terminal_recovery = bootstrap
-            .as_ref()
-            .is_some_and(|bootstrap| reopen_closes_working_turn(&bootstrap.checkpoint));
+        let local_terminal_recovery = bootstrap.as_ref().is_some_and(|bootstrap| {
+            reopen_closes_working_turn_at(&bootstrap.checkpoint, builder.decision_barrier)
+        });
         let restored_frame = bootstrap
             .as_ref()
             .filter(|bootstrap| {
@@ -873,6 +894,7 @@ impl PreparedAgent {
             local_composition: builder.local_composition,
             interpreter_observation,
             post_compaction_note: builder.post_compaction_note,
+            decision_barrier: builder.decision_barrier,
             request_slots: builder.request_slots,
             model_rebind: builder
                 .model_reresolver
@@ -901,10 +923,11 @@ impl PreparedAgent {
             post_compaction_note: self.post_compaction_note.as_ref(),
             ids: self.ids.as_ref(),
         };
-        let recovery = Box::pin(
-            self.authority
-                .publish_root_turn_closure(&telemetry, workflow),
-        )
+        let recovery = Box::pin(self.authority.publish_root_turn_closure(
+            &telemetry,
+            workflow,
+            self.decision_barrier,
+        ))
         .await?;
         if let Some(recovery) = recovery {
             self.abandoned_turn = recovery.abandoned_turn;

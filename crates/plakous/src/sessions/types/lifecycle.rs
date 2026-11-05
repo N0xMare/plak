@@ -31,6 +31,25 @@ impl OpenSessionRequest {
             runtime,
         }
     }
+
+    /// Makes the open close a turn the previous owner left waiting at an
+    /// effect decision instead of restoring it there: the turn ends abandoned
+    /// with `cause`, the decision never made and its effect never started
+    /// (spec 01 §5.5). For a new owner that does not take over the previous
+    /// owner's pending decisions.
+    ///
+    /// The caller asserts `cause`: `ProcessLost` only when the previous
+    /// owner was lost, `Interrupted` when it let go of the turn (a planned
+    /// handoff). Best effort: a turn the open could not otherwise abandon is
+    /// restored as if this were not set.
+    #[must_use]
+    pub fn closing_effect_decision_barriers(
+        mut self,
+        cause: plakous_agent::AbandonmentCause,
+    ) -> Self {
+        self.runtime.builder = self.runtime.builder.closing_effect_decision_barriers(cause);
+        self
+    }
 }
 
 impl ArchiveSessionReport {

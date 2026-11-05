@@ -2276,6 +2276,25 @@ command and P T's newest round provider operation (a compaction's own
 provider attempt is a compaction record, not a round). A commit obligation is recovered
 first (§5.3), and a pending effect decision, tool batch or hosted server-pause
 frame is restored, not closed. Otherwise the first matching row closes T.
+
+An open whose builder closes effect-decision barriers
+(`AgentBuilder::closing_effect_decision_barriers(cause)`, or
+`OpenSessionRequest::closing_effect_decision_barriers(cause)` through the
+facade) does not restore the pending effect decision its frame names: it closes
+T the way it closes a turn it cannot restore, through the same abandonment
+closure. That unmade decision folds as a tool proven never to have started
+(its operation is settled `ProvenNotDispatched` with the live path's
+decision-outcome evidence and resolution `shutdown`, then finalized); any
+other decision record keeps its own rule. T abandons with the caller's
+`cause`, and the claim is the strongest the rest of T honestly supports
+(`NothingStarted` when only the decision was outstanding). History gets the
+abandonment note, never a requested cancel's. The open cannot tell a lost
+owner from a released one, so the caller asserts the cause: `ProcessLost`
+only when the previous owner was lost, `Interrupted` when it let go of the
+turn (a planned handoff). A new owner that does not take over the previous
+owner's pending decisions uses it. The option is best effort: when the rest
+of T has no closure row, the open restores T as if the option were not set.
+A tool-batch or server-pause frame is restored even then.
 Restore requires a decodable effect-decision, server-pause or tool-batch frame,
 or an explicit Code Cell workflow scope (commit recovery is checked first).
 Bare Finalization debt without a closure row is typed integrity, never Restore.
@@ -11706,7 +11725,8 @@ down. A fenced Code Cell is abandoned through its own evidence (a failure result
 for the outer call saying it may have run tools that changed the workspace) and
 then finalized, with the `RunningTool` claim. A checkpoint outstanding on
 anything else — a pending effect decision, a hosted continuation — keeps its own
-recovery rule. A consumer learns a terminal result it never recorded from the
+recovery rule, unless the open closes effect-decision barriers (§5.5). A
+consumer learns a terminal result it never recorded from the
 session's change feed: the closing commit carries the `TurnTerminal` fact
 (and, for an abandonment, its claim and cause), and the result's content is the
 committed checkpoint it names (§5.11). Publication is chapter 02's
@@ -11723,7 +11743,9 @@ applies the feed to its tail once more and opens the head it now names; a second
 stale answer is a lease-contention refusal, which waiting can change, not a
 recovery-required one. A Working head this build cannot close exists only as
 typed integrity, and that refusal says a retry will not change it. A pending
-effect decision or a hosted continuation is restored, not closed. A turn cut
+effect decision or a hosted continuation is restored, not closed, except that
+an open closing effect-decision barriers abandons a pending decision (§5.5). A
+turn cut
 inside a running tool, a joined process, a compaction or a Code Cell is
 abandonable, including a native Code Mode, JavaScript or Python cell whose
 nested tool or process was in flight when the host was lost (§5.5). A sibling

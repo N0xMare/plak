@@ -147,6 +147,17 @@ pub(in crate::runtime) fn checkpoint_requires_closed_recovery(
     )
 }
 
+/// What an open does with a head whose turn waits at an effect decision.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum DecisionBarrier {
+    /// Restore the turn at its barrier, to be decided.
+    #[default]
+    Restore,
+    /// Close the turn as abandoned with the cause the caller asserts: the
+    /// decision was never made, so the effect it guarded never started.
+    Close(AbandonmentCause),
+}
+
 pub(in crate::runtime) enum RootClosure {
     FinalizeRecorded {
         terminal: LocalTerminalRecoveryFold,
@@ -182,6 +193,7 @@ impl RootClosure {
 /// closure scope; the classifier is not authority to widen that scope.
 fn newest_root_turn_closure(
     checkpoint: &RuntimeCheckpoint,
+    barrier: DecisionBarrier,
 ) -> Result<Option<RootClosure>, AgentError> {
     if !checkpoint_requires_closed_recovery(checkpoint) {
         return Ok(None);
@@ -222,7 +234,7 @@ fn newest_root_turn_closure(
         Err(error) if error.kind() == AgentErrorKind::OutcomeUnknown => error,
         Err(error) => return Err(error),
     };
-    match abandonment_evidence_fold(checkpoint) {
+    match abandonment_evidence_fold(checkpoint, barrier) {
         Ok(fold) => Ok(Some(RootClosure::Abandon {
             claim: abandoned_turn_claim(&fold),
             fold,
@@ -252,7 +264,7 @@ fn newest_root_turn_closure(
 pub(in crate::runtime) fn local_terminal_recovery_fold(
     checkpoint: &RuntimeCheckpoint,
 ) -> Result<LocalTerminalRecoveryFold, AgentError> {
-    match newest_root_turn_closure(checkpoint)? {
+    match newest_root_turn_closure(checkpoint, DecisionBarrier::Restore)? {
         Some(RootClosure::FinalizeRecorded { terminal, .. } | RootClosure::Complete(terminal)) => {
             Ok(terminal)
         }
@@ -267,9 +279,9 @@ pub(in crate::runtime) fn local_terminal_recovery_fold(
 pub(in crate::runtime) fn abandoned_turn_recovery_fold(
     checkpoint: &RuntimeCheckpoint,
 ) -> Result<AbandonedTurnRecoveryFold, AgentError> {
-    match newest_root_turn_closure(checkpoint) {
+    match newest_root_turn_closure(checkpoint, DecisionBarrier::Restore) {
         Ok(Some(RootClosure::Abandon { fold, .. })) => Ok(fold),
-        _ => abandonment_evidence_fold(checkpoint),
+        _ => abandonment_evidence_fold(checkpoint, DecisionBarrier::Restore),
     }
 }
 
@@ -278,14 +290,16 @@ pub(in crate::runtime) fn abandoned_turn_recovery_fold(
 pub(in crate::runtime) fn root_turn_closure_for_test(
     checkpoint: &RuntimeCheckpoint,
 ) -> Result<Option<RootClosure>, AgentError> {
-    newest_root_turn_closure(checkpoint)
+    newest_root_turn_closure(checkpoint, DecisionBarrier::Restore)
 }
 
 #[cfg(test)]
 pub(in crate::runtime::durable) fn close_root_turn_for_test(
     checkpoint: &RuntimeCheckpoint,
 ) -> Result<(plakous_model::CanonicalHistory, RuntimeOperationLedger), AgentError> {
-    let Some(RootClosure::Abandon { fold, claim }) = newest_root_turn_closure(checkpoint)? else {
+    let Some(RootClosure::Abandon { fold, claim }) =
+        newest_root_turn_closure(checkpoint, DecisionBarrier::Restore)?
+    else {
         return Err(AgentError::new(
             AgentErrorKind::Session,
             "test cut is not an abandoned root",
@@ -300,7 +314,16 @@ pub(in crate::runtime::durable) fn close_root_turn_for_test(
 /// Whether a newly opened owner closes this working head itself. Such a head
 /// is not recovery-only; opening it is how it recovers.
 pub(crate) fn reopen_closes_working_turn(checkpoint: &RuntimeCheckpoint) -> bool {
-    recovery_verdict(RecoveryEvidence::head(checkpoint)).closes()
+    reopen_closes_working_turn_at(checkpoint, DecisionBarrier::Restore)
+}
+
+/// [`reopen_closes_working_turn`] for an open that treats an effect-decision
+/// barrier as `barrier` says.
+pub(crate) fn reopen_closes_working_turn_at(
+    checkpoint: &RuntimeCheckpoint,
+    barrier: DecisionBarrier,
+) -> bool {
+    recovery_verdict(RecoveryEvidence::head(checkpoint).with_barrier(barrier)).closes()
 }
 
 /// The closure the one predicate assigns to this head: `None` for a head it
@@ -308,7 +331,16 @@ pub(crate) fn reopen_closes_working_turn(checkpoint: &RuntimeCheckpoint) -> bool
 pub(in crate::runtime) fn verdict_closure(
     checkpoint: &RuntimeCheckpoint,
 ) -> Result<Option<RootClosure>, AgentError> {
-    recovery_verdict(RecoveryEvidence::head(checkpoint)).into_closure()
+    verdict_closure_at(checkpoint, DecisionBarrier::Restore)
+}
+
+/// [`verdict_closure`] for an open that treats an effect-decision barrier as
+/// `barrier` says.
+pub(in crate::runtime) fn verdict_closure_at(
+    checkpoint: &RuntimeCheckpoint,
+    barrier: DecisionBarrier,
+) -> Result<Option<RootClosure>, AgentError> {
+    recovery_verdict(RecoveryEvidence::head(checkpoint).with_barrier(barrier)).into_closure()
 }
 
 /// The session-workflow row the one predicate assigns to this head, if any.

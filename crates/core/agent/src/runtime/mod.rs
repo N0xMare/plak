@@ -193,6 +193,8 @@ pub struct AgentBuilder {
     tool_scheduler: Option<(ToolScheduler, ToolRuntimeConfig)>,
     local_composition: Option<LocalCompositionConstruction>,
     post_compaction_note: Option<PostCompactionNote>,
+    /// What a durable reopen does with a turn waiting at an effect decision.
+    decision_barrier: durable::turn_recovery::DecisionBarrier,
     model_reresolver: Option<(Arc<dyn ModelReresolver>, plakous_model::Timestamp)>,
     request_slots: Option<RequestSlots>,
     /// The runner the run's environment executes on, when it is not the
@@ -255,6 +257,7 @@ struct PreparedAgent {
     local_composition: Option<LocalCompositionConstruction>,
     interpreter_observation: Option<InterpreterObservation>,
     post_compaction_note: Option<PostCompactionNote>,
+    decision_barrier: durable::turn_recovery::DecisionBarrier,
     model_rebind: Option<reresolution::ModelRebind>,
     request_slots: Option<RequestSlots>,
 }

@@ -12,7 +12,7 @@ use crate::runtime::durable::branch::{
     operation_run_id, validate_durable_builder, validate_session_operation_id,
 };
 use crate::runtime::durable::turn_recovery::{
-    checkpoint_requires_closed_recovery, reopen_closes_working_turn, validate_loaded_address,
+    checkpoint_requires_closed_recovery, reopen_closes_working_turn_at, validate_loaded_address,
 };
 use crate::runtime::durable::{
     DurableGenesisIdentities, DurableOpenVerification, DurableRuntimeOpen, DurableSessionAddress,
@@ -351,7 +351,10 @@ impl DurableSessionRuntime {
         // An unfinished turn this open closes itself is not recovery-only:
         // opening it is how it recovers (spec 01 §13.1). Everything else
         // outstanding still is.
-        let abandonable = reopen_closes_working_turn(loaded.checkpoint().checkpoint());
+        let abandonable = reopen_closes_working_turn_at(
+            loaded.checkpoint().checkpoint(),
+            builder.decision_barrier,
+        );
         let restored = decode_restored_continuation(loaded.checkpoint().checkpoint());
         if checkpoint_requires_closed_recovery(loaded.checkpoint().checkpoint())
             && !abandonable
@@ -362,7 +365,9 @@ impl DurableSessionRuntime {
                 retry_after_seconds: None,
             });
         }
-        if let Ok(frame) = restored
+        // A barrier this open closes is not restored, so its expiry is moot.
+        if !abandonable
+            && let Ok(frame) = restored
             && matches!(
                 &frame,
                 RestoredContinuationFrame::EffectDecision(effect)

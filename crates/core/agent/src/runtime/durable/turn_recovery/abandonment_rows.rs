@@ -8,7 +8,10 @@ use super::{
     close_as_unobserved, controls, finalize_not_started, model_round_boundary, replay,
     root_is_only_turn_operation, terminal_turn_usage, unsent_decision,
 };
-use crate::runtime::continuation::{runtime_component, runtime_manifest_error};
+use crate::runtime::continuation::{
+    RestoredContinuationFrame, decode_restored_continuation, runtime_component,
+    runtime_manifest_error,
+};
 use crate::runtime::durable::composition_recovery::{code_cell_abandonment_fold, pending_steering};
 use crate::runtime::durable::{AbandonedRoot, AbandonedTurnRecoveryFold};
 use crate::runtime::operation_record::operation_turn_id;
@@ -56,6 +59,9 @@ pub(super) struct TurnFoldFacts<'a> {
     /// The root's last round completed with a tool batch whose results were
     /// never added.
     pub(super) batch_pending: bool,
+    /// The decision operation of the effect-decision barrier this open
+    /// closes, when it closes one.
+    pub(super) closed_decision: Option<u64>,
 }
 
 /// The row of one turn-owned obligation, or `None` when a turn cannot abandon
@@ -73,6 +79,11 @@ pub(super) fn turn_row(
         RecoveryObligationKind::Effect => effect_row(facts, record, action, state),
         RecoveryObligationKind::ProviderAttempt => provider_row(action, state),
         RecoveryObligationKind::ProcessSession => process_row(action, state),
+        RecoveryObligationKind::EffectDecision
+            if facts.closed_decision == Some(record.operation_id()) =>
+        {
+            decision_row(action, state)
+        }
         RecoveryObligationKind::EffectDecision
         | RecoveryObligationKind::HostedContinuation
         | RecoveryObligationKind::Commit
@@ -106,6 +117,19 @@ fn command_row(
         }
         (RecoveryAction::FinalizationRequired, DurableOperationState::Dispatched) if root_open => {
             Some(TurnRow::Root)
+        }
+        _ => None,
+    }
+}
+
+/// An effect decision a closing open finds unmade. The decision guards its
+/// effect, so the effect never started: the tool is closed as unrun, the way
+/// a denied or shut-down decision closes it live.
+fn decision_row(action: RecoveryAction, state: &DurableOperationState) -> Option<TurnRow> {
+    match (action, state) {
+        (RecoveryAction::RestoreEffectDecision, DurableOperationState::DecisionRequired(_))
+        | (RecoveryAction::ProvenNotDispatched, DurableOperationState::Prepared) => {
+            Some(TurnRow::EffectUnrun)
         }
         _ => None,
     }
@@ -365,6 +389,10 @@ pub(super) fn finalize_retained_operations(
             ledger = controls::settle_control(&ledger, record, checkpoint_id)?;
             continue;
         }
+        if matches!(record.state(), DurableOperationState::DecisionRequired(_)) {
+            ledger = close_unmade_decision(&ledger, source, operation.0, checkpoint_id)?;
+            continue;
+        }
         if matches!(record.state(), DurableOperationState::Prepared) {
             ledger = finalize_not_started(&ledger, record, checkpoint_id, history_identity)?;
             continue;
@@ -404,6 +432,51 @@ pub(super) fn finalize_retained_operations(
             .map_err(runtime_manifest_error)?;
     }
     Ok(ledger)
+}
+
+/// Closes an effect decision a lost owner never made the way a shutdown at
+/// the barrier closes it live: the decision outcome, never dispatched, then
+/// finalized.
+fn close_unmade_decision(
+    ledger: &RuntimeOperationLedger,
+    source: &RuntimeCheckpoint,
+    operation: u64,
+    checkpoint_id: CheckpointId,
+) -> Result<RuntimeOperationLedger, AgentError> {
+    let Ok(RestoredContinuationFrame::EffectDecision(frame)) = decode_restored_continuation(source)
+    else {
+        return Err(AgentError::from_store(SessionStoreError::corrupt()));
+    };
+    if frame.decision_operation.0 != operation {
+        return Err(AgentError::from_store(SessionStoreError::corrupt()));
+    }
+    let outcome = serde_json::to_vec(&(
+        "plakous-agent/decision-outcome-v2",
+        frame.decision.binding_digest(),
+        crate::EffectDecisionResolution::Shutdown,
+    ))
+    .map_err(|_| {
+        AgentError::new(
+            AgentErrorKind::Internal,
+            "decision outcome evidence could not be canonicalized",
+        )
+    })?;
+    let evidence = runtime_component(RuntimeComponentKind::Operation, outcome)?;
+    ledger
+        .transition_operation_many(
+            operation,
+            [
+                DurableOperationTransition::new(
+                    checkpoint_id,
+                    DurableOperationState::ProvenNotDispatched(evidence.clone()),
+                ),
+                DurableOperationTransition::new(
+                    checkpoint_id,
+                    DurableOperationState::Finalized(evidence),
+                ),
+            ],
+        )
+        .map_err(runtime_manifest_error)
 }
 
 /// Close the turn's root command by its abandoned shape.
@@ -547,5 +620,36 @@ fn dispatched_root_cancellation(facts: &ClosureFacts<'_>) -> &'static str {
         _ => {
             "the turn was abandoned after the process was lost; the tool its last round asked for never started"
         }
+    }
+}
+
+#[cfg(test)]
+mod decision_row_tests {
+    use super::*;
+
+    /// Only an unmade decision folds as an unrun effect. A decided one (here
+    /// owing finalization) has no row, so a closing open restores or refuses
+    /// rather than calling the effect it authorized unrun.
+    #[test]
+    fn only_an_unmade_decision_folds_as_an_unrun_effect() -> Result<(), AgentError> {
+        let evidence = runtime_component(RuntimeComponentKind::Operation, b"decided".to_vec())?;
+        assert_eq!(
+            decision_row(
+                RecoveryAction::ProvenNotDispatched,
+                &DurableOperationState::Prepared
+            ),
+            Some(TurnRow::EffectUnrun)
+        );
+        for state in [
+            DurableOperationState::Completed(evidence.clone()),
+            DurableOperationState::ProvenNotDispatched(evidence.clone()),
+            DurableOperationState::Finalized(evidence),
+        ] {
+            assert_eq!(
+                decision_row(RecoveryAction::FinalizationRequired, &state),
+                None
+            );
+        }
+        Ok(())
     }
 }

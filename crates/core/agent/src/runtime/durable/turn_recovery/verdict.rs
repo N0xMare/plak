@@ -2,7 +2,7 @@
 //! head checkpoint. The live open, the read-only `SQLite` inspection and the
 //! rehearsal differ only in where they load the evidence from.
 
-use super::{RootClosure, newest_root_turn_closure};
+use super::{DecisionBarrier, RootClosure, newest_root_turn_closure};
 use crate::runtime::continuation::decode_restored_continuation;
 use crate::runtime::durable::workflow_closure::{WorkflowClosure, workflow_compaction_closure};
 use crate::{
@@ -15,11 +15,23 @@ use crate::{
 #[derive(Clone, Copy)]
 pub(in crate::runtime) struct RecoveryEvidence<'a> {
     head: &'a RuntimeCheckpoint,
+    /// What the open does with an effect-decision barrier: restore it (the
+    /// default) or close it like an unfinished turn it cannot restore.
+    barrier: DecisionBarrier,
 }
 
 impl<'a> RecoveryEvidence<'a> {
     pub(in crate::runtime) const fn head(head: &'a RuntimeCheckpoint) -> Self {
-        Self { head }
+        Self {
+            head,
+            barrier: DecisionBarrier::Restore,
+        }
+    }
+
+    /// The same head, for an open that closes an effect-decision barrier
+    /// rather than restoring it.
+    pub(in crate::runtime) const fn with_barrier(self, barrier: DecisionBarrier) -> Self {
+        Self { barrier, ..self }
     }
 }
 
@@ -89,7 +101,7 @@ pub(in crate::runtime) fn recovery_verdict(evidence: RecoveryEvidence<'_>) -> Re
         Ok(None) => {}
         Err(error) => return RecoveryVerdict::Refuse(RecoveryRefusal::Integrity(error)),
     }
-    let refusal = match newest_root_turn_closure(head) {
+    let refusal = match newest_root_turn_closure(head, evidence.barrier) {
         Ok(Some(closure)) => return RecoveryVerdict::Close(Box::new(closure)),
         Ok(None) => {
             return RecoveryVerdict::Refuse(RecoveryRefusal::Integrity(AgentError::new(

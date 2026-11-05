@@ -193,6 +193,136 @@ fn assert_receipt_capacity_evidence(
     );
 }
 
+/// An open that closes effect-decision barriers ends a lost owner's turn at
+/// its barrier the way it ends one it cannot restore: abandoned with cause
+/// process lost, nothing started, the decision closed as never made and the
+/// abandonment note in history. Nothing says the request was cancelled, so
+/// nothing tells the model not to act on it.
+#[tokio::test]
+async fn a_closing_open_abandons_a_lost_owners_effect_decision_barrier() -> TestResult {
+    close_a_barrier(
+        crate::runtime::AbandonmentCause::ProcessLost,
+        "abandoned after the process was lost",
+    )
+    .await
+}
+
+/// A caller whose previous owner let go of the turn (a planned handoff)
+/// asserts `Interrupted`, and the note says the turn stopped, not that a
+/// process was lost.
+#[tokio::test]
+async fn a_closing_open_records_the_cause_its_caller_asserts() -> TestResult {
+    close_a_barrier(
+        crate::runtime::AbandonmentCause::Interrupted,
+        "this turn stopped before anything it asked for started",
+    )
+    .await
+}
+
+async fn close_a_barrier(cause: crate::runtime::AbandonmentCause, note_text: &str) -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let descriptor = durable_test_descriptor("test.route")?;
+    let model = Arc::new(
+        ArtifactModel::new(
+            descriptor.clone(),
+            artifact_authority(&descriptor, 1)?,
+            0,
+            84_000,
+            false,
+        )
+        .with_tool_first(),
+    );
+    let registry = one_mutating_tool_registry()?;
+    let store = Arc::new(TestCreateStore::default());
+    let sessions = DurableSessionRuntime::current(
+        store.clone(),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("nonzero lease")?,
+    )?;
+    let original = sessions
+        .create(
+            "create:close-barrier",
+            durable_decision_builder(Arc::clone(&workspace), Arc::clone(&model), registry.clone())?,
+        )
+        .await?;
+    let _turn = original
+        .start(CommandId::new("root:close-barrier")?, "await a decision")
+        .await?
+        .into_turn()
+        .ok_or("root unexpectedly duplicated")?;
+    let address = loop {
+        let checkpoint = original.checkpoint();
+        if matches!(
+            checkpoint.manifest().lifecycle(),
+            RuntimeLifecycle::Working {
+                recovery_phase: WorkingRecoveryPhase::EffectDecision,
+                ..
+            }
+        ) {
+            break DurableSessionAddress::new(
+                original.session_id(),
+                original.branch_id(),
+                checkpoint.id(),
+            );
+        }
+        tokio::task::yield_now().await;
+    };
+    store.expire_active_lease();
+    let DurableRuntimeOpen::Opened(agent) = sessions
+        .open(
+            "open:close-barrier",
+            address,
+            durable_decision_builder(workspace, Arc::clone(&model), registry)?
+                .closing_effect_decision_barriers(cause),
+        )
+        .await?
+    else {
+        return Err("a closing open restored the barrier".into());
+    };
+    let report = agent
+        .abandoned_turn()
+        .ok_or("the barrier's turn was not abandoned")?;
+    assert_eq!(
+        report.claim(),
+        crate::runtime::AbandonedTurnClaim::NothingStarted
+    );
+    assert_eq!(report.cause(), cause);
+    let checkpoint = agent.checkpoint();
+    let manifest = checkpoint.manifest();
+    assert!(matches!(manifest.lifecycle(), RuntimeLifecycle::Quiescent));
+    let note = manifest
+        .canonical()
+        .history()
+        .segments()
+        .into_iter()
+        .last()
+        .and_then(|segment| segment.items().last())
+        .and_then(|item| item.blocks().first())
+        .and_then(|block| match block {
+            ContentBlock::Text(text) => Some(text.text().to_owned()),
+            _ => None,
+        })
+        .ok_or("no closing note")?;
+    assert!(note.contains(note_text), "{note}");
+    assert!(!note.contains("cancelled"), "{note}");
+    assert!(
+        manifest
+            .ledger()
+            .operations()
+            .iter()
+            .all(|record| !matches!(record.kind(), DurableOperationKind::Effect { .. })),
+        "the guarded effect never started"
+    );
+    assert_eq!(
+        model.calls.load(Ordering::Acquire),
+        1,
+        "nothing was replayed"
+    );
+    agent.shutdown().await?;
+    Ok(())
+}
+
 pub(super) fn durable_decision_builder(
     workspace: Arc<WorkspacePolicy>,
     model: Arc<ArtifactModel>,

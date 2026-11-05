@@ -21,8 +21,8 @@ use crate::runtime::cleanup::{combine_cleanup_results, contain_cleanup_panic};
 use crate::runtime::continuation::checkpoint_bundle_error;
 use crate::runtime::durable::DurableCodeCellAbandonmentDisposition;
 use crate::runtime::durable::turn_recovery::{
-    RootClosure, abandonment_cause, recover_root_turn_publication, verdict_closure,
-    verdict_workflow_closure,
+    DecisionBarrier, RootClosure, abandonment_cause, recover_root_turn_publication,
+    verdict_closure_at, verdict_workflow_closure,
 };
 use crate::runtime::durable::workflow_closure::{
     WorkflowClosureBranch, WorkflowClosureRuntime, publish_workflow_closure,
@@ -1144,6 +1144,7 @@ impl PreparedCheckpoint {
         &mut self,
         telemetry: &DurabilityCommitTelemetry,
         workflow: WorkflowClosureRuntime<'_>,
+        barrier: DecisionBarrier,
     ) -> Result<Option<RootTurnRecovery>, AgentError> {
         let authority = &mut self.state;
         if let Some(closure) = verdict_workflow_closure(&authority.checkpoint) {
@@ -1173,7 +1174,7 @@ impl PreparedCheckpoint {
                 abandoned_turn: None,
             }));
         }
-        let closure = match verdict_closure(&authority.checkpoint) {
+        let closure = match verdict_closure_at(&authority.checkpoint, barrier) {
             Ok(closure) => closure,
             Err(error) if error.kind() == AgentErrorKind::OutcomeUnknown => None,
             Err(error) => return Err(error),

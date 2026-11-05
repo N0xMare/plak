@@ -13,6 +13,7 @@ use super::{
     is_accepted_root, last_root_turn, operation_turn_id, pending_steering, provider_outcome,
     queued_root, replay, runtime_component, runtime_manifest_error, terminal_record_for_command,
 };
+use crate::runtime::continuation::{RestoredContinuationFrame, decode_restored_continuation};
 
 /// Reads the one plan that abandons a working root turn.
 ///
@@ -43,6 +44,7 @@ use super::{
 )]
 pub(super) fn abandonment_evidence_fold(
     checkpoint: &RuntimeCheckpoint,
+    barrier: super::DecisionBarrier,
 ) -> Result<AbandonedTurnRecoveryFold, AgentError> {
     let refuse = |message: &'static str| AgentError::new(AgentErrorKind::OutcomeUnknown, message);
     let manifest = checkpoint.manifest();
@@ -88,13 +90,26 @@ pub(super) fn abandonment_evidence_fold(
     let code_cell = code_cell_abandonment_fold(checkpoint)
         .ok()
         .filter(|fold| fold.turn_abandonment && !fold.operations.is_empty());
+    // A barrier this open closes is the one decision its restorable frame
+    // names; any other decision record keeps its own rule.
+    let closed_decision = match barrier {
+        super::DecisionBarrier::Close(_) => match decode_restored_continuation(checkpoint) {
+            Ok(RestoredContinuationFrame::EffectDecision(frame)) => {
+                Some(frame.decision_operation.0)
+            }
+            _ => None,
+        },
+        super::DecisionBarrier::Restore => None,
+    };
     let facts = TurnFoldFacts {
         ledger,
         turn_id,
         code_cell: code_cell.is_some(),
         root_dispatched,
         batch_pending,
+        closed_decision,
     };
+    let mut barrier_closed = false;
     for obligation in obligations {
         let record = ledger
             .operation(obligation.operation_id())
@@ -183,7 +198,10 @@ pub(super) fn abandonment_evidence_fold(
             }
             Some(TurnRow::ProviderUncertain) => provider_operations.push(operation),
             Some(TurnRow::EffectUncertain) => effect_operations.push(operation),
-            Some(TurnRow::EffectUnrun) => unrun_effect_operations.push(operation),
+            Some(TurnRow::EffectUnrun) => {
+                barrier_closed |= closed_decision == Some(operation.0);
+                unrun_effect_operations.push(operation);
+            }
             Some(TurnRow::ProcessUncertain) => process_operations.push(operation),
             None => {
                 return Err(refuse(
@@ -321,6 +339,10 @@ pub(super) fn abandonment_evidence_fold(
         compaction_operations,
         root,
         tool_round_completed,
+        barrier_cause: match barrier {
+            super::DecisionBarrier::Close(cause) if barrier_closed => Some(cause),
+            _ => None,
+        },
     })
 }
 
@@ -626,6 +648,9 @@ pub(super) fn close_as_unobserved(
 pub(in crate::runtime) const fn abandonment_cause(
     fold: &AbandonedTurnRecoveryFold,
 ) -> AbandonmentCause {
+    if let Some(cause) = fold.barrier_cause {
+        return cause;
+    }
     match fold.root {
         AbandonedRoot::Prepared | AbandonedRoot::Dispatched => AbandonmentCause::ProcessLost,
         AbandonedRoot::AlreadyTerminal | AbandonedRoot::PendingTerminal => {
