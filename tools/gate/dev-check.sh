@@ -640,21 +640,22 @@ run_timed() {
 
 # Groups that build only in directories of their own (the contract fixtures'
 # cache, the publish dry run's package target) and assert nothing about wall
-# time run beside the others, from the end of static, when no test lane is
-# selected: a test lane's wall-clock budgets must not share the host with
-# their compiles. Their output follows the group they ran beside; tooling,
-# which has short process timeouts, waits for them first.
-overlapping=()
+# time run beside the others when no test lane is selected: a test lane's
+# wall-clock budgets must not share the host with their compiles. Package,
+# the longest, starts with the gate; contracts starts as static ends. Their
+# output follows, in canonical order, once they end; tooling, which has short
+# process timeouts, waits for them first.
+early=() late=()
 if [[ ",$selection," != *",tests-"* ]]; then
-  for group in contracts package; do
-    if [[ ",$selection," == *",$group,"* ]]; then overlapping+=("$group"); fi
-  done
+  if [[ ",$selection," == *",package,"* ]]; then early+=(package); fi
+  if [[ ",$selection," == *",contracts,"* ]]; then late+=(contracts); fi
+  if [[ ",$selection," != *",static,"* ]]; then early+=(${late[@]+"${late[@]}"}); late=(); fi
 fi
 background=()
 overlapped=' '
 start_overlapping() {
   local group log state
-  for group in ${overlapping[@]+"${overlapping[@]}"}; do
+  for group in "$@"; do
     log="$(mktemp "$TMPDIR/plak-group-$group.XXXXXX")"
     state="$(mktemp "$TMPDIR/plak-group-state-$group.XXXXXX")"
     (
@@ -666,11 +667,15 @@ start_overlapping() {
     background+=("$group:$!:$log:$state")
     overlapped+="$group "
   done
-  overlapping=()
 }
 finish_overlapping() {
-  local entry group pid log state status rest
-  for entry in ${background[@]+"${background[@]}"}; do
+  local name entry group pid log state status rest
+  for name in "${all_groups[@]}"; do
+    for entry in ${background[@]+"${background[@]}"}; do
+      if [[ "${entry%%:*}" == "$name" ]]; then break; fi
+      entry=''
+    done
+    if [[ -z "${entry:-}" ]]; then continue; fi
     IFS=: read -r group pid log state <<<"$entry"
     wait "$pid" || true
     cat "$log"
@@ -685,7 +690,7 @@ finish_overlapping() {
   done
   background=()
 }
-if [[ ",$selection," != *",static,"* ]]; then start_overlapping; fi
+start_overlapping ${early[@]+"${early[@]}"}
 for group in "${all_groups[@]}"; do
   if [[ ",$selection," != *",$group,"* ]]; then continue; fi
   case "$overlapped" in
@@ -693,7 +698,7 @@ for group in "${all_groups[@]}"; do
   esac
   if [[ "$group" == tooling ]]; then finish_overlapping; fi
   run_timed "$group"
-  if [[ "$group" == static ]]; then start_overlapping; fi
+  if [[ "$group" == static ]]; then start_overlapping ${late[@]+"${late[@]}"}; fi
 done
 finish_overlapping
 while IFS= read -r skipped; do

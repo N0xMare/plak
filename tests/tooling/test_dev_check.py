@@ -172,6 +172,13 @@ with open(os.environ['GATE_CALLS'], 'a') as log:
                              git_nosystem=os.environ.get('GIT_CONFIG_NOSYSTEM'),
                              target_rustflags=os.environ.get(
                                  'CARGO_TARGET_HOST_TRIPLE_RUSTFLAGS'))) + '\n')
+if args[0] == 'clippy' and os.environ.get('GATE_CLIPPY_WAITS_FOR'):
+    import time
+    deadline = time.monotonic() + 5
+    while not Path(os.environ['GATE_CLIPPY_WAITS_FOR']).exists():
+        if time.monotonic() > deadline:
+            raise SystemExit('clippy ran alone')
+        time.sleep(0.02)
 if args[0] == 'doc' and os.environ.get('GATE_DOC_WAITS_FOR'):
     import time
     deadline = time.monotonic() + 5
@@ -252,6 +259,8 @@ os.execv(real, [real, *sys.argv[1:]])
 import json, os, sys
 with open(os.environ['GATE_CALLS'], 'a') as log:
     log.write(json.dumps(dict(publish=sys.argv[1:], offline=os.environ.get('CARGO_NET_OFFLINE'))) + '\n')
+if os.environ.get('GATE_CLIPPY_WAITS_FOR'):
+    open(os.environ['GATE_CLIPPY_WAITS_FOR'], 'w').close()
 raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
 '''
         )
@@ -527,8 +536,35 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
             ),
         )
 
-    def test_contracts_run_after_a_selected_test_lane(self):
-        result, calls, scripts = self.run_gate('--steps', 'tests-serial,contracts')
+    def test_package_starts_with_the_gate_beside_static(self):
+        # The fake clippy waits for the publish dry run to have started.
+        self.commit_fixture()
+        self.env['GATE_CLIPPY_WAITS_FOR'] = str(self.root / 'package-started')
+        result, calls, scripts = self.run_gate('--steps', 'static,contracts,package')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(
+            [
+                line.split()[2]
+                for line in result.stdout.splitlines()
+                if line.startswith('== time: ')
+            ],
+            ['static', 'contracts', 'package'],
+        )
+        records = [json.loads(line) for line in self.log.read_text().splitlines()]
+        last_clippy = max(
+            i for i, row in enumerate(records) if row.get('args', [''])[0] == 'clippy'
+        )
+        contracts = next(
+            i
+            for i, row in enumerate(records)
+            if row.get('python') == ['tools/gate/check_public_compile.py']
+        )
+        # Contracts still waits for static to end.
+        self.assertGreater(contracts, last_clippy)
+
+    def test_contracts_and_package_run_after_a_selected_test_lane(self):
+        self.commit_fixture()
+        result, calls, scripts = self.run_gate('--steps', 'tests-serial,contracts,package')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         records = [json.loads(line) for line in self.log.read_text().splitlines()]
         lane = max(i for i, row in enumerate(records) if row.get('args', [''])[0] == 'nextest')
@@ -537,7 +573,9 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
             for i, row in enumerate(records)
             if row.get('python') == ['tools/gate/check_public_compile.py']
         )
+        publish = next(i for i, row in enumerate(records) if 'publish' in row)
         self.assertGreater(contracts, lane)
+        self.assertGreater(publish, contracts)
 
     def test_failed_test_lanes_do_not_skip_contracts_or_tooling(self):
         self.env['GATE_CARGO_FAILURES'] = json.dumps({'nextest': 8})
