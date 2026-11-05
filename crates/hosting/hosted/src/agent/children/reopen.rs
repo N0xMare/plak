@@ -682,7 +682,7 @@ async fn reopen_spawned_child_at_head(
         .unwrap_or(SessionToolFence::OccupancyReadOnly);
     let sessions = parent
         .state_roots()
-        .runtime_sessions()
+        .child_runtime_sessions()
         .map_err(|_| ChildReopenError::unavailable("plak runtime service is unavailable"))?;
     let mut locator = SessionLocator::from_str(locator).map_err(|error| {
         ChildReopenError::unavailable(format!("child session locator is invalid: {error}"))

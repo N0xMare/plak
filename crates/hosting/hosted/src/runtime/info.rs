@@ -267,6 +267,10 @@ fn session_info_view_with_storage<P: plakous_host_protocol::ProtocolExtension>(
                 plakous_host_protocol::views::presentation::StorageLevel::Refused
             }
         },
+        session_store_percent: config
+            .state_roots
+            .last_store_fill()
+            .and_then(|fill| fill.shown_percent()),
         host_version: plakous::VERSION.to_owned(),
         session_id: config.session.id.clone(),
         working_dir: config.cwd.display().to_string(),

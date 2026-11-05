@@ -7353,6 +7353,30 @@ fn session_gc_reclaims_superseded_history_and_keeps_the_session() {
         "{}",
         collected.stdout
     );
+    // What remains, and which session retains it, by the product id.
+    assert!(
+        collected.stdout.contains("remaining ")
+            && collected
+                .stdout
+                .contains("runtime.sqlite3: new work stops at "),
+        "{}",
+        collected.stdout
+    );
+    let largest = collected
+        .stdout
+        .split_once("largest sessions by retained object bytes")
+        .map(|(_, rest)| rest)
+        .expect("gc lists the largest sessions");
+    assert!(
+        largest.contains(&format!(" checkpoints: session {session}")),
+        "{}",
+        collected.stdout
+    );
+    assert!(
+        !collected.stdout.contains("note: a running plak"),
+        "{}",
+        collected.stdout
+    );
     let shown = run_cli(&fixture, &["session", "show", &session]);
     assert!(shown.status.success(), "{}", shown.stderr);
 
@@ -8150,13 +8174,15 @@ fn a_v11_session_imports_and_exports_as_v12_with_an_identical_history() {
         &["session", "import", path.to_str().expect("UTF-8")],
     );
     assert!(imported.status.success(), "{}", imported.stderr);
-    assert!(
-        imported
-            .stdout
-            .contains("this session's export records no profile; the home default profile applies"),
-        "{}",
-        imported.stdout
+    let notice = "this session's export records no profile; the home default profile applies";
+    assert_eq!(
+        imported.stdout.matches(notice).count() + imported.stderr.matches(notice).count(),
+        1,
+        "the profile notice prints once: {}{}",
+        imported.stdout,
+        imported.stderr
     );
+    assert!(imported.stdout.contains(notice), "{}", imported.stdout);
     let new = imported
         .stdout
         .lines()

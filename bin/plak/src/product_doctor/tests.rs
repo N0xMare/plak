@@ -130,12 +130,19 @@ fn doctor_labels_newer_telemetry_files_without_warning_or_removal_advice()
 }
 
 #[test]
-fn store_pressure_is_full_at_the_ordinary_threshold_and_warns_one_reserve_before() {
-    // A 16-checkpoint store: reserve 2, new work stops at 14.
-    assert_eq!(StorePressure::of(11, 2, 14), StorePressure::Available);
-    assert_eq!(StorePressure::of(12, 2, 14), StorePressure::NearlyFull);
-    assert_eq!(StorePressure::of(14, 2, 14), StorePressure::Full);
-    assert_eq!(StorePressure::of(17, 2, 14), StorePressure::Full);
+fn store_pressure_is_full_at_the_ordinary_threshold_and_warns_from_seventy_percent() {
+    assert_eq!(StorePressure::of(699, 1000), StorePressure::Available);
+    assert_eq!(StorePressure::of(700, 1000), StorePressure::NearlyFull);
+    assert_eq!(StorePressure::of(999, 1000), StorePressure::NearlyFull);
+    assert_eq!(StorePressure::of(1000, 1000), StorePressure::Full);
+    assert_eq!(StorePressure::of(1200, 1000), StorePressure::Full);
+    assert_eq!(StorePressure::percent(3_221_225_472, 3_758_096_384), 85);
+    // The detail's fill is the bound nearest its stop, not the largest count.
+    assert_eq!(
+        StorePressure::fill_percent([(400_000, 458_752), (10_221, 3_670_016), (20, 3_758)]),
+        87
+    );
+    assert_eq!(StorePressure::fill_percent([]), 0);
     assert!(StorePressure::Full > StorePressure::NearlyFull);
 }
 #[test]

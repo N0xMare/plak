@@ -18,7 +18,7 @@ mod sqlite;
 pub use sqlite::{
     BUNDLED_SQLITE_REQUIRED_COMPILE_OPTIONS, BUNDLED_SQLITE_SOURCE_ID, BUNDLED_SQLITE_VERSION,
     SQLITE_SCHEMA_VERSION, SqliteFeedUsage, SqliteFileUsage, SqlitePersistenceShape,
-    SqliteSessionStore, SqliteStoreOptions, SqliteStoreStats,
+    SqliteSessionRetention, SqliteSessionStore, SqliteStoreOptions, SqliteStoreStats,
 };
 #[cfg(feature = "perf-instrumentation")]
 #[doc(hidden)]

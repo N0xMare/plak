@@ -398,6 +398,29 @@ Capacity health is not a transcript fact: warning levels remain in live chrome,
 and refusal feedback uses the non-persisted operator-settings notice scope.
 Neither operator paths nor a warning row per prompt enter exports or models.
 
+The shared runtime store (`runtime.sqlite3`, chapter 01 §5.2) has logical
+retention limits of its own, independent of the volume. Its fill is the most
+filled aggregate bound as a whole percentage of the point where new work stops
+(the ordinary threshold), read through the process's open runtime backend
+(`AgentSessions::store_usage`, the usage snapshot its last store operation
+published; no file is opened or reverified). A session's host reads it every
+five seconds and posts one live operator-settings warning the first time the fill reaches each of 70%,
+85% and 95%; a step warns again only after the fill fell below it (for example
+after `plak session gc`). The warning names the store file, the fill, the bound
+with where new work and child agents' new work stop, and carries the reclaim
+remedy, which every face renders as the store file, then `plak session gc
+--all`, then `plak session delete <id>` on unneeded sessions, and that `plak
+state prune-legacy` frees only other builds' stores; every storage-pressure
+remedy names the store file the same way. The session facts the host publishes carry the
+fill from 70% (`session_store_percent`, in-process chrome only), and the idle
+HUD then reads `session store <n>% full · plak session gc --all`, outranked
+only by the volume refusal label. Whenever the five-second reading changes the
+fill those facts show, including a drop below 70% after `plak session gc`, the
+host republishes its last session facts with the new fill, so the HUD follows
+the store between turns. Child agents' new work stops one store
+reserve before the root's (chapter 03 §10.1), so the root keeps that headroom
+for its turn, compaction and cleanup once a tree has filled the store.
+
 During work, an authoritative capacity refusal is distinct from the preventive
 floor: product writes carry `StoreRefusal::StorageFull`, and runtime/tree
 stores retain their typed capacity cause. Writers retain the exact pending
@@ -1581,7 +1604,27 @@ not a promise made by prune/delete acknowledgements.
 It prints one summary line `reclaimed <n> checkpoints, <n> objects, <n> bytes
 (<n> sessions pruned, <n> interrupted deletes finished)` and one
 `skipped <id>: <reason>` line per skipped session; skips do not fail the
-command.
+command. It then reports what remains, for the binding bound (the one nearest
+where its new work stops): `remaining <n> <bound> in <store file>: new work stops
+at <n>, child agents' at <n>, limit <n>`, and the five sessions retaining the
+most object bytes (`SessionBackend::inspect_sqlite_session_retention`), each as
+`<bytes> bytes, <n> checkpoints: session <id>`, or `runtime session <id>` when
+no product record names it (a sub-agent's). Objects are shared, so each
+session's figure counts every object it reaches and the figures do not sum to
+the store's. The per-session walk reads the objects, edges and checkpoint
+roots in three sequential scans and resolves them in memory: on a 3.4 GB store
+of 472,000 objects and 724,000 edges the scans take about five seconds cold
+and memory stays near 60 MB, and no read snapshot outlives one scan, so a
+concurrent store's checkpoint waits at most that long. When another process
+holds a state key's runtime store open, it adds `note: a running plak on this
+home uses state <key> of another build; this gc ran as build state <key> and
+did not touch that store; ...`: each build reclaims only its own state key's
+store. A process holding a store open holds an exclusive lock on its own lock
+file in that key's `runtime.sqlite3-holders` directory, which the kernel
+releases when it exits or re-executes (a `/reload`); gc probes each lock file
+with a non-blocking exclusive lock it releases at once, as the store's own
+holder probe does, so a lock file left by a gone or re-executed process does
+not count.
 
 ### 2.6 Intents, views, and the projector
 
@@ -4542,7 +4585,16 @@ its session's host (the product surface's `check_build` intent, answered by
 `build_status`), which compares that resolved file (path, inode,
 modification time) with the one it is running; while they differ the
 composer's hint-line guidance reads `new build installed · /reload`. A process started by absolute path resolves to
-that path, so a rebuild in place is still detected.
+that path, so a rebuild in place is still detected. The exception is a path
+inside an installer snapshot (`<prefix>/lib/plak/{maintainer,release}/<64
+hex>/plak`, chapter 06): snapshots are immutable, so such a launch follows its
+flavor's current install instead, the file `plak` on `PATH` resolves to when
+that is a snapshot under the same `<prefix>/lib/plak/<flavor>` directory. A
+`PATH` that resolves to another flavor, a development build or nothing leaves
+the snapshot itself. A reload whose target is the very file the process runs
+prints, before it re-executes, a line beginning `reload reopened the same build
+<path>` that says no newer install of its flavor resolves on `PATH` and that
+moving to another build means quitting and running it with `--resume <id>`.
 The background-process refusal is `reload refused: background processes are
 running; stop them first (/ps)`. A process-local shared count reaches the shell
 before the host publishes an idle boundary. The idle host re-reads live jobs on
@@ -5793,6 +5845,7 @@ bottom border is a plain line. HUD vocabulary, highest priority first:
 | An approval is pending (dormant in ordinary Plak) | pulsing `◆ approval needed` |
 | Idle, with pending continuation (yields to a problem label) | steady `◆` plus the pending parts joined by ` · `: `1 result pending` / `N results pending`, `1 question pending` / `N questions pending`, `1 process exited` / `N processes exited`, and `auto-continue paused` |
 | Idle, no pending indicator, product-home capacity refused (§2.2) | `storage low · new turns refused` |
+| Idle, no pending indicator, session store at 70% or more of where new work stops (§2.2) | `session store <n>% full · plak session gc --all` |
 | Idle, no pending indicator, product-home capacity warning (§2.2) | `storage warning · plak doctor` |
 | Stop in progress | `cancelling…` |
 | Native credential unavailable before send | ``waiting for login: run `plak login <provider>` `` |
@@ -8643,9 +8696,11 @@ version; the home; its volume's free space (`home_free_space`, §2.2); the confi
 file; the product and runtime databases; the
 runtime store's retained usage (`runtime_store`: per aggregate bound used/limit
 and where new work stops, read-only against the default limits from the
-store's recorded counters in one row read, never a scan of retained history; `full` is an
-error once new work is refused, `nearly_full` a warning within one reserve of
-it, both with the remedy `plak session gc --all`, then
+store's recorded counters in one row read, never a scan of retained history; the
+detail starts with the store file and its fill as a percentage of where new
+work stops, and each bound also names where child agents' new work stops; `full` is an
+error once new work is refused, `nearly_full` a warning from 70% of it (the
+TUI's first warning step, §2.2), both with the remedy `plak session gc --all`, then
 `plak session delete <id>`; the detail also shows the database file size and
 free bytes, the change feed's retained rows and encoded bytes summed from the
 sessions rows' feed counters, never by scanning the feed (informational: feed

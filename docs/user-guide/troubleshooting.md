@@ -242,8 +242,21 @@ finish, publish their result, and recover. You see it as one of:
   `session store is full (...)`. It is a plain failure, not
   *recovery required*: nothing was dispatched after the refusal. A Code Cell
   sees each refused nested call as an ordinary error it can catch;
-- `plak doctor` reporting `Runtime store` as `full` (or `nearly_full` shortly
-  before).
+- `plak doctor` reporting `Runtime store` as `full` (or `nearly_full` from
+  70% of the point where new work stops).
+
+The store is `runtime.sqlite3` in this build's state directory
+(`~/.plak/state/<key>/`); the notices and `plak doctor` name the exact file.
+Before it fills, the TUI warns once each at 70%, 85% and 95% of the point
+where new work stops, and while it is past 70% the idle status line reads
+`session store <n>% full · plak session gc --all`.
+
+Sub-agents stop first. Their new work stops one reserve earlier (3 GiB of
+object bytes by default, against 3.5 GiB for the root), so a tree that fills
+the store does not take the root with it: `spawn_agent` is refused with
+`storage_low`, a message to a sub-agent is refused, and a sub-agent's running
+turn ends failed, while your root session can still finish its turn, compact
+and clean up. The remedies below are the same.
 
 Rarely the reserve itself runs out, for example when many turns were finishing
 at once. A turn then fails with the first line
@@ -265,6 +278,11 @@ unfinished turn (run `plak session recover SESSION_ID`, then `gc` again), or
 one with a pending workflow (open the session once, then `gc` again). It
 also finishes deletes a crash interrupted. Turns reclaim their own history once
 enough builds up, so `gc` frees most for long-lived or imported sessions.
+It then prints the bytes that remain against where new work stops and the
+sessions retaining the most, which are the ones worth deleting. Run it with
+the same build as the plak you are using: each build reclaims only its own
+state directory's store, and `gc` says so when a running plak on this home
+uses another one.
 
 If the store is still full, delete sessions you no longer need:
 
@@ -280,7 +298,9 @@ or resumable or needs recovery (Plak recovers it; `u` in the Agents tab retries 
 blocks it. A finished child's history and the agent tree are deleted with the
 session. A delete that failed part way finishes when run again (or with
 `plak session gc --all`). `/new`, compaction, a fresh session, and `/recover`
-do not reclaim retained state. The database file shrinks as `gc` and deletion
+do not reclaim retained state. `plak state prune-legacy` removes only other
+builds' state directories (listed by `plak doctor` as `Legacy state`); it frees
+disk space but never this build's store. The database file shrinks as `gc` and deletion
 return free pages; `plak doctor` shows the file size and its free bytes.
 Opening a session and recovering an interrupted turn keep
 working while the store is full, because they write into the reserve.

@@ -1733,6 +1733,49 @@ recovering sessions draw on the same reserve and recovery can still be refused
 when it is exhausted; the remedies are a raised limit, pruning or deleting
 other sessions, or deleting a parent with `--abandon-children` (spec 02).
 
+**Subordinate handles.** `AgentSessions::with_subordinate_admission` returns a
+view of the same backend, drivers and change feed whose new work stops one
+reserve earlier, at `L - 2 * ceil(L / 8)` of each aggregate bound `L`
+(`SessionStoreBoundUsage::subordinate_threshold`). The class belongs to the
+handle, not to the session or the store, and is never persisted; a host opens
+the sessions it wants to stop first (sub-agents) through such a handle so the
+others keep that reserve for their new work. The handle holds new work to the
+mark in two places, both reading the backend's usage snapshot:
+
+- Its `usage` reports the mark as each bound's ordinary threshold
+  (`StoreBoundUsage::with_ordinary_threshold`), so every runtime pressure check
+  through it, the root admission check and a running Code Cell's nested-call
+  check alike, stops at the mark with exactly the unrecorded `StoragePressure`
+  refusal or the catchable `Backpressure` error it gives at the store's own
+  threshold.
+- Its `Ordinary` creates, forks and commits past the mark run one bounded
+  reclaim batch, reread, and are refused with the ordinary-class
+  `SessionStoreError::Capacity` whose threshold is the mark. A running turn
+  therefore ends exactly as at the ordinary threshold (one published `Failed`
+  of kind `Session`; a compaction `ProvenNotDispatched`). No session state is
+  written, but the reclaim batch is a garbage-collection write. A create the
+  store already accepted resolves to its receipt (`recover_create`) instead of
+  being refused, so a replay is never turned into a refusal.
+
+The refusal's text names both stops: `(subordinate ordinary writes stop at
+<mark>, before the store's <ordinary threshold>)`, and
+`SessionStorePressure::subordinate` reports it. A durable refusal record keeps
+the mark as its threshold and the `Ordinary` class, so no format changes.
+`Settlement` and `Recovery` writes pass through unchanged and are not bounded by
+the mark: a subordinate turn that crosses it still publishes its terminal, and
+its compaction completion and recovery write up to their own class thresholds.
+The check is not atomic with the commit. Past the mark, at most one ordinary
+commit per subordinate runtime that read the snapshot before the mark (one
+owner per session) and each create already past its check can still land, each
+within the per-commit bounds; the store itself enforces every class threshold
+atomically. Every subordinate ordinary write costs one usage read, which on
+SQLite is the in-process snapshot the last store operation published.
+`AgentSessions::store_usage` reads the backend's three bound readings against
+the store's own thresholds whatever the handle's class, and
+`SessionBackend::sqlite_with_retention_bounds` opens SQLite with explicit
+checkpoint, object and object-byte bounds (inspection still reads against the
+defaults).
+
 A refusal is `SessionStoreError::Capacity` carrying the bound, the attempted
 usage, the class threshold, the configured limit and the class. An ordinary
 refusal is definite: nothing was written. Before admitting a root the runtime
@@ -1762,7 +1805,14 @@ below current usage; integrity and corruption refusals are unchanged.
 used, limit, reserve and the ordinary and settlement thresholds, against the
 default limits, from the recorded counters in one row read; the database file
 size and its free-list bytes) read-only, including over a store past its
-limits.
+limits. `SessionBackend::inspect_sqlite_session_retention` reads, in one
+read-only snapshot, every session's retained checkpoints and the object bytes
+they reach (shared objects count toward every session that reaches them),
+largest first. It reads the objects, the edges and the checkpoint roots in three
+sequential scans, each its own read statement with no per-row lookup, and walks
+the graph in memory; an object deleted between the scans is skipped, so a store
+written meanwhile gives approximate figures. It is an operator inspection, never
+a runtime path.
 
 **Pruning in SQLite.** One `IMMEDIATE` transaction checks the lease, exact
 head and Quiescent kind, selects the superseded checkpoints through indexes on

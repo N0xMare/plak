@@ -452,3 +452,37 @@ fn advice_and_login_wait_commands_parse() {
         parse_rendered_command(&command);
     }
 }
+
+#[test]
+fn store_capacity_remedies_name_the_store_file_and_the_reclaim_commands_in_order() {
+    let store = crate::home::paths::PlakPaths::home_from_env()
+        .unwrap()
+        .runtime_database();
+    for remedy in [
+        NoticeRemedy::ReclaimRetainedHistory {},
+        NoticeRemedy::ReclaimThenRecover {},
+    ] {
+        for frontend in [Frontend::Tui, Frontend::Run, Frontend::Jsonl] {
+            let text = remedy_text(
+                &remedy,
+                RemedyContext {
+                    frontend,
+                    session_id: Some("current-id"),
+                },
+            );
+            assert!(
+                text.starts_with(&format!("the session store is {}; ", store.display())),
+                "{text}"
+            );
+            let gc = text.find("`plak session gc --all`").unwrap();
+            let delete = text.find("`plak session delete <id>`").unwrap();
+            assert!(gc < delete, "{text}");
+            assert!(
+                text.ends_with(
+                    "`plak state prune-legacy` frees only other builds' stores, not this one"
+                ),
+                "{text}"
+            );
+        }
+    }
+}

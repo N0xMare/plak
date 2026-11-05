@@ -14,6 +14,23 @@ use super::{
     start_child_turn_owned,
 };
 
+/// `storage_low` once the shared store's fill has reached the mark where child
+/// agents' new work stops (spec 03 §10.1).
+fn refuse_past_children_mark(
+    fill: crate::storage_pressure::StoreFill,
+) -> Result<(), crate::agent_tree::TopologyError> {
+    if !fill.children_stopped() {
+        return Ok(());
+    }
+    Err(crate::agent_tree::TopologyError::new(
+        crate::agent_tree_protocol::TopologyErrorCode::StorageLow,
+        format!(
+            "spawning is unavailable: {}; finish this work without new agents and tell the operator the session store needs reclaiming; do not delete files or retry",
+            fill.children_refusal()
+        ),
+    ))
+}
+
 pub(in crate::agent) struct ProductChildSessionBinder {
     pub(in crate::agent) parent: SpawnParent,
 }
@@ -34,6 +51,11 @@ impl ProductChildSessionBinder {
                 crate::agent_tree_protocol::TopologyErrorCode::StorageLow,
                 "spawning is unavailable: the operator's storage is below the admission floor; do not delete files or retry",
             ));
+        }
+        // The process's last reading of the shared store, at most one host
+        // poll old; `admit_binding` reads it again before anything is bound.
+        if let Some(fill) = self.parent.state_roots().last_store_fill() {
+            refuse_past_children_mark(fill)?;
         }
         let tree_id = spawn_parent_tree_id(&self.parent);
         let Some(runtime) = crate::topology_runtime::lookup(tree_id) else {
@@ -68,6 +90,10 @@ impl ProductChildSessionBinder {
     ) -> Pin<Box<dyn Future<Output = Result<(), crate::agent_tree::TopologyError>> + Send + 'a>>
     {
         Box::pin(async move {
+            // A fresh reading: the spawn may come long after the last one.
+            if let Some(fill) = self.parent.state_roots().read_store_fill().await {
+                refuse_past_children_mark(fill)?;
+            }
             let Some(provider) = crate::runtime::oauth_provider_for_account(&binding.account)
             else {
                 return Ok(());
@@ -381,7 +407,7 @@ pub(in crate::agent) async fn create_spawned_child_session(
     .map_err(|error| SpawnBindError::Refused(error.host_failure()))?;
     let sessions = parent
         .state_roots()
-        .runtime_sessions()
+        .child_runtime_sessions()
         .map_err(|_| "plak runtime service is unavailable".to_owned())?;
     let created = match sessions
         .create(CreateSessionRequest::new(operation_id.clone(), runtime))

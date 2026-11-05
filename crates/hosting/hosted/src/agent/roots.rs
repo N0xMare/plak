@@ -183,6 +183,9 @@ pub struct ProductStateRoots {
     // Clones are process-lifetime handles: every attach and workflow uses the
     // same bounded SQLite actor instead of reopening its database.
     runtime_sessions: Arc<Mutex<Option<Arc<AgentSessions>>>>,
+    /// This process's last reading of the shared runtime store's fill
+    /// ([`Self::read_store_fill`]), for the session facts.
+    store_fill: Arc<Mutex<Option<crate::storage_pressure::StoreFill>>>,
     /// The shutdown of the attachment these roots were handed to. Every
     /// runtime-store handle and tree they open waits on it, and on nothing
     /// another attachment bound.
@@ -296,6 +299,7 @@ impl ProductStateRoots {
             state_home,
             subscriptions: std::fs::canonicalize(&subscriptions).unwrap_or(subscriptions),
             runtime_sessions: Arc::new(Mutex::new(None)),
+            store_fill: Arc::default(),
             storage_shutdown: None,
             tree_store: Arc::new(Mutex::new(None)),
             tree_store_factory: tree_store,
@@ -477,6 +481,11 @@ impl ProductStateRoots {
         self.exchange_observer.clone()
     }
 
+    /// The runtime database every session of this home shares.
+    pub(crate) fn runtime_database(&self) -> &std::path::Path {
+        &self.runtime_database
+    }
+
     /// The product record service shared by every command and attach root.
     pub fn session_records(&self) -> Arc<dyn crate::session_store::SessionRecordStore> {
         self.session_records.clone()
@@ -532,6 +541,38 @@ impl ProductStateRoots {
             }
             None => shared,
         })
+    }
+
+    /// Reads the shared runtime store's fill through the open backend (one
+    /// usage read, no file inspection) and keeps it as this process's last
+    /// reading. `None` when the store or its reading is unavailable: a usage
+    /// read never refuses work on its own.
+    pub(crate) async fn read_store_fill(&self) -> Option<crate::storage_pressure::StoreFill> {
+        let sessions = self.runtime_sessions().ok()?;
+        let fill = crate::storage_pressure::StoreFill::of(&sessions.store_usage().await.ok()?)?;
+        *self
+            .store_fill
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(fill);
+        Some(fill)
+    }
+
+    /// The fill [`Self::read_store_fill`] last read in this process.
+    pub(crate) fn last_store_fill(&self) -> Option<crate::storage_pressure::StoreFill> {
+        *self
+            .store_fill
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// [`Self::runtime_sessions`] for spawned children: their new work stops
+    /// one store reserve before the root's, so a tree that fills the shared
+    /// store leaves the root headroom to finish its turn, compact and clean up
+    /// (spec 03 §10.1).
+    pub(crate) fn child_runtime_sessions(&self) -> CliResult<Arc<AgentSessions>> {
+        Ok(Arc::new(
+            self.runtime_sessions()?.with_subordinate_admission(),
+        ))
     }
 
     fn shared_runtime_sessions(&self) -> CliResult<Arc<AgentSessions>> {
@@ -705,6 +746,7 @@ impl ProductStateRoots {
             product,
             state_home,
             runtime_sessions: Arc::new(Mutex::new(None)),
+            store_fill: Arc::default(),
             storage_shutdown: None,
             tree_store: Arc::new(Mutex::new(None)),
             tree_store_factory: Arc::new(doubles::MemoryTreeStoreFactory),
@@ -790,7 +832,7 @@ impl ProductStateRoots {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
-mod tests;
+pub(crate) mod tests;
 
 /// In-process doubles of the product ports, for hosted tests.
 #[cfg(any(test, feature = "test-support"))]

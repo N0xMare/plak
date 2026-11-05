@@ -601,6 +601,7 @@ pub fn inspect_runtime_store(path: &Path) -> RuntimeStoreStatus {
 const RUNTIME_STORE_REMEDY: &str = "reclaim superseded history with `plak session gc --all`, then free sessions with `plak session delete <id>`; /new and compaction do not reclaim it";
 
 fn runtime_store_check(
+    path: &Path,
     status: RuntimeStoreStatus,
     retention_failure_at_ns: Option<i64>,
 ) -> DoctorCheck {
@@ -629,21 +630,28 @@ fn runtime_store_check(
         RuntimeStoreStatus::Usage(usage) => usage,
     };
     let bounds = usage.bounds();
+    let percent = StorePressure::fill_percent(
+        bounds
+            .iter()
+            .map(|bound| (bound.used(), bound.ordinary_threshold())),
+    );
     let detail = bounds
         .iter()
         .map(|bound| {
             format!(
-                "{} {}/{} (new work stops at {})",
+                "{} {}/{} (new work stops at {}, child agents' at {})",
                 bound.bound(),
                 bound.used(),
                 bound.limit(),
-                bound.ordinary_threshold()
+                bound.ordinary_threshold(),
+                bound.subordinate_threshold()
             )
         })
         .collect::<Vec<_>>()
         .join(", ");
     let detail = format!(
-        "{detail}; file {} bytes, {} free; feed {} rows, {} bytes",
+        "{}: {percent}% of where new work stops; {detail}; file {} bytes, {} free; feed {} rows, {} bytes",
+        path.display(),
         usage.file_bytes(),
         usage.free_bytes(),
         usage.feed_records(),
@@ -658,7 +666,7 @@ fn runtime_store_check(
     };
     let pressure = bounds
         .iter()
-        .map(|bound| StorePressure::of(bound.used(), bound.reserve(), bound.ordinary_threshold()))
+        .map(|bound| StorePressure::of(bound.used(), bound.ordinary_threshold()))
         .max()
         .unwrap_or(StorePressure::Available);
     match pressure {
@@ -688,21 +696,37 @@ fn runtime_store_check(
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum StorePressure {
     Available,
-    /// Within one reserve of the ordinary threshold.
+    /// At or past 70% of the ordinary threshold, where the TUI first warns.
     NearlyFull,
     /// New work is refused; only settlement and recovery still write.
     Full,
 }
 
 impl StorePressure {
-    const fn of(used: u64, reserve: u64, ordinary_threshold: u64) -> Self {
+    fn of(used: u64, ordinary_threshold: u64) -> Self {
         if used >= ordinary_threshold {
             Self::Full
-        } else if used.saturating_add(reserve) >= ordinary_threshold {
+        } else if Self::percent(used, ordinary_threshold) >= 70 {
             Self::NearlyFull
         } else {
             Self::Available
         }
+    }
+
+    /// The fill of the bound nearest its stop: the largest of each
+    /// `(used, ordinary_threshold)` pair's percentage.
+    fn fill_percent(bounds: impl IntoIterator<Item = (u64, u64)>) -> u64 {
+        bounds
+            .into_iter()
+            .map(|(used, ordinary_threshold)| Self::percent(used, ordinary_threshold))
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// `used` as a whole percentage of `ordinary_threshold`.
+    fn percent(used: u64, ordinary_threshold: u64) -> u64 {
+        u64::try_from(u128::from(used) * 100 / u128::from(ordinary_threshold.max(1)))
+            .unwrap_or(u64::MAX)
     }
 }
 
@@ -866,6 +890,7 @@ pub fn diagnose(input: DoctorInputs) -> DoctorReport {
         input.runtime_database,
     ));
     checks.push(runtime_store_check(
+        &input.paths.runtime_database,
         input.runtime_store,
         input.retention_failure_at_ns,
     ));

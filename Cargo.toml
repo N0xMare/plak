@@ -482,7 +482,7 @@ env-ceiling = 26
 reason = "Capability registry, grouped interactive identity/carry helpers, lookup/re-export predicates, the capacity-probe hook and the offline image-hash delay installed at the composition root; native contract-drift errors exist only with their compiled route."
 
 [workspace.metadata.plakous.cfg.plakous]
-feature-ceiling = 66
+feature-ceiling = 63
 env-sites = ["src/test_session_lease.rs"]
 reason = "Existing placement debt plus the auth/native-only drift type, error formatting and Codex live-refusal summaries; reduced products must not link omitted auth. The store feature gates the sessions module at its one declaration. The test-hooks session lease override is the only environment read, and other builds do not compile it."
 

@@ -286,6 +286,10 @@ pub struct Sender<P: plakous_host_protocol::ProtocolExtension = plakous_host_pro
     /// The process rows the session last published, shared by every clone,
     /// so an unchanged list is not published again.
     processes: Arc<std::sync::Mutex<Option<Vec<plakous_host_protocol::views::ProcessView>>>>,
+    /// The last session facts the session published, shared by every clone,
+    /// so a background reading can republish them with a new store fill.
+    session_info:
+        Arc<std::sync::Mutex<Option<plakous_host_protocol::views::presentation::SessionInfoView>>>,
     /// Unit laws inspect publication order before latest-state coalescing.
     #[cfg(test)]
     recorded: Option<Arc<std::sync::Mutex<Vec<ContentEvent<P>>>>>,
@@ -324,6 +328,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             answers: None,
             usage: Arc::default(),
             processes: Arc::default(),
+            session_info: Arc::default(),
             #[cfg(test)]
             recorded: None,
         }
@@ -343,6 +348,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             answers: self.answers.clone(),
             usage: Arc::clone(&self.usage),
             processes: Arc::clone(&self.processes),
+            session_info: Arc::clone(&self.session_info),
             #[cfg(test)]
             recorded: self.recorded.clone(),
         }
@@ -406,6 +412,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(view.clone());
         }
+        if let HostEvent::SessionInfo(view) = &value {
+            *self
+                .session_info
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(view.clone());
+        }
         let Some(answers) = self.answers.as_ref() else {
             return self.publish(value);
         };
@@ -441,6 +453,25 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             answers,
             ..self.clone()
         }
+    }
+
+    /// Publishes the session's last facts again carrying the store fill
+    /// `percent`, when facts were published and the fill they show differs,
+    /// so the HUD follows the store between turns, down as well as up.
+    pub(crate) fn republish_store_fill(&self, percent: Option<u8>) -> bool {
+        let Some(mut view) = self
+            .session_info
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        else {
+            return false;
+        };
+        if view.session_store_percent == percent {
+            return false;
+        }
+        view.session_store_percent = percent;
+        self.send(ContentEvent::SessionInfo(view))
     }
 
     /// The last usage view the session published, if any.

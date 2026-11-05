@@ -854,3 +854,29 @@ fn confirmation_requires_a_terminal_or_yes_and_defaults_to_no() {
     assert!(text.contains("Delete 1 listed non-current state entries"));
     assert!(confirm_prune_legacy(&paths, true, false, &mut &b""[..], &mut output).is_ok());
 }
+
+#[test]
+fn running_state_keys_name_only_stores_whose_holder_lock_is_held() {
+    let root = tempfile::tempdir().unwrap();
+    let paths = PlakPaths::explicit(root.path().join("home"));
+    let lock = |key: &str, name: &str| {
+        let holders = paths.state_root().join(key).join("runtime.sqlite3-holders");
+        fs::create_dir_all(&holders).unwrap();
+        let path = holders.join(name);
+        fs::write(&path, b"").unwrap();
+        fs::write(holders.join("session.branch.holder"), b"").unwrap();
+        path
+    };
+    let held = fs::File::open(lock("r1.e1.p1.t1", "1-0b9362741729c6eb.lock")).unwrap();
+    rustix::fs::flock(&held, rustix::fs::FlockOperation::NonBlockingLockExclusive).unwrap();
+    // A lock file left by a process that exited or re-executed under the
+    // same pid (a `/reload` onto another build) is free: not a running plak.
+    lock(
+        "r2.e2.p2.t2",
+        &format!("{}-0123456789abcdef.lock", std::process::id()),
+    );
+    fs::create_dir_all(paths.state_root().join("r3.e3.p3.t3")).unwrap();
+    assert_eq!(running_state_keys(&paths), ["r1.e1.p1.t1"]);
+    drop(held);
+    assert_eq!(running_state_keys(&paths), Vec::<String>::new());
+}

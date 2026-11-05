@@ -133,6 +133,18 @@ fn storage_warning_is_idle_chrome_and_clears_with_a_healthy_projection() {
         Some("storage low · new turns refused")
     );
     info.storage_level = plakous_host_protocol::views::presentation::StorageLevel::Available;
+    app.apply_host_event(HostEvent::SessionInfo(info.clone()));
+    assert_eq!(app.turn_status_label(), None);
+    // From 70% the session store's fill and the reclaim command show while idle.
+    info.session_store_percent = Some(87);
+    info.storage_level = plakous_host_protocol::views::presentation::StorageLevel::Warning;
+    app.apply_host_event(HostEvent::SessionInfo(info.clone()));
+    assert_eq!(
+        app.turn_status_label().as_deref(),
+        Some("session store 87% full · plak session gc --all")
+    );
+    info.session_store_percent = None;
+    info.storage_level = plakous_host_protocol::views::presentation::StorageLevel::Available;
     app.apply_host_event(HostEvent::SessionInfo(info));
     assert_eq!(app.turn_status_label(), None);
 }

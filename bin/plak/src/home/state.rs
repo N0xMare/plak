@@ -109,6 +109,46 @@ fn notice_size_budget() -> Duration {
     NOTICE_SIZE_BUDGET
 }
 
+/// The state keys under this home whose runtime store a live process holds
+/// open, sorted. Every process that opens a runtime store holds an exclusive
+/// lock on its own `<pid>-<nonce>.lock` in that key's
+/// `runtime.sqlite3-holders` directory for as long as the store is open; the
+/// kernel releases it when the process exits or execs (a `/reload`). A lock
+/// file is probed with a non-blocking exclusive lock that is released at once,
+/// as the store's own holder probe does, so a file left behind by a gone or
+/// re-executed process is not counted. This process's own open store counts.
+pub(crate) fn running_state_keys(paths: &PlakPaths) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(paths.state_root()) else {
+        return Vec::new();
+    };
+    let mut keys = entries
+        .flatten()
+        .filter(|entry| {
+            let Ok(holders) = fs::read_dir(entry.path().join("runtime.sqlite3-holders")) else {
+                return false;
+            };
+            holders.flatten().any(|holder| {
+                let path = holder.path();
+                path.extension()
+                    .is_some_and(|extension| extension == "lock")
+                    && lock_is_held(&path)
+            })
+        })
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .collect::<Vec<_>>();
+    keys.sort();
+    keys
+}
+
+/// Whether another open file description holds `path`'s lock. Taking it
+/// without waiting proves it free and releases it on drop; a file that cannot
+/// be opened is not a live holder.
+fn lock_is_held(path: &Path) -> bool {
+    fs::File::open(path).is_ok_and(|file| {
+        rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive).is_err()
+    })
+}
+
 /// Everything under `state/` that is not this build's directory, sorted.
 pub(super) fn other_state(paths: &PlakPaths) -> Vec<PathBuf> {
     let current = paths.state_dir();

@@ -438,3 +438,88 @@ fn an_identity_known_without_hashing_comes_only_from_the_cache() {
     std::fs::write(&image, "image, rebuilt").unwrap();
     assert_eq!(known(home.path()), None);
 }
+
+fn executable(path: &Path, bytes: &[u8]) {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, bytes).unwrap();
+    let mut permissions = std::fs::metadata(path).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(path, permissions).unwrap();
+}
+
+/// A TUI launched by its snapshot's own path reloads onto its flavor's current
+/// install, the file `plak` on `PATH` resolves to; anything else keeps the
+/// path it was launched by.
+#[test]
+fn a_snapshot_path_launch_follows_its_flavors_current_install() {
+    use super::interactive::resolve_installed_path;
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(root.path()).unwrap();
+    let lib = root.join("lib/plak");
+    let old = lib.join(format!("maintainer/{}/plak", "a".repeat(64)));
+    let new = lib.join(format!("maintainer/{}/plak", "b".repeat(64)));
+    let release = lib.join(format!("release/{}/plak", "c".repeat(64)));
+    let dev = root.join("target/debug/plak");
+    for (path, bytes) in [
+        (&old, &b"old"[..]),
+        (&new, b"new"),
+        (&release, b"release"),
+        (&dev, b"dev"),
+    ] {
+        executable(path, bytes);
+    }
+    let bin = root.join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let search = std::env::join_paths([&bin]).unwrap();
+    let point_path_at = |target: &Path| {
+        let link = bin.join("plak");
+        let _ = std::fs::remove_file(&link);
+        symlink(target, &link).unwrap();
+    };
+
+    point_path_at(&new);
+    assert_eq!(
+        resolve_installed_path(&old, Some(&search)),
+        Some(new.clone())
+    );
+    // Launched through a symlink to the old snapshot: the same snapshot.
+    let alias = root.join("old-alias");
+    symlink(&old, &alias).unwrap();
+    assert_eq!(
+        resolve_installed_path(&alias, Some(&search)),
+        Some(new.clone())
+    );
+    // The current install launched by its own path is already current.
+    assert_eq!(
+        resolve_installed_path(&new, Some(&search)),
+        Some(new.clone())
+    );
+    // Another flavor on PATH is not this launch's install.
+    point_path_at(&release);
+    assert_eq!(
+        resolve_installed_path(&old, Some(&search)),
+        Some(old.clone())
+    );
+    // A development build on PATH, or nothing, leaves the snapshot itself.
+    point_path_at(&dev);
+    assert_eq!(
+        resolve_installed_path(&old, Some(&search)),
+        Some(old.clone())
+    );
+    assert_eq!(resolve_installed_path(&old, None), Some(old.clone()));
+    // Outside the installer layout a path is its own install, as before.
+    point_path_at(&new);
+    assert_eq!(
+        resolve_installed_path(&dev, Some(&search)),
+        Some(dev.clone())
+    );
+    let not_an_id = lib.join("maintainer/not-a-snapshot/plak");
+    executable(&not_an_id, b"odd");
+    assert_eq!(
+        resolve_installed_path(&not_an_id, Some(&search)),
+        Some(not_an_id.clone())
+    );
+}

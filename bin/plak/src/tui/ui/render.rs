@@ -181,6 +181,23 @@ impl App {
         true
     }
 
+    /// The idle HUD's storage label: the volume refusal, then the session
+    /// store's fill from 70%, then the volume warning (spec 02 §2.2).
+    fn idle_storage_label(&self) -> Option<String> {
+        use plakous_host_protocol::views::presentation::StorageLevel;
+        match (
+            self.session_info.storage_level,
+            self.session_info.session_store_percent,
+        ) {
+            (StorageLevel::Refused, _) => Some("storage low · new turns refused".to_owned()),
+            (_, Some(percent)) => Some(format!(
+                "session store {percent}% full · plak session gc --all"
+            )),
+            (StorageLevel::Warning, None) => Some("storage warning · plak doctor".to_owned()),
+            (StorageLevel::Available, None) => None,
+        }
+    }
+
     /// The §5.4 HUD state, including idle warnings and pending work.
     ///
     /// Every value is host-observed: the running tool's own §5.2 header, the
@@ -223,12 +240,7 @@ impl App {
             return Some(label);
         }
         if !self.busy {
-            use plakous_host_protocol::views::presentation::StorageLevel;
-            return match self.session_info.storage_level {
-                StorageLevel::Available => None,
-                StorageLevel::Warning => Some("storage warning · plak doctor".to_owned()),
-                StorageLevel::Refused => Some("storage low · new turns refused".to_owned()),
-            };
+            return self.idle_storage_label();
         }
         if self.phase == HostPhase::Interrupting {
             return Some("cancelling…".to_owned());

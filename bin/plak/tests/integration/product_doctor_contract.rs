@@ -496,12 +496,20 @@ fn runtime_store_usage_reports_thresholds_file_size_and_prune_failure() {
     let mut values = input(&temp);
     values.runtime_store = RuntimeStoreStatus::Usage(usage);
     let failed = values.clone();
+    let store = values.paths.runtime_database.display().to_string();
     let report = diagnose(values);
     let row = check(&report, CheckKind::RuntimeStore);
     assert_eq!(row.severity, Severity::Ok);
     assert!(!row.detail.contains("prune failed"), "{}", row.detail);
-    assert!(row.detail.starts_with("checkpoints 0/"));
+    assert!(
+        row.detail.starts_with(&format!(
+            "{store}: 0% of where new work stops; checkpoints 0/"
+        )),
+        "{}",
+        row.detail
+    );
     assert!(row.detail.contains("new work stops at"));
+    assert!(row.detail.contains("child agents' at"), "{}", row.detail);
     assert!(row.detail.contains("object bytes 0/"));
     assert!(row.detail.contains("; file "), "{}", row.detail);
     assert!(row.detail.contains(" free"), "{}", row.detail);

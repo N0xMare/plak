@@ -369,15 +369,9 @@ fn keep_source_profile(
                         ),
                     ));
         }
-        Err(notice) => {
-            config
-                .session
-                .record_notice(plakous_hosted::sessions::TranscriptRow::info(
-                    product_sessions::NoticeScope::Session,
-                    &notice,
-                ));
-            note.push_str(&format!("; {notice}"));
-        }
+        // The import's summary line carries it once: the CLI prints it and the
+        // TUI opens the successor with it as its opening note.
+        Err(notice) => note.push_str(&format!("; {notice}")),
     }
 }
 

@@ -17,7 +17,8 @@ use plakous_agent::internal::{
     CommitReceipt, CommittedCheckpoint, CreateReceipt, CreateSession, DeleteReceipt, DeleteSession,
     DurabilityReport, FeedPage, FeedSeq, FeedTail, ForkBranch, ForkReceipt, LeaseInstant,
     LoadedBranch, Page, PruneBranch, PruneReceipt, RecoverFork, SessionQuery, SessionRef,
-    SessionStore, SessionStoreError, SessionSummary, StoreFuture, StoreUsage, StoredCheckpoint,
+    SessionStore, SessionStoreError, SessionSummary, StoreAdmission, StoreFuture, StoreReclaimMode,
+    StoreUsage, StoredCheckpoint,
 };
 use plakous_model::SessionId;
 
@@ -177,6 +178,8 @@ pub(in crate::sessions) struct NotifyingStore {
     /// This handle's storage-wait interrupt; other handles on the same
     /// backend keep their own.
     interrupt: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
+    /// Whether this handle's ordinary writes stop at the subordinate mark.
+    subordinate: bool,
 }
 
 impl NotifyingStore {
@@ -184,11 +187,13 @@ impl NotifyingStore {
         inner: Arc<dyn SessionStore>,
         notifier: Arc<FeedNotifier>,
         interrupt: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
+        subordinate: bool,
     ) -> Arc<dyn SessionStore> {
         Arc::new(Self {
             inner,
             notifier,
             interrupt,
+            subordinate,
         })
     }
 
@@ -196,6 +201,37 @@ impl NotifyingStore {
         if result.is_ok() {
             self.notifier.notify(session);
         }
+    }
+
+    /// The usage reading through this handle: a subordinate handle reports
+    /// its mark as each bound's ordinary threshold, so the runtime's own
+    /// pressure checks (root admission and a running cell's nested calls)
+    /// stop there exactly as they stop at the store's threshold.
+    async fn held_usage(&self) -> Result<StoreUsage, SessionStoreError> {
+        let usage = self.inner.usage().await?;
+        Ok(if self.subordinate {
+            usage.with_ordinary_thresholds(|bound| {
+                crate::sessions::backend::subordinate_threshold(bound.limit())
+            })
+        } else {
+            usage
+        })
+    }
+
+    /// The refusal an ordinary write through a subordinate handle meets once
+    /// any aggregate bound has reached its mark. Like the store's own refusal
+    /// it is definite: no session state is written. One bounded reclaim batch
+    /// runs before refusing. The check reads the usage snapshot, so concurrent
+    /// writers may pass the mark by their in-flight commits; the store still
+    /// enforces the class thresholds itself.
+    async fn subordinate_refusal(&self, admission: StoreAdmission) -> Option<SessionStoreError> {
+        if !self.subordinate || admission != StoreAdmission::Ordinary {
+            return None;
+        }
+        self.held_usage().await.ok()?.ordinary_exhausted()?;
+        let _ = self.inner.reclaim(StoreReclaimMode::Bounded).await;
+        let exhausted = self.held_usage().await.ok()?.ordinary_exhausted()?;
+        Some(SessionStoreError::Capacity(exhausted.ordinary_refusal()))
     }
 }
 
@@ -222,6 +258,15 @@ impl SessionStore for NotifyingStore {
     fn create(&self, request: CreateSession) -> StoreFuture<'_, CreateReceipt> {
         let session = request.session().session_id();
         Box::pin(async move {
+            if let Some(refusal) = self.subordinate_refusal(request.admission()).await {
+                // A create the store already accepted replays to its receipt:
+                // the mark refuses only new work.
+                return self
+                    .inner
+                    .recover_create(request)
+                    .await
+                    .map_err(|_| refusal);
+            }
             let result = self.inner.create(request).await;
             self.after(&result, session);
             result
@@ -285,6 +330,9 @@ impl SessionStore for NotifyingStore {
         let session = request.expected().session().session_id();
         let bundle = request.checkpoint().clone();
         Box::pin(async move {
+            if let Some(refusal) = self.subordinate_refusal(request.admission()).await {
+                return Err(refusal);
+            }
             let result = self.inner.commit(request).await;
             if let Ok(receipt) = &result
                 && let Ok(stored) = StoredCheckpoint::from_store(receipt.checkpoint(), bundle)
@@ -304,6 +352,9 @@ impl SessionStore for NotifyingStore {
     fn fork(&self, request: ForkBranch) -> StoreFuture<'_, ForkReceipt> {
         let session = request.source().session().session_id();
         Box::pin(async move {
+            if let Some(refusal) = self.subordinate_refusal(request.admission()).await {
+                return Err(refusal);
+            }
             let result = self.inner.fork(request).await;
             self.after(&result, session);
             result
@@ -320,13 +371,13 @@ impl SessionStore for NotifyingStore {
 
     fn reclaim(
         &self,
-        mode: plakous_agent::internal::StoreReclaimMode,
+        mode: StoreReclaimMode,
     ) -> StoreFuture<'_, plakous_agent::internal::StoreReclaimReport> {
         self.inner.reclaim(mode)
     }
 
     fn usage(&self) -> StoreFuture<'_, StoreUsage> {
-        self.inner.usage()
+        Box::pin(self.held_usage())
     }
 
     fn archive(&self, request: ArchiveSession) -> StoreFuture<'_, ArchiveReceipt> {

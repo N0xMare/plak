@@ -1325,11 +1325,13 @@ fn reload_installed_plak(
             return Ok(format!("reload kept this session open: {reason}"));
         }
     };
+    let same_build = say_if_same_build(&executable, resumable, &record.id);
     tracing::info!(
         target: "plak.reload",
         executable = %executable.display(),
         session = %record.id,
         carried = carry_file.is_some(),
+        same_build,
         "exec installed plak"
     );
     let error = std::os::unix::process::CommandExt::exec(&mut command);
@@ -1350,6 +1352,27 @@ fn reload_installed_plak(
         executable.display(),
         unverified.unwrap_or_default()
     )))
+}
+
+/// Says so when the reload target is the very file this process runs, and
+/// whether it was.
+fn say_if_same_build(executable: &Path, resumable: bool, session: &str) -> bool {
+    let same_build = build_identity::running_executable() == Some(executable);
+    if same_build && resumable {
+        let _ = writeln!(io::stdout(), "{}", same_build_note(executable, session));
+        let _ = io::stdout().flush();
+    }
+    same_build
+}
+
+/// What a reload that reopens the very build it runs says, since nothing on
+/// screen changes: no newer install of this build's flavor resolves on `PATH`.
+fn same_build_note(executable: &Path, session: &str) -> String {
+    format!(
+        "reload reopened the same build {}: `plak` on PATH resolves to no newer install of \
+         its flavor; to move to another build, quit and run it with `--resume {session}`",
+        executable.display()
+    )
 }
 
 fn reload_command(

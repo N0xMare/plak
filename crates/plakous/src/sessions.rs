@@ -119,10 +119,10 @@ pub async fn abandon_and_release(
 }
 mod backend;
 pub mod feed;
-pub use backend::{SessionBackend, SessionStoreBound};
+pub use backend::{SessionBackend, SessionRetention, SessionStoreBound, SessionStoreBoundUsage};
 mod call_detail;
 #[cfg(feature = "sessions-sqlite")]
-pub use backend::{SessionPersistenceShape, SessionStoreBoundUsage, SessionStoreUsage};
+pub use backend::{SessionPersistenceShape, SessionStoreUsage};
 pub use call_detail::{
     MAX_CALL_DETAIL_SIDE_BYTES, SessionCallDetail, SessionCallDetailOutcome, SessionCallDetailText,
 };
@@ -325,6 +325,8 @@ pub struct AgentSessions {
     runtime: DurableSessionRuntime,
     drivers: Arc<DriverRegistry>,
     feed: Arc<feed::FeedNotifier>,
+    interrupt: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
+    subordinate: bool,
 }
 
 mod branch;
@@ -344,7 +346,8 @@ impl AgentSessions {
     pub fn new(backend: SessionBackend) -> Result<Self, AgentSessionsError> {
         let (backend, durability, drivers) = backend.into_parts();
         let feed = Arc::new(feed::FeedNotifier::default());
-        let store = feed::NotifyingStore::wrap(Arc::clone(&backend), Arc::clone(&feed), None);
+        let store =
+            feed::NotifyingStore::wrap(Arc::clone(&backend), Arc::clone(&feed), None, false);
         let runtime =
             DurableSessionRuntime::current(Arc::clone(&store), durability, session_lease_seconds())
                 .map_err(|error| runtime_error(&error))?;
@@ -354,7 +357,33 @@ impl AgentSessions {
             runtime,
             drivers,
             feed,
+            interrupt: None,
+            subordinate: false,
         })
+    }
+
+    /// This handle with `interrupt` and `subordinate` over the same backend,
+    /// drivers and change feed.
+    fn view(
+        &self,
+        interrupt: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
+        subordinate: bool,
+    ) -> Self {
+        let store = feed::NotifyingStore::wrap(
+            Arc::clone(&self.backend),
+            Arc::clone(&self.feed),
+            interrupt.clone(),
+            subordinate,
+        );
+        Self {
+            runtime: self.runtime.with_store(Arc::clone(&store)),
+            store,
+            backend: Arc::clone(&self.backend),
+            drivers: Arc::clone(&self.drivers),
+            feed: Arc::clone(&self.feed),
+            interrupt,
+            subordinate,
+        }
     }
 
     /// This service as one host handle uses it: a store wait for capacity
@@ -365,18 +394,41 @@ impl AgentSessions {
     /// interrupt is bound on the agent.
     #[must_use]
     pub fn with_storage_interrupt(&self, interrupt: Arc<dyn Fn() -> bool + Send + Sync>) -> Self {
-        let store = feed::NotifyingStore::wrap(
-            Arc::clone(&self.backend),
-            Arc::clone(&self.feed),
-            Some(interrupt),
-        );
-        Self {
-            runtime: self.runtime.with_store(Arc::clone(&store)),
-            store,
-            backend: Arc::clone(&self.backend),
-            drivers: Arc::clone(&self.drivers),
-            feed: Arc::clone(&self.feed),
-        }
+        self.view(Some(interrupt), self.subordinate)
+    }
+
+    /// Reads the backend's aggregate retention usage, one reading per bound
+    /// (checkpoints, objects, object bytes), against the limits it was opened
+    /// with and the store's own class thresholds, whatever this handle's
+    /// class. A SQLite backend answers from the snapshot its last write
+    /// published, so another process's writes show after this process's next
+    /// store operation.
+    ///
+    /// # Errors
+    /// Returns a typed backend failure.
+    pub async fn store_usage(&self) -> Result<[SessionStoreBoundUsage; 3], AgentSessionsError> {
+        self.backend
+            .usage()
+            .await
+            .map(SessionStoreBoundUsage::readings)
+            .map_err(store_error)
+    }
+
+    /// This service for sessions that must stop before the others: an
+    /// ordinary write (one that begins new work: a create, fork, root or
+    /// prompt receipt, a prepare or first dispatch fence) through the returned
+    /// handle is refused, definitely and with nothing written, once any
+    /// aggregate bound of limit `L` reaches one reserve below the ordinary
+    /// threshold, `L - 2 * ceil(L / 8)`. The refusal is the
+    /// ordinary-class [`SessionStorePressure`] a full store gives, held to that
+    /// lower mark, so a turn running there ends exactly as at the ordinary
+    /// threshold. Settlement and recovery writes are unchanged. Handles
+    /// without the class keep the last reserve before the ordinary threshold
+    /// for their own new work. Every handle shares the backend, its drivers
+    /// and its change feed, and this one keeps this handle's interrupt.
+    #[must_use]
+    pub fn with_subordinate_admission(&self) -> Self {
+        self.view(self.interrupt.clone(), true)
     }
 
     async fn attach(

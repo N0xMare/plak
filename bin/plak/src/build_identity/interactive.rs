@@ -12,12 +12,58 @@ pub(crate) fn invocation_argv0() -> std::ffi::OsString {
 }
 
 /// The executable the same invocation would start now: `argv[0]` resolved on
-/// `PATH` (or as recorded), with symlinks followed to the installed file.
+/// `PATH` (or as recorded), with symlinks followed to the installed file. A
+/// launch by an installer snapshot's own path follows that flavor's current
+/// install ([`resolve_installed_path`]).
 pub(crate) fn installed_executable() -> Option<PathBuf> {
+    let search = std::env::var_os("PATH");
     match &launch().invocation {
-        Invocation::Path(path) => std::fs::canonicalize(path).ok(),
-        Invocation::Name(name) => resolve_installed_name(name, std::env::var_os("PATH").as_deref()),
+        Invocation::Path(path) => resolve_installed_path(path, search.as_deref()),
+        Invocation::Name(name) => resolve_installed_name(name, search.as_deref()),
     }
+}
+
+/// Resolve a path invocation to the file it names, following symlinks. A path
+/// inside an installer snapshot (`<prefix>/lib/plak/{maintainer,release}/<64
+/// hex>/<name>`) instead resolves to what `<name>` on `path` resolves to when
+/// that is a snapshot of the same flavor directory: snapshots are immutable,
+/// so the snapshot's own path never changes, and a newer install of its flavor
+/// is what that launch reloads onto. A `PATH` name that resolves elsewhere
+/// (another flavor, a development build, nothing) leaves the snapshot itself.
+pub(super) fn resolve_installed_path(
+    path: &Path,
+    search: Option<&std::ffi::OsStr>,
+) -> Option<PathBuf> {
+    let resolved = std::fs::canonicalize(path).ok();
+    let launched = resolved.as_deref().unwrap_or(path);
+    if let Some(flavor) = snapshot_flavor_dir(launched)
+        && let Some(name) = launched.file_name()
+        && let Some(current) = resolve_installed_name(name, search)
+        && snapshot_flavor_dir(&current) == Some(flavor)
+    {
+        return Some(current);
+    }
+    resolved
+}
+
+/// The `<prefix>/lib/plak/<flavor>` directory of an installer snapshot's
+/// executable, or `None` outside that layout.
+fn snapshot_flavor_dir(executable: &Path) -> Option<&Path> {
+    let snapshot = executable.parent()?;
+    let id = snapshot.file_name()?.to_str()?;
+    if id.len() != 64
+        || !id
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    {
+        return None;
+    }
+    let flavor = snapshot.parent()?;
+    if !matches!(flavor.file_name()?.to_str()?, "maintainer" | "release") {
+        return None;
+    }
+    let product = flavor.parent()?;
+    (product.file_name()? == "plak" && product.parent()?.file_name()? == "lib").then_some(flavor)
 }
 
 /// Resolve a command name on `path` (`PATH`'s shape) to the installed file,

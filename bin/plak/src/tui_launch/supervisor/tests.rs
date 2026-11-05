@@ -249,3 +249,16 @@ fn a_round_resuming_another_session_settles_the_reload_requests_it_held() {
         assert_eq!(settled["reason"], "not taken: the session switched");
     }
 }
+
+#[test]
+fn a_reload_onto_the_running_build_says_so_and_how_to_move() {
+    let note = same_build_note(Path::new("/lib/plak/maintainer/abc/plak"), "sid-1");
+    assert!(
+        note.starts_with("reload reopened the same build /lib/plak/maintainer/abc/plak: "),
+        "{note}"
+    );
+    assert!(
+        note.ends_with("quit and run it with `--resume sid-1`"),
+        "{note}"
+    );
+}

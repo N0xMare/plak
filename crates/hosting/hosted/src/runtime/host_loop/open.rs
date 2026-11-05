@@ -566,6 +566,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
                 agent,
                 config.store.clone(),
                 events.clone(),
+                config.state_roots.clone(),
             )
         });
         let mut host = Self::new(

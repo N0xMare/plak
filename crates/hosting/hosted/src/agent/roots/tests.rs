@@ -3,6 +3,15 @@ use std::sync::Arc;
 
 use super::ProductStateRoots;
 
+/// Makes `sessions` the process's shared runtime service of `roots`, so a
+/// test controls its retention bounds.
+pub(crate) fn seed_runtime_sessions(
+    roots: &ProductStateRoots,
+    sessions: Arc<plakous::sessions::AgentSessions>,
+) {
+    *roots.runtime_sessions.lock().unwrap() = Some(sessions);
+}
+
 #[derive(Default)]
 struct PausedTreeStore {
     inner: crate::agent_tree::MemoryTreeStore,

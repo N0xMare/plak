@@ -63,6 +63,8 @@ mod ops;
 #[allow(clippy::unwrap_used, reason = "isolated SQLite fixtures")]
 mod persistence_shape_tests;
 mod reads;
+mod retention;
+pub use retention::SqliteSessionRetention;
 mod rows;
 mod schema;
 #[cfg(test)]
@@ -649,6 +651,19 @@ impl SqliteSessionStore {
                 ..SqliteStoreOptions::default()
             },
         )
+    }
+
+    /// Opens with explicit actor and retained-state bounds on the system
+    /// lease clock.
+    ///
+    /// # Errors
+    ///
+    /// Returns a redaction-safe I/O, schema, or corruption error.
+    pub fn open_with_options(
+        path: impl AsRef<Path>,
+        options: SqliteStoreOptions,
+    ) -> Result<Self, SessionStoreError> {
+        Self::open_with_clock_and_options(path, Arc::new(SystemLeaseClock::new()?), options)
     }
 
     /// Opens with an injected clock.

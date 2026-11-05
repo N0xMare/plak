@@ -109,10 +109,30 @@ impl SessionStorePressure {
     pub const fn admission(&self) -> SessionStoreAdmission {
         self.admission
     }
+
+    /// Whether a subordinate handle held this new work below the store's
+    /// ordinary threshold
+    /// ([`AgentSessions::with_subordinate_admission`](super::AgentSessions::with_subordinate_admission)).
+    #[must_use]
+    pub const fn subordinate(&self) -> bool {
+        matches!(self.admission, SessionStoreAdmission::Ordinary)
+            && self.threshold < StoreAdmission::Ordinary.threshold(self.limit)
+    }
 }
 
 impl fmt::Display for SessionStorePressure {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.subordinate() {
+            return write!(
+                formatter,
+                "{} {}/{} (subordinate ordinary writes stop at {}, before the store's {})",
+                self.bound,
+                self.used,
+                self.limit,
+                self.threshold,
+                StoreAdmission::Ordinary.threshold(self.limit)
+            );
+        }
         write!(
             formatter,
             "{} {}/{} ({} writes stop at {})",

@@ -93,6 +93,7 @@ mod python;
 mod retention;
 #[cfg(all(feature = "composition", feature = "sessions-sqlite"))]
 mod sdk;
+mod subordinate;
 
 #[test]
 fn facade_open_admits_only_runtime_restorable_working_phases() {

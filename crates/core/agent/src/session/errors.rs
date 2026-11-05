@@ -214,6 +214,21 @@ impl fmt::Display for SessionStoreCapacity {
             return write!(formatter, "{} overflow", self.bound);
         }
         match self.admission {
+            // A handle that stops its new work below the class threshold
+            // (`StoreBoundUsage::with_ordinary_threshold`) names both.
+            Some(StoreAdmission::Ordinary)
+                if self.max < StoreAdmission::Ordinary.threshold(self.limit) =>
+            {
+                write!(
+                    formatter,
+                    "{} {}/{} (subordinate ordinary writes stop at {}, before the store's {})",
+                    self.bound,
+                    self.current,
+                    self.limit,
+                    self.max,
+                    StoreAdmission::Ordinary.threshold(self.limit)
+                )
+            }
             Some(admission) if self.max != self.limit => write!(
                 formatter,
                 "{} {}/{} ({admission} writes stop at {})",
@@ -230,13 +245,32 @@ pub struct StoreBoundUsage {
     bound: StoreCapacityBound,
     used: u64,
     limit: u64,
+    /// Where ordinary work stops: the class threshold of `limit`, unless the
+    /// reporting handle holds its new work lower.
+    ordinary: u64,
 }
 
 impl StoreBoundUsage {
     /// Creates one backend-reported bound reading.
     #[must_use]
     pub const fn new(bound: StoreCapacityBound, used: u64, limit: u64) -> Self {
-        Self { bound, used, limit }
+        Self {
+            bound,
+            used,
+            limit,
+            ordinary: StoreAdmission::Ordinary.threshold(limit),
+        }
+    }
+
+    /// This reading as a handle that stops its ordinary work at `threshold`
+    /// reports it, so that every pressure check through that handle stops
+    /// there. A threshold above the class threshold is clamped to it.
+    #[must_use]
+    pub const fn with_ordinary_threshold(mut self, threshold: u64) -> Self {
+        if threshold < self.ordinary {
+            self.ordinary = threshold;
+        }
+        self
     }
 
     /// Returns which bound this reading is for.
@@ -266,7 +300,7 @@ impl StoreBoundUsage {
     /// Returns the amount at which ordinary work stops.
     #[must_use]
     pub const fn ordinary_threshold(self) -> u64 {
-        StoreAdmission::Ordinary.threshold(self.limit)
+        self.ordinary
     }
 
     /// Returns the amount at which settlement stops.
@@ -329,6 +363,18 @@ impl StoreUsage {
     #[must_use]
     pub const fn bounds(self) -> [StoreBoundUsage; 3] {
         [self.checkpoints, self.objects, self.object_bytes]
+    }
+
+    /// This reading with each bound's ordinary work held to `threshold` of
+    /// it ([`StoreBoundUsage::with_ordinary_threshold`]).
+    #[must_use]
+    pub fn with_ordinary_thresholds(self, threshold: impl Fn(StoreBoundUsage) -> u64) -> Self {
+        let held = |bound: StoreBoundUsage| bound.with_ordinary_threshold(threshold(bound));
+        Self {
+            checkpoints: held(self.checkpoints),
+            objects: held(self.objects),
+            object_bytes: held(self.object_bytes),
+        }
     }
 
     /// Returns the first bound on which ordinary work has no headroom left.

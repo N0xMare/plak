@@ -175,7 +175,7 @@ impl ChildSessionPort for ParentSessionPort {
             let sessions = self
                 .parent
                 .state_roots()
-                .runtime_sessions()
+                .child_runtime_sessions()
                 .map_err(|_| session_refusal("plak runtime service is unavailable"))?;
             let accepted = sessions
                 .accepted_create(&operation_id)

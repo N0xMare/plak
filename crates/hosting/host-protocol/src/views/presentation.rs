@@ -779,6 +779,11 @@ pub struct SessionInfoView {
     /// Product-home capacity level, with no operator paths or rendered prose.
     /// In-process chrome only; not persisted or projected on JSONL v1.
     pub storage_level: StorageLevel,
+    /// The shared session store's fill as a whole percentage of where new
+    /// work stops, reported only from 70%. In-process chrome only; not
+    /// persisted or projected on JSONL v1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_store_percent: Option<u8>,
     /// Host binary version.
     pub host_version: String,
     /// Product session id.

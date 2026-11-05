@@ -3,7 +3,6 @@ use super::error::store_path_error;
 use super::registry::DriverRegistry;
 use super::{AgentSessionsError, error::store_error};
 use plakous_agent::internal::{RuntimeDurability, SessionStore};
-#[cfg(feature = "sessions-sqlite")]
 use plakous_agent::internal::{StoreBoundUsage, StoreUsage};
 use plakous_store::{MemorySessionStore, MemoryStoreLimits};
 #[cfg(feature = "sessions-sqlite")]
@@ -54,6 +53,31 @@ impl SessionBackend {
 
 #[cfg(feature = "sessions-sqlite")]
 impl SessionBackend {
+    /// Reads, for every session of one SQLite store, its retained checkpoints
+    /// and the object bytes they reach, largest first, without opening the
+    /// store for use. Returns an empty list when no current-shape database
+    /// exists. Shared objects count toward every session that reaches them.
+    ///
+    /// # Errors
+    ///
+    /// Returns a redaction-safe refusal for unsafe, unknown, or damaged shape.
+    pub fn inspect_sqlite_session_retention(
+        path: impl AsRef<Path>,
+    ) -> Result<Vec<SessionRetention>, AgentSessionsError> {
+        let path = path.as_ref();
+        let retention = SqliteSessionStore::inspect_session_retention(path)
+            .map_err(|error| store_path_error(path, error))?;
+        Ok(retention
+            .unwrap_or_default()
+            .into_iter()
+            .map(|session| SessionRetention {
+                session_id: session.session_id,
+                checkpoints: session.checkpoints,
+                object_bytes: session.object_bytes,
+            })
+            .collect())
+    }
+
     /// Opens or creates one required-durability SQLite backend.
     ///
     /// Attach admits bounded shape, exact schema, and counters. It does not
@@ -94,6 +118,43 @@ impl SessionBackend {
             SqliteSessionStore::open(path).map_err(|error| store_path_error(path, error))?;
         Ok(Self::from_store(
             Arc::new(store.with_storage_probe(probe)),
+            RuntimeDurability::Required,
+        ))
+    }
+
+    /// Opens or creates one required-durability SQLite backend whose
+    /// aggregate retention bounds are `checkpoints`, `objects` and
+    /// `object_bytes` instead of the defaults; every other bound keeps its
+    /// default. The admission reserve and its class thresholds follow these
+    /// bounds. Usage inspection ([`Self::inspect_sqlite_usage`]) still reads
+    /// against the defaults.
+    ///
+    /// # Errors
+    /// Returns the same admission failures as [`Self::sqlite`].
+    pub fn sqlite_with_retention_bounds(
+        path: impl AsRef<Path>,
+        checkpoints: std::num::NonZeroUsize,
+        objects: std::num::NonZeroUsize,
+        object_bytes: std::num::NonZeroUsize,
+    ) -> Result<Self, AgentSessionsError> {
+        let path = path.as_ref();
+        let defaults = plakous_store::SqliteStoreOptions::default();
+        let limits = defaults.limits();
+        let options = plakous_store::SqliteStoreOptions::new(
+            MemoryStoreLimits::new(
+                limits.max_sessions(),
+                limits.max_branches_per_session(),
+                checkpoints,
+                objects,
+                object_bytes,
+                limits.max_page_size(),
+            ),
+            defaults.queue_capacity(),
+        );
+        let store = SqliteSessionStore::open_with_options(path, options)
+            .map_err(|error| store_path_error(path, error))?;
+        Ok(Self::from_store(
+            Arc::new(store),
             RuntimeDurability::Required,
         ))
     }
@@ -176,6 +237,14 @@ impl fmt::Debug for SessionBackend {
     }
 }
 
+/// Where ordinary writes through a subordinate handle stop on a bound of
+/// `limit`: one reserve before the ordinary threshold, so that the handles
+/// without the class keep that reserve for their own new work
+/// ([`AgentSessions::with_subordinate_admission`](super::AgentSessions::with_subordinate_admission)).
+pub(crate) const fn subordinate_threshold(limit: u64) -> u64 {
+    limit.saturating_sub(plakous_agent::internal::StoreAdmission::reserve(limit).saturating_mul(2))
+}
+
 /// Which aggregate retention bound a usage reading or refusal is for.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -198,7 +267,6 @@ impl fmt::Display for SessionStoreBound {
     }
 }
 
-#[cfg(feature = "sessions-sqlite")]
 /// Used and configured amount of one aggregate retention bound.
 ///
 /// New work stops at [`Self::ordinary_threshold`]; recording the outcome of
@@ -210,8 +278,26 @@ pub struct SessionStoreBoundUsage {
     usage: StoreBoundUsage,
 }
 
-#[cfg(feature = "sessions-sqlite")]
 impl SessionStoreBoundUsage {
+    /// Every aggregate bound of `usage`: checkpoints, objects, object bytes.
+    pub(super) const fn readings(usage: StoreUsage) -> [Self; 3] {
+        let [checkpoints, objects, object_bytes] = usage.bounds();
+        [
+            Self {
+                bound: SessionStoreBound::Checkpoints,
+                usage: checkpoints,
+            },
+            Self {
+                bound: SessionStoreBound::Objects,
+                usage: objects,
+            },
+            Self {
+                bound: SessionStoreBound::ObjectBytes,
+                usage: object_bytes,
+            },
+        ]
+    }
+
     /// Returns which bound this reading is for.
     #[must_use]
     pub const fn bound(&self) -> SessionStoreBound {
@@ -248,10 +334,47 @@ impl SessionStoreBoundUsage {
         self.usage.settlement_threshold()
     }
 
+    /// Returns the amount at which new work through a subordinate handle
+    /// stops, one reserve below [`Self::ordinary_threshold`].
+    #[must_use]
+    pub const fn subordinate_threshold(&self) -> u64 {
+        subordinate_threshold(self.usage.limit())
+    }
+
     /// Whether new work is refused on this bound.
     #[must_use]
     pub const fn ordinary_exhausted(&self) -> bool {
         self.usage.ordinary_exhausted()
+    }
+}
+
+/// One session's retained checkpoints and the object bytes they reach
+/// (`SessionBackend::inspect_sqlite_session_retention`, with `sessions-sqlite`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SessionRetention {
+    session_id: plakous_model::SessionId,
+    checkpoints: u64,
+    object_bytes: u64,
+}
+
+impl SessionRetention {
+    /// Returns the session.
+    #[must_use]
+    pub const fn session_id(&self) -> plakous_model::SessionId {
+        self.session_id
+    }
+
+    /// Returns the retained checkpoints of every branch of the session.
+    #[must_use]
+    pub const fn checkpoints(&self) -> u64 {
+        self.checkpoints
+    }
+
+    /// Returns the accounted bytes of the objects those checkpoints reach,
+    /// shared objects included.
+    #[must_use]
+    pub const fn object_bytes(&self) -> u64 {
+        self.object_bytes
     }
 }
 
@@ -273,8 +396,6 @@ impl SessionStoreUsage {
         file: Option<SqliteFileUsage>,
         feed: Option<SqliteFeedUsage>,
     ) -> Self {
-        let [checkpoints, objects, object_bytes] = usage.bounds();
-        let reading = |bound, usage| SessionStoreBoundUsage { bound, usage };
         let file = file.unwrap_or(SqliteFileUsage {
             file_bytes: 0,
             free_bytes: 0,
@@ -284,11 +405,7 @@ impl SessionStoreUsage {
             bytes: 0,
         });
         Self {
-            bounds: [
-                reading(SessionStoreBound::Checkpoints, checkpoints),
-                reading(SessionStoreBound::Objects, objects),
-                reading(SessionStoreBound::ObjectBytes, object_bytes),
-            ],
+            bounds: SessionStoreBoundUsage::readings(usage),
             file_bytes: file.file_bytes,
             free_bytes: file.free_bytes,
             feed_records: feed.records,

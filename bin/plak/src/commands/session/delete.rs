@@ -624,7 +624,106 @@ pub(crate) fn gc_sessions(
         .map_err(|error| CliFailure::new(error.to_string()))?;
     tally.reclaimed.objects = tally.reclaimed.objects.saturating_add(report.objects());
     tally.reclaimed.bytes = tally.reclaimed.bytes.saturating_add(report.object_bytes());
-    write_gc_tally(stdout, &tally).map_err(|_| CliFailure::new("stdout failed"))
+    write_gc_tally(stdout, &tally).map_err(|_| CliFailure::new("stdout failed"))?;
+    let names = product.session_locators().map_err(CliFailure::new)?;
+    write_store_report(stdout, paths, &names).map_err(|_| CliFailure::new("stdout failed"))
+}
+
+/// The bound nearest where new work stops, relative to that stop: the one
+/// that refuses new work first.
+fn binding_bound(
+    bounds: &[plakous::sessions::SessionStoreBoundUsage],
+) -> plakous::sessions::SessionStoreBoundUsage {
+    let share = |bound: &plakous::sessions::SessionStoreBoundUsage| {
+        u128::from(bound.used()) * 1_000_000 / u128::from(bound.ordinary_threshold().max(1))
+    };
+    let mut binding = bounds[0];
+    for bound in &bounds[1..] {
+        if share(bound) > share(&binding) {
+            binding = *bound;
+        }
+    }
+    binding
+}
+
+/// How many sessions the gc report lists by retained bytes.
+const LARGEST_SESSIONS: usize = 5;
+
+/// What is left after gc: the store's remaining object bytes against where
+/// new work stops, the sessions retaining the most, and any running plak on
+/// this home that uses another build's store, which this gc did not touch.
+fn write_store_report(
+    stdout: &mut dyn io::Write,
+    paths: &crate::home::paths::PlakPaths,
+    names: &[(String, Option<SessionLocator>)],
+) -> io::Result<()> {
+    let store = paths.runtime_database();
+    match plakous::sessions::SessionBackend::inspect_sqlite_usage(&store) {
+        Ok(Some(usage)) => {
+            let binding = binding_bound(usage.bounds());
+            writeln!(
+                stdout,
+                "remaining {} {} in {}: new work stops at {}, child agents' at {}, limit {}",
+                binding.used(),
+                binding.bound(),
+                store.display(),
+                binding.ordinary_threshold(),
+                binding.subordinate_threshold(),
+                binding.limit()
+            )?;
+        }
+        Ok(None) => writeln!(
+            stdout,
+            "remaining 0 object bytes: {} holds no sessions",
+            store.display()
+        )?,
+        Err(error) => writeln!(stdout, "remaining bytes unavailable: {error}")?,
+    }
+    match plakous::sessions::SessionBackend::inspect_sqlite_session_retention(&store) {
+        Ok(sessions) if !sessions.is_empty() => {
+            writeln!(
+                stdout,
+                "largest sessions by retained object bytes (objects they share count toward each):"
+            )?;
+            for session in sessions.iter().take(LARGEST_SESSIONS) {
+                let name = names
+                    .iter()
+                    .find(|(_, locator)| {
+                        locator.is_some_and(|locator| locator.session_id() == session.session_id())
+                    })
+                    .map_or_else(
+                        || {
+                            format!(
+                                "runtime session {} (a sub-agent's, or no product record)",
+                                session.session_id()
+                            )
+                        },
+                        |(id, _)| format!("session {id}"),
+                    );
+                writeln!(
+                    stdout,
+                    "  {} bytes, {} checkpoints: {name}",
+                    session.object_bytes(),
+                    session.checkpoints()
+                )?;
+            }
+        }
+        Ok(_) => {}
+        Err(error) => writeln!(stdout, "per-session retention unavailable: {error}")?,
+    }
+    let current = crate::home::state::state_key();
+    let others: Vec<String> = crate::home::state::running_state_keys(paths)
+        .into_iter()
+        .filter(|key| *key != current)
+        .collect();
+    if !others.is_empty() {
+        writeln!(
+            stdout,
+            "note: a running plak on this home uses state {} of another build; this gc ran as build state {current} and did not touch that store; run `plak session gc` with that build to reclaim it",
+            others.join(", ")
+        )?;
+    }
+    Ok(())
 }
 
 /// Prunes one session at the head its views name after a lease-free projector

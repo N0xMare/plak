@@ -51,6 +51,24 @@ fn credential_command(account: AccountTarget) -> String {
     }
 }
 
+/// Legacy stores never count against this build's store.
+const LEGACY_STORES: &str =
+    "`plak state prune-legacy` frees only other builds' stores, not this one";
+
+/// `the session store is <file>; ` for this process's product home, so a
+/// capacity remedy names the file it is about.
+fn session_store_clause() -> String {
+    crate::home::paths::PlakPaths::home_from_env().map_or_else(
+        |_| String::new(),
+        |paths| {
+            format!(
+                "the session store is {}; ",
+                paths.runtime_database().display()
+            )
+        },
+    )
+}
+
 pub(crate) fn storage_admission(text: &str) -> String {
     format!(
         "{text}; {}",
@@ -290,8 +308,9 @@ pub(crate) fn remedy_text(remedy: &NoticeRemedy, context: RemedyContext<'_>) -> 
         },
         R::RetryFork {} => match face { Tui => "run /fork again".into(), Run => format!("{open_tui} and use /fork"), Jsonl => "send fork again".into() },
         R::ReclaimThenRecover {} => format!(
-            "run `plak session gc --all`, then `plak session delete <id>` on unneeded sessions, \
-             then {}",
+            "{}run `plak session gc --all`, then `plak session delete <id>` on unneeded \
+             sessions, then {}; {LEGACY_STORES}",
+            session_store_clause(),
             match face {
                 Tui => "/recover".into(),
                 Run => format!("`plak session recover {session}`"),
@@ -299,8 +318,9 @@ pub(crate) fn remedy_text(remedy: &NoticeRemedy, context: RemedyContext<'_>) -> 
             }
         ),
         R::ReclaimRetainedHistory {} => format!(
-            "run `plak session gc --all`, then `plak session delete <id>` on unneeded sessions; \
-             {} do not reclaim retained history",
+            "{}run `plak session gc --all`, then `plak session delete <id>` on unneeded \
+             sessions; {} do not reclaim retained history; {LEGACY_STORES}",
+            session_store_clause(),
             match face {
                 Tui => "/new, compaction and /recover",
                 _ => "clear, compact and recover",

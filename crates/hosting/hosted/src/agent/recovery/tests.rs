@@ -5211,3 +5211,230 @@ impl Fixture {
         .expect("the continuations are admitted");
     }
 }
+
+/// Children stop one store reserve before the root through the product's own
+/// wiring. With the shared store past the children's mark, `spawn_agent`
+/// refuses `storage_low` and mints nothing, a spawn's create is refused and
+/// creates nothing, a reopened child's next turn is refused, and the root's
+/// next turn is admitted.
+#[tokio::test]
+async fn children_stop_one_reserve_before_the_root_through_the_product_wiring() {
+    use std::num::NonZeroUsize;
+    let fixture = Fixture::new("child-mark");
+    // 128 checkpoints: the root's new work stops at 112, the children's at 96.
+    let limited = Arc::new(
+        AgentSessions::new(
+            plakous::sessions::SessionBackend::sqlite_with_retention_bounds(
+                fixture.database(),
+                NonZeroUsize::new(128).unwrap(),
+                NonZeroUsize::new(1 << 20).unwrap(),
+                NonZeroUsize::new(1 << 30).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap(),
+    );
+    crate::agent::roots::tests::seed_runtime_sessions(
+        fixture.parent.state_roots(),
+        Arc::clone(&limited),
+    );
+    let sessions = fixture.sessions();
+    let loopback = || {
+        let controller =
+            BoundaryController::quiet_from_evidence_path(CrashBoundary::None, &fixture.evidence)
+                .unwrap();
+        plakous_offline_crash_harness::runtime_binding(fixture.root.path(), controller).unwrap()
+    };
+    let create = |operation: String| {
+        let sessions = Arc::clone(&sessions);
+        let binding = loopback();
+        async move {
+            let CreateSessionOutcome::Created { session, .. } = sessions
+                .create(CreateSessionRequest::new(
+                    SessionOperationId::new(operation).unwrap(),
+                    binding,
+                ))
+                .await
+                .unwrap()
+            else {
+                panic!("created session required")
+            };
+            session.release().await.unwrap()
+        }
+    };
+    let root = create("child-mark:root".into()).await;
+
+    // A child created below the mark, through the children's handle.
+    let child = fixture.spawn();
+    let CreateSessionOutcome::Created { session, .. } = fixture
+        .parent
+        .state_roots()
+        .child_runtime_sessions()
+        .unwrap()
+        .create(CreateSessionRequest::new(
+            spawn_child_operation_id(&fixture.tree_id, &child).unwrap(),
+            fixture.binding(),
+        ))
+        .await
+        .unwrap()
+    else {
+        panic!("created child session required")
+    };
+    let child_locator = session.release().await.unwrap();
+    fixture
+        .runtime
+        .mutate_then_emit(false, {
+            let (child, locator) = (child.clone(), child_locator.to_string());
+            move |tree| {
+                tree.record_child_session(&child, &locator)
+                    .map_err(|error| error.message)
+            }
+        })
+        .await
+        .unwrap();
+
+    // Fill to the children's mark through the root's handle.
+    let mut fillers = 0;
+    while sessions.store_usage().await.unwrap()[0].used() < 96 {
+        fillers += 1;
+        assert!(fillers < 128, "the store never reached the children's mark");
+        create(format!("child-mark:filler-{fillers}")).await;
+    }
+    let used = sessions.store_usage().await.unwrap()[0].used();
+    assert!(used < 100, "the root keeps headroom: {used}");
+
+    // spawn_agent: storage_low, nothing minted. The host's poll keeps the
+    // process's last reading; the test takes one.
+    assert!(
+        fixture
+            .parent
+            .state_roots()
+            .read_store_fill()
+            .await
+            .is_some_and(|fill| fill.children_stopped())
+    );
+    let nodes = fixture.live_nodes();
+    let (succeeded, refused) = fixture
+        .invoke(
+            "spawn_agent",
+            json!({
+                "template": "review",
+                "prompt": "review the diff",
+                "output_schema_json": "{\"type\":\"object\"}",
+                "tier": "read_only",
+            }),
+        )
+        .await;
+    assert!(!succeeded, "{refused}");
+    assert_eq!(code(&refused), "storage_low", "{refused}");
+    assert!(
+        refused["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("where child agents' new work stops"),
+        "{refused}"
+    );
+    assert_eq!(fixture.live_nodes(), nodes, "a refused spawn minted a node");
+
+    // A spawn's create past the mark creates nothing.
+    let spawned = fixture
+        .runtime
+        .mutate_then_emit(false, |tree| {
+            tree.spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+                .map_err(|error| error.message)
+        })
+        .await
+        .unwrap();
+    let operation = spawn_child_operation_id(&fixture.tree_id, &spawned.agent_id).unwrap();
+    let start = crate::agent_tree_tools::SpawnStart {
+        path: fixture.root.path().display().to_string(),
+        spawned,
+        description: "review".into(),
+        prompt: "review the diff".into(),
+        output_schema_json: "{}".into(),
+        turn_token: 1,
+        tier: Tier::ReadOnly,
+        account: "claude".into(),
+        tuple_id: "claude-opus-5-5".into(),
+        effort: None,
+    };
+    let created = crate::agent::children::create_spawned_child_session(
+        &fixture.parent,
+        &start,
+        tokio::time::Instant::now() + Duration::from_secs(120),
+    )
+    .await;
+    assert!(
+        matches!(
+            created,
+            Err(crate::agent_tree_tools::SpawnBindError::Refused(_))
+        ),
+        "a spawn's create passed the children's mark"
+    );
+    assert_eq!(sessions.accepted_create(&operation).await.unwrap(), None);
+
+    // The reopened child's next turn is refused, typed, with nothing written.
+    let path = fixture
+        .runtime
+        .read(|tree| tree.node(&child).unwrap().path.display().to_string())
+        .unwrap();
+    let ChildReopen::Attached { session, .. } = reopen_spawned_child(
+        &fixture.parent,
+        &child,
+        &path,
+        &child_locator.to_string(),
+        "child-mark",
+        ChildReopenMode::OWNER,
+    )
+    .await
+    .unwrap() else {
+        panic!("the child reopens");
+    };
+    let refused = session
+        .agent()
+        .unwrap()
+        .command(plakous::agent::TurnCommand::Start {
+            command_id: CommandId::new("child-mark:child-turn").unwrap(),
+            input: "more work".to_owned().into(),
+        })
+        .await
+        .unwrap();
+    let rejection = refused
+        .acknowledgement()
+        .rejection()
+        .expect("the child's turn was admitted past its mark");
+    assert_eq!(
+        rejection.kind(),
+        plakous::agent::ControlErrorKind::StoragePressure
+    );
+    assert_eq!(sessions.store_usage().await.unwrap()[0].used(), used);
+    session.release().await.unwrap();
+
+    // The root's next turn is admitted.
+    let OpenSessionOutcome::Opened { session, .. } = sessions
+        .open(OpenSessionRequest::new(
+            SessionOperationId::new("child-mark:open-root").unwrap(),
+            root,
+            loopback(),
+        ))
+        .await
+        .unwrap()
+    else {
+        panic!("the root reopens");
+    };
+    let result = session
+        .agent()
+        .prompt("the root keeps working")
+        .await
+        .unwrap()
+        .result()
+        .await
+        .unwrap();
+    assert!(
+        matches!(result.outcome(), TurnResultOutcome::Completed(_)),
+        "{:?}",
+        result.outcome()
+    );
+    session.release().await.unwrap();
+    crate::topology_runtime::force_release(&fixture.tree_id).await;
+}

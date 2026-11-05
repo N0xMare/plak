@@ -235,6 +235,12 @@ by itself. `/reload` is refused, with a transcript note, while:
   sub-agents run: `reload refused: wait for the turn to finish or cancel it`
   or `reload refused: sub-agents are still running`.
 
+A TUI started by an installed snapshot's own path (for example
+`~/.local/lib/plak/maintainer/<id>/plak --resume <session>`) follows that
+flavor's current install, the `plak` on `PATH`, when that is a snapshot of the
+same flavor. When `/reload` would start the very build that is running, it says
+`reload reopened the same build <path>` and how to move to another build.
+
 A refusal never closes the TUI. Before closing anything, `/reload` asks the
 installed build whether it would reopen this session exactly. If it would, the
 session resumes as it is. If the installed build derives a different frozen

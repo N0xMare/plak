@@ -649,7 +649,8 @@ Before template admission, binding, minting or tree writes, the hosted binder
 asks the product store's capacity probe. A product-home volume below the
 512 MiB admission floor refuses with `storage_low` and a path-free storage reason
 (chapter 02 §2.2). No child or attempt is created. This affects only new
-spawns, not running children, mail, retirement or recovery.
+spawns, not running children, mail, retirement or recovery. A shared session
+store past the children's mark refuses the same way (§10.1).
 The model-facing refusal says the operator's storage is below the admission
 floor and instructs the agent not to delete files or retry; only operator
 doctor output names the volume. `capacity` retains its running-set meaning.
@@ -2807,6 +2808,28 @@ parent alone. What paces a wide tree is the per-account request budget
 The separate `storage_low` refusal is the product-home admission floor
 (chapter 02 §2.2), not running saturation. It carries no running set and is not
 remedied by interrupting children, deleting files or repeated model-side retries.
+
+Children stop before the root on the shared runtime store too. Every child
+session is created, replayed and reopened through a subordinate handle
+(`AgentSessions::with_subordinate_admission`, chapter 01 §5.2), whose new work
+stops one store reserve below the ordinary threshold: at `L - 2 * ceil(L / 8)`
+of each aggregate bound `L` (3 GiB of the 4 GiB object-byte default, where the
+root's new work stops at 3.5 GiB). Reads and recovery-class writes of child
+sessions (effect-evidence recovery, the accepted-create lookup) may use the
+root's handle. Past the mark `spawn_agent` refuses with `storage_low` before a
+node is admitted or anything is minted: the spawn admission checks the
+process's last store reading (at most one host poll old) before the template is
+resolved, and a fresh reading before the binding is admitted; the message names
+the bound, where child agents' new work stops and where the root's does. A child's Start or
+follow-up is refused as storage pressure (mail delivery refused, nothing
+admitted), a running child's Code Cell meets the mark at its next nested call
+with the catchable `Backpressure` error, and a child turn already running ends
+at its next ordinary write with the ordinary storage-pressure failure (`Failed`
+of kind `Session`, never `recovery_required`), whose result reaches its parent
+like any failed attempt. Settlement and recovery writes of children are not
+held to the mark (chapter 01 §5.2 bounds what still lands past it). The root
+therefore keeps the last reserve before the ordinary threshold for its own
+turn, compaction and cleanup.
 
 | Bound | Value | Configurable |
 | --- | --- | --- |
