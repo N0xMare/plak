@@ -3735,6 +3735,14 @@ verdicts) are addressed, the session profile and workspace chrome states.
   next session's first window) follows the next attachment's `attached`
   answer. A switch whose new root cannot be read ends the connection as a
   leaving client's does.
+- **Local faces.** A connection's acceptor marks it a local face (stdio's
+  `plak agent --wire v2`) or a remote one (the web endpoint); a connection
+  is remote unless marked. The TUI reaches its host in process, not through
+  a wire acceptor. A remote face is refused, `refused_for_role` with row
+  `local_face`, the intents that exec or hand off the host's own build or
+  answer with the installed build's path and probe output: `check_build`,
+  `probe_reload`, `accept_reload_request` and `refuse_reload_request`
+  (chapter 04 §4.6).
 - **Requests.** A `request` carries a client-chosen id and an `op`:
   `attach` (a node, by tree and agent id), `detach`, `intent` (an
   attachment and a session intent) or `ping`. It gets exactly one

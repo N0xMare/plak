@@ -311,3 +311,66 @@ fn a_failure_before_dispatch_is_a_v2_refusal() {
     );
     assert!(!text.contains("\"v\":1"), "{text}");
 }
+
+/// A remote face is refused the intents only a local face may send (the
+/// installed-build check and probe, which exec the installed build and
+/// answer with its path, and the reload-request handover): none reaches the
+/// session. stdio's local face sends them. A connection whose acceptor never
+/// names its face is a remote one.
+#[test]
+fn only_a_local_face_may_probe_or_check_the_installed_build() {
+    use plakous_hosted::host_service::wire::Face;
+    for face in [None, Some(Face::Remote), Some(Face::Local)] {
+        let (actions, intents) = user_action_channel();
+        let (observations, events) = plakous_host_protocol::observation_channel();
+        let (client, lines) = mpsc::sync_channel(8);
+        let intent = |id, intent| ClientFrame::Request {
+            id,
+            op: Op::Intent {
+                attachment: ROOT_ATTACHMENT,
+                intent: SessionIntent::Extension(intent),
+                blobs: Vec::new(),
+            },
+        };
+        for frame in [
+            ClientFrame::Request {
+                id: 1,
+                op: Op::Attach { node: root() },
+            },
+            intent(2, SurfaceIntent::ProbeReload),
+            intent(3, SurfaceIntent::CheckBuild),
+            ClientFrame::Bye,
+        ] {
+            client.send(Ok(line(&frame))).unwrap();
+        }
+        let host = thread::spawn(move || fake_session(&intents, observations));
+        let mut output = Vec::new();
+        let adapter = Adapter::new(root(), &mut output, actions);
+        match face {
+            Some(face) => adapter.face(face),
+            None => adapter,
+        }
+        .serve(&lines, &events)
+        .unwrap();
+        let taken = host.join().unwrap();
+        let reached = taken
+            .iter()
+            .filter(|intent| matches!(intent, SessionIntent::Extension(_)))
+            .count();
+        let refused = frames(&output)
+            .iter()
+            .filter(|frame| {
+                matches!(frame, HostFrame::Response {
+                    outcome: Outcome::Refused(RequestRefusal::RefusedForRole { row }),
+                    ..
+                } if row == "local_face")
+            })
+            .count();
+        match face {
+            None | Some(Face::Remote) => {
+                assert_eq!((reached, refused), (0, 2), "{face:?}: {taken:?}");
+            }
+            Some(Face::Local) => assert_eq!((reached, refused), (2, 0), "{taken:?}"),
+        }
+    }
+}

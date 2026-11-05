@@ -14,7 +14,7 @@ use plakous_host_protocol::SessionIntent;
 use plakous_host_protocol::wire::{HandshakeRefusal, LineReader, WireError};
 use plakous_hosted::error::{CliFailure, CliResult, ProcessOutcome};
 use plakous_hosted::host_service::wire::{
-    WireConnection, handshake, refuse, session_root, session_root_of, session_welcome,
+    Face, WireConnection, handshake, refuse, session_root, session_root_of, session_welcome,
 };
 use plakous_hosted::runtime::{HostConfig, spawn_host_worker};
 
@@ -55,7 +55,9 @@ pub(crate) fn run_agent_wire(
         root.clone(),
     );
     let served = match handshake::<PlakExtension>(&lines, welcome, stdout, &signalled) {
+        // stdio's peer is the parent process that started this one.
         Ok(true) => Adapter::new(root, stdout, actions.clone())
+            .face(Face::Local)
             .with_stop(signalled)
             .serving(session_id, move |id| session_root_of(&state_roots, id))
             .serve(&lines, &events),

@@ -364,8 +364,8 @@ fn a_shared_session_moves_every_attachment_on_a_switch() {
         .build()
         .unwrap();
     let (mut first, mut second, mut later) = (Vec::new(), Vec::new(), Vec::new());
-    let mut one = session.connect(&mut first, || false);
-    let mut two = session.connect(&mut second, || false);
+    let mut one = session.connect(&mut first, Face::Local, || false);
+    let mut two = session.connect(&mut second, Face::Local, || false);
     assert!(matches!(
         one.request(1, Op::Attach { node: root() }),
         Some(Outcome::Ok(Answer::Attached { attachment: 1 }))
@@ -399,7 +399,7 @@ fn a_shared_session_moves_every_attachment_on_a_switch() {
         Some(Outcome::Ok(Answer::Attached { attachment: 3 }))
     ));
     one.flush().unwrap();
-    let mut three = session.connect(&mut later, || false);
+    let mut three = session.connect(&mut later, Face::Local, || false);
     assert!(matches!(
         three.request(
             1,

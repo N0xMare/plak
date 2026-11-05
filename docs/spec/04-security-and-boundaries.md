@@ -692,8 +692,8 @@ widens it.
 ### 2.10 The web endpoint
 
 `plak web` (chapter 02 §4.5) serves one session to browsers on the tailnet.
-Everything a client admitted there can do, an operator at the TUI can do: it
-holds the serving user's shell. The endpoint's whole job is deciding who the
+Everything a client admitted there can do, an operator at the TUI can do,
+except the local-face intents of §4.6: it holds the serving user's shell. The endpoint's whole job is deciding who the
 client is, and its checks stop different attackers.
 
 - **The tailnet identity stops everyone who is not an allowed login.** The
@@ -1590,7 +1590,14 @@ running interactive session to reload onto the installed build (chapter 02
   channel, and a session's host announces and takes requests only for the
   session it serves, never for a session a face names; a face can only
   acknowledge a request the host offered it and refuse one the host handed
-  over to it. A
+  over to it. These requests, the installed-build check (`check_build`)
+  and probe (`probe_reload`, which execs the installed build and answers
+  with its path, its configuration errors and the carry's capacity), are
+  for a local face only: a wire v2 connection whose acceptor did not mark
+  it local (the web endpoint, however its client authenticated) is refused
+  them `refused_for_role` with row `local_face`, and nothing is run. stdio's
+  `plak agent --wire v2` is local; the TUI reaches its host in process, not
+  through a wire acceptor. A
   request that replaces one the host has not yet taken gives the replaced one
   a `superseded` outcome. Outcomes nobody collected are pruned after seven
   days.

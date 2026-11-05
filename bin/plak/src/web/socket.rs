@@ -18,7 +18,7 @@ use hyper::upgrade::Upgraded;
 use hyper::{Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use plakous_host_protocol::wire::{HandshakeRefusal, MAX_LINE_BYTES};
-use plakous_hosted::host_service::wire::{HELLO_DEADLINE, WireConnection, handshake, refuse};
+use plakous_hosted::host_service::wire::{Face, HELLO_DEADLINE, WireConnection, handshake, refuse};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
@@ -272,7 +272,9 @@ async fn drive(socket: &mut Socket, served: &Served) -> Ended {
     }
     let mut connection = served
         .session
-        .connect(outbox.clone(), move || stop.stopped());
+        // The web endpoint is never a local face, however its client
+        // authenticated: it may not exec or hand off the host's build.
+        .connect(outbox.clone(), Face::Remote, move || stop.stopped());
     let ended = attached(socket, served, &mut connection, &outbox, &mut pong).await;
     // Every way out detaches, so the session never holds a dead attachment.
     connection.leave();

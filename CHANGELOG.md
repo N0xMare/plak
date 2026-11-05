@@ -341,6 +341,13 @@ an export.
   intent the service refused for the attachment's role; `plak agent` JSONL
   v1 answers it as that command's `error` record), `HostService` is
   `Clone` (its clones are the same service), and the new types.
+- A wire v2 connection is a local or a remote face
+  (`host_service::wire::Face`, `WireConnection::face`,
+  `WireSession::connect` takes it); a remote face, the web endpoint's, is
+  refused the local-face-only intents (`ProtocolExtension::local_only`:
+  Plak's installed-build check and probe and the reload-request
+  handover) as `refused_for_role` `local_face`. Embedder break: the
+  `connect` signature and the new trait method (defaults to false).
 - The TUI's last direct product reads move behind the protocol: the
   reload target is the session host's `probe_reload` (answered by
   `reload_probed` with the target and the host build's refusal, or

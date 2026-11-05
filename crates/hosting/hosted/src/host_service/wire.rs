@@ -218,6 +218,18 @@ pub enum Leave {
     Detach,
 }
 
+/// Whether a connection's transport is a local face of the host (stdio's
+/// parent, the TUI over the host's own socket) or a remote one (the web
+/// endpoint). A remote face is refused the intents only a local face may
+/// send ([`ProtocolExtension::local_only`]).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Face {
+    /// A process of this user on this machine.
+    Local,
+    /// A client reached over the network, however authenticated.
+    Remote,
+}
+
 /// The connection's state after the handshake: one attachment at a time
 /// on the session's host service.
 pub struct WireConnection<P: ProtocolExtension, W: Write> {
@@ -229,6 +241,7 @@ pub struct WireConnection<P: ProtocolExtension, W: Write> {
     resync_after_attach: Option<AttachmentId>,
     blobs: BlobAssembler,
     leave: Leave,
+    face: Face,
     quit_sent: bool,
     /// Whether the process was asked to stop.
     stopped: Box<dyn Fn() -> bool + Send + Sync>,
@@ -284,6 +297,7 @@ where
             resync_after_attach: None,
             blobs: BlobAssembler::default(),
             leave,
+            face: Face::Remote,
             quit_sent: false,
             stopped: Box::new(|| false),
             served: None,
@@ -293,6 +307,14 @@ where
             settled: Vec::new(),
             next_mail: 0,
         }
+    }
+
+    /// This connection, its transport marked `face`; a connection is a
+    /// remote face until its acceptor says otherwise.
+    #[must_use]
+    pub const fn face(mut self, face: Face) -> Self {
+        self.face = face;
+        self
     }
 
     /// This connection, ending as a leaving client does once `stopped`
@@ -534,6 +556,13 @@ where
             } => {
                 if self.attachment != Some(attachment) {
                     return refused(RequestRefusal::NotAttached);
+                }
+                if self.face == Face::Remote
+                    && matches!(&intent, SessionIntent::Extension(extension) if P::local_only(extension))
+                {
+                    return refused(RequestRefusal::RefusedForRole {
+                        row: "local_face".to_owned(),
+                    });
                 }
                 if let Err(error) = self.blobs.restore_images(&mut intent, &blobs) {
                     return refused(RequestRefusal::Malformed {

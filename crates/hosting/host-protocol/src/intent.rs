@@ -20,6 +20,15 @@ pub trait ProtocolExtension: Clone + fmt::Debug + Eq + Send + Sync + 'static {
         let _ = intent;
         false
     }
+
+    /// Whether `intent` is for a local face only: it execs or hands off the
+    /// host's own build, or answers with the host machine's paths and its
+    /// same-user channels. A connection whose transport is not a local face
+    /// refuses it.
+    fn local_only(intent: &Self::Intent) -> bool {
+        let _ = intent;
+        false
+    }
 }
 
 /// Mailbox classification the observation channel applies to an extension.

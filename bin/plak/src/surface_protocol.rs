@@ -270,6 +270,20 @@ impl ProtocolExtension for PlakExtension {
             SurfaceIntent::OpenUsage | SurfaceIntent::RereadUsage
         )
     }
+
+    /// The installed-build check and probe (they exec the installed build
+    /// and answer with its path, its configuration errors and the carry's
+    /// capacity) and the reload-request handover (a same-user local
+    /// channel, spec 04 §4.6).
+    fn local_only(intent: &SurfaceIntent) -> bool {
+        matches!(
+            intent,
+            SurfaceIntent::CheckBuild
+                | SurfaceIntent::ProbeReload
+                | SurfaceIntent::AcceptReloadRequest { .. }
+                | SurfaceIntent::RefuseReloadRequest { .. }
+        )
+    }
 }
 
 /// One acknowledged attention occurrence.

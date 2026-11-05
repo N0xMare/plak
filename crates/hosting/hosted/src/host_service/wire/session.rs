@@ -19,7 +19,7 @@ use tokio::sync::watch;
 
 use super::super::{HostService, TreeNodes};
 use super::served::{self, ServedSession, Shared};
-use super::{ATTACHMENT_CAPACITY, Leave, POLL, WireConnection};
+use super::{ATTACHMENT_CAPACITY, Face, Leave, POLL, WireConnection};
 
 /// A session served to any number of connections over time.
 pub struct WireSession<P: ProtocolExtension> {
@@ -102,11 +102,13 @@ impl<P: ProtocolExtension> WireSession<P> {
         served::lock(&self.served).session().to_owned()
     }
 
-    /// A new connection writing its frames to `out`, serving this session;
-    /// it detaches when it leaves, and ends once `stopped` turns true.
+    /// A new connection writing its frames to `out`, serving this session
+    /// to a client its acceptor marked `face`; it detaches when it leaves,
+    /// and ends once `stopped` turns true.
     pub fn connect<W: Write>(
         &self,
         out: W,
+        face: Face,
         stopped: impl Fn() -> bool + Send + Sync + 'static,
     ) -> WireConnection<P, W>
     where
@@ -117,6 +119,7 @@ impl<P: ProtocolExtension> WireSession<P> {
         let (service, generation) = (guard.service(), guard.generation());
         drop(guard);
         WireConnection::on_service(service, out, self.actions.clone(), Leave::Detach)
+            .face(face)
             .with_stop(stopped)
             .on_served(Arc::clone(&self.served), generation)
     }
