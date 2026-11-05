@@ -580,6 +580,64 @@ fn each_moved_connection_gets_the_replay_on_its_next_root_attach() {
     assert!(!later_events.contains(&draft), "{later_events:?}");
 }
 
+/// An opening too long to hold until the binding that names its session
+/// ends the served session's attachments with `resync_required`, after
+/// what they held and before any of the opening: none of it reaches them,
+/// whichever session it turns out to be.
+#[test]
+fn an_opening_too_long_to_hold_resyncs_the_old_attachments() {
+    use plakous_host_protocol::Core;
+    use plakous_host_protocol::views::transcript::NoticeScope;
+    let before = SessionObservation::<Core>::Row(TranscriptRow::info(NoticeScope::Host, "before"));
+    let (actions, _intents) = plakous_host_protocol::intent_channel::<Core>();
+    let mut stdout = Vec::new();
+    let mut connection = WireConnection::new(root(), &mut stdout, actions)
+        .serving("s1", |id| Some(root_named(&format!("tree-{id}"))));
+    connection.request(1, Op::Attach { node: root() });
+    assert!(connection.observe(before.clone()).unwrap());
+    assert!(
+        connection
+            .observe(SessionObservation::SessionOpening)
+            .unwrap()
+    );
+    for index in 0..=ATTACHMENT_CAPACITY {
+        let row = TranscriptRow::info(NoticeScope::Host, format!("opening {index}"));
+        assert!(connection.observe(SessionObservation::Row(row)).unwrap());
+    }
+    connection.flush().unwrap();
+    assert!(connection.observe(binding("s2")).unwrap());
+    connection.flush().unwrap();
+    drop(connection);
+    let frames = host_frames(&stdout);
+    let resync = frames
+        .iter()
+        .position(|frame| matches!(frame, HostFrame::ResyncRequired { attachment: 1 }))
+        .expect("resync_required");
+    assert!(
+        frames[..resync].iter().any(|frame| matches!(
+            frame,
+            HostFrame::Event { observation, .. } if *observation == before
+        )),
+        "{frames:?}"
+    );
+    assert!(
+        !frames.iter().any(|frame| matches!(
+            frame,
+            HostFrame::Event {
+                observation: SessionObservation::Row(row),
+                ..
+            } if row.text().is_some_and(|text| text.starts_with("opening"))
+        )),
+        "{frames:?}"
+    );
+    assert!(
+        !frames
+            .iter()
+            .any(|frame| matches!(frame, HostFrame::Moved { attachment: 1, .. })),
+        "{frames:?}"
+    );
+}
+
 /// Events past the capacity between `moved` and the next attach.
 fn overflow_after_a_switch<W: Write>(
     connection: &mut WireConnection<plakous_host_protocol::Core, W>,

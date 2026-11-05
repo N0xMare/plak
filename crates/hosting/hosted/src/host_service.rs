@@ -362,6 +362,20 @@ impl<P: ProtocolExtension> HostService<P> {
         moved
     }
 
+    /// Ends every attachment with [`Outbound::ResyncRequired`], after what
+    /// each already holds: what follows belongs to no session yet that it
+    /// may be shown.
+    fn resync_attachments(&self) {
+        let mut state = self.lock();
+        state.requester = None;
+        for held in state.attachments.values_mut() {
+            if !held.dropped {
+                held.dropped = true;
+                held.queue.push_back(Outbound::ResyncRequired);
+            }
+        }
+    }
+
     /// Offers `observations`, a switch's replay, to `attachment` alone: the
     /// root attachment that replaced `moved`, which the switch ended. An
     /// answer window a moved attachment's intent opened is that

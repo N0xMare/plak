@@ -113,9 +113,16 @@ impl<P: ProtocolExtension> ServedSession<P> {
         if binding.is_none() && held.len() <= ATTACHMENT_CAPACITY {
             return true;
         }
+        let overflowed = binding.is_none();
         let held = self.held.take().unwrap_or_default();
         if let Some(next) = binding.flatten() {
             return self.switch(next, held);
+        }
+        if overflowed {
+            // Too long an opening to hold: it may be the next session's,
+            // which the served session's attachments must not be shown, so
+            // they end and attach again for a fresh snapshot.
+            self.service.resync_attachments();
         }
         self.pass(held);
         true

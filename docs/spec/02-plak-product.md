@@ -3768,7 +3768,9 @@ verdicts) are addressed, the session profile and workspace chrome states.
   node}`, naming the new session's root, and the client attaches that node
   fresh on the same connection. The new session's opening comes before the
   binding that names it, so the host holds what follows a session opening
-  until that binding: none of it reaches the old attachment, and what the
+  until that binding: none of it reaches the old attachment (an opening
+  too long to hold, past an attachment's capacity, ends the old
+  attachments with `resync_required` before any of it), and what the
   next attach snapshot does not carry (an open notice, an answer before the
   next session's first window) follows the `attached` answer of each moved
   connection's next root attach, an answer to one connection's intent to
