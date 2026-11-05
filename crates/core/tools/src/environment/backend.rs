@@ -63,7 +63,7 @@ pub(super) use process::host_execution_backend;
 mod process;
 #[cfg(unix)]
 use process::execute_host_literal_process;
-pub(super) use process::{HostProcessContext, JoinedProcessServiceCache};
+pub(super) use process::{HostProcessContext, JoinedProcessServiceCache, ProcessFacts};
 pub use process::{JoinedProcessHostCapacity, JoinedProcessSessions};
 use process::{validate_absolute_program, validate_process_value, validate_process_values};
 use workspace::resolve_existing_no_symlink;

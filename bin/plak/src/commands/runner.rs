@@ -31,7 +31,7 @@ use plakous_hosted::error::{CliFailure, CliResult, ProcessOutcome};
 use crate::home::paths::{PlakPaths, SecretShelf};
 use dial::ssh_command;
 pub(crate) use dial::{STRICT_SSH_OPTIONS, version};
-use home::RunnerHome;
+use home::{LocalRunnerHome, RunnerHome};
 
 /// This process's bind as the home's `host_id`. Its `host_instance` is the
 /// process instance tree custody names, the same for the process's life, so
@@ -57,6 +57,7 @@ const START_WAIT: Duration = Duration::from_secs(10);
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum RunnerCommand {
     Serve,
+    ServeLocal,
     Connect,
     Allow { host_id: String },
     Ps { name: Option<String> },
@@ -76,6 +77,7 @@ pub(crate) fn run(
         .map_err(|error| CliFailure::new(format!("the runner runtime did not start: {error}")))?;
     match command {
         RunnerCommand::Serve => runtime.block_on(serve(paths)),
+        RunnerCommand::ServeLocal => runtime.block_on(serve_local(paths)),
         RunnerCommand::Connect => {
             let bridged = runtime.block_on(connect(paths));
             // The bridge's stdin copy may still sit in a blocking read of
@@ -166,6 +168,7 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
             floors: Some(Arc::new(floors)),
             path: crate::environment::inherited_path(),
             home: crate::environment::inherited_home(),
+            home_local: None,
         },
     )
     .map_err(|error| CliFailure::new(format!("the runner did not start: {error}")))?;
@@ -173,6 +176,73 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
         Ok(()) => Ok(()),
         // One daemon per user and build is enough.
         Err(daemon::DaemonError::AlreadyServing(_)) => Ok(()),
+        Err(error) => Err(CliFailure::new(error.to_string())),
+    }
+}
+
+/// `plak runner serve --local`: this home's home-local runner (spec 01
+/// §8.4), in the foreground, until it is idle. It binds only this home's
+/// host, from any build of its protocol version, carries only process
+/// sessions, and starts each process in the context its host sends; it
+/// serves any workspace outside the product home, as the local runner does.
+async fn serve_local(paths: &PlakPaths) -> CliResult<()> {
+    let home = LocalRunnerHome::of(paths);
+    let socket = home.socket_path();
+    daemon::check_socket_path(&socket).map_err(|error| CliFailure::new(error.to_string()))?;
+    private_directory(home.root())?;
+    let empty = home.empty_directory();
+    private_directory(&empty)?;
+    let scope = || -> CliResult<ExecutionEnvironmentScope> {
+        Ok(ExecutionEnvironmentScope::Run(
+            plakous::model::RunId::try_from(uuid::Uuid::new_v4())
+                .map_err(|error| CliFailure::new(error.to_string()))?,
+        ))
+    };
+    let environment = ExecutionEnvironment::host(
+        scope()?,
+        &empty,
+        &empty,
+        ExecutionEnvironmentConfig::default(),
+    )
+    .map_err(|error| CliFailure::new(format!("{}: {error}", empty.display())))?;
+    let workspace_scope = scope()?;
+    let excluded = paths.home().to_path_buf();
+    let workspaces = Arc::new(move |root: &Path, cwd: &Path| {
+        if !root.is_absolute() || home::overlaps_home(root, &excluded) {
+            return Err(plakous::tools::runner::workspace_refusal());
+        }
+        ExecutionEnvironment::host(
+            workspace_scope,
+            root,
+            cwd,
+            ExecutionEnvironmentConfig::default(),
+        )
+    });
+    let floors = FileOwnerFloors::open(home.floors_path())
+        .map_err(|error| CliFailure::new(error.to_string()))?;
+    let runner_id = RunnerId::new(home.runner_id()?)
+        .map_err(|error| CliFailure::new(format!("runner id: {error}")))?;
+    let host = host_id(paths)?;
+    let service = RunnerService::with_options(
+        environment,
+        RunnerIdentity {
+            runner_id,
+            version: version(),
+            boot_id: boot_id(),
+            binary_id: crate::build_identity::known_binary_id(),
+        },
+        RunnerOptions {
+            workspaces: Some(workspaces),
+            local_host: Some(host.clone()),
+            floors: Some(Arc::new(floors)),
+            home_local: Some(host),
+            ..RunnerOptions::default()
+        },
+    )
+    .map_err(|error| CliFailure::new(format!("the home-local runner did not start: {error}")))?;
+    let idle = home::RunnerToml::default().idle_exit();
+    match daemon::serve_socket(service, &socket, idle).await {
+        Ok(()) | Err(daemon::DaemonError::AlreadyServing(_)) => Ok(()),
         Err(error) => Err(CliFailure::new(error.to_string())),
     }
 }

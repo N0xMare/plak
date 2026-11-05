@@ -153,6 +153,53 @@ impl RunnerHome {
     }
 }
 
+/// This home's home-local runner (spec 02 §2.1), apart from the machine's
+/// runner for paired hosts: `$PLAK_HOME/host/runner/v<N>/`, one per runner
+/// protocol version, so its owner floors never meet a build of another
+/// protocol. It holds the runner id, the owner floors, the private socket
+/// directory and an empty default workspace.
+#[derive(Clone, Debug)]
+pub(crate) struct LocalRunnerHome {
+    root: PathBuf,
+}
+
+impl LocalRunnerHome {
+    pub(crate) fn of(paths: &PlakPaths) -> Self {
+        Self {
+            root: paths
+                .home()
+                .join("host")
+                .join("runner")
+                .join(format!("v{}", super::version().protocol)),
+        }
+    }
+
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// The socket, named by the directory's protocol version alone: every
+    /// build of that protocol reaches the same daemon.
+    pub(crate) fn socket_path(&self) -> PathBuf {
+        self.root.join("run").join("runner.sock")
+    }
+
+    pub(crate) fn floors_path(&self) -> PathBuf {
+        self.root.join("owners.json")
+    }
+
+    /// Where a request that names no workspace is answered: an empty
+    /// directory.
+    pub(crate) fn empty_directory(&self) -> PathBuf {
+        self.root.join("empty")
+    }
+
+    /// The home-local runner's stable identity, created on first use.
+    pub(crate) fn runner_id(&self) -> CliResult<String> {
+        read_or_create_id(&self.root, "runner-id", "r-")
+    }
+}
+
 /// This home's stable host identity, created on first use: a runner pairs
 /// with it, and every process of the home presents it. Owner leases are per
 /// process instance ([`super::bind`]).

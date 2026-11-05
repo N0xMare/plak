@@ -10,7 +10,7 @@ use plakous_model::CancellationToken;
 use serde_json::{Value, json};
 
 use super::super::{
-    ExecutionBackendError, ExecutionWorkspace, JoinedProcessCursorPollResult,
+    ExecutionBackendError, ExecutionWorkspace, HostProcessContext, JoinedProcessCursorPollResult,
     JoinedProcessHostCapacity, JoinedProcessInputDisposition, JoinedProcessOutputCursor,
     JoinedProcessSessionId, JoinedProcessSessions, JoinedProcessStartRequest, JoinedProcessStatus,
     LineOwner, OperationContext,
@@ -39,6 +39,9 @@ const WATCH_TICK: Duration = Duration::from_millis(100);
 pub struct RunnerSessions {
     link: Arc<dyn RunnerLink>,
     workspace: ExecutionWorkspace,
+    /// On a home-local runner, the host's own process context: each start
+    /// carries what it resolves to, and the runner starts the process in it.
+    local_process: Option<Arc<HostProcessContext>>,
     owner: Mutex<LineOwner>,
     mirror: Mutex<Mirror>,
     /// Bumped whenever a read of the line's jobs finds one newly ended.
@@ -121,6 +124,7 @@ impl RunnerSessions {
         Self {
             link: backend.link(),
             workspace: ExecutionWorkspace::from_environment(environment),
+            local_process: None,
             owner: Mutex::new(owner),
             mirror: Mutex::default(),
             terminal_changes: tokio::sync::watch::channel(0).0,
@@ -138,10 +142,22 @@ impl RunnerSessions {
         Self {
             link,
             workspace: ExecutionWorkspace::from_environment(environment),
+            local_process: None,
             owner: Mutex::new(owner),
             mirror: Mutex::default(),
             terminal_changes: tokio::sync::watch::channel(0).0,
         }
+    }
+
+    /// The sessions of a home-local runner, which starts each process in the
+    /// context `process` resolves to when it is started.
+    #[must_use]
+    pub(in crate::environment) fn with_local_process(
+        mut self,
+        process: Arc<HostProcessContext>,
+    ) -> Self {
+        self.local_process = Some(process);
+        self
     }
 
     /// Follows the line's job events until the stream ends: each report
@@ -228,7 +244,15 @@ impl RunnerSessions {
         control: OperationContext,
     ) -> Result<JoinedProcessSessionId, ExecutionBackendError> {
         let next = self.next_job_number();
-        let payload = wire::envelope(&self.workspace, encode_start(&request, next)?)?;
+        let process = self
+            .local_process
+            .as_ref()
+            .map(|process| process.facts())
+            .transpose()?;
+        let payload = wire::envelope(
+            &self.workspace,
+            encode_start(&request, next, process.as_ref())?,
+        )?;
         let started: StartedWire = from_value(
             self.send(RunnerVerb::ProcessStart, payload, &control, None)
                 .await?,
@@ -534,6 +558,11 @@ pub fn decode_jobs_snapshot(value: Value) -> Result<(String, Vec<JobView>), Exec
 /// Answers one session verb from a line's `sessions`, as the runner side of
 /// a link; `instance` names this runner process in starts and snapshots. A
 /// verb of another family is [`ServeFailure::Unsupported`].
+///
+/// A home-local runner (`home_local`) starts each process in the context
+/// its host resolved and sent with the start, and refuses a start without
+/// one; any other runner starts processes in its own environment and
+/// refuses a start that carries one.
 pub fn serve_sessions(
     environment: &ExecutionEnvironment,
     sessions: &JoinedProcessSessions,
@@ -541,6 +570,7 @@ pub fn serve_sessions(
     verb: &str,
     payload: Value,
     control: OperationContext,
+    home_local: bool,
 ) -> ServeFuture {
     // The job event stream is a stream the runner opens itself.
     let Some(verb) = RunnerVerb::parse(verb).filter(|verb| {
@@ -558,7 +588,15 @@ pub fn serve_sessions(
             _ => {
                 // Starts, writes, stops and promotions block on the child.
                 tokio::task::spawn_blocking(move || {
-                    effect(&environment, &sessions, &instance, verb, payload, control)
+                    effect(
+                        &environment,
+                        &sessions,
+                        &instance,
+                        verb,
+                        payload,
+                        control,
+                        home_local,
+                    )
                 })
                 .await
                 .unwrap_or_else(|_| Err(wire::malformed()))
@@ -575,14 +613,30 @@ fn effect(
     verb: RunnerVerb,
     payload: Value,
     control: OperationContext,
+    home_local: bool,
 ) -> Result<Value, ExecutionBackendError> {
     match verb {
         RunnerVerb::ProcessStart => {
-            let (request, next) = decode_start(wire::open_envelope(environment, payload)?)?;
+            let (request, next, process) =
+                decode_start(wire::open_envelope(environment, payload)?)?;
+            let process = match (home_local, process) {
+                (true, Some(facts)) => Some(Arc::new(HostProcessContext::from_facts(facts)?)),
+                (false, None) => None,
+                (true, None) => {
+                    return Err(super::super::invalid_request(
+                        "a home-local runner starts a process only in its host's process context",
+                    ));
+                }
+                (false, Some(_)) => {
+                    return Err(super::super::invalid_request(
+                        "a runner starts processes in its own environment",
+                    ));
+                }
+            };
             // The line numbers past every number its host has seen, so a
             // restarted runner never reuses one.
             sessions.seed_job_counter(next);
-            let id = sessions.start(request, control)?;
+            let id = sessions.start_in(request, control, process)?;
             to_value(&StartedWire {
                 session: encode_session(id),
                 instance: instance.to_owned(),

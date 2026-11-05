@@ -677,6 +677,9 @@ pub struct ExecutionEnvironment {
     /// The link to the runner this environment's operations run on, when it
     /// is not the local runner. Process-local, like the line owner.
     pub(super) runner_link: Option<Arc<dyn crate::environment::runner::RunnerLink>>,
+    /// The home-local runner this local environment's process sessions run
+    /// on, when one carries them. Process-local, like the line owner.
+    pub(super) local_daemon: Option<crate::environment::runner::LocalDaemon>,
 }
 
 impl ExecutionEnvironment {
@@ -846,6 +849,7 @@ impl ExecutionEnvironment {
             visual_read: None,
             line_owner: None,
             runner_link: None,
+            local_daemon: None,
         })
     }
 

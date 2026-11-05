@@ -14,7 +14,7 @@ use super::super::{
     ExecutionBackendError, JoinedProcessCommand, JoinedProcessCursorPollResult,
     JoinedProcessOutputCursor, JoinedProcessOutputRecord, JoinedProcessOutputStream,
     JoinedProcessSessionId, JoinedProcessShellProfile, JoinedProcessStartRequest,
-    JoinedProcessStatus, JoinedProcessTerminalMode,
+    JoinedProcessStatus, JoinedProcessTerminalMode, MAX_EXECUTION_VALUE_BYTES, ProcessFacts,
 };
 use super::wire::{from_value, hex, malformed, path_text, to_value, unhex};
 use crate::{JobStatus, JobStopReason, JobView};
@@ -46,11 +46,64 @@ struct StartWire {
     /// The lowest number the session may take: past every number the host
     /// has seen on the line, so a restarted runner never reuses one.
     next_number: u32,
+    /// The process environment the host resolved, sent only to a home-local
+    /// runner, which starts the process in it rather than in its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    process: Option<ProcessWire>,
+}
+
+/// [`ProcessFacts`] on the wire: paths and the `PATH` text, never a value
+/// of the host's own environment.
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ProcessWire {
+    path: String,
+    prefix: Option<String>,
+    home: Option<String>,
+    ceiling: Option<String>,
+}
+
+impl ProcessWire {
+    fn encode(facts: &ProcessFacts) -> Result<Self, ExecutionBackendError> {
+        Ok(Self {
+            path: facts.path.clone(),
+            prefix: facts.prefix.as_deref().map(path_text).transpose()?,
+            home: facts.home.as_deref().map(path_text).transpose()?,
+            ceiling: facts.ceiling.as_deref().map(path_text).transpose()?,
+        })
+    }
+
+    fn decode(self) -> Result<ProcessFacts, ExecutionBackendError> {
+        let absolute = |text: Option<String>| -> Result<Option<PathBuf>, ExecutionBackendError> {
+            text.map(|text| {
+                let path = PathBuf::from(text);
+                if path.is_absolute() && !path.as_os_str().as_encoded_bytes().contains(&0) {
+                    Ok(path)
+                } else {
+                    Err(malformed())
+                }
+            })
+            .transpose()
+        };
+        if self.path.is_empty()
+            || self.path.len() > MAX_EXECUTION_VALUE_BYTES
+            || self.path.contains('\0')
+        {
+            return Err(malformed());
+        }
+        Ok(ProcessFacts {
+            path: self.path,
+            prefix: absolute(self.prefix)?,
+            home: absolute(self.home)?,
+            ceiling: absolute(self.ceiling)?,
+        })
+    }
 }
 
 pub(super) fn encode_start(
     request: &JoinedProcessStartRequest,
     next_number: u32,
+    process: Option<&ProcessFacts>,
 ) -> Result<Value, ExecutionBackendError> {
     let command = match &request.command {
         JoinedProcessCommand::Literal {
@@ -78,13 +131,15 @@ pub(super) fn encode_start(
         .to_owned(),
         output_spool_threshold: request.output_spool_threshold,
         next_number,
+        process: process.map(ProcessWire::encode).transpose()?,
     })
 }
 
-/// A start request and the lowest number its session may take.
+/// A start request, the lowest number its session may take, and the
+/// process environment its host resolved, when it sent one.
 pub(super) fn decode_start(
     value: Value,
-) -> Result<(JoinedProcessStartRequest, u32), ExecutionBackendError> {
+) -> Result<(JoinedProcessStartRequest, u32, Option<ProcessFacts>), ExecutionBackendError> {
     let wire: StartWire = from_value(value)?;
     let command = match wire.command {
         CommandWire::Literal {
@@ -113,7 +168,8 @@ pub(super) fn decode_start(
         terminal,
     )?;
     request.output_spool_threshold = wire.output_spool_threshold;
-    Ok((request, wire.next_number))
+    let process = wire.process.map(ProcessWire::decode).transpose()?;
+    Ok((request, wire.next_number, process))
 }
 
 pub(super) fn encode_session(id: JoinedProcessSessionId) -> String {

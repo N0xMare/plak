@@ -17,7 +17,7 @@ use plakous_runner_protocol::{
 use plakous_tools::ToolPreempt;
 use plakous_tools::internal::runner::{
     RunnerCall, RunnerCallFuture, RunnerClass, RunnerFailure, RunnerLink, RunnerOpenFuture,
-    RunnerStreams, RunnerVerb, encode_preempt,
+    RunnerStreams, RunnerVerb, RunnerVerbFamily, encode_preempt,
 };
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
@@ -108,6 +108,10 @@ pub struct RunnerClient {
 struct Inner {
     bind: Bind,
     windows: ClientWindows,
+    /// Bound to this home's home-local runner (spec 01 §8.4): any build of
+    /// the same protocol version is bound, and only process-session calls
+    /// are sent.
+    home_local: bool,
     /// Where keyed calls are recorded before they are sent.
     journal: Option<Arc<dyn CallJournal>>,
     /// The calls a previous host process left in the journal, until
@@ -200,6 +204,40 @@ impl RunnerClient {
     where
         S: AsyncRead + AsyncWrite + Send + 'static,
     {
+        Self::connect_with(stream, bind, windows, journal, false).await
+    }
+
+    /// [`Self::connect_journaled`] to this home's home-local runner: a
+    /// runner of the bind's protocol version is bound whatever its build's
+    /// revision or flavor, and only process-session calls are sent; any
+    /// other call is refused here, with no effect.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::connect_journaled`], with a runner of another protocol
+    /// version.
+    pub async fn connect_home_local<S>(
+        stream: S,
+        bind: Bind,
+        windows: ClientWindows,
+        journal: Option<Arc<dyn CallJournal>>,
+    ) -> Result<(Self, Hello), ConnectError>
+    where
+        S: AsyncRead + AsyncWrite + Send + 'static,
+    {
+        Self::connect_with(stream, bind, windows, journal, true).await
+    }
+
+    async fn connect_with<S>(
+        stream: S,
+        bind: Bind,
+        windows: ClientWindows,
+        journal: Option<Arc<dyn CallJournal>>,
+        home_local: bool,
+    ) -> Result<(Self, Hello), ConnectError>
+    where
+        S: AsyncRead + AsyncWrite + Send + 'static,
+    {
         let left = match &journal {
             Some(journal) => journal
                 .pending()
@@ -210,6 +248,7 @@ impl RunnerClient {
             inner: Arc::new(Inner {
                 bind,
                 windows,
+                home_local,
                 journal,
                 left: Mutex::new(left),
                 ids: uuid::Uuid::new_v4().simple().to_string(),
@@ -359,7 +398,12 @@ impl RunnerClient {
             Some(Ok(_)) => return Err(ConnectError::Malformed("not a hello".into())),
             Some(Err(error)) => return Err(ConnectError::Malformed(error.to_string())),
         };
-        if hello.version != self.inner.bind.version {
+        let bound = if self.inner.home_local {
+            hello.version.protocol == self.inner.bind.version.protocol
+        } else {
+            hello.version == self.inner.bind.version
+        };
+        if !bound {
             return Err(ConnectError::VersionMismatch {
                 runner: hello.version,
             });
@@ -769,6 +813,11 @@ impl Inner {
     }
 
     async fn call(&self, call: RunnerCall) -> Result<Value, RunnerFailure> {
+        if self.home_local && call.verb().family() != RunnerVerbFamily::Sessions {
+            return Err(RunnerFailure::Unavailable(
+                "the home-local runner carries only process sessions".into(),
+            ));
+        }
         let owner = call.owner().map(wire_owner);
         if let Some(owner) = &owner {
             self.transfer(owner).await?;

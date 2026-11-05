@@ -181,6 +181,10 @@ branch, never by reopening an old checkpoint with different tools.
 A session's tools run on one runner, and the runner is part of its binding:
 the execution backend descriptor names it (§8.5), the run-stable workspace
 facts record it, and reopen compares it like every other environment fact.
+The runner is the machine-and-user authority the tools act as, not the
+transport that carries them: the local runner's processes may run in process
+or through the home's home-local runner (§8.4), and either way the session
+presents the `local` descriptor and run-stable facts and reopens on either.
 Every L0 branch transition (a rebind or fork compiled by this library) keeps
 its source's runner; a transition whose target names another runner is refused
 before any branch is written, as `InvalidInput` with `BindingChange::Runner`
@@ -5574,11 +5578,14 @@ runner for a session yet.
 - **Handshake.** The runner speaks first: `Hello { version, binary_id,
   runner_id, instance, boot_id, descriptor, capabilities, path, home,
   job_bound }`. The version triple is the protocol version (1), the source
-  revision and the build flavor, and binding requires an exact match; the
+  revision and the build flavor, and binding requires an exact match, except
+  to a home-local runner (below), which binds by protocol version alone; the
   binary id is evidence and is never compared. `instance` is fresh for every
   runner process and `boot_id` names the machine boot it runs in. The
   descriptor is the `Runner` descriptor its operations present, never
-  `local`. The host answers `Bind { host_id, host_instance, version, inspect }`.
+  `local`; the one exception is the home-local runner, whose operations a
+  host presents as the local runner's (`local_daemon_environment` supplies
+  the descriptor and run-stable facts; its `Hello` descriptor is not used). The host answers `Bind { host_id, host_instance, version, inspect }`.
   The runner refuses any frame before `Bind` (`Unbound`), a `Bind` of another
   version, and a host whose identity its allowlist does not hold
   (`NotPaired`); the host refuses a runner of another version before any
@@ -5751,6 +5758,26 @@ runner for a session yet.
   platform's `sockaddr_un` limit (103 bytes on macOS, 107 elsewhere) is
   refused by name, by the daemon and by the bridge; `plak runner serve`,
   `connect` and `ps` check it before they prepare or ask anything.
+- **Home-local runner.** A home's own daemon (`RunnerOptions::home_local`,
+  `plak runner serve --local`, chapter 02 §2.1) carries the local runner's
+  processes so that they can outlive the host process that started them. It
+  binds only the host id it was started for, whatever its allowlist says and
+  for inspection too (`NotPaired` otherwise), and binds any build of its
+  protocol version whatever its source revision or flavor
+  (`RunnerClient::connect_home_local` on the host side). It answers only the
+  process-session verbs; any other request is refused `Unsupported`, and the
+  host's home-local client refuses to send one, so files, version control and
+  services stay with the host and only process verbs are ever journaled for
+  it. It starts each process in the process context its host sends with the
+  start (the base `PATH`, the required `PATH` prefix, `HOME` and the
+  repository discovery ceiling, never a value of the host's own environment)
+  and refuses a start without one; every other runner starts processes in its
+  own environment and refuses a start that carries one. Its home and socket
+  are keyed by the protocol version, so its floors never meet a build of
+  another protocol. Because a home-local bind no longer proves that both ends
+  are one build, every change to the runner's semantics (a holder, fence or
+  key rule, a refusal's meaning, a journal or floors rule, a frame's meaning)
+  bumps `PROTOCOL_VERSION`.
 - **Host link.** A call waits 30 s for an answer (120 s for an effect call),
   then its outcome is unknown. Effect calls, owner controls, observations and
   reads outstanding when the link is lost are replayed by key and digest on
@@ -6367,6 +6394,22 @@ environment with no selected runner runtime or no line owner refuses every
 start, `Unsupported` with no effect. No production configuration can name
 a runner. The facade reaches the seam only through the hidden
 `plakous::tools::runner` and `plakous::agent::select_runner_backend`.
+
+The home-local transport (unsupported; only tests select it, and no product
+path does yet). `local_daemon_environment` builds the local runner's host
+environment, with the local descriptor, run-stable facts, files, version
+control and process options of `host_with_policy_and_process_options`, whose
+`joined_process_sessions` is a runner arm over the line's sessions on the
+home-local runner (§8.4), reached through a `RunnerLink` on a given runtime.
+Each start resolves this environment's process context (the prefix's
+identity checked as for a direct start) and sends it with the start; the
+runner starts the process in that context, so it sees the cwd, `PATH`,
+`HOME`, discovery ceiling and terminal rules a direct start gives it; its
+umask is the runner's, inherited from the process that started the runner. The environment refuses a
+configuration that delegates an environment variable or a credential, since
+the value would have to cross the link. Capacity is the home-local runner's
+one bound for every host of the home; a direct start in another process is
+counted by that process.
 
 An explicit joined-process shell profile enrolls both its absolute invocation
 name and its canonical filesystem object, plus its fixed argument prefix.

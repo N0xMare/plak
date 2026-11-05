@@ -870,7 +870,9 @@ impl ExecutionEnvironment {
         // An environment whose operations run on another runner holds a
         // service whose processes run there, on the selected runner's
         // runtime; without a line owner or a runtime it refuses every start.
-        let created = if self.backend().kind() == ExecutionBackendKind::Runner
+        let created = if let Some(daemon) = &self.local_daemon {
+            self.local_daemon_sessions(daemon)?
+        } else if self.backend().kind() == ExecutionBackendKind::Runner
             && !self.backend().runner_id().is_some_and(RunnerId::is_local)
         {
             match crate::environment::runner::process_runner() {

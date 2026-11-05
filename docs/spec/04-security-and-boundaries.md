@@ -707,6 +707,20 @@ widens it.
   before accepting it, so a restart does not reopen the line to an older
   owner. The host's leases and commit fencing remain the authority; the
   runner only reduces late effects.
+- **The home-local runner is the home's own, and only its own.** A home's
+  home-local runner (`plak runner serve --local`, chapter 01 §8.4) carries
+  the local runner's processes for that home's hosts. It accepts only that
+  home's `host_id`, for inspection too, and never a paired remote's; it needs
+  no pairing and no `runner.toml`, because its socket is the user's own (0600
+  in 0700 directories, `host/runner/v<N>/run/`, the peer checked before the
+  hello) and its lock and stale-socket rules are the machine runner's. Its
+  authority equals the local runner's: any workspace outside the product
+  home. `plak runner connect --stdio`, which ssh reaches, bridges only to the
+  machine runner under `runner/run/`, never to `host/runner/`. Nothing but
+  process-session verbs crosses this wire, and no secret value does either:
+  each start carries only the paths and the `PATH` text of the host's process
+  context, an environment that delegates a variable or a credential is
+  refused before anything is sent, and the runner answers no service spawn.
 
 ### 2.10 The web endpoint
 

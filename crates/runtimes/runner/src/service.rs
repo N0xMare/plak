@@ -64,6 +64,8 @@ struct Inner {
     /// The host identity of this machine's own product home: an inspection
     /// under it is a local `plak runner ps` and sees every host's lines.
     local_host: Option<String>,
+    /// See [`RunnerOptions::home_local`].
+    home_local: Option<String>,
     /// Each host instance's current connection: a key's answer goes to the
     /// instance that last sent the key, so an answer that outlives its
     /// connection reaches that instance's reconnection.
@@ -195,6 +197,13 @@ pub struct RunnerOptions {
     /// secrets are read from; without it a service that names one is
     /// refused.
     pub secrets: Option<Arc<RunnerSecretResolver>>,
+    /// Set, a home-local runner of the home whose host identity it names
+    /// (spec 01 §8.4): it binds only that host, whatever [`Self::hosts`]
+    /// says, from a build of its protocol version whatever the build's
+    /// revision or flavor; it answers only the process-session verbs; and it
+    /// starts each process in the process context its host sends with the
+    /// start.
+    pub home_local: Option<String>,
 }
 
 impl RunnerService {
@@ -276,6 +285,7 @@ impl RunnerService {
                 hosts_allowed: options.hosts,
                 probe_paths: options.probe_paths,
                 local_host: options.local_host,
+                home_local: options.home_local,
                 hosts: Mutex::default(),
                 leases: Mutex::default(),
                 next_connection: AtomicU64::new(0),
@@ -323,13 +333,8 @@ impl RunnerService {
             closer.cancel();
             return;
         };
-        if bind.version != self.inner.hello.version {
-            let _ = sender.send(refused(
-                None,
-                Refusal::VersionMismatch {
-                    runner: self.inner.hello.version.clone(),
-                },
-            ));
+        if let Some(refusal) = self.bind_refusal(&bind) {
+            let _ = sender.send(refused(None, refusal));
             closer.cancel();
             return;
         }
@@ -393,6 +398,28 @@ impl RunnerService {
         }
         self.leave(&host, &instance, connection);
         closer.cancel();
+    }
+
+    /// Why `bind` is refused before anything else: another version, or, on a
+    /// home-local runner, another protocol version or another home's host,
+    /// which it serves not even to inspect.
+    fn bind_refusal(&self, bind: &Bind) -> Option<Refusal> {
+        let ours = &self.inner.hello.version;
+        let version_bound = match &self.inner.home_local {
+            Some(_) => bind.version.protocol == ours.protocol,
+            None => bind.version == *ours,
+        };
+        if !version_bound {
+            return Some(Refusal::VersionMismatch {
+                runner: ours.clone(),
+            });
+        }
+        match &self.inner.home_local {
+            Some(home) if *home != bind.host_id => Some(Refusal::NotPaired {
+                host_id: bind.host_id.clone(),
+            }),
+            _ => None,
+        }
     }
 
     /// Makes a bound connection its host instance's current one, draining
@@ -541,6 +568,7 @@ impl RunnerService {
                 RunnerVerb::JobsSnapshot.as_str(),
                 Value::Null,
                 OperationContext::new(CancellationToken::new()),
+                self.inner.home_local.is_some(),
             )
             .await
             .unwrap_or(Value::Null);
@@ -658,6 +686,17 @@ impl RunnerService {
             ));
             return;
         };
+        // A home-local runner carries its host's processes and nothing else:
+        // files, version control and services stay with the host.
+        if self.inner.home_local.is_some() && verb.family() != RunnerVerbFamily::Sessions {
+            let _ = sender.send(refused(
+                Some(id),
+                Refusal::Unsupported {
+                    what: request.operation.verb,
+                },
+            ));
+            return;
+        }
         if verb.family() == RunnerVerbFamily::Sessions && request.owner.is_none() {
             let _ = sender.send(refused(
                 Some(id),
@@ -778,6 +817,7 @@ impl RunnerService {
                 verb.as_str(),
                 payload,
                 control,
+                self.inner.home_local.is_some(),
             ),
             Err(failure) => Box::pin(std::future::ready(Err(failure))),
         }

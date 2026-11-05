@@ -87,9 +87,7 @@ use std::io::{Read, Write};
 use std::num::NonZeroU64;
 #[cfg(unix)]
 use std::os::fd::{AsFd, AsRawFd, RawFd};
-use std::path::Path;
-#[cfg(unix)]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::process::{Command, Stdio};
 use std::sync::Condvar;
@@ -125,6 +123,18 @@ use super::{
     JoinedProcessTerminalMode, LiteralProcessResult, PreparedLiteralProcess,
     resolve_existing_no_symlink, workspace_error,
 };
+
+/// The process context a host resolved for one start, as a home-local
+/// runner receives it: no value of the host's own environment, only the
+/// base `PATH`, the required `PATH` prefix, the `HOME` and the repository
+/// discovery ceiling its context sets.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(in crate::environment) struct ProcessFacts {
+    pub(in crate::environment) path: String,
+    pub(in crate::environment) prefix: Option<PathBuf>,
+    pub(in crate::environment) home: Option<PathBuf>,
+    pub(in crate::environment) ceiling: Option<PathBuf>,
+}
 
 #[cfg(test)]
 mod cleanup_contention_tests;

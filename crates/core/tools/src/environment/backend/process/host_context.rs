@@ -8,7 +8,7 @@ use super::{
     ExecutionBackendFuture, ExecutionEnvironmentError, ExecutionEnvironmentErrorKind,
     ExecutionEnvironmentLimits, ExecutionWorkspace, HostProcessOwner, Instant,
     LiteralProcessResult, MAX_EXECUTION_VALUE_BYTES, OperationContext, Path, PathBuf,
-    PreparedLiteralProcess, cleanup_unresolved_error, fs, invalid_request, io_error,
+    PreparedLiteralProcess, ProcessFacts, cleanup_unresolved_error, fs, invalid_request, io_error,
     resolve_existing_no_symlink, supervise_host_process, workspace_error,
 };
 
@@ -83,6 +83,46 @@ impl HostProcessContext {
                     .unwrap_or(workspace.root())
                     .to_path_buf()
             }),
+        })
+    }
+
+    /// What a process started in this context gets, checked now: the base
+    /// `PATH`, the required prefix (its identity checked), the `HOME` and the
+    /// repository discovery ceiling. A home-local runner starts its host's
+    /// processes in exactly this context (spec 01 §8.4).
+    pub(in crate::environment) fn facts(&self) -> Result<ProcessFacts, ExecutionBackendError> {
+        Ok(ProcessFacts {
+            path: self.fallback_path.clone(),
+            prefix: self.required_prefix()?.map(Path::to_path_buf),
+            home: self.home.clone(),
+            ceiling: self.discovery_ceiling.clone(),
+        })
+    }
+
+    /// The context a home-local runner starts a host's process in: the
+    /// host's facts, with the prefix directory captured again here, so each
+    /// start checks it as a direct start does.
+    pub(in crate::environment) fn from_facts(
+        facts: ProcessFacts,
+    ) -> Result<Self, ExecutionBackendError> {
+        let prefix = facts
+            .prefix
+            .map(|path| {
+                let directory = fs::File::open(&path)
+                    .ok()
+                    .filter(|_| fs::canonicalize(&path).ok().as_ref() == Some(&path))
+                    .filter(|directory| directory.metadata().is_ok_and(|meta| meta.is_dir()))
+                    .ok_or_else(|| {
+                        invalid_request("required process PATH prefix is unavailable")
+                    })?;
+                Ok::<_, ExecutionBackendError>((path, directory))
+            })
+            .transpose()?;
+        Ok(Self {
+            fallback_path: facts.path,
+            home: facts.home,
+            prefix,
+            discovery_ceiling: facts.ceiling,
         })
     }
 

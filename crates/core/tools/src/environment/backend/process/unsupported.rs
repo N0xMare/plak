@@ -25,6 +25,21 @@ impl HostProcessContext {
             "host processes need a unix target",
         ))
     }
+
+    pub(in crate::environment) fn facts(
+        &self,
+    ) -> Result<super::ProcessFacts, ExecutionBackendError> {
+        match *self {}
+    }
+
+    pub(in crate::environment) fn from_facts(
+        _facts: super::ProcessFacts,
+    ) -> Result<Self, ExecutionBackendError> {
+        Err(ExecutionBackendError::new(
+            super::ExecutionBackendErrorKind::Unsupported,
+            "host processes need a unix target",
+        ))
+    }
 }
 
 pub(in crate::environment) fn host_execution_backend(

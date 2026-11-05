@@ -130,3 +130,22 @@ fn a_runner_bind_names_the_process_custody_instance() {
     assert_eq!(custody_host().host_id, "host-1");
     assert_eq!(held.host_instance, custody_host().instance.to_string());
 }
+
+/// `connect --stdio`, which a host's ssh runs, bridges only to the machine
+/// runner; the home-local runner lives apart, keyed by protocol version.
+#[test]
+fn connect_never_reaches_the_home_local_runner() {
+    let home = tempfile::tempdir().unwrap();
+    let paths = PlakPaths::explicit(home.path().to_path_buf());
+    let bridged = checked_socket(&RunnerHome::of(&paths)).unwrap();
+    let local = LocalRunnerHome::of(&paths);
+    assert!(bridged.starts_with(home.path().join("runner").join("run")));
+    assert!(!bridged.starts_with(home.path().join("host")));
+    assert_eq!(
+        local.socket_path(),
+        home.path()
+            .join("host/runner")
+            .join(format!("v{}", version().protocol))
+            .join("run/runner.sock")
+    );
+}

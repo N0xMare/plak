@@ -591,7 +591,13 @@ impl KeyAction {
 
 #[derive(Debug, Subcommand)]
 enum RunnerAction {
-    Serve,
+    Serve {
+        /// Serve this home's home-local runner, which carries its own host's
+        /// processes, instead of the machine's runner for paired hosts.
+        /// Hidden: only a host starts it.
+        #[arg(long, hide = true, action = ArgAction::SetTrue)]
+        local: bool,
+    },
     Connect {
         /// Bridge standard input and output to the daemon (what a host's
         /// ssh runs).
@@ -629,7 +635,8 @@ impl RunnerAction {
                 action: Some(action),
             } => return action.into_command(runner_secret, "runner"),
             Self::Secret { action: None } => return help(),
-            Self::Serve => RunnerCommand::Serve,
+            Self::Serve { local: false } => RunnerCommand::Serve,
+            Self::Serve { local: true } => RunnerCommand::ServeLocal,
             Self::Connect { stdio: true } => RunnerCommand::Connect,
             // A bare leaf routes to the parent group's help.
             Self::Connect { stdio: false }

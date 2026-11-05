@@ -40,11 +40,34 @@ impl JoinedProcessSessions {
         request: JoinedProcessStartRequest,
         control: OperationContext,
     ) -> Result<JoinedProcessSessionId, ExecutionBackendError> {
+        self.start_in(request, control, None)
+    }
+
+    /// [`Self::start`] in `process` instead of this service's own process
+    /// context and environment: a home-local runner starts its host's
+    /// process in the context the host resolved for it.
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "start consumes one exact request at its process-dispatch boundary"
+    )]
+    pub(in crate::environment) fn start_in(
+        &self,
+        request: JoinedProcessStartRequest,
+        control: OperationContext,
+        process: Option<Arc<super::HostProcessContext>>,
+    ) -> Result<JoinedProcessSessionId, ExecutionBackendError> {
         if let Some(arm) = self.runner_arm() {
             return arm.start(request, control);
         }
         control.check_cancelled()?;
-        let Some(process) = self.inner.process.clone() else {
+        let (process, environment) = match process {
+            Some(process) => (Some(process), Arc::from(Vec::new())),
+            None => (
+                self.inner.process.clone(),
+                Arc::clone(&self.inner.environment),
+            ),
+        };
+        let Some(process) = process else {
             return Err(backend_error(
                 ExecutionBackendErrorKind::Unsupported,
                 "process sessions of a session on another runner are not carried yet",
@@ -102,7 +125,7 @@ impl JoinedProcessSessions {
         let started = start_joined_host_process(
             &self.inner.workspace,
             &process,
-            &self.inner.environment,
+            &environment,
             self.inner.limits,
             self.inner.queue_limit,
             &request,

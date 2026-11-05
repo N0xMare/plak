@@ -929,6 +929,12 @@ fn product_command_argv_matrix() {
                 Command::Runner(crate::commands::runner::RunnerCommand::Serve)
             )
         }),
+        (&["runner", "serve", "--local"], |c| {
+            matches!(
+                c,
+                Command::Runner(crate::commands::runner::RunnerCommand::ServeLocal)
+            )
+        }),
         (&["runner", "connect", "--stdio"], |c| {
             matches!(
                 c,

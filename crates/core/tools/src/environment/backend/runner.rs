@@ -7,6 +7,7 @@
 //! owns ([`wire`]); the link frames, keys and fences them. Nothing here
 //! selects a runner for a session.
 
+mod local;
 mod probe;
 mod process;
 mod service;
@@ -19,6 +20,8 @@ use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 
+pub(in crate::environment) use local::LocalDaemon;
+pub use local::local_daemon_environment;
 use plakous_model::{AttemptId, CallId, CancellationToken, Timestamp};
 pub use probe::{RunnerWorkspaceProbe, serve_probe};
 pub use process::{ProcessRunner, process_runner, select_process_runner, workspace_probe};
