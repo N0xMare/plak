@@ -73,11 +73,6 @@ pub static TOPOLOGY_PROMPT_PINS: &[PromptPin] = &[
         "0cc2e5859d0f73fb3b255bb61d2dd2d6d3c601e992302bf912a0ff0d158b5fc4",
     ),
     PromptPin::new(
-        "topology.topology_recover_description",
-        PLAK_TOPOLOGY_RECOVER_DESCRIPTION,
-        "dc2e20bd99fec5e5b63011d3d8014610afdf2969de7d42e34f2a0b75f2bccf74",
-    ),
-    PromptPin::new(
         "topology.topology_adopt_description_template",
         PLAK_TOPOLOGY_ADOPT_DESCRIPTION_TEMPLATE,
         "7721bcb7c9c92e38ccd495871c9c27c9266b59b7756e9c558dc9398b5e08e199",
@@ -152,9 +147,6 @@ pub const PLAK_TOPOLOGY_JOBS_STOP_DESCRIPTION: &str = "Stop a background process
 
 /// `close_agent` tool description on hub roots with topology granted.
 pub const PLAK_TOPOLOGY_CLOSE_DESCRIPTION: &str = "End the named child and its descendants permanently; closed rows stay inspectable in list_agents.";
-
-/// `recover_agent` tool description on hub roots with topology granted.
-pub const PLAK_TOPOLOGY_RECOVER_DESCRIPTION: &str = "Recover a child whose list_agents row says remedy recover_agent: its session is reopened exactly, nothing it ran is replayed, and its attempt ends failed so purpose=followup and close_agent work again. A recovery that cannot run yet is refused with a recovery_* code and changes nothing; repeating it on a recovered child changes nothing.";
 
 /// `adopt_candidate` tool description on nodes granted `may_adopt`; `{await}`
 /// is the presented await tool.

@@ -18,9 +18,9 @@ use crate::envelope::{
 };
 use crate::topology::{
     AdoptCandidateRequest, AdoptOutcome, AttemptId, AttemptScopedRequest, CandidateId, Delegation,
-    ListAgentsRequest, MessagePriority, MessagePurpose, SendAgentMessageRequest, SpawnAgentRequest,
-    SpawnWorkspace, SubmitResultRequest, TOPOLOGY_PRESENTATION_ORDER, TemplateName, Tier,
-    TopologyErrorCode, WaitAgentRequest, WorkspaceIdRequest,
+    INVOKE_TOOL_NAMES, ListAgentsRequest, MessagePriority, MessagePurpose, SendAgentMessageRequest,
+    SpawnAgentRequest, SpawnWorkspace, SubmitResultRequest, TemplateName, Tier, TopologyErrorCode,
+    WaitAgentRequest, WorkspaceIdRequest,
 };
 
 /// identity golden: a change here is a wire/durable-format change and needs the
@@ -628,7 +628,7 @@ fn wire_identity_closed_vocabularies_are_pinned() {
         &mut rows,
         CLOSED_VOCABULARY_PINS,
         "invoke_tool_names",
-        &TOPOLOGY_PRESENTATION_ORDER.join(","),
+        &INVOKE_TOOL_NAMES.join(","),
     );
     check(
         &mut failures,

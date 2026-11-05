@@ -33,17 +33,15 @@ use crate::tree::text::{
     PLAK_TOPOLOGY_DISCARD_DESCRIPTION, PLAK_TOPOLOGY_INTERRUPT_DESCRIPTION,
     PLAK_TOPOLOGY_JOBS_STOP_DESCRIPTION, PLAK_TOPOLOGY_JOBS_WAIT_DESCRIPTION,
     PLAK_TOPOLOGY_LIST_DESCRIPTION, PLAK_TOPOLOGY_OPERATION_FALLBACK_TEMPLATE,
-    PLAK_TOPOLOGY_RECOVER_DESCRIPTION, PLAK_TOPOLOGY_SEND_DESCRIPTION,
-    PLAK_TOPOLOGY_SPAWN_DESCRIPTION_TEMPLATE, PLAK_TOPOLOGY_SUBMIT_DESCRIPTION,
-    PLAK_TOPOLOGY_TASK_KILL_DESCRIPTION, PLAK_TOPOLOGY_TASK_OUTPUT_DESCRIPTION,
-    PLAK_TOPOLOGY_WAIT_DESCRIPTION,
+    PLAK_TOPOLOGY_SEND_DESCRIPTION, PLAK_TOPOLOGY_SPAWN_DESCRIPTION_TEMPLATE,
+    PLAK_TOPOLOGY_SUBMIT_DESCRIPTION, PLAK_TOPOLOGY_TASK_KILL_DESCRIPTION,
+    PLAK_TOPOLOGY_TASK_OUTPUT_DESCRIPTION, PLAK_TOPOLOGY_WAIT_DESCRIPTION,
 };
 use crate::tree::{
     AWAIT_RECEIPT_KIND, AwaitAgents, AwaitJobRow, AwaitOutput, AwaitRequest, Effects,
-    MailDisposition, MailDurableState, MintTicket, NodeDetach, ProductAgentTree,
-    RecoverAgentOutput, SendMessageOutput, Settled, SpawnAdmission, SpawnAgentOutput,
-    SpawnReservation, TopologyError, TopologyObserver, TreeStore, bounded_text,
-    topology_error_from_vcs,
+    MailDisposition, MailDurableState, MintTicket, NodeDetach, ProductAgentTree, SendMessageOutput,
+    Settled, SpawnAdmission, SpawnAgentOutput, SpawnReservation, TopologyError, TopologyObserver,
+    TreeStore, bounded_text, topology_error_from_vcs,
 };
 use crate::tree::{TreeRuntimeError, TreeRuntimeResult};
 use plakous_workspace::occupancy_vcs::{VcsError, VcsOps};
@@ -88,7 +86,6 @@ enum TopologyKind {
     Wait,
     Interrupt,
     Close,
-    Recover,
     Submit,
     Adopt,
     Discard,
@@ -147,7 +144,6 @@ impl TopologyKind {
             Self::Wait => "wait_agent",
             Self::Interrupt => "interrupt_agent",
             Self::Close => "close_agent",
-            Self::Recover => "recover_agent",
             Self::Submit => "submit_result",
             Self::Adopt => "adopt_candidate",
             Self::Discard => "discard_workspace",
@@ -166,7 +162,6 @@ impl TopologyKind {
             "wait_agent" => Self::Wait,
             "interrupt_agent" => Self::Interrupt,
             "close_agent" => Self::Close,
-            "recover_agent" => Self::Recover,
             "submit_result" => Self::Submit,
             "adopt_candidate" => Self::Adopt,
             "discard_workspace" => Self::Discard,
@@ -185,7 +180,7 @@ impl TopologyKind {
     /// cell's agent budget.
     ///
     /// Only kinds that produce *new* agent work count. `wait_agent`,
-    /// `list_agents`, `close_agent`, `recover_agent`, `interrupt_agent`,
+    /// `list_agents`, `close_agent`, `interrupt_agent`,
     /// `submit_result`,
     /// `adopt_candidate` and `discard_workspace` are deliberately free: an
     /// exhausted cell must still be able to await, steer, and close the
@@ -201,7 +196,7 @@ impl TopologyKind {
     }
 }
 
-const fn presentation_kinds() -> [TopologyKind; 10] {
+const fn presentation_kinds() -> [TopologyKind; 9] {
     [
         TopologyKind::Spawn,
         TopologyKind::List,
@@ -209,16 +204,16 @@ const fn presentation_kinds() -> [TopologyKind; 10] {
         TopologyKind::Wait,
         TopologyKind::Interrupt,
         TopologyKind::Close,
-        TopologyKind::Recover,
         TopologyKind::Submit,
         TopologyKind::Adopt,
         TopologyKind::Discard,
     ]
 }
 
-/// Closed JSONL `invoke_tool` names: the same topology set the model can be granted.
+/// Closed JSONL `invoke_tool` names: the topology set the model can be
+/// granted, and the operator's `recover_agent`, which the host runs itself.
 pub fn is_topology_invoke_name(name: &str) -> bool {
-    TopologyKind::from_name(name).is_some()
+    plakous_host_protocol::topology::INVOKE_TOOL_NAMES.contains(&name)
 }
 
 #[derive(Clone)]
@@ -417,7 +412,6 @@ impl TopologyTool {
             TopologyKind::Send => self.send_with(operation_id, value).await,
             TopologyKind::Interrupt => self.interrupt_with(operation_id, value).await,
             TopologyKind::Close => self.close_with(operation_id, value).await,
-            TopologyKind::Recover => self.recover_with(value).await,
             TopologyKind::Adopt => self.adopt_with(&operation_id, value).await,
             TopologyKind::List | TopologyKind::Submit | TopologyKind::Discard => {
                 self.run_named(&operation_id, value).await
@@ -506,7 +500,6 @@ impl TopologyTool {
                 | TopologyKind::Send
                 | TopologyKind::Interrupt
                 | TopologyKind::Close
-                | TopologyKind::Recover
                 | TopologyKind::TaskOutput
                 | TopologyKind::TaskKill
                 | TopologyKind::JobsWait

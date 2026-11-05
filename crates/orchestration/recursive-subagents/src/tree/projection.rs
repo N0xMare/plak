@@ -353,8 +353,12 @@ impl ProductAgentTree {
                         refusal.kind, refusal.message
                     ));
                 }
+                // The host recovers the session itself; nothing for the
+                // caller to call.
                 None => {
-                    value["remedy"] = serde_json::Value::String("recover_agent".to_owned());
+                    value["recovery"] = serde_json::Value::String(
+                        "the host is recovering its session; no call is needed".to_owned(),
+                    );
                 }
             },
             RecoveryNeed::Workspace { reason, .. } => {

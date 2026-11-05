@@ -3069,7 +3069,7 @@ async fn fast_release_failure_acknowledges_intent_and_emits_one_owner_notice_for
         runtime.driver().join_retirement_tasks().await.unwrap();
         let (id, notice) = faults.try_recv().expect("owner fault notice");
         assert_eq!(id, child);
-        assert!(notice.contains("recover_agent required"));
+        assert!(notice.contains("; recovery required"));
         assert!(faults.try_recv().is_err());
         runtime
             .read(|tree| {

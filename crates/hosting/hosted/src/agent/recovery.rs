@@ -9,9 +9,11 @@
 //! deterministic create, which either returns the session that create already
 //! made or makes the one it was admitted to make.
 //!
-//! The same [`recover_child`] serves the `recover_agent` tool, which may wait
-//! out a held lease, and each `recover_node` run over a tree (a custody take,
-//! `/recover`, a release with a recovery need), which never waits on a lease.
+//! The same [`recover_child`] serves the operator's retry of one child (the
+//! Agents list's `u`, or JSONL `invoke_tool` of `recover_agent`), which may
+//! wait out a held lease, and each `recover_node` run over a tree (a custody
+//! take, `/recover`, a release with a recovery need), which never waits on a
+//! lease. Recovery is never a model tool.
 //! Each child is held by one run at a time ([`claim_child`]). A refusal
 //! may advance (or, for a replayed create, record) the node's session locator;
 //! it never settles the attempt. The session part of an interrupted seal or
@@ -113,7 +115,7 @@ impl ChildSessionPort for ParentSessionPort {
     ) -> PortFuture<'a, ChildReopened> {
         Box::pin(async move {
             // Never waits on a held lease: a `recover_node` run skips such a
-            // child and `recover_agent` polls between tries.
+            // child and the operator's retry polls between tries.
             let mode = ChildReopenMode {
                 lease_wait: Duration::ZERO,
                 recovery: true,
@@ -690,7 +692,7 @@ fn owner_live() -> TopologyError {
     refusal(
         TopologyErrorCode::RecoveryOwnerLive,
         "this process still owns the child's turn, startup, retirement, or recovery; it \
-         settles on its own, and recover_agent retries after that",
+         settles on its own, and the operator's retry works after that",
     )
 }
 
@@ -1056,8 +1058,8 @@ pub(super) async fn recover_unresolved_children(
     report
 }
 
-/// How long an explicit `recover_agent` waits out a held lease.
-fn recover_agent_lease_wait() -> Duration {
+/// How long the operator's retry waits out a held lease.
+fn operator_recover_lease_wait() -> Duration {
     #[cfg(test)]
     if let Some(wait) = test_lease_wait::get() {
         return wait;
@@ -1065,7 +1067,7 @@ fn recover_agent_lease_wait() -> Duration {
     CHILD_LEASE_WAIT
 }
 
-/// A shorter `recover_agent` lease wait for tests that hold a lease on
+/// A shorter operator-retry lease wait for tests that hold a lease on
 /// purpose. Each nextest test is its own process.
 #[cfg(test)]
 pub(crate) mod test_lease_wait {
@@ -1090,7 +1092,7 @@ pub(crate) mod test_lease_wait {
     }
 }
 
-/// The `recover_agent` port over the attached hub.
+/// The operator's retry port over the attached hub.
 pub(super) struct ProductChildRecoverer {
     pub(super) parent: SpawnParent,
     pub(super) runtime: Arc<ProductTopologyRuntime>,
@@ -1106,7 +1108,7 @@ impl ProductChildRecoverer {
             // Each try holds the child without waiting on the lease, and
             // releases it between tries, so a held lease never stalls a
             // recycle or another recovery of it.
-            let deadline = tokio::time::Instant::now() + recover_agent_lease_wait();
+            let deadline = tokio::time::Instant::now() + operator_recover_lease_wait();
             let port = ParentSessionPort {
                 parent: self.parent.clone(),
             };
@@ -1135,8 +1137,8 @@ impl ProductChildRecoverer {
 /// Why an operator `u` must not call [`ProductChildRecoverer::recover`].
 ///
 /// Eligibility is [`operator_child_recover_eligible`]: failed-idle and
-/// `recovery_required` children, on a tree `recover_agent` would still
-/// accept, with no model-grant check. The revision fence stays here.
+/// `recovery_required` children, on a live, interrupted or terminal-cleanup
+/// tree, with no model-grant check. The revision fence stays here.
 pub(crate) fn refuse_operator_child_recover(
     revision: u64,
     expected_revision: u64,
@@ -1171,8 +1173,8 @@ pub(crate) fn refuse_operator_child_recover(
     }
 }
 
-/// One operator child recover: the `recover_agent` port, not the model tool
-/// and not a `recover_node` run over the tree. The tree mutex is not held
+/// One operator child recover from the Agents list: the operator's retry
+/// port, not a `recover_node` run over the tree. The tree mutex is not held
 /// across the lease wait.
 pub(crate) async fn operator_child_recover(
     runtime: &Arc<ProductTopologyRuntime>,
@@ -1209,6 +1211,33 @@ pub(crate) async fn operator_child_recover(
     .recover(agent_id.to_owned(), Some(attempt))
     .await
     .map_err(|error| format!("{}: {}", code_name(error.code), error.message))
+}
+
+/// The JSONL operator's `invoke_tool` of `recover_agent`: the Agents list's
+/// retry for one child, without the confirmation's revision fence. A child
+/// that is not waiting on recovery answers its state with `recovered: false`,
+/// so a repeat is idempotent.
+pub(crate) async fn operator_recover_tool(
+    runtime: &Arc<ProductTopologyRuntime>,
+    arguments: &serde_json::Value,
+) -> Result<RecoverAgentOutput, TopologyError> {
+    let request: crate::agent_tree_protocol::AttemptScopedRequest =
+        serde_json::from_value(arguments.clone()).map_err(|error| {
+            TopologyError::new(TopologyErrorCode::SchemaMismatch, error.to_string())
+        })?;
+    runtime.read(|tree| tree.authorize_operator_recover(&request))??;
+    let parent = super::build::rejoin_parent(runtime).ok_or_else(|| {
+        TopologyError::new(
+            TopologyErrorCode::RecoverySessionUnavailable,
+            "this host cannot reopen child sessions; nothing changed",
+        )
+    })?;
+    ProductChildRecoverer {
+        parent,
+        runtime: Arc::clone(runtime),
+    }
+    .recover(request.agent_id, request.expected_attempt_id)
+    .await
 }
 
 /// One `recover_node` run over the tree's children (design section 6.3),

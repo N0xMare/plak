@@ -1122,7 +1122,7 @@ fn child_retirement_sigkill_cuts_recover_closed_once_without_redispatch() {
 }
 
 #[test]
-fn recover_agent_waits_for_a_still_held_child_lease() {
+fn operator_recover_waits_for_a_still_held_child_lease() {
     let root = tempfile::tempdir().unwrap();
     let mut owner = spawn_owner(root.path(), "mid");
     let id = await_owner(&mut owner, "held lease");
@@ -1175,7 +1175,7 @@ fn recover_agent_waits_for_a_still_held_child_lease() {
         assert!(fixture.reopen_attempts.load(Ordering::SeqCst) >= 2);
         assert!(
             outcome.unwrap().recovered,
-            "recover_agent must poll rather than immediately refusing a held lease"
+            "the operator's retry must poll rather than immediately refusing a held lease"
         );
         assert!(began.elapsed() >= super::CHILD_LEASE_POLL);
         assert_eq!(fixture.abandonments(&id).await, 1);

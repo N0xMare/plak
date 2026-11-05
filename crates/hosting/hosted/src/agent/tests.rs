@@ -1828,7 +1828,6 @@ fn child_session_fence_follows_the_tier() {
         "spawn_agent",
         "interrupt_agent",
         "close_agent",
-        "recover_agent",
         "adopt_candidate",
         "discard_workspace",
     ] {
@@ -3854,7 +3853,6 @@ fn session_surfaces_rename_nothing_under_any_runtime() {
         "list_agents",
         "close_agent",
         "interrupt_agent",
-        "recover_agent",
         "adopt_candidate",
         "discard_workspace",
         "submit_result",

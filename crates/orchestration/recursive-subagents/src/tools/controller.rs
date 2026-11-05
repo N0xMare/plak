@@ -1,4 +1,4 @@
-//! The host's one port onto child sessions: bind, mail, cancel and recover.
+//! The host's one port onto child sessions: bind, mail and cancel.
 
 use super::*;
 
@@ -7,10 +7,6 @@ use super::*;
 /// does with no controller installed: it refuses, or it settles the tree
 /// alone, rather than pretending.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-#[allow(
-    clippy::struct_excessive_bools,
-    reason = "one independent flag per child service"
-)]
 pub struct ChildServices {
     /// [`ChildController::bind`] and its admission hooks.
     pub bind: bool,
@@ -18,8 +14,6 @@ pub struct ChildServices {
     pub mail: bool,
     /// [`ChildController::cancel_agents`].
     pub cancel: bool,
-    /// [`ChildController::recover`].
-    pub recover: bool,
 }
 
 impl ChildServices {
@@ -28,7 +22,6 @@ impl ChildServices {
         bind: true,
         mail: true,
         cancel: true,
-        recover: true,
     };
     /// Binding spawned children only.
     pub const BIND: Self = Self {
@@ -45,20 +38,14 @@ impl ChildServices {
         cancel: true,
         ..Self::NONE
     };
-    /// Child recovery only.
-    pub const RECOVER: Self = Self {
-        recover: true,
-        ..Self::NONE
-    };
     const NONE: Self = Self {
         bind: false,
         mail: false,
         cancel: false,
-        recover: false,
     };
 }
 
-/// Opens, feeds, cancels and recovers the sessions behind a tree's children.
+/// Opens, feeds and cancels the sessions behind a tree's children.
 ///
 /// The tree decides; the controller acts on sessions, which the tree cannot
 /// open. Each service is called with the tree mutex released, and the tree
@@ -194,27 +181,6 @@ pub trait ChildController: Send + Sync {
             })
         })
     }
-
-    /// Settles a `recovery_required` child by reopening its session exactly,
-    /// fenced to `expected_attempt_id` when given. Recovery never replays a
-    /// model call or a tool, and a refusal leaves the node exactly as it was.
-    fn recover(
-        &self,
-        agent_id: String,
-        expected_attempt_id: Option<crate::protocol::AttemptId>,
-    ) -> Pin<Box<dyn Future<Output = Result<RecoverAgentOutput, TopologyError>> + Send + '_>> {
-        let _ = (agent_id, expected_attempt_id);
-        Box::pin(async { Err(recovery_unavailable()) })
-    }
-}
-
-/// The refusal of `recover_agent` on a host that cannot reopen child
-/// sessions, whether it has no controller or one that does not recover.
-pub(super) fn recovery_unavailable() -> TopologyError {
-    TopologyError::new(
-        TopologyErrorCode::RecoverySessionUnavailable,
-        "this host cannot reopen child sessions; nothing changed",
-    )
 }
 
 const UNPROVIDED: &str = "the child controller does not provide this service";
@@ -246,10 +212,5 @@ impl TopologyTool {
     /// The controller, when it cancels live turns.
     pub(super) fn canceller(&self) -> Option<&Arc<dyn ChildController>> {
         self.controller_with(|services| services.cancel)
-    }
-
-    /// The controller, when it recovers children.
-    pub(super) fn recoverer(&self) -> Option<&Arc<dyn ChildController>> {
-        self.controller_with(|services| services.recover)
     }
 }

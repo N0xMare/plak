@@ -101,7 +101,7 @@ async fn navigator_retirement_failures_reach_the_transcript_once_from_the_owner(
                 false,
             );
         }
-        let notices = received.try_iter().filter(|event| matches!(event, HostEvent::Row(TranscriptRow::Notice(row)) if row.text.contains("recover_agent required"))).count();
+        let notices = received.try_iter().filter(|event| matches!(event, HostEvent::Row(TranscriptRow::Notice(row)) if row.text.contains("; recovery required"))).count();
         assert_eq!(notices, 1, "{action}");
         crate::topology_runtime::force_release(&session.id).await;
     }

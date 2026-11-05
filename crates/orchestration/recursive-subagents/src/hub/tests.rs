@@ -999,7 +999,7 @@ async fn retirement_owner_emits_one_recovery_detach_and_notice_despite_late_fail
         .expect("owner fault notice")
         .unwrap();
     assert_eq!(agent, id);
-    assert!(message.contains("recover_agent required"));
+    assert!(message.contains("recovery required"));
     finish.notify_one();
     assert!(!first.await.is_clean());
     assert!(!second.await.is_clean());

@@ -2,7 +2,6 @@
 
 use std::pin::Pin;
 
-use super::super::recovery::ProductChildRecoverer;
 use super::{ProductChildSessionBinder, ProductLiveCanceller, ProductMailDeliverer};
 
 /// The product's child controller: each child service's hosted
@@ -11,7 +10,6 @@ pub(in crate::agent) struct ProductChildController {
     pub(in crate::agent) binder: ProductChildSessionBinder,
     pub(in crate::agent) deliverer: ProductMailDeliverer,
     pub(in crate::agent) canceller: ProductLiveCanceller,
-    pub(in crate::agent) recoverer: ProductChildRecoverer,
     /// A root runtime built against the hub without a session attachment
     /// keeps the tree resident while its tools live.
     pub(in crate::agent) _residency: Option<crate::topology_runtime::HubResidency>,
@@ -95,14 +93,5 @@ impl crate::agent_tree_tools::ChildController for ProductChildController {
         >,
     > {
         self.canceller.cancel_agents(agent_ids, signalled)
-    }
-
-    fn recover(
-        &self,
-        agent_id: String,
-        expected_attempt_id: Option<crate::agent_tree_protocol::AttemptId>,
-    ) -> Boxed<'_, Result<crate::agent_tree::RecoverAgentOutput, crate::agent_tree::TopologyError>>
-    {
-        self.recoverer.recover(agent_id, expected_attempt_id)
     }
 }

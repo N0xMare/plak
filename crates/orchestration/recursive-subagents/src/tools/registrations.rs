@@ -111,7 +111,7 @@ pub(super) fn schema(kind: TopologyKind, spawnable_templates: &[String]) -> Valu
             }),
             &[],
         ),
-        TopologyKind::Interrupt | TopologyKind::Close | TopologyKind::Recover => object_schema(
+        TopologyKind::Interrupt | TopologyKind::Close => object_schema(
             json!({
                 "agent_id": { "type": "string" },
                 "expected_attempt_id": {
@@ -252,7 +252,6 @@ fn registration(
         (TopologyKind::Submit, _) => PLAK_TOPOLOGY_SUBMIT_DESCRIPTION.to_owned(),
         (TopologyKind::Interrupt, _) => PLAK_TOPOLOGY_INTERRUPT_DESCRIPTION.to_owned(),
         (TopologyKind::Close, _) => PLAK_TOPOLOGY_CLOSE_DESCRIPTION.to_owned(),
-        (TopologyKind::Recover, _) => PLAK_TOPOLOGY_RECOVER_DESCRIPTION.to_owned(),
         (TopologyKind::Adopt, _) => PLAK_TOPOLOGY_ADOPT_DESCRIPTION_TEMPLATE
             .replace("{await}", vocabulary.presented_name("wait_agent")),
         (TopologyKind::Discard, _) => PLAK_TOPOLOGY_DISCARD_DESCRIPTION.to_owned(),

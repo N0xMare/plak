@@ -320,7 +320,6 @@ fn spawn_wires_parent_peer_to_child_and_adopt_follows_may_adopt() {
             "wait_agent",
             "interrupt_agent",
             "close_agent",
-            "recover_agent",
             "adopt_candidate",
             "discard_workspace",
         ]

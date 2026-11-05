@@ -263,6 +263,11 @@ an export.
   waits as for a busy slot and stays durable until its recovery settles. `--resume-tree`, the TUI resume
   row and the `Resume agents first` copy are gone, and the background
   recovery pass no longer holds a tree-wide lock.
+- Recovery is Plak's job, not the model's: `recover_agent` leaves every
+  agent's tools. `list_agents` now says the host is recovering a child whose
+  session recovery is pending, with no remedy to call. You retry one child
+  with `u` in the Agents tab or, from a JSONL client, `invoke_tool` with
+  `recover_agent`, which stays an operator-only name.
 - `/reload` onto a build without an install manifest (a development or
   cargo-installed build) no longer falls back to an unverified resume on a
   busy machine; the reload probe answers without hashing the build.
@@ -731,7 +736,8 @@ an export.
 - `t` opens a history of settled agents grouped by local day, with search
   (`/`) and a failures filter (`!`).
 - `u` recovers a failed or recovery-required child after a confirmation,
-  through the same exact recovery path as `recover_agent`. A paused agent tree
+  through the same exact recovery path as the JSONL operator's
+  `recover_agent`. A paused agent tree
   shows a clickable resume row at the top of the list and of the history.
 - When `config.toml` fails to load, the Agents and profile surfaces show one
   diagnostic naming the config error instead of a missing-template error per

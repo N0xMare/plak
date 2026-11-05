@@ -1486,8 +1486,9 @@ when any of them refuses:
 - **live tree**: the session's agent tree has a child that is not finished
   (running, pending, paused, sealing or interrupted); the children are named;
 - **recovery-required tree**: the session's agent tree has a child whose state
-  needs recovery; the children are named and the remedy is `recover_agent` or
-  explicit `--abandon-children` on deletion;
+  needs recovery; the children are named and the remedy is the host's recovery
+  (the Agents list's `u` retries one) or explicit `--abandon-children` on
+  deletion;
 - **fork dependency**: another product session continues from it (its rebind
   or clear source) or keeps its head
   in the same runtime session, as a fork does; the dependents are named. A
@@ -3530,7 +3531,9 @@ after a gap; a fresh attachment starts with clean prompt provenance.
 `tree`, `interrupt_node`, `close_node`, `stop_all`, `resume` and `invoke_tool`
 are the topology commands; `resume` is the operator's Resume of a child a lost
 host interrupted (chapter 03 §14.1) and answers with one tree note naming what
-it resumed, what was not held and what did not start; chapter 03 §15 owns their semantics
+it resumed, what was not held and what did not start; `invoke_tool` of
+`recover_agent` is the operator's retry of one child's recovery, a name no
+model catalog presents (chapter 03 §4.5a); chapter 03 §15 owns their semantics
 and their refusals.
 
 `resolve_approval` uses the same single-use `ResolveApproval` intent as the
@@ -5563,7 +5566,7 @@ never persisted; a restored transcript opens items the same way.
 **Agent milestones and notices.** Milestone rows end the group and stack
 without blank rows between them: `◆ spawned c23 · worker · <brief first line>`,
 `◇ re-tasked c23 · <first line>`, `✓ c23 finished · 14m`, `✗ c23 failed ·
-<reason>`, `⚠ c23 needs recovery · recover_agent`, `? c23 asks · <first
+<reason>`, `⚠ c23 needs recovery · u retries`, `? c23 asks · <first
 line>`, `⇲ adopted cand-c23-a1 · 16 files`, `✗ adopt conflict · <path>`
 (`+N more` for further paths). A row whose milestone carries text (brief,
 result, reason or question) or several conflict paths ends `▸` and opens to
@@ -6746,7 +6749,7 @@ asks to recover the selected child when that child is a failed or recovery-requi
 in the same pop-up: `Recover #id?` and `Settle this child's recorded session recovery. No task is retried and no model call or tool is replayed.`
 The intent is `RecoverTopologyNode`, bound to the tree id, revision, agent
 id and attempt id the pop-up opened on. It is not the root `Recover` intent
-and not a model tool call. A child that is not waiting on
+and not a model tool call (no model is granted one; chapter 03 §4.5a). A child that is not waiting on
 recovery, or the root, does nothing. The pop-up stays open while that same tree, agent and attempt are still
 eligible and the tree is not paused. Eligibility is the host's predicate:
 a non-root `failed` or `recovery_required` child that still has an attempt,
@@ -6826,8 +6829,8 @@ visible order (never the root, no wrap).
 The view offers the Agents list's per-agent controls for the agent on screen,
 with the same pop-up and the same intents: `i` and `c` ask to interrupt or
 close it in the destructive confirmation pop-up, `x` acknowledges its current
-attention occurrence, and `y` copies its id. Recovery stays the root agent's (`recover_agent`), as in the
-list. Its identity is the agent id: tree snapshot revisions
+attention occurrence, and `y` copies its id. The recovery retry stays on the
+list (`u`). Its identity is the agent id: tree snapshot revisions
 never reset, re-emit or close it. Opening another agent replaces it, and a
 session switch (`/new`, open, resume, fork: `ClearView`, `SessionOpening` or
 a binding naming another session) closes it; a same-session presentation
@@ -8848,7 +8851,7 @@ When the first hosted tool is enabled for live use, hosted unknown-outcome
 messaging on TUI, `plak run`, JSONL and child status rows must name the tool,
 its class, failure phase, that nothing was retried, and the remedy. Today the
 root waits for an explicit prompt or `/recover`; children show
-`recovery_required` with `recover_agent`, leaving the parent model to decide.
+`recovery_required`, which the host recovers, leaving the parent model to decide.
 No automatic "continue" is dispatched. Read-only hosted retrieval defaults to
 an isolated local wrapper whose failure is an ordinary tool observation;
 inline retrieval and class-specific hosted messages are implemented with the

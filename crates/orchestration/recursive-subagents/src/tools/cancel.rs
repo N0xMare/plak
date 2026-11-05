@@ -182,13 +182,7 @@ impl TopologyTool {
         let payload = json!({
             "agents": closed
                 .iter()
-                .map(|(agent_id, status)| {
-                    if *status == crate::protocol::NodeStatus::RecoveryRequired {
-                        json!({ "agent_id": agent_id, "status": status, "remedy": "recover_agent" })
-                    } else {
-                        json!({ "agent_id": agent_id, "status": status })
-                    }
-                })
+                .map(|(agent_id, status)| json!({ "agent_id": agent_id, "status": status }))
                 .collect::<Vec<_>>()
         });
         if replayed {
@@ -318,44 +312,6 @@ impl TopologyTool {
         )
         .await;
         Ok(())
-    }
-
-    /// `recover_agent`: authority under the lock, then the host's exact
-    /// session reopen with the lock released. No operation receipt is kept:
-    /// recovery is idempotent by construction, so a repeat answers from the
-    /// node as it stands.
-    pub(super) async fn recover_with(
-        &self,
-        value: &Value,
-    ) -> Result<ToolOutcome, ToolRuntimeError> {
-        let caller = self
-            .caller_id
-            .lock()
-            .map(|guard| guard.clone())
-            .unwrap_or_default();
-        let request = match decode::<AttemptScopedRequest>(value) {
-            Ok(request) => request,
-            Err(error) => return Self::topology_failure(&error),
-        };
-        let authorized = self
-            .driver
-            .read(|tree| tree.authorize_recover(&caller, &request))
-            .map_err(|error| {
-                ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
-            })?;
-        if let Err(error) = authorized {
-            return Self::topology_failure(&error);
-        }
-        let Some(recoverer) = self.recoverer() else {
-            return Self::topology_failure(&controller::recovery_unavailable());
-        };
-        match recoverer
-            .recover(request.agent_id, request.expected_attempt_id)
-            .await
-        {
-            Ok(output) => ToolOutcome::success_text(json!(output).to_string()),
-            Err(error) => Self::topology_failure(&error),
-        }
     }
 
     async fn finish_cancel_receipt<Req, Out>(

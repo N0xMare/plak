@@ -79,7 +79,7 @@ pub enum RecoveryResolution {
     },
 }
 
-/// The `recover_agent` receipt.
+/// The receipt of one child recovery: the operator's retry, or a `recover_node`.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RecoverAgentOutput {
     /// The node recovered.
@@ -319,27 +319,24 @@ impl ProductAgentTree {
             .collect()
     }
 
-    /// Authorizes `recover_agent` exactly as `close_agent` is authorized: the
-    /// caller must manage the node, and an `expected_attempt_id` must name its
-    /// current attempt.
+    /// Authorizes the operator's retry of one child's recovery (JSONL
+    /// `invoke_tool` of `recover_agent`): any child of a live or
+    /// terminal-cleanup tree, and an `expected_attempt_id` must name its
+    /// current attempt. It is not a model grant.
     ///
     /// # Errors
     ///
-    /// Refuses a stopped-for-good tree, a paused tree, a caller that does not
-    /// manage the target, and a stale attempt id.
-    pub fn authorize_recover(
+    /// Refuses a stopped-for-good tree, the root, an unknown agent and a
+    /// stale attempt id.
+    pub fn authorize_operator_recover(
         &self,
-        caller_id: &str,
         request: &AttemptScopedRequest,
     ) -> Result<(), TopologyError> {
         self.require_live_or_terminal_cleanup()?;
-        let grant = self.grant(caller_id)?;
-        let allowed = grant.managed_ids.iter().any(|id| id == &request.agent_id)
-            || grant.close_ids.iter().any(|id| id == &request.agent_id);
-        if !allowed {
+        if self.node(&request.agent_id)?.parent_agent_id.is_none() {
             return Err(TopologyError::new(
                 TopologyErrorCode::GrantDenied,
-                "caller may not recover that node",
+                "the root is not recovered as a child",
             ));
         }
         self.require_expected_attempt(&request.agent_id, request.expected_attempt_id.as_ref())

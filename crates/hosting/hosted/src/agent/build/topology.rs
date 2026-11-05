@@ -817,14 +817,10 @@ fn topology_host_ports(
                 parent: parent.clone(),
             },
             deliverer: ProductMailDeliverer {
-                parent: parent.clone(),
+                parent,
                 runtime: Arc::clone(runtime),
             },
             canceller: ProductLiveCanceller {
-                runtime: Arc::clone(runtime),
-            },
-            recoverer: crate::agent::recovery::ProductChildRecoverer {
-                parent,
                 runtime: Arc::clone(runtime),
             },
             _residency: residency,
@@ -840,6 +836,13 @@ pub struct TopologyInvokeReceipt {
     pub detail: String,
 }
 
+/// The operator retry's refusal as its receipt detail.
+#[derive(serde::Serialize)]
+struct OperatorRecoverRefusal<'a> {
+    code: plakous_host_protocol::topology::TopologyErrorCode,
+    message: &'a str,
+}
+
 /// Idle JSONL `invoke_tool`: TopologyTool on the attached hub, not a model turn.
 pub async fn invoke_topology_tool_on_hub(
     tree_id: &str,
@@ -850,6 +853,28 @@ pub async fn invoke_topology_tool_on_hub(
 ) -> Result<TopologyInvokeReceipt, String> {
     let runtime = crate::topology_runtime::lookup(tree_id)
         .ok_or_else(|| "invoke_tool requires an attached topology hub".to_owned())?;
+    // The operator's retry is no model tool: the host runs it on the Agents
+    // list's port, whichever node the call names as its caller.
+    if name == plakous_host_protocol::topology::OPERATOR_RECOVER_TOOL {
+        let (succeeded, detail) =
+            match crate::agent::recovery::operator_recover_tool(&runtime, arguments).await {
+                Ok(receipt) => (true, serde_json::to_string(&receipt)),
+                Err(error) => (
+                    false,
+                    serde_json::to_string(&OperatorRecoverRefusal {
+                        code: error.code,
+                        message: &error.message,
+                    }),
+                ),
+            };
+        let detail = detail.map_err(|error| error.to_string())?;
+        return Ok(TopologyInvokeReceipt {
+            call_id: operation_id.to_owned(),
+            name: name.to_owned(),
+            succeeded,
+            detail,
+        });
+    }
     let caller = runtime
         .read(|tree| {
             Ok::<_, String>(match caller_id {

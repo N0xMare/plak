@@ -6961,7 +6961,7 @@ its exact owner but leaves promoted processes running. `shutdown()`, explicit
 shutdown commands and `Drop` select Terminal; process-exit abandonment closes
 admission and starts bounded stops, without a second driver stop pass. Only
 same-branch recovery/authority-refresh callers and live-attempt child
-retirement (interrupted, RecoveryRequired recycle, `recover_agent`) select
+retirement (interrupted, RecoveryRequired recycle, a child recovery) select
 Transfer through `OpenedSession::release_for_transfer`. A new same-branch owner, or the
 line's next head, reopens admission when it binds the retained service. Transfer
 needs a `JobHost` to retain the service: without one the release is Terminal
@@ -7689,8 +7689,8 @@ container expiry, or ambiguous continuation MUST suppress automatic retry,
 fresh-container replacement, source replay, and continuation redispatch.
 Without an exact read-only outcome locator the root turn ends recovery-required
 and waits for an explicit prompt or `/recover`; it never automatically
-"continues". A child becomes `recovery_required`, with remedy `recover_agent`,
-and its parent model decides. Hosted PTC never replays even with a locator.
+"continues". A child becomes `recovery_required`, the host recovers it without
+replaying the call, and its parent model decides what follows. Hosted PTC never replays even with a locator.
 Unknown-outcome presentation names the tool, its class, failure phase, that
 nothing was retried, and the explicit remedy. A retry is a new root turn and
 operation identity.

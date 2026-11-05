@@ -233,7 +233,6 @@ pub(crate) fn occupancy_read_only_allows(name: &str, effect: ToolEffect) -> bool
                     | "spawn_agent"
                     | "interrupt_agent"
                     | "close_agent"
-                    | "recover_agent"
                     | "adopt_candidate"
                     | "discard_workspace"
             ) || is_process_session_tool(name)

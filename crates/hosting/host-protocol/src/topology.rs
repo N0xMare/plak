@@ -57,7 +57,26 @@ pub const TOPOLOGY_PRESENTATION_ORDER: &[&str] = &[
     "wait_agent",
     "interrupt_agent",
     "close_agent",
-    "recover_agent",
+    "submit_result",
+    "adopt_candidate",
+    "discard_workspace",
+];
+
+/// The operator's retry of one child's recovery over JSONL `invoke_tool`:
+/// never a model tool; the host runs it on the same port as the Agents
+/// list's `u`.
+pub const OPERATOR_RECOVER_TOOL: &str = "recover_agent";
+
+/// Closed JSONL `invoke_tool` names: the model-visible topology tools, with
+/// the operator's [`OPERATOR_RECOVER_TOOL`] after `close_agent`.
+pub const INVOKE_TOOL_NAMES: &[&str] = &[
+    "spawn_agent",
+    "list_agents",
+    "send_agent_message",
+    "wait_agent",
+    "interrupt_agent",
+    "close_agent",
+    OPERATOR_RECOVER_TOOL,
     "submit_result",
     "adopt_candidate",
     "discard_workspace",
@@ -507,24 +526,24 @@ pub enum TopologyErrorCode {
     /// `wait_agent`: the waiting agent's own turn was interrupted or settled,
     /// so the wait is abandoned. Nothing about the watched children changed.
     WaitCallerSettled,
-    /// `recover_agent`: the child's session lease is still held by another
+    /// A child recovery: the child's session lease is still held by another
     /// owner; retry after the lease period. Like every recovery refusal it
     /// may have advanced the node's session locator and never settles.
     RecoveryLeaseHeld,
-    /// `recover_agent`: this process still owns the child's turn, startup, or
+    /// A child recovery: this process still owns the child's turn, startup, or
     /// retirement; it settles on its own or on the next tree open.
     RecoveryOwnerLive,
-    /// `recover_agent`: the session or tree store refused (for example at
+    /// A child recovery: the session or tree store refused (for example at
     /// capacity). Never settles.
     RecoveryStorageUnavailable,
-    /// `recover_agent`: the reopened head needs executor effect evidence this
+    /// A child recovery: the reopened head needs executor effect evidence this
     /// host does not hold. Never settles.
     RecoveryEffectEvidenceRefused,
-    /// `recover_agent`: an interrupted seal, adopt, or removal is all that
+    /// A child recovery: an interrupted seal, adopt, or removal is all that
     /// keeps the node `recovery_required`; its VCS outcome cannot be decided
     /// exactly, and `close_agent` ends the node.
     RecoveryVcsAmbiguous,
-    /// `recover_agent`: the child session could not be reopened or recreated
+    /// A child recovery: the child session could not be reopened or recreated
     /// for another reason the message names. Never settles.
     RecoverySessionUnavailable,
     /// An `inherit` child shares its parent's checkout, so it runs on the
@@ -725,9 +744,8 @@ impl NodeStatus {
 /// Whether the attached operator may confirm `u` for this child.
 ///
 /// The same predicate the host refuses with: a non-root `failed` or
-/// `recovery_required` child that still has an attempt, on a tree
-/// `recover_agent` would still accept (`live`, `interrupted`, or
-/// `tree_terminal`). A paused or closed tree, the root, and any other
+/// `recovery_required` child that still has an attempt, on a `live`,
+/// `interrupted` or `tree_terminal` tree. A paused or closed tree, the root, and any other
 /// status are not eligible. This is not a model grant and not a revision
 /// fence.
 #[must_use]
@@ -1295,8 +1313,8 @@ impl WaitAgentRequest {
     }
 }
 
-/// `interrupt_agent` / `close_agent` / `recover_agent`: optionally fenced to
-/// one attempt.
+/// `interrupt_agent`, `close_agent` and the operator's `recover_agent`:
+/// optionally fenced to one attempt.
 ///
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -1491,8 +1509,7 @@ impl TopologyGrant {
             .iter()
             .copied()
             .filter(|name| match *name {
-                "spawn_agent" | "wait_agent" | "interrupt_agent" | "close_agent"
-                | "recover_agent" => spawn_live,
+                "spawn_agent" | "wait_agent" | "interrupt_agent" | "close_agent" => spawn_live,
                 "list_agents" | "send_agent_message" => has_peers,
                 "submit_result" => !is_root,
                 "adopt_candidate" => self.may_adopt,

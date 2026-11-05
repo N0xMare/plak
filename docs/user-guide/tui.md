@@ -591,7 +591,7 @@ Waits are one line with what they asked for and what happened:
 `Waited for agents · up to 60m · woke after 12m (c39 finished)`; a failed wait
 shows its error. Child agents get their own rows, which end a group:
 `◆ spawned c23 · worker · <brief>`, `◇ re-tasked c23 · …`, `✓ c23 finished ·
-14m`, `✗ c23 failed · <reason>`, `⚠ c23 needs recovery · recover_agent`,
+14m`, `✗ c23 failed · <reason>`, `⚠ c23 needs recovery · u retries`,
 `? c23 asks · <question>`, `⇲ adopted cand-c23-a1 · 16 files` and
 `✗ adopt conflict · <path>`. A row with a brief, result, reason, question or
 several paths ends `▸` and opens to all of it, and an adopted row opens to
@@ -819,8 +819,8 @@ ones the live list has aged out. The header counts
 agents are hidden, and `f` shows every agent.
 
 An agent needs attention when its current attempt failed, was blocked by a
-quota, ended without submitting a result, or needs recovery (the inspector
-names the `recover_agent` remedy). The root does not, and neither does an
+quota, ended without submitting a result, or needs recovery (Plak recovers it,
+and `u` retries it). The root does not, and neither does an
 agent you closed or whose attempt was cancelled. It stays listed with `⚠`
 until you press `x`, which records that one occurrence — the attempt, why it
 needs attention, and when it ended — in Plak's store, so it survives a

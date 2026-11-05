@@ -85,7 +85,7 @@ impl std::fmt::Display for SessionDeleteRefusal {
             ),
             Self::RecoveryRequiredTree { children } => write!(
                 formatter,
-                "its agent tree has child agents that need recovery ({}); resolve them with recover_agent first or delete with --abandon-children",
+                "its agent tree has child agents that need recovery ({}); resolve them first (u in the Agents tab retries one) or delete with --abandon-children",
                 children.join(", ")
             ),
             Self::ForkDependency { dependents } => write!(

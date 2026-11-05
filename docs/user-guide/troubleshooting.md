@@ -275,7 +275,7 @@ plak session delete SESSION_ID
 
 `gc` and deleting are never refused for lack of space. Deleting is refused while the session is
 open in a running plak, while its agent tree has a child that is still running
-or resumable or needs recovery (resolve it with `recover_agent`), and while other sessions continue from it or share its history
+or resumable or needs recovery (Plak recovers it; `u` in the Agents tab retries one), and while other sessions continue from it or share its history
 (forks, rebinds, `/new` targets); the refusal names what
 blocks it. A finished child's history and the agent tree are deleted with the
 session. A delete that failed part way finishes when run again (or with
@@ -408,8 +408,9 @@ a fresh session does not mark an old child recovered.
 
 A recovery-required **child**, including one whose release was refused, is
 settled by reopening its session exactly once more: reopening or resuming the
-tree does it in the background, `/recover` does it for the whole tree, and a
-parent can call `recover_agent` for one child. Nothing is replayed, and a note
+tree does it in the background, `/recover` does it for the whole tree, and `u`
+on a child in the Agents tab (or a JSONL `invoke_tool` of `recover_agent`)
+retries one child. No agent has a recovery tool. Nothing is replayed, and a note
 says which children were recovered, which were not and why, and which the pass
 did not reach. Until it is closed, such a child holds none of its parent's
 child slots but counts toward the tree's node budget.

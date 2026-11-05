@@ -20,6 +20,7 @@ fn root_catalog_omits_submit_result() {
     assert!(names.iter().any(|name| name == "adopt_candidate"));
     assert!(!names.iter().any(|name| name == "merge_workspace"));
     assert!(!names.iter().any(|name| name == "submit_result"));
+    assert!(!names.iter().any(|name| name == "recover_agent"));
 }
 
 #[test]
@@ -285,39 +286,11 @@ async fn invoke_granted_list_agents_succeeds() {
     assert!(outcome_json(&outcome)["agents"].is_array());
 }
 
-struct StubRecoverer {
-    calls: AtomicUsize,
-}
-
-impl ChildController for StubRecoverer {
-    fn services(&self) -> ChildServices {
-        ChildServices::RECOVER
-    }
-
-    fn recover(
-        &self,
-        agent_id: String,
-        expected_attempt_id: Option<crate::protocol::AttemptId>,
-    ) -> Pin<Box<dyn Future<Output = Result<RecoverAgentOutput, TopologyError>> + Send + '_>> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        Box::pin(async move {
-            Ok(RecoverAgentOutput {
-                agent_id,
-                attempt_id: expected_attempt_id,
-                recovered: true,
-                status: NodeStatus::Failed,
-                attempt: Some(crate::protocol::AttemptStatus::Failed),
-                failure_kind: Some(crate::tree::TURN_ABANDONED.to_owned()),
-                workspace_recovery: None,
-            })
-        })
-    }
-}
-
-/// `recover_agent` is authorized like `close_agent` before the host port
-/// is asked, and a host with no port refuses with a typed reason.
+/// Recovery is the host's: no node is granted `recover_agent`. It stays a
+/// JSONL `invoke_tool` name only because the host runs it as the operator's
+/// retry; the tree's own tool path refuses it as no topology tool.
 #[tokio::test]
-async fn invoke_granted_recover_agent_authorizes_then_asks_the_host() {
+async fn recover_agent_is_no_model_topology_tool() {
     let root = tempfile::tempdir().unwrap();
     let (store, mut tree) = persist_fixture(&root);
     let child = tree
@@ -326,49 +299,15 @@ async fn invoke_granted_recover_agent_authorizes_then_asks_the_host() {
         .agent_id;
     tree.settle_for_test();
     let driver = driver_on(tree, store);
-    let recoverer = Arc::new(StubRecoverer {
-        calls: AtomicUsize::new(0),
-    });
-    let invoke = |caller: &str, target: &str, operation: &str, with_port: bool| {
-        let driver = driver.clone();
-        let caller = caller.to_owned();
-        let arguments = json!({ "agent_id": target });
-        let operation = operation.to_owned();
-        let ports = TopologyHostPorts {
-            controller: with_port.then(|| Arc::clone(&recoverer) as Arc<dyn ChildController>),
-            ..TopologyHostPorts::default()
-        };
-        async move {
-            invoke_granted_topology_tool_on(
-                driver,
-                caller,
-                "recover_agent",
-                &arguments,
-                operation,
-                ports,
-            )
-            .await
-        }
-    };
-
-    let unported = invoke("root", &child, "op-recover-1", false).await.unwrap();
-    assert_eq!(unported.kind(), ToolOutcomeKind::Failure);
-    assert_eq!(
-        outcome_json(&unported)["code"],
-        "recovery_session_unavailable"
-    );
-
-    let denied = invoke("root", "root", "op-recover-2", true).await.unwrap();
-    assert_eq!(denied.kind(), ToolOutcomeKind::Failure);
-    assert_eq!(outcome_json(&denied)["code"], "grant_denied");
-    assert_eq!(recoverer.calls.load(Ordering::SeqCst), 0);
-
-    let receipt = invoke("root", &child, "op-recover-3", true).await.unwrap();
-    assert_eq!(receipt.kind(), ToolOutcomeKind::Success);
-    assert_eq!(outcome_json(&receipt)["agent_id"], child.as_str());
-    assert_eq!(outcome_json(&receipt)["recovered"], true);
-    assert_eq!(recoverer.calls.load(Ordering::SeqCst), 1);
-
-    let leaf = invoke(&child, &child, "op-recover-4", true).await;
-    assert!(leaf.is_err(), "a leaf is not granted recover_agent");
+    assert!(is_topology_invoke_name("recover_agent"));
+    let refused = invoke_granted_topology_tool_on(
+        driver,
+        "root".to_owned(),
+        "recover_agent",
+        &json!({ "agent_id": child }),
+        "op-recover".to_owned(),
+        TopologyHostPorts::default(),
+    )
+    .await;
+    assert!(refused.is_err(), "{refused:?}");
 }

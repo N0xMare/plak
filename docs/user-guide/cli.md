@@ -758,7 +758,7 @@ full; `/new`, compaction and `/recover` do not. It asks first unless `--yes`
 is given, and refuses while the session is open in a running plak (or its
 process died less than half a minute ago), while its agent tree has a
 sub-agent that is still running or resumable, or one that needs recovery
-(resolve it with `recover_agent` first, or explicitly abandon that obligation
+(let Plak recover it first, or retry it with `u` in the Agents tab, or explicitly abandon that obligation
 with `--abandon-children`), or while other sessions continue from
 it or share its history (forks, rebinds, `/new` targets); the
 refusal names them. These checks run before the question and again after it,

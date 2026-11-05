@@ -172,7 +172,8 @@ pub enum Attention {
     Blocked,
     /// The turn ended without `submit_result`.
     NoSubmission,
-    /// The node needs `recover_agent` before anything else.
+    /// The node's recovery is unresolved: the host recovers it, and `u`
+    /// retries it.
     RecoveryRequired,
 }
 

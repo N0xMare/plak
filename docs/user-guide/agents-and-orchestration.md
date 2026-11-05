@@ -213,9 +213,9 @@ pins belong to retained records, independently of the checkout's lifetime.
 
 Tools a model can see, grant-gated: `spawn_agent`, `list_agents`,
 `send_agent_message`, `wait_agent`, `interrupt_agent`, `close_agent`,
-`recover_agent`, `submit_result`, `adopt_candidate`, `discard_workspace`.
-`spawn_agent`, `wait_agent`, `interrupt_agent`, `close_agent` and
-`recover_agent` appear only with a non-empty spawn menu
+`submit_result`, `adopt_candidate`, `discard_workspace`.
+`spawn_agent`, `wait_agent`, `interrupt_agent` and `close_agent` appear only
+with a non-empty spawn menu
 and remaining depth; `adopt_candidate` only with `may_adopt`; `submit_result`
 on every non-root node. On Grok (SuperGrok OAuth and the xAI API) the await and
 the interrupt are Grok's own `get_command_or_subagent_output` and
@@ -255,17 +255,19 @@ no turn: mail for it waits and is kept. A child that still reads
 toward the tree's node budget until it is closed.
 
 Such a child is settled by reopening its session once more, without replaying
-anything it ran:
+anything it ran. Recovery is Plak's job, not the model's: no agent has a
+recovery tool, and `list_agents` says the host is recovering that child. It
+runs:
 
 - automatically, in the background, when the tree is reopened;
 - when you run `/recover`;
-- by its parent calling `recover_agent { agent_id }`, which `list_agents` and
-  `close_agent` name as the remedy on that row.
+- when you retry one child: `u` on it in the Agents tab, or, from a JSONL
+  client, `invoke_tool` with `recover_agent` and its `agent_id`.
 
 Recovery runs in the background and never holds up the session. Each run that
 did something posts one note naming the children it recovered and the ones it
-could not (with the reason). `recover_agent` retries a refusal; `/recover` only
-selects children with unresolved session outcomes. A child whose interrupted
+could not (with the reason). The one-child retry retries a refusal; `/recover`
+only selects children with unresolved session outcomes. A child whose interrupted
 turn may have run a tool gets a warning that its workspace may have changed.
 The tool's unobserved conversation result is not kept or replayed; workspace
 changes remain in the child's workspace for review, not erased. A child whose
@@ -279,7 +281,7 @@ was mid seal or adopt stays `recovery_required` until it is closed.
 A refusal to reopen or initially publish settles nothing and says why:
 `recovery_lease_held` means
 another process still holds the child's session (automatic recovery does not
-wait; `recover_agent` waits up to 35 seconds), and the others are
+wait; the one-child retry waits up to 35 seconds), and the others are
 `recovery_session_unavailable`, `recovery_storage_unavailable`,
 `recovery_effect_evidence_refused` and `recovery_owner_live` (the child is
 still being settled by this process). A close or interrupt can time out while
@@ -292,7 +294,7 @@ refusal as its failure and frees its slot.
 
 A child whose seal or adopt was interrupted has its session settled the same
 way, but whether the VCS step landed is not something Plak can tell, so the
-child stays `recovery_required`: `recover_agent` reports the blocker in
+child stays `recovery_required`: the one-child retry reports the blocker in
 `workspace_recovery` (or refuses `recovery_vcs_ambiguous` when the session was
 already settled), `list_agents` names `close_agent` as the remedy, and closing
 it after you have inspected the copy ends it and frees its slot.
@@ -308,7 +310,7 @@ actually fails reports `mint_unavailable` with the seal diagnostic and leaves
 `seal_failed` on the attempt; inspect its retained copy before closing it.
 If the tree store refuses to publish the seal completion, recovery reports
 `recovery_storage_unavailable` instead of claiming it succeeded. For a child
-already failed and idle in this process, use `recover_agent` to retry the
+already failed and idle in this process, retry that one child (`u`) to retry the
 publication: `/recover` does not select that child. This does not rerun its
 seal. If a seal failed in the same drain, the storage refusal includes both
 diagnostics. A recorded `seal_failed` diagnostic survives restart and still

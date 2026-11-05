@@ -1045,18 +1045,19 @@ dispatch a second cancellation. Refusal to persist cancellation preparation is
 also checked to leave both node state and the live canceller untouched.
 
 Child-recovery regressions (`agent::recovery::tests` in `plakous-hosted`, the
-tree's `tree::recovery` unit tests, the `recover_agent` tool tests, and one
+tree's `tree::recovery` unit tests, the operator-retry tests, and one
 host-loop `/recover` test) reproduce the stranding failure mode: a real
 unknown-outcome child turn on a real runtime database, a fixture binding with
 a real projected tool catalog, and a SQLite trigger that refuses the turn
 waiter's own recycle reopen, so the node is left `recovery_required` and its
 turn is never abandoned. Every settlement goes through the product reopen
 (`reopen_spawned_child`) with the spawn's real create identity and a parked
-rejoin spec. They prove that `recover_agent` (through the hub tool executor)
+rejoin spec. They prove that the operator's retry (JSONL `invoke_tool` of
+`recover_agent`, on the host's operator port; no model catalog has it)
 and a `recover_node` run each interrupt the child (law L, attempt kept, no
 failure) with no additional provider dispatch, that close frees the slot, and
 that `/recover` shows the user which child it recovered. A lease another
-session holds is refused `recovery_lease_held` exactly, by `recover_agent`
+session holds is refused `recovery_lease_held` exactly, by the operator's retry
 after a short injected lease wait, with the child not held between its polls,
 and by a run at once. Hub unit tests prove that a recovery claim excludes a
 second run and a recycling child, that a run tracked on a closed hub is
@@ -1064,9 +1065,10 @@ aborted, and that shutdown aborts a run that overruns its allowance and still
 returns. A refused tree publish changes nothing and its retry still interrupts
 the child; a refusal records nothing on the node. Mail for an owed child
 before its `recover_node` starts nothing and stays durable; an owed child whose
-exact open restores its turn rejoins unmarked. Recovery racing the
+exact open restores its turn has it cancelled and is marked `owner_lost`, never
+rejoined. Recovery racing the
 turn waiter settles the attempt once, and a real turn waiter whose recycle is
-waiting out a held lease makes `recover_agent` answer `recovery_owner_live`
+waiting out a held lease makes the operator's retry answer `recovery_owner_live`
 and the pass skip the child at once, without either waiting behind it. A
 terminal refusal lets `close_agent` settle the attempt with the refusal's code
 and end the node. An interrupted adopt behind an unknown
@@ -2681,7 +2683,9 @@ adoption; `root_second_stale_open_refuses_contention_without_a_third_projection`
 and `root_stale_open_with_projection_debt_refuses_without_retry` pin its refusal
 boundaries. `root_startup_rejoins_certified_decision_once_and_settles_waits` pins
 the root's restored turn; a child's never is: its open closes an effect-decision
-barrier as abandoned (`an_owed_child_at_a_decision_barrier_is_closed_as_abandoned_and_marked_owner_lost`). `recover_agent_waits_for_a_still_held_child_lease` pins the explicit recovery
+barrier as abandoned
+(`an_owed_child_at_a_decision_barrier_is_closed_as_abandoned_and_marked_owner_lost`).
+`operator_recover_waits_for_a_still_held_child_lease` pins the explicit recovery
 wait; `owner_reopen_polls_a_reinstated_lease_with_a_new_operation_id` pins the
 owner's inner lease poll, elapsed wait and incremented open identity. These
 durability tests are separate from enrollment in the single-root sweep.

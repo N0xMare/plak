@@ -270,10 +270,9 @@ pub enum SessionIntent<P: ProtocolExtension = Core> {
     },
     /// Host stop-all: postorder-close every non-root non-terminal node.
     StopAllTopology,
-    /// Settle one child's recorded session recovery. Not the root `Recover`
-    /// intent and not a model `recover_agent` call. The host refuses a stale
-    /// revision or a different attempt, and it does not run while the tree is
-    /// restored-paused.
+    /// Settle one child's recorded session recovery: the operator's retry,
+    /// not the root `Recover` intent. The host refuses a stale revision or a
+    /// different attempt.
     RecoverTopologyNode {
         /// Tree the confirmation was bound to.
         tree_id: String,

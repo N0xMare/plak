@@ -478,7 +478,7 @@ async fn record_retirement_fault(
             };
             let _ = driver.retirement_faults.send((
                 agent_id.to_owned(),
-                format!("{prefix} for {agent_id}: {error}; recover_agent required"),
+                format!("{prefix} for {agent_id}: {error}; recovery required"),
             ));
         }
     }))

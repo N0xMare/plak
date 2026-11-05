@@ -810,7 +810,7 @@ pub(crate) fn milestone_parts(milestone: &AgentMilestone) -> (&'static str, Stri
             },
         ),
         MilestoneEvent::Failed => ("✗", with_first(format!("{id} failed"))),
-        MilestoneEvent::NeedsRecovery => ("⚠", format!("{id} needs recovery · recover_agent")),
+        MilestoneEvent::NeedsRecovery => ("⚠", format!("{id} needs recovery · u retries")),
         MilestoneEvent::Asks => ("?", with_first(format!("{id} asks"))),
         MilestoneEvent::Adopted => (
             "⇲",

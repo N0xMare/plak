@@ -698,13 +698,15 @@ fn the_first_settlement_of_an_attempt_wins() {
     assert_eq!(tree.node(&id).unwrap().status, NodeStatus::Failed);
 }
 
-/// Recovery authority is close authority; a sibling cannot recover.
+/// The operator may retry any child's recovery; the root is not a child.
 #[test]
-fn recover_authority_follows_close_authority() {
+fn operator_recover_authority_covers_every_child_but_the_root() {
     let (_tmp, mut tree) = tree();
     let id = stuck_child(&mut tree);
-    tree.authorize_recover("root", &scoped(&id)).unwrap();
-    let error = tree.authorize_recover(&id, &scoped("root")).unwrap_err();
+    tree.authorize_operator_recover(&scoped(&id)).unwrap();
+    let error = tree
+        .authorize_operator_recover(&scoped("root"))
+        .unwrap_err();
     assert_eq!(error.code, TopologyErrorCode::GrantDenied);
 }
 

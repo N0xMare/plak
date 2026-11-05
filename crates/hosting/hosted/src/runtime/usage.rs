@@ -438,7 +438,6 @@ fn append_request_tool_names(
         "list_agents",
         "submit_result",
         "interrupt_agent",
-        "recover_agent",
         "close_agent",
         "adopt_candidate",
         "discard_workspace",

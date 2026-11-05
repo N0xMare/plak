@@ -515,7 +515,7 @@ dispatch. A submit-harness restart returns a typed reconciliation-required
 error when its Duplicate turn has retired; the existing live-handle string
 boundary carries its exact diagnostic without a new public API. The caller
 marks the child `recovery_required`, preserves the prepared result context,
-and retires the attachment. `recover_agent`/reopen settles that recorded
+and retires the attachment. A recovery reopen settles that recorded
 command from the child's feed (§14.1); the monitor does not overwrite this state with ordinary completion.
 Completed topology-operation receipts still
 replay without starting or rejoining a turn.
@@ -538,7 +538,6 @@ visible to the model at all — it is never "shown then denied".
 | `wait_agent` | yes | no | yes |
 | `interrupt_agent` | yes | no | yes |
 | `close_agent` | yes | no | yes |
-| `recover_agent` | yes | no | yes |
 | `list_agents` | yes | yes | yes |
 | `send_agent_message` | yes | yes | yes |
 | `submit_result` | **no** | yes | yes |
@@ -548,7 +547,7 @@ visible to the model at all — it is never "shown then denied".
 A child's grant carries `may_spawn` when its own template's menu (its `spawns`
 list minus itself, as frozen in the epoch) is non-empty and depth remains; the
 root's grant always carries it. The compile rules are exact: `spawn_agent`,
-`wait_agent`, `interrupt_agent`, `close_agent` and `recover_agent` require
+`wait_agent`, `interrupt_agent` and `close_agent` require
 `may_spawn` **and** remaining depth, and `spawn_agent` is additionally withheld
 while the node's menu is empty; `list_agents` and `send_agent_message` require
 `may_spawn` or a non-empty message-peer set; `submit_result` requires the node
@@ -556,6 +555,10 @@ not be the root; `adopt_candidate` requires `may_adopt`, which a template may
 set only alongside `spawns` naming another template, so a leaf child never
 carries it;
 `discard_workspace` requires `may_spawn`.
+
+Recovery is never a model tool: the host recovers children itself (§14), and
+the operator's per-child retry is the Agents list's `u` or a JSONL
+`invoke_tool` of `recover_agent` (§4.5a), which no catalog presents.
 
 The `wait_agent` row is the grant of the await (§4.4) over children and mail:
 a pack presentation of the await that replaces `wait_agent` compiles under the
@@ -1161,8 +1164,8 @@ than dispatching
 again. The navigator's close, interrupt and stop-all have the same prompt-return
 contract. A
 `recovery_required` node whose session outcome is unresolved is not closed:
-its row reports `recovery_required` with `remedy: "recover_agent"`, keeps its
-attempt failure, and authorizes no retry. Two kinds of `recovery_required` node
+its row reports `recovery_required`, keeps its attempt failure, and authorizes
+no retry: the host recovers it (§14.2). Two kinds of `recovery_required` node
 are closed like any other: one whose only remaining blocker is an interrupted
 seal, adopt, or copy removal, once the operator has inspected the copy, and one
 whose recovery met a refusal no retry can get past (section 4.5a), whose
@@ -1187,19 +1190,22 @@ refusal code. Pi's `stop {id}` presents both slots the same way (§4.4). Neither
 presentation carries `expected_attempt_id`: the interrupt it runs always
 targets the child's current attempt, so it never refuses `attempt_mismatch`.
 
-### 4.5a `recover_agent`
+### 4.5a The operator's retry of one child's recovery
 
-`{ agent_id, expected_attempt_id? }` settles a `recovery_required` child through
-the one supported path, the same exact session reopen a relaunch performs, and
-returns `{ agent_id, attempt_id, recovered, status, attempt, failure_kind }`.
-Authority is `close_agent`'s: the caller must manage the node (its managed or
-close set), on a live or terminal-cleanup tree; a stale `expected_attempt_id`
-is `attempt_mismatch`. It writes no operation receipt and needs none: a node
-that is not waiting on recovery returns its current state with
-`recovered: false`, so a repeat is idempotent. When the session part settles
-but an interrupted seal, adopt, or copy removal still holds the node, the
-receipt also carries `workspace_recovery`, naming that blocker; `close_agent`
-then ends the node.
+Recovery is the host's job, and no model is granted a recovery tool. The
+operator keeps one retry per child. JSONL `invoke_tool` of `recover_agent`,
+`{ agent_id, expected_attempt_id? }`, an operator-only name no catalog
+presents, settles a `recovery_required` child through the one supported path,
+the same exact session reopen a relaunch performs, and returns
+`{ agent_id, attempt_id, recovered, status, attempt, failure_kind }`. It runs
+on the operator's port whichever node the call names as its caller: any child
+of a live or terminal-cleanup tree, never the root (`grant_denied`); a stale
+`expected_attempt_id` is `attempt_mismatch`. It writes no operation receipt
+and needs none: a node that is not waiting on recovery returns its current
+state with `recovered: false`, so a repeat is idempotent. When the session
+part settles but an interrupted seal, adopt, or copy removal still holds the
+node, the receipt also carries `workspace_recovery`, naming that blocker;
+`close_agent` then ends the node.
 
 The Agents list's `u`, after its confirmation pop-up, is the same port for
 one child: `RecoverTopologyNode` names the tree, the snapshot revision, the
@@ -1209,16 +1215,16 @@ a root, a child that is not `failed` or `recovery_required` (or has no attempt),
 or a different attempt
 (`attempt mismatch`) before it calls this port. Failed-idle is eligible: the
 same predicate the Agents list uses, with no model-grant check, and the same
-tree-state guard as `recover_agent` (`live`, `interrupted`, or terminal
+tree-state guard as the JSONL retry (`live`, `interrupted`, or terminal
 cleanup). A matching call is
 `ProductChildRecoverer::recover` with that attempt. It is not the root
-`Recover` intent and not an `invoke_tool` of `recover_agent`. The call
+`Recover` intent. The call
 runs on the host executor without holding the tree mutex across the lease
 wait. The hub tracks that task with the tree's other `recover_node` runs.
 Shutdown waits up to `HOST_SHUTDOWN_RELEASE_TIMEOUT`, then aborts it, before
 any lease is released. Quit or `/reload` uses that same shutdown.
 
-`recover_agent` is the one trigger that waits on a lease: it waits up to 35
+The operator's retry is the one trigger that waits on a lease: it waits up to 35
 seconds for a lapsed owner's lease and then refuses. It polls: each try holds
 the child for one recovery and never waits on the lease, and the child is
 released between tries, every two seconds, so a held lease never stalls a
@@ -1248,7 +1254,7 @@ An already-terminal root with only exact same-turn finalization debt closes
 quiescently on reopen (chapter 01 §5.5), without another result or
 abandonment report. The fenced turn waiter's successful recycle then settles
 the attempt as an ordinary failed attempt (`turn_abandoned`), not
-`recovery_required`; an explicit `recover_agent` of such a quiescent reopen
+`recovery_required`; the operator's retry of such a quiescent reopen
 interrupts the child with cause `owner_lost`, attempt kept (law L, §14.1).
 An abandonment report already proves a successful recycle; only a reopen
 without that report needs a quiescent-head probe. A probe failure is logged as
@@ -1951,7 +1957,7 @@ that session failure's kind on the attempt; settling the session (section
 `seal_failed`. A seal that failed on its own (`seal_failed`) is not retried
 by recovery and reports `mint_unavailable` with the seal diagnostic. An
 interrupted seal reports `recovery_vcs_ambiguous` (section 14.2). Neither is
-settled by a `recover_node` run or by `recover_agent`; the operator
+settled by a `recover_node` run or by the operator's retry; the operator
 inspects the copy and closes the node.
 
 ### 6.6 Dormant checkout reclamation
@@ -2764,8 +2770,8 @@ explicit successor-epoch operation.
 refuse `attempt_mismatch` when it is not the child's current attempt.
 
 A `recovery_required` child with an unresolved session outcome is not closed
-by `close_agent` and cannot be re-tasked; `recover_agent` (section 4.5a) or the
-automatic pass settles it as section 14.2 describes: `failed` and idle, after
+by `close_agent` and cannot be re-tasked; the host's recovery (or the
+operator's retry, section 4.5a) settles it as section 14.2 describes: `failed` and idle, after
 which `followup` and `close_agent` work as for any failed attempt; `completed`
 for a retirement-only quiescent reopen with submitted output; or `closed`, with
 no result mail, when the parent had already closed it.
@@ -2941,7 +2947,7 @@ until its next epoch rather than at whatever the live config says — there are
 no migrations, and a running tree's ceiling never moves under it. What is
 charged is only work that creates a new agent: `spawn_agent`, and
 `send_agent_message` with `purpose=followup`. Ordinary mail, `wait_agent`,
-`list_agents`, `close_agent`, `recover_agent`, `interrupt_agent`,
+`list_agents`, `close_agent`, `interrupt_agent`,
 `submit_result`, `adopt_candidate`, and `discard_workspace` are free.
 
 Admission charges the budget **before** `request_key` dedup and **before** the
@@ -3961,7 +3967,7 @@ while its session failure kind was retained (section 6.5) is begun once more,
 and a second failure records `seal_failed`. A parent receives at most one
 `result` mail per attempt: settlement pushes the settled result only when the
 attempt's failure had not already pushed one, and the outcome also reaches the
-caller through the `recover_agent` receipt or the pass note below. The host
+caller through the operator retry's receipt or the pass note below. The host
 builds that receipt from the authoritative tree after all queued effects have
 been recorded and published, not from the intermediate `sealing` state. Both
 resolution and the final receipt are fenced to the recovered attempt: if a
@@ -3986,7 +3992,7 @@ the receipt's `workspace_recovery` names the remaining blocker, and
 `close_agent` ends the node once the operator has inspected the copy.
 
 The host settles a child by reopening its session exactly (§14.1). Here (for
-`recover_agent` and an unresolved session outcome; an owed child's
+the operator's retry and an unresolved session outcome; an owed child's
 `recover_node` cancels it the same way and marks the child, §14.1) a head that
 restores a resumable working turn is cancelled and released, never rejoined, and the child is interrupted
 (law L). A head that requires effect evidence is
@@ -4052,16 +4058,16 @@ and seal diagnostics, rather than hiding the seal failure.
 An explicit retry in the same process publishes the recorded state before
 returning even a no-op receipt; it does not rerun the seal or claim to have
 settled the session a second time.
-For an already-settled, failed-idle child this retry is `recover_agent`, not
-`/recover`: a `recover_node` run only selects unresolved child session outcomes.
+For an already-settled, failed-idle child this retry is the operator's (section
+4.5a), not `/recover`: a `recover_node` run only selects unresolved child session outcomes.
 A dirty whole-tree revision alone does not identify which child's recovery
 outcome has not yet been reported; it is not automatic child recovery authority.
 
 Settlement has three triggers:
 
-- `recover_agent` (section 4.5a), for one child, with its bounded lease wait,
-  including the Agents list's confirmed `u` (`RecoverTopologyNode`), which
-  uses that port and no other;
+- the operator's retry (section 4.5a), for one child, with its bounded lease
+  wait: the Agents list's confirmed `u` (`RecoverTopologyNode`) or a JSONL
+  `invoke_tool` of `recover_agent`, which use that port and no other;
 
 - a `recover_node` run over the tree: the custody take's (the first root
   attach after this process takes the tree's custody runs `recover_node` for
@@ -4094,7 +4100,7 @@ scan leaves the node to the waiter.
 Each host-loop-requested run that settled or refused anything reports once to
 the user as a system note naming the children it recovered (interrupted, attempt
 kept) and each refused child with its `recovery_*` code. A refusal note names
-`recover_agent` as the retry and explains that `/recover` only selects unresolved
+the operator's retry and explains that `/recover` only selects unresolved
 child sessions, not an already-settled child's pending publication. A child
 whose session settled but
 whose seal or adopt is still ambiguous is listed as refused
@@ -4102,13 +4108,14 @@ whose seal or adopt is still ambiguous is listed as refused
 `recovery_required`; `list_agents` and `/tree` show it.
 
 `list_agents` lists `recovery_required` rows even without
-`include_completed`, and a full row carries `remedy: "recover_agent"` when a
-session recovery would settle it, or `remedy: "close_agent"` with a
+`include_completed`, and a full row carries a `recovery` note saying the host
+is recovering its session, with no remedy, when a session recovery would
+settle it, or `remedy: "close_agent"` with a
 `recovery` reason when only a workspace ambiguity remains or a terminal
 refusal holds it. A failed copy removal (`workspace_cleanup`) is a workspace
 ambiguity, not a session recovery. Interrupted seals,
-adopts and copy removals are never settled automatically or by
-`recover_agent`: their outcome is a VCS question, and the tree records no
+adopts and copy removals are never settled automatically or by the
+operator's retry: their outcome is a VCS question, and the tree records no
 pre-landing target snapshot or expected seal commit to compare the evidence
 against, so a node held only by one is refused `recovery_vcs_ambiguous`. The
 one follow-up is a copy removal whose occupants the operator has closed, which
@@ -4238,7 +4245,7 @@ A later `recover_node` run exact-opens and owns the child session. If its
 authoritative head is quiescent with no admitted Start or abandonment, the
 child is interrupted with cause `owner_lost` and the opened attempt kept
 (§14.1); nothing is reported to the parent. It does not leave a clean opening
-requiring an explicit `recover_agent` call. The opened attempt's unread
+requiring an explicit retry. The opened attempt's unread
 opening envelope stays unread and durable: it reaches the child with its next
 turn, ahead of any later followup's mail.
 The deliverer reserves startup

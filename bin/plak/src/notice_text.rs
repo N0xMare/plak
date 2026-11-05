@@ -95,14 +95,14 @@ pub(crate) fn remedy_text(remedy: &NoticeRemedy, context: RemedyContext<'_>) -> 
         },
         R::RecoverChildren {} => match face {
             Tui => "\
-                /recover selects unresolved child sessions only; recover_agent retries a \
-                particular obligation; close_agent only ends a node whose reported remedy is \
-                close_agent"
+                /recover selects unresolved child sessions only; u on an agent in the Agents \
+                tab retries a particular obligation; close_agent only ends a node whose \
+                reported remedy is close_agent"
                 .into(),
             Run => format!(
                 "`plak session recover {session}` selects unresolved child sessions only; \
-                 use the TUI for per-agent recovery; recover_agent retries an obligation \
-                 and close_agent only ends a node whose reported remedy is close_agent"
+                 use the TUI's Agents tab (u) for per-agent recovery; close_agent only ends a \
+                 node whose reported remedy is close_agent"
             ),
             Jsonl => "\
                 send recover for unresolved child sessions; invoke_tool with recover_agent or \

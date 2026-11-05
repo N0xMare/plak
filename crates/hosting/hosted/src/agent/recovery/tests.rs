@@ -2261,30 +2261,43 @@ async fn an_interrupted_adopt_settles_its_session_then_closes() {
     assert_eq!(fixture.live_nodes() + 1, before);
 }
 
-/// A leaf child may not recover its sibling: the tool is not compiled for
-/// it, so the refusal comes before any reopen. (A spawner that does not
-/// manage the node is `grant_denied`; the tree's unit tests pin that.)
+/// `recover_agent` is the operator's, never a model tool: no node's catalog
+/// offers it, the JSONL call runs on the operator's port whichever node it
+/// names as caller, and the root is not recovered as a child.
 #[tokio::test]
-async fn recover_agent_is_refused_to_a_caller_that_does_not_manage_the_node() {
+async fn recover_agent_is_the_operators_and_no_model_tool() {
     let fixture = Fixture::new("recover-authority");
     let id = fixture.stuck_child().await;
     let sibling = fixture.spawn();
-    let refused = crate::agent::invoke_topology_tool_on_hub(
+    for caller in ["root", sibling.as_str()] {
+        let offered = fixture
+            .runtime
+            .read(|tree| tree.compiled_tool_names(caller).unwrap())
+            .unwrap();
+        assert!(!offered.contains(&"recover_agent"), "{caller}: {offered:?}");
+    }
+    let root = crate::agent::invoke_topology_tool_on_hub(
+        &fixture.tree_id,
+        None,
+        "recover_agent",
+        &json!({ "agent_id": "root" }),
+        "recover:root",
+    )
+    .await
+    .unwrap();
+    assert!(!root.succeeded);
+    assert!(root.detail.contains("grant_denied"), "{}", root.detail);
+    let receipt = crate::agent::invoke_topology_tool_on_hub(
         &fixture.tree_id,
         Some(&sibling),
         "recover_agent",
         &json!({ "agent_id": id }),
         "recover:sibling",
     )
-    .await;
-    let Err(refused) = refused else {
-        panic!("a leaf caller was granted recover_agent")
-    };
-    assert_eq!(
-        refused,
-        format!("topology tool `recover_agent` is not granted to `{sibling}`")
-    );
-    assert_eq!(fixture.status(&id), NodeStatus::RecoveryRequired);
+    .await
+    .unwrap();
+    assert!(receipt.succeeded, "{}", receipt.detail);
+    assert_eq!(fixture.status(&id), NodeStatus::Interrupted);
 }
 
 /// Installs a child binding agent construction refuses before it writes
