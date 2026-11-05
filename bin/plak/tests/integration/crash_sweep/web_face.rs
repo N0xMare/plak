@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 
 use plak::wire_transport::PlakExtension;
 use plakous_host_protocol::client::{self, Transport, WireReceiver, WireSender};
-use plakous_host_protocol::wire::{ClientLocality, Hello, WIRE_VERSION};
+use plakous_host_protocol::wire::{Hello, WIRE_VERSION};
 use plakous_host_protocol::{Draft, SessionIntent, SessionObservation};
 use serde_json::{Value, json};
 use tungstenite::protocol::{Role, WebSocketConfig};
@@ -371,7 +371,6 @@ fn connect(socket: &std::path::Path) -> Result<Connection, String> {
         proto: WIRE_VERSION,
         binary_id: "crash-sweep".into(),
         caps: Vec::new(),
-        locality: ClientLocality::default(),
     };
     let (sender, receiver, welcome) =
         client::connect::<PlakExtension>(transport, hello).map_err(|error| error.to_string())?;
