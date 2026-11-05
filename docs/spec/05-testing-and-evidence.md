@@ -1978,6 +1978,17 @@ after the offline one-CAS publication. Pilots require strategy
 dispatch. The durability lane repeats these three shapes through
 `image_residency_crash_cuts_recover_without_redispatch`; direct receipt tests
 independently materialize and validate v3 source/selection/successor evidence.
+The shape `residency_dormant_materialize` serves its session through `plak web
+--session <id> --idle-release 1` instead of `plak agent`: a wire v2 client
+(`plakous_host_protocol::client`) comes in through the endpoint's gate as
+`tailscale serve` would, prompts and reads the answer, and leaves; once the
+runtime store shows no live owner the session is dormant, and a second
+connection materializes it again, then `SIGINT` ends the endpoint while that
+connection holds the session. Its pilot requires one answer, one provider
+dispatch, and the endpoint's `opening released session` and `opened session`
+lines once each. Its cuts kill the endpoint at every indexed commit, the idle
+release's and the wake's included, and recover through the ordinary `plak
+agent` relaunch.
 Released job coverage distinguishes successful explicit disown, ordinary stop
 and missing-owner unknown outcomes, preserves read-only reopen and consumption,
 and rejects released terminals carrying an exit code or stopper.

@@ -14,6 +14,7 @@ mod shapes;
 mod summary;
 mod table;
 mod trace;
+mod web_face;
 mod workflow_recovery;
 
 use serde_json::{Value, json};

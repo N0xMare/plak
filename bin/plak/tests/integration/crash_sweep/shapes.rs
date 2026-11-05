@@ -7,6 +7,7 @@ use plakous_recursive_subagents::protocol::CandidateId;
 use serde_json::{Value, json};
 pub(super) mod c1;
 pub(super) mod child;
+pub(super) mod dormant;
 pub(super) mod handoff;
 mod residency;
 pub(super) mod runner;
@@ -505,6 +506,18 @@ pub(super) const REGISTRY: &[Shape] = &[
         setup: no_setup,
         lifecycle: prompt_then_quit,
         assert_live: assert_final_cell,
+    },
+    Shape {
+        name: dormant::NAME,
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: final_only,
+        configure: dormant::configure,
+        setup: no_setup,
+        // The live lifecycle is the web face's; a requeued original
+        // resumes on the `plak agent` relaunch as any shape's does.
+        lifecycle: prompt_then_quit,
+        assert_live: dormant::assert_dormant,
     },
 ];
 

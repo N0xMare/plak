@@ -184,6 +184,14 @@ fn lifecycle(
 ) -> AgentOutcome {
     let _orphans = Orphans(fixture);
     (shapes::get(shape).configure)(fixture);
+    if shape == shapes::dormant::NAME {
+        let mut command = fixture.command();
+        command.env(TRACE_ENV, fixture.root.join("commit-trace.jsonl"));
+        if let Some(k) = cut {
+            command.env(KILL_ENV, format!("{}:{}", k.store, k.store_ordinal));
+        }
+        return super::web_face::dormant_lifecycle(fixture, command, session);
+    }
     let mut round_gates = super::round_gates::RoundGates::new(fixture, shape);
     let mut command = fixture.command();
     command
