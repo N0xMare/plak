@@ -268,6 +268,12 @@ fn private_directory(directory: &Path) -> io::Result<()> {
             directory.display()
         )));
     }
+    if metadata.uid() != rustix::process::geteuid().as_raw() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("{} belongs to another user", directory.display()),
+        ));
+    }
     if metadata.mode() & 0o077 != 0 {
         std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700))?;
     }
@@ -297,5 +303,50 @@ mod tests {
         let refused = check_socket_path(&long).unwrap_err();
         assert_eq!(refused.kind(), io::ErrorKind::InvalidInput);
         assert!(refused.to_string().contains(&long.display().to_string()));
+    }
+
+    /// A socket directory another user owns is refused by name before
+    /// anything is written there, for the machine runner and the home-local
+    /// runner alike: both serve through `serve_socket`.
+    #[tokio::test]
+    async fn a_socket_directory_of_another_user_is_refused() {
+        // Owned by root; a root test run proves nothing here.
+        let theirs = Path::new("/");
+        if rustix::process::geteuid().is_root() {
+            return;
+        }
+        let refused = private_directory(theirs).unwrap_err();
+        assert_eq!(refused.kind(), io::ErrorKind::PermissionDenied);
+        let ours = tempfile::tempdir().unwrap();
+        private_directory(&ours.path().join("run")).unwrap();
+        private_directory(&ours.path().join("run")).unwrap();
+        let service = RunnerService::new(
+            plakous_tools::ExecutionEnvironment::host(
+                plakous_tools::ExecutionEnvironmentScope::Run(
+                    plakous_model::RunId::try_from(uuid::Uuid::new_v4()).unwrap(),
+                ),
+                ours.path(),
+                ".",
+                plakous_tools::ExecutionEnvironmentConfig::default(),
+            )
+            .unwrap(),
+            crate::RunnerIdentity {
+                runner_id: plakous_tools::RunnerId::new("daemon-test").unwrap(),
+                version: VersionTriple::current("test", "debug"),
+                boot_id: "boot".into(),
+                binary_id: None,
+            },
+        )
+        .unwrap();
+        let Err(DaemonError::Io(refused)) = serve_socket(
+            service,
+            &theirs.join("plak-runner-test.sock"),
+            Duration::ZERO,
+        )
+        .await
+        else {
+            panic!("a socket in another user's directory was served");
+        };
+        assert_eq!(refused.kind(), io::ErrorKind::PermissionDenied);
     }
 }

@@ -24,6 +24,9 @@ pub use message::{
 pub use owner::LineOwner;
 
 /// The protocol version this crate speaks. Both ends must match it exactly.
+/// A home-local runner binds any build of it, so every change to the
+/// runner's semantics bumps it (spec 01 §8.4); the frames of each version
+/// are pinned by a test.
 pub const PROTOCOL_VERSION: u32 = 1;
 
 /// The exact identity two ends compare before any request: the protocol
@@ -55,3 +58,7 @@ impl VersionTriple {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests;
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "unit tests")]
+mod pinned_tests;

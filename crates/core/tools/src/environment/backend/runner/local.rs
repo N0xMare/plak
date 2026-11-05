@@ -25,8 +25,10 @@ pub(in crate::environment) struct LocalDaemon {
 /// builds it, whose process sessions run on the home-local runner behind
 /// `link` (on `runtime`). Its descriptor and run-stable facts are the
 /// local runner's: the daemon is a transport, not a runner of its own.
-/// Each process start carries the `PATH`, `HOME` and discovery ceiling this
-/// environment resolves, and nothing of the host's own environment.
+/// Each process start carries the process context this environment
+/// resolves: only `PATH` and `HOME` as a direct start uses them, the required
+/// `PATH` prefix with its captured identity, and the discovery ceiling; no
+/// other variable and no delegated value.
 /// Unsupported: only tests select it (spec 01 §8.5).
 ///
 /// # Errors

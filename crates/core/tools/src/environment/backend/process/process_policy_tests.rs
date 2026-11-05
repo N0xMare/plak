@@ -194,3 +194,29 @@ fn program_lookup_never_consults_relative_path_entries() {
         Path::new("/bin/sh")
     );
 }
+
+/// A home-local runner starts a host's process only in the prefix directory
+/// the host captured: one swapped in at the same path after the host's check
+/// is refused there, as the host's own recheck refuses it.
+#[test]
+fn a_home_local_start_refuses_a_prefix_swapped_after_the_host_checked_it() {
+    let root = tempfile::tempdir().expect("workspace");
+    fs::create_dir(root.path().join("tools")).expect("prefix");
+    let workspace = crate::WorkspacePolicy::host(root.path(), ".").expect("policy");
+    let process = HostProcessContext::capture(
+        &workspace,
+        crate::HostProcessOptions::new(Some("tools".into())).expect("options"),
+    )
+    .expect("context");
+    let facts = process.facts().expect("facts");
+    assert!(HostProcessContext::from_facts(facts.clone()).is_ok());
+    let prefix = workspace.root().join("tools");
+    fs::rename(&prefix, workspace.root().join("captured")).expect("move the prefix away");
+    fs::create_dir(&prefix).expect("a new directory at the prefix path");
+    fs::write(prefix.join("git"), "#!/bin/sh\n").expect("a fake tool");
+    assert!(process.required_prefix().is_err(), "the host refuses it");
+    assert!(
+        HostProcessContext::from_facts(facts).is_err(),
+        "the runner refuses it too"
+    );
+}

@@ -125,15 +125,25 @@ use super::{
 };
 
 /// The process context a host resolved for one start, as a home-local
-/// runner receives it: no value of the host's own environment, only the
-/// base `PATH`, the required `PATH` prefix, the `HOME` and the repository
-/// discovery ceiling its context sets.
+/// runner receives it: the base `PATH` and the `HOME` a direct start uses,
+/// the required `PATH` prefix with the identity the host captured, and the
+/// repository discovery ceiling; no other variable and no delegated value.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::environment) struct ProcessFacts {
     pub(in crate::environment) path: String,
-    pub(in crate::environment) prefix: Option<PathBuf>,
+    pub(in crate::environment) prefix: Option<PrefixFact>,
     pub(in crate::environment) home: Option<PathBuf>,
     pub(in crate::environment) ceiling: Option<PathBuf>,
+}
+
+/// The required `PATH` prefix directory and the device and inode the host
+/// captured for it: the runner starts a process only while the directory at
+/// that path is still that one.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(in crate::environment) struct PrefixFact {
+    pub(in crate::environment) path: PathBuf,
+    pub(in crate::environment) device: u64,
+    pub(in crate::environment) inode: u64,
 }
 
 #[cfg(test)]

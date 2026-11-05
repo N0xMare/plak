@@ -14,7 +14,8 @@ use super::super::{
     ExecutionBackendError, JoinedProcessCommand, JoinedProcessCursorPollResult,
     JoinedProcessOutputCursor, JoinedProcessOutputRecord, JoinedProcessOutputStream,
     JoinedProcessSessionId, JoinedProcessShellProfile, JoinedProcessStartRequest,
-    JoinedProcessStatus, JoinedProcessTerminalMode, MAX_EXECUTION_VALUE_BYTES, ProcessFacts,
+    JoinedProcessStatus, JoinedProcessTerminalMode, MAX_EXECUTION_VALUE_BYTES, PrefixFact,
+    ProcessFacts,
 };
 use super::wire::{from_value, hex, malformed, path_text, to_value, unhex};
 use crate::{JobStatus, JobStopReason, JobView};
@@ -52,22 +53,41 @@ struct StartWire {
     process: Option<ProcessWire>,
 }
 
-/// [`ProcessFacts`] on the wire: paths and the `PATH` text, never a value
-/// of the host's own environment.
+/// [`ProcessFacts`] on the wire: the `PATH` text, the prefix with its
+/// captured identity, and the `HOME` and ceiling paths; no other variable.
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct ProcessWire {
     path: String,
-    prefix: Option<String>,
+    prefix: Option<PrefixWire>,
     home: Option<String>,
     ceiling: Option<String>,
+}
+
+/// The required prefix's path and the identity the host captured for it.
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct PrefixWire {
+    path: String,
+    device: u64,
+    inode: u64,
 }
 
 impl ProcessWire {
     fn encode(facts: &ProcessFacts) -> Result<Self, ExecutionBackendError> {
         Ok(Self {
             path: facts.path.clone(),
-            prefix: facts.prefix.as_deref().map(path_text).transpose()?,
+            prefix: facts
+                .prefix
+                .as_ref()
+                .map(|prefix| {
+                    Ok::<_, ExecutionBackendError>(PrefixWire {
+                        path: path_text(&prefix.path)?,
+                        device: prefix.device,
+                        inode: prefix.inode,
+                    })
+                })
+                .transpose()?,
             home: facts.home.as_deref().map(path_text).transpose()?,
             ceiling: facts.ceiling.as_deref().map(path_text).transpose()?,
         })
@@ -93,7 +113,16 @@ impl ProcessWire {
         }
         Ok(ProcessFacts {
             path: self.path,
-            prefix: absolute(self.prefix)?,
+            prefix: self
+                .prefix
+                .map(|prefix| {
+                    Ok::<_, ExecutionBackendError>(PrefixFact {
+                        path: absolute(Some(prefix.path))?.ok_or_else(malformed)?,
+                        device: prefix.device,
+                        inode: prefix.inode,
+                    })
+                })
+                .transpose()?,
             home: absolute(self.home)?,
             ceiling: absolute(self.ceiling)?,
         })

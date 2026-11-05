@@ -1388,6 +1388,7 @@ dependencies = [
  "plakous-model",
  "plakous-runner-protocol",
  "plakous-tools",
+ "rustix",
  "serde",
  "serde_json",
  "serde_json_canonicalizer",

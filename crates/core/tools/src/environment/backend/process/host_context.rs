@@ -7,7 +7,7 @@ use super::{
     Arc, AtomicBool, EnvironmentVariableName, EnvironmentVariableValue, ExecutionBackendError,
     ExecutionBackendFuture, ExecutionEnvironmentError, ExecutionEnvironmentErrorKind,
     ExecutionEnvironmentLimits, ExecutionWorkspace, HostProcessOwner, Instant,
-    LiteralProcessResult, MAX_EXECUTION_VALUE_BYTES, OperationContext, Path, PathBuf,
+    LiteralProcessResult, MAX_EXECUTION_VALUE_BYTES, OperationContext, Path, PathBuf, PrefixFact,
     PreparedLiteralProcess, ProcessFacts, cleanup_unresolved_error, fs, invalid_request, io_error,
     resolve_existing_no_symlink, supervise_host_process, workspace_error,
 };
@@ -87,35 +87,62 @@ impl HostProcessContext {
     }
 
     /// What a process started in this context gets, checked now: the base
-    /// `PATH`, the required prefix (its identity checked), the `HOME` and the
-    /// repository discovery ceiling. A home-local runner starts its host's
-    /// processes in exactly this context (spec 01 §8.4).
+    /// `PATH`, the required prefix with the identity captured when this
+    /// context was (checked against it here), the `HOME` and the repository
+    /// discovery ceiling. A home-local runner starts its host's processes in
+    /// exactly this context (spec 01 §8.4).
     pub(in crate::environment) fn facts(&self) -> Result<ProcessFacts, ExecutionBackendError> {
+        let prefix = match self.required_prefix()? {
+            Some(path) => {
+                let captured = self
+                    .prefix
+                    .as_ref()
+                    .map(|(_, directory)| directory.metadata())
+                    .transpose()
+                    .map_err(|_| invalid_request("required process PATH prefix is unavailable"))?
+                    .ok_or_else(|| {
+                        invalid_request("required process PATH prefix is unavailable")
+                    })?;
+                Some(PrefixFact {
+                    path: path.to_path_buf(),
+                    device: captured.dev(),
+                    inode: captured.ino(),
+                })
+            }
+            None => None,
+        };
         Ok(ProcessFacts {
             path: self.fallback_path.clone(),
-            prefix: self.required_prefix()?.map(Path::to_path_buf),
+            prefix,
             home: self.home.clone(),
             ceiling: self.discovery_ceiling.clone(),
         })
     }
 
     /// The context a home-local runner starts a host's process in: the
-    /// host's facts, with the prefix directory captured again here, so each
-    /// start checks it as a direct start does.
+    /// host's facts, with the prefix directory opened here and refused unless
+    /// it is still the directory the host captured, so a directory swapped in
+    /// at that path between the host's check and this one is never used.
     pub(in crate::environment) fn from_facts(
         facts: ProcessFacts,
     ) -> Result<Self, ExecutionBackendError> {
         let prefix = facts
             .prefix
-            .map(|path| {
-                let directory = fs::File::open(&path)
+            .map(|prefix| {
+                let directory = fs::File::open(&prefix.path)
                     .ok()
-                    .filter(|_| fs::canonicalize(&path).ok().as_ref() == Some(&path))
-                    .filter(|directory| directory.metadata().is_ok_and(|meta| meta.is_dir()))
+                    .filter(|_| fs::canonicalize(&prefix.path).ok().as_ref() == Some(&prefix.path))
+                    .filter(|directory| {
+                        directory.metadata().is_ok_and(|meta| {
+                            meta.is_dir()
+                                && meta.dev() == prefix.device
+                                && meta.ino() == prefix.inode
+                        })
+                    })
                     .ok_or_else(|| {
-                        invalid_request("required process PATH prefix is unavailable")
+                        invalid_request("required process PATH prefix identity changed")
                     })?;
-                Ok::<_, ExecutionBackendError>((path, directory))
+                Ok::<_, ExecutionBackendError>((prefix.path, directory))
             })
             .transpose()?;
         Ok(Self {

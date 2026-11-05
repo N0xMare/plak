@@ -5769,9 +5769,11 @@ runner for a session yet.
   host's home-local client refuses to send one, so files, version control and
   services stay with the host and only process verbs are ever journaled for
   it. It starts each process in the process context its host sends with the
-  start (the base `PATH`, the required `PATH` prefix, `HOME` and the
-  repository discovery ceiling, never a value of the host's own environment)
-  and refuses a start without one; every other runner starts processes in its
+  start (only `PATH` and `HOME` as a direct start uses them, the required
+  `PATH` prefix with the device and inode the host captured, which the
+  runner refuses unless the directory at that path is still that one, and
+  the repository discovery ceiling; no other variable and no delegated
+  value) and refuses a start without one; every other runner starts processes in its
   own environment and refuses a start that carries one. Its home and socket
   are keyed by the protocol version, so its floors never meet a build of
   another protocol. Because a home-local bind no longer proves that both ends
@@ -6402,7 +6404,8 @@ control and process options of `host_with_policy_and_process_options`, whose
 `joined_process_sessions` is a runner arm over the line's sessions on the
 home-local runner (§8.4), reached through a `RunnerLink` on a given runtime.
 Each start resolves this environment's process context (the prefix's
-identity checked as for a direct start) and sends it with the start; the
+identity checked as for a direct start, and sent with it so the runner
+checks it again) and sends it with the start; the
 runner starts the process in that context, so it sees the cwd, `PATH`,
 `HOME`, discovery ceiling and terminal rules a direct start gives it; its
 umask is the runner's, inherited from the process that started the runner. The environment refuses a
