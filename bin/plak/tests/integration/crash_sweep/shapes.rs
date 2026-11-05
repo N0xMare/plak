@@ -34,6 +34,13 @@ fn handoff_resume_child_pilot_records_the_child_handoff_before_its_release() {
 }
 
 #[test]
+fn handoff_resume_deaf_child_pilot_keeps_the_handoff_of_a_child_its_release_cut_short() {
+    let shape = "handoff_resume_deaf_child";
+    let (seed, session) = super::driver::setup(shape);
+    super::driver::pilot(&seed, &session, shape);
+}
+
+#[test]
 fn owner_lost_child_continue_pilot_quits_without_a_handoff() {
     let shape = "owner_lost_child_continue";
     let (seed, session) = super::driver::setup(shape);
@@ -238,6 +245,16 @@ pub(super) const REGISTRY: &[Shape] = &[
         setup: no_setup,
         lifecycle: child::handoff_lifecycle,
         assert_live: child::assert_handoff_live,
+    },
+    Shape {
+        name: "handoff_resume_deaf_child",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: child::script,
+        configure: child::configure_deaf_handoff,
+        setup: no_setup,
+        lifecycle: child::handoff_lifecycle,
+        assert_live: child::assert_deaf_handoff_live,
     },
     Shape {
         name: "owner_lost_child_continue",

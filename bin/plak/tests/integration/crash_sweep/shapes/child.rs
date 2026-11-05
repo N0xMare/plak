@@ -13,6 +13,12 @@
 //! relaunches into exactly one continuation of it; the same cut under
 //! `hold` (`handoff_resume_child`'s earlier cuts) leaves it held.
 //!
+//! `handoff_resume_deaf_child`: as `handoff_resume_child`, but the child's
+//! request ignores its cancel, so the releasing host's hub join is cut short
+//! with the child still running. The handoff row stands and nothing else is
+//! recorded for it: a cut after the row continues it once, and no cut leaves
+//! it `recovery_required`.
+//!
 //! Either way every continuation is one accepted continuation command and
 //! one request, and a second relaunch continues nothing more.
 
@@ -63,10 +69,11 @@ fn root(fixture: &Fixture, steps: &Value) -> Value {
     })
 }
 
-fn waiting_child(fixture: &Fixture, gate: &str) -> Value {
+fn waiting_child(fixture: &Fixture, gate: &str, deaf: bool) -> Value {
     json!({
         "version": 1,
         "repeat_last_step": true,
+        "stall_ignores_cancellation": deaf,
         "steps": [{"stream": [{"text": CHILD_PREFIX}, {"gate": {"file": fixture.root.join(gate)}}],
                    "output": {"text": "child done"}}]
     })
@@ -78,11 +85,15 @@ pub(super) fn script() -> Value {
 }
 
 pub(super) fn configure_handoff(fixture: &Fixture) {
-    write_scripts(fixture, NEVER);
+    write_scripts(fixture, NEVER, false);
+}
+
+pub(super) fn configure_deaf_handoff(fixture: &Fixture) {
+    write_scripts(fixture, NEVER, true);
 }
 
 pub(super) fn configure_owner_lost(fixture: &Fixture) {
-    write_scripts(fixture, CHILD_RELEASE);
+    write_scripts(fixture, CHILD_RELEASE, false);
     let path = fixture.home().join("config.toml");
     let config = std::fs::read_to_string(&path).unwrap();
     if !config.contains("resume_after_loss") {
@@ -94,16 +105,16 @@ pub(super) fn configure_owner_lost(fixture: &Fixture) {
     }
 }
 
-fn write_child(fixture: &Fixture, gate: &str) {
+fn write_child(fixture: &Fixture, gate: &str, deaf: bool) {
     std::fs::write(
         fixture.root.join(CHILD_SCRIPT),
-        serde_json::to_vec_pretty(&waiting_child(fixture, gate)).unwrap(),
+        serde_json::to_vec_pretty(&waiting_child(fixture, gate, deaf)).unwrap(),
     )
     .unwrap();
 }
 
-fn write_scripts(fixture: &Fixture, gate: &str) {
-    write_child(fixture, gate);
+fn write_scripts(fixture: &Fixture, gate: &str, deaf: bool) {
+    write_child(fixture, gate, deaf);
     fixture.write_script(&root(
         fixture,
         &json!([
@@ -321,6 +332,24 @@ pub(super) fn assert_handoff_live(fixture: &Fixture, outcome: &AgentOutcome, _: 
     );
 }
 
+/// As the handoff pilot, and the release that let go of the deaf child
+/// says so instead of failing.
+pub(super) fn assert_deaf_handoff_live(
+    fixture: &Fixture,
+    outcome: &AgentOutcome,
+    state: &summary::Summary,
+) {
+    assert_handoff_live(fixture, outcome, state);
+    assert!(
+        outcome
+            .lines
+            .iter()
+            .any(|line| line.contains("handed off c1 with its turn still running")),
+        "the cut-short handoff is noted: {:?}",
+        outcome.lines
+    );
+}
+
 pub(super) fn assert_owner_lost_live(
     fixture: &Fixture,
     outcome: &AgentOutcome,
@@ -407,13 +436,20 @@ pub(in super::super) fn after_kill(
     relaunch: impl Fn(&str) -> AgentProcess,
 ) -> Value {
     let before = before(fixture, session);
+    // A host that let go of a running child, planned or lost, never leaves
+    // it dead: its next owner decides it.
+    assert_ne!(
+        tree(fixture, session).and_then(|tree| tree.rows().node("c1").ok().map(|node| node.status)),
+        Some(NodeStatus::RecoveryRequired),
+        "{before:?}: the cut left the child recovery_required"
+    );
     let _ = std::fs::remove_file(fixture.root.join(super::handoff::QUIT_AS_HANDOFF));
     let root_before = invariants::dispatches(fixture).len();
     let child_before = child_dispatches(fixture);
     // The root answers, and a continued child waits again, so it is counted
     // while it runs and never asks for a second request.
     let _ = std::fs::remove_file(fixture.root.join(CHILD_RELEASE));
-    write_child(fixture, NEVER);
+    write_child(fixture, NEVER, false);
     fixture.write_script(&root(
         fixture,
         &json!([{"output": {"text": FOLLOWUP}, "finish": "stop"}]),

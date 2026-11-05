@@ -2135,6 +2135,11 @@ relaunch dispatches nothing for the root or the child. Their lifecycles
 let the root answer only after every store stayed still for a second behind
 the child's dispatch, and quit only once the tree folded the child's
 acceptance, so both twins release the same feed.
+`handoff_resume_deaf_child` is `handoff_resume_child` with a child whose
+request ignores its cancel, so the releasing host's two-second hub join is cut
+short with the child still running: its handoff row stands and nothing else is
+recorded for it, a cut after the row continues it once, any earlier cut holds
+it. In every child shape a cut never leaves the child `recovery_required`.
 The opt-in `uncertain_mcp_tool` shape drives the fake MCP server's escaped
 result into an uncertain tool outcome; its pilot's host recovers the fenced
 root in place before quit, so its cuts cover that reopen's commits, including
