@@ -28,17 +28,41 @@ pub(crate) use document::{
 pub(crate) use export::{export_session, new_carry_file};
 pub(crate) use handoff::take_reload_handoff;
 pub(crate) use reload::{
-    CarryCapacityProbe, ReloadProbe, ReopenProbe, reload_probe, reopen_credential_gate,
-    reopen_probe,
+    CarryCapacityProbe, ReloadProbe, ReloadTarget, ReopenProbe, reload_probe,
+    reopen_credential_gate, reopen_probe,
 };
 #[cfg(feature = "tui")]
 pub(crate) use {
     epoch::apply_on_reload,
     interactive::{
-        ReloadPlan, ReloadTarget, carry_foreign_session, carry_out, rebind_session, reload_plan,
-        reload_target_for_session, switch_to,
+        ReloadPlan, carry_foreign_session, carry_out, rebind_session, reload_plan, switch_to,
     },
 };
+
+/// The installed build a reload of `session_id` would start, and this
+/// build's refusal of it, resolved while the session is still attached.
+#[cfg(feature = "tui")]
+pub(crate) fn probe_reload(
+    paths: &crate::home::paths::PlakPaths,
+    workspace: &std::path::Path,
+    session_id: Option<&str>,
+) -> (Option<ReloadTarget>, Option<String>) {
+    let target = interactive::reload_target_for_session(paths, workspace, session_id);
+    let refusal = target
+        .as_ref()
+        .and_then(|target| target.refusal(&crate::home::state::state_key()));
+    (target, refusal)
+}
+
+/// A build with no interactive face has no installed build to reload onto.
+#[cfg(not(feature = "tui"))]
+pub(crate) const fn probe_reload(
+    _paths: &crate::home::paths::PlakPaths,
+    _workspace: &std::path::Path,
+    _session_id: Option<&str>,
+) -> (Option<ReloadTarget>, Option<String>) {
+    (None, None)
+}
 
 pub(crate) use import::{CarriedImport, already_carried, carried_forward_label, import_and_resume};
 pub(crate) use intent::{load_for_work, pending_successor, work_id};

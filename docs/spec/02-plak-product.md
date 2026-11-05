@@ -4215,9 +4215,12 @@ The normal reload handoff carries the session forward when
 that build has another state key, or the same key and an exact-reopen verdict
 of `binding_changed` (§2.5.1). It is refused while a turn runs,
 while sub-agents or background processes are live, or when no installed `plak` resolves on `PATH`, so a
-refusal never closes the TUI. Asking the installed build its state key runs off
-the UI thread: the transcript reads `checking installed build…` while the TUI
-stays responsive, and the refusals are checked again when the answer lands.
+refusal never closes the TUI. Asking the installed build its state key is the
+session's host's (the product surface's `probe_reload`, answered off its
+thread by `reload_probed` with the target and this build's refusal of it,
+or `reload_probe_failed`): the transcript reads `checking installed build…`
+while the TUI stays responsive, and the refusals are checked again when the
+answer lands.
 Otherwise the TUI quits through the ordinary
 handoff path — host worker joined and session released, then the terminal
 restored — and the process replaces itself (`exec`) with the executable its own
@@ -5448,6 +5451,7 @@ bottom border is a plain line. HUD vocabulary, highest priority first:
 | Condition | State |
 | --- | --- |
 | Quitting | `quitting…` |
+| A model lookup before the session opens is retrying (published by the launch's supervisor, `lookup_status`) | `retrying model lookup (N/3): <cause>` |
 | Session opening | `starting…` |
 | An approval is pending (dormant in ordinary Plak) | pulsing `◆ approval needed` |
 | Idle, with pending continuation (yields to a problem label) | steady `◆` plus the pending parts joined by ` · `: `1 result pending` / `N results pending`, `1 question pending` / `N questions pending`, `1 process exited` / `N processes exited`, and `auto-continue paused` |

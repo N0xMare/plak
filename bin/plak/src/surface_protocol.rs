@@ -367,6 +367,12 @@ pub enum SurfaceIntent {
         /// The request taken.
         request_id: String,
     },
+    /// Ask the host which installed `plak` a reload of the session it serves
+    /// would start, and whether this build refuses it; answered by
+    /// [`SurfaceObservation::ReloadProbed`], or
+    /// [`SurfaceObservation::ReloadProbeFailed`] when the check could not
+    /// run.
+    ProbeReload,
     /// Record a requested reload's refusal for its requester; only a request
     /// the host handed over.
     RefuseReloadRequest {
@@ -394,6 +400,7 @@ impl fmt::Debug for SurfaceIntent {
             Self::AcknowledgeAgent { .. } => "AcknowledgeAgent{..}",
             Self::ListAgentAcknowledgements { .. } => "ListAgentAcknowledgements{..}",
             Self::CheckBuild => "CheckBuild",
+            Self::ProbeReload => "ProbeReload",
             Self::AcceptReloadRequest { .. } => "AcceptReloadRequest{..}",
             Self::RefuseReloadRequest { .. } => "RefuseReloadRequest{..}",
         })
@@ -473,6 +480,22 @@ pub enum SurfaceObservation {
     /// ([`SurfaceIntent::AcceptReloadRequest`]); the face runs it at its next
     /// idle boundary or refuses it ([`SurfaceIntent::RefuseReloadRequest`]).
     ReloadRequested(crate::reload_request::ReloadRequest),
+    /// The installed build a reload would start (`None` when no `plak` is
+    /// installed), and this build's refusal of it.
+    ReloadProbed {
+        /// The reload target.
+        target: Option<Box<crate::carry::ReloadTarget>>,
+        /// Why this build refuses it, if it does.
+        refusal: Option<String>,
+    },
+    /// The installed-build check could not run.
+    ReloadProbeFailed,
+    /// Pre-bind lookup progress the launch publishes before the session
+    /// opens (`retrying model lookup …`); `None` once it finished.
+    LookupStatus {
+        /// The progress line.
+        text: Option<String>,
+    },
 }
 
 impl ObservationExtension for SurfaceObservation {
@@ -490,7 +513,9 @@ impl ObservationExtension for SurfaceObservation {
     /// session's profile and workspace chrome are the session's state.
     fn wire_class(&self) -> ObservationClass {
         match self {
-            Self::SessionProfile(_) | Self::WorkspaceChrome(_) => ObservationClass::State,
+            Self::SessionProfile(_) | Self::WorkspaceChrome(_) | Self::LookupStatus { .. } => {
+                ObservationClass::State
+            }
             Self::SettingsView(_)
             | Self::SettingsViewApplied(_)
             | Self::SettingsLoadFailed(_)
@@ -505,7 +530,9 @@ impl ObservationExtension for SurfaceObservation {
             | Self::AgentAcknowledgements { .. }
             | Self::AgentAcknowledgementsUnavailable { .. }
             | Self::BuildStatus { .. }
-            | Self::ReloadRequested(_) => ObservationClass::Addressed,
+            | Self::ReloadRequested(_)
+            | Self::ReloadProbed { .. }
+            | Self::ReloadProbeFailed => ObservationClass::Addressed,
         }
     }
 
@@ -528,6 +555,9 @@ impl ObservationExtension for SurfaceObservation {
             Self::AgentAcknowledgementsUnavailable { .. } => "agent_acknowledgements_unavailable",
             Self::BuildStatus { .. } => "build_status",
             Self::ReloadRequested(_) => "reload_requested",
+            Self::ReloadProbed { .. } => "reload_probed",
+            Self::ReloadProbeFailed => "reload_probe_failed",
+            Self::LookupStatus { .. } => "lookup_status",
         }
     }
 }

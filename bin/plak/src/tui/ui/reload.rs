@@ -1,14 +1,20 @@
-//! `/reload`: the installed-build probe runs off the UI thread.
+//! `/reload`: the installed-build probe runs on the session's host, off its
+//! thread.
 //!
 //! Asking the installed `plak` its state key spawns a process that may take
 //! seconds on a first exec; the loop keeps painting and handing input while
-//! it runs, then hands off (or prints the refusal) when the answer lands.
+//! the host runs it, then hands off (or prints the refusal) when the answer
+//! (`reload_probed`) lands.
 
-use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 
 use super::{App, ScrollBlock};
 
 pub(super) const RELOAD_CHECKING: &str = "checking installed build…";
+
+/// How long the host may take to answer a reload probe before the TUI
+/// refuses the reload as timed out.
+const RELOAD_PROBE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// The session's own reload requests, as the host hands them over: a
 /// request waiting for the next idle boundary, the one a running probe
@@ -64,8 +70,50 @@ impl ReloadSource {
     }
 }
 
+/// A reload probe's answer: the target, and the host build's refusal of it.
+pub(super) type ReloadProbed = (Option<crate::carry::ReloadTarget>, Option<String>);
+
 impl App {
-    /// Starts `probe` on its own thread unless one is already running.
+    /// Asks the session's host for the reload target unless a check is
+    /// already running; its answer arrives as `reload_probed`.
+    pub(super) fn start_host_reload_probe(
+        &mut self,
+        actions: Option<&crate::tui::FaceActionSender>,
+    ) {
+        if self.reload_probe.is_some() {
+            return;
+        }
+        let sent = actions.is_some_and(|actions| {
+            actions
+                .send(crate::tui::UserAction::Extension(
+                    crate::tui::SurfaceIntent::ProbeReload,
+                ))
+                .is_ok()
+        });
+        if !sent {
+            self.push_block(ScrollBlock::System(
+                "reload refused: could not start the installed-build check".to_owned(),
+            ));
+            self.mark_dirty();
+            return;
+        }
+        self.reload_probe_answer = Some(self.begin_reload_probe());
+        self.reload_probe_asked_at = Some(self.now());
+    }
+
+    /// The host's answer to the reload probe; `None` when the check failed.
+    pub(super) fn apply_reload_probed(&mut self, probed: Option<ReloadProbed>) {
+        if let Some(answer) = self.reload_probe_answer.take()
+            && let Some(probed) = probed
+        {
+            let _ = answer.send(probed);
+        }
+        self.mark_dirty();
+    }
+
+    /// Starts `probe` on its own thread unless one is already running, as
+    /// the host's would.
+    #[cfg(test)]
     pub(super) fn start_reload_probe(
         &mut self,
         probe: impl FnOnce() -> Option<crate::carry::ReloadTarget> + Send + 'static,
@@ -73,23 +121,23 @@ impl App {
         if self.reload_probe.is_some() {
             return;
         }
+        let sender = self.begin_reload_probe();
+        std::thread::spawn(move || {
+            let target = probe();
+            let refusal = target
+                .as_ref()
+                .and_then(|target| target.refusal(&crate::home::state::state_key()));
+            let _ = sender.send((target, refusal));
+        });
+    }
+
+    fn begin_reload_probe(&mut self) -> Sender<ReloadProbed> {
         let (sender, receiver) = mpsc::channel();
-        let spawned = std::thread::Builder::new()
-            .name("plak-reload-probe".to_owned())
-            .spawn(move || {
-                let _ = sender.send(probe());
-            });
-        if spawned.is_err() {
-            self.push_block(ScrollBlock::System(
-                "reload refused: could not start the installed-build check".to_owned(),
-            ));
-            self.mark_dirty();
-            return;
-        }
         self.reload_source = Some(ReloadSource::snapshot(self));
         self.reload_probe = Some(receiver);
         self.push_block(ScrollBlock::System(RELOAD_CHECKING.to_owned()));
         self.mark_dirty();
+        sender
     }
 
     pub(super) fn reload_source_changed(&self) -> bool {
@@ -297,9 +345,23 @@ impl App {
             }
             return Some(ReloadOutcome::HandOff(Some(target)));
         }
-        let receiver: &Receiver<Option<crate::carry::ReloadTarget>> = self.reload_probe.as_ref()?;
-        let target = match receiver.try_recv() {
-            Ok(target) => target,
+        if self.reload_probe_answer.is_some()
+            && self.reload_probe_asked_at.is_some_and(|asked| {
+                self.now().saturating_duration_since(asked) >= RELOAD_PROBE_DEADLINE
+            })
+        {
+            self.reload_probe = None;
+            self.reload_probe_answer = None;
+            self.reload_probe_asked_at = None;
+            self.push_block(ScrollBlock::System(
+                "reload refused: the installed-build check timed out".to_owned(),
+            ));
+            self.mark_dirty();
+            return Some(ReloadOutcome::Refused);
+        }
+        let receiver: &Receiver<ReloadProbed> = self.reload_probe.as_ref()?;
+        let (target, host_refusal) = match receiver.try_recv() {
+            Ok(probed) => probed,
             Err(TryRecvError::Empty) => return None,
             Err(TryRecvError::Disconnected) => {
                 self.reload_probe = None;
@@ -316,11 +378,7 @@ impl App {
             self.push_block(ScrollBlock::System("reload kept this session open: the conversation changed during the capacity check; retry /reload".to_owned()));
             return Some(ReloadOutcome::Refused);
         }
-        let refusal = self.reload_refusal().map(str::to_owned).or_else(|| {
-            target
-                .as_ref()
-                .and_then(|target| target.refusal(&crate::home::state::state_key()))
-        });
+        let refusal = self.reload_refusal().map(str::to_owned).or(host_refusal);
         if let Some(reason) = refusal {
             self.push_block(ScrollBlock::System(reason));
             return Some(ReloadOutcome::Refused);

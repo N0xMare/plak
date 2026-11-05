@@ -1241,6 +1241,9 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
                 let session = facts.session.as_ref().map(|session| session.id.as_str());
                 self.reload.check(session, events);
             }
+            SurfaceIntent::ProbeReload => {
+                crate::shell::reload_surface::probe(&self.paths, facts.session, events);
+            }
             SurfaceIntent::AcceptReloadRequest { request_id } => {
                 self.reload.accept(&request_id);
             }

@@ -99,3 +99,28 @@ fn only_a_uuid_session_is_announced() {
     assert!(victim.exists(), "a path-like session touches no file");
     assert!(!paths.run_dir().join("victim.listener").exists());
 }
+
+/// A probe for no session is refused as such, not as a failed check.
+#[test]
+fn a_probe_with_no_session_is_refused_as_such() {
+    let (_root, paths) = home();
+    let (sender, received) = plakous_host_protocol::observation_channel();
+    probe(&paths, None, &Sender::over(sender));
+    assert!(matches!(
+        received.try_recv().unwrap(),
+        HostEvent::Extension(SurfaceObservation::ReloadProbed { target: None, refusal: Some(refusal) })
+            if refusal == NO_SESSION
+    ));
+}
+
+/// A probe that never answers (it could not run) is answered as a failed
+/// check.
+#[test]
+fn an_unanswered_probe_is_answered_as_failed() {
+    let (sender, received) = plakous_host_protocol::observation_channel();
+    drop(ProbeAnswer(Some(Sender::over(sender))));
+    assert!(matches!(
+        received.try_recv().unwrap(),
+        HostEvent::Extension(SurfaceObservation::ReloadProbeFailed)
+    ));
+}

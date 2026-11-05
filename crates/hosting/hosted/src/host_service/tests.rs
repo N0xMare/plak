@@ -698,3 +698,15 @@ fn a_detached_requester_takes_no_more_answers() {
         [Observation::DraftRestored(Draft::from("after"))]
     );
 }
+
+/// A publisher outside the session reaches the face on its next read, as
+/// the session's own observations do.
+#[test]
+fn a_face_takes_what_its_publisher_publishes() {
+    let (actions, _intents) = intent_channel::<Core>();
+    let (_published, events) = observation_channel::<Core>();
+    let (_actions, face) = face(actions, events);
+    face.publisher().publish(Observation::SetBusy(true));
+    assert_eq!(face.try_recv(), Ok(Observation::SetBusy(true)));
+    assert_eq!(face.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty));
+}

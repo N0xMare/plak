@@ -1,40 +1,45 @@
 //! Ephemeral pre-bind lookup progress; never session or admission authority.
+//!
+//! An interactive launch publishes it to the face on screen (its supervisor
+//! installs a publisher for the launch); without one it is a CLI status line.
 
-use std::sync::{
-    Mutex,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::Mutex;
 
-static STATUS: Mutex<Option<String>> = Mutex::new(None);
-static TUI_ACTIVE: AtomicBool = AtomicBool::new(false);
+/// Where progress goes while an interactive launch runs.
+type Publisher = Box<dyn Fn(Option<String>) + Send + Sync>;
 
-#[cfg(feature = "tui")]
-pub(crate) fn tui_active(active: bool) {
-    TUI_ACTIVE.store(active, Ordering::Relaxed);
+static PUBLISHER: Mutex<Option<Publisher>> = Mutex::new(None);
+
+/// Routes progress to `publisher` until it is cleared with `None`.
+#[allow(
+    dead_code,
+    reason = "the interactive launch is the only publisher; a build without one has none"
+)]
+pub(crate) fn publish_to(publisher: Option<Publisher>) {
+    *PUBLISHER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = publisher;
 }
 
 pub(crate) fn retry(attempt: u8, cause: &str) {
     let message = format!("retrying model lookup ({attempt}/3): {cause}");
-    *STATUS
+    let publisher = PUBLISHER
         .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(message.clone());
-    if !TUI_ACTIVE.load(Ordering::Relaxed) {
-        write_cli_status(&message);
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    match publisher.as_ref() {
+        Some(publish) => publish(Some(message)),
+        None => write_cli_status(&message),
     }
 }
 
 pub(crate) fn finished() {
-    *STATUS
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
-}
-
-#[cfg(feature = "tui")]
-pub(crate) fn current() -> Option<String> {
-    STATUS
+    if let Some(publish) = PUBLISHER
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .clone()
+        .as_ref()
+    {
+        publish(None);
+    }
 }
 
 fn write_cli_status(message: &str) {

@@ -137,6 +137,61 @@ fn not_taken(paths: &PlakPaths, request: &ReloadRequest, why: &str) {
     );
 }
 
+/// Answers a reload probe for `session`, the session this host serves, off
+/// the host's thread: asking the installed `plak` can take seconds. The
+/// answer always comes, as `reload_probe_failed` when the check could not
+/// run, and as a refusal when the host serves no session.
+pub(super) fn probe(
+    paths: &PlakPaths,
+    session: Option<plakous_hosted::runtime::SurfaceSession>,
+    events: &Sender<PlakExtension>,
+) {
+    let answer = ProbeAnswer(Some(events.answering()));
+    let Some(session) = session else {
+        answer.send(SurfaceObservation::ReloadProbed {
+            target: None,
+            refusal: Some(NO_SESSION.to_owned()),
+        });
+        return;
+    };
+    let paths = paths.clone();
+    let _ = std::thread::Builder::new()
+        .name("plak-reload-probe".to_owned())
+        .spawn(move || {
+            let (target, refusal) =
+                crate::carry::probe_reload(&paths, &session.workspace, Some(&session.id));
+            answer.send(SurfaceObservation::ReloadProbed {
+                target: target.map(Box::new),
+                refusal,
+            });
+        });
+}
+
+/// The probe's refusal when the host serves no session.
+const NO_SESSION: &str = "reload refused: no session to reload";
+
+/// A reload probe's answer, sent once: dropped unanswered (the check could
+/// not run or panicked), it answers that the check failed.
+struct ProbeAnswer(Option<Sender<PlakExtension>>);
+
+impl ProbeAnswer {
+    fn send(mut self, observation: SurfaceObservation) {
+        if let Some(events) = self.0.take() {
+            let _ = events.send(ContentEvent::Extension(observation));
+        }
+    }
+}
+
+impl Drop for ProbeAnswer {
+    fn drop(&mut self) {
+        if let Some(events) = self.0.take() {
+            let _ = events.send(ContentEvent::Extension(
+                SurfaceObservation::ReloadProbeFailed,
+            ));
+        }
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]
 mod tests;

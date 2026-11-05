@@ -336,6 +336,7 @@ fn run_persistent_tui(
     launch: tui::TuiLaunch,
     actions: &surface_protocol::FaceActionSender,
     events: surface_protocol::HostEventReceiver,
+    lookup: &LookupPublication,
 ) -> Result<tui::TuiOutcome, tui::TuiError> {
     if terminal.is_none() {
         *terminal = Some(tui::PersistentTerminal::open(launch.mouse_enabled)?);
@@ -345,10 +346,83 @@ fn run_persistent_tui(
             "persistent TUI terminal was not initialized".into(),
         ));
     };
+    lookup.attach(events.publisher());
     // Keep the caller's sender. Dropping the last sender is Disconnected, and
     // the host treats that as Quit; which shutdown the round requests on the
     // mailbox is `settle_tui_round`'s call once the terminal is cooked.
-    terminal.run(launch, Some(actions.clone()), Some(events))
+    let outcome = terminal.run(launch, Some(actions.clone()), Some(events));
+    lookup.detach();
+    outcome
+}
+
+/// The launch's pre-bind lookup progress, published to the face of the
+/// round on screen. It is installed for the whole launch, so a lookup
+/// retried between rounds is kept for the next face and never written under
+/// the TUI.
+struct LookupPublication {
+    slot: Arc<std::sync::Mutex<LookupSlot>>,
+}
+
+#[derive(Default)]
+struct LookupSlot {
+    text: Option<String>,
+    face: Option<plakous_hosted::host_service::FacePublisher<surface_protocol::PlakExtension>>,
+}
+
+impl LookupPublication {
+    fn install() -> Self {
+        let slot = Arc::new(std::sync::Mutex::new(LookupSlot::default()));
+        let published = Arc::clone(&slot);
+        crate::lookup_status::publish_to(Some(Box::new(move |text| {
+            let mut slot = published
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            slot.text.clone_from(&text);
+            if let Some(face) = &slot.face {
+                publish_lookup(face, text);
+            }
+        })));
+        Self { slot }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, LookupSlot> {
+        self.slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The round's face takes the progress from now on, starting with the
+    /// line already showing.
+    fn attach(
+        &self,
+        face: plakous_hosted::host_service::FacePublisher<surface_protocol::PlakExtension>,
+    ) {
+        let mut slot = self.lock();
+        if slot.text.is_some() {
+            publish_lookup(&face, slot.text.clone());
+        }
+        slot.face = Some(face);
+    }
+
+    fn detach(&self) {
+        self.lock().face = None;
+    }
+}
+
+impl Drop for LookupPublication {
+    fn drop(&mut self) {
+        crate::lookup_status::publish_to(None);
+    }
+}
+
+fn publish_lookup(
+    face: &plakous_hosted::host_service::FacePublisher<surface_protocol::PlakExtension>,
+    text: Option<String>,
+) {
+    face.publish(surface_protocol::HostEvent::Extension(
+        surface_protocol::SurfaceObservation::LookupStatus { text },
+    ));
+    tui::wake::wake();
 }
 
 /// Shell status while `plak resume` waits for the operator to pick a session.
@@ -407,6 +481,7 @@ pub(super) fn run_tui_rounds(
         cwd,
         authoritative_catalog_admission,
     } = launch;
+    let lookup = LookupPublication::install();
     loop {
         // The flag lives for exactly one round: the round the operator declined
         // the picker sets it, and the round the product starts on their behalf
@@ -661,7 +736,13 @@ pub(super) fn run_tui_rounds(
                 launch.open_resume_picker = true;
                 state.open_resume_picker = false;
             }
-            let ui = run_persistent_tui(&mut state.persistent_tui, launch, &action_tx, event_rx);
+            let ui = run_persistent_tui(
+                &mut state.persistent_tui,
+                launch,
+                &action_tx,
+                event_rx,
+                &lookup,
+            );
             let ui = settle_tui_round(
                 ui,
                 &mut state.persistent_tui,
@@ -689,8 +770,13 @@ pub(super) fn run_tui_rounds(
                         launch.open_resume_picker = true;
                         state.open_resume_picker = false;
                     }
-                    let ui =
-                        run_persistent_tui(&mut state.persistent_tui, launch, &action_tx, event_rx);
+                    let ui = run_persistent_tui(
+                        &mut state.persistent_tui,
+                        launch,
+                        &action_tx,
+                        event_rx,
+                        &lookup,
+                    );
                     let ui = settle_tui_round(
                         ui,
                         &mut state.persistent_tui,
@@ -782,8 +868,13 @@ pub(super) fn run_tui_rounds(
                         launch.open_resume_picker = true;
                         state.open_resume_picker = false;
                     }
-                    let ui =
-                        run_persistent_tui(&mut state.persistent_tui, launch, &action_tx, event_rx);
+                    let ui = run_persistent_tui(
+                        &mut state.persistent_tui,
+                        launch,
+                        &action_tx,
+                        event_rx,
+                        &lookup,
+                    );
                     settle_tui_round(
                         ui,
                         &mut state.persistent_tui,

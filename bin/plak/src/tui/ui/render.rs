@@ -189,8 +189,8 @@ impl App {
         if self.quitting {
             return Some(QUITTING_STATUS.to_owned());
         }
-        if let Some(status) = crate::lookup_status::current() {
-            return Some(status);
+        if let Some(status) = &self.lookup_status {
+            return Some(status.clone());
         }
         if self.session_open_started.is_some() {
             return Some("starting…".to_owned());

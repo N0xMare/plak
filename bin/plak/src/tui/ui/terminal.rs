@@ -248,7 +248,6 @@ impl TerminalRestoration {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         *held = false;
-        crate::lookup_status::tui_active(false);
         if self.bracketed_paste
             && let Err(error) = stdout().execute(DisableBracketedPaste)
         {
@@ -465,7 +464,6 @@ impl PersistentTerminal {
         *held = true;
         set_steady_cursor_style();
         drop(held);
-        crate::lookup_status::tui_active(true);
         Ok(Self {
             terminal,
             restoration,
@@ -725,16 +723,7 @@ pub(super) fn run_app(
         if std::mem::take(&mut app.pending_reload) {
             // Asked while the session is still attached: once the handoff
             // starts there is nothing left to show a slow answer on.
-            let workspace = std::path::PathBuf::from(&app.workspace);
-            let session_id = app.session_id.clone();
-            let context = app.reload_context.clone();
-            app.start_reload_probe(move || {
-                crate::carry::reload_target_for_session(
-                    context.as_ref()?,
-                    &workspace,
-                    session_id.as_deref(),
-                )
-            });
+            app.start_host_reload_probe(actions);
         }
         match app.poll_reload_probe() {
             Some(super::reload::ReloadOutcome::HandOff(target)) => {

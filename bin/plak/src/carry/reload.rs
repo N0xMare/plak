@@ -3,8 +3,27 @@
 use super::document::IMPORTABLE_VERSIONS;
 use crate::home::paths::PlakPaths;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
-#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+/// The installed `plak` a reload would start, and the state key it answered;
+/// it crosses from the session's host to the face that asked (spec 02 §5.1).
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReloadTarget {
+    pub(crate) executable: PathBuf,
+    pub(crate) capacity: Option<Box<CarryCapacityProbe>>,
+    pub(crate) capacity_error: Option<String>,
+    /// `None` when the build did not answer in time or with one key.
+    pub(crate) state_key: Option<String>,
+    pub(crate) probe: Option<ReloadProbe>,
+    /// The destination's exact-reopen verdict for a same-key reload; `None`
+    /// when it was not asked, did not answer in time, or predates the question.
+    pub(crate) reopen: Option<Box<ReopenProbe>>,
+    /// The session's own reload request this reload performs, if any.
+    pub(crate) request: Option<Box<crate::reload_request::ReloadRequest>>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CarryCapacityProbe {
     pub(crate) route: String,
@@ -24,7 +43,7 @@ impl CarryCapacityProbe {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq, schemars::JsonSchema)]
 pub(crate) struct ReloadProbe {
     pub(crate) state_key: String,
     pub(crate) export_versions: Vec<u32>,
@@ -47,7 +66,7 @@ pub(crate) fn reload_probe(paths: &PlakPaths) -> ReloadProbe {
 
 /// The destination's answer to "would exact reopen of this session attach?",
 /// asked by `/reload` before teardown (hidden `version --reopen-probe <id>`).
-#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq, schemars::JsonSchema)]
 #[serde(tag = "verdict", rename_all = "snake_case")]
 pub(crate) enum ReopenProbe {
     /// Exact reopen attaches.

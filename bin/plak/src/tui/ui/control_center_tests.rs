@@ -1301,6 +1301,68 @@ fn the_reload_probe_runs_off_the_ui_thread_and_hands_off_when_it_answers() {
     assert!(app.reload_probe.is_none());
 }
 
+/// The probe is the session host's: the TUI asks with `probe_reload` and
+/// hands off on `reload_probed`, refuses with the host's refusal, and reads
+/// a failed check as a refusal.
+#[test]
+fn the_reload_probe_is_asked_of_the_host_and_settles_on_its_answer() {
+    for (answer, refused) in [
+        (
+            SurfaceObservation::ReloadProbed {
+                target: None,
+                refusal: None,
+            },
+            false,
+        ),
+        (
+            SurfaceObservation::ReloadProbed {
+                target: None,
+                refusal: Some("reload kept this session open: synthetic".into()),
+            },
+            true,
+        ),
+        (SurfaceObservation::ReloadProbeFailed, true),
+    ] {
+        let mut app = App::new(launch_basic(), true);
+        let (actions, intents) = user_action_channel();
+        app.start_host_reload_probe(Some(&actions));
+        assert_eq!(
+            intents.try_recv().unwrap(),
+            UserAction::Extension(SurfaceIntent::ProbeReload)
+        );
+        assert!(blocks_contain(&app, "checking installed build…"));
+        assert!(app.poll_reload_probe().is_none(), "waiting on the host");
+        app.apply_host_event(HostEvent::Extension(answer));
+        let outcome = app
+            .poll_reload_probe()
+            .expect("the answer settles the probe");
+        assert_eq!(
+            matches!(outcome, super::reload::ReloadOutcome::Refused),
+            refused
+        );
+    }
+}
+
+/// A host that does not answer the probe within its deadline leaves the
+/// reload refused as timed out, and the session open.
+#[test]
+fn an_unanswered_host_reload_probe_times_out() {
+    let mut app = App::new(launch_basic(), true);
+    let (actions, _intents) = user_action_channel();
+    app.start_host_reload_probe(Some(&actions));
+    assert!(app.poll_reload_probe().is_none());
+    app.reload_probe_asked_at = std::time::Instant::now().checked_sub(Duration::from_secs(31));
+    assert!(matches!(
+        app.poll_reload_probe(),
+        Some(super::reload::ReloadOutcome::Refused)
+    ));
+    assert!(blocks_contain(
+        &app,
+        "reload refused: the installed-build check timed out"
+    ));
+    assert!(app.reload_probe.is_none() && !app.should_quit);
+}
+
 #[test]
 fn reload_hands_off_to_the_installed_executable_before_applying_an_epoch() {
     for children in [0, 1] {

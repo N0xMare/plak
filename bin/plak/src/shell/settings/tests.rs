@@ -585,6 +585,7 @@ fn every_product_intent_uses_immutable_phase_facts_and_bounded_observations() {
                 | SurfaceIntent::AcknowledgeAgent { .. }
                 | SurfaceIntent::ListAgentAcknowledgements { .. }
                 | SurfaceIntent::CheckBuild
+                | SurfaceIntent::ProbeReload
                 | SurfaceIntent::AcceptReloadRequest { .. }
                 | SurfaceIntent::RefuseReloadRequest { .. }
                 | SurfaceIntent::WatchUsage(_) => {

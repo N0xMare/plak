@@ -3,7 +3,7 @@
 use super::document::{CarryDocument, IMPORTABLE_VERSIONS, VERSION, read_document, write_document};
 use super::export::{export_session, new_carry_file};
 use super::import::already_carried;
-use super::reload::{CarryCapacityProbe, ReloadProbe, ReopenProbe};
+use super::reload::{CarryCapacityProbe, ReloadProbe, ReloadTarget, ReopenProbe};
 use crate::cli_output::safe_terminal_block;
 use crate::home::paths::PlakPaths;
 use crate::shell::services::Services;
@@ -46,22 +46,6 @@ pub(crate) fn reload_plan(
         Some(_) => ReloadPlan::Carry,
         None => ReloadPlan::ResumeUnverified,
     }
-}
-
-/// The installed `plak` a reload would start, and the state key it answered.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ReloadTarget {
-    pub(crate) executable: PathBuf,
-    pub(crate) capacity: Option<Box<CarryCapacityProbe>>,
-    pub(crate) capacity_error: Option<String>,
-    /// `None` when the build did not answer in time or with one key.
-    pub(crate) state_key: Option<String>,
-    pub(crate) probe: Option<ReloadProbe>,
-    /// The destination's exact-reopen verdict for a same-key reload; `None`
-    /// when it was not asked, did not answer in time, or predates the question.
-    pub(crate) reopen: Option<Box<ReopenProbe>>,
-    /// The session's own reload request this reload performs, if any.
-    pub(crate) request: Option<Box<crate::reload_request::ReloadRequest>>,
 }
 
 impl ReloadTarget {

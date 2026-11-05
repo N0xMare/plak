@@ -992,6 +992,16 @@ impl App {
             HostEvent::Extension(SurfaceObservation::ReloadRequested(request)) => {
                 self.apply_reload_request(request);
             }
+            HostEvent::Extension(SurfaceObservation::ReloadProbed { target, refusal }) => {
+                self.apply_reload_probed(Some((target.map(|target| *target), refusal)));
+            }
+            HostEvent::Extension(SurfaceObservation::ReloadProbeFailed) => {
+                self.apply_reload_probed(None);
+            }
+            HostEvent::Extension(SurfaceObservation::LookupStatus { text }) => {
+                self.lookup_status = text;
+                self.mark_dirty();
+            }
             HostEvent::Extension(SurfaceObservation::OpenUsageOverlay) => {
                 if self.pending_open_usage {
                     self.pending_open_usage = false;

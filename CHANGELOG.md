@@ -341,6 +341,12 @@ an export.
   intent the service refused for the attachment's role; `plak agent` JSONL
   v1 answers it as that command's `error` record), `HostService` is
   `Clone` (its clones are the same service), and the new types.
+- The TUI's last direct product reads move behind the protocol: the
+  reload target is the session host's `probe_reload` (answered by
+  `reload_probed` with the target and the host build's refusal, or
+  `reload_probe_failed`), and pre-bind lookup progress is the launch
+  supervisor's `lookup_status` publication to the face on screen
+  (`host_service::FacePublisher`, `FaceReceiver::publisher`).
 - The interactive launch's round loop is the session supervisor
   (`tui_launch::supervisor`): it settles each round, applies the TUI's
   session requests (`SessionRequest`: retry attach, edit config, rebind,

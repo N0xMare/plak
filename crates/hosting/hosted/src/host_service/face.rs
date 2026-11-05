@@ -180,6 +180,29 @@ impl<P: ProtocolExtension> HostService<P> {
     }
 }
 
+/// Publishes to a face from outside its session: a product publisher of
+/// the face's process (the launch's pre-bind progress) whose observations
+/// reach the face's service as the session's do, and the face on its next
+/// read.
+pub struct FacePublisher<P: ProtocolExtension> {
+    service: HostService<P>,
+}
+
+impl<P: ProtocolExtension> Clone for FacePublisher<P> {
+    fn clone(&self) -> Self {
+        Self {
+            service: self.service.clone(),
+        }
+    }
+}
+
+impl<P: ProtocolExtension> FacePublisher<P> {
+    /// Publishes `observation`.
+    pub fn publish(&self, observation: SessionObservation<P>) {
+        self.service.observe(observation);
+    }
+}
+
 impl<P: ProtocolExtension> Drop for FaceReceiver<P> {
     fn drop(&mut self) {
         self.service.leave(self.attachment);
@@ -201,16 +224,26 @@ impl<P: ProtocolExtension> FaceReceiver<P> {
         }
     }
 
-    fn next_taken(&self) -> Option<SessionObservation<P>> {
-        self.taken
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .pop_front()
+    /// A publisher of this face's service for observations from outside
+    /// the session ([`FacePublisher`]).
+    #[must_use]
+    pub fn publisher(&self) -> FacePublisher<P> {
+        FacePublisher {
+            service: self.service.clone(),
+        }
     }
 
-    fn offer(&self, observation: SessionObservation<P>) {
-        self.service.observe(observation);
-        let taken = self.service.take(self.attachment);
+    /// Takes what a [`FacePublisher`] queued; whether there was any.
+    fn take_published(&self) -> bool {
+        let published = self.service.take(self.attachment);
+        if published.is_empty() {
+            return false;
+        }
+        self.queue(published);
+        true
+    }
+
+    fn queue(&self, taken: Vec<Outbound<P>>) {
         self.taken
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -220,6 +253,18 @@ impl<P: ProtocolExtension> FaceReceiver<P> {
                 // is never moved.
                 Outbound::ResyncRequired | Outbound::Moved { .. } => None,
             }));
+    }
+
+    fn next_taken(&self) -> Option<SessionObservation<P>> {
+        self.taken
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .pop_front()
+    }
+
+    fn offer(&self, observation: SessionObservation<P>) {
+        self.service.observe(observation);
+        self.queue(self.service.take(self.attachment));
     }
 
     /// As [`ObservationReceiver::transcript_resnapshot_required_for`].
@@ -244,6 +289,9 @@ impl<P: ProtocolExtension> FaceReceiver<P> {
             if let Some(observation) = self.next_taken() {
                 return Ok(observation);
             }
+            if self.take_published() {
+                continue;
+            }
             self.offer(self.events.try_recv()?);
         }
     }
@@ -261,6 +309,9 @@ impl<P: ProtocolExtension> FaceReceiver<P> {
         loop {
             if let Some(observation) = self.next_taken() {
                 return Ok(observation);
+            }
+            if self.take_published() {
+                continue;
             }
             let remaining = deadline.saturating_duration_since(Instant::now());
             self.offer(self.events.recv_timeout(remaining)?);

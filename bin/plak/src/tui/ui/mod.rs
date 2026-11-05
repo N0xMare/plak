@@ -432,8 +432,6 @@ pub(crate) struct App {
     /// The launch directory, where a typed or dropped relative image path
     /// resolves.
     launch_directory: std::path::PathBuf,
-    /// The session's product context, for the `/reload` probe.
-    reload_context: Option<crate::home::paths::PlakPaths>,
     #[allow(
         dead_code,
         reason = "resume note already injected into blocks at launch"
@@ -550,7 +548,13 @@ pub(crate) struct App {
     /// `/reload` was accepted; the loop starts the installed-build probe.
     pending_reload: bool,
     /// The running installed-build probe; the loop hands off when it answers.
-    reload_probe: Option<std::sync::mpsc::Receiver<Option<crate::carry::ReloadTarget>>>,
+    reload_probe: Option<std::sync::mpsc::Receiver<reload::ReloadProbed>>,
+    /// Where the host's answer to the running reload probe goes.
+    reload_probe_answer: Option<std::sync::mpsc::Sender<reload::ReloadProbed>>,
+    /// When the host was asked for the running reload probe.
+    reload_probe_asked_at: Option<Instant>,
+    /// The launch's pre-bind lookup progress (`lookup_status`), if any.
+    lookup_status: Option<String>,
     reload_confirmed_target: Option<crate::carry::ReloadTarget>,
     reload_source: Option<reload::ReloadSource>,
     reload_requests: reload::ReloadRequests,
@@ -860,7 +864,6 @@ impl App {
             session_id: launch.session_id,
             workspace: display_workspace(&launch.workspace),
             launch_directory: launch.workspace.clone(),
-            reload_context: launch.reload_home.clone(),
             workspace_chrome,
             account: launch.account,
             model: launch.model,
@@ -927,6 +930,9 @@ impl App {
             build_check_sent: None,
             pending_reload: false,
             reload_probe: None,
+            reload_probe_answer: None,
+            reload_probe_asked_at: None,
+            lookup_status: None,
             reload_confirmed_target: None,
             reload_source: None,
             reload_requests: reload::ReloadRequests::new(launch.reload_home.clone()),

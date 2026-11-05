@@ -61,7 +61,7 @@ use plakous_host_protocol::{
 };
 
 pub use child::{ChildNodes, ControlDone, NodeState};
-pub use face::{FaceReceiver, FaceSender, face};
+pub use face::{FacePublisher, FaceReceiver, FaceSender, face};
 pub use tree_nodes::TreeNodes;
 
 /// The prefix marking an `IntentStarted` whose window holds only that
