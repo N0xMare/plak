@@ -244,6 +244,12 @@ pub enum RequestRefusal {
     },
     /// No such node.
     UnknownNode,
+    /// The node was the root of the session the connection's welcome named,
+    /// which has since switched to the one rooted at `node`: attach that.
+    Moved {
+        /// The served session's root now.
+        node: NodeAddress,
+    },
     /// The node is closed: it never runs again.
     NodeClosed,
     /// The node is retiring: its host is releasing it.

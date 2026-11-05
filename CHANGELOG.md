@@ -368,6 +368,10 @@ an export.
   (`ObservationExtension::local_only`: Plak's build status, reload
   probe answers, handed-over reload requests and lookup progress).
   Embedder break: `HostService::attach` takes the connection's `Face`.
+- A wire v2 attach of the root a connection last knew, of a session that
+  has since switched, is refused `moved` with the served session's root
+  (`RequestRefusal::Moved`), not `unknown_node`: a connection welcomed
+  before a switch learns where the session went.
 - The TUI's last direct product reads move behind the protocol: the
   reload target is the session host's `probe_reload` (answered by
   `reload_probed` with the target and the host build's refusal, or

@@ -242,6 +242,56 @@ fn a_session_switch_moves_the_attachment_to_the_new_root() {
     )));
 }
 
+/// A connection welcomed before a switch that attaches the root its welcome
+/// named is refused `moved` with the served session's root, which it then
+/// attaches; a root it never knew is still unknown.
+#[test]
+fn an_attach_of_the_welcomed_root_after_a_switch_is_refused_moved() {
+    use plakous_host_protocol::Core;
+    let (actions, _intents) = plakous_host_protocol::intent_channel::<Core>();
+    let (published, events) = plakous_host_protocol::observation_channel::<Core>();
+    let session = WireSession::start(root(), "s1".to_owned(), actions, events, |id| {
+        Some(root_named(&format!("tree-{id}")))
+    });
+    let mut stdout = Vec::new();
+    let mut connection = session.connect(&mut stdout, Face::Remote, || false);
+    published.send(binding("s2")).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while session.session_id() != "s2" {
+        assert!(Instant::now() < deadline, "the switch");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(
+        connection.request(1, Op::Attach { node: root() }),
+        Some(Outcome::Refused(RequestRefusal::Moved {
+            node: root_named("tree-s2")
+        }))
+    );
+    assert_eq!(
+        connection.request(
+            2,
+            Op::Attach {
+                node: root_named("tree-s3")
+            }
+        ),
+        Some(Outcome::Refused(RequestRefusal::UnknownNode))
+    );
+    assert!(matches!(
+        connection.request(
+            3,
+            Op::Attach {
+                node: root_named("tree-s2")
+            }
+        ),
+        Some(Outcome::Ok(Answer::Attached { .. }))
+    ));
+    assert_eq!(
+        connection.request(4, Op::Attach { node: root() }),
+        Some(Outcome::Refused(RequestRefusal::UnknownNode)),
+        "a connection that followed the switch knows the new root"
+    );
+}
+
 /// A process asked to stop ends the connection as a leaving client does,
 /// with the session quit.
 #[test]

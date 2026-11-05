@@ -3791,10 +3791,12 @@ verdicts) are addressed, the session profile and workspace chrome states.
   `response` with that id: `attached`, `detached`, `accepted` (the intent
   entered the node's mailbox; what it does arrives as observations) or
   `pong`, or a refusal: `backpressure`, `one_in_flight`, `disconnected`,
-  `refused_for_role` (with its role-table row), `unknown_node`,
-  `node_closed`, `node_retiring`, `out_of_reach`, `mail_refused` (with the
-  tree's reason), `not_attached` or `malformed`. A refused request did
-  nothing.
+  `refused_for_role` (with its role-table row), `unknown_node`, `moved`
+  (with the served session's root: the attach named the root the
+  connection last knew, of a session that has since switched, so the client
+  attaches that node instead), `node_closed`, `node_retiring`,
+  `out_of_reach`, `mail_refused` (with the tree's reason), `not_attached` or
+  `malformed`. A refused request did nothing.
 - **Observation classes.** Every observation is one class. A **state** is
   broadcast as the latest value of its kind and is part of the attach
   snapshot. An **event** is broadcast as it happens; a *required* event is

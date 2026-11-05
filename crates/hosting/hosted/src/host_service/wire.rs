@@ -534,8 +534,16 @@ where
                 // the session's observations.
                 let served = self.served.clone();
                 let mut guard = served.as_ref().map(served::lock);
+                let known = self.service.root().clone();
                 if let Some(guard) = &guard {
                     self.follow(guard);
+                }
+                // A connection welcomed before a switch, or that missed its
+                // `moved`, still names the root it knew.
+                if node == known && node != *self.service.root() {
+                    return refused(RequestRefusal::Moved {
+                        node: self.service.root().clone(),
+                    });
                 }
                 match self.service.attach(&node, self.face) {
                     Ok(attachment) => {
