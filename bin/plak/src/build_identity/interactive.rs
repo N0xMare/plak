@@ -1,12 +1,10 @@
 use super::{FileIdentity, Invocation, launch};
-#[cfg(feature = "tui")]
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 /// `argv[0]` to hand a re-exec, so the successor records the same invocation
 /// (a `PATH` name stays a name) and keeps detecting newer installs.
 #[cfg(feature = "tui")]
-pub(crate) fn invocation_argv0() -> OsString {
+pub(crate) fn invocation_argv0() -> std::ffi::OsString {
     match &launch().invocation {
         Invocation::Name(name) => name.clone(),
         Invocation::Path(path) => path.clone().into_os_string(),

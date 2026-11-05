@@ -22,14 +22,16 @@ const RELOAD_RELEASE_BOUND: Duration = plakous_host_protocol::limits::HOST_CANCE
 use plakous::agent::ReasoningEffort;
 
 use super::face::{RoundFace, RoundMailbox, exit_restored_tui, round_face};
-use super::{supported_provider_rows, tui_presentation_bundle, tui_presentation_values};
+use super::{
+    resolved_workspace_path, supported_provider_rows, tui_presentation_bundle,
+    tui_presentation_values,
+};
 use crate::commands::host_config::{
     TuiAttachEligibility, TuiAttacher, build_host_config, deferred_attach_refusal_reason,
     tui_attach_eligibility,
 };
 use crate::commands::support::{
     HOST_WORKER_JOIN_TIMEOUT, edit_config_file, join_host_worker_bounded, join_tui_host_worker,
-    resolved_workspace_path,
 };
 use crate::shell::services::Services;
 use crate::{
@@ -1356,12 +1358,12 @@ fn reload_command(
     session: &str,
 ) -> std::process::Command {
     let mut command = std::process::Command::new(executable);
-    command.env_remove(crate::environment::RELOAD_EPOCH_ENV);
+    command.env_remove(super::RELOAD_EPOCH_ENV);
     if matches!(
         plan,
         carry::ReloadPlan::Resume | carry::ReloadPlan::ResumeUnverified
     ) {
-        command.env(crate::environment::RELOAD_EPOCH_ENV, "1");
+        command.env(super::RELOAD_EPOCH_ENV, "1");
         command.arg("--resume").arg(session);
     }
     command

@@ -795,16 +795,5 @@ pub fn join_host_worker_bounded_with_notice(
         .map(|_| ())
 }
 
-/// A workspace path as the workspace probe resolves it, or as recorded when
-/// it does not resolve. A probe that cannot answer refuses the resume rather
-/// than compare a path that only looks unresolvable.
-pub(crate) fn resolved_workspace_path(path: &Path) -> CliResult<PathBuf> {
-    let probe: &dyn plakous::tools::WorkspaceProbe = &plakous::tools::LocalWorkspaceProbe;
-    Ok(probe
-        .canonicalize(path)
-        .map_err(|error| CliFailure::new(format!("workspace could not be inspected: {error}")))?
-        .unwrap_or_else(|| path.to_path_buf()))
-}
-
 #[cfg(test)]
 mod editor_tests;

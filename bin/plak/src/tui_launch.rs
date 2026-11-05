@@ -6,14 +6,13 @@ pub(crate) mod face;
 pub(crate) mod supervisor;
 
 use std::io::{self, IsTerminal as _, Write as _};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 #[cfg(test)]
 use crate::PresentationBackend;
 use crate::commands::host_config::{NativeTuiAttacher, TuiAttacher};
 use crate::commands::session::seed_new_session_binding;
-use crate::commands::support::resolved_workspace_path;
 use crate::shell::services::Services;
 use crate::{
     CliFailure, CliFailureKind, CliResult, ProcessOutcome, TuiPresentationBundle, build_identity,
@@ -374,6 +373,22 @@ fn supported_provider_rows() -> Vec<plakous_host_protocol::views::ProviderDef> {
             },
         )
         .collect()
+}
+
+/// What a reload sets on the build it starts when that build applies changed
+/// orchestration settings; a process-local handoff marker, never session
+/// authority (spec 02 §5.1).
+const RELOAD_EPOCH_ENV: &str = "PLAK_RELOAD_APPLY_ORCHESTRATION";
+
+/// A workspace path as the workspace probe resolves it, or as recorded when
+/// it does not resolve. A probe that cannot answer refuses the resume rather
+/// than compare a path that only looks unresolvable.
+fn resolved_workspace_path(path: &Path) -> CliResult<PathBuf> {
+    let probe: &dyn plakous::tools::WorkspaceProbe = &plakous::tools::LocalWorkspaceProbe;
+    Ok(probe
+        .canonicalize(path)
+        .map_err(|error| CliFailure::new(format!("workspace could not be inspected: {error}")))?
+        .unwrap_or_else(|| path.to_path_buf()))
 }
 
 #[cfg(test)]

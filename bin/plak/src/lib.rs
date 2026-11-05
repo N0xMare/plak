@@ -58,7 +58,6 @@ mod composition_tests;
 mod config;
 mod diagnostics;
 mod dispatch;
-#[cfg(feature = "tui")]
 mod environment;
 mod host_status_text;
 mod log_text;

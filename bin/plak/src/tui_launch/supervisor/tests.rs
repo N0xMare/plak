@@ -15,7 +15,7 @@ fn reload_applies_orchestration_in_the_installed_build_without_a_second_import()
         assert_eq!(command.get_program(), executable.as_os_str());
         let marker = command
             .get_envs()
-            .find(|(key, _)| *key == crate::environment::RELOAD_EPOCH_ENV)
+            .find(|(key, _)| *key == super::super::RELOAD_EPOCH_ENV)
             .unwrap()
             .1;
         assert_eq!(

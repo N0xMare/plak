@@ -76,6 +76,9 @@ pub(crate) fn work_id(
     else {
         return Ok(id.to_owned());
     };
+    // A build that cannot run the session refuses before following or settling
+    // anything, so the refusal opens no store for writing.
+    crate::build_features::admit_session(&record)?;
     load_for_work(services, record, stderr).map(|record| record.id)
 }
 
