@@ -198,6 +198,14 @@ def load_policy(root_manifest: dict[str, Any]) -> Policy:
                     f"modules.{package_name}.{module_name}.may-use",
                 ),
             }
+            ceiling = rule.get("may-use-ceiling")
+            if ceiling is not None:
+                if not isinstance(ceiling, int) or isinstance(ceiling, bool) or ceiling < 0:
+                    raise ValueError(
+                        f"workspace policy modules.{package_name}.{module_name}"
+                        ".may-use-ceiling must be a non-negative integer"
+                    )
+                modules[package_name][module_name]["may-use-ceiling"] = ceiling
     return Policy(
         layers=layers,
         edges=edges,

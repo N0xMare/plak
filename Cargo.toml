@@ -377,7 +377,7 @@ may-use = [
     "crate::config::host_event_channel",
     "crate::config::user_action_channel",
     # Product paths the TUI still names inline. The wire face removes them;
-    # this list only shrinks.
+    # this list only shrinks, and may-use-ceiling follows it down.
     "crate::build_features::require_account",
     "crate::build_identity::FLAVOR",
     "crate::build_identity::installed_executable",
@@ -405,6 +405,7 @@ may-use = [
     "crate::tui_timing::quit_requested",
     "crate::usage_remedy::unavailable_reason",
 ]
+may-use-ceiling = 53
 
 [patch.crates-io]
 monty-typeshed = { path = "vendor/monty-typeshed" }

@@ -1135,6 +1135,59 @@ class LayerPolicyTests(unittest.TestCase):
             ],
         )
 
+    def test_module_rules_resolve_super_chains_by_the_files_module(self) -> None:
+        """A `super::` chain that climbs out of the module is a `crate::` path."""
+        package = synthetic_package("plak", "bin", "bin/plak", package_class="supported")
+        rules = {
+            "tui": {
+                "forbid-crates": ("plakous", "plakous-*"),
+                "allow-crates": ("plakous-host-protocol",),
+                "may-use": ("crate::tui", "crate::config::SettingsView"),
+            }
+        }
+        sources = {
+            "src/tui/ui/reload.rs": (
+                "use super::state::App;\n"
+                "use super::super::super::carry::ReloadTarget;\n"
+                "fn f() { super::super::theme::dark(); super::super::super::home::paths(); }"
+            ),
+            "src/tui/mod.rs": (
+                "use super::config::SettingsView;\nuse super::store::Row;\n"
+                "pub mod control { use super::UserAction; fn f() { super::super::shell::x(); } }"
+            ),
+        }
+        self.assertEqual(
+            workspace_policy.validate_module_rules(package, sources, rules),
+            [
+                "plak:src/tui/mod.rs: module 'tui' may not use 'crate::store::Row'",
+                "plak:src/tui/mod.rs: module 'tui' may not name 'crate::shell::x'",
+                "plak:src/tui/ui/reload.rs: module 'tui' may not use 'crate::carry::ReloadTarget'",
+                "plak:src/tui/ui/reload.rs: module 'tui' may not name 'crate::home::paths'",
+            ],
+        )
+
+    def test_module_rules_hold_may_use_to_its_ceiling(self) -> None:
+        """With a ceiling, `may-use` lists exactly that many paths."""
+        package = synthetic_package("plak", "bin", "bin/plak", package_class="supported")
+        sources = {"src/tui/mod.rs": "use crate::tui::theme::Theme;"}
+        tail = ": the list only shrinks, and the ceiling follows it down"
+        for ceiling, errors in (
+            (2, []),
+            (1, [f"plak: module 'tui' may-use lists 2 paths, over its may-use-ceiling 1{tail}"]),
+            (3, [f"plak: module 'tui' may-use lists 2 paths, under its may-use-ceiling 3{tail}"]),
+        ):
+            rules = {
+                "tui": {
+                    "forbid-crates": (),
+                    "allow-crates": (),
+                    "may-use": ("crate::tui", "crate::config::SettingsView"),
+                    "may-use-ceiling": ceiling,
+                }
+            }
+            self.assertEqual(
+                workspace_policy.validate_module_rules(package, sources, rules), errors
+            )
+
     def test_module_rules_refuse_a_forbidden_crate_inside_a_use_brace_group(self) -> None:
         """`use {plakous_model::a, std::io}` names a forbidden crate once."""
         package = synthetic_package("plak", "bin", "bin/plak", package_class="supported")

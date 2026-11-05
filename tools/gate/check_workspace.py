@@ -2386,18 +2386,21 @@ def _path_root_identifiers(tokens: list[RustToken], spans: list[tuple[int, int]]
     return roots
 
 
-def _inline_crate_paths(tokens: list[RustToken], spans: list[tuple[int, int]]) -> set[str]:
-    """Every `crate::a::b` path written outside a `use` tree, as far as its
-    identifiers go (a generic argument, a call or a field ends it)."""
-    paths: set[str] = set()
+def _inline_module_paths(
+    tokens: list[RustToken], spans: list[tuple[int, int]]
+) -> set[tuple[int, tuple[str, ...]]]:
+    """Every `crate::a::b` and `super::a::b` path written outside a `use`
+    tree, as far as its identifiers go (a generic argument, a call or a
+    field ends it), with the index of its first token."""
+    paths: set[tuple[int, tuple[str, ...]]] = set()
     for index, token in enumerate(tokens):
-        if token.kind != "identifier" or token.value != "crate":
+        if token.kind != "identifier" or token.value not in {"crate", "super"}:
             continue
         if any(start <= index < end for start, end in spans):
             continue
         if index > 0 and tokens[index - 1].value == "::":
             continue
-        names = ["crate"]
+        names = [token.value]
         cursor = index + 1
         while (
             cursor + 1 < len(tokens)
@@ -2407,8 +2410,61 @@ def _inline_crate_paths(tokens: list[RustToken], spans: list[tuple[int, int]]) -
             names.append(tokens[cursor + 1].value)
             cursor += 2
         if len(names) > 1:
-            paths.add("::".join(names))
+            paths.add((index, tuple(names)))
     return paths
+
+
+def _inline_modules(tokens: list[RustToken]) -> list[tuple[str, ...]]:
+    """For each token, the inline `mod name { ... }` blocks it sits in,
+    outermost first."""
+    stack: list[tuple[str, int]] = []
+    depth = 0
+    pending: str | None = None
+    names: list[tuple[str, ...]] = []
+    for index, token in enumerate(tokens):
+        if token.value == "{":
+            depth += 1
+            if pending is not None:
+                stack.append((pending, depth))
+                pending = None
+        elif token.value == "}":
+            if stack and stack[-1][1] == depth:
+                stack.pop()
+            depth = max(0, depth - 1)
+        elif (
+            token == RustToken("identifier", "mod")
+            and index + 2 < len(tokens)
+            and tokens[index + 1].kind == "identifier"
+            and tokens[index + 2].value == "{"
+        ):
+            pending = tokens[index + 1].value
+        names.append(tuple(name for name, _ in stack))
+    return names
+
+
+def _file_module_path(path: str) -> list[str]:
+    """The module a source file is, as `crate` path segments:
+    `src/tui/ui/reload.rs` is `crate::tui::ui::reload`, a `mod.rs` its
+    directory's module."""
+    parts = path.removeprefix("src/").removesuffix(".rs").split("/")
+    if parts[-1] in {"mod", "lib", "main"}:
+        parts.pop()
+    return ["crate", *parts]
+
+
+def _resolve_module_path(names: tuple[str, ...] | list[str], module: list[str]) -> str | None:
+    """`names` as a `crate::` path, its leading `super`s taken against the
+    file's `module`; `None` when the chain climbs above the crate."""
+    if names[0] == "crate":
+        return "::".join(names)
+    base = list(module)
+    rest = list(names)
+    while rest and rest[0] == "super":
+        if len(base) == 1:
+            return None
+        base.pop()
+        rest.pop(0)
+    return "::".join(base + rest)
 
 
 def _identifier_values(tokens: list[RustToken]) -> list[str]:
@@ -3862,7 +3918,11 @@ def validate_module_rules(
     file may `use` std/core/alloc, its own external dependencies, the paths
     listed in `may-use`, and nothing matching `forbid-crates` unless it is
     listed in `allow-crates`; any other `crate::` path is an error, whether
-    a `use` declares it or the code names it inline. Inactive until the
+    a `use` declares it or the code names it inline, and so is a `super::`
+    chain that resolves, by the file's module and the inline `mod` blocks
+    around it, to one. With a
+    `may-use-ceiling`, `may-use` lists exactly that many paths: the list
+    only shrinks, and the ceiling is lowered with it. Inactive until the
     module directory exists.
     """
     errors: list[str] = []
@@ -3875,25 +3935,44 @@ def validate_module_rules(
                 return False
             return any(_crate_pattern_matches(pattern, crate) for pattern in rule["forbid-crates"])
 
+        # The module itself is always reachable: `may-use` names it.
+        def reachable(full: str | None) -> bool:
+            return full is not None and any(
+                full == allowed or full.startswith(allowed + "::") for allowed in rule["may-use"]
+            )
+
+        ceiling = rule.get("may-use-ceiling")
+        if ceiling is not None and len(rule["may-use"]) != ceiling:
+            direction = "over" if len(rule["may-use"]) > ceiling else "under"
+            errors.append(
+                f"{package.name}: module {module!r} may-use lists {len(rule['may-use'])} paths, "
+                f"{direction} its may-use-ceiling {ceiling}: the list only shrinks, and the "
+                "ceiling follows it down"
+            )
+
         for path, contents in sorted(sources.items()):
             if not path.startswith(prefix):
                 continue
             tokens = rust_tokens(contents)
             spans = _use_statement_spans(tokens)
-            for statement in _use_statements(tokens):
+            file_module = _file_module_path(path)
+            inline_modules = _inline_modules(tokens)
+
+            def module_at(index: int) -> list[str]:
+                return [*file_module, *inline_modules[index]]
+
+            for start, end in spans:
+                statement = tokens[start:end]
                 refused_roots: set[str] = set()
                 for names in _use_tree_paths(statement):
                     if not names:
                         continue
                     root = names[0]
-                    if root in {"std", "core", "alloc", "super", "self"}:
+                    if root in {"std", "core", "alloc", "self"}:
                         continue
-                    if root == "crate":
-                        full = "::".join(names)
-                        if not any(
-                            full == allowed or full.startswith(allowed + "::")
-                            for allowed in rule["may-use"]
-                        ):
+                    if root in {"crate", "super"}:
+                        full = _resolve_module_path(names, module_at(start))
+                        if not reachable(full):
                             errors.append(
                                 f"{package.name}:{path}: module {module!r} may not use {full!r}"
                             )
@@ -3905,11 +3984,12 @@ def validate_module_rules(
                         )
             # A path written inline names what a `use` would: the same
             # `may-use` list governs both.
-            for full in sorted(_inline_crate_paths(tokens, spans)):
-                if not any(
-                    full == allowed or full.startswith(allowed + "::")
-                    for allowed in rule["may-use"]
-                ):
+            inline = {
+                _resolve_module_path(names, module_at(index))
+                for index, names in _inline_module_paths(tokens, spans)
+            }
+            for full in sorted(inline, key=str):
+                if not reachable(full):
                     errors.append(f"{package.name}:{path}: module {module!r} may not name {full!r}")
             for root in sorted(_path_root_identifiers(tokens, spans)):
                 crate = root.replace("_", "-")
