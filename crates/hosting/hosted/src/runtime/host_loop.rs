@@ -183,6 +183,9 @@ struct RootRole<'a, P: plakous_host_protocol::ProtocolExtension> {
     /// boundary: consent was given (a Resume, `resume_after_loss =
     /// "continue"`, or a decision a crash left pending).
     root_loss_resume_due: bool,
+    /// Since when nothing has kept the session resident, while the host
+    /// releases idle sessions ([`super::HostConfig::idle_release`]).
+    idle_since: Option<Instant>,
 }
 
 enum HostStep {
@@ -206,6 +209,7 @@ mod prompt;
 pub(super) mod publication;
 mod recover;
 mod release;
+mod residency;
 mod restored;
 mod run_until_idle;
 mod session_executor;

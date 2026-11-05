@@ -3902,6 +3902,19 @@ verdicts) are addressed, the session profile and workspace chrome states.
   session rather than an attachment and answers `stopped`; until stop
   records are written (the root's `interrupt{stopped}`), every host refuses
   it `unsupported`.
+- **Residency in a host.** A host that releases idle sessions keeps a
+  session resident while anything needs it: a turn, a queued or deferred
+  command, recovery debt, a pending continuation (a transient resume, a
+  lost host's Resume, a host-authored continuation), a background process,
+  a resident child in its tree, or an attachment. Once none has held for
+  the idle release, 300 s, the session's own actor releases it through its
+  joined quit: its runtime lease and holder record, then the root's hub
+  entry, and the tree's custody last, since nothing else in the tree is
+  resident. Every condition is read in the actor when it decides, so a job
+  terminal, an attach or an intent racing the timer is never lost: it lands
+  before the decision and keeps the session, or after the release and opens
+  it again. An embedded face's session (the TUI, `plak agent`, `plak run`)
+  is never released for being idle.
 - **Session requests.** `retry_attach` (re-resolve the binding and open the
   session again), `resume_session {session}` (switch to one of the user's
   sessions) and `rebind {cause}` (carry the history into a new session on

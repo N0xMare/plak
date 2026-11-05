@@ -3448,7 +3448,9 @@ goes. Every other release of a session is its host's shutdown of that session
 and runs the tree's joined shutdown at the last attachment, retiring live
 children: quit, a headless exit, a failed open, and the session a fork,
 `/new`, a session switch or a recovery leaves behind. So does a hand-off
-after its host's shutdown is latched. At its quit the host releases the
+after its host's shutdown is latched, and a host's idle release (chapter 02
+§4.4), which happens only while no child is live, so the tree is dormant
+and its custody goes last. At its quit the host releases the
 attachments its switches left behind, then ends every tree a hand-off left in
 custody that no root session holds again with its joined shutdown, and joins
 the dormant trees' shutdowns already under way. Either way the hub entry goes first and

@@ -558,12 +558,12 @@ fn the_service_does_not_keep_the_session_open() {
     let shut_down = Arc::new(std::sync::atomic::AtomicBool::new(false));
     intents.on_shutdown({
         let shut_down = Arc::clone(&shut_down);
-        move || shut_down.store(true, std::sync::atomic::Ordering::Release)
+        move || shut_down.store(true, Ordering::Release)
     });
     let service = HostService::for_faces(actions.clone(), root(), 4);
     let (actions, _face) = service.attach_face(actions, events);
     drop(actions);
-    assert!(shut_down.load(std::sync::atomic::Ordering::Acquire));
+    assert!(shut_down.load(Ordering::Acquire));
     assert_eq!(
         service.attach(&root(), Face::Remote),
         Err(RequestRefusal::Disconnected)

@@ -441,6 +441,7 @@ pub fn build_host_config(
                 seed_history: None,
                 seed_line: None,
                 source_releases: product_host::SourceReleases::default(),
+                idle_release: None,
                 continuation: crate::reload_request::take_reload_continuation(),
                 event_renderer: Some(crate::log_text::render),
             });
@@ -561,6 +562,7 @@ pub fn build_host_config(
         seed_history: None,
         seed_line: None,
         source_releases: product_host::SourceReleases::default(),
+        idle_release: None,
         continuation: crate::reload_request::take_reload_continuation(),
         event_renderer: Some(crate::log_text::render),
     })

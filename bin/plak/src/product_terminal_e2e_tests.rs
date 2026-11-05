@@ -232,6 +232,7 @@ impl TuiAttacher for OfflineAttacher {
             seed_history: None,
             seed_line: None,
             source_releases: crate::product_host::SourceReleases::default(),
+            idle_release: None,
             continuation: None,
             event_renderer: None,
         });
@@ -1706,6 +1707,7 @@ fn host_config(
         seed_history: None,
         seed_line: None,
         source_releases: crate::product_host::SourceReleases::default(),
+        idle_release: None,
         continuation: None,
         event_renderer: None,
     }

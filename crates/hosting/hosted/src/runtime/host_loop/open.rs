@@ -609,6 +609,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
                 prep_hooks: super::prompt::preparation::Hooks::new(),
                 idle_entry_pass_due: false,
                 root_loss_resume_due: false,
+                idle_since: None,
             },
         );
         host.publish_pending_continuation();

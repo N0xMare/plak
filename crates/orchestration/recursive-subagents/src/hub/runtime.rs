@@ -115,6 +115,12 @@ impl ProductTopologyRuntime {
         self.residents.load(Ordering::Acquire) == 0 && self.live.lock().await.is_quiet()
     }
 
+    /// Whether no child turn is live, starting or retiring here: every child
+    /// node is dormant, whatever the root does.
+    pub async fn children_quiet(&self) -> bool {
+        self.live.lock().await.is_quiet()
+    }
+
     /// Asks the hub to check whether the tree went dormant.
     pub(super) fn note_quiet(&self) {
         self.quiet.notify_one();

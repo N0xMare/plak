@@ -151,6 +151,8 @@ pub(crate) mod fault_store;
 #[cfg(test)]
 mod handoff_tests;
 #[cfg(test)]
+mod idle_release_tests;
+#[cfg(test)]
 mod intent_wake_tests;
 mod rebind;
 mod reconcile;
@@ -858,7 +860,24 @@ pub struct HostConfig<P: plakous_host_protocol::ProtocolExtension = plakous_host
     /// boundary, through the same durable host-wake submission as an idle
     /// wake (a reload the session requested posts one). Taken once.
     pub continuation: Option<String>,
+    /// When a host releases the session once nothing keeps it resident
+    /// (spec 02 §4.4); `None` for an embedded face, whose session lives as
+    /// long as the face.
+    pub idle_release: Option<IdleRelease>,
 }
+
+/// How long a host keeps an idle session before releasing it, and the
+/// attachments its residency counts.
+#[derive(Clone, Debug)]
+pub struct IdleRelease {
+    /// How long every residency condition must stay clear.
+    pub after: Duration,
+    /// The session's host service attachments.
+    pub attachments: crate::host_service::AttachmentCount,
+}
+
+/// How long a host keeps an idle session resident (spec 02 §4.4).
+pub const IDLE_RELEASE: Duration = Duration::from_secs(300);
 
 /// How a node whose host was lost continues (`[host] resume_after_loss`).
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

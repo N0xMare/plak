@@ -50,6 +50,7 @@ mod tree_nodes;
 pub mod wire;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use plakous_host_protocol::observation::{Delivery, ObservationClass};
@@ -184,6 +185,8 @@ struct State<P: ProtocolExtension> {
     agent_holders: BTreeMap<String, usize>,
     /// Whether a new attachment waits ([`Attachment::waiting`]).
     holding: bool,
+    /// How many attachments the map holds, for [`AttachmentCount`].
+    count: Arc<AtomicUsize>,
 }
 
 /// One session's host service; its clones are the same service.
@@ -296,7 +299,32 @@ fn baseline_scope<P: ProtocolExtension>(
     }
 }
 
+/// How many attachments a session's host service holds now, readable by
+/// the session itself (its residency, spec 02 §4.4). It is made before the
+/// service exists and bound once the service is
+/// ([`HostService::with_attachment_count`]); unbound it reads none.
+#[derive(Clone, Debug, Default)]
+pub struct AttachmentCount(Arc<std::sync::OnceLock<Arc<AtomicUsize>>>);
+
+impl AttachmentCount {
+    /// The attachments the bound service holds.
+    #[must_use]
+    pub fn get(&self) -> usize {
+        self.0
+            .get()
+            .map_or(0, |count| count.load(Ordering::Acquire))
+    }
+}
+
 impl<P: ProtocolExtension> HostService<P> {
+    /// This service, counting its attachments into `count`; the first
+    /// service bound to a count is the one it reads.
+    #[must_use]
+    pub fn with_attachment_count(self, count: &AttachmentCount) -> Self {
+        let _ = count.0.set(Arc::clone(&self.lock().count));
+        self
+    }
+
     /// The service of the session `actions` drives, whose root is `root`;
     /// each attachment holds at most `capacity` outbound items beyond its
     /// attach snapshot.
@@ -332,6 +360,7 @@ impl<P: ProtocolExtension> HostService<P> {
                 requester: None,
                 agent_holders: BTreeMap::new(),
                 holding: false,
+                count: Arc::default(),
             })),
         }
     }
@@ -552,7 +581,7 @@ impl<P: ProtocolExtension> HostService<P> {
             if let Err(error) = sender.send(SessionIntent::ResyncTranscript {
                 scope: TranscriptScope::Root,
             }) {
-                self.lock().attachments.remove(&id);
+                self.lock().remove_counted(id);
                 return Err(refusal_of(&error));
             }
         }
@@ -607,7 +636,7 @@ impl<P: ProtocolExtension> HostService<P> {
                 observation,
             });
         }
-        state.attachments.insert(id, attachment);
+        state.insert_counted(id, attachment);
         (id, ask)
     }
 
@@ -982,7 +1011,23 @@ impl<P: ProtocolExtension> State<P> {
         if self.requester == Some(attachment) {
             self.requester = None;
         }
-        self.attachments.remove(&attachment)
+        self.remove_counted(attachment)
+    }
+
+    /// Adds `attachment` under `id`, counted.
+    fn insert_counted(&mut self, id: AttachmentId, attachment: Attachment<P>) {
+        if self.attachments.insert(id, attachment).is_none() {
+            self.count.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+
+    /// Takes the attachment `id` out, counted.
+    fn remove_counted(&mut self, id: AttachmentId) -> Option<Attachment<P>> {
+        let removed = self.attachments.remove(&id);
+        if removed.is_some() {
+            self.count.fetch_sub(1, Ordering::AcqRel);
+        }
+        removed
     }
 
     /// Whether an attachment other than one holding `own` holds an agent

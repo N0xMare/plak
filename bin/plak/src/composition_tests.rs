@@ -116,6 +116,7 @@ pub(crate) fn product_injected_attached_host(
         seed_history: None,
         seed_line: None,
         source_releases: crate::product_host::SourceReleases::default(),
+        idle_release: None,
         continuation: None,
         event_renderer: None,
     };
@@ -906,6 +907,7 @@ fn clear_publishes_fresh_product_and_runtime_authority_before_dispatch() {
         seed_history: None,
         seed_line: None,
         source_releases: crate::product_host::SourceReleases::default(),
+        idle_release: None,
         continuation: None,
         event_renderer: None,
     };

@@ -171,6 +171,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 acknowledgement = Some(guard);
                 action
             });
+            if received.is_ok() {
+                // An intent is activity: the idle release waits afresh.
+                self.role.idle_since = None;
+            }
             let cancels_resume =
                 received.is_ok() && !matches!(&received, Ok(UserAction::ResyncTranscript { .. }));
             let cancelled_resume = cancels_resume && self.role.pending_resume.is_some();
@@ -1078,6 +1082,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     }
                     if one_shot.is_none() && observed_tree {
                         return self.child_wake_prompt(Instant::now()).await;
+                    }
+                    if one_shot.is_none() && self.idle_release_due().await {
+                        return Ok(self.release_idle());
                     }
                     return Ok(HostStep::Continue);
                 }

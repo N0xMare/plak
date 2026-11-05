@@ -594,6 +594,7 @@ fn deferred_startup_never_claims_attachment_before_failed_open_falls_back() {
         seed_history: None,
         seed_line: None,
         source_releases: SourceReleases::default(),
+        idle_release: None,
         continuation: None,
         event_renderer: None,
     };

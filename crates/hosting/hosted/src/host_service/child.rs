@@ -238,7 +238,7 @@ impl<P: ProtocolExtension> HostService<P> {
         sender.send(ask).map_err(|error| refusal_of(&error))?;
         state.next_attachment += 1;
         let waiting = state.holding;
-        state.attachments.insert(
+        state.insert_counted(
             id,
             Attachment {
                 face,
