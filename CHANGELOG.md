@@ -239,7 +239,9 @@ an export.
 - A planned handoff (`/reload`) records each node with work in flight as
   handed off before its host releases it, and the next host continues each
   once by itself, whatever `resume_after_loss` says; a handoff it could not
-  record holds like a loss. `/reload` no longer refuses while a turn or a
+  record holds like a loss. A handoff waits up to 5 s for the running turn to
+  settle (a quit waits 300 ms); a turn still running then is released as a
+  held loss, with a warning rather than an error. `/reload` no longer refuses while a turn or a
   sub-agent runs: it hands them off, and the new build continues each once. It
   still refuses while a background process runs, and a reload that carries
   into a new session still refuses a running turn or sub-agent. The installed

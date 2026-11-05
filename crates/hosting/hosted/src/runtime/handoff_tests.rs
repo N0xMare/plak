@@ -13,7 +13,8 @@ use crate::runtime::fault_store::{FaultStore, StoreCall, StoreFaults};
 use crate::runtime::recover_tests::{script, scripted_host_with, turn_completed, wait_for};
 use crate::runtime::root_loss::{RootLossState, root_loss_state};
 use crate::runtime::root_loss_open_tests::{
-    Release, dispatches, held_notice, idle, next_host, open_and_quit, release_a_running_root_turn,
+    Cancel, Release, dispatches, held_notice, idle, next_host, open_and_quit,
+    release_a_running_root_turn,
 };
 use crate::runtime::spawn_host_worker;
 use crate::runtime::test_kit::TestExtension;
@@ -45,22 +46,42 @@ fn record_root_causes(
     config
 }
 
-/// A running root turn handed off, whether its cancel settled or the
-/// release abandoned it by lease: the handoff is durable before the lease
-/// release, the next open continues the turn once by itself under hold, and
-/// a later open continues nothing.
+/// Whether the host emitted a notice whose text contains `text`, and with
+/// which tone.
+fn notice_tone(
+    seen: &[crate::surface_protocol::HostEvent<TestExtension>],
+    text: &str,
+) -> Option<plakous_host_protocol::views::transcript::NoticeTone> {
+    seen.iter().find_map(|event| match event {
+        crate::surface_protocol::HostEvent::Row(
+            plakous_host_protocol::views::transcript::TranscriptRow::Notice(notice),
+        ) if notice.text.contains(text) => Some(notice.tone),
+        _ => None,
+    })
+}
+
+/// A running root turn handed off, its cancel settling at once or only
+/// after a second, past an interactive quit's 300 ms grace: the handoff
+/// waits it out with no escalation, the handoff is durable before the
+/// lease release, the next open continues the turn once by itself under
+/// hold, and a later open continues nothing.
 #[test]
 fn a_handed_off_root_turn_continues_once_by_itself() {
-    for deaf in [true, false] {
+    for cancel in [Cancel::Prompt, Cancel::Slow] {
         let root = tempfile::tempdir().unwrap();
         let seen = Arc::new(Mutex::new(None));
-        let lost = release_a_running_root_turn(root.path(), Release::Handoff, deaf, |config| {
+        let lost = release_a_running_root_turn(root.path(), Release::Handoff, cancel, |config| {
             record_root_causes(config, &seen)
         });
         assert_eq!(
+            notice_tone(&lost.seen, "did not settle"),
+            None,
+            "the handoff's cancel settled within its grace ({cancel:?})"
+        );
+        assert_eq!(
             seen.lock().unwrap().clone(),
             Some(vec![RootInterruptCause::Handoff]),
-            "recorded before the release (deaf={deaf})"
+            "recorded before the release ({cancel:?})"
         );
         assert_eq!(dispatches(&lost.evidence), 1);
 
@@ -80,11 +101,11 @@ fn a_handed_off_root_turn_continues_once_by_itself() {
         );
         send_attached_action(&actions, UserAction::Quit);
         host.join().unwrap().unwrap();
-        assert!(!events_seen.iter().any(held_notice), "deaf={deaf}");
+        assert!(!events_seen.iter().any(held_notice), "{cancel:?}");
         assert_eq!(
             dispatches(&lost.evidence),
             2,
-            "one continuation (deaf={deaf})"
+            "one continuation ({cancel:?})"
         );
         let intents = lost.store.load_intents(&lost.id).unwrap();
         assert_eq!(
@@ -94,7 +115,7 @@ fn a_handed_off_root_turn_continues_once_by_itself() {
                 .map(|intent| intent.value.cause)
                 .collect::<Vec<_>>(),
             [RootInterruptCause::Handoff],
-            "the loss of the handed-off turn is not recorded again (deaf={deaf})"
+            "the loss of the handed-off turn is not recorded again ({cancel:?})"
         );
         assert_eq!(intents.root_continuations.len(), 1);
         assert_eq!(
@@ -108,7 +129,7 @@ fn a_handed_off_root_turn_continues_once_by_itself() {
             serde_json::json!([]),
             Arc::clone(&lost.store),
         ));
-        assert_eq!(dispatches(&lost.evidence), 2, "nothing more (deaf={deaf})");
+        assert_eq!(dispatches(&lost.evidence), 2, "nothing more ({cancel:?})");
         assert_eq!(
             lost.store
                 .load_intents(&lost.id)
@@ -134,16 +155,22 @@ impl StoreFaults for RefuseRootLoss {
     }
 }
 
-/// A handoff whose write fails still releases, without the record: the
-/// next open reads an ordinary loss and holds, and nothing continues by
-/// itself without a durable handoff row.
+/// A handoff whose write fails still releases, without the record: its
+/// cancel settled the turn, so the next open holds nothing and nothing
+/// continues by itself without a durable handoff row. (A turn the release
+/// left unsettled is held: `a_handoff_whose_turn_never_settles_holds_as_a_loss`.)
 #[test]
-fn a_handoff_the_host_could_not_record_holds_as_a_loss() {
+fn a_handoff_the_host_could_not_record_continues_nothing() {
     let root = tempfile::tempdir().unwrap();
-    let lost = release_a_running_root_turn(root.path(), Release::Handoff, true, |mut config| {
-        config.store = Arc::new(FaultStore::new(Arc::clone(&config.store), RefuseRootLoss));
-        config
-    });
+    let lost = release_a_running_root_turn(
+        root.path(),
+        Release::Handoff,
+        Cancel::Prompt,
+        |mut config| {
+            config.store = Arc::new(FaultStore::new(Arc::clone(&config.store), RefuseRootLoss));
+            config
+        },
+    );
     assert_eq!(
         lost.store
             .load_intents(&lost.id)
@@ -159,11 +186,59 @@ fn a_handoff_the_host_could_not_record_holds_as_a_loss() {
         serde_json::json!([]),
         Arc::clone(&lost.store),
     ));
-    assert!(seen.iter().any(held_notice), "{seen:#?}");
+    assert!(!seen.iter().any(held_notice), "{seen:#?}");
+    let record = lost.store.load(&lost.id).unwrap();
+    assert_eq!(root_loss_state(lost.store.as_ref(), &record).unwrap(), None);
+    assert_eq!(dispatches(&lost.evidence), 1, "nothing continued");
+}
+
+/// A handoff whose running turn never settles within the handoff's grace
+/// degrades into an ordinary loss: the release abandons the turn by lease
+/// and records no handoff, says so with a warning rather than an error, and
+/// the next open holds the turn and continues nothing by itself.
+#[test]
+fn a_handoff_whose_turn_never_settles_holds_as_a_loss() {
+    let root = tempfile::tempdir().unwrap();
+    let seen = Arc::new(Mutex::new(None));
+    let lost = release_a_running_root_turn(root.path(), Release::Handoff, Cancel::Deaf, |config| {
+        record_root_causes(config, &seen)
+    });
+    assert_eq!(*seen.lock().unwrap(), None, "no handoff was recorded");
+    assert_eq!(
+        notice_tone(&lost.seen, "did not settle"),
+        Some(plakous_host_protocol::views::transcript::NoticeTone::Warning),
+        "{:#?}",
+        lost.seen
+    );
+    assert!(
+        !lost.seen.iter().any(|event| matches!(event,
+            crate::surface_protocol::HostEvent::Row(
+                plakous_host_protocol::views::transcript::TranscriptRow::Notice(notice))
+            if notice.tone == plakous_host_protocol::views::transcript::NoticeTone::Error)),
+        "no error terminal mid-handoff: {:#?}",
+        lost.seen
+    );
+    let opened = open_and_quit(next_host(
+        root.path(),
+        &lost,
+        serde_json::json!([]),
+        Arc::clone(&lost.store),
+    ));
+    assert!(opened.iter().any(held_notice), "{opened:#?}");
     let record = lost.store.load(&lost.id).unwrap();
     assert_eq!(
         root_loss_state(lost.store.as_ref(), &record).unwrap(),
         Some(RootLossState::Held)
+    );
+    assert_eq!(
+        lost.store
+            .load_intents(&lost.id)
+            .unwrap()
+            .root_interrupts
+            .iter()
+            .map(|intent| intent.value.cause)
+            .collect::<Vec<_>>(),
+        [RootInterruptCause::OwnerLost]
     );
     assert_eq!(dispatches(&lost.evidence), 1, "nothing continued");
 }
@@ -252,7 +327,9 @@ fn a_planned_handoff_is_armed_only_by_its_own_release() {
 fn a_stop_the_host_lost_before_its_terminal_is_never_continued() {
     let root = tempfile::tempdir().unwrap();
     let lost =
-        release_a_running_root_turn(root.path(), Release::StopThenLost, true, |config| config);
+        release_a_running_root_turn(root.path(), Release::StopThenLost, Cancel::Deaf, |config| {
+            config
+        });
     let mut config = next_host(
         root.path(),
         &lost,
@@ -282,7 +359,8 @@ fn a_stop_the_host_lost_before_its_terminal_is_never_continued() {
 #[test]
 fn an_idle_interrupt_keeps_a_held_root_and_a_stop_of_everything_ends_it() {
     let root = tempfile::tempdir().unwrap();
-    let lost = release_a_running_root_turn(root.path(), Release::Lost, true, |config| config);
+    let lost =
+        release_a_running_root_turn(root.path(), Release::Lost, Cancel::Deaf, |config| config);
     let config = next_host(
         root.path(),
         &lost,

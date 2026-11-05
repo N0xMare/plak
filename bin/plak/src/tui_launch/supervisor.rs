@@ -102,7 +102,7 @@ fn settle_tui_round(
     ) {
         let _ = writeln!(stdout, "reloading…");
         let _ = stdout.flush();
-        if matches!(
+        let budget = if matches!(
             &ui,
             Ok(tui::TuiOutcome::Request {
                 request: tui::SessionRequest::ReloadRelease { .. },
@@ -111,11 +111,16 @@ fn settle_tui_round(
         ) {
             // A reload is a planned handoff: the host records each node with
             // work in flight as handed off before it releases (spec 03 §14.1).
+            // Its running turn's cancel may take the host's cancel bound to
+            // settle, so the join waits that much longer than a quit's.
             host_mailbox.request_handoff_and_release();
+            tui_timing::remaining_exit_budget()
+                + plakous_host_protocol::limits::HOST_CANCEL_SETTLE_TIMEOUT
         } else {
             host_mailbox.request_abandon_and_release();
-        }
-        if join_host_worker_bounded(join, tui_timing::remaining_exit_budget(), label).is_err() {
+            tui_timing::remaining_exit_budget()
+        };
+        if join_host_worker_bounded(join, budget, label).is_err() {
             tui::report_background_panic();
         }
         tui_timing::exiting();

@@ -4974,7 +4974,10 @@ settlement, quit gives the terminal result another 100 ms to become observable;
 if it remains late, the host abandons without synthesizing an interrupted
 result. Every explicit host `Quit` intent and a disconnected control plane use
 this same bounded-settle rule,
-regardless of whether its producer also requested process-exit abandonment.
+regardless of whether its producer also requested process-exit abandonment,
+except a planned handoff (`/reload`, chapter 03 §14.1), whose cancel is bounded
+by the host's 5 s cancel bound instead and which, past it, releases as an
+ordinary held loss with a warning rather than escalating with an error.
 An idle quit or one whose terminal joined uses normal joined release, including
 child retirement and its failures; it retains the settled terminal and pauses
 the queue. Only when no terminal joined at the bound does a host-local

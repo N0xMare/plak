@@ -626,6 +626,13 @@ impl<P: ProtocolExtension> IntentReceiver<P> {
         self.0.planned_handoff.swap(false, Ordering::AcqRel)
     }
 
+    /// Whether a planned handoff is armed, without taking it: the running
+    /// turn's quit reads it to choose its cancel grace.
+    #[must_use]
+    pub fn planned_handoff(&self) -> bool {
+        self.0.planned_handoff.load(Ordering::Acquire)
+    }
+
     /// Whether the product has painted its first interactive frame.
     #[must_use]
     pub fn is_promptable(&self) -> bool {

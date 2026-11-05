@@ -111,6 +111,11 @@ pub struct ScriptPlan {
     /// Signal tests that need an unobserved request set this and say why.
     #[serde(default)]
     pub stall_ignores_cancellation: bool,
+    /// How long a streamed stall takes to answer the cancellation it
+    /// observed: a provider slow to end a cancelled request, so the turn
+    /// settles late but does settle. Default 0.
+    #[serde(default)]
+    pub cancel_settle_ms: u64,
     /// Bind the scripted model under this adapter profile id instead of the
     /// fixture's own, so a later build of the same session can be shown to
     /// derive a different frozen binding input.

@@ -3736,7 +3736,14 @@ opens.
 upgrade) releases its session as a planned handoff: the face requests the
 release with the handoff armed (`request_handoff_and_release`), and the
 release takes the flag first, so a refused or failed release leaves none
-armed and a later plain release never inherits it. Inside its own release,
+armed and a later plain release never inherits it. The release's cancel of
+a running root turn is bounded by the host's cancel bound (5 s), not an
+interactive quit's 300 ms, so a turn slow to settle under load is still
+handed off; the reload's join waits that much longer than a quit's. A turn
+that does not settle within it degrades the release into an ordinary loss:
+the handoff is disarmed and nothing is recorded, the release abandons the
+turn by lease and says so with a warning, never an error, and the next open
+holds the turn (and marks the running sub-agents `owner_lost`). Inside its own release,
 before any lease is released, the releasing host applies each running
 child's feed to its tail, then records an interrupt with cause `handoff` on
 each child that is running or parked and whose assignment started (a turn of

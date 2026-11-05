@@ -512,6 +512,7 @@ impl LanguageModel for LoopbackModel {
                         step,
                         stream_cancellation,
                         script.stall_ignores_cancellation,
+                        std::time::Duration::from_millis(script.cancel_settle_ms),
                     )?;
                     return Ok(Box::pin(leading.chain(events)) as ModelStream);
                 }

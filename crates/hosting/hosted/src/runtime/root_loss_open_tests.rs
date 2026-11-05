@@ -29,6 +29,8 @@ pub(super) struct Lost {
     pub(super) state_roots: crate::agent::ProductStateRoots,
     pub(super) id: String,
     pub(super) evidence: PathBuf,
+    /// What the releasing host emitted.
+    pub(super) seen: Vec<HostEvent>,
 }
 
 pub(super) fn dispatches(evidence: &Path) -> usize {
@@ -42,7 +44,7 @@ pub(super) fn dispatches(evidence: &Path) -> usize {
 /// A root turn whose host exits by lease alone while its provider request
 /// stalls past cancellation: the next exact open closes it as lost.
 fn lose_a_root_turn(root: &Path) -> Lost {
-    release_a_running_root_turn(root, Release::Lost, true, |config| config)
+    release_a_running_root_turn(root, Release::Lost, Cancel::Deaf, |config| config)
 }
 
 /// How the host running the turn lets go.
@@ -56,13 +58,25 @@ pub(super) enum Release {
     StopThenLost,
 }
 
-/// A root turn whose host lets go mid-request. A `deaf` stall outlasts the
+/// How the turn's provider answers the release's cancel.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum Cancel {
+    /// At once.
+    Prompt,
+    /// After a second: past an interactive quit's 300 ms grace, well inside
+    /// a planned handoff's.
+    Slow,
+    /// Never: the stall outlasts every grace.
+    Deaf,
+}
+
+/// A root turn whose host lets go mid-request. A deaf stall outlasts the
 /// cancel, so the release abandons the turn by lease; otherwise the cancel
-/// settles first.
+/// settles first, unless the release's grace runs out before it.
 pub(super) fn release_a_running_root_turn(
     root: &Path,
     release: Release,
-    deaf: bool,
+    cancel: Cancel,
     configure: impl FnOnce(
         crate::runtime::HostConfig<TestExtension>,
     ) -> crate::runtime::HostConfig<TestExtension>,
@@ -70,7 +84,8 @@ pub(super) fn release_a_running_root_turn(
     let plan: Arc<ScriptPlan> = Arc::new(
         serde_json::from_value(serde_json::json!({
             "version": SCRIPT_VERSION,
-            "stall_ignores_cancellation": deaf,
+            "stall_ignores_cancellation": cancel == Cancel::Deaf,
+            "cancel_settle_ms": if cancel == Cancel::Slow { 1000 } else { 0 },
             "steps": [{"stream": [{"text": "lost prefix"}, {"stall": 30000}]}]
         }))
         .unwrap(),
@@ -101,11 +116,13 @@ pub(super) fn release_a_running_root_turn(
         }
     }
     let _ = host.join().unwrap();
+    seen.extend(events.try_iter());
     Lost {
         store,
         state_roots,
         id,
         evidence,
+        seen,
     }
 }
 
@@ -410,6 +427,7 @@ fn a_fenced_root_turn_records_no_loss_and_holds_nothing() {
         state_roots: config.state_roots.clone(),
         id: config.session.id.clone(),
         evidence,
+        seen: Vec::new(),
     };
     let (actions, events, host) = spawn_host_worker(config).unwrap();
     let mut seen = Vec::new();

@@ -60,6 +60,7 @@ pub(super) fn scripted_stream(
     step: &ScriptStep,
     cancellation: plakous::model::CancellationToken,
     deaf: bool,
+    cancel_settle: std::time::Duration,
 ) -> Result<ModelStream, ModelError> {
     enum Item {
         Event(Box<ModelEvent>),
@@ -138,12 +139,14 @@ pub(super) fn scripted_stream(
                             .err()
                             .map(Err),
                         Item::Stall(milliseconds) => {
-                            stall(milliseconds, &cancellation, deaf).await.then(|| {
-                                Err(ModelError::new(
-                                    ModelErrorKind::Cancelled,
-                                    "the scripted stream stall was cancelled",
-                                ))
-                            })
+                            if !stall(milliseconds, &cancellation, deaf).await {
+                                return None;
+                            }
+                            tokio::time::sleep(cancel_settle).await;
+                            Some(Err(ModelError::new(
+                                ModelErrorKind::Cancelled,
+                                "the scripted stream stall was cancelled",
+                            )))
                         }
                     }
                 }

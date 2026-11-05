@@ -22,6 +22,9 @@ use plakous_host_protocol::status::{
 use std::time::Duration;
 
 const QUIT_CANCEL_GRACE: Duration = Duration::from_millis(300);
+/// A planned handoff's cancel grace: the host's ordinary cancel bound, so a
+/// turn slow to settle under load is handed off rather than abandoned.
+const HANDOFF_CANCEL_GRACE: Duration = HOST_CANCEL_SETTLE_TIMEOUT;
 const QUIT_RESULT_JOIN: Duration = Duration::from_millis(100);
 
 impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
@@ -140,6 +143,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                     // settlement and never issues a second cancel command,
                     // whose durable acceptance would race the abandonment. A
                     // refused interrupt accepted nothing, so quit requests.
+                    // A planned handoff bounds the same settlement by the
+                    // host's cancel bound instead of quit's 300 ms.
+                    let handoff = self.host.actions.planned_handoff();
+                    let grace = if handoff {
+                        HANDOFF_CANCEL_GRACE
+                    } else {
+                        QUIT_CANCEL_GRACE
+                    };
                     let settlement = if self.turn_result.is_some() {
                         #[cfg(test)]
                         super::quit_trace::step(&self.host.session.id, "terminal");
@@ -151,19 +162,33 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                             self.control.wait_until_settled().await;
                             Ok::<(), plakous::agent::ControlError>(())
                         };
-                        settle_cancel(settled, QUIT_CANCEL_GRACE).await
+                        settle_cancel(settled, grace).await
                     } else {
                         #[cfg(test)]
                         super::quit_trace::step(&self.host.session.id, "requested");
-                        settle_cancel(self.control.cancel(), QUIT_CANCEL_GRACE).await
+                        settle_cancel(self.control.cancel(), grace).await
                     };
                     self.cancel_unsettled = None;
                     if let CancelSettlement::Unsettled(detail) = &settlement {
                         self.cancel_unsettled = Some(detail.clone());
-                        let _ = self.host.events.notice(TranscriptRow::error(
-                            NoticeScope::Host,
-                            format!("quit escalated a cancel that did not settle: {detail}"),
-                        ));
+                        // A handoff whose turn never settled degrades into an
+                        // ordinary loss: disarmed here, the release records
+                        // no handoff, and the next open holds the turn.
+                        let notice = if handoff && self.host.actions.take_planned_handoff() {
+                            TranscriptRow::warning(
+                                NoticeScope::Host,
+                                format!(
+                                    "the handoff released a turn that did not settle; the next \
+                                     host holds it: {detail}"
+                                ),
+                            )
+                        } else {
+                            TranscriptRow::error(
+                                NoticeScope::Host,
+                                format!("quit escalated a cancel that did not settle: {detail}"),
+                            )
+                        };
+                        let _ = self.host.events.notice(notice);
                         // Persist the escalation notice here, before the
                         // queue write, rather than at whichever loop pass the
                         // 100 ms join leaves: the product commit sequence of a
