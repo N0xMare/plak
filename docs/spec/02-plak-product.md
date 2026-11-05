@@ -3770,8 +3770,10 @@ verdicts) are addressed, the session profile and workspace chrome states.
   binding that names it, so the host holds what follows a session opening
   until that binding: none of it reaches the old attachment, and what the
   next attach snapshot does not carry (an open notice, an answer before the
-  next session's first window) follows the next attachment's `attached`
-  answer. A switch whose new root cannot be read ends the connection as a
+  next session's first window) follows the `attached` answer of each moved
+  connection's next root attach, an answer to one connection's intent to
+  that connection only. A connection attached to nothing at the switch
+  gets the attach snapshot only. A switch whose new root cannot be read ends the connection as a
   leaving client's does.
 - **Local faces.** A connection's acceptor marks it a local face (stdio's
   `plak agent --wire v2`) or a remote one (the web endpoint); a connection
@@ -4028,9 +4030,10 @@ The hidden maintainer command `plak web --listen <unix:path|127.0.0.1:port>
   and its root node (§4.4). A stop ends every hello wait and connection as a
   leaving client does. When the session switches to another (`/new`,
   `/resume`, a rebind), every connection's attachment ends with `moved`
-  naming the new session's root, as on stdio (§4.4); the first attach after
-  the switch gets what the attach snapshot does not carry, and a connection
-  that arrives later is welcomed to the new session. A switch whose new root
+  naming the new session's root, as on stdio (§4.4); each moved
+  connection's next root attach gets what the attach snapshot does not
+  carry, and a connection that arrives later is welcomed to the new
+  session. A switch whose new root
   cannot be read ends the endpoint as the session's end does; a connection
   that arrives after the end is refused `unavailable`. Nothing before the gate is refused in a wire frame: it gets
   the uniform `403`, so no failure text reaches an unauthenticated peer.

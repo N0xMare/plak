@@ -486,6 +486,100 @@ fn a_shared_session_moves_every_attachment_on_a_switch() {
     )));
 }
 
+/// Every connection a switch moved gets the opening's replay on its next
+/// root attach, whichever attaches first: both get the open notice, and an
+/// answer to one connection's intent reaches that connection alone, with
+/// its own correlation. A connection that arrives after the switch was
+/// never moved and gets the attach snapshot only.
+#[test]
+fn each_moved_connection_gets_the_replay_on_its_next_root_attach() {
+    use plakous_host_protocol::Core;
+    use plakous_host_protocol::views::transcript::NoticeScope;
+    let notice = SessionObservation::<Core>::Row(TranscriptRow::info(
+        NoticeScope::Host,
+        "the next session opened",
+    ));
+    let draft = SessionObservation::<Core>::DraftRestored(Draft::from("first's draft"));
+    let (actions, _intents) = plakous_host_protocol::intent_channel::<Core>();
+    let (published, events) = plakous_host_protocol::observation_channel::<Core>();
+    let session = WireSession::start(root(), "s1".to_owned(), actions, events, |id| {
+        Some(root_named(&format!("tree-{id}")))
+    });
+    let (mut first_out, mut second_out, mut later_out) = (Vec::new(), Vec::new(), Vec::new());
+    let mut first = session.connect(&mut first_out, Face::Local, || false);
+    let mut second = session.connect(&mut second_out, Face::Local, || false);
+    assert!(matches!(
+        first.request(1, Op::Attach { node: root() }),
+        Some(Outcome::Ok(Answer::Attached { attachment: 1 }))
+    ));
+    assert!(matches!(
+        second.request(1, Op::Attach { node: root() }),
+        Some(Outcome::Ok(Answer::Attached { attachment: 2 }))
+    ));
+    for observation in [
+        binding("s1"),
+        SessionObservation::SessionOpening,
+        notice.clone(),
+        SessionObservation::IntentStarted(Some("attachment:1:mine".into())),
+        draft.clone(),
+        SessionObservation::IntentStarted(None),
+        binding("s2"),
+    ] {
+        published.send(observation).unwrap();
+    }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while session.session_id() != "s2" {
+        assert!(Instant::now() < deadline, "the switch");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let next = root_named("tree-s2");
+    // The second attaches first, before either has sent its `moved`.
+    assert!(matches!(
+        second.request(2, Op::Attach { node: next.clone() }),
+        Some(Outcome::Ok(Answer::Attached { attachment: 3 }))
+    ));
+    first.flush().unwrap();
+    assert!(matches!(
+        first.request(2, Op::Attach { node: next.clone() }),
+        Some(Outcome::Ok(Answer::Attached { attachment: 4 }))
+    ));
+    let mut later = session.connect(&mut later_out, Face::Local, || false);
+    assert!(matches!(
+        later.request(1, Op::Attach { node: next }),
+        Some(Outcome::Ok(Answer::Attached { attachment: 5 }))
+    ));
+    for connection in [&mut first, &mut second, &mut later] {
+        connection.flush().unwrap();
+    }
+    drop((first, second, later));
+    let events_of = |frames: Vec<HostFrame<Core>>, attachment: AttachmentId| {
+        frames
+            .into_iter()
+            .filter_map(|frame| match frame {
+                HostFrame::Event {
+                    attachment: held,
+                    observation,
+                    ..
+                } if held == attachment => Some(observation),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let first_events = events_of(host_frames(&first_out), 4);
+    let second_events = events_of(host_frames(&second_out), 3);
+    let later_events = events_of(host_frames(&later_out), 5);
+    assert!(first_events.contains(&notice), "{first_events:?}");
+    assert!(second_events.contains(&notice), "{second_events:?}");
+    assert!(!later_events.contains(&notice), "{later_events:?}");
+    assert!(first_events.contains(&draft), "{first_events:?}");
+    assert!(
+        first_events.contains(&SessionObservation::IntentStarted(Some("mine".into()))),
+        "{first_events:?}"
+    );
+    assert!(!second_events.contains(&draft), "{second_events:?}");
+    assert!(!later_events.contains(&draft), "{later_events:?}");
+}
+
 /// Events past the capacity between `moved` and the next attach.
 fn overflow_after_a_switch<W: Write>(
     connection: &mut WireConnection<plakous_host_protocol::Core, W>,
@@ -554,7 +648,8 @@ fn a_replay_past_the_capacity_ends_in_a_resync() {
 }
 
 /// A replay given up after one switch does not outlive it: after another
-/// switch, the next attachment gets that switch's replay and no resync.
+/// switch, the moved connection's next attachment gets that switch's
+/// replay and no resync.
 #[test]
 fn a_later_switch_replays_again_after_an_overflow() {
     use plakous_host_protocol::Core;
@@ -567,6 +662,7 @@ fn a_later_switch_replays_again_after_an_overflow() {
     let mut stdout = Vec::new();
     let mut connection = WireConnection::new(root(), &mut stdout, actions)
         .serving("s1", |id| Some(root_named(&format!("tree-{id}"))));
+    connection.request(1, Op::Attach { node: root() });
     overflow_after_a_switch(&mut connection, "s2");
     for observation in [
         SessionObservation::SessionOpening,
@@ -575,7 +671,7 @@ fn a_later_switch_replays_again_after_an_overflow() {
     ] {
         assert!(connection.observe(observation).unwrap());
     }
-    assert!(connection.frame(attach_line(1, "tree-s3")).unwrap());
+    assert!(connection.frame(attach_line(2, "tree-s3")).unwrap());
     connection.flush().unwrap();
     drop(connection);
     let frames = host_frames(&stdout);

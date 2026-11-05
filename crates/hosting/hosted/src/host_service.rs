@@ -346,15 +346,74 @@ impl<P: ProtocolExtension> HostService<P> {
     /// Ends every attachment with [`Outbound::Moved`] naming `node`, after
     /// what each already holds: the session was replaced by the one whose
     /// root that is. Each attachment's holder reroots its own handle.
-    pub fn move_attachments(&self, node: &NodeAddress) {
+    ///
+    /// Returns the attachments it ended.
+    pub fn move_attachments(&self, node: &NodeAddress) -> Vec<AttachmentId> {
         let mut state = self.lock();
         state.requester = None;
-        for held in state.attachments.values_mut() {
+        let mut moved = Vec::new();
+        for (id, held) in &mut state.attachments {
             if !held.dropped {
                 held.dropped = true;
                 held.queue.push_back(Outbound::Moved { node: node.clone() });
+                moved.push(*id);
             }
         }
+        moved
+    }
+
+    /// Offers `observations`, a switch's replay, to `attachment` alone: the
+    /// root attachment that replaced `moved`, which the switch ended. An
+    /// answer window a moved attachment's intent opened is that
+    /// attachment's: `moved`'s reaches `attachment` with its own
+    /// correlation, another's reaches it not at all; what answers no
+    /// attachment's intent reaches it as it does every root attachment.
+    fn replay(
+        &self,
+        attachment: AttachmentId,
+        moved: AttachmentId,
+        observations: Vec<SessionObservation<P>>,
+    ) {
+        {
+            let mut state = self.lock();
+            let Some(held) = state.attachments.get_mut(&attachment) else {
+                return;
+            };
+            let capacity = held.capacity(self.capacity);
+            let mut window: Option<AttachmentId> = None;
+            for observation in observations {
+                let class = observation.class();
+                let observation = match observation {
+                    SessionObservation::IntentStarted(started) => {
+                        let named = started.map(|started| {
+                            started
+                                .strip_prefix(ANSWER)
+                                .unwrap_or(started.as_str())
+                                .to_owned()
+                        });
+                        let answered = named.as_deref().and_then(attachment_of);
+                        window = answered.as_ref().map(|(owner, _)| *owner);
+                        match answered {
+                            Some((owner, _)) if owner != moved => continue,
+                            Some((_, client)) => SessionObservation::IntentStarted(client),
+                            None => SessionObservation::IntentStarted(named),
+                        }
+                    }
+                    observation => observation,
+                };
+                let shown = match baseline_scope(&observation) {
+                    Some(scope) => held.scopes.contains(scope),
+                    None => {
+                        class != ObservationClass::Addressed
+                            || window.is_none_or(|owner| owner == moved)
+                    }
+                };
+                if shown {
+                    held.offer(observation, class, capacity);
+                }
+            }
+        }
+        self.repair_gaps();
     }
 
     /// This service, with the session tree's children attachable through

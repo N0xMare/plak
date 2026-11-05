@@ -2,14 +2,15 @@
 //! and its switch to another. A session's opening comes before the binding
 //! that names it, so what follows an opening is held until that binding
 //! says whose it is: the served session's, or the next one's. A switch ends
-//! every attachment with `moved` naming the next session's root, and the
-//! next attachment gets the opening's events an attach snapshot does not
-//! carry, after its `attached` answer.
+//! every attachment with `moved` naming the next session's root, and each
+//! moved connection's next root attachment gets the opening's events an
+//! attach snapshot does not carry, after its `attached` answer.
 
+use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use plakous_host_protocol::views::transcript::TranscriptScope;
-use plakous_host_protocol::wire::NodeAddress;
+use plakous_host_protocol::wire::{AttachmentId, NodeAddress};
 use plakous_host_protocol::{ProtocolExtension, SessionObservation};
 
 use super::super::{ChildNodes, HostService, TreeNodes, kept_for_attach};
@@ -30,11 +31,15 @@ pub(super) struct ServedSession<P: ProtocolExtension> {
     /// A session opening held until the binding that names its session.
     held: Option<Vec<SessionObservation<P>>>,
     /// After a switch, the next session's events an attach snapshot does
-    /// not carry, waiting for the next attachment.
+    /// not carry, kept for every attachment a switch moved until its
+    /// connection attaches the root again or leaves; the next switch
+    /// replaces it.
     replay: Vec<SessionObservation<P>>,
-    awaiting_attach: bool,
-    /// The replay outgrew the attachment capacity and was given up: the
-    /// next attachment resyncs instead of getting a silent gap.
+    /// The moved attachments still owed the replay.
+    owed: BTreeSet<AttachmentId>,
+    /// The replay outgrew the attachment capacity and was given up: an
+    /// owed attachment's connection resyncs instead of getting a silent
+    /// gap.
     replay_lost: bool,
 }
 
@@ -59,7 +64,7 @@ impl<P: ProtocolExtension> ServedSession<P> {
             generation: 0,
             held: None,
             replay: Vec::new(),
-            awaiting_attach: false,
+            owed: BTreeSet::new(),
             replay_lost: false,
         }))
     }
@@ -84,7 +89,7 @@ impl<P: ProtocolExtension> ServedSession<P> {
     /// to; `false` when the switch's root cannot be found and the service
     /// must end.
     pub(super) fn observe(&mut self, event: SessionObservation<P>) -> bool {
-        if self.awaiting_attach && !self.replay_lost && !kept_for_attach(&event) {
+        if !self.owed.is_empty() && !self.replay_lost && !kept_for_attach(&event) {
             self.replay.push(event.clone());
             self.limit_replay();
         }
@@ -118,8 +123,9 @@ impl<P: ProtocolExtension> ServedSession<P> {
 
     /// Takes `observations`, the opening of the session `next` names. When
     /// that is not the served one, every attachment ends with `moved` naming
-    /// its root, and the next attachment gets the opening's events after
-    /// its attach snapshot. `false` when that root cannot be found.
+    /// its root, and each moved connection's next root attachment gets the
+    /// opening's events after its attach snapshot. `false` when that root
+    /// cannot be found.
     fn switch(&mut self, next: String, observations: Vec<SessionObservation<P>>) -> bool {
         if next == self.session {
             self.pass(observations);
@@ -131,7 +137,9 @@ impl<P: ProtocolExtension> ServedSession<P> {
         };
         // What the old session's attachments still hold goes first; the
         // switch's observations belong to the new session's attachments.
-        self.service.move_attachments(&node);
+        // A connection moved before and not yet attached again is owed
+        // this switch's replay instead of the last one's.
+        self.owed.extend(self.service.move_attachments(&node));
         let nodes: Arc<dyn ChildNodes> = Arc::new(TreeNodes::new(node.tree_id.clone()));
         self.service.reroot(node, Some(nodes));
         self.session = next;
@@ -150,9 +158,9 @@ impl<P: ProtocolExtension> ServedSession<P> {
             })
             .map(|(_, observation)| observation.clone())
             .collect();
-        self.awaiting_attach = true;
         self.replay_lost = false;
         self.limit_replay();
+        self.settle();
         self.pass(observations);
         true
     }
@@ -164,17 +172,43 @@ impl<P: ProtocolExtension> ServedSession<P> {
         self.pass(held);
     }
 
-    /// A connection attached: the opening a switch left waiting follows its
-    /// attach snapshot, after the `attached` answer. `true` when that
-    /// replay was given up, so the attachment must resync, as a slow
-    /// consumer does, rather than miss events.
-    pub(super) fn attached(&mut self) -> bool {
-        if !std::mem::take(&mut self.awaiting_attach) {
+    /// A connection whose attachment `moved` was moved attached the root as
+    /// `attachment`: the opening a switch left waiting follows its attach
+    /// snapshot, after the `attached` answer. `true` when that replay was
+    /// given up, so the attachment must resync, as a slow consumer does,
+    /// rather than miss events.
+    pub(super) fn attached(&mut self, moved: AttachmentId, attachment: AttachmentId) -> bool {
+        if !self.owed.remove(&moved) {
             return false;
         }
-        let replay = std::mem::take(&mut self.replay);
-        self.pass(replay);
-        std::mem::take(&mut self.replay_lost)
+        let lost = self.replay_lost;
+        if !lost {
+            self.service.replay(attachment, moved, self.replay.clone());
+        }
+        self.settle();
+        lost
+    }
+
+    /// Whether the attachment `moved`, ended by a switch, is still owed
+    /// that switch's replay.
+    pub(super) fn owes(&self, moved: AttachmentId) -> bool {
+        self.owed.contains(&moved)
+    }
+
+    /// The connection whose attachment `moved` was moved left without
+    /// attaching again.
+    pub(super) fn forget(&mut self, moved: AttachmentId) {
+        if self.owed.remove(&moved) {
+            self.settle();
+        }
+    }
+
+    /// Drops the replay once no attachment is owed it.
+    fn settle(&mut self) {
+        if self.owed.is_empty() {
+            self.replay = Vec::new();
+            self.replay_lost = false;
+        }
     }
 
     /// Gives the replay up once it outgrows the attachment capacity.

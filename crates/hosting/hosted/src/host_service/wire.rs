@@ -251,6 +251,9 @@ pub struct WireConnection<P: ProtocolExtension, W: Write> {
     attachment: Option<AttachmentId>,
     /// The attachment just answered `attached` that must resync at once.
     resync_after_attach: Option<AttachmentId>,
+    /// The attachment a switch last moved, owed that switch's replay on
+    /// this connection's next root attach.
+    moved: Option<AttachmentId>,
     blobs: BlobAssembler,
     leave: Leave,
     face: Face,
@@ -307,6 +310,7 @@ where
             actions,
             attachment: None,
             resync_after_attach: None,
+            moved: None,
             blobs: BlobAssembler::default(),
             leave,
             face: Face::Remote,
@@ -455,9 +459,16 @@ where
                 }
             }
             Leave::Detach => {
-                if let Some(held) = self.attachment.take() {
+                let held = self.attachment.take();
+                if let Some(held) = held {
                     let _ = self.service.detach(held);
                     self.unanswered();
+                }
+                if let Some(served) = &self.served {
+                    let mut served = served::lock(served);
+                    for moved in held.into_iter().chain(self.moved.take()) {
+                        served.forget(moved);
+                    }
                 }
             }
         }
@@ -526,14 +537,18 @@ where
         match op {
             Op::Ping => Some(Outcome::Ok(Answer::Pong)),
             Op::Attach { node } => {
-                if let Some(held) = self.attachment.take() {
-                    let _ = self.service.detach(held);
-                    self.unanswered();
-                }
                 // An attach and the replay it takes are one step against
                 // the session's observations.
                 let served = self.served.clone();
                 let mut guard = served.as_ref().map(served::lock);
+                if let Some(held) = self.attachment.take() {
+                    let _ = self.service.detach(held);
+                    self.unanswered();
+                    // Moved, with its `moved` not yet sent.
+                    if guard.as_ref().is_some_and(|guard| guard.owes(held)) {
+                        self.moved = Some(held);
+                    }
+                }
                 let known = self.service.root().clone();
                 if let Some(guard) = &guard {
                     self.follow(guard);
@@ -548,8 +563,12 @@ where
                 match self.service.attach(&node, self.face) {
                     Ok(attachment) => {
                         self.attachment = Some(attachment);
-                        if let Some(guard) = guard.as_mut()
-                            && guard.attached()
+                        // A child attach leaves the replay owed to the next
+                        // root attach.
+                        if node == *self.service.root()
+                            && let Some(guard) = guard.as_mut()
+                            && let Some(moved) = self.moved.take()
+                            && guard.attached(moved, attachment)
                         {
                             self.resync_after_attach = Some(attachment);
                         }
@@ -692,6 +711,7 @@ where
                 }
                 Outbound::Moved { node } => {
                     self.attachment = None;
+                    self.moved = Some(attachment);
                     self.unanswered();
                     for (id, outcome) in std::mem::take(&mut self.settled) {
                         write_frame(&mut self.stdout, &HostFrame::<P>::Response { id, outcome })?;
