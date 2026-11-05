@@ -45,6 +45,7 @@ tokio = { workspace = true, features = ["process"] }
 
 [dev-dependencies]
 nix.workspace = true
+plakous-runner-protocol.workspace = true
 proptest = { workspace = true, features = ["std"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

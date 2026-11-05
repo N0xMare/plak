@@ -4524,6 +4524,7 @@ dependencies = [
  "ignore",
  "nix 0.28.0",
  "plakous-model",
+ "plakous-runner-protocol",
  "portable-pty",
  "proptest",
  "regex",

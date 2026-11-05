@@ -497,3 +497,7 @@ pub(super) fn decode_snapshot(
         .collect::<Result<Vec<_>, ExecutionBackendError>>()?;
     Ok((wire.instance, jobs))
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "unit tests")]
+mod pinned_tests;
