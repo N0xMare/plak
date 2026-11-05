@@ -82,7 +82,7 @@ pub(crate) enum Row {
     /// `ResumeSessionHandoff`. Switch and rebind arrive as product
     /// extension effects and are taken with the extension row.
     Workflow,
-    /// `RefreshReadiness`, `RetryAttach`.
+    /// `RefreshReadiness`, `RetryAttach`, `Promptable`.
     Readiness,
     /// `Recover`.
     Recover,
@@ -242,7 +242,9 @@ pub(crate) fn row_of(action: &UserAction) -> Row {
         | UserAction::ForkSession { .. }
         | UserAction::ResumeSession { .. }
         | UserAction::ResumeSessionHandoff { .. } => Row::Workflow,
-        UserAction::RefreshReadiness | UserAction::RetryAttach => Row::Readiness,
+        UserAction::RefreshReadiness | UserAction::RetryAttach | UserAction::Promptable => {
+            Row::Readiness
+        }
         UserAction::Recover => Row::Recover,
         UserAction::OpenTopologyNavigator
         | UserAction::RefreshTopologyTree
@@ -287,7 +289,7 @@ pub(crate) fn child_address(action: &UserAction) -> Option<&str> {
 }
 
 /// The number of intent variants [`row_of`] places.
-const INTENT_VARIANTS: usize = 40;
+const INTENT_VARIANTS: usize = 41;
 
 /// One intent of every variant, child-addressed wherever the intent can be.
 pub(crate) fn every_intent() -> Vec<UserAction> {
@@ -337,6 +339,7 @@ pub(crate) fn every_intent() -> Vec<UserAction> {
         },
         UserAction::RefreshReadiness,
         UserAction::RetryAttach,
+        UserAction::Promptable,
         UserAction::Recover,
         UserAction::OpenTopologyNavigator,
         UserAction::OpenAgentTranscript { agent_id: id() },

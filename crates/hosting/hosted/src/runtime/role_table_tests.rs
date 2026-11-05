@@ -312,7 +312,12 @@ fn assert_refused_busy(seen: &[HostEvent], intents: &[UserAction]) {
 /// W: a running workflow observes none of the row's intents and leaves
 /// them all, in arrival order, for the loop's next passes.
 fn assert_workflow_defers(row: Row) {
-    let intents = intents_of(row);
+    // The promptable mark is its sender's flag: it never enters the queue,
+    // so nothing defers it.
+    let intents: Vec<_> = intents_of(row)
+        .into_iter()
+        .filter(|action| !matches!(action, UserAction::Promptable))
+        .collect();
     let (sender, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let state = RefCell::new(InterruptWatchState::default());
     let watch = InterruptWatch::new(&receiver, &state);

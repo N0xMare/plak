@@ -188,17 +188,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 
 #[test]
-fn running_process_count_is_shared_without_enqueuing_an_intent() {
-    let (sender, receiver) = intent_channel::<Core>();
-    assert_eq!(sender.background_processes(), 0);
-    receiver.set_background_processes(2);
-    assert_eq!(sender.clone().background_processes(), 2);
-    assert!(receiver.try_recv().is_err());
-    receiver.set_background_processes(0);
-    assert_eq!(sender.background_processes(), 0);
-}
-
-#[test]
 fn context_capacity_snapshots_supersede_their_own_older_value() {
     let (sender, receiver) = observation_channel::<Core>();
     sender
@@ -219,7 +208,7 @@ fn context_capacity_snapshots_supersede_their_own_older_value() {
 fn promptable_is_a_local_signal_and_abandonment_outranks_queued_work() {
     let (sender, receiver) = intent_channel::<Core>();
     assert!(!receiver.is_promptable());
-    sender.mark_promptable();
+    sender.send(SessionIntent::Promptable).unwrap();
     assert!(receiver.is_promptable());
     assert!(matches!(
         receiver.try_recv(),

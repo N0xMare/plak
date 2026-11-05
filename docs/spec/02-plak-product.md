@@ -4035,15 +4035,24 @@ verdicts) are addressed, the session profile and workspace chrome states.
   attachment's. A JSONL v1 command whose intent the service refuses gets
   an `error` record with its id, and the stream goes on. A face's service
   names no root node yet, since the deferred TUI launch learns its tree
-  only on the host worker. Four TUI signals are process-local and not
-  intents or observations, each with its reason: the process list and
-  running count the host mirrors into the mailbox (a remote face sees job
-  lifecycle events instead); the promptable mark after the first painted
-  frame, which gates passive maintenance on this terminal; the
-  abandon-and-release request after the terminal is restored, which is
-  this process's exit; and the launcher's `/new` and resume publication
-  cells, which hand one launch round to the next and outlive any
-  attachment. The last two belong to the session supervisor, the product
+  only on the host worker. The session's background processes are the
+  state observation `processes {views, running}`: every live and recently
+  ended process row of the session's job registry, and how many are
+  running or stopping. The host publishes it when the rows change (a
+  running row's elapsed time only by the whole second), so every root
+  attachment holds the latest in its attach snapshot; a session that has
+  had no process since it opened publishes none, which a face reads as an
+  empty list. A child attachment gets none, and JSONL v1 never projects
+  it. The face sends the intent
+  `promptable` once after its first painted frame: it sets the flag that
+  gates passive maintenance and never enters the session's queue, so it
+  has no answer window; it is refused to a child attachment
+  (`refused_for_role`, row `readiness`), and `plak agent` never sends it.
+  Two TUI signals are process-local and not intents or observations, each
+  with its reason: the abandon-and-release request after the terminal is
+  restored, which is this process's exit; and the launcher's `/new` and
+  resume publication cells, which hand one launch round to the next and
+  outlive any attachment. Both belong to the session supervisor, the product
   side of an interactive launch that owns its rounds: the TUI hands the
   terminal back with a session request (retry the attach, resume another
   session, rebind, release for a reload, or the config editor), and the

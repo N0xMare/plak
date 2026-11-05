@@ -56,8 +56,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                 .notice(TranscriptRow::error(NoticeScope::Session, failure));
         }
         self.host
-            .actions
-            .set_processes(self.host.roots.job_registry().snapshot());
+            .events
+            .publish_processes(self.host.roots.job_registry().snapshot());
         // Poll control-plane actions (non-blocking). Actions a long host
         // operation drained but did not handle come first: they arrived before
         // anything still in the mailbox, and the FIFO `interrupt.rs` documents
@@ -85,8 +85,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                             .notice(TranscriptRow::error(NoticeScope::Session, error));
                     }
                     self.host
-                        .actions
-                        .set_processes(self.host.roots.job_registry().snapshot());
+                        .events
+                        .publish_processes(self.host.roots.job_registry().snapshot());
                     if interrupt {
                         Ok(UserAction::Interrupt)
                     } else {
@@ -725,6 +725,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                         self.host.events,
                     );
                 }
+                // A flag its sender sets; it never enters the queue.
+                Ok(UserAction::Promptable) => {}
                 Ok(UserAction::ResyncTranscript { scope }) => {
                     self.host.events.resync_transcript(&scope);
                 }

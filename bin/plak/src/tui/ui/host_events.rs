@@ -1239,6 +1239,9 @@ impl App {
             HostEvent::SessionOpening => {
                 self.session_open_started = Some(self.now());
                 self.session_open_ms = None;
+                // The opening session's processes come as its own list; one
+                // with none sends none.
+                self.apply_process_snapshot(std::sync::Arc::new(Vec::new()));
                 self.open_notes_from = Some(self.pane.blocks.len());
                 self.mark_dirty();
             }
@@ -1374,6 +1377,9 @@ impl App {
             HostEvent::LastUserPromptAt(sent) => {
                 let (now, now_unix_ms) = (self.now(), self.unix_now_ms());
                 self.seed_last_prompt_at(sent, now, now_unix_ms);
+            }
+            HostEvent::Processes { views, .. } => {
+                self.apply_process_snapshot(std::sync::Arc::new(views));
             }
             HostEvent::SteerAck { state, .. } => {
                 match state.as_str() {

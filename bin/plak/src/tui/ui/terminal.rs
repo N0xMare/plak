@@ -673,12 +673,10 @@ pub(super) fn run_app(
         PilotSidecar::from_root(crate::test_hooks::tui_pilot_root()).map_err(TuiError::Io)?;
     let mut input_watch = crate::tui::wake::InputWatch::default();
     let mut input_seen = crate::tui::wake::Input::Quiet;
+    let mut promptable_sent = false;
     loop {
         // Biased: terminal input is drained before host observations, so a
         // burst of stream deltas can never starve a keystroke or an interrupt.
-        if let Some(actions) = actions {
-            app.apply_process_snapshot(actions.processes());
-        }
         // A hung-up terminal is a quit, as `SIGHUP` is: crossterm's reader
         // would spin on the dead descriptor, so it is not drained.
         let input_events = if input_seen == crate::tui::wake::Input::HungUp {
@@ -797,8 +795,10 @@ pub(super) fn run_app(
             if let Some(after_draw) = app.after_draw.take() {
                 after_draw();
             }
-            if let Some(actions) = actions {
-                actions.mark_promptable();
+            // Once, after the first painted frame: the host learns the face
+            // takes input. Not queued work.
+            if !promptable_sent && let Some(actions) = actions {
+                promptable_sent = actions.send(UserAction::Promptable).is_ok();
             }
             if app.copy_selection_after_draw {
                 if let Some(text) = app.take_transcript_selection_text() {

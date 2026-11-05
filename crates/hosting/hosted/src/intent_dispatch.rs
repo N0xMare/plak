@@ -87,6 +87,7 @@ impl IntentClass {
             | UserAction::ResumeQueueDrain
             | UserAction::ResolveApproval { .. }
             | UserAction::RefreshReadiness
+            | UserAction::Promptable
             | UserAction::OpenTopologyNavigator
             | UserAction::OpenAgentTranscript { .. }
             | UserAction::CloseAgentTranscript

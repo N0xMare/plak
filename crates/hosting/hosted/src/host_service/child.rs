@@ -92,7 +92,9 @@ const fn row<P: ProtocolExtension>(intent: &SessionIntent<P>) -> &'static str {
         | SessionIntent::ForkSession { .. }
         | SessionIntent::ResumeSession { .. }
         | SessionIntent::ResumeSessionHandoff { .. } => "workflow",
-        SessionIntent::RefreshReadiness | SessionIntent::RetryAttach => "readiness",
+        SessionIntent::RefreshReadiness
+        | SessionIntent::RetryAttach
+        | SessionIntent::Promptable => "readiness",
         SessionIntent::Recover => "recover",
         SessionIntent::OpenTopologyNavigator
         | SessionIntent::RefreshTopologyTree

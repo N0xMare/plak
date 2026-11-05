@@ -126,6 +126,9 @@ pub mod network_watch;
 #[cfg(test)]
 mod notice_tests;
 mod oneshot;
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "unit tests")]
+mod processes_tests;
 mod projection;
 #[cfg(test)]
 pub(crate) use projection::probe::view_write as observe_projector_view_write;
@@ -277,9 +280,30 @@ pub struct Sender<P: plakous_host_protocol::ProtocolExtension = plakous_host_pro
     /// The last usage view the session published, shared by every clone.
     usage:
         Arc<std::sync::Mutex<Option<plakous_host_protocol::views::presentation::UsageLimitsView>>>,
+    /// The process rows the session last published, shared by every clone,
+    /// so an unchanged list is not published again.
+    processes: Arc<std::sync::Mutex<Option<Vec<plakous_host_protocol::views::ProcessView>>>>,
     /// Unit laws inspect publication order before latest-state coalescing.
     #[cfg(test)]
     recorded: Option<Arc<std::sync::Mutex<Vec<ContentEvent<P>>>>>,
+}
+
+/// Whether two process lists show the same: a running process's elapsed
+/// time counts only in whole seconds.
+fn same_processes(
+    held: &[plakous_host_protocol::views::ProcessView],
+    next: &[plakous_host_protocol::views::ProcessView],
+) -> bool {
+    held.len() == next.len()
+        && held.iter().zip(next).all(|(old, new)| {
+            old.id == new.id
+                && old.command == new.command
+                && old.owner == new.owner
+                && old.started_at == new.started_at
+                && old.status == new.status
+                && old.output == new.output
+                && old.elapsed_ms / 1000 == new.elapsed_ms / 1000
+        })
 }
 
 /// The correlation one `IntentStarted` carried.
@@ -314,6 +338,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             window: Arc::default(),
             answers: None,
             usage: Arc::default(),
+            processes: Arc::default(),
             #[cfg(test)]
             recorded: None,
         }
@@ -332,6 +357,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             window: Arc::clone(&self.window),
             answers: self.answers.clone(),
             usage: Arc::clone(&self.usage),
+            processes: Arc::clone(&self.processes),
             #[cfg(test)]
             recorded: self.recorded.clone(),
         }
@@ -432,6 +458,28 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
         }
     }
 
+    /// Publishes the session's process rows when they changed since the
+    /// last published ones: anything but a running process's elapsed time
+    /// within the same second. A session that never had a process publishes
+    /// none: no rows is what a face holds before the first.
+    pub(crate) fn publish_processes(&self, views: Vec<plakous_host_protocol::views::ProcessView>) {
+        let mut last = self
+            .processes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let unchanged = match last.as_ref() {
+            Some(held) => same_processes(held, &views),
+            None => views.is_empty(),
+        };
+        if unchanged {
+            return;
+        }
+        *last = Some(views.clone());
+        drop(last);
+        let running = views.iter().filter(|row| row.status.is_live()).count();
+        let _ = self.send(ContentEvent::Processes { views, running });
+    }
+
     /// The last usage view the session published, if any.
     pub(crate) fn usage(
         &self,
@@ -452,6 +500,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .clear();
+            // The opening session's attachments keep no process list yet.
+            *self
+                .processes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         }
         let boundary = matches!(value, HostEvent::Status { .. } | HostEvent::SetBusy(false));
         let mut presentations = self

@@ -92,6 +92,7 @@ pub fn host_event_kind<P: ProtocolExtension>(event: &SessionObservation<P>) -> &
         SessionObservation::TopologyNavigatorUnavailable { .. } => "tree_unavailable",
         SessionObservation::PendingContinuation { .. } => "pending_continuation",
         SessionObservation::LastUserPromptAt(_) => "last_user_prompt_at",
+        SessionObservation::Processes { .. } => "processes",
         SessionObservation::Extension(extension) => extension.kind_label(),
     }
 }
@@ -583,6 +584,7 @@ pub fn project_host_event<P: ProtocolExtension>(
         | SessionObservation::CallDetail(_)
         | SessionObservation::PendingContinuation { .. }
         | SessionObservation::LastUserPromptAt(_)
+        | SessionObservation::Processes { .. }
         | SessionObservation::Extension(_) => return None,
     }
     Some(encode_object(fields))

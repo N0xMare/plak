@@ -530,9 +530,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 failure,
             ));
         }
-        self.role
-            .actions
-            .set_background_processes(self.role.config.state_roots.job_registry().running_count());
+        // Counting prunes the registry's services that are gone, as each pass
+        // always has; the published count is the rows' own.
+        let _ = self.role.config.state_roots.job_registry().running_count();
         for row in self.role.job_events.emit(
             self.role.config.state_roots.job_registry(),
             &self.role.events,
@@ -542,8 +542,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             let _ = self.role.events.send(ContentEvent::Row(row));
         }
         self.role
-            .actions
-            .set_processes(self.role.config.state_roots.job_registry().snapshot());
+            .events
+            .publish_processes(self.role.config.state_roots.job_registry().snapshot());
     }
 
     async fn run(

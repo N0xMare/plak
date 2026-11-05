@@ -417,6 +417,14 @@ an export.
   directory private to the user. Wire fix: `ContextUsage::display_percent`
   is a `u64` (was `u128`, which no wire v2 reader could decode inside a
   tagged frame); embedder break for its readers.
+- The session's background processes and the face's promptable mark are
+  wire v2 traffic: the state observation `processes {views, running}`
+  (`SessionObservation::Processes`), published when the rows change, and
+  the intent `promptable` (`SessionIntent::Promptable`), which sets the
+  passive-maintenance flag without entering the queue. Embedder break:
+  the mailbox mirror is gone (`IntentSender::processes`,
+  `background_processes`, `mark_promptable`; `IntentReceiver::set_processes`,
+  `set_background_processes`; the `FaceSender` forwards).
 - The TUI's last direct product reads move behind the protocol: the
   reload target is the session host's `probe_reload` (answered by
   `reload_probed` with the target and the host build's refusal, or

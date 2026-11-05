@@ -285,6 +285,8 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
             });
         }
         UserAction::RefreshReadiness => state.readiness.start(config),
+        // A flag its sender sets; it never enters the queue.
+        UserAction::Promptable => {}
         UserAction::OpenAgentTranscript { agent_id } => {
             super::child_live::send_agent_transcript(
                 events,

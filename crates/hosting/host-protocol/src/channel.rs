@@ -131,8 +131,6 @@ impl<P: ProtocolExtension> ObservationSink<P> for ObservationSender<P> {
 }
 
 struct IntentQueue<P: ProtocolExtension> {
-    background_processes: AtomicUsize,
-    processes: Mutex<Arc<Vec<crate::views::ProcessView>>>,
     promptable: AtomicBool,
     abandon_and_release: AtomicBool,
     queue: Mutex<VecDeque<QueuedIntent<P>>>,
@@ -406,27 +404,6 @@ impl<P: ProtocolExtension> Drop for IntentSender<P> {
 }
 
 impl<P: ProtocolExtension> IntentSender<P> {
-    /// Process-local host observation for reload/quit admission, not a wire intent.
-    #[must_use]
-    pub fn background_processes(&self) -> usize {
-        self.0.background_processes.load(Ordering::Acquire)
-    }
-    /// Latest live and recent-terminal process view published by the host.
-    #[must_use]
-    pub fn processes(&self) -> Arc<Vec<crate::views::ProcessView>> {
-        Arc::clone(
-            &self
-                .0
-                .processes
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
-        )
-    }
-    /// Marks the first interactive frame ready for input. This local signal
-    /// permits passive maintenance; it is not a session mutation or wire intent.
-    pub fn mark_promptable(&self) {
-        self.0.promptable.store(true, Ordering::Release);
-    }
     /// Requests process-exit abandonment rather than joined host shutdown.
     /// Call only after restoring the terminal; this outranks queued product work.
     pub fn request_abandon_and_release(&self) {
@@ -493,6 +470,11 @@ impl<P: ProtocolExtension> IntentSender<P> {
     ) -> Result<(), IntentSendError<P>> {
         if !self.0.receiver_alive.load(Ordering::Acquire) {
             return Err(IntentSendError::Disconnected(action));
+        }
+        // A flag the host reads, never queued work: nothing answers it.
+        if matches!(action, SessionIntent::Promptable) {
+            self.0.promptable.store(true, Ordering::Release);
+            return Ok(());
         }
         let urgent_bit = match &action {
             SessionIntent::Interrupt => Some(URGENT_INTERRUPT),
@@ -616,19 +598,6 @@ impl<P: ProtocolExtension> IntentReceiver<P> {
         }
     }
 
-    /// Replaces the observational process view without filling the event queue.
-    pub fn set_processes(&self, processes: Vec<crate::views::ProcessView>) {
-        self.set_background_processes(processes.iter().filter(|row| row.status.is_live()).count());
-        *self
-            .0
-            .processes
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Arc::new(processes);
-    }
-    /// Publishes the host's running-process count to its attached shell.
-    pub fn set_background_processes(&self, count: usize) {
-        self.0.background_processes.store(count, Ordering::Release);
-    }
     /// Whether the producer requested the bounded process-exit release path.
     #[must_use]
     pub fn abandon_and_release_requested(&self) -> bool {
@@ -820,8 +789,6 @@ pub fn intent_channel<P: ProtocolExtension>() -> (IntentSender<P>, IntentReceive
     let shared = Arc::new(IntentQueue {
         shutdown_requested: AtomicBool::new(false),
         promptable: AtomicBool::new(false),
-        background_processes: AtomicUsize::new(0),
-        processes: Mutex::new(Arc::new(Vec::new())),
         abandon_and_release: AtomicBool::new(false),
         queue: Mutex::new(VecDeque::with_capacity(INTENT_QUEUE_CAPACITY)),
         urgent: AtomicU8::new(0),
@@ -959,6 +926,7 @@ pub(crate) fn latest_state_event<P: ProtocolExtension>(event: &SessionObservatio
             | SessionObservation::TopologyNavigatorUnavailable { .. }
             | SessionObservation::PendingContinuation { .. }
             | SessionObservation::LastUserPromptAt(_)
+            | SessionObservation::Processes { .. }
     )
 }
 

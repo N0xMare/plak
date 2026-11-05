@@ -39,6 +39,7 @@ fn expected_class(action: &UserAction) -> IntentClass {
         | UserAction::ResumeQueueDrain
         | UserAction::ResolveApproval { .. }
         | UserAction::RefreshReadiness
+        | UserAction::Promptable
         | UserAction::OpenTopologyNavigator
         | UserAction::OpenAgentTranscript { .. }
         | UserAction::CloseAgentTranscript
@@ -106,6 +107,7 @@ fn every_intent() -> Vec<UserAction> {
             compact: false,
         },
         UserAction::RefreshReadiness,
+        UserAction::Promptable,
         UserAction::RetryAttach,
         UserAction::Recover,
         UserAction::OpenTopologyNavigator,
@@ -153,7 +155,7 @@ fn every_intent() -> Vec<UserAction> {
 }
 
 /// The number of `SessionIntent` variants `expected_class` matches.
-const INTENT_VARIANTS: usize = 40;
+const INTENT_VARIANTS: usize = 41;
 
 #[test]
 fn every_intent_has_its_class_and_disposition() {

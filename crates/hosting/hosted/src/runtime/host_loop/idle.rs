@@ -972,6 +972,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     self.role.readiness.start(&self.role.config);
                     None
                 }
+                // A flag its sender sets; it never enters the queue.
+                Ok(UserAction::Promptable) => None,
                 Ok(UserAction::ResyncTranscript { scope }) => {
                     self.role.events.resync_transcript(&scope);
                     None

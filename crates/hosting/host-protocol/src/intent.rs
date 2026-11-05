@@ -295,6 +295,11 @@ pub enum SessionIntent<P: ProtocolExtension = Core> {
     /// Ask the host for the current agent-template readiness projection
     /// (spec 02 §5.5). Answered with [`SessionObservation::TemplateReadiness`](crate::observation::SessionObservation::TemplateReadiness).
     RefreshTemplates,
+    /// The face painted its first interactive frame and takes input: the
+    /// host may run passive maintenance. Idempotent; it never enters the
+    /// session's queue and has no answer window. A frontend that never
+    /// paints (`plak agent`) never sends it.
+    Promptable,
     /// Maintainer JSONL: run one granted topology tool on the hub tree.
     ///
     /// Idle-only. `name` is a closed topology tool. `arguments` is canonical JSON
@@ -372,6 +377,7 @@ impl<P: ProtocolExtension> fmt::Debug for SessionIntent<P> {
             Self::RecoverTopologyNode { .. } => "RecoverTopologyNode(..)",
             Self::ResumeLossContinuation { .. } => "ResumeLossContinuation(..)",
             Self::RefreshTemplates => "RefreshTemplates",
+            Self::Promptable => "Promptable",
             Self::InvokeTool { .. } => "InvokeTool(..)",
             Self::RequestCallDetail { .. } => "RequestCallDetail(..)",
             Self::Extension(extension) => return write!(formatter, "Extension({extension:?})"),

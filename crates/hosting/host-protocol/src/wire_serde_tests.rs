@@ -26,7 +26,7 @@ where
 
 fn intents() -> Vec<Intent> {
     let id = || "q1".to_owned();
-    vec![
+    let mut intents = vec![
         Intent::Prompt(Draft::from("hi")),
         Intent::FollowUp(Draft::from("more")),
         Intent::Steer(Draft::from("steer")),
@@ -119,11 +119,19 @@ fn intents() -> Vec<Intent> {
             arguments: "{}".into(),
             agent_id: None,
         },
+    ];
+    intents.extend(later_intents());
+    intents
+}
+
+fn later_intents() -> [Intent; 2] {
+    [
         Intent::RequestCallDetail {
             call_id: "call1".into(),
             agent_id: Some("c1".into()),
             session_id: "s1".into(),
         },
+        Intent::Promptable,
     ]
 }
 
@@ -131,7 +139,7 @@ fn intents() -> Vec<Intent> {
 #[test]
 fn every_intent_round_trips_tagged_by_kind() {
     let intents = intents();
-    assert_eq!(intents.len(), 39, "every core intent but Extension");
+    assert_eq!(intents.len(), 40, "every core intent but Extension");
     for intent in &intents {
         let encoded = round_trips(intent);
         assert!(encoded["kind"].is_string(), "{encoded}");

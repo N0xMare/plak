@@ -375,6 +375,7 @@ pub mod control {
             | UserAction::ResumeSessionHandoff { .. }
             | UserAction::ForkSession { .. }
             | UserAction::RefreshReadiness
+            | UserAction::Promptable
             | UserAction::RetryAttach
             | UserAction::Recover
             | UserAction::OpenTopologyNavigator

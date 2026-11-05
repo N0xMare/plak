@@ -94,7 +94,8 @@ impl<P: ProtocolExtension> SessionObservation<P> {
             | Self::SessionOpening
             | Self::SessionOpened { .. }
             | Self::PendingContinuation { .. }
-            | Self::LastUserPromptAt(_) => State,
+            | Self::LastUserPromptAt(_)
+            | Self::Processes { .. } => State,
             Self::PresentationSnapshot(_)
             | Self::TranscriptPatch(_)
             | Self::ResumeSessions(_)

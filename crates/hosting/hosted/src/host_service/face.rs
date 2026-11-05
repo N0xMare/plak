@@ -4,10 +4,9 @@
 //! observations from the service, in the receiver's own shape.
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex, PoisonError, mpsc};
+use std::sync::{Mutex, PoisonError, mpsc};
 use std::time::{Duration, Instant};
 
-use plakous_host_protocol::views::ProcessView;
 use plakous_host_protocol::views::transcript::TranscriptScope;
 use plakous_host_protocol::wire::{AttachmentId, NodeAddress};
 use plakous_host_protocol::{
@@ -81,23 +80,6 @@ impl<P: ProtocolExtension> FaceSender<P> {
     ) -> Result<(), IntentSendError<P>> {
         self.service
             .face_intent(self.attachment, &self.actions, action, correlation)
-    }
-
-    /// As [`IntentSender::background_processes`].
-    #[must_use]
-    pub fn background_processes(&self) -> usize {
-        self.actions.background_processes()
-    }
-
-    /// As [`IntentSender::processes`].
-    #[must_use]
-    pub fn processes(&self) -> Arc<Vec<ProcessView>> {
-        self.actions.processes()
-    }
-
-    /// As [`IntentSender::mark_promptable`].
-    pub fn mark_promptable(&self) {
-        self.actions.mark_promptable();
     }
 
     /// As [`IntentSender::request_abandon_and_release`].

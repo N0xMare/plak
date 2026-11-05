@@ -61,6 +61,7 @@ fn plain_observations_take_their_pinned_class() {
             "tree_unavailable addressed",
             "pending_continuation state",
             "last_user_prompt_at state",
+            "processes state",
         ]
     );
 }

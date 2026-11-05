@@ -439,6 +439,15 @@ define_observations! {
     /// (spec 02 §5.4). `None` when no stored entry carries that time.
     /// Presentation only, in-process: omitted from JSONL and never persisted.
     LastUserPromptAt(Option<u64>),
+    /// The session's background processes, live and recently ended, and
+    /// how many are live: what quit and reload admission count. Published
+    /// when they change; the latest replaces the last.
+    Processes {
+        /// The process rows, oldest first.
+        views: Vec<crate::views::ProcessView>,
+        /// How many of them are still running or stopping.
+        running: usize,
+    },
     /// Product-owned traffic the protocol carries but never interprets.
     ///
     /// The mailbox classifies it through [`ObservationExtension`](crate::intent::ObservationExtension) and nothing

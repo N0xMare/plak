@@ -83,5 +83,17 @@ pub(crate) fn class_samples() -> Vec<Observation> {
             auto_continue_paused: false,
         },
         Observation::LastUserPromptAt(None),
+        Observation::Processes {
+            views: vec![crate::views::ProcessView {
+                id: "p1".into(),
+                command: "make".into(),
+                owner: "root".into(),
+                started_at: 1,
+                elapsed_ms: 2,
+                status: crate::views::ProcessStatus::Running,
+                output: "ok".into(),
+            }],
+            running: 1,
+        },
     ]
 }

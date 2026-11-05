@@ -558,3 +558,40 @@ fn a_too_small_activity_frame_drops_process_hits() {
     app.handle_mouse(left_click(stale.x, stale.y));
     assert_eq!(app.process_selected, selected);
 }
+
+/// The host's `processes` observation is the TUI's process list: the rows
+/// replace the last ones, the live ones are the running count, and a
+/// session opening clears them.
+#[test]
+fn the_processes_observation_is_the_process_list() {
+    let mut app = App::new(launch_basic(), true);
+    let running = ProcessView {
+        id: "root:p1".into(),
+        command: "sleep 30".into(),
+        owner: "root".into(),
+        started_at: 10,
+        elapsed_ms: 1_000,
+        status: ProcessStatus::Running,
+        output: String::new(),
+    };
+    app.apply_host_event(HostEvent::Processes {
+        views: vec![running.clone()],
+        running: 1,
+    });
+    assert_eq!(*app.processes, std::slice::from_ref(&running));
+    assert_eq!(app.background_processes, 1);
+    let ended = ProcessView {
+        status: ProcessStatus::Exited(Some(0)),
+        ..running
+    };
+    app.apply_host_event(HostEvent::Processes {
+        views: vec![ended.clone()],
+        running: 0,
+    });
+    assert_eq!(*app.processes, [ended]);
+    assert_eq!(app.background_processes, 0);
+    // An opening session's own list follows, and one without processes
+    // sends none.
+    app.apply_host_event(HostEvent::SessionOpening);
+    assert!(app.processes.is_empty());
+}
