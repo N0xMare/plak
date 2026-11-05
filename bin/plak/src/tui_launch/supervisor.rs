@@ -1294,16 +1294,7 @@ fn reload_installed_plak(
         carry::ReloadPlan::Carry => {
             let (path, carried) = match carry::carry_out(paths, record) {
                 Ok(path) => path,
-                Err(reason) => {
-                    let why = if binding_change.is_some() {
-                        "the installed build cannot reopen this session exactly"
-                    } else {
-                        "the new build reads another state format"
-                    };
-                    return Ok(format!(
-                        "reload kept this session open: {why}, and {reason}"
-                    ));
-                }
+                Err(reason) => return Ok(carry_refused_note(binding_change.is_some(), reason)),
             };
             let _ = writeln!(io::stdout(), "carrying {}", carried.summary);
             let _ = io::stdout().flush();
@@ -1352,6 +1343,16 @@ fn reload_installed_plak(
         executable.display(),
         unverified.unwrap_or_default()
     )))
+}
+
+/// Why a reload that had to carry the session kept it open instead.
+fn carry_refused_note(binding_changed: bool, reason: impl std::fmt::Display) -> String {
+    let why = if binding_changed {
+        "the installed build cannot reopen this session exactly"
+    } else {
+        "the new build reads another state format"
+    };
+    format!("reload kept this session open: {why}, and {reason}")
 }
 
 /// Says so when the reload target is the very file this process runs, and

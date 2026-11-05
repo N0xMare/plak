@@ -932,7 +932,7 @@ fn settings_reset_enter_confirms_and_esc_cancels() {
 
 /// An idle app that sent `text` as a prompt, still unanswered by the host.
 fn sent_prompt(text: &str) -> (App, UserAction, crate::surface_protocol::UserActionReceiver) {
-    let (sender, receiver) = crate::tui::user_action_channel();
+    let (sender, receiver) = crate::config::user_action_channel();
     let mut app = App::new(launch_basic(), true);
     app.set_input(text.into());
     let action = app.submit_line(false).expect("prompt");
