@@ -663,7 +663,9 @@ widens it.
   from the store, authorizes nothing, so observations stay readable to the
   home. Protection rests on the holder rules (a line's effect calls, controls
   and same-owner transfers are accepted only from its holder instance), on
-  `Cancel`, `Preempt` and `Ack` bound to the instance that sent the key, and
+  keys (only the key's instance or the line's holder may be answered under a
+  key or readdress it, and `Cancel`, `Preempt` and `Ack` act only for the
+  instance the key is addressed to), and
   on hosts minting owners only from the lease. `host_instance` is
   self-asserted in `Bind`, so the holder rules guard against bugs, not
   against the home's own user: processes of the same user are trusted, as

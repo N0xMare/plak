@@ -396,7 +396,14 @@ fn a_keys_answer_and_acknowledgement_belong_to_the_instance_that_last_sent_it() 
     else {
         panic!("the first send runs");
     };
-    // The host restarted: its new instance replays the key.
+    // The host restarted: its new instance takes the line with a newer
+    // owner, then replays the key its predecessor sent.
+    assert_eq!(
+        tables.transfer(HOST, "instance-b", "t2".into(), Some(&head), owner(1, 2)),
+        RunnerFrame::TransferAccepted {
+            control_id: "t2".into()
+        }
+    );
     tables.admit(HOST, "instance-b", &effect("s1", &head, "d", true), now);
     assert_eq!(
         tables.answer(HOST, &key, result("r1"), now),
@@ -542,15 +549,68 @@ fn a_sibling_cannot_signal_or_call_on_a_held_line() {
         tables.admit(HOST, SIBLING, &control("s2", &head), now),
         not_transferred("s2")
     );
-    // A replay runs nothing: an unseen key is tombstoned whoever asks.
-    assert_eq!(
-        tables.admit(HOST, SIBLING, &effect("s3", &head, "e", true), now),
-        Admission::Answer(RunnerFrame::NotSeen {
-            request_id: "s3".into()
-        })
-    );
     assert!(matches!(
         tables.admit(HOST, INSTANCE, &control("h1", &head), now),
+        Admission::Run(Some(_))
+    ));
+}
+
+/// A sibling cannot take the holder's keys: not its answer, its result or
+/// its acknowledgement, and it cannot tombstone a key the holder is about to
+/// send.
+#[test]
+fn a_sibling_cannot_readdress_or_tombstone_the_holder_keys() {
+    let mut tables = Tables::default();
+    let now = Instant::now();
+    let head = owner(1, 1);
+    transferred(&mut tables, &head);
+    let Admission::Run(Some(key)) =
+        tables.admit(HOST, INSTANCE, &effect("r1", &head, "d", false), now)
+    else {
+        panic!("the holder's send runs");
+    };
+    // A sibling's resend and replay of the running key are refused.
+    assert_eq!(
+        tables.admit(HOST, SIBLING, &effect("s1", &head, "d", false), now),
+        not_transferred("s1")
+    );
+    assert_eq!(
+        tables.admit(HOST, SIBLING, &effect("s2", &head, "d", true), now),
+        not_transferred("s2")
+    );
+    // The answer still goes to the holder, and only its Ack spends the key.
+    assert_eq!(
+        tables.answer(HOST, &key, result("r1"), now),
+        (result("r1"), Some(INSTANCE.to_owned()))
+    );
+    assert_eq!(
+        tables.admit(HOST, SIBLING, &effect("s3", &head, "d", true), now),
+        not_transferred("s3")
+    );
+    tables.acknowledge(HOST, SIBLING, "r1");
+    assert!(tables.holds_unacknowledged(now));
+    tables.acknowledge(HOST, INSTANCE, "r1");
+    assert!(!tables.holds_unacknowledged(now));
+    // A sibling's replay of an unseen key tombstones nothing: the holder's
+    // first send of that key runs.
+    let unseen = Request {
+        class: RequestClass::EffectCall {
+            call_id: "call-2".into(),
+            attempt_id: "attempt-1".into(),
+        },
+        ..effect("s4", &head, "d", true)
+    };
+    assert_eq!(
+        tables.admit(HOST, SIBLING, &unseen, now),
+        not_transferred("s4")
+    );
+    let first = Request {
+        request_id: "r2".into(),
+        replay: false,
+        ..unseen
+    };
+    assert!(matches!(
+        tables.admit(HOST, INSTANCE, &first, now),
         Admission::Run(Some(_))
     ));
 }
@@ -687,5 +747,8 @@ fn a_floors_file_of_an_earlier_format_is_refused_by_name() {
     assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
     let message = error.to_string();
     assert!(message.contains(&path.display().to_string()), "{message}");
-    assert!(message.contains("removing the file"), "{message}");
+    assert!(
+        message.contains("stop every host of the paired homes, then remove"),
+        "{message}"
+    );
 }

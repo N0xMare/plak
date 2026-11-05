@@ -60,9 +60,9 @@ impl FileOwnerFloors {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!(
-                        "the runner's owner floors {} cannot be read ({error}); removing the \
-                         file starts the runner with no floors, so any first owner of a line \
-                         is accepted once",
+                        "the runner's owner floors cannot be read ({error}); stop every host \
+                         of the paired homes, then remove {} to start the runner with no \
+                         floors, so the first owner of each line is accepted once",
                         path.display()
                     ),
                 )

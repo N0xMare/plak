@@ -218,7 +218,11 @@ impl Tables {
     /// Admits one request from `instance` of `host`, at most once per
     /// effect-call key. A key already held is answered from the table
     /// whatever its owner, since the call it names may have run; the owner
-    /// fence applies only to work that has not.
+    /// fence applies only to work that has not. A held key of a line is
+    /// answered, and readdressed, only to the instance that last sent it or
+    /// to the line's holder (a successor that transferred the line first):
+    /// another process of the host would otherwise take the answer, the
+    /// result and the acknowledgement from the live holder.
     pub(crate) fn admit(
         &mut self,
         host: &str,
@@ -240,9 +244,19 @@ impl Tables {
                 });
             }
         };
+        let holder = self.holder(host, request).map(str::to_owned);
         if let Some(key) = &key
             && let Some(op) = self.ops.get_mut(&(host.to_owned(), key.clone()))
         {
+            if request.owner.is_some()
+                && op.instance != instance
+                && holder.as_deref() != Some(instance)
+            {
+                return Admission::Answer(RunnerFrame::Refused {
+                    request_id: Some(id),
+                    refusal: Refusal::OwnerNotTransferred,
+                });
+            }
             if op.digest != request.digest {
                 return Admission::Answer(RunnerFrame::StaleRequest { request_id: id });
             }
@@ -300,27 +314,47 @@ impl Tables {
         }
     }
 
+    /// The instance holding the line `request` names, if it names one.
+    fn holder(&self, host: &str, request: &Request) -> Option<&str> {
+        let owner = request.owner.as_ref()?;
+        self.owners
+            .get(&(host.to_owned(), owner.line.clone()))
+            .map(|owned| owned.holder.as_str())
+    }
+
     /// The refusal of a request whose owner is not the line's accepted
     /// owner holding it: an older one is stale, and a newer one, or the
     /// accepted one of an orphaned line, is transferred first.
     fn fence(&self, host: &str, instance: &str, request: &Request) -> Option<RunnerFrame> {
         let owner = request.owner.as_ref()?;
         let id = request.request_id.clone();
+        let keyed = matches!(
+            request.class,
+            RequestClass::EffectCall { .. } | RequestClass::OwnerControl { .. }
+        );
+        let current = self.owners.get(&(host.to_owned(), owner.line.clone()));
+        // A replay of an unseen key tombstones it, so only the line's holder
+        // may send one: its own key again, or its predecessor's under the
+        // older owner it took the line from. Another instance's tombstone
+        // would refuse the holder's own first send of that key.
+        if keyed && request.replay {
+            return match current {
+                Some(current) if current.holder == instance => None,
+                _ => Some(RunnerFrame::Refused {
+                    request_id: Some(id),
+                    refusal: Refusal::OwnerNotTransferred,
+                }),
+            };
+        }
         // An effect call or control that would run is accepted only from the
         // line's holder: another instance of the host transfers first, which
-        // needs a newer owner. A replay runs nothing (it answers a stored key
-        // or tombstones an unseen one) and an observation has no effect, so
-        // neither is held to the holder.
-        let owned_work = !request.replay
-            && matches!(
-                request.class,
-                RequestClass::EffectCall { .. } | RequestClass::OwnerControl { .. }
-            );
-        match self.owners.get(&(host.to_owned(), owner.line.clone())) {
+        // needs a newer owner. An observation has no effect, so it is not
+        // held to the holder.
+        match current {
             Some(current)
                 if current.owner == *owner
                     && current.adopted
-                    && owned_work
+                    && keyed
                     && current.holder != instance =>
             {
                 Some(RunnerFrame::Refused {

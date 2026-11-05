@@ -10,8 +10,8 @@
 //! - `host_killed_mid_call_is_recovered_and_readopted_by_its_host_id`:
 //!   SIGKILL a host with a job running and an effect call in flight. Its
 //!   owner lease runs out and the line is orphaned; the same host identity
-//!   returns as a new process, replays the journaled call (which ran once),
-//!   transfers the line to a newer owner and reads the job to its end.
+//!   returns as a new process, transfers the line to a newer owner, replays
+//!   the journaled call (which ran once) and reads the job to its end.
 //! - `host_crash_with_a_sibling_connected_orphans_only_its_lines`: another
 //!   process of the same home stays bound while a host is killed holding a
 //!   line. The sibling cannot stop the line's job with the owner it can read,
@@ -388,22 +388,22 @@ async fn host_killed_mid_call_is_recovered_and_readopted_by_its_host_id() {
         "{lines:?}"
     );
 
-    // The same host identity returns as a new process: it replays the call
-    // it died inside, which ran exactly once.
+    // The same host identity returns as a new process. A newer owner of the
+    // line re-adopts it first: only the line's holder may replay its keys.
     let (client, environment, backend) = connect(directory.path(), "instance-2", true).await;
+    let sessions = RunnerSessions::new(&backend, &environment, owner(1, 2));
+    let jobs = sessions.jobs().await.unwrap();
+    assert_eq!(jobs.len(), 1);
+    let lines = client.lines().await.unwrap();
+    assert!(lines[0].adopted, "the transfer re-adopted the line");
+    // It replays the call its predecessor died inside, which ran exactly
+    // once.
     let recovered = client.recover().await;
     assert_eq!(recovered.len(), 1, "{recovered:?}");
     assert!(recovered[0].answer.is_ok(), "{recovered:?}");
     assert!(client.recover().await.is_empty(), "the journal is settled");
     let log = std::fs::read_to_string(workspace(directory.path()).join("effect.log")).unwrap();
     assert_eq!(log, "ran\n");
-
-    // A newer owner of the line re-adopts it and reads its job to the end.
-    let sessions = RunnerSessions::new(&backend, &environment, owner(1, 2));
-    let jobs = sessions.jobs().await.unwrap();
-    assert_eq!(jobs.len(), 1);
-    let lines = client.lines().await.unwrap();
-    assert!(lines[0].adopted, "the transfer re-adopted the line");
     let job = ended(&sessions).await;
     assert_eq!(job.status, JobStatus::Exited(Some(0)));
     assert_eq!(job.output, "done");

@@ -136,12 +136,8 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
             .config()
             .is_ok_and(|config| config.hosts.iter().any(|allowed| allowed == host_id))
     });
-    let floors = FileOwnerFloors::open(home.floors_path()).map_err(|error| {
-        CliFailure::new(format!(
-            "{} could not be read: {error}",
-            home.floors_path().display()
-        ))
-    })?;
+    let floors = FileOwnerFloors::open(home.floors_path())
+        .map_err(|error| CliFailure::new(error.to_string()))?;
     let runner_id = RunnerId::new(home.runner_id()?)
         .map_err(|error| CliFailure::new(format!("runner id: {error}")))?;
     let service = RunnerService::with_options(

@@ -683,8 +683,15 @@ async fn a_restarted_host_replays_by_key_and_never_runs_twice() {
     };
     drop(before);
 
-    // Its successor replays every request it may have sent.
+    // Its successor takes the line with a newer owner, then replays every
+    // request its predecessor may have sent.
     let mut after = Raw::bound(&service, "instance-2").await;
+    let take_over = HostFrame::TransferOwner(TransferOwner {
+        control_id: "t2".into(),
+        from: Some(wire_owner()),
+        to: wire_owner_of(LINE, 2),
+    });
+    assert_eq!(after.ask(take_over).await, accepted("t2"));
     assert_eq!(
         after.ask(keyed("r7", first_call, &append, true)).await,
         RunnerFrame::Result {
@@ -1480,4 +1487,54 @@ async fn conformance_after_restart_floor_owner_is_refused_from_a_sibling() {
             .await,
         accepted("t4")
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn conformance_a_sibling_cannot_take_or_tombstone_the_holder_keys() {
+    let root = tempfile::tempdir().unwrap();
+    let service = service(root.path());
+    let slow = operation(
+        &service,
+        root.path(),
+        shell("sleep 1; echo x >> log; echo ran"),
+    )
+    .await;
+    let mut holder = Raw::bound(&service, "instance-1").await;
+    assert_eq!(
+        holder.ask(transfer("t1", None, wire_owner())).await,
+        accepted("t1")
+    );
+    let running = "00000000-0000-0000-0000-000000000004";
+    holder
+        .send(&keyed_for("r1", running, wire_owner(), &slow))
+        .await;
+    let mut sibling = Raw::bound(&service, "instance-2").await;
+    // The running key is neither readdressed by a resend nor by a replay.
+    assert_eq!(
+        sibling
+            .ask(keyed_for("s1", running, wire_owner(), &slow))
+            .await,
+        not_transferred("s1")
+    );
+    assert_eq!(
+        sibling.ask(keyed("s2", running, &slow, true)).await,
+        not_transferred("s2")
+    );
+    // Its answer reaches the holder.
+    assert!(
+        matches!(holder.next().await, RunnerFrame::Result { request_id, .. } if request_id == "r1")
+    );
+    // An unseen key a sibling replays is not tombstoned: the holder runs it.
+    let unseen = "00000000-0000-0000-0000-000000000005";
+    assert_eq!(
+        sibling.ask(keyed("s3", unseen, &slow, true)).await,
+        not_transferred("s3")
+    );
+    assert!(matches!(
+        holder
+            .ask(keyed_for("r2", unseen, wire_owner(), &slow))
+            .await,
+        RunnerFrame::Result { .. }
+    ));
+    assert_eq!(appended(root.path()), 2);
 }

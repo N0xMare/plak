@@ -5675,11 +5675,15 @@ runner for a session yet.
   accepted again only from its recorded holder (any instance may present a
   newer owner, as always). A floors file the runner cannot read, including
   one of an earlier format, refuses the runner's start, naming the file;
-  removing it starts the runner with no floors. On a held line, an effect call
-  or owner control that would run is accepted only from the holder's
-  connections, and any other instance of the host is refused
-  `OwnerNotTransferred`; a replay and an observation are not held to the
-  holder, since a replay runs nothing and an observation has no effect. The fence applies to
+  stopping every host of the paired homes and removing it starts the runner
+  with no floors. On a held line, an effect call or owner control that would
+  run is accepted only from the holder's connections, and any other instance
+  of the host is refused `OwnerNotTransferred`; so is a replay from any other
+  instance, since a replay of an unseen key tombstones it, and a key already
+  held is answered and readdressed only to the instance that last sent it or
+  to the line's holder (a successor that transferred the line first), so no
+  other process takes its answer, result or acknowledgement. An observation
+  has no effect and is not held to the holder. The fence applies to
   work that has not run: a new key or an unkeyed request whose owner is older
   than the accepted owner is refused `StaleOwner`, and one whose owner is newer
   but was never transferred, or is the accepted owner of a line that is not
@@ -5776,9 +5780,12 @@ The at-most-once law across restarts:
   answered `Expired` unless its key is still held, and its outcome is
   unknown. The host journals each effect call and owner control, with the
   runner instance it goes to, before sending it, and forgets it when its
-  answer arrives; a returning host process replays every journaled call sent
-  to the same runner instance and settles the rest as of unknown outcome,
-  since a runner restart forgot them.
+  answer arrives; a returning host process, after transferring each line to
+  its newer owner, replays every journaled call sent to the same runner
+  instance and settles the rest as of unknown outcome, since a runner restart
+  forgot them. The journal is the home's, shared by its processes: only the
+  process that serves the lines recovers it, and a call refused because
+  another instance holds its line stays journaled.
 - **Both restarted.** Every outstanding call is of unknown outcome.
 - **Jobs across a host restart.** A job keeps running on the runner when the
   host process that started it is lost. A successor host process of the same

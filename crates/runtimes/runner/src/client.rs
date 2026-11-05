@@ -265,10 +265,18 @@ impl RunnerClient {
     /// and answers what each established. A call dispatched to another
     /// runner instance is not replayed: its outcome is unknown. Each answered
     /// call is settled in the journal.
+    ///
+    /// The journal is the home's, shared by its processes, and the runner
+    /// answers a line's keys only to the line's holder. So only the process
+    /// that serves the lines recovers, after transferring each to its newer
+    /// owner; a call refused because another instance holds its line stays
+    /// journaled for that holder's recovery.
     pub async fn recover(&self) -> Vec<RecoveredCall> {
         let left = std::mem::take(&mut *lock(&self.inner.left));
         let instance = self.instance();
+        let not_holder = format!("{:?}", Refusal::OwnerNotTransferred);
         let mut recovered = Vec::with_capacity(left.len());
+        let mut kept = Vec::new();
         for entry in left {
             let answer = if entry.dispatched_to == instance {
                 self.inner.replay(&entry).await
@@ -277,8 +285,15 @@ impl RunnerClient {
                     "the runner restarted since the call was sent".into(),
                 ))
             };
-            // A replay the link lost stays recorded for the next recovery.
-            let answered = !matches!(&answer, Err(RunnerFailure::OutcomeUnknown(reason)) if reason == LINK_LOST);
+            // A replay the link lost, or one another holder must make, stays
+            // recorded for the next recovery.
+            let held_elsewhere =
+                matches!(&answer, Err(RunnerFailure::Refused(reason)) if *reason == not_holder);
+            let answered = !held_elsewhere
+                && !matches!(&answer, Err(RunnerFailure::OutcomeUnknown(reason)) if reason == LINK_LOST);
+            if held_elsewhere {
+                kept.push(entry.clone());
+            }
             if answered && let Some(journal) = &self.inner.journal {
                 let _ = journal.settle(&entry.request.request_id);
             }
@@ -287,6 +302,7 @@ impl RunnerClient {
                 answer,
             });
         }
+        lock(&self.inner.left).extend(kept);
         recovered
     }
 
