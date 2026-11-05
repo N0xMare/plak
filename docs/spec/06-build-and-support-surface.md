@@ -891,10 +891,11 @@ just musl container --fast plak  # optional targeted iteration
 ```
 
 `just musl container` is a maintainer-only gate. `tools/musl/musl-check.sh` uses the
-preloaded image `plak-qual-base:11162b86` (image ID `11162b863a52`), which is
+preloaded image `plak-qual-base:6fc79538` (image ID `6fc795383e2c`), which is
 not published; without that image on a Linux x86_64 Docker host the gate cannot
 run, and the platform tiers above remain the public evidence. The image holds Alpine 3.24.2,
-Rust 1.99.0 with a musl host toolchain, clippy, rustfmt and C/C++ tools, Python 3.14,
+Rust 1.99.0 with a musl host toolchain, clippy, rustfmt, the
+`wasm32-unknown-unknown` target and C/C++ tools, Python 3.14,
 curl, git, jj, just, and the registry sources for cargo-deny (not its executable),
 the workspace and compile-contract fixture lockfiles. It never pulls an image or installs tools.
 Provide the executable musl cargo-nextest 0.9.100 and ruff 0.17.3 in
@@ -902,12 +903,11 @@ Provide the executable musl cargo-nextest 0.9.100 and ruff 0.17.3 in
 substitute for them. The image's `nextest` target exports both binaries.
 The container has no network and sets `CARGO_NET_OFFLINE=true`. A dependency
 change requires refreshing the image's registry before qualification.
-The preloaded image does not include the `wasm32-unknown-unknown` rustc
-target. `musl-check.sh` passes `--qual-container` to the gate, and the
-`builds` group's wasm check then skips instead of failing the tier; the run
-names the skip in its final summary and records no gate evidence (section 7.5).
-When a later image includes the target, the check runs. The image is not
-rebuilt for this check.
+The pinned image includes the `wasm32-unknown-unknown` rustc target, so the
+`builds` group's wasm check runs there. `musl-check.sh` passes
+`--qual-container` to the gate, under which an image without the target skips
+that check instead of failing the tier; such a run names the skip in its final
+summary and records no gate evidence (section 7.5).
 `tools/musl/image.Dockerfile` is the recipe: built from a `git archive` of a
 commit, its default target is the image, tagged `plak-qual-base:` plus the first
 eight hex digits of its image ID, and its `nextest` target exports the musl
@@ -1963,12 +1963,12 @@ offline musl image. `just dev-tools install` runs
 whose rustc lacks the target fails and names that install, with one exception.
 The gate probes the target as the directory
 `$(rustc --print sysroot)/lib/rustlib/wasm32-unknown-unknown/lib`, so it needs
-no `rustup` on `PATH`. The preloaded qualification image
-`plak-qual-base:11162b86` has no network and does not include the target, and
-the image is not rebuilt for this check. `tools/musl/musl-check.sh` passes the
+no `rustup` on `PATH`. The pinned qualification image
+`plak-qual-base:6fc79538` has no network and includes the target; an earlier
+image without it may still run the gate. `tools/musl/musl-check.sh` passes the
 leading gate argument `--qual-container`, which nothing else passes; an
 environment variable cannot select it. With that argument and the target
-absent, the builds group prints
+absent (an image without it), the builds group prints
 
 ```text
 skip wasm32-unknown-unknown: the preloaded musl qualification image does not include this rustc target (spec 06 section 7.5)

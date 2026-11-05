@@ -16,7 +16,7 @@ tools="$(cd "$tools" && pwd -P)"
 target="${PLAK_MUSL_TARGET_DIR:-$root/target/musl-gate}"
 mkdir -p "$target" "$root/target"
 target="$(cd "$target" && pwd -P)"
-image=plak-qual-base:11162b86
+image=plak-qual-base:6fc79538
 # One Cargo cache per pinned image: a bumped image never inherits old crates.
 cargo_home="$target/cargo-home-${image##*:}"
 mkdir -p "$cargo_home"
@@ -50,8 +50,8 @@ docker run --rm --platform linux/amd64 --pull never --network none \
     export PATH=/qual/tools:$PATH CARGO_TARGET_DIR=/qual/target/artifacts CARGO_NET_OFFLINE=true
     export CARGO_BUILD_TARGET=x86_64-unknown-linux-musl
     rustc -V; rustc -Vv | grep "^host:"; cargo nextest --version; python3 -V
-    # The preloaded image has no wasm32-unknown-unknown target and no network:
-    # the gate skips that one check and names the skip (spec 06 section 7.5).
+    # An image without the wasm32-unknown-unknown target skips that one check
+    # and names the skip (spec 06 section 7.5); the pinned image has it.
     bash tools/gate/dev-check.sh --qual-container "$@"' sh "$@" || status=$?
 echo "EXIT $status"
 exit "$status"
