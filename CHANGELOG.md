@@ -261,7 +261,9 @@ an export.
   id shows as its own row while the turn runs, in the host and in the TUI,
   instead of briefly replacing the imported one. A carried session's first save
   keeps the notices recorded before it (such as the carried-forward note) as
-  notices with their own identities, after the imported rows.
+  notices with their own identities, after the imported rows. A repair or
+  refusal note stays where it happened in the transcript instead of trailing
+  the newest turn.
 
 ### Plakous
 

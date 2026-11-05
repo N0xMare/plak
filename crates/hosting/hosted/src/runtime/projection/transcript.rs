@@ -60,9 +60,10 @@ pub(in crate::runtime) struct Presentations {
     // monotonic across replacements, so a retired serve cannot share a baseline.
     states: BTreeMap<TranscriptScope, TranscriptState>,
     live: BTreeMap<TranscriptScope, live::LiveRows>,
-    /// Each scope's repair notices, one per cause, at the key each was first
-    /// shown at. Every later snapshot of the scope carries them, so a repair
-    /// stays readable until the face clears or retires the scope.
+    /// Each scope's repair notices, one per cause, each just after the last
+    /// committed row at its repair. Every later snapshot of the scope carries
+    /// them in place, so a repair stays readable, and scrolls away with its
+    /// history, until the face clears or retires the scope.
     repairs: BTreeMap<TranscriptScope, BTreeMap<&'static str, TranscriptItem>>,
     pub(in crate::runtime) root_busy: bool,
     pub(in crate::runtime) root_terminal_status: bool,
@@ -259,11 +260,21 @@ impl Presentations {
     /// with the refused snapshot's shape, and one notice its presentation
     /// keeps (spec 02 §2.6). Rows are never logged.
     fn note_repair(&mut self, snapshot: &PresentationSnapshot, error: &PresentationError) {
-        let cause = repair_cause(error);
+        let (cause, slot) = repair_cause(error);
         let notices = self.repairs.entry(snapshot.scope.clone()).or_default();
         if notices.contains_key(cause) {
             return;
         }
+        // A reserved ordinal after the last committed row: it sorts before
+        // every row a later record derives and collides with no stored row.
+        let anchor = snapshot
+            .items
+            .iter()
+            .map(|item| item.key)
+            .filter(|key| key.anchor < 1_u64 << 63 && !is_repair_key(*key))
+            .max()
+            .map_or(0, |key| key.anchor);
+        let key = RowKey::new(anchor, Lane::Product, REPAIR_ORDINALS - slot);
         let misordered = snapshot
             .items
             .windows(2)
@@ -285,7 +296,7 @@ impl Presentations {
         notices.insert(
             cause,
             TranscriptItem {
-                key: crate::sessions::provisional_key(),
+                key,
                 row: TranscriptRow::error(
                     crate::sessions::NoticeScope::Host,
                     format!(
@@ -438,16 +449,26 @@ impl Presentations {
     }
 }
 
-const fn repair_cause(error: &PresentationError) -> &'static str {
+/// The top product-lane ordinals of every anchor are the repair notices', one
+/// per cause; no store numbers that far.
+const REPAIR_ORDINALS: u32 = u32::MAX;
+const REPAIR_CAUSES: u32 = 7;
+
+const fn is_repair_key(key: RowKey) -> bool {
+    matches!(key.lane, Lane::Product) && key.ordinal > REPAIR_ORDINALS - REPAIR_CAUSES
+}
+
+/// A repair's cause and its slot among the reserved ordinals.
+const fn repair_cause(error: &PresentationError) -> (&'static str, u32) {
     match error {
-        PresentationError::UnsupportedSchema(_) => "unsupported schema",
-        PresentationError::ItemLimit => "row limit",
-        PresentationError::ByteLimit => "byte limit",
-        PresentationError::KeyOrder => "rows out of key order",
-        PresentationError::ConflictingKey => "conflicting key",
-        PresentationError::ScopeMismatch => "scope mismatch",
+        PresentationError::UnsupportedSchema(_) => ("unsupported schema", 0),
+        PresentationError::ItemLimit => ("row limit", 1),
+        PresentationError::ByteLimit => ("byte limit", 2),
+        PresentationError::KeyOrder => ("rows out of key order", 3),
+        PresentationError::ConflictingKey => ("conflicting key", 4),
+        PresentationError::ScopeMismatch => ("scope mismatch", 5),
         PresentationError::RevisionMismatch { .. } | PresentationError::NonAdvancingRevision => {
-            "revision mismatch"
+            ("revision mismatch", 6)
         }
     }
 }

@@ -2084,7 +2084,9 @@ An unsaved notice receives its provisional identity once; projector reloads
 carry that identity with the pending notice rather than allocating one from
 the rebuilt window length. A reload shows the pending notices after the
 committed rows, in key order, and drops a named pending notice whose identity
-the store already holds; that notice is shown once, at its committed key. A debug build asserts that a
+the store already holds; that notice is shown once, at its committed key. A
+reopen that cannot read the committed intents keeps the projection it shows
+and logs `transcript.reload_deferred` instead. A debug build asserts that a
 pending notice never sorts before the rows already shown; a release build
 gives such a notice a fresh provisional key. Skipped headers and blank thinking rows claim no
 stored presentation key. A debug build asserts that the stored projection's
@@ -2191,12 +2193,15 @@ leaving the face frozen on its prior revision, and reports the repair once per
 cause and scope: a `plak.presentation` host-log warning names the presentation
 error, the refused view's row count and bytes and its first misordered key
 pair (never row content), and a host error notice joins that scope's
-presentation at a provisional key. Every later snapshot and patch of the scope
-keeps that notice until the face clears the view, opens another session or
+presentation just after the last committed row at the repair, at a product-lane
+ordinal reserved for it (the top seven ordinals of an anchor, one per cause,
+which no store reaches). Every later snapshot and patch of the scope keeps that
+notice in place until the face clears the view, opens another session or
 retires the agent scope, so it outlives the resync that replaced the invalid
-view. A face that refuses an invalid snapshot keeps its last good view,
-requests one resync and shows one refusal note per cause, which that session's
-later snapshots keep.
+view and scrolls away with its history rather than trailing the newest turn.
+A face that refuses an invalid snapshot keeps its last good view, requests one
+resync and shows one refusal note per cause, which that session's later
+snapshots keep after the row it followed.
 This repairs only disposable presentation state; it never repairs stored or
 canonical authority.
 A runtime-derived row's anchor is its record's sequence, lane 0, and its ordinal

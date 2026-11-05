@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use super::{App, TranscriptSelection};
 use crate::tui::{FaceActionSender, UserAction};
-use plakous_host_protocol::views::transcript::{TranscriptRevision, TranscriptScope};
+use plakous_host_protocol::views::transcript::{RowKey, TranscriptRevision, TranscriptScope};
 
 use crate::tui::blocks::{self, ScrollBlock, TranscriptChange, TranscriptRenderCache};
 
@@ -24,10 +24,10 @@ pub(crate) struct TranscriptPane {
     pub(super) presentation_session: Option<String>,
     pub(super) presentation_ready: bool,
     pub(super) resync: Option<TranscriptScope>,
-    /// Notes of snapshots this pane refused, one per cause, with the session
-    /// namespace each was refused in. Every install of that session keeps
-    /// them, so a refusal stays readable past the resync that answers it.
-    pub(super) refusals: Vec<(Option<String>, String)>,
+    /// Notes of snapshots this pane refused, one per cause. Every install of
+    /// the session each was refused in keeps it where it was shown, so a
+    /// refusal stays readable past the resync that answers it.
+    pub(super) refusals: Vec<Refusal>,
     resync_sent: Option<(u64, Instant)>,
     resync_after_revision: u64,
     /// Monotonic identity for every transcript content/layout mutation.
@@ -113,6 +113,15 @@ impl TranscriptPane {
             thinking_started: HashMap::new(),
         }
     }
+}
+
+/// The note of one refused presentation snapshot.
+pub(super) struct Refusal {
+    /// The root session whose presentation refused it.
+    pub(super) session: Option<String>,
+    pub(super) note: String,
+    /// The last keyed row the note followed when it was shown.
+    pub(super) anchor: Option<RowKey>,
 }
 
 /// An agent's transcript, shown as the Activity > Agents body.

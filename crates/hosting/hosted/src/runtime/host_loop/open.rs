@@ -327,16 +327,27 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
             && let Ok(stored) = config.store.load(&config.session.id)
         {
             let unsaved = config.session.transcript.pending_notice_items();
-            config.session.transcript = stored.transcript;
-            if !unsaved.is_empty() {
-                let intents = config
-                    .store
-                    .load_intents(&config.session.id)
-                    .unwrap_or_default();
-                config
-                    .session
-                    .transcript
-                    .restore_pending_notices(unsaved, &intents);
+            // Unsaved notices are deduplicated against the committed ones; an
+            // unreadable intent set keeps the shown projection until the next
+            // refresh rather than showing a named notice twice.
+            let intents = if unsaved.is_empty() {
+                Ok(sessions::projector::ProductIntents::default())
+            } else {
+                config.store.load_intents(&config.session.id)
+            };
+            match intents {
+                Ok(intents) => {
+                    config.session.transcript = stored.transcript;
+                    config
+                        .session
+                        .transcript
+                        .restore_pending_notices(unsaved, &intents);
+                }
+                Err(error) => log_ev(
+                    log.as_ref(),
+                    &config,
+                    SessionEvent::new("transcript.reload_deferred").str("error", &error),
+                ),
             }
             config.session.root_turn_count = stored.root_turn_count;
             config.session.tool_call_count = stored.tool_call_count;

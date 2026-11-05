@@ -245,8 +245,8 @@ impl App {
             self.restore_opening_note(&mut blocks, full_window);
         }
         self.restore_local_keyed_blocks(&mut blocks, &mut restore);
-        Self::restore_open_notes(&mut blocks, &mut restore);
         self.restore_refusals(&mut blocks);
+        Self::restore_open_notes(&mut blocks, &mut restore);
         self.pane.blocks = blocks;
         let running = self.finish_keyed_restore(restore);
         self.refresh_keyed_item_details(running);
@@ -264,19 +264,23 @@ impl App {
             .resolve_blocks(self.pane.transcript_cache.layout());
     }
 
-    /// Keeps this session's refusal notes past a snapshot that replaced them.
+    /// Keeps this session's refusal notes past a snapshot that replaced them,
+    /// each after the keyed row it followed, so it scrolls away with history.
     fn restore_refusals(&mut self, blocks: &mut Vec<ScrollBlock>) {
         let session = &self.pane.presentation_session;
         self.pane
             .refusals
-            .retain(|(refused_in, _)| refused_in == session);
-        for (_, note) in &self.pane.refusals {
-            if !blocks
+            .retain(|refusal| refusal.session == *session);
+        for refusal in &self.pane.refusals {
+            if blocks
                 .iter()
-                .any(|block| matches!(block, ScrollBlock::Error(text) if text == note))
+                .any(|block| matches!(block, ScrollBlock::Error(text) if *text == refusal.note))
             {
-                blocks.push(ScrollBlock::Error(note.clone()));
+                continue;
             }
+            let at = self.pane.keyed.after(refusal.anchor, blocks.len());
+            self.pane.keyed.splice(at, 0, 1);
+            blocks.insert(at, ScrollBlock::Error(refusal.note.clone()));
         }
     }
 
@@ -339,8 +343,12 @@ impl App {
                     let note = format!(
                         "invalid presentation snapshot refused ({error:?}); kept the last good view and requested a resync"
                     );
-                    let refusal = (namespace, note);
-                    if !self.pane.refusals.contains(&refusal) {
+                    if !self
+                        .pane
+                        .refusals
+                        .iter()
+                        .any(|refusal| refusal.session == namespace && refusal.note == note)
+                    {
                         tracing::warn!(
                             target: "plak.presentation",
                             ?scope,
@@ -348,8 +356,13 @@ impl App {
                             rows = snapshot.items.len(),
                             "invalid presentation snapshot refused"
                         );
-                        self.pane.blocks.push(ScrollBlock::Error(refusal.1.clone()));
-                        self.pane.refusals.push(refusal);
+                        let anchor = self.pane.keyed.local_anchor(self.pane.blocks.len());
+                        self.pane.blocks.push(ScrollBlock::Error(note.clone()));
+                        self.pane.refusals.push(super::pane::Refusal {
+                            session: namespace,
+                            note,
+                            anchor,
+                        });
                     }
                     self.pane.resync.get_or_insert(scope);
                     self.mark_transcript_replaced();

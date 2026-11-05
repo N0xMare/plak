@@ -1251,8 +1251,13 @@ fn a_refused_snapshot_note_survives_the_resync_snapshot_once_per_cause() {
     let mut resynced = rows;
     resynced.insert(after, TranscriptRow::assistant("after the resync"));
     app.apply_host_event(HostEvent::PresentationSnapshot(snapshot(4, &resynced)));
-    assert!(app.pane.keyed.get(after).is_some());
     assert_eq!(refusals(&app), 1, "the resync snapshot keeps the note");
+    assert_eq!(
+        app.pane.keyed.get(after),
+        Some(2),
+        "the note stays after the row it followed, not at the end"
+    );
+    assert!(matches!(&app.pane.blocks[1], ScrollBlock::Error(_)));
     assert!(paint(&mut app).contains("invalid·presentation·snapshot·refused·(KeyOrder)"));
 }
 

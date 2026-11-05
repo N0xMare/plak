@@ -1012,6 +1012,20 @@ fn a_repair_notice_stays_in_its_scope_once_per_cause_until_the_face_clears() {
     assert!(publisher.resync(&TranscriptScope::Root, &sink));
     drain(&mut consumer);
     assert_eq!(repairs(consumer.items()), 1);
+    // It stays where the repair happened, so later rows follow it.
+    assert!(publisher.publish(
+        snapshot(
+            TranscriptScope::Root,
+            &[(1, "first"), (2, "second"), (3, "later")]
+        ),
+        &sink,
+    ));
+    drain(&mut consumer);
+    assert_eq!(
+        consumer.items().values().next_back(),
+        Some(&TranscriptRow::assistant("later"))
+    );
+    assert_eq!(repairs(consumer.items()), 1);
 
     let agent = TranscriptScope::Agent("c1".into());
     assert!(publisher.snapshot(snapshot(agent.clone(), &[(1, "child")]), &sink));
