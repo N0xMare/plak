@@ -396,6 +396,8 @@ struct Terminal {
     child: Box<dyn portable_pty::Child + Send + Sync>,
     capture: Arc<Mutex<Capture>>,
     reader: Option<std::thread::JoinHandle<()>>,
+    /// The fixture's product home, read for the logs a failed exit reports.
+    home: PathBuf,
 }
 
 /// How the terminal is launched.
@@ -504,6 +506,7 @@ impl Terminal {
             child,
             capture,
             reader: Some(reader_thread),
+            home: fixture.home(),
         }
     }
 
@@ -672,7 +675,12 @@ impl Terminal {
         );
     }
 
-    fn finish(mut self) -> portable_pty::ExitStatus {
+    fn finish(self) -> portable_pty::ExitStatus {
+        self.finish_with_screen().0
+    }
+
+    /// [`Self::finish`], with the last screen the process left.
+    fn finish_with_screen(mut self) -> (portable_pty::ExitStatus, String) {
         let deadline = Instant::now() + WAIT;
         // A quit that lands while a turn still settles asks first (spec 02
         // §5.3): confirm it once, as the operator would.
@@ -697,17 +705,24 @@ impl Terminal {
                 None => std::thread::sleep(Duration::from_millis(20)),
             }
         };
+        let capture = Arc::clone(&self.capture);
         drop(self.master);
         if let Some(reader) = self.reader.take() {
             let _ = reader.join();
         }
-        status
+        let screen = capture.lock().unwrap().parser.screen().contents();
+        (status, screen)
     }
 
     fn quit(mut self) {
         self.send(b"/quit\r");
-        let status = self.finish();
-        assert!(status.success(), "the terminal did not exit cleanly");
+        let home = self.home.clone();
+        let (status, screen) = self.finish_with_screen();
+        assert!(
+            status.success(),
+            "the terminal did not exit cleanly: {status:?}\nlast screen:\n{screen}\n{}",
+            exit_logs(&home)
+        );
     }
 
     /// `SIGKILL`, which no handler can soften; returns the exit status.
@@ -732,6 +747,43 @@ impl Terminal {
         }
         status
     }
+}
+
+/// The tails of the session event logs and `plak.log` under `home`, so a
+/// failed exit explains itself.
+fn exit_logs(home: &Path) -> String {
+    use std::fmt::Write as _;
+    const TAIL: usize = 40;
+    let mut logs: Vec<PathBuf> = vec![home.join("logs").join("plak.log")];
+    for state in std::fs::read_dir(home.join("state"))
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        let sessions = state.path().join("sessions");
+        for entry in std::fs::read_dir(sessions).into_iter().flatten().flatten() {
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".events.jsonl")
+            {
+                logs.push(entry.path());
+            }
+        }
+    }
+    let mut report = String::new();
+    for log in logs {
+        let Ok(text) = std::fs::read_to_string(&log) else {
+            continue;
+        };
+        let lines: Vec<_> = text.lines().collect();
+        let _ = writeln!(report, "--- {} (last {TAIL} lines)", log.display());
+        for line in &lines[lines.len().saturating_sub(TAIL)..] {
+            report.push_str(line);
+            report.push('\n');
+        }
+    }
+    report
 }
 
 /// The screen row that holds `needle`.
@@ -1743,9 +1795,23 @@ fn queue_chords_select_reorder_edit_steer_and_drop_follow_ups() {
     terminal.wait_where("the queued follow-up drained", |frame| {
         frame.contains("❯ queued gamma") && frame.matches("the answer after the stall").count() >= 1
     });
-    terminal.wait_where("the follow-up answered", |frame| {
-        frame.matches("the answer after the stall").count() >= 2
-            || frame.contains("the stalled answer")
+    // Quit only once the follow-up's own turn answered and ended. The first
+    // turn's answers are on screen already, so they cannot be the cue: a
+    // /quit that lands during the follow-up cancels it, and a cancel that
+    // misses the quit grace exits 130 by design.
+    terminal.wait_where("the follow-up answered and idle", |frame| {
+        frame
+            .split_once("❯ queued gamma")
+            .is_some_and(|(_, after)| after.contains("the answer after the stall"))
+            && [
+                "waiting for model",
+                "responding",
+                "thinking",
+                "cancelling…",
+                "working",
+            ]
+            .iter()
+            .all(|busy| !frame.contains(busy))
     });
     terminal.quit();
 }
