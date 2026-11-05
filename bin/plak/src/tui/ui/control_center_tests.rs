@@ -1343,6 +1343,34 @@ fn the_reload_probe_is_asked_of_the_host_and_settles_on_its_answer() {
     }
 }
 
+/// The launch's pre-bind lookup progress reaches the HUD as the host
+/// publishes it (`lookup_status`), ahead of every other status, and leaves
+/// it when the lookup finished.
+#[test]
+fn lookup_progress_from_the_host_is_the_hud_status_until_it_clears() {
+    const RETRY: &str = "retrying model lookup (2/3): HTTP 503";
+    let mut app = App::new(launch_basic(), true);
+    let idle = app.turn_status_label();
+    app.apply_host_event(HostEvent::Extension(SurfaceObservation::LookupStatus {
+        text: Some(RETRY.into()),
+    }));
+    assert_eq!(app.turn_status_label().as_deref(), Some(RETRY));
+    let mut terminal = Terminal::new(TestBackend::new(120, 12)).unwrap();
+    terminal.draw(|frame| app.draw(frame)).unwrap();
+    let painted = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(ratatui::buffer::Cell::symbol)
+        .collect::<String>();
+    assert!(painted.contains("retrying model lookup (2/3)"), "{painted}");
+    app.apply_host_event(HostEvent::Extension(SurfaceObservation::LookupStatus {
+        text: None,
+    }));
+    assert_eq!(app.turn_status_label(), idle);
+}
+
 /// A host that does not answer the probe within its deadline leaves the
 /// reload refused as timed out, and the session open.
 #[test]

@@ -1352,6 +1352,36 @@ fn assert_fits(frame: &str, cols: u16, what: &str) {
     );
 }
 
+/// Resizing while a turn runs refits every frame without losing the turn:
+/// the prompt keeps its block through the narrow refit and the answer lands
+/// in the wide one.
+#[test]
+fn resizing_during_a_running_turn_refits_and_keeps_the_turn() {
+    const PROMPT: &str = "resize while this turn runs";
+    let fixture = Fixture::new(&stalled_then_answers(MID_TURN_STALL_MS));
+    let mut terminal = Terminal::spawn_sized(&fixture, Launch::Fresh, TUI_ROWS, 160);
+    terminal.wait_ready();
+    terminal.send(format!("{PROMPT}\r").as_bytes());
+    fixture.wait_for_provider_dispatch();
+    terminal.wait_screen("waiting for model");
+    terminal.resize(TUI_ROWS, 60);
+    let narrow = terminal.wait_where("the busy 60-column refit", |frame| {
+        frame.contains(PROMPT) && frame.lines().all(|line| line.chars().count() <= 60)
+    });
+    assert_fits(&narrow, 60, "the busy 60-column frame");
+    terminal.resize(TUI_ROWS, 160);
+    let answered = terminal.wait_where("the answer after the resizes", |frame| {
+        frame.contains("the stalled answer") && frame.lines().any(|line| line.chars().count() > 60)
+    });
+    assert_fits(&answered, 160, "the answered 160-column frame");
+    assert!(
+        answered.contains(PROMPT),
+        "the prompt keeps its block:\n{answered}"
+    );
+    assert!(terminal.is_alive(), "a resize mid-turn must never quit");
+    terminal.quit();
+}
+
 /// The wordmark's first row, present whenever the banner is painted.
 const WORDMARK_ROW: &str = "████████╗ ██╗      ██████████╗ ██╗  ██╗";
 
