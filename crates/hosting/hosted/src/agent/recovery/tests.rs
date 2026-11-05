@@ -4631,6 +4631,104 @@ async fn an_interrupt_after_admission_and_before_bind_binds_nothing() {
     crate::topology_runtime::force_release(&fixture.tree_id).await;
 }
 
+/// The same window when the admitted turn reaches its provider before the
+/// release stops it, as load allows: the turn ends needing recovery, which
+/// a terminal fold leaves bound, and still no turn is bound.
+#[tokio::test]
+async fn an_interrupt_before_bind_binds_nothing_after_the_admitted_turn_dispatched() {
+    let fixture = Fixture::new("resume-dispatched-before-bind");
+    let id = owner_lost_child(&fixture).await;
+    let interrupt = interrupt_hook(&fixture, &id);
+    let (runtime, sessions, target) = (fixture.runtime.clone(), fixture.sessions(), id.clone());
+    crate::agent::park::hooks::set_after_loss_continuation_admission(
+        &id,
+        Arc::new(move || {
+            let (interrupt, runtime, sessions, target) = (
+                interrupt.clone(),
+                runtime.clone(),
+                Arc::clone(&sessions),
+                target.clone(),
+            );
+            Box::pin(async move {
+                interrupt().await;
+                continuation_ended_in_feed(&runtime, &sessions, &target).await;
+            })
+        }),
+    );
+    let resumed = crate::agent::children::operator_resume_after_loss(&fixture.runtime, Some(&id))
+        .await
+        .unwrap();
+    assert!(
+        matches!(
+            resumed.as_slice(),
+            [(agent, crate::agent::children::LossResume::Deferred(_))] if agent == &id
+        ),
+        "{resumed:?}"
+    );
+    fixture
+        .runtime
+        .read(|tree| {
+            assert_eq!(tree.node(&id).unwrap().status, NodeStatus::Interrupted);
+            assert_eq!(tree.attempt(&id).unwrap().turn_id, None, "no turn bound");
+            assert_eq!(tree.loss_continuation(&id), None);
+        })
+        .unwrap();
+    let commands = continuation_commands(&fixture);
+    assert_eq!(commands.len(), 1);
+    assert!(
+        commands[0].1.is_some(),
+        "the command is settled: {commands:?}"
+    );
+    crate::topology_runtime::force_release(&fixture.tree_id).await;
+}
+
+/// Waits until the child's feed records the terminal of the turn the
+/// continuation's command started: here, an unknown provider outcome.
+async fn continuation_ended_in_feed(
+    runtime: &ProductTopologyRuntime,
+    sessions: &Arc<AgentSessions>,
+    id: &str,
+) {
+    let (locator, command) = runtime
+        .read(|tree| {
+            let command = tree
+                .commands()
+                .values()
+                .find(|command| {
+                    command
+                        .command_id
+                        .starts_with(ProductAgentTree::LOSS_RESUME_COMMAND_PREFIX)
+                })
+                .map(|command| command.command_id.clone());
+            (tree.node(id).unwrap().session_locator.clone(), command)
+        })
+        .unwrap();
+    let (locator, command) = (locator.unwrap(), command.unwrap());
+    let session_id = locator.parse::<SessionLocator>().unwrap().session_id();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let feed = read_tree_feed(sessions, session_id, 0)
+                .await
+                .unwrap();
+            if feed
+                .records
+                .iter()
+                .flat_map(plakous::sessions::feed::FeedRecord::facts)
+                .any(|fact| {
+                    matches!(fact, plakous::sessions::feed::FeedFact::TurnTerminal {
+                        command_id, outcome: plakous::sessions::feed::FeedTurnOutcome::RecoveryRequired, ..
+                    } if command_id.as_str() == command)
+                })
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the continuation's turn ends before the host releases it");
+}
+
 /// An owed child's owner-lost mark withdraws what never ran but keeps a
 /// still-pending continuation's command for the continuation to resubmit.
 #[tokio::test]

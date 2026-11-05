@@ -531,9 +531,32 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
         // itself evidence that the command was admitted.
         let projection =
             crate::agent::ledger::project_child_feed(runtime, agent_id, &attached).await;
-        release_startup(runtime, agent_id, startup, attached).await;
+        // The release cancels the admitted turn and publishes its terminal.
+        let released = release_startup(runtime, agent_id, startup, attached).await;
         if hold_ended(&error) {
             projection.map_err(ChildStartFailure::from)?;
+            // The acceptance fold binds an interrupted node's turn so that
+            // recovery can settle it; a terminal fold releases it again unless
+            // the turn reached a provider first and ended needing recovery.
+            // The interrupt outranked this bind and the turn has ended here,
+            // so the node keeps no turn whatever its terminal was.
+            if released.is_some() {
+                let (id, turn, writer) = (
+                    agent_id.to_owned(),
+                    turn_id.to_string(),
+                    runtime.driver().clone(),
+                );
+                mutate_child(runtime.driver(), agent_id, move |tree| {
+                    if tree
+                        .attempt(&id)
+                        .is_some_and(|attempt| attempt.turn_id.as_deref() == Some(turn.as_str()))
+                        && tree.release_attempt_turn(&id).is_ok()
+                    {
+                        persist_or_fault(&writer, tree, &id);
+                    }
+                })
+                .await;
+            }
             crate::agent::ledger::ChildLedger::settlement_only(runtime.driver())
                 .settle(&command_text, crate::driver::ledger::Settlement::Recorded)
                 .await

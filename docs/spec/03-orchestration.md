@@ -3651,7 +3651,11 @@ names, which is no longer pending; so a continuation is never dispatched
 twice.
 Its Start re-checks that it is still pending when it reserves the child and
 when it binds the turn, so a close, an interrupt or another turn that ended it
-refuses the Start. Once its command is accepted and its turn runs, the
+refuses the Start. A Start the runtime already admitted when its bind is
+refused is released at once, and the release cancels its turn. The node then
+keeps no turn bound, whatever that turn's terminal: a turn that reached its
+provider before the release stopped it can end needing recovery. Its command
+settles from its record, since its batch is already in history. Once its command is accepted and its turn runs, the
 continuation is **running**. The turn is a new host instruction to continue
 the assignment from the last completed step without repeating completed
 actions; it never replays the lost turn, carries the child's unread mail, and
