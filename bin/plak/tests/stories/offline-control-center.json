@@ -20,14 +20,14 @@
     {
       "kind": "wait",
       "id": "launch-ready",
-      "contains": "offline-loopback-v1"
+      "contains": "/ commands"
     },
     {
       "kind": "assert",
       "id": "launch-chrome",
       "contains": [
         "/ commands",
-        "offline-loopback-v1"
+        "powered by plakous"
       ],
       "excludes": [
         "panicked"
@@ -169,7 +169,7 @@
       "excludes": [
         "unknown command"
       ],
-      "cursor_visible": true
+      "cursor_visible": false
     },
     {
       "kind": "send",

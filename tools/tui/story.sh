@@ -7,6 +7,6 @@ trace="${2:-target/plak-test-tmp/tui-story-trace.json}"
 mkdir -p "$(dirname "$trace")"
 rm -f "$trace"
 PLAK_TUI_STORY="$PWD/$story" PLAK_TUI_TRACE="$PWD/$trace" \
-  cargo test --locked -p plak --features test-hooks --test offline_e2e \
-  run_declarative_tui_story -- --ignored --exact --nocapture
+  cargo test --locked --workspace --all-features --test integration \
+  offline_e2e::run_declarative_tui_story -- --ignored --exact --nocapture
 echo "trace: $trace"
