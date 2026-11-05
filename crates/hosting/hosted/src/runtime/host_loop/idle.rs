@@ -378,11 +378,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                         self.role.pending_start = None;
                         return Ok(HostStep::Continue);
                     }
-                    if one_shot.is_none() {
-                        self.stop_root_continuation(
-                            sessions::projector::RootInterruptCause::Operator,
-                        );
-                    }
+                    // An idle interrupt keeps a held root continuation: a
+                    // stray Esc must not discard it. Only the Resume, a new
+                    // prompt or a stop of everything ends it.
                     if !cancelled_resume
                         && !self.has_automatic_continue_work()
                         && one_shot.is_none()

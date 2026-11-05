@@ -244,7 +244,8 @@ an export.
   record why (`operator`, `parent`, `cascade`, `stopped`), and tree rows carry
   it. A stop is final: stopping a running root turn is recorded before its
   cancel, so a host lost before the turn ended never continues it, and
-  stopping a root that holds a continuation after a lost host ends it.
+  `/stop-all` ends a root continuation held after a lost host; an idle
+  interrupt (`Esc`) keeps it.
 - Reopening a session no longer pauses the agent tree. A sub-agent whose turn
   lost its owner is interrupted (owner lost) on reopen, keeps its attempt and
   waits for mail or a followup; a parked sub-agent whose wake was still

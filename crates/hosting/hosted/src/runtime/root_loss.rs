@@ -478,7 +478,7 @@ pub(crate) fn root_loss_is_handoff(
         .is_some_and(|loss| loss.cause == RootContinuationCause::Handoff))
 }
 
-/// A stop of the root (the operator's interrupt, or a stop of everything)
+/// A stop of everything (`stopped`)
 /// while it holds a continuation after a loss, or has one pending: one root
 /// interrupt with `cause` naming the same stopped turn, so stops stay
 /// stopped, then the pending continuation's prepared submission and its

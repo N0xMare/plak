@@ -267,3 +267,43 @@ fn a_stop_the_host_lost_before_its_terminal_is_never_continued() {
     );
     assert_eq!(intents.root_continuations.len(), 0, "nothing continues");
 }
+
+/// An idle interrupt keeps a held root continuation, so a stray Esc never
+/// discards it; a stop of everything ends it with a `stopped` record. The
+/// stop finds the hold still there only if the interrupt kept it.
+#[test]
+fn an_idle_interrupt_keeps_a_held_root_and_a_stop_of_everything_ends_it() {
+    let root = tempfile::tempdir().unwrap();
+    let lost = release_a_running_root_turn(root.path(), Release::Lost, true, |config| config);
+    let config = next_host(
+        root.path(),
+        &lost,
+        serde_json::json!([]),
+        Arc::clone(&lost.store),
+    );
+    let (actions, events, host) = spawn_host_worker(config).unwrap();
+    let mut seen = Vec::new();
+    wait_for(&events, &mut seen, "the held notice", held_notice);
+    send_attached_action(&actions, UserAction::Interrupt);
+    send_attached_action(&actions, UserAction::StopAllTopology);
+    wait_for(&events, &mut seen, "the stop", |event| {
+        matches!(event, crate::surface_protocol::HostEvent::Row(
+            plakous_host_protocol::views::transcript::TranscriptRow::Notice(notice))
+            if notice.text.starts_with("stopped: the turn the lost host was running"))
+    });
+    send_attached_action(&actions, UserAction::Quit);
+    host.join().unwrap().unwrap();
+    let intents = lost.store.load_intents(&lost.id).unwrap();
+    assert_eq!(
+        intents
+            .root_interrupts
+            .iter()
+            .map(|intent| intent.value.cause)
+            .collect::<Vec<_>>(),
+        [RootInterruptCause::OwnerLost, RootInterruptCause::Stopped],
+        "the interrupt recorded nothing; the stop ended the hold"
+    );
+    let record = lost.store.load(&lost.id).unwrap();
+    assert_eq!(root_loss_state(lost.store.as_ref(), &record).unwrap(), None);
+    assert_eq!(dispatches(&lost.evidence), 1);
+}

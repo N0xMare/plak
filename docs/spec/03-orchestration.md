@@ -3768,10 +3768,12 @@ that turn, before its cancel is requested. Any root interrupt anchored on a
 turn is final for it: a stop recorded first keeps a later loss or handoff of
 the same turn from being recorded, so a host lost before the stopped turn's
 terminal leaves a stop that nothing continues, under either policy. The
-operator's interrupt of an idle root that holds a continuation after a loss,
-or has one pending, records `operator`, and a stop of the whole tree records
-`stopped`, both anchored on the loss's turn; either ends the continuation and
-withdraws a pending continuation's prepared submission with its queue item.
+operator's interrupt of an idle root records nothing and keeps a held root
+continuation, so a stray interrupt never discards it: only the Resume, a new
+prompt or a stop of the whole tree ends it. A stop of the whole tree while the
+root holds a continuation after a loss, or has one pending, records `stopped`
+anchored on the loss's turn, which ends the continuation and withdraws a
+pending continuation's prepared submission with its queue item.
 
 A child whose own turn a live owner fenced is recovered at once, without
 waiting for the parent: its turn waiter releases and reopens the session as

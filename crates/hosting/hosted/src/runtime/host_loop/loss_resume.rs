@@ -82,8 +82,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         }
     }
 
-    /// A stop of the root while it holds a continuation after a loss, or
-    /// has one pending, ends it: stops stay stopped (spec 03 §14.1).
+    /// A stop of everything while the root holds a continuation after a
+    /// loss, or has one pending, ends it: stops stay stopped (spec 03
+    /// §14.1). An idle interrupt does not.
     pub(super) fn stop_root_continuation(
         &mut self,
         cause: crate::sessions::projector::RootInterruptCause,
