@@ -292,3 +292,66 @@ fn the_scan_keeps_only_a_process_lost_terminal_with_nothing_admitted_after() {
         "a fenced turn's closure is no loss"
     );
 }
+
+fn scan_turn(n: u128) -> plakous::model::TurnId {
+    format!("00000000-0000-4000-8000-{n:012x}").parse().unwrap()
+}
+
+fn scan_accepted(n: u128) -> FeedFact {
+    FeedFact::CommandAccepted {
+        command_id: plakous::agent::CommandId::new(format!("command-{n}")).unwrap(),
+        kind: FeedCommandKind::Root {
+            origin: plakous::model::TurnOrigin::UserPrompt,
+        },
+        turn_id: Some(scan_turn(n)),
+        sequence: 1,
+        operation_id: None,
+    }
+}
+
+fn scan_process_lost(n: u128) -> FeedFact {
+    FeedFact::TurnTerminal {
+        turn_id: scan_turn(n),
+        command_id: plakous::agent::CommandId::new(format!("command-{n}")).unwrap(),
+        outcome: FeedTurnOutcome::Cancelled {
+            cause: FeedCancelCause::Abandoned {
+                claim: plakous::agent::AbandonedTurnClaim::ModelRequest,
+                cause: plakous::agent::AbandonmentCause::ProcessLost,
+                model_round_completed: false,
+                tool_round_completed: false,
+            },
+        },
+        closed_exchange: false,
+        steering_settled_unapplied: false,
+        usage: plakous::agent::TurnUsage::default(),
+    }
+}
+
+/// A scan start below the feed's retention restarts at the retained start:
+/// a lost turn whose terminal is still retained is found there.
+#[test]
+fn a_scan_below_retention_restarts_and_finds_a_retained_terminal() {
+    let mut scanner = LossScanner::new(FeedSeq::new(5));
+    // A candidate read before the retention answer is not kept.
+    scanner.record(FeedSeq::new(6), &[scan_accepted(9), scan_process_lost(9)]);
+    assert!(scanner.behind_retention(10), "the first answer restarts");
+    assert_eq!(scanner.cursor, FeedSeq::new(9), "at the retained start");
+    assert_eq!(scanner.lost, None);
+    scanner.record(FeedSeq::new(10), &[scan_accepted(1)]);
+    scanner.record(FeedSeq::new(11), &[scan_process_lost(1)]);
+    assert_eq!(
+        scanner.lost.map(|lost| (lost.turn_id, lost.applied_seq)),
+        Some((scan_turn(1).to_string(), 11))
+    );
+}
+
+/// A lost turn whose terminal is itself behind retention is not found, so
+/// it is not held; a second retention answer ends the scan.
+#[test]
+fn a_terminal_behind_retention_is_no_loss() {
+    let mut scanner = LossScanner::new(FeedSeq::new(5));
+    assert!(scanner.behind_retention(20));
+    scanner.record(FeedSeq::new(20), &[]);
+    assert_eq!(scanner.lost, None, "the lost turn's terminal was pruned");
+    assert!(!scanner.behind_retention(30), "the scan restarts once");
+}

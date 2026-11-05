@@ -227,35 +227,65 @@ pub(crate) async fn lost_root_turn(
     sessions: &AgentSessions,
     scan: LossScan,
 ) -> Result<Option<LostRootTurn>, String> {
-    let mut cursor = scan.after;
-    let mut restarted = false;
-    let mut lost = None;
+    let mut scanner = LossScanner::new(scan.after);
     loop {
         let page = sessions
             .feed_page(FeedPageRequest::after(FeedCursor::new(
                 scan.session,
-                cursor,
+                scanner.cursor,
             )))
             .await
             .map_err(|error| error.to_string())?;
         let records = match page {
             FeedPage::Records { records, .. } => records,
-            FeedPage::BehindRetention { retained_from, .. } if !restarted => {
-                restarted = true;
-                lost = None;
-                cursor = FeedSeq::new(retained_from.get().saturating_sub(1));
+            FeedPage::BehindRetention { retained_from, .. }
+                if scanner.behind_retention(retained_from.get()) =>
+            {
                 continue;
             }
             _ => return Ok(None),
         };
         if records.is_empty() {
-            return Ok(lost);
+            return Ok(scanner.lost);
         }
         for record in records {
-            cursor = record.header().seq;
-            for fact in record.facts() {
-                fold_lost_turn(&mut lost, cursor.get(), fact);
-            }
+            scanner.record(record.header().seq, record.facts());
+        }
+    }
+}
+
+/// The loss scan's position and candidate between feed pages.
+struct LossScanner {
+    cursor: FeedSeq,
+    restarted: bool,
+    lost: Option<LostRootTurn>,
+}
+
+impl LossScanner {
+    const fn new(after: FeedSeq) -> Self {
+        Self {
+            cursor: after,
+            restarted: false,
+            lost: None,
+        }
+    }
+
+    /// The cursor fell below the feed's retention: restart once from the
+    /// retained start with no candidate. Says whether the scan goes on.
+    fn behind_retention(&mut self, retained_from: u64) -> bool {
+        if self.restarted {
+            return false;
+        }
+        self.restarted = true;
+        self.lost = None;
+        self.cursor = FeedSeq::new(retained_from.saturating_sub(1));
+        true
+    }
+
+    fn record(&mut self, seq: FeedSeq, facts: &[FeedFact]) {
+        self.cursor = seq;
+        for fact in facts {
+            fold_lost_turn(&mut self.lost, seq.get(), fact);
         }
     }
 }
