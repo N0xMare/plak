@@ -29,9 +29,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             self.finish_projection(false).await?;
         }
         // The handoff record is durable before any lease is released.
-        if handoff {
+        // The tree's runtime is kept until the release ends, which gives
+        // its custody up explicitly (spec 03 §14).
+        let handed_off_tree = if handoff {
             self.record_planned_handoff().await;
-        }
+            crate::topology_runtime::lookup(&super::durable_tree_id(
+                &self.role.config.topology_rows(),
+                &self.role.config.session,
+            ))
+        } else {
+            None
+        };
         if abandon && let Some(agent) = self.opened.agent() {
             agent.begin_abandon();
         }
@@ -127,6 +135,21 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             (Some(stop), Some(trees)) => Some(format!("{stop}; {trees}")),
             (stop, trees) => stop.or(trees),
         };
+        // A planned handoff gives the tree's custody up here, cut short or
+        // not, not when the last driver clone drops: a child the release let
+        // go of while it ran holds a clone until its task ends. Its runtime
+        // branch lease guards its session meanwhile, so the next host's
+        // reopen of it is refused until then and retries.
+        if let Some(runtime) = handed_off_tree
+            && let Err(error) = runtime.driver().release_custody()
+        {
+            super::log_ev(
+                self.role.log.as_ref(),
+                &self.role.config,
+                super::SessionEvent::new("session.handoff_custody_kept")
+                    .str("error", error.to_string()),
+            );
+        }
         // A planned handoff that let go of a child still running is no
         // failure: its handoff row stands, and the next host continues it
         // once (spec 03 §14.1). A plain quit's is a loss, and fails.

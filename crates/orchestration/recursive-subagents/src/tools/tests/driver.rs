@@ -1844,3 +1844,35 @@ async fn a_settle_queued_during_an_outage_records_its_completion_after_a_cancel(
     );
     assert!(!driver.read(ProductAgentTree::owes_effects).unwrap());
 }
+
+/// A planned handoff gives its tree's custody up at once, for every clone
+/// of the driver, not when the last clone drops: the store's record reads
+/// released while a clone (a child's task) still lives, that clone's saves
+/// are refused as not in custody, and neither a second release nor the
+/// clone's drop writes the record again.
+#[test]
+fn releasing_custody_gives_it_up_while_a_clone_lives() {
+    let root = tempfile::tempdir().unwrap();
+    let store: Arc<dyn TreeStore> = Arc::new(MemoryTreeStore::new());
+    let tree = bootstrap_tree("custody-release", root.path());
+    let id = tree.tree_id.clone();
+    let driver = driver_on(tree, Arc::clone(&store));
+    let child_task = driver.clone();
+    let held = store.custody_port().custody(&id).unwrap().unwrap();
+    assert!(!held.released);
+    driver.release_custody().unwrap();
+    let released = store.custody_port().custody(&id).unwrap().unwrap();
+    assert!(released.released, "custody outlived its explicit release");
+    assert!(
+        child_task.custody_refusal().is_some(),
+        "a clone still writes under a released custody"
+    );
+    driver.release_custody().unwrap();
+    drop(driver);
+    drop(child_task);
+    assert_eq!(
+        store.custody_port().custody(&id).unwrap().unwrap(),
+        released,
+        "the record changed after its explicit release"
+    );
+}

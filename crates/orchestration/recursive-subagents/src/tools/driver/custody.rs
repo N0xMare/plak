@@ -9,10 +9,10 @@ use super::{ProductAgentTree, TreeDriver, TreeStore};
 /// A driver's custody of its tree (spec 03 §14), taken when the driver bound
 /// the tree to its store.
 pub(super) struct DriverCustody {
-    store: Arc<dyn TreeStore>,
+    pub(super) store: Arc<dyn TreeStore>,
     /// The share this driver holds, or why its take was refused; every save
     /// is then refused the same way.
-    hold: Result<Mutex<Option<crate::tree::CustodyHold>>, crate::tree::CustodyError>,
+    pub(super) hold: Result<Mutex<Option<crate::tree::CustodyHold>>, crate::tree::CustodyError>,
 }
 
 impl DriverCustody {
@@ -72,7 +72,43 @@ impl DriverCustody {
     }
 }
 
+impl DriverCustody {
+    /// Gives this driver's share up now, for every clone of the driver:
+    /// each later save is refused as not in custody, and the last clone's
+    /// drop finds nothing to give up.
+    fn release_now(&self) -> Result<(), crate::tree::CustodyError> {
+        let Ok(hold) = &self.hold else {
+            return Ok(());
+        };
+        let Some(hold) = hold
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+        else {
+            return Ok(());
+        };
+        crate::tree::release_custody_hold(self.store.custody_port(), hold)
+    }
+}
+
 impl TreeDriver {
+    /// Gives the tree's custody up now, at the end of a planned handoff's
+    /// release (spec 03 §14), rather than when the driver's last clone
+    /// drops: a child the release let go of while it still ran keeps a
+    /// clone until its task ends, which would make the moment custody is
+    /// given up depend on that task. The child's runtime branch lease
+    /// still guards its session until then. Every later save of this
+    /// driver is refused as not in custody. Giving up custody already given
+    /// up does nothing.
+    ///
+    /// # Errors
+    ///
+    /// The store refused the release; the record still names this process,
+    /// and ends with it.
+    pub fn release_custody(&self) -> Result<(), crate::tree::CustodyError> {
+        self.custody.release_now()
+    }
+
     pub(super) fn save_claimed(
         &self,
         tree: &ProductAgentTree,

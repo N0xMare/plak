@@ -5156,8 +5156,10 @@ impl Fixture {
     }
 
     /// The next host's custody take: the reopen law, then one recovery run
-    /// with its continuation pass.
+    /// with its continuation pass. A planned handoff gave custody up at the
+    /// end of its release, so the take takes it again first.
     pub(crate) async fn next_host_take(&self) {
+        self.runtime.driver().retake_custody_for_test().unwrap();
         self.runtime
             .mutate_then_emit(false, |tree| {
                 tree.apply_reopen_law();

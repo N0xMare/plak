@@ -3387,7 +3387,16 @@ bootstraps the tree, so that first save is fenced too, and gives its own share
 back on every exit: an attach that fails after its take leaves the record
 released, not held by the live process. The driver gives its
 share up when its last clone drops, so every writer that can still write (an
-owed release, a waiter that captured the driver) writes under it. A
+owed release, a waiter that captured the driver) writes under it. A planned
+handoff's release is the exception: it gives the driver's share up
+explicitly at its end, whether or not it cut a running child short, because
+a child it let go of while its turn ran keeps a driver clone until its task
+ends, and when that happens is the task's timing. Every later save of that
+driver is refused as not in custody. The child's runtime branch lease still
+guards its session until its task ends or the process exits, so a next host
+that takes custody and reopens the child is refused (`lease is held`) and
+retries, as a handed-off child the release cut short is always continued
+(§14.1). A
 write outside a driver (a headless flow, a bootstrap before the hub attaches,
 a session deletion) uses the process's claim when it holds one, otherwise one
 taken for the write and released after it (`TreeStore::save_in_custody`,
@@ -3455,7 +3464,8 @@ attachments its switches left behind, then ends every tree a hand-off left in
 custody that no root session holds again with its joined shutdown, and joins
 the dormant trees' shutdowns already under way. Either way the hub entry goes first and
 custody is released when the tree driver's last clone drops, after every
-writer that can still write has returned. A starting or retiring slot is work
+writer that can still write has returned, except at a planned handoff's
+release, which gives it up explicitly at its end (above). A starting or retiring slot is work
 in flight until its owner clears it, so an owner cancelled before it clears
 its slot keeps the tree from going dormant; such a tree ends at a shutdown
 release or at its host's quit. A tree brought up without a root attachment (by

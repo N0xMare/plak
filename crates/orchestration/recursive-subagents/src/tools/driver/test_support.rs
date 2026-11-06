@@ -40,3 +40,33 @@ impl TreeDriver {
         .await
     }
 }
+
+impl TreeDriver {
+    /// A test's stand-in for the next host's custody take after a planned
+    /// handoff gave the tree's custody up ([`Self::release_custody`]): this
+    /// driver takes it again.
+    ///
+    /// # Errors
+    ///
+    /// The take was refused.
+    pub fn retake_custody_for_test(&self) -> Result<(), crate::tree::CustodyError> {
+        let Ok(slot) = &self.custody.hold else {
+            return Ok(());
+        };
+        let tree_id = self
+            .tree
+            .lock()
+            .map(|tree| tree.tree_id.clone())
+            .unwrap_or_else(|poisoned| poisoned.into_inner().tree_id.clone());
+        let mut slot = slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if slot.is_none() {
+            *slot = Some(crate::tree::acquire_custody(
+                self.custody.store.custody_port(),
+                &tree_id,
+            )?);
+        }
+        Ok(())
+    }
+}
