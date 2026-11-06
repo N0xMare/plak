@@ -2205,8 +2205,10 @@ recorded for it, a cut after the row continues it once, any earlier cut holds
 it. In every child shape a cut never leaves the child `recovery_required`.
 `tree_grandchild_survives_loss` is that child with a spawn of its own: the
 grandchild's request waits, every cut keeps the grandchild node, and no cut
-or relaunch dispatches it again; hub shutdown retires the grandchild before
-the child (spec 03 §16), so its twins commit in one order. `tree_child_parked_job_loss` parks the child
+or relaunch dispatches it again. The child's spawn opens only once the root's
+second request is dispatched and the stores are quiet, so the root's round
+pass and the spawn's tree writes never race, and hub shutdown retires the
+grandchild before the child (spec 03 §16), so its twins commit in one order. `tree_child_parked_job_loss` parks the child
 on one local process; the process appends one line per start, and no cut or
 relaunch may start it twice. Both quit with the descendant still running, so
 their cuts are `HELD` once that work exists and `REQUEUED` or

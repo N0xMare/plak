@@ -22,6 +22,8 @@ const GRAND_SCRIPT: &str = "grandchild-script.json";
 const CHILD_EVIDENCE: &str = "child-evidence.jsonl";
 const GRAND_EVIDENCE: &str = "grandchild-evidence.jsonl";
 const CHILD_PARKED: &str = "lineage-parked";
+const ROOT_EVIDENCE: &str = "evidence.jsonl";
+const SPAWN_GATE: &str = "lineage-spawn";
 const NEVER: &str = "lineage-never";
 const MARKER: &str = "parked-job-starts";
 const QUIET: std::time::Duration = std::time::Duration::from_secs(1);
@@ -58,13 +60,15 @@ pub(super) fn parked_script() -> Value {
 }
 
 pub(super) fn configure_grandchild(fixture: &Fixture) {
-    // The second step never opens. Answering would fail the submit schema
-    // and retire the child, which closes the grandchild.
+    // The spawn waits for its gate (see `lifecycle`). The second step never
+    // opens. Answering would fail the submit schema and retire the child,
+    // which closes the grandchild.
     let child = json!({
         "version": 1,
         "repeat_last_step": true,
         "steps": [
-            {"output": {"tool": {"name": "spawn_agent", "arguments": {
+            {"stream": [{"gate": {"file": fixture.root.join(SPAWN_GATE)}}],
+             "output": {"tool": {"name": "spawn_agent", "arguments": {
                 "template": "note",
                 "tier": "read_only",
                 "description": "note",
@@ -188,8 +192,29 @@ fn node_status(fixture: &Fixture, agent: &str) -> Option<NodeStatus> {
         .and_then(|tree| tree.rows().node(agent).ok().map(|node| node.status))
 }
 
+/// Whether the commit trace has stayed the same length for [`QUIET`].
+fn trace_quiet(fixture: &Fixture, state: &mut Lifecycle) -> bool {
+    let len = std::fs::read_to_string(fixture.root.join("commit-trace.jsonl")).map_or(0, |trace| {
+        trace
+            .lines()
+            .filter(|line| line.contains("\"indexed\":true"))
+            .count()
+    });
+    match state.trace_quiet {
+        Some((seen, since)) if seen == len => since.elapsed() >= QUIET,
+        _ => {
+            state.trace_quiet = Some((len, std::time::Instant::now()));
+            false
+        }
+    }
+}
+
 /// Prompts, lets the root answer once the descendant or the parked process
 /// is durable and the stores have gone quiet, then quits.
+///
+/// The grandchild's spawn opens only once the root's second request is
+/// dispatched and the stores have gone quiet: the root's round pass and the
+/// child's spawn write the one tree, and otherwise race.
 pub(super) fn lifecycle(
     fixture: &Fixture,
     records: &[Value],
@@ -200,28 +225,24 @@ pub(super) fn lifecycle(
         state.sent = true;
         return Some(prompt_frame("crash-sweep-original-prompt"));
     }
+    let spawn_gate = fixture.root.join(SPAWN_GATE);
+    if !parked_job
+        && state.sent
+        && !spawn_gate.exists()
+        && evidence_dispatches(fixture, ROOT_EVIDENCE) >= 2
+        && trace_quiet(fixture, state)
+    {
+        std::fs::write(&spawn_gate, b"").unwrap();
+        state.trace_quiet = None;
+    }
     let ready = if parked_job {
         marker_lines(fixture) >= 1
     } else {
         evidence_dispatches(fixture, GRAND_EVIDENCE) >= 1
     };
     let parked = fixture.root.join(CHILD_PARKED);
-    if state.sent && !parked.exists() && ready {
-        let len =
-            std::fs::read_to_string(fixture.root.join("commit-trace.jsonl")).map_or(0, |trace| {
-                trace
-                    .lines()
-                    .filter(|line| line.contains("\"indexed\":true"))
-                    .count()
-            });
-        match state.trace_quiet {
-            Some((seen, since)) if seen == len => {
-                if since.elapsed() >= QUIET {
-                    std::fs::write(&parked, b"").unwrap();
-                }
-            }
-            _ => state.trace_quiet = Some((len, std::time::Instant::now())),
-        }
+    if state.sent && !parked.exists() && ready && trace_quiet(fixture, state) {
+        std::fs::write(&parked, b"").unwrap();
     }
     let answered = state.sent
         && parked.exists()
