@@ -5,6 +5,7 @@ use crate::error::CliResult;
 
 pub(super) fn registrations(
     _limits: plakous::tools::web::FetchUrlLimits,
+    _image_results: bool,
 ) -> CliResult<Vec<ToolRegistration>> {
     Err(CapabilityUnavailable {
         id: "fetch_url",

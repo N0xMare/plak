@@ -495,6 +495,11 @@ impl ToolProjectionExposureV2 {
             (ToolProjectionLoweringV2::PiBash, ToolProjectionRaisingV2::ProcessResult) => {
                 "pi_background_notice_text_v1"
             }
+            // Generic envelopes now join text and retain model-content parts.
+            // Read programs above do not execute this path.
+            (_, ToolProjectionRaisingV2::TextResultObjectV1) => {
+                "text_result_object_model_content_v2"
+            }
             _ => raising.operation(),
         };
         let raising_identity = projection_program_identity(

@@ -3812,7 +3812,7 @@ admission. Lowering: Responses sends inline bytes as a `data:` URL
 `input_image` for user and tool-result images (the OpenAI Platform, Codex,
 Codex Lite, xAI Platform and SuperGrok request policies admit user
 `input_image`; OpenRouter Responses does not). The SuperGrok context upper
-bound counts each user `input_image` at the conservative per-image token bound
+bound counts each user and tool-result `input_image` at the conservative per-image token bound
 instead of its data-URL bytes. Messages sends `{type: "image", source: {type: "base64",
 media_type, data}}` user blocks and the same blocks inside `tool_result`
 content for direct-lineage tool images. Chat sends user `image_url` parts with
@@ -5506,8 +5506,26 @@ advertises the canonical 4,096-entry `head_limit` maximum.
 A Direct presentation that raises canonical text into a `{"result": string}`
 object (`text_result_object_v1`, including the Claude cat-n, pi read and
 Grok plain-metadata read programs) is constructed only over an output schema that admits every such
-object: closed, with exactly the one string property `result`. Raising then
-never fails on size: every result the canonical output contract admits raises,
+object: closed, with exactly the one string property `result`. Generic raising
+joins canonical text parts in order with a newline between parts, raises that
+text as the first part, and preserves non-text model-content parts after it
+in their original order. Image-only results have an empty `result` string.
+Multiple text parts and images are legitimate canonical content and MUST NOT
+fail the turn. `fetch_url` uses the same installed visual-read acceptance fact
+as file image reads: an accepting route retains the image; otherwise it keeps
+the metadata head and appends the line
+`[1 image(s) omitted: this tool's result carries text only here]`. A missing
+visual-read fact also omits it. The product's single subscription route-policy
+switch `SUPERGROK_TOOL_RESULT_IMAGES` in its tool-plan compiler may restrict
+fetched images independently of user image input; false selects that same
+metadata-plus-note result. The switch is bound into the fetch executor identity.
+The generic program's executable identity is
+`text_result_object_model_content_v2` (replacing `text_result_object_v1`);
+projection identities, receipts and frozen bindings therefore change for all
+menus using that generic program, on every route. The separately identified
+Claude cat-n, pi read and Grok read programs retain their identities: they do
+not execute generic content raising. No persisted encoding changes.
+Raising never fails on size: every result the canonical output contract admits raises,
 bounded by that contract (the wrapper escapes it once more), not by the
 semantic-JSON string bound. The runtime's per-result observation cut (§10.3)
 is what brings the raised text under the model-visible bound, and it keeps the

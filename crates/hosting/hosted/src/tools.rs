@@ -241,7 +241,10 @@ impl ProductToolExtensions {
             );
         }
         if fetch_url {
-            appended.extend(fetch_url::registrations(plan.fetch_url_limits())?);
+            appended.extend(fetch_url::registrations(
+                plan.fetch_url_limits(),
+                plan.fetch_url_images(),
+            )?);
         }
         let mut image_slot = None;
         if image_gen {

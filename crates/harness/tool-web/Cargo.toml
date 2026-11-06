@@ -37,6 +37,9 @@ fetch = ["dep:htmd", "dep:plakous-http", "dep:tokio", "dep:url"]
 image-gen = []
 
 [dev-dependencies]
+plakous-agent.workspace = true
+plakous-responses.workspace = true
+plakous-test-support = { path = "../../../tests/support/plakous-test-support" }
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
 rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 tempfile.workspace = true

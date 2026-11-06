@@ -22,13 +22,13 @@ use crate::native_auth::{
     XAI_GROK_PRIMARY_CODING_MODEL,
 };
 
-pub(crate) const GROK_CONTEXT_ACCOUNTING_REVISION: &str = "responses-wire-accounting-v3";
+pub(crate) const GROK_CONTEXT_ACCOUNTING_REVISION: &str = "responses-wire-accounting-v4";
 pub(crate) const GROK_CONTEXT_PROJECTION_REVISION: &str = "responses-canonical-grok-v3";
 pub(crate) const GROK_OUTPUT_RESERVATION_REVISION: &str = "xai-grok-wire-max-output-v1";
 pub(crate) const GROK_MEASUREMENT_CERTIFICATE_ID: &str = "xai-grok-responses-upper-bound";
-pub(crate) const GROK_MEASUREMENT_CERTIFICATE_REVISION: &str = "release-2026-08-10-r2";
+pub(crate) const GROK_MEASUREMENT_CERTIFICATE_REVISION: &str = "release-2026-08-10-r3";
 pub(crate) const GROK_ESTIMATOR_METHOD: &str = "complete-wire-byte-occurrence-upper-bound";
-pub(crate) const GROK_ESTIMATOR_REVISION: &str = "grok-responses-v2";
+pub(crate) const GROK_ESTIMATOR_REVISION: &str = "grok-responses-v3";
 
 const RESPONSES_FAMILY: &str = "responses-family";
 const FIXED_MARGIN: u64 = 4_096;

@@ -33,6 +33,7 @@ enum Kind {
 pub(crate) fn render(
     fetched: &Fetched,
     spill: &mut dyn FnMut(&[u8]) -> Option<String>,
+    accepts_images: bool,
 ) -> Result<ToolOutcome, ToolRuntimeError> {
     let mut head = header(fetched);
     if fetched.status.as_u16() >= 400 {
@@ -84,7 +85,7 @@ pub(crate) fn render(
             head.push_str(&bounded(text, spill));
             ToolOutcome::success_text(head)
         }
-        Kind::Image(media_type) => image(fetched, head, media_type),
+        Kind::Image(media_type) => image(fetched, head, media_type, accepts_images),
         Kind::Binary => ToolOutcome::failure_text(format!(
             "fetch_url returned binary content ({}, {}); use a shell download if you need the file",
             essence.as_deref().unwrap_or("no content type"),
@@ -175,6 +176,7 @@ fn image(
     fetched: &Fetched,
     mut head: String,
     declared: &'static str,
+    accepts_images: bool,
 ) -> Result<ToolOutcome, ToolRuntimeError> {
     let limit = usize::try_from(MAX_STANDARD_IMAGE_BYTES).unwrap_or(usize::MAX);
     if fetched.truncated || fetched.body.len() > limit {
@@ -201,6 +203,10 @@ fn image(
         "image: media_type={declared} bytes={} dimensions={dimensions}",
         fetched.body.len()
     );
+    if !accepts_images {
+        head.push_str("\n[1 image(s) omitted: this tool's result carries text only here]");
+        return ToolOutcome::success_text(head);
+    }
     let content = |error| {
         ToolRuntimeError::from_sensitive_source(
             ToolRuntimeErrorKind::Execution,

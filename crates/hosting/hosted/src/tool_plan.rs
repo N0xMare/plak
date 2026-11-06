@@ -372,6 +372,7 @@ pub(crate) struct ToolPlan {
     mcp_registrations: Vec<plakous::tools::ToolRegistration>,
     notices: Vec<String>,
     fetch_url_limits: FetchUrlLimits,
+    fetch_url_images: bool,
     retrieval_options: RetrievalOptions,
 }
 
@@ -574,6 +575,7 @@ impl ToolPlan {
             mcp_registrations: Vec::new(),
             notices: Vec::new(),
             fetch_url_limits: FetchUrlLimits::default(),
+            fetch_url_images: true,
             retrieval_options: RetrievalOptions::default(),
         }
     }
@@ -630,6 +632,10 @@ impl ToolPlan {
     pub(crate) fn with_fetch_url_limits(mut self, limits: FetchUrlLimits) -> Self {
         self.fetch_url_limits = limits;
         self
+    }
+
+    pub(crate) const fn fetch_url_images(&self) -> bool {
+        self.fetch_url_images
     }
 
     /// The options the planned retrieval wrappers fix on every call.
@@ -708,6 +714,10 @@ pub(crate) enum ToolRoute {
     XaiApi,
     OpenRouter,
 }
+
+// One integration switch for the subscription proxy's existing tool-image
+// shape. False retains fetched metadata but omits the image on this route.
+const SUPERGROK_TOOL_RESULT_IMAGES: bool = true;
 
 impl ToolRoute {
     #[cfg(test)]
@@ -847,6 +857,7 @@ pub(crate) fn bind_tool_plan_on(
             image_slot.clone().map(|slot| slot as Arc<dyn ImageGenPort>),
         ),
     )?;
+    plan.fetch_url_images = !matches!(route, ToolRoute::Grok) || SUPERGROK_TOOL_RESULT_IMAGES;
     if let Some(binding) = plan.retrieval.as_mut() {
         binding.slot = slot;
     }

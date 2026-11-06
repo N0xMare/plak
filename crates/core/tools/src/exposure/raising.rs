@@ -275,14 +275,27 @@ pub(super) fn raise_text_result_object(
     if outcome.kind() != crate::ToolOutcomeKind::Success {
         return Ok(outcome);
     }
-    let [ToolResultPart::Text(text)] = outcome.parts() else {
-        return Err(ToolRuntimeError::new(
-            ToolRuntimeErrorKind::Execution,
-            "canonical projection result is not one text value",
-        ));
-    };
+    let mut texts = Vec::new();
+    let mut content = Vec::new();
+    for part in outcome.parts() {
+        match part {
+            ToolResultPart::Text(text) => texts.push(text.text()),
+            _ => content.push(part.clone()),
+        }
+    }
+    let result = texts.join("\n");
     let update = outcome.process_session_update();
-    raise_text_result_object_from_result(text.text(), update)
+    let raised = raise_text_result_object_from_result(&result, update.clone())?;
+    if content.is_empty() {
+        return Ok(raised);
+    }
+    let mut parts = raised.parts().to_vec();
+    parts.extend(content);
+    let raised = ToolOutcome::raised_content(parts)?;
+    Ok(match update {
+        Some(update) => raised.with_process_session_update(update),
+        None => raised,
+    })
 }
 
 /// Whether every `{"result": <string>}` object is an instance of `schema`.

@@ -392,11 +392,17 @@ impl ToolOutcome {
                 &error,
             )
         })?;
+        Self::raised_content(vec![ToolResultPart::Text(text)])
+    }
+
+    /// Retains canonical model content after a raised text envelope. An
+    /// image-only canonical result needs one extra part for that envelope.
+    pub(crate) fn raised_content(parts: Vec<ToolResultPart>) -> Result<Self, ToolRuntimeError> {
         Self::new(
             ToolOutcomeKind::Success,
-            vec![ToolResultPart::Text(text)],
+            parts,
             ToolOutcomeLimits {
-                max_parts: 1,
+                max_parts: MAX_TOOL_OUTCOME_PARTS + 1,
                 max_bytes: 4 * MAX_TOOL_OUTCOME_BYTES,
             },
         )

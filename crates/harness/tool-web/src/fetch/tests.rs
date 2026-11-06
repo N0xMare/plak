@@ -20,6 +20,8 @@ use url::Url;
 use super::content::{MAX_HTML_DEPTH, bounded, html_to_markdown, render};
 use super::*;
 
+mod turn;
+
 type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 
 const UA: &str = "plak/0.0.0-test";
@@ -166,7 +168,7 @@ fn text(outcome: &ToolOutcome) -> String {
 }
 
 fn rendered(fetched: &Fetched) -> TestResult<ToolOutcome> {
-    Ok(render(fetched, &mut no_spill)?)
+    Ok(render(fetched, &mut no_spill, true)?)
 }
 
 fn png(width: u32, height: u32) -> Vec<u8> {
@@ -263,6 +265,24 @@ fn invalid_arguments_are_refused_before_any_request() {
             "{arguments}"
         );
     }
+}
+
+#[test]
+fn tool_image_route_policy_is_bound_into_the_fetch_executor() -> TestResult {
+    let pack = FetchUrlPack::new(FetchUrlLimits::default(), UA)?;
+    let identity = |pack: &FetchUrlPack| -> TestResult<_> {
+        let mut builder = plakous_tools::ToolRegistryBuilder::default();
+        for registration in pack.registrations()? {
+            builder.register(registration)?;
+        }
+        Ok(builder
+            .freeze()
+            .identity(&ToolName::new("fetch_url")?)
+            .ok_or("missing fetch identity")?
+            .executor_binding_identity())
+    };
+    assert_ne!(identity(&pack)?, identity(&pack.with_image_results(false))?);
+    Ok(())
 }
 
 #[test]

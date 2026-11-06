@@ -48,6 +48,7 @@ const RENDER_STACK_BYTES: usize = 32 * 1024 * 1024;
 #[derive(Clone)]
 pub struct FetchUrlPack {
     fetcher: Arc<Fetcher>,
+    image_results: bool,
 }
 
 impl FetchUrlPack {
@@ -73,6 +74,7 @@ impl FetchUrlPack {
         let user_agent = HeaderValue::from_str(user_agent)
             .map_err(registration_error("fetch_url user agent is invalid"))?;
         Ok(Self {
+            image_results: true,
             fetcher: Arc::new(Fetcher {
                 client,
                 limits,
@@ -85,6 +87,14 @@ impl FetchUrlPack {
     #[must_use]
     pub fn limits(&self) -> FetchUrlLimits {
         self.fetcher.limits
+    }
+
+    /// Restricts image results for a route whose tool-image wire is not admitted.
+    /// The bound visual-read fact still gates image input independently.
+    #[must_use]
+    pub const fn with_image_results(mut self, allowed: bool) -> Self {
+        self.image_results = allowed;
+        self
     }
 
     /// The one registration. Its identity names no limit: the bounds change
@@ -106,11 +116,19 @@ impl FetchUrlPack {
                 .map_err(registration_error("fetch_url id is invalid"))?,
             ToolExecutorId::new("plakous.web.fetch_url.executor.v1")
                 .map_err(registration_error("fetch_url executor id is invalid"))?,
-            ToolExecutorBindingIdentity::new(1, &[ISSUER, TOOL_NAME.as_bytes()])
-                .map_err(registration_error("fetch_url binding identity is invalid"))?,
+            ToolExecutorBindingIdentity::new(
+                2,
+                &[
+                    ISSUER,
+                    TOOL_NAME.as_bytes(),
+                    &[u8::from(self.image_results)],
+                ],
+            )
+            .map_err(registration_error("fetch_url binding identity is invalid"))?,
             definition,
             Arc::new(FetchUrlTool {
                 fetcher: Arc::clone(&self.fetcher),
+                image_results: self.image_results,
             }),
         )
         .nested_eligible())
@@ -446,6 +464,7 @@ fn redirect_target(current: &Url, location: &str) -> Result<Url, FetchError> {
 
 struct FetchUrlTool {
     fetcher: Arc<Fetcher>,
+    image_results: bool,
 }
 
 impl ToolExecutor for FetchUrlTool {
@@ -476,10 +495,13 @@ impl ToolExecutor for FetchUrlTool {
                 }
             };
             let sessions = context.environment().existing_joined_process_sessions();
+            let accepts_images = self.image_results
+                && plakous_tools::internal::visual_read(context.environment())
+                    .is_some_and(plakous_tools::internal::VisualReadSession::accepts_images);
             let rendered = tokio::select! {
                 biased;
                 () = context.cancellation().cancelled() => return Err(cancelled()),
-                rendered = render_off_thread(fetched, sessions, deadline, self.fetcher.limits) => rendered,
+                rendered = render_off_thread(fetched, sessions, deadline, self.fetcher.limits, accepts_images) => rendered,
             }?;
             Ok(rendered.with_presentation_subject(subject))
         })
@@ -497,6 +519,7 @@ async fn render_off_thread(
     sessions: Option<plakous_tools::JoinedProcessSessions>,
     deadline: Instant,
     limits: FetchUrlLimits,
+    accepts_images: bool,
 ) -> Result<ToolOutcome, ToolRuntimeError> {
     let (sender, receiver) = tokio::sync::oneshot::channel();
     std::thread::Builder::new()
@@ -509,7 +532,7 @@ async fn render_off_thread(
                     .and_then(|sessions| sessions.spill_output(bytes))
                     .map(|file| file.path)
             };
-            let _ = sender.send(content::render(&fetched, &mut spill));
+            let _ = sender.send(content::render(&fetched, &mut spill, accepts_images));
         })
         .map_err(|error| {
             ToolRuntimeError::from_sensitive_source(

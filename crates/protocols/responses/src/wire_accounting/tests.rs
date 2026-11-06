@@ -2,6 +2,43 @@ use super::*;
 use serde_json::json;
 
 #[test]
+fn tool_result_images_use_the_same_accounting_as_user_images() -> Result<(), WireAccountingError> {
+    let parts = json!([
+        {"type":"input_text","text":"{\"result\":\"image head\"}"},
+        {"type":"input_image","image_url":"data:image/png;base64,AQID"},
+        {"type":"input_image","image_url":"data:image/png;base64,BAUG"}
+    ]);
+    let body = |input| {
+        json!({
+            "model":"model-a", "input":input, "stream":true, "store":false,
+            "include":["reasoning.encrypted_content"]
+        })
+    };
+    let tool = inspect_wire_occurrences(&body(json!([
+        {"type":"function_call_output","call_id":"image-call","output":parts}
+    ])))?;
+    let user = inspect_wire_occurrences(&body(json!([
+        {"type":"message","role":"user","content":parts}
+    ])))?;
+    assert_eq!(tool.count(ResponsesWireOccurrence::InputImage), 2);
+    assert_eq!(tool.count(ResponsesWireOccurrence::InputText), 1);
+    assert_eq!(tool.image_url_bytes(), 52);
+    assert_eq!(tool.image_url_bytes(), user.image_url_bytes());
+    for part in [
+        json!({"type":"output_text","text":"not tool content"}),
+        json!({"type":"refusal","refusal":"not tool content"}),
+    ] {
+        assert_eq!(
+            inspect_wire_occurrences(&body(json!([
+                {"type":"function_call_output","call_id":"image-call","output":[part]}
+            ]))),
+            Err(WireAccountingError::Unsupported)
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn closed_wire_shapes_are_counted_exactly() -> Result<(), WireAccountingError> {
     let body = json!({
         "model": "model-a",

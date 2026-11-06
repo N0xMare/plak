@@ -235,6 +235,86 @@ fn identity_raising_validates_and_text_raising_matches_its_schema()
 }
 
 #[test]
+fn text_result_object_joins_text_and_preserves_model_content()
+-> Result<(), Box<dyn std::error::Error>> {
+    use plakous_model::{ImageBlock, MediaSource, TextBlock};
+
+    let (map, receipt) = text_projection(ToolProjectionRaisingV2::TextResultObjectV1)?;
+    let image = ToolResultPart::Image(ImageBlock::new(
+        "image/png",
+        MediaSource::bytes(vec![1, 2, 3])?,
+    )?);
+    let first = ToolResultPart::Text(TextBlock::new("head", None)?);
+    let second = ToolResultPart::Text(TextBlock::new("tail", None)?);
+    for (parts, expected) in [
+        (vec![first.clone(), second.clone()], "head\ntail"),
+        (
+            vec![first.clone(), image.clone(), second, image.clone()],
+            "head\ntail",
+        ),
+        (vec![first, image.clone()], "head"),
+        (
+            vec![
+                ToolResultPart::Text(TextBlock::new("head\n", None)?),
+                image.clone(),
+            ],
+            "head\n",
+        ),
+        (vec![image.clone()], ""),
+    ] {
+        let content = parts
+            .iter()
+            .filter(|part| !matches!(part, ToolResultPart::Text(_)))
+            .cloned()
+            .collect::<Vec<_>>();
+        let outcome = map.raise(&receipt, ToolOutcome::success(parts)?)?;
+        assert!(outcome.is_success());
+        let [ToolResultPart::Text(text), rest @ ..] = outcome.parts() else {
+            return Err("raised result was not one text object".into());
+        };
+        assert_eq!(rest, content);
+        assert_eq!(
+            serde_json::from_str::<Value>(text.text())?,
+            json!({"result": expected})
+        );
+    }
+    let failure = ToolOutcome::failure_text("fetch refused")?;
+    assert_eq!(map.raise(&receipt, failure.clone())?, failure);
+    let full = ToolOutcome::success(vec![image; crate::MAX_TOOL_OUTCOME_PARTS])?;
+    let raised = map.raise(&receipt, full)?;
+    assert_eq!(raised.parts().len(), crate::MAX_TOOL_OUTCOME_PARTS + 1);
+    Ok(())
+}
+
+#[test]
+fn text_result_program_rotation_rejects_an_old_receipt() -> Result<(), Box<dyn std::error::Error>> {
+    let (map, mut receipt) = text_projection(ToolProjectionRaisingV2::TextResultObjectV1)?;
+    let entry = map.entries().first().ok_or("missing entry")?;
+    let program = |name: &[u8]| {
+        Digest::sha256(
+            DigestDomain::ToolDefinition,
+            2,
+            &[
+                b"plakous-tools/projection-program-v2",
+                b"raising",
+                name,
+                entry.output_schema().digest().bytes(),
+            ],
+        )
+    };
+    assert_eq!(
+        receipt.raising_identity,
+        program(b"text_result_object_model_content_v2")?
+    );
+    receipt.raising_identity = program(b"text_result_object_v1")?;
+    assert!(
+        map.raise(&receipt, ToolOutcome::success_text("head")?)
+            .is_err()
+    );
+    Ok(())
+}
+
+#[test]
 fn text_result_object_raises_every_result_its_canonical_contract_permits()
 -> Result<(), Box<dyn std::error::Error>> {
     let (wrapped, receipt) = text_projection(ToolProjectionRaisingV2::TextResultObjectV1)?;

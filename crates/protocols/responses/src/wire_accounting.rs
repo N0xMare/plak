@@ -38,7 +38,7 @@ pub enum ResponsesWireOccurrence {
     ReasoningSummary,
     /// One structurally bounded, otherwise opaque replay item.
     OpaqueReplay,
-    /// An `input_image` user message content part. Its `image_url` bytes are
+    /// An `input_image` user or tool-result content part. Its `image_url` bytes are
     /// reported separately by [`ResponsesWireOccurrenceCounts::image_url_bytes`].
     InputImage,
 }
@@ -328,13 +328,15 @@ fn inspect_function_call_output(
         Some(Value::String(_)) => {}
         Some(Value::Array(parts)) => {
             for part in parts {
-                let part = part.as_object().ok_or(WireAccountingError::Malformed)?;
-                if required_nonempty_string(part, "type")? != "input_text" {
+                // Tool results use the same admitted input_text/input_image
+                // parts as user content, including the per-image token bound.
+                if !matches!(
+                    part.get("type").and_then(Value::as_str),
+                    Some("input_text" | "input_image")
+                ) {
                     return Err(WireAccountingError::Unsupported);
                 }
-                validate_members(part, &["type", "text"], &[])?;
-                required_string(part, "text")?;
-                counts.increment(ResponsesWireOccurrence::InputText)?;
+                inspect_message_part(part, "user", counts)?;
             }
         }
         _ => return Err(WireAccountingError::Malformed),

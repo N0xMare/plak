@@ -4649,8 +4649,11 @@ name = "plakous-tool-web"
 version = "0.0.3"
 dependencies = [
  "htmd",
+ "plakous-agent",
  "plakous-http",
  "plakous-model",
+ "plakous-responses",
+ "plakous-test-support",
  "plakous-tools",
  "rcgen",
  "rustls",

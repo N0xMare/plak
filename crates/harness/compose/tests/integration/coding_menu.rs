@@ -91,7 +91,7 @@ fn request(
 }
 
 #[test]
-fn claude_read_and_edit_raise_real_text_and_reject_non_text_success()
+fn claude_read_rejects_malformed_observations_and_edit_joins_text()
 -> Result<(), Box<dyn std::error::Error>> {
     let projection = claude_projection()?;
     for (call, tool, arguments, canonical_text, expected_result) in [
@@ -126,7 +126,18 @@ fn claude_read_and_edit_raise_real_text_and_reject_non_text_success()
             ToolResultPart::Text(TextBlock::new("first", None)?),
             ToolResultPart::Text(TextBlock::new("second", None)?),
         ])?;
-        assert!(projection.raise(&receipt, mismatch).is_err());
+        if tool == "Read" {
+            assert!(projection.raise(&receipt, mismatch).is_err());
+        } else {
+            let raised = projection.raise(&receipt, mismatch)?;
+            let [ToolResultPart::Text(text)] = raised.parts() else {
+                return Err("joined edit was not one text result".into());
+            };
+            assert_eq!(
+                serde_json::from_str::<Value>(text.text())?,
+                json!({"result":"first\nsecond"})
+            );
+        }
     }
     Ok(())
 }
@@ -198,34 +209,34 @@ fn claude_read_numbers_empty_and_truncated_slices() -> Result<(), Box<dyn std::e
 }
 
 #[test]
-fn claude_lossless_read_identity_changes_only_the_numbered_raising_program()
+fn claude_read_and_generic_text_program_identities_are_exact()
 -> Result<(), Box<dyn std::error::Error>> {
     let direct = claude_projection()?;
     let nested = claude_read_projection(true)?;
-    for (projection, name, prior_program, changed) in [
-        (&direct, "Read", "text_result_object_v1", true),
-        (&direct, "Edit", "text_result_object_v1", false),
-        (&direct, "Write", "text_result_object_v1", false),
-        (&nested, "Read", "raw_utf8_v1", false),
+    for (projection, name, program) in [
+        (
+            &direct,
+            "Read",
+            "claude_cat_n_lossless_text_result_object_v2",
+        ),
+        (&direct, "Edit", "text_result_object_model_content_v2"),
+        (&direct, "Write", "text_result_object_model_content_v2"),
+        (&nested, "Read", "raw_utf8_v1"),
     ] {
         let entry = projection
             .by_exposed(&ToolName::new(name)?)
             .ok_or("missing entry")?;
-        let prior_identity = Digest::sha256(
+        let expected = Digest::sha256(
             DigestDomain::ToolDefinition,
             2,
             &[
                 b"plakous-tools/projection-program-v2",
                 b"raising",
-                prior_program.as_bytes(),
+                program.as_bytes(),
                 entry.output_schema().digest().bytes(),
             ],
         )?;
-        assert_eq!(
-            entry.raising_identity() != prior_identity,
-            changed,
-            "{name}"
-        );
+        assert_eq!(entry.raising_identity(), expected, "{name}");
     }
     Ok(())
 }

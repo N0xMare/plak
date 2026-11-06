@@ -475,6 +475,10 @@ fn fetch_url_binds_on_every_route_and_registers_after_the_wrappers() -> TestResu
         );
         assert!(plan.retrieval().is_none(), "{route:?}");
         assert_eq!(plan.fetch_url_limits(), FetchUrlLimits::default());
+        assert_eq!(
+            plan.fetch_url_images(),
+            !matches!(route, ToolRoute::Grok) || SUPERGROK_TOOL_RESULT_IMAGES
+        );
         let extensions = crate::tools::ProductToolExtensions::empty()
             .with_plan(&plan)
             .map_err(|error| error.to_string())?;

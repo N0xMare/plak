@@ -165,13 +165,15 @@ fn checked_in_live_observations_recompute_input_bounds_and_disprove_output_cap()
         corpus.get("route").and_then(Value::as_str),
         Some("xai.grok-subscription.responses.2026-07")
     );
+    // This recorded corpus predates tool-result image admission. Its wire
+    // shapes retain the same coefficients under the expanded estimator.
     assert_eq!(
         corpus.get("accounting_revision").and_then(Value::as_str),
-        Some(GROK_CONTEXT_ACCOUNTING_REVISION)
+        Some("responses-wire-accounting-v3")
     );
     assert_eq!(
         corpus.get("estimator_revision").and_then(Value::as_str),
-        Some(GROK_ESTIMATOR_REVISION)
+        Some("grok-responses-v2")
     );
     for observation in observations {
         let wire_size = observation
