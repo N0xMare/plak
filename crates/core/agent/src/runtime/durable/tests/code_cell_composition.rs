@@ -231,9 +231,25 @@ pub(super) struct FakeCompositionIntegration {
 }
 
 pub(super) fn neutral_composition_test_descriptor() -> TestResult<ResolvedModelDescriptor> {
+    neutral_composition_test_descriptor_with_images(true)
+}
+
+fn neutral_composition_test_descriptor_with_images(
+    images: bool,
+) -> TestResult<ResolvedModelDescriptor> {
     let observed_at = Timestamp::new(1, 0)?;
     let base = durable_test_descriptor_at("test.subscription_route", observed_at)?;
     let protocol = ProtocolId::new("test.protocol")?;
+    let mut features = base.capabilities().features().clone();
+    if images {
+        features.insert(
+            Capability::ImageInput,
+            base.capabilities()
+                .get(Capability::Tools)
+                .ok_or("tools support")?
+                .clone(),
+        );
+    }
     Ok(ResolvedModelDescriptor::new(
         &plakous_model::StandardIntegrationAuthority::release_owned(),
         protocol.clone(),
@@ -242,7 +258,7 @@ pub(super) fn neutral_composition_test_descriptor() -> TestResult<ResolvedModelD
         None,
         Some(ModelFamilyId::new("responses-family")?),
         ModelAdapterProfileId::new("test.compat.2026-07-31.r1")?,
-        base.capabilities().clone(),
+        CapabilitySet::new(features, BTreeMap::new()),
     )
     .with_context_contract(durable_test_context_contract(protocol, observed_at)?))
 }
@@ -1174,6 +1190,18 @@ async fn a_cell_with_more_media_bytes_than_a_result_holds_completes_the_turn() -
 }
 
 #[tokio::test]
+async fn composition_images_without_image_input_are_omitted() -> TestResult {
+    let parts = fitted_composition_cell("emit images without input", None).await?;
+    assert!(
+        parts
+            .iter()
+            .all(|part| !matches!(part, ToolResultPart::Image(_)))
+    );
+    assert!(parts.iter().any(|part| matches!(part, ToolResultPart::Text(text) if text.text().contains("3 image(s) omitted"))));
+    Ok(())
+}
+
+#[tokio::test]
 async fn a_cell_with_excessive_text_bytes_completes_the_turn() -> TestResult {
     let parts = fitted_composition_cell("emit large text", None).await?;
     let [ToolResultPart::Text(_), ToolResultPart::Text(text)] = parts.as_slice() else {
@@ -1259,7 +1287,8 @@ async fn composition_cell_observation(
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
     let registry = neutral_composition_test_registry()?;
-    let descriptor = neutral_composition_test_descriptor()?;
+    let descriptor =
+        neutral_composition_test_descriptor_with_images(source != "emit images without input")?;
     let authority = artifact_authority(&descriptor, 1)?;
     let mut model =
         ArtifactModel::new(descriptor.clone(), authority.clone(), 0, 0xc0de_5301, false)
@@ -1283,7 +1312,8 @@ async fn composition_cell_observation(
             LocalCompositionLifecycle::RootTurnJoined,
         ),
     )?
-    .config(AgentConfig::default().with_observation_budget_cap_bytes(cap));
+    .config(AgentConfig::default().with_observation_budget_cap_bytes(cap))
+    .image_normalizer(Arc::new(FixtureImageNormalizer));
     let store = Arc::new(TestCreateStore::default());
     store
         .fail_second_effect_preparation

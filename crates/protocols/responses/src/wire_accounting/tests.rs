@@ -27,6 +27,7 @@ fn tool_result_images_use_the_same_accounting_as_user_images() -> Result<(), Wir
     for part in [
         json!({"type":"output_text","text":"not tool content"}),
         json!({"type":"refusal","refusal":"not tool content"}),
+        json!({"type":"input_image","image_url":"data:image/png;base64,AQID","detail":"high"}),
     ] {
         assert_eq!(
             inspect_wire_occurrences(&body(json!([
@@ -35,6 +36,12 @@ fn tool_result_images_use_the_same_accounting_as_user_images() -> Result<(), Wir
             Err(WireAccountingError::Unsupported)
         );
     }
+    assert_eq!(
+        inspect_wire_occurrences(&body(json!([
+            {"type":"message","role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,AQID","detail":"high"}]}
+        ]))),
+        Err(WireAccountingError::Unsupported)
+    );
     Ok(())
 }
 

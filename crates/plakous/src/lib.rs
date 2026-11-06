@@ -1401,15 +1401,16 @@ pub mod xai {
     pub use crate::responses_retrieval::XaiRetrievalPort;
     pub use plakous_xai::XAI_PLATFORM_REVIEW_DUE_AT_UNIX_SECONDS;
     pub use plakous_xai::{
-        ApiKey, GrokCodingProfile, SUPERGROK_REFERENCE_CLIENT_VERSION, SUPERGROK_RESPONSES_ORIGIN,
-        SUPERGROK_RESPONSES_PATH, SuperGrokResponsesDialect, XAI_PLATFORM_GROK_46_CONTEXT_TOKENS,
-        XAI_PLATFORM_GROK_46_MODEL, XAI_PLATFORM_MAX_OUTPUT_TOKENS, XaiApiModel, XaiApiModelError,
-        XaiApiModelStatus, XaiAuthError, XaiGrokSubscriptionRoute, XaiListedModel, XaiModel,
-        XaiModelError, XaiPlatformApiKeyAuthority, XaiPlatformApiKeyRequest, XaiPlatformBuildError,
+        ApiKey, GrokCodingProfile, SUPERGROK_ALLOW_TOOL_RESULT_IMAGES,
+        SUPERGROK_REFERENCE_CLIENT_VERSION, SUPERGROK_RESPONSES_ORIGIN, SUPERGROK_RESPONSES_PATH,
+        SuperGrokResponsesDialect, XAI_PLATFORM_GROK_46_CONTEXT_TOKENS, XAI_PLATFORM_GROK_46_MODEL,
+        XAI_PLATFORM_MAX_OUTPUT_TOKENS, XaiApiModel, XaiApiModelError, XaiApiModelStatus,
+        XaiAuthError, XaiGrokSubscriptionRoute, XaiListedModel, XaiModel, XaiModelError,
+        XaiPlatformApiKeyAuthority, XaiPlatformApiKeyRequest, XaiPlatformBuildError,
         XaiPlatformKeyGeneration, XaiPlatformKeySource, XaiPlatformModel, XaiResolvedModel,
-        XaiRouteError, accept_xai_listed_models, list_xai_api_models, xai_api_bundled_listing,
-        xai_api_key_fingerprint, xai_api_key_generation, xai_api_models, xai_platform_selection,
-        xai_platform_selection_for,
+        XaiRouteError, accept_xai_listed_models, list_xai_api_models,
+        supergrok_tool_image_adapter_revision, xai_api_bundled_listing, xai_api_key_fingerprint,
+        xai_api_key_generation, xai_api_models, xai_platform_selection, xai_platform_selection_for,
     };
     pub use plakous_xai::{SUPERGROK_HOSTED_RETRIEVAL, XAI_API_HOSTED_RETRIEVAL};
     pub use plakous_xai::{XAI_IMAGE_MODEL, XaiImages};

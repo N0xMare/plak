@@ -5,6 +5,18 @@
 )]
 mod fake_composition;
 
+// Scripted models use opaque image bytes; decoder behavior has its own tests.
+pub(in crate::runtime) struct FixtureImageNormalizer;
+
+impl plakous_tools::ImageNormalizer for FixtureImageNormalizer {
+    fn normalize(&self, bytes: &[u8]) -> Result<plakous_tools::PreparedImage, String> {
+        Ok(plakous_tools::PreparedImage::new(
+            "image/png",
+            bytes.to_vec(),
+        ))
+    }
+}
+
 mod admission_occupancy;
 mod admitted_round;
 #[path = "../artifact_prefix_tests.rs"]

@@ -36,6 +36,7 @@ pub use anthropic::ANTHROPIC;
 pub use claude::CLAUDE;
 pub use codex::CODEX;
 pub use grok::GROK;
+pub(crate) use grok::tool_result_images as supergrok_tool_result_images;
 pub use openai::OPENAI;
 pub use openrouter::OPENROUTER;
 pub use xai::XAI;

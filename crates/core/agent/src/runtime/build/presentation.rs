@@ -195,14 +195,33 @@ impl ToolPresentation {
         receipt: Option<&ToolProjectionReceiptV2>,
         outcome: ToolOutcome,
     ) -> Result<ToolOutcome, ToolRuntimeError> {
-        match (self, receipt) {
+        let prepared = plakous_tools::internal::tool_images_prepared(&outcome);
+        let raised = match (self, receipt) {
             (Self::V2(projection), Some(receipt)) => projection.raise(receipt, outcome),
             (Self::V1(_) | Self::V2(_), None) => Ok(outcome),
             _ => Err(ToolRuntimeError::new(
                 ToolRuntimeErrorKind::Execution,
                 "tool projection receipt disagrees with the runtime presentation mode",
             )),
-        }
+        }?;
+        Ok(if prepared {
+            plakous_tools::internal::mark_tool_images_prepared(raised)
+        } else {
+            raised
+        })
+    }
+
+    pub(in crate::runtime) async fn present_outcome(
+        outcome: ToolOutcome,
+        invocation: &plakous_tools::ToolInvocation,
+        environment: &ExecutionEnvironment,
+        cancellation: &plakous_model::CancellationToken,
+    ) -> Result<(plakous_model::ToolResultBlock, ToolOutcome), ToolRuntimeError> {
+        let outcome =
+            plakous_tools::internal::prepare_tool_images(outcome, environment, cancellation)
+                .await?;
+        let result = outcome.to_model_result(invocation)?;
+        Ok((result, outcome))
     }
 
     pub(in crate::runtime) fn request_prefix(

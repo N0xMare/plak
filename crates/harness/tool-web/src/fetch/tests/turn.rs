@@ -31,11 +31,22 @@ use plakous_tools::{
     ProviderModelProjectionIdentityV2, ToolRegistryBuilder, WorkspacePolicy, compile,
 };
 
-struct UnusedNormalizer;
+#[derive(Default)]
+struct RecordingNormalizer {
+    calls: Mutex<Vec<Vec<u8>>>,
+    reject: bool,
+}
 
-impl ImageNormalizer for UnusedNormalizer {
-    fn normalize(&self, _: &[u8]) -> Result<PreparedImage, String> {
-        Err("fetch_url uses its bounded image bytes directly".to_owned())
+impl ImageNormalizer for RecordingNormalizer {
+    fn normalize(&self, bytes: &[u8]) -> Result<PreparedImage, String> {
+        self.calls
+            .lock()
+            .map_err(|_| "recording lock")?
+            .push(bytes.to_vec());
+        if self.reject {
+            return Err("invalid image data".to_owned());
+        }
+        Ok(PreparedImage::new("image/png", png(1, 1)))
     }
 }
 
@@ -246,92 +257,126 @@ fn scenario(
 
 #[tokio::test]
 async fn pack_fetch_image_turn_completes_with_route_appropriate_model_content() -> TestResult {
-    use std::str::FromStr;
     let peer = peer(vec![(
         "/image",
         reply("200 OK", &[("content-type", "image/png")], &png(2, 3)),
     )])
     .await?;
     for presentation in [CodingPresentation::Grok, CodingPresentation::Claude] {
-        for (accepts_images, route_images) in [(true, true), (false, true), (true, false)] {
-            let descriptor = descriptor(accepts_images)?;
-            let time = Timestamp::new(1, 0)?;
-            let binding = Digest::sha256(DigestDomain::ModelBinding, 1, &[b"test-fetch"])?;
-            let authority =
-                RuntimeModelAuthority::new(&descriptor, binding, binding, 1, time, None)?;
-            let pack: Arc<dyn ToolPack> = Arc::new(
-                FetchUrlPack::with_client(peer.client.clone(), FetchUrlLimits::default(), UA)?
-                    .with_image_results(route_images),
-            );
-            let mut registry = ToolRegistryBuilder::default();
-            plakous_tools::register_packs(&[Arc::clone(&pack)], &mut registry)?;
-            let definitions = registry.freeze().definitions().to_vec();
-            let configuration = configuration(&descriptor, &authority, &definitions)?;
-            let target = projection_target(&configuration)?;
-            let surface = compile(
-                &[pack],
-                presentation,
-                ToolRegistryBuilder::default(),
-                target,
-                None,
-            )?;
-            let call = ToolCallBlock::new(
-                CallId::from_str("00000000-0000-0000-0000-000000000100")?,
-                ToolName::new("fetch_url")?,
-                ToolExecutionOwner::Local,
-                ToolCallState::Requested,
-                ToolCorrelation::default(),
-                json!({"url":format!("{}/image", peer.base)}).to_string(),
-            )?;
-            let model = Arc::new(
-                ScriptedModel::new(
-                    descriptor,
-                    [
-                        scenario(ContentBlock::ToolCall(call), FinishReason::ToolCalls, 1000)?,
-                        scenario(
-                            ContentBlock::Text(TextBlock::new("done", None)?),
-                            FinishReason::Stop,
-                            1001,
-                        )?,
-                    ],
-                )
-                .with_runtime_authority(authority.clone())
-                .with_context_observation(CountObservation::new("test-counter", "v1", 64)?),
-            );
-            let configured =
-                ConfiguredLanguageModel::custom(model.clone(), configuration, authority)?;
-            let workspace = tempfile::tempdir()?;
-            let agent = AgentBuilder::new(
-                configured,
-                surface.registry().clone(),
-                Arc::new(WorkspacePolicy::host(workspace.path(), ".")?),
-            )
-            .tool_projection(surface.into_projection())
-            .image_normalizer(Arc::new(UnusedNormalizer))
-            .request_policy(AgentRequestPolicy::new(
-                GenerationLimits::default(),
-                ReasoningPolicy::Disabled,
-            ))
-            .identity_sources(Arc::new(FixedClock::new(time)), Arc::new(SystemIdGenerator))
-            .build()?;
-            let result = agent.prompt("fetch the image").await?.result().await?;
-            assert_eq!(
-                result
-                    .response()
-                    .ok_or("missing final response")?
-                    .output_text(),
-                "done"
-            );
-            let plans = model.captured_plans();
-            assert_eq!(plans.len(), 2);
-            assert_model_content(plans[1].request(), accepts_images && route_images)?;
-            agent.shutdown().await?;
+        for case in [
+            (true, true, true, true),
+            (false, true, true, true),
+            (true, false, true, true),
+            (true, true, false, true),
+            (true, true, true, false),
+        ] {
+            run_turn_case(&peer, presentation, case).await?;
         }
     }
     Ok(())
 }
 
-fn assert_model_content(request: &plakous_model::ModelRequest, images: bool) -> TestResult {
+async fn run_turn_case(
+    peer: &Peer,
+    presentation: CodingPresentation,
+    case: (bool, bool, bool, bool),
+) -> TestResult {
+    use std::str::FromStr;
+    let (accepts_images, route_images, visual, normalize_ok) = case;
+    let descriptor = descriptor(accepts_images)?;
+    let time = Timestamp::new(1, 0)?;
+    let binding = Digest::sha256(DigestDomain::ModelBinding, 1, &[b"test-fetch"])?;
+    let authority = RuntimeModelAuthority::new(&descriptor, binding, binding, 1, time, None)?;
+    let pack: Arc<dyn ToolPack> = Arc::new(
+        FetchUrlPack::with_client(peer.client.clone(), FetchUrlLimits::default(), UA)?
+            .with_image_results(route_images),
+    );
+    let mut registry = ToolRegistryBuilder::default();
+    plakous_tools::register_packs(&[Arc::clone(&pack)], &mut registry)?;
+    let definitions = registry.freeze().definitions().to_vec();
+    let configuration = configuration(&descriptor, &authority, &definitions)?;
+    let target = projection_target(&configuration)?;
+    let surface = compile(
+        &[pack],
+        presentation,
+        ToolRegistryBuilder::default(),
+        target,
+        None,
+    )?;
+    let call = ToolCallBlock::new(
+        CallId::from_str("00000000-0000-0000-0000-000000000100")?,
+        ToolName::new("fetch_url")?,
+        ToolExecutionOwner::Local,
+        ToolCallState::Requested,
+        ToolCorrelation::default(),
+        json!({"url":format!("{}/image", peer.base)}).to_string(),
+    )?;
+    let model = Arc::new(
+        ScriptedModel::new(
+            descriptor,
+            [
+                scenario(ContentBlock::ToolCall(call), FinishReason::ToolCalls, 1000)?,
+                scenario(
+                    ContentBlock::Text(TextBlock::new("done", None)?),
+                    FinishReason::Stop,
+                    1001,
+                )?,
+            ],
+        )
+        .with_runtime_authority(authority.clone())
+        .with_context_observation(CountObservation::new("test-counter", "v1", 64)?),
+    );
+    let configured = ConfiguredLanguageModel::custom(model.clone(), configuration, authority)?;
+    let workspace = tempfile::tempdir()?;
+    let normalizer = Arc::new(RecordingNormalizer {
+        reject: !normalize_ok,
+        ..RecordingNormalizer::default()
+    });
+    let mut builder = AgentBuilder::new(
+        configured,
+        surface.registry().clone(),
+        Arc::new(WorkspacePolicy::host(workspace.path(), ".")?),
+    )
+    .tool_projection(surface.into_projection())
+    .tool_result_images(route_images)
+    .request_policy(AgentRequestPolicy::new(
+        GenerationLimits::default(),
+        ReasoningPolicy::Disabled,
+    ))
+    .identity_sources(Arc::new(FixedClock::new(time)), Arc::new(SystemIdGenerator));
+    if visual {
+        builder = builder.image_normalizer(normalizer.clone());
+    }
+    let agent = builder.build()?;
+    let result = agent.prompt("fetch the image").await?.result().await?;
+    assert_eq!(
+        result
+            .response()
+            .ok_or("missing final response")?
+            .output_text(),
+        "done"
+    );
+    let plans = model.captured_plans();
+    assert_eq!(plans.len(), 2);
+    let decoded = accepts_images && route_images && visual;
+    assert_model_content(
+        plans[1].request(),
+        decoded && normalize_ok,
+        decoded && !normalize_ok,
+    )?;
+    assert_eq!(
+        *normalizer.calls.lock().map_err(|_| "recording lock")?,
+        if decoded { vec![png(2, 3)] } else { Vec::new() }
+    );
+    agent.shutdown().await?;
+    Ok(())
+}
+
+fn assert_model_content(
+    request: &plakous_model::ModelRequest,
+    images: bool,
+    failed: bool,
+) -> TestResult {
     let protocol = ProtocolId::new("test.fetch")?;
     let family = ModelFamilyId::new("test.fetch")?;
     let model_id = ModelId::new("test.fetch")?;
@@ -353,6 +398,10 @@ fn assert_model_content(request: &plakous_model::ModelRequest, images: bool) -> 
         .ok_or("missing lowered tool result")?;
     if images {
         assert_eq!(output["output"][1]["type"], "input_image");
+        assert_eq!(
+            output["output"][1].as_object().map(serde_json::Map::len),
+            Some(2)
+        );
         assert!(
             output["output"][1]["image_url"]
                 .as_str()
@@ -373,7 +422,14 @@ fn assert_model_content(request: &plakous_model::ModelRequest, images: bool) -> 
         })
         .collect::<Vec<_>>();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].kind(), ToolResultKind::Success);
+    assert_eq!(
+        results[0].kind(),
+        if failed {
+            ToolResultKind::Failure
+        } else {
+            ToolResultKind::Success
+        }
+    );
     let [ToolResultPart::Text(text), rest @ ..] = results[0].parts() else {
         return Err("missing raised text".into());
     };
@@ -382,9 +438,17 @@ fn assert_model_content(request: &plakous_model::ModelRequest, images: bool) -> 
     assert!(head.contains("image: media_type=image/png bytes=29 dimensions=2x3"));
     if images {
         assert!(matches!(rest, [ToolResultPart::Image(_)]));
+        let ToolResultPart::Image(image) = &rest[0] else {
+            return Err("missing image".into());
+        };
+        assert_eq!(image.source().as_bytes(), Some(png(1, 1).as_slice()));
         assert!(!head.contains("omitted"));
+    } else if failed {
+        assert_eq!(rest, []);
+        assert!(head.ends_with("[image normalization failed: invalid image data]"));
     } else {
         assert_eq!(rest, []);
+        assert!(!head.contains("[image 1]"));
         assert!(
             head.ends_with("\n[1 image(s) omitted: this tool's result carries text only here]")
         );

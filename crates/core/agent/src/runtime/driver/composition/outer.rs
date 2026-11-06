@@ -259,35 +259,55 @@ impl Driver {
             )
         })?;
         let mut presented = true;
-        let result = local_composition_response_parts(
-            &response,
-            max_output_tokens,
-            wall_time,
-            integration.integration().as_ref(),
-        )
-        .and_then(|parts| {
-            ToolOutcome::success(parts).map_err(|error| AgentError::from_tool(&error))
-        })
-        .and_then(|outcome| {
-            self.tool_presentation
-                .raise(projection_receipt.as_ref(), outcome)
-                .and_then(|outcome| outcome.to_model_result(&invocation))
-                .map_err(|error| AgentError::from_tool(&error))
-        })
-        .or_else(|error| {
-            presented = false;
-            let parts = local_composition_refusal_parts(
+        let result = async {
+            let parts = local_composition_response_parts(
                 &response,
+                max_output_tokens,
                 wall_time,
-                integration.integration().result_projection(),
-                &error,
+                integration.integration().as_ref(),
             )?;
-            // Presentation itself may have refused the result. Its fallback
-            // is already model-visible text, not another raising attempt.
-            ToolOutcome::success(parts)
-                .and_then(|outcome| outcome.to_model_result(&invocation))
-                .map_err(|error| AgentError::from_tool(&error))
-        })?;
+            let outcome =
+                ToolOutcome::success(parts).map_err(|error| AgentError::from_tool(&error))?;
+            let raised = self
+                .tool_presentation
+                .raise(projection_receipt.as_ref(), outcome)
+                .map_err(|error| AgentError::from_tool(&error))?;
+            ToolPresentation::present_outcome(
+                raised,
+                &invocation,
+                self.tools.environment(),
+                &command.cancellation,
+            )
+            .await
+            .map(|(result, _)| result)
+            .map_err(|error| AgentError::from_tool(&error))
+        }
+        .await;
+        let result = match result {
+            Ok(result) => result,
+            Err(error) => {
+                presented = false;
+                let parts = local_composition_refusal_parts(
+                    &response,
+                    wall_time,
+                    integration.integration().result_projection(),
+                    &error,
+                )?;
+                // Presentation itself may have refused the result. Its fallback
+                // is already model-visible text, not another raising attempt.
+                let outcome =
+                    ToolOutcome::success(parts).map_err(|error| AgentError::from_tool(&error))?;
+                ToolPresentation::present_outcome(
+                    outcome,
+                    &invocation,
+                    self.tools.environment(),
+                    &command.cancellation,
+                )
+                .await
+                .map_err(|error| AgentError::from_tool(&error))?
+                .0
+            }
+        };
         let named_state = self
             .local_composition
             .as_mut()

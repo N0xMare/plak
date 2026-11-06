@@ -138,9 +138,11 @@ async fn image_outcome(
         return ToolOutcome::failure_text(IMAGE_READS_UNAVAILABLE);
     };
     context.check_cancelled()?;
-    let prepared = plakous_tools::internal::join_blocking(context.cancellation(), move || {
-        normalizer.normalize(&bytes)
-    })
+    let prepared = plakous_tools::internal::normalize_tool_image(
+        normalizer,
+        Ok(bytes),
+        context.cancellation(),
+    )
     .await
     .map_err(|error| {
         if error.kind() == ToolRuntimeErrorKind::Cancelled {
@@ -164,7 +166,7 @@ async fn image_outcome(
     )
     .map_err(content_runtime_error)?;
     match ToolOutcome::success(vec![plakous_model::ToolResultPart::Image(image)]) {
-        Ok(outcome) => Ok(outcome),
+        Ok(outcome) => Ok(plakous_tools::internal::mark_tool_images_prepared(outcome)),
         Err(_) => ToolOutcome::failure_text(IMAGE_BUDGET),
     }
 }

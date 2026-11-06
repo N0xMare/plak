@@ -33,7 +33,25 @@ pub const SUPERGROK_RESPONSES_PATH: &str = "/v1/responses";
 /// Reviewed native reference version sent in subscription request headers.
 pub const SUPERGROK_REFERENCE_CLIENT_VERSION: &str = "1.0.70";
 /// Stable request/adapter revision retained by admission and recovery facts.
-pub const XAI_RESPONSES_ADAPTER_REVISION: &str = "plakous-xai-responses-adapter-v8";
+pub const XAI_RESPONSES_ADAPTER_REVISION: &str =
+    supergrok_tool_image_adapter_revision(SUPERGROK_ALLOW_TOOL_RESULT_IMAGES);
+
+/// Integration switch for every SuperGrok tool-result image, not user images.
+pub const SUPERGROK_ALLOW_TOOL_RESULT_IMAGES: bool = true;
+
+pub(crate) const fn supergrok_request_policy(allow_tool_images: bool) -> ResponsesRequestPolicy {
+    ResponsesRequestPolicy::supergrok_stateless().with_tool_result_images(allow_tool_images)
+}
+
+/// Binds both choices of the tool-image admission policy into the native adapter.
+#[must_use]
+pub const fn supergrok_tool_image_adapter_revision(allowed: bool) -> &'static str {
+    if allowed {
+        "plakous-xai-responses-adapter-v9-tool-images"
+    } else {
+        "plakous-xai-responses-adapter-v9-text-tool-results"
+    }
+}
 /// Exact reviewed route/model capability-table revision.
 pub(crate) const SUPERGROK_FEATURE_REVISION: &str = "plak-xai-subscription-feature-matrix-v8";
 /// Closed shared-host behavior revision for this dialect table.
@@ -130,7 +148,7 @@ impl SuperGrokResponsesDialect {
     /// `store:false`, requests encrypted reasoning, and uses concise summary.
     #[must_use]
     pub const fn request_policy(self) -> ResponsesRequestPolicy {
-        ResponsesRequestPolicy::supergrok_stateless()
+        supergrok_request_policy(SUPERGROK_ALLOW_TOOL_RESULT_IMAGES)
     }
 
     /// SuperGrok never emits the Responses `parallel_tool_calls` field.

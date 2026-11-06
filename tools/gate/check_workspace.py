@@ -1852,6 +1852,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     },
     ("plakous-hosted", "src/capabilities/grok_available.rs"): {
         "model": {"HostedRetrievalTable"},
+        "xai": {"SUPERGROK_ALLOW_TOOL_RESULT_IMAGES"},
     },
     ("plakous-hosted", "src/capabilities/openai_available.rs"): {
         "model": {"HostedRetrievalTable"},

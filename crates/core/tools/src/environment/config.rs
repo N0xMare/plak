@@ -671,6 +671,7 @@ pub struct ExecutionEnvironment {
     pub(super) read_observations: Arc<super::read_observations::ReadObservations>,
     /// Live image-read facts. Absent from the descriptor digest.
     pub(super) visual_read: Option<Arc<crate::internal::VisualReadSession>>,
+    pub(super) tool_result_images: bool,
     /// The line head this environment's operations run for. Process-local
     /// and absent from the descriptor digest: a reopen owns under a new fence.
     pub(super) line_owner: Option<LineOwner>,
@@ -847,6 +848,7 @@ impl ExecutionEnvironment {
             host_process: None,
             read_observations: Arc::default(),
             visual_read: None,
+            tool_result_images: true,
             line_owner: None,
             runner_link: None,
             local_daemon: None,
@@ -885,6 +887,15 @@ impl ExecutionEnvironment {
     /// The live image-read facts, when the agent installed them.
     pub(crate) fn visual_read(&self) -> Option<&crate::internal::VisualReadSession> {
         self.visual_read.as_deref()
+    }
+
+    pub(crate) fn with_tool_result_images(mut self, allowed: bool) -> Self {
+        self.tool_result_images = allowed;
+        self
+    }
+
+    pub(crate) const fn tool_result_images(&self) -> bool {
+        self.tool_result_images
     }
 
     /// Returns the exact identity to bind into audit and authorization records.

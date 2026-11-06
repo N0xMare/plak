@@ -3550,6 +3550,79 @@ fn inline_image_bytes_lower_to_base64_data_urls_for_users_and_tool_results() -> 
 }
 
 #[test]
+fn subscription_tool_image_policy_rejects_images_without_disabling_user_images() -> TestResult {
+    let image = plakous_model::ImageBlock::new("image/png", MediaSource::bytes(vec![1, 2, 3])?)?;
+    let call = ToolCallBlock::new(
+        id::<CallId>(801)?,
+        ToolName::new("lookup")?,
+        ToolExecutionOwner::Local,
+        ToolCallState::Requested,
+        ToolCorrelation::default(),
+        r#"{"q":"image"}"#,
+    )?;
+    let items = vec![
+        user(800, "fetch")?,
+        ConversationItem::new(
+            id::<EntryId>(801)?,
+            Actor::Assistant,
+            vec![ContentBlock::ToolCall(call.clone())],
+            Provenance::ModelOutput,
+        )?,
+        ConversationItem::new(
+            id::<EntryId>(802)?,
+            Actor::Tool,
+            vec![ContentBlock::ToolResult(ToolResultBlock::new(
+                call.call_id(),
+                ToolExecutionOwner::Local,
+                ToolResultKind::Success,
+                vec![ToolResultPart::Image(image.clone())],
+                call.correlation().clone(),
+            )?)],
+            Provenance::ToolExecution,
+        )?,
+    ];
+    let request = crate::test_support::model_request_builder(
+        ConversationView::from_items(items)?,
+        metadata()?,
+    )
+    .tools(vec![tool("lookup", false)?])
+    .build()?;
+    let (protocol, family, model) = target_values()?;
+    let lower = |request: &ModelRequest, policy| {
+        lower_responses_request(
+            request,
+            ResponsesRequestConfig::new(&protocol, Some(&family), &model, policy, None),
+        )
+    };
+    let accepted = ResponsesRequestPolicy::supergrok_stateless().with_tool_result_images(true);
+    let refused = ResponsesRequestPolicy::supergrok_stateless().with_tool_result_images(false);
+    assert!(lower(&request, accepted).is_ok());
+    assert!(matches!(
+        lower(&request, refused),
+        Err(ResponsesRequestError::Content(
+            ResponsesRequestContentError::ToolResultImage
+        ))
+    ));
+    assert_ne!(
+        accepted.execution_identity()?,
+        refused.execution_identity()?
+    );
+    let user_image = ConversationItem::new(
+        id::<EntryId>(803)?,
+        Actor::User,
+        vec![ContentBlock::Image(image)],
+        Provenance::UserInput,
+    )?;
+    let user_request = crate::test_support::model_request_builder(
+        ConversationView::from_items(vec![user_image])?,
+        metadata()?,
+    )
+    .build()?;
+    assert!(lower(&user_request, refused).is_ok());
+    Ok(())
+}
+
+#[test]
 fn multimodal_tool_result_lowers_exact_data_urls_and_detail() -> TestResult {
     let image_url = "data:image/png;base64,AAAA";
     let audio_url = "data:audio/wav;base64,BBBB";

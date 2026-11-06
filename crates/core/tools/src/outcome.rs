@@ -9,6 +9,10 @@ use plakous_model::{
 
 use crate::{ToolInvocation, ToolRuntimeError, ToolRuntimeErrorKind};
 
+pub(crate) mod images;
+
+pub(crate) use images::prepare_tool_images;
+
 /// Default maximum retained bytes across one tool outcome.
 pub const MAX_TOOL_OUTCOME_BYTES: usize = 1024 * 1024;
 /// Default maximum ordered parts across one tool outcome.
@@ -100,6 +104,7 @@ impl ToolOutcomeLimits {
 /// One terminal outcome retaining canonical result-part order.
 #[derive(Clone, PartialEq)]
 pub struct ToolOutcome {
+    pub(crate) images_prepared: bool,
     value: Option<Box<crate::ExecutionValue>>,
     kind: ToolOutcomeKind,
     parts: Vec<ToolResultPart>,
@@ -120,6 +125,7 @@ impl fmt::Debug for ToolOutcome {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("ToolOutcome")
+            .field("images_prepared", &self.images_prepared)
             .field("kind", &self.kind)
             .field("part_count", &self.parts.len())
             .field("retained_bytes", &self.retained_bytes)
@@ -263,6 +269,7 @@ impl ToolOutcome {
             wait_fact: None,
             presentation_subject: None,
             file_read: None,
+            images_prepared: false,
         })
     }
 
@@ -329,6 +336,7 @@ impl ToolOutcome {
                 wait_fact: None,
                 presentation_subject: None,
                 file_read: None,
+                images_prepared: false,
             },
         }
     }
@@ -363,6 +371,7 @@ impl ToolOutcome {
                 wait_fact: None,
                 presentation_subject: None,
                 file_read: None,
+                images_prepared: false,
             },
         }
     }

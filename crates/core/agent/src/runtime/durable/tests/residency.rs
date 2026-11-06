@@ -613,6 +613,7 @@ async fn programmatic_tool_batch_image_refusal_finalizes_its_continuation() -> T
         .create(
             "create:programmatic-image-refusal",
             durable_decision_builder(workspace, Arc::clone(&model), registry)?
+                .image_normalizer(Arc::new(FixtureImageNormalizer))
                 .tool_policy(Arc::new(AlwaysAllowPolicy))
                 .with_scheduled_compaction_enabled(false),
         )

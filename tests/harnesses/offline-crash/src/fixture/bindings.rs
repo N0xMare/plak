@@ -902,6 +902,7 @@ pub(super) fn scripted_runtime_binding_with_cursor_inner(
     )?;
     let workspace = Arc::new(WorkspacePolicy::host(workspace, ".")?);
     let builder = AgentBuilder::new(configured, registry, workspace)
+        .image_normalizer(Arc::new(ScriptImageNormalizer))
         .config(scripted_agent_config(script))
         .tool_policy(scripted_tool_policy(script))
         .identity_sources(
@@ -918,6 +919,18 @@ pub(super) fn scripted_runtime_binding_with_cursor_inner(
         None => builder,
     };
     Ok(SessionRuntimeBinding::new(builder))
+}
+
+// Loopback media are opaque fixture bytes, never sent to a provider.
+struct ScriptImageNormalizer;
+
+impl plakous::tools::ImageNormalizer for ScriptImageNormalizer {
+    fn normalize(&self, bytes: &[u8]) -> Result<plakous::tools::PreparedImage, String> {
+        Ok(plakous::tools::PreparedImage::new(
+            "image/png",
+            bytes.to_vec(),
+        ))
+    }
 }
 
 /// The scripted binding whose tools are the standard coding packs.

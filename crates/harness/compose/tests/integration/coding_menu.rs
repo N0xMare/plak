@@ -219,8 +219,8 @@ fn claude_read_and_generic_text_program_identities_are_exact()
             "Read",
             "claude_cat_n_lossless_text_result_object_v2",
         ),
-        (&direct, "Edit", "text_result_object_model_content_v2"),
-        (&direct, "Write", "text_result_object_model_content_v2"),
+        (&direct, "Edit", "text_result_object_image_markers_v3"),
+        (&direct, "Write", "text_result_object_image_markers_v3"),
         (&nested, "Read", "raw_utf8_v1"),
     ] {
         let entry = projection

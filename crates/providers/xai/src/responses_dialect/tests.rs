@@ -6,6 +6,22 @@ use plakous_responses::{
 };
 use serde_json::json;
 
+#[test]
+fn subscription_request_policy_binds_both_tool_image_switch_values()
+-> Result<(), Box<dyn std::error::Error>> {
+    for allowed in [false, true] {
+        assert_eq!(
+            supergrok_request_policy(allowed),
+            ResponsesRequestPolicy::supergrok_stateless().with_tool_result_images(allowed)
+        );
+    }
+    assert_ne!(
+        supergrok_request_policy(false).execution_identity()?,
+        supergrok_request_policy(true).execution_identity()?
+    );
+    Ok(())
+}
+
 #[cfg(feature = "native-auth")]
 #[test]
 fn supergrok_rejects_product_composition_tool_presentations() {
@@ -46,7 +62,7 @@ fn request_route_and_revision_facts_match_the_supergrok_golden() {
             "protocol": "xai.responses.grok-subscription.2026-07",
             "origin": "https://cli-chat-proxy.grok.com",
             "path": "/v1/responses",
-            "adapter_revision": "plakous-xai-responses-adapter-v8",
+            "adapter_revision": XAI_RESPONSES_ADAPTER_REVISION,
             "feature_revision": "plak-xai-subscription-feature-matrix-v8",
             "research_baseline": "2026-08-22",
             "store": false,
@@ -59,6 +75,7 @@ fn request_route_and_revision_facts_match_the_supergrok_golden() {
     assert_eq!(
         facts.request_policy(),
         ResponsesRequestPolicy::supergrok_stateless()
+            .with_tool_result_images(SUPERGROK_ALLOW_TOOL_RESULT_IMAGES)
     );
     assert!(!facts.emits_parallel_tool_calls());
     assert!(facts.requires_encrypted_reasoning_replay());

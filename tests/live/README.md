@@ -33,6 +33,7 @@ just live smoke claude-opus-low       # claude-opus-5-5
 just live smoke claude-opus-medium
 just live smoke deepseek-messages --only cli_task,cli_resume,fault_reset
 just live smoke grok --only cancel,fault_reset
+just live smoke grok --only supergrok_tool_image  # opt-in paid fetch/vision qualification
 just live smoke grok --only wrap_up
 just live smoke codex --only wrap_up
 just live smoke grok --only py_ptc
@@ -192,6 +193,7 @@ PLAK_LIVE_VISION_ROUTE=claude-haiku55-low just live smoke api-openai --only imag
 | --- | --- | --- |
 | `image_input` | none | `--image` of a cat photo; the answer names a cat, and a captured request carries an image block (Messages `image`, Responses `input_image` or Chat `image_url`) that decodes to an image; the report says whether it is the exact file bytes |
 | `fetch_url` | `fetch_url` | the session log has a `fetch_url` call of the raw GitHub URL of `vendor/monty-typeshed/PLAK-PATCH.md` at a public commit, and the answer carries the one SHA-256 that file records |
+| `supergrok_tool_image` | `fetch_url` | opt-in SuperGrok probe: serve the committed `tests/live/assets/sample-01.png` unchanged at a neutral public URL, set `PLAK_LIVE_TOOL_IMAGE_URL`, and run the scenario. It verifies the PNG pin and exact captured tool-image bytes/shape, then requires the letters visible only in its pixels. Loopback URLs are intentionally refused by fetch_url; the expected answer never enters the prompt or metadata. |
 | `mcp_stdio`, `mcp_http` | `mcp:everything` | the reference server `@modelcontextprotocol/server-everything` (pinned, installed once under `target/live/assets/`) over stdio or streamable HTTP on loopback, allowlisted to `get-sum` and `get-env`; the log has both calls, the answer has the sum of two random operands and a token that only the server's environment holds; stdio also needs the server's stdin to show `tools/call get-sum` with those arguments. On Codex and the OpenAI API the prompt asks for the calls inside a Code Mode cell, and a captured `exec` cell source must call `mcp__everything__get-sum` (exact name) or its JavaScript identifier `mcp__everything__get_sum`. An allowlisted tool Plak leaves out of the model's catalog is `harness` |
 | `mcp_github_stdio`, `mcp_github_http` | `mcp:github` | the official GitHub MCP server (stdio: the digest-pinned `ghcr.io/github/github-mcp-server` image with `--read-only --tools get_file_contents,list_commits,search_repositories`; HTTP: `https://api.githubcopilot.com/mcp/x/repos/readonly`), Plak allowlisted to those read tools; Plak offers `mcp__github__get_file_contents` (else `harness`), the log has the call and the answer carries the same SHA-256 |
 | `mcp_everything_all`, `mcp_github_all_stdio`, `mcp_github_all_http` | `mcp:everything`, `mcp:github` | the same oracles with no allowlist anywhere: every tool the reference server lists over stdio, the GitHub image's whole `--read-only` default tool set, and the remote `https://api.githubcopilot.com/mcp/readonly` endpoint; the session must open with the whole catalog |

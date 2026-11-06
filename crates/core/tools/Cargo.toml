@@ -28,6 +28,7 @@ reason = "Existing item-level lint debt after the joined-process registry split;
 default = []
 
 [dependencies]
+base64.workspace = true
 globset.workspace = true
 ignore.workspace = true
 plakous-model.workspace = true

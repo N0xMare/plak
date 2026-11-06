@@ -250,17 +250,17 @@ fn text_result_object_joins_text_and_preserves_model_content()
         (vec![first.clone(), second.clone()], "head\ntail"),
         (
             vec![first.clone(), image.clone(), second, image.clone()],
-            "head\ntail",
+            "head\n[image 1]\ntail\n[image 2]",
         ),
-        (vec![first, image.clone()], "head"),
+        (vec![first, image.clone()], "head\n[image 1]"),
         (
             vec![
                 ToolResultPart::Text(TextBlock::new("head\n", None)?),
                 image.clone(),
             ],
-            "head\n",
+            "head\n\n[image 1]",
         ),
-        (vec![image.clone()], ""),
+        (vec![image.clone()], "[image 1]"),
     ] {
         let content = parts
             .iter()
@@ -304,13 +304,18 @@ fn text_result_program_rotation_rejects_an_old_receipt() -> Result<(), Box<dyn s
     };
     assert_eq!(
         receipt.raising_identity,
-        program(b"text_result_object_model_content_v2")?
+        program(b"text_result_object_image_markers_v3")?
     );
-    receipt.raising_identity = program(b"text_result_object_v1")?;
-    assert!(
-        map.raise(&receipt, ToolOutcome::success_text("head")?)
-            .is_err()
-    );
+    for prior in [
+        "text_result_object_v1",
+        "text_result_object_model_content_v2",
+    ] {
+        receipt.raising_identity = program(prior.as_bytes())?;
+        assert!(
+            map.raise(&receipt, ToolOutcome::success_text("head")?)
+                .is_err()
+        );
+    }
     Ok(())
 }
 

@@ -200,7 +200,9 @@ impl Driver {
             &invocation,
             call,
             dispatched,
-        );
+            (self.tools.environment(), &command.cancellation),
+        )
+        .await;
         let output_bytes = exact
             .as_ref()
             .map_or(0, |execution| tool_result_content_bytes(&execution.result));
@@ -868,13 +870,17 @@ impl Driver {
     }
 }
 
-pub(super) fn present_effect_result(
+pub(super) async fn present_effect_result(
     outcome: &mut Result<plakous_tools::ToolOutcome, ToolRuntimeError>,
     presentation: &crate::runtime::ToolPresentation,
     receipt: Option<&ToolProjectionReceiptV2>,
     invocation: &ToolInvocation,
     call: &ToolCallBlock,
     dispatched: bool,
+    control: (
+        &plakous_tools::ExecutionEnvironment,
+        &plakous_model::CancellationToken,
+    ),
 ) -> Result<ToolExecutionResult, AgentError> {
     let value = outcome
         .as_mut()
@@ -885,10 +891,33 @@ pub(super) fn present_effect_result(
             let raised = presentation
                 .raise(receipt, outcome.clone())
                 .map_err(|error| AgentError::from_tool(&error))?;
+            let presented = crate::runtime::ToolPresentation::present_outcome(
+                raised.clone(),
+                invocation,
+                control.0,
+                control.1,
+            )
+            .await;
+            let (result, raised) = match presented {
+                Err(error) if error.kind() == ToolRuntimeErrorKind::Cancelled => {
+                    let omitted = plakous_tools::internal::omit_tool_images(
+                        raised,
+                        "normalization cancelled after tool completed",
+                    )
+                    .map_err(|error| AgentError::from_tool(&error))?;
+                    crate::runtime::ToolPresentation::present_outcome(
+                        omitted,
+                        invocation,
+                        control.0,
+                        &plakous_model::CancellationToken::new(),
+                    )
+                    .await
+                    .map_err(|error| AgentError::from_tool(&error))?
+                }
+                result => result.map_err(|error| AgentError::from_tool(&error))?,
+            };
             (
-                raised
-                    .to_model_result(invocation)
-                    .map_err(|error| AgentError::from_tool(&error))?,
+                result,
                 raised.presentation_subject().map(str::to_owned),
                 Some(raised),
             )

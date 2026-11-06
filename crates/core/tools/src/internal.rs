@@ -525,6 +525,81 @@ pub fn bind_effect_dispatch(
 
 pub use crate::visual_read::VisualReadSession;
 
+/// Marks images decoded by the installed host normalizer in this live outcome.
+pub fn mark_tool_images_prepared(mut outcome: ToolOutcome) -> ToolOutcome {
+    outcome.images_prepared = true;
+    outcome
+}
+
+/// Whether this live outcome's images have already passed the host normalizer.
+pub const fn tool_images_prepared(outcome: &ToolOutcome) -> bool {
+    outcome.images_prepared
+}
+
+/// Omits images without changing a completed tool's semantic outcome.
+pub fn omit_tool_images(
+    outcome: ToolOutcome,
+    reason: &str,
+) -> Result<ToolOutcome, ToolRuntimeError> {
+    crate::outcome::images::omit_images(outcome, reason)
+}
+
+/// Runs one decoder under the process-wide two-decoder bound.
+pub(crate) static IMAGE_DECODERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+
+/// Runs one decoder under the process-wide two-decoder bound.
+pub async fn normalize_tool_image(
+    normalizer: Arc<dyn crate::ImageNormalizer>,
+    bytes: Result<Vec<u8>, String>,
+    cancellation: &CancellationToken,
+) -> Result<Result<crate::PreparedImage, String>, ToolRuntimeError> {
+    use std::future::Future as _;
+    use std::pin::Pin;
+    use std::task::Poll;
+
+    let mut acquire = std::pin::pin!(IMAGE_DECODERS.acquire());
+    let mut cancelled = cancellation.cancelled();
+    let permit = std::future::poll_fn(|cx| {
+        if Pin::new(&mut cancelled).poll(cx).is_ready() {
+            return Poll::Ready(Err(ToolRuntimeError::new(
+                ToolRuntimeErrorKind::Cancelled,
+                "image normalization cancelled",
+            )));
+        }
+        acquire.as_mut().poll(cx).map(|permit| {
+            permit.map_err(|_| {
+                ToolRuntimeError::new(
+                    ToolRuntimeErrorKind::Execution,
+                    "image decoder semaphore closed",
+                )
+            })
+        })
+    })
+    .await?;
+    join_blocking(cancellation, move || {
+        let _permit = permit;
+        bytes.and_then(|bytes| normalizer.normalize(&bytes))
+    })
+    .await
+}
+
+/// Installs the host's bound, authority-narrowing tool-image policy.
+pub fn install_tool_result_images(
+    environment: ExecutionEnvironment,
+    allowed: bool,
+) -> ExecutionEnvironment {
+    environment.with_tool_result_images(allowed)
+}
+
+/// Applies route acceptance and bounded decoding before a tool result enters model history.
+pub async fn prepare_tool_images(
+    outcome: ToolOutcome,
+    environment: &ExecutionEnvironment,
+    cancellation: &CancellationToken,
+) -> Result<ToolOutcome, ToolRuntimeError> {
+    crate::outcome::prepare_tool_images(outcome, environment, cancellation).await
+}
+
 /// Installs image-read facts the agent derived from its provider configuration.
 ///
 /// Not part of the environment descriptor, and not a supported inventory item.

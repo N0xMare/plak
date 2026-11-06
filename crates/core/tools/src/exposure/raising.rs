@@ -277,9 +277,15 @@ pub(super) fn raise_text_result_object(
     }
     let mut texts = Vec::new();
     let mut content = Vec::new();
+    let mut images = 0;
     for part in outcome.parts() {
         match part {
-            ToolResultPart::Text(text) => texts.push(text.text()),
+            ToolResultPart::Text(text) => texts.push(text.text().to_owned()),
+            ToolResultPart::Image(_) => {
+                images += 1;
+                texts.push(format!("[image {images}]"));
+                content.push(part.clone());
+            }
             _ => content.push(part.clone()),
         }
     }

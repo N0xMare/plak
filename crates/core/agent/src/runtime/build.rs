@@ -265,6 +265,7 @@ impl AgentBuilder {
             job_counter_seed: 1,
             job_host: None,
             image_normalizer: None,
+            tool_result_images: true,
             config: AgentConfig::default(),
             request_policy: AgentRequestPolicy::default(),
             instructions: Vec::new(),
@@ -322,6 +323,14 @@ impl AgentBuilder {
     #[must_use]
     pub fn image_normalizer(mut self, normalizer: Arc<dyn plakous_tools::ImageNormalizer>) -> Self {
         self.image_normalizer = Some(normalizer);
+        self
+    }
+
+    /// Narrows tool image input independently of user images. A host that
+    /// changes this policy must bind it into its provider configuration.
+    #[must_use]
+    pub const fn tool_result_images(mut self, allowed: bool) -> Self {
+        self.tool_result_images = allowed;
         self
     }
 
@@ -1225,6 +1234,10 @@ fn attach_job_environment(
             Arc::clone(normalizer),
         );
     }
+    environment = plakous_tools::internal::install_tool_result_images(
+        environment,
+        builder.tool_result_images,
+    );
     let fresh_sessions = environment
         .joined_process_sessions()
         .map_err(|error| AgentError::from_tool(&plakous_tools::backend_runtime_error(error)))?;

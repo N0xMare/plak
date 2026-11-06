@@ -338,6 +338,7 @@ pub struct ResponsesRequestPolicy {
     prompt_cache: PromptCachePolicy,
     structured_output: StructuredOutputPolicy,
     image_input: bool,
+    tool_result_images: bool,
     parallel_tool_calls: bool,
     parallel_tool_calls_field: ParallelToolCallsFieldPolicy,
     reasoning_effort: ReasoningEffortPolicy,
@@ -348,6 +349,13 @@ pub struct ResponsesRequestPolicy {
 }
 
 impl ResponsesRequestPolicy {
+    /// Narrows tool-result images independently of user image input.
+    #[must_use]
+    pub const fn with_tool_result_images(mut self, allowed: bool) -> Self {
+        self.tool_result_images = allowed;
+        self
+    }
+
     /// Builds an explicit closed policy from admitted route/model facts.
     #[allow(
         clippy::too_many_arguments,
@@ -381,6 +389,7 @@ impl ResponsesRequestPolicy {
             prompt_cache,
             structured_output,
             image_input,
+            tool_result_images: true,
             parallel_tool_calls,
             parallel_tool_calls_field: ParallelToolCallsFieldPolicy::WhenToolsPresent,
             reasoning_effort,
@@ -715,7 +724,8 @@ impl ResponsesRequestPolicy {
             }
         };
         let flags = [
-            u8::from(self.image_input),
+            // User input and the independent tool-image restriction occupy separate bits.
+            u8::from(self.image_input) | (u8::from(!self.tool_result_images) << 1),
             u8::from(self.parallel_tool_calls),
             match self.instruction_placement {
                 InstructionPlacementPolicy::TopLevelInstructions

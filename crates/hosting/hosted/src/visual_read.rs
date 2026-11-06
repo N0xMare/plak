@@ -340,6 +340,7 @@ mod executor {
 
     fn image_of(outcome: &ToolOutcome) -> (&str, &[u8]) {
         assert_eq!(outcome.kind(), ToolOutcomeKind::Success);
+        assert!(plakous_tools::internal::tool_images_prepared(outcome));
         let [ToolResultPart::Image(image)] = outcome.parts() else {
             panic!("expected one image part");
         };

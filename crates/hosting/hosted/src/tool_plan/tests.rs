@@ -476,8 +476,9 @@ fn fetch_url_binds_on_every_route_and_registers_after_the_wrappers() -> TestResu
         assert!(plan.retrieval().is_none(), "{route:?}");
         assert_eq!(plan.fetch_url_limits(), FetchUrlLimits::default());
         assert_eq!(
-            plan.fetch_url_images(),
-            !matches!(route, ToolRoute::Grok) || SUPERGROK_TOOL_RESULT_IMAGES
+            plan.tool_result_images(),
+            !matches!(route, ToolRoute::Grok)
+                || crate::capabilities::supergrok_tool_result_images()
         );
         let extensions = crate::tools::ProductToolExtensions::empty()
             .with_plan(&plan)
@@ -509,6 +510,64 @@ fn fetch_url_binds_on_every_route_and_registers_after_the_wrappers() -> TestResu
     assert_eq!(
         extensions.names().map(ToolName::as_str).collect::<Vec<_>>(),
         ["WebSearch", "fetch_url"]
+    );
+    Ok(())
+}
+
+#[test]
+#[cfg(feature = "web-fetch")]
+fn tool_image_switch_narrows_only_the_subscription_route_and_rotates_binding() -> TestResult {
+    use plakous::tools::ToolRegistryBuilder;
+
+    for route in ToolRoute::ALL {
+        let decisions = [
+            tool_result_images(route, false),
+            tool_result_images(route, true),
+        ];
+        assert_eq!(
+            decisions,
+            if route == ToolRoute::Grok {
+                [false, true]
+            } else {
+                [true, true]
+            }
+        );
+        let mut identities = Vec::new();
+        for (switch, allowed) in [false, true].into_iter().zip(decisions) {
+            let selection = TemplateToolSelection::parse(["fetch_url"])?;
+            let plan = ToolPlan::new(&selection, []).with_tool_image_policy(route, switch);
+            assert_eq!(plan.tool_result_images(), allowed);
+            let extensions = crate::tools::ProductToolExtensions::empty()
+                .with_plan(&plan)
+                .map_err(|error| error.to_string())?;
+            assert_eq!(extensions.tool_result_images(), allowed);
+            let mut builder = ToolRegistryBuilder::default();
+            for registration in extensions.registrations() {
+                builder.register(registration.clone())?;
+            }
+            identities.push(
+                builder
+                    .freeze()
+                    .identity(&ToolName::new("fetch_url")?)
+                    .ok_or("missing fetch")?
+                    .executor_binding_identity(),
+            );
+            let empty = ToolPlan::new(&TemplateToolSelection::default(), [])
+                .with_tool_image_policy(route, switch);
+            assert_eq!(
+                crate::tools::ProductToolExtensions::empty()
+                    .with_plan(&empty)
+                    .map_err(|error| error.to_string())?
+                    .tool_result_images(),
+                allowed
+            );
+        }
+        assert_eq!(identities[0] != identities[1], route == ToolRoute::Grok);
+    }
+    #[cfg(any(feature = "grok", feature = "xai-api"))]
+    assert_ne!(
+        plakous::xai::supergrok_tool_image_adapter_revision(false),
+        plakous::xai::supergrok_tool_image_adapter_revision(true)
     );
     Ok(())
 }

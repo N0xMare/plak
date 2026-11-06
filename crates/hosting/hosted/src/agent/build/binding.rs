@@ -1060,6 +1060,7 @@ pub(in crate::agent) async fn coding_session_runtime_binding_for(
         builder
             .config(config)
             .request_policy(request_policy)
+            .tool_result_images(product_extensions.tool_result_images())
             .image_normalizer(crate::visual_read::normalizer()),
     ))
     }, binding_span)

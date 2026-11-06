@@ -9,6 +9,8 @@ use super::{RouteCapability, RouteKind};
 use crate::binding::ResolvedProtocol;
 use plakous::subscriptions::NativeProvider;
 
+pub(crate) use compiled::tool_result_images;
+
 pub static GROK: RouteCapability = RouteCapability {
     compiled: compiled::COMPILED,
     feature: "grok",

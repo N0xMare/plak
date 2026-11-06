@@ -318,6 +318,7 @@ pub(crate) fn runtime_binding(
         builder
             .config(config)
             .request_policy(request)
+            .tool_result_images(spec.topology_extensions.tool_result_images())
             .image_normalizer(crate::visual_read::normalizer()),
     ))
 }

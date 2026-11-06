@@ -407,13 +407,17 @@ turn's own admission-compaction fit check uses the turn's input — is measured
 with all its parts, images included, so a pending image counts exactly as it
 will once admitted. An input with no text part (images only) is valid.
 
-A workspace image returned by a tool is not user-input admission. Claude
-`Read` and Codex `view_image` normalize it through the hosted image decoder
+A tool-result image is not user-input admission. Claude `Read` and Codex
+`view_image` normalize workspace images through the hosted image decoder
 (long edge at most 2048 px) into the tool-result contract, whose JSON
 measurement is 1 MiB, and the result is an ordinary image part. The decoder
 always runs: PNG, JPEG and WebP that decode cleanly and already fit are kept
 byte-identical, and a GIF is re-encoded from its first frame as PNG. A decode
-failure is a tool failure, not a runtime error. Image residency then applies
+failure is a tool failure, not a runtime error. The final runtime tool-result
+boundary (§8.2) applies that same decoder to fetched, MCP and generated images,
+including MCP base64 data URLs, before they enter model history. A missing
+decoder or a route without tool-image acceptance yields metadata and an
+explicit omission note instead. Image residency then applies
 to that part as it does to any other consumed tool image.
 
 The command's canonical input frames the verb tag (and target turn), then per
@@ -5507,24 +5511,51 @@ A Direct presentation that raises canonical text into a `{"result": string}`
 object (`text_result_object_v1`, including the Claude cat-n, pi read and
 Grok plain-metadata read programs) is constructed only over an output schema that admits every such
 object: closed, with exactly the one string property `result`. Generic raising
-joins canonical text parts in order with a newline between parts, raises that
-text as the first part, and preserves non-text model-content parts after it
-in their original order. Image-only results have an empty `result` string.
+joins canonical text parts in order with a newline between parts, inserting
+`[image N]` at each image's source position (N is one-based), raises that text
+as the first part, and preserves non-text model-content parts after it in
+their original order. The markers retain caption-to-image associations.
 Multiple text parts and images are legitimate canonical content and MUST NOT
-fail the turn. `fetch_url` uses the same installed visual-read acceptance fact
-as file image reads: an accepting route retains the image; otherwise it keeps
-the metadata head and appends the line
-`[1 image(s) omitted: this tool's result carries text only here]`. A missing
-visual-read fact also omits it. The product's single subscription route-policy
-switch `SUPERGROK_TOOL_RESULT_IMAGES` in its tool-plan compiler may restrict
-fetched images independently of user image input; false selects that same
-metadata-plus-note result. The switch is bound into the fetch executor identity.
+fail the turn. At the single runtime boundary where raised outcomes become
+model tool results, every producer (including fetch, MCP and image generation)
+is subject to the descriptor's `ImageInput` fact and the bound tool-image
+policy. Without acceptance, a visual-read fact, or its normalizer, images are
+removed and the text ends with
+`[<n> image(s) omitted: this tool's result carries text only here]`. A result
+wrapper remains one valid JSON object, with the note inside its `result` text.
+Accepted images pass through `VisualReadSession::normalizer()` on
+`join_blocking`: inline bytes and MCP base64 data URLs are decoded and fitted
+to the 2,048 px edge bound before entering model history. An ephemeral prepared
+mark on a live outcome avoids decoding workspace images a second time; raising
+preserves that mark, which is never persisted or trusted across import/reopen.
+All tool-image decodes share a process-wide semaphore of two. Its permit stays
+with the blocking worker even if its caller stops waiting on cancellation.
+Omission also removes the corresponding positional `[image N]` marker lines;
+no dangling reference to a removed image remains. A normalization
+error becomes a text tool failure with the existing metadata, not a failed
+turn or a resident corrupt image. Fetch keeps its early visual-read check
+but delegates decoding to this shared boundary, avoiding a second decoder.
+If normalization is cancelled after a mutating tool has completed, the images
+are omitted with a cancellation note but its text and semantic kind remain;
+durable evidence still records the completed effect, never a cancelled failure.
+The single `SUPERGROK_ALLOW_TOOL_RESULT_IMAGES` switch in the xAI adapter
+controls all subscription tool images independently of user input. It stays
+true for opt-in live qualification; false produces the same omission result
+for fetch, MCP and image generation in the product. The SuperGrok request policy
+also rejects tool-result `input_image` when false, without disabling user images,
+so every embedder is constrained by the adapter's claim. Both switch values have distinct native
+adapter revisions; fetch additionally binds its choice into its executor.
 The generic program's executable identity is
-`text_result_object_model_content_v2` (replacing `text_result_object_v1`);
+`text_result_object_image_markers_v3` (replacing the marker-free
+`text_result_object_model_content_v2`, whose predecessor was `text_result_object_v1`);
 projection identities, receipts and frozen bindings therefore change for all
 menus using that generic program, on every route. The separately identified
 Claude cat-n, pi read and Grok read programs retain their identities: they do
-not execute generic content raising. No persisted encoding changes.
+not execute generic content raising. Existing sessions on these menus and
+routes are not exactly reopened; they move by export/carry. The export
+encoding and all persisted encodings are unchanged, so no format-version
+bump is needed. Binding inputs change for generic menu projections, fetch
+executors, and SuperGrok's context contract and adapter policy.
 Raising never fails on size: every result the canonical output contract admits raises,
 bounded by that contract (the wrapper escapes it once more), not by the
 semantic-JSON string bound. The runtime's per-result observation cut (§10.3)

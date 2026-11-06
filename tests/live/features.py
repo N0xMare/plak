@@ -38,6 +38,7 @@ REFUSED = "refused"
 CATALOG = (
     ("image_input", "cli"),
     ("fetch_url", "cli"),
+    ("supergrok_tool_image", "cli"),
     ("mcp_stdio", "cli"),
     ("mcp_http", "cli"),
     ("mcp_stdio_py", "cli"),
@@ -585,6 +586,58 @@ class Features:
         if marker not in answer_text(out, records):
             raise ScenarioFailure(MODEL, f"session {session}: answer lacks the fetched SHA-256")
         return f"session {session}: fetch_url of {rev[:12]} raw file; marker in the answer"
+
+    def supergrok_tool_image(self) -> str:
+        """Opt-in subscription probe of an image inside function_call_output."""
+        if self.route.account != "grok":
+            raise ScenarioFailure(REFUSED, "supergrok_tool_image requires a grok route")
+        url = os.environ.get("PLAK_LIVE_TOOL_IMAGE_URL", "")
+        if not url or "aenqvr" in url.lower():
+            raise ScenarioFailure(
+                HARNESS,
+                "serve tests/live/assets/sample-01.png at a neutral public URL and set PLAK_LIVE_TOOL_IMAGE_URL",
+            )
+        fixture = live.ROOT / "tests/live/assets/sample-01.png"
+        pinned = "36dc77247663fe27fffdbdb51dd03251127c97fdbf2e8c2f93d52387f3c9b3ad"
+        data = fixture.read_bytes()
+        if hashlib.sha256(data).hexdigest() != pinned or http_get(url) != data:
+            raise ScenarioFailure(HARNESS, "tool-image URL must serve the pinned PNG unchanged")
+        out, records, segments, _, session = self.run(
+            "supergrok_tool_image",
+            f"Use fetch_url to fetch {url} and visually inspect the returned image. "
+            "Read the six uppercase letters shown in the image. Reply with those letters only.",
+            ["fetch_url"],
+        )
+        if not any(url in json.dumps(call) for call in tool_calls(records, "fetch_url")):
+            raise ScenarioFailure(MODEL, f"session {session}: no fetch_url call")
+        images = []
+        for body in capture_requests(segments):
+            if not isinstance(body, dict):
+                continue
+            for item in body.get("input", []):
+                if not isinstance(item, dict) or item.get("type") != "function_call_output":
+                    continue
+                output = item.get("output")
+                if isinstance(output, list):
+                    images.extend(
+                        part
+                        for part in output
+                        if isinstance(part, dict) and part.get("type") == "input_image"
+                    )
+        if not images or any(set(image) != {"type", "image_url"} for image in images):
+            raise ScenarioFailure(HARNESS, f"session {session}: no exact tool-result image shape")
+        if any(
+            not isinstance(image["image_url"], str) or _data_url_bytes(image["image_url"]) != data
+            for image in images
+        ):
+            raise ScenarioFailure(HARNESS, f"session {session}: tool image is not inline")
+        if re.sub(r"\s+", "", answer_text(out, records)).strip(".\"'`") != "AENQVR":
+            raise ScenarioFailure(
+                MODEL, f"session {session}: answer does not match the pinned image's letters"
+            )
+        return (
+            f"session {session}: pinned tool-result PNG reached SuperGrok and its letters were read"
+        )
 
     # --- MCP: the reference server ------------------------------------------------
 

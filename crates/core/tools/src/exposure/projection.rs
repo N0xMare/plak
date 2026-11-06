@@ -498,7 +498,7 @@ impl ToolProjectionExposureV2 {
             // Generic envelopes now join text and retain model-content parts.
             // Read programs above do not execute this path.
             (_, ToolProjectionRaisingV2::TextResultObjectV1) => {
-                "text_result_object_model_content_v2"
+                "text_result_object_image_markers_v3"
             }
             _ => raising.operation(),
         };

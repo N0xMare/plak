@@ -90,9 +90,10 @@ pub const XAI_PLATFORM_REVIEW_DUE_AT_UNIX_SECONDS: u64 = platform_binding::REVIE
 #[cfg(feature = "native-auth")]
 pub use responses_dialect::compile_supergrok_subscription_configuration;
 pub use responses_dialect::{
-    SUPERGROK_REFERENCE_CLIENT_VERSION, SUPERGROK_RESPONSES_DIALECT, SUPERGROK_RESPONSES_ORIGIN,
-    SUPERGROK_RESPONSES_PATH, SuperGrokEventDelta, SuperGrokResponsesDialect,
-    XAI_RESPONSES_ADAPTER_REVISION,
+    SUPERGROK_ALLOW_TOOL_RESULT_IMAGES, SUPERGROK_REFERENCE_CLIENT_VERSION,
+    SUPERGROK_RESPONSES_DIALECT, SUPERGROK_RESPONSES_ORIGIN, SUPERGROK_RESPONSES_PATH,
+    SuperGrokEventDelta, SuperGrokResponsesDialect, XAI_RESPONSES_ADAPTER_REVISION,
+    supergrok_tool_image_adapter_revision,
 };
 pub use retrieval::XaiRetrieval;
 pub use route::{

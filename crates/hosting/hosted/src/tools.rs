@@ -68,9 +68,13 @@ pub struct ProductToolExtensions {
     /// Elsewhere it stays registered, so canonical tool authority does not
     /// move with the vocabulary, and is never shown (spec 01 §3).
     skill_presented: bool,
+    omit_tool_images: bool,
 }
 
 impl ProductToolExtensions {
+    pub(crate) const fn tool_result_images(&self) -> bool {
+        !self.omit_tool_images
+    }
     pub(crate) fn admit_sdk(&self) -> CliResult<()> {
         let names = self.names().map(ToString::to_string).collect::<Vec<_>>();
         admit_sdk_extensions(names)
@@ -112,6 +116,7 @@ impl ProductToolExtensions {
             }
         }
         Ok(Self {
+            omit_tool_images: false,
             registrations: registrations.into(),
             host_facts: plakous_host_protocol::PromptHostFacts::default(),
             retrieval: None,
@@ -188,7 +193,8 @@ impl ProductToolExtensions {
     /// without a registration refuses the bind. The empty plan leaves the
     /// extensions, and every surface and identity compiled from them,
     /// unchanged.
-    pub(crate) fn with_plan(self, plan: &crate::tool_plan::ToolPlan) -> CliResult<Self> {
+    pub(crate) fn with_plan(mut self, plan: &crate::tool_plan::ToolPlan) -> CliResult<Self> {
+        self.omit_tool_images = !plan.tool_result_images();
         let mut wrappers = Vec::new();
         let mut mcp = Vec::new();
         let mut fetch_url = false;
@@ -243,7 +249,7 @@ impl ProductToolExtensions {
         if fetch_url {
             appended.extend(fetch_url::registrations(
                 plan.fetch_url_limits(),
-                plan.fetch_url_images(),
+                plan.tool_result_images(),
             )?);
         }
         let mut image_slot = None;
@@ -262,6 +268,7 @@ impl ProductToolExtensions {
                 .with_host_facts(host_facts);
         extended.retrieval = slot;
         extended.image_gen = image_slot;
+        extended.omit_tool_images = self.omit_tool_images;
         if let Some(earning) = earning {
             extended.contributions = vec![PromptContribution::new(
                 UNTRUSTED_TOOL_DATA_CONTRIBUTION_ID,

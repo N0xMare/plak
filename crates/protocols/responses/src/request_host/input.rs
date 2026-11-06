@@ -402,6 +402,14 @@ pub(super) fn lower_item(
                 }
             }
             ContentBlock::ToolResult(result) => {
+                if !config.policy.tool_result_images
+                    && result
+                        .parts()
+                        .iter()
+                        .any(|part| matches!(part, ToolResultPart::Image(_)))
+                {
+                    return Err(ResponsesRequestContentError::ToolResultImage.into());
+                }
                 flush_message(role, &mut message_parts, output);
                 if item.actor() != Actor::Tool {
                     return Err(ResponsesProtectedToolError::InvalidResultActor.into());

@@ -333,10 +333,15 @@ async fn execute_read_only_tool(
             let raised = tool_presentation
                 .raise(projection_receipt.as_ref(), outcome.clone())
                 .map_err(|error| AgentError::from_tool(&error))?;
+            let (result, raised) = crate::runtime::ToolPresentation::present_outcome(
+                raised,
+                &invocation,
+                tools.environment(),
+                &cancellation,
+            )
+            .await
+            .map_err(|error| AgentError::from_tool(&error))?;
             let presentation_subject = raised.presentation_subject().map(str::to_owned);
-            let result = raised
-                .to_model_result(&invocation)
-                .map_err(|error| AgentError::from_tool(&error))?;
             (result, presentation_subject, Some(raised))
         }
         Err(error) if error.kind() == ToolRuntimeErrorKind::Cancelled => {
