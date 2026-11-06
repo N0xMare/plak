@@ -1422,6 +1422,8 @@ const SCHEMA: Schema = Schema {
 pub mod acknowledgements;
 #[cfg(feature = "test-support")]
 pub(crate) mod benchmark;
+/// What a host's session directory reads.
+pub mod directory;
 /// The product's SQLite implementation of the hosted session-record port.
 pub mod session_records;
 /// The product session record's durable half: the free functions that open

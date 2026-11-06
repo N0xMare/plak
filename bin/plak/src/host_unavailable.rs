@@ -9,7 +9,10 @@ use crate::shell::services::Services;
 /// # Errors
 ///
 /// Always.
-pub(crate) fn run_host_command(_services: &Services) -> CliResult<ProcessOutcome> {
+pub(crate) fn run_host_command(
+    _services: &Services,
+    _command: &crate::command::HostCommand,
+) -> CliResult<ProcessOutcome> {
     Err(CliFailure::new(
         "plak host is not in this build; maintainer builds have it (feature web)",
     ))

@@ -18,8 +18,8 @@ use super::TreeStoreError;
 mod custodian;
 mod liveness;
 pub use custodian::{
-    CustodyHold, acquire_custody, bind_custody_host, custody_host, holder_runs_here, machine_name,
-    process_instance, release_custody_hold, with_custody,
+    CustodyHold, acquire_custody, bind_custody_host, custody_host, holder_elsewhere,
+    holder_runs_here, machine_name, process_instance, release_custody_hold, with_custody,
 };
 
 /// One host process image: its process id and a nonce drawn at start, so a

@@ -4,36 +4,49 @@
 //! before a byte is read. A socket found there is replaced only by the
 //! holder of `host.lock`, so a live host's socket is never unlinked.
 //!
-//! The skeleton hosts no session: every admitted connection gets one wire
-//! v2 `refused unavailable` after its hello (or after the hello deadline),
-//! and is closed.
+//! Each admitted connection speaks wire v2 lines, exactly stdio's (one
+//! frame per line, at most 16 MiB), to the host's sessions: its hello is
+//! answered with the host's welcome, which names no session, and then it
+//! is a `HostConnection` of the host (spec 02 §4.4, the session
+//! directory). It is a remote face: nothing on it execs or hands off the
+//! host's build. A client that leaves, or one that falls 10 s behind on a
+//! write, detaches; its sessions run on.
 
+use std::collections::VecDeque;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use plakous_host_protocol::wire::HandshakeRefusal;
+use plakous_host_protocol::wire::{HandshakeRefusal, LineReader, WireError};
 use plakous_hosted::error::{CliFailure, CliResult};
-use plakous_hosted::host_service::wire::{HELLO_DEADLINE, refuse};
+use plakous_hosted::host_service::wire::{
+    Face, HELLO_DEADLINE, SessionHost, handshake, lines, refuse,
+};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+use tokio::net::unix::OwnedWriteHalf;
 use tokio::net::{UnixListener, UnixStream};
 
 use super::lock::HostLock;
 use crate::surface_protocol::PlakExtension;
 
-/// What every admitted connection is told while no session is hosted.
-pub(super) const NO_SESSION: &str = "plak host serves no session yet";
-/// How often the accept loop looks for a stop.
+/// How often the accept loop and every connection look for a stop.
 const STOP_POLL: Duration = Duration::from_millis(50);
-/// The most a hello may carry before the line is given up on.
-const HELLO_LIMIT: usize = 16 * 1024 * 1024;
 /// The most connections waiting for their hello at once; past it a
 /// connection is closed unanswered.
 const PENDING_LIMIT: usize = 16;
+/// The most admitted connections at once; past it a hello is refused
+/// `busy`.
+const CONNECTION_LIMIT: usize = 64;
 /// How long the accept loop waits after a failed accept (out of
 /// descriptors, say) before it tries again.
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
+/// How long one write may take to reach a slow client before it is
+/// dropped.
+const SEND_DEADLINE: Duration = Duration::from_secs(10);
+/// The most bytes waiting for one client before it is dropped as slow.
+const MAX_PENDING_BYTES: usize = 64 * 1024 * 1024;
 
 /// The longest socket path the platform's `sockaddr_un` holds, with its
 /// terminating NUL.
@@ -98,11 +111,18 @@ impl Bound {
         &self.path
     }
 
-    /// Accepts connections until `stopped` turns true. Each admitted one is
-    /// answered on a task of its own; a stop does not wait for them.
-    pub(super) async fn serve(&self, stopped: impl Fn() -> bool) {
+    /// Accepts connections to `host` until `stopped` turns true. Each
+    /// admitted one is served on a task of its own; a stop ends them as
+    /// leaving clients.
+    pub(super) async fn serve(
+        &self,
+        host: &Arc<SessionHost<PlakExtension>>,
+        stopped: impl Fn() -> bool + Send + Sync + 'static,
+    ) {
+        let stopped: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(stopped);
         let mut tick = tokio::time::interval(STOP_POLL);
         let pending = Arc::new(AtomicUsize::new(0));
+        let admitted = Arc::new(AtomicUsize::new(0));
         loop {
             tokio::select! {
                 accepted = self.listener.accept() => {
@@ -113,10 +133,11 @@ impl Bound {
                     if !admits(stream.peer_cred().ok().map(|peer| peer.uid()), self.owner) {
                         continue;
                     }
-                    if let Some(slot) = Pending::take(&pending) {
+                    if let Some(place) = Place::take(&pending, PENDING_LIMIT) {
+                        let (host, stopped) = (Arc::clone(host), Arc::clone(&stopped));
+                        let admitted = Arc::clone(&admitted);
                         tokio::spawn(async move {
-                            answer(stream).await;
-                            drop(slot);
+                            connection(stream, &host, stopped, place, &admitted).await;
                         });
                     }
                 }
@@ -140,22 +161,22 @@ impl Bound {
     }
 }
 
-/// One connection's place among those waiting for their hello.
-struct Pending(Arc<AtomicUsize>);
+/// One connection's place under a count's limit, given back when dropped.
+struct Place(Arc<AtomicUsize>);
 
-impl Pending {
-    /// A place, or `None` when [`PENDING_LIMIT`] connections already wait.
-    fn take(count: &Arc<AtomicUsize>) -> Option<Self> {
+impl Place {
+    /// A place, or `None` when `limit` are already taken.
+    fn take(count: &Arc<AtomicUsize>, limit: usize) -> Option<Self> {
         count
             .try_update(Ordering::AcqRel, Ordering::Acquire, |held| {
-                (held < PENDING_LIMIT).then_some(held + 1)
+                (held < limit).then_some(held + 1)
             })
             .ok()
             .map(|_| Self(Arc::clone(count)))
     }
 }
 
-impl Drop for Pending {
+impl Drop for Place {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::AcqRel);
     }
@@ -181,32 +202,152 @@ fn check_length(path: &Path) -> CliResult<()> {
     )))
 }
 
-/// Waits for the hello line (bounded by the hello deadline and the frame
-/// cap), then refuses `unavailable` and closes.
-async fn answer(mut stream: UnixStream) {
-    let mut line = Vec::new();
-    let mut buffer = [0_u8; 4096];
-    let _ = tokio::time::timeout(HELLO_DEADLINE, async {
-        while !line.contains(&b'\n') && line.len() < HELLO_LIMIT {
-            match stream.read(&mut buffer).await {
-                Ok(0) | Err(_) => return,
-                Ok(read) => line.extend_from_slice(&buffer[..read]),
+/// The frames one connection has written and not yet sent.
+#[derive(Clone, Default)]
+struct Outbox(Arc<Mutex<Vec<u8>>>);
+
+impl Outbox {
+    fn take(&self) -> Vec<u8> {
+        std::mem::take(&mut *self.0.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+}
+
+impl Write for Outbox {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut pending = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if pending.len() + buf.len() > MAX_PENDING_BYTES {
+            return Err(std::io::Error::other("the client fell behind"));
+        }
+        pending.extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Sends what the connection wrote; `Err` when the client is gone or too
+/// slow.
+async fn send(write: &mut OwnedWriteHalf, outbox: &Outbox) -> Result<(), ()> {
+    let bytes = outbox.take();
+    if bytes.is_empty() {
+        return Ok(());
+    }
+    match tokio::time::timeout(SEND_DEADLINE, write.write_all(&bytes)).await {
+        Ok(Ok(())) => Ok(()),
+        _ => Err(()),
+    }
+}
+
+/// The client's lines as they arrive.
+struct Reader {
+    read: tokio::net::unix::OwnedReadHalf,
+    lines: LineReader,
+    queued: VecDeque<Result<String, WireError>>,
+    buffer: Vec<u8>,
+}
+
+impl Reader {
+    /// Reads once; `false` at the end of input.
+    async fn fill(&mut self) -> bool {
+        match self.read.read(&mut self.buffer).await {
+            Ok(0) | Err(_) => false,
+            Ok(read) => {
+                self.queued.extend(self.lines.push(&self.buffer[..read]));
+                true
             }
         }
+    }
+}
+
+/// Serves one admitted connection: its hello, then its frames and its
+/// sessions' observations, until it leaves or the host stops.
+async fn connection(
+    stream: UnixStream,
+    host: &Arc<SessionHost<PlakExtension>>,
+    stopped: Arc<dyn Fn() -> bool + Send + Sync>,
+    pending: Place,
+    admitted: &Arc<AtomicUsize>,
+) {
+    let (read, mut write) = stream.into_split();
+    let mut reader = Reader {
+        read,
+        lines: LineReader::default(),
+        queued: VecDeque::new(),
+        buffer: vec![0; 64 * 1024],
+    };
+    let outbox = Outbox::default();
+    let hello = tokio::time::timeout(HELLO_DEADLINE, async {
+        while reader.queued.is_empty() {
+            if !reader.fill().await {
+                return None;
+            }
+        }
+        reader.queued.pop_front()
     })
     .await;
-    let mut frame = Vec::new();
-    if refuse::<PlakExtension>(
-        &mut frame,
-        HandshakeRefusal::Unavailable {
-            detail: NO_SESSION.to_owned(),
-        },
-    )
-    .is_ok()
-    {
-        let _ = stream.write_all(&frame).await;
+    let hello = match hello {
+        Ok(Some(hello)) => hello,
+        Ok(None) => return,
+        Err(_) => {
+            let _ = refuse::<PlakExtension>(
+                &mut outbox.clone(),
+                HandshakeRefusal::Malformed {
+                    detail: format!("no hello within {} ms", HELLO_DEADLINE.as_millis()),
+                },
+            );
+            let _ = send(&mut write, &outbox).await;
+            return;
+        }
+    };
+    let Some(place) = Place::take(admitted, CONNECTION_LIMIT) else {
+        let _ = refuse::<PlakExtension>(&mut outbox.clone(), HandshakeRefusal::Busy);
+        let _ = send(&mut write, &outbox).await;
+        return;
+    };
+    drop(pending);
+    let (first, hellos) = lines(1);
+    let _ = first.send(hello);
+    drop(first);
+    let stop = Arc::clone(&stopped);
+    let admitted =
+        handshake::<PlakExtension>(&hellos, host.welcome(), &mut outbox.clone(), &move || {
+            stop()
+        });
+    if send(&mut write, &outbox).await.is_err() || !matches!(admitted, Ok(true)) {
+        return;
     }
-    let _ = stream.shutdown().await;
+    let stop = Arc::clone(&stopped);
+    let mut connection = host.connect(outbox.clone(), Face::Remote, move || stop());
+    loop {
+        if connection.flush().is_err() || send(&mut write, &outbox).await.is_err() || stopped() {
+            break;
+        }
+        if let Some(line) = reader.queued.pop_front() {
+            // An attach may open a session, which takes a while.
+            let reading = tokio::task::block_in_place(|| connection.frame(line));
+            if !matches!(reading, Ok(true)) {
+                let _ = connection.flush();
+                let _ = send(&mut write, &outbox).await;
+                break;
+            }
+            continue;
+        }
+        tokio::select! {
+            more = reader.fill() => {
+                if !more {
+                    break;
+                }
+            }
+            () = connection.changed() => {}
+            () = tokio::time::sleep(STOP_POLL) => {}
+        }
+    }
+    // Every way out detaches, so no session holds a dead attachment.
+    connection.leave();
+    let _ = write.shutdown().await;
+    drop(place);
 }
 
 #[cfg(test)]

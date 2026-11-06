@@ -4475,9 +4475,9 @@ The hidden maintainer command `plak web --listen <unix:path|127.0.0.1:port>
 
 The hidden maintainer command `plak host` (feature `web`, in maintainer
 builds) is the per-user host process, run in the foreground under a systemd
-user unit or a terminal multiplexer on the host machine. It hosts no session
-yet and changes no other face: the TUI, `plak run`, `plak agent` and `plak
-web` run their sessions as before.
+user unit or a terminal multiplexer on the host machine. It serves every
+session of the home, across workspaces, to the clients of its control
+socket, through the session directory (§4.4).
 
 - **One per home and state key.** Before anything else it takes an exclusive
   lock on `state/<key>/host.lock` and holds it for its life; the file names
@@ -4490,23 +4490,61 @@ web` run their sessions as before.
   `run/` under a 0700 `host/`; a socket found there is a dead host's, since
   only the holder of `host.lock` replaces it, and the host removes its own
   socket, before releasing the lock, when it stops. Only the user who owns the
-  directory may speak on it (chapter 04 §4.7). Every admitted connection's
-  hello is answered `refused unavailable` ("plak host serves no session yet")
-  in a wire v2 frame (§4.4), and the connection is closed. At most 16
-  connections wait for their hello at once; another is closed unanswered,
-  and a failed accept is retried after 100 ms.
+  directory may speak on it (chapter 04 §4.7). A connection speaks wire v2
+  lines as stdio does: its hello is answered with a welcome that names no
+  session, or refused (`version_mismatch`, `malformed`, `busy` past 64
+  connections), and then it is a client of the session directory. It is a
+  remote face (§4.4): nothing on it execs or hands off the host's build. At
+  most 16 connections wait for their hello at once; another is closed
+  unanswered, and a failed accept is retried after 100 ms. A client that
+  leaves, or one a write waits on for 10 s, detaches; its sessions run on.
+- **Sessions.** A session opens in its own workspace's product context
+  (§1), as `plak agent` opens it with no overrides, when a client first
+  attaches it, and stays resident while anything keeps it (§4.4, residency
+  in a host); it releases after the idle release, 300 s (the hidden
+  `--idle-release <seconds>` sets it), and the next attach opens it again.
+  An open refused because another live host process holds the session's
+  tree is `tree_hosted_elsewhere` with that process's machine, binary and
+  pid; any other failed open is `session_unavailable` with why (a session
+  whose tree runs no hub holds no custody, and another process's open of
+  it is refused by its lease, `session_unavailable`). The
+  directory's rows are the home's newest 256 sessions. A dormant row's
+  activity is its root's durable record: `stopped` after a stop,
+  `held_after_loss` while a lost host's turn waits for Resume, `idle`
+  otherwise; its live work is none, and `held_children` is not yet counted.
+  `hosted_elsewhere` names a tree's custody holder only when it is not this
+  process and not proven gone: a holder on this machine whose instance lock
+  is free is a crashed host's or TUI's, and its session reads free; one on
+  another machine always reads held.
+- **New session.** `new_session {workspace, template?, request_id}` creates
+  a session in `workspace`, an existing directory, canonicalized, on the
+  binding of `template` from that workspace's context, or of its `[root]
+  agent` when absent, as `plak agent` seeds one. The request id must be a
+  uuid; the session's id is the version 5 uuid of it in the namespace of
+  the home's `host-id`, so a retry of a request whose answer was lost finds
+  the session it made and answers the same `created`, and never makes a
+  second one. The record is one product commit; the runtime session is
+  created when it is first opened, under the open's own law (§2.6). The
+  session is dormant until attached; its `environment` is
+  `host-login-shell`, and a session a TUI or `plak agent` created reads
+  `cli`. Any existing directory is accepted (chapter 04 §2.10).
 - **Tool environment.** It captures the login shell's `PATH` once at start,
   bounded at 5 s however the shell's startup files behave, as `plak runner
   serve` does when `runner.toml` sets no `path` (the shell runs in a process
   group of its own, killed once it answered or the deadline passed), falling back to its own `PATH` and then `/usr/bin:/bin`, with its
   own `HOME`; the start line names the source but never the directories.
-  Sessions it hosts will run their tools with that environment, not the shell
-  a TUI was started in (no direnv, no per-project `PATH`).
+  It does not yet hand that environment to its sessions' tools, which run
+  with the host process's own.
 - **Stopping.** `SIGTERM`, `SIGHUP` or `SIGINT` stops it: it stops accepting,
-  removes its socket and releases the lock. The stop is bounded: the process
-  exits within 60 s of the signal however its work stands, under the unit's
-  `TimeoutStopSec`. It prints `plak host: serving on <socket> (host <host
-  id>, instance <instance>); tools get <source>` once it accepts.
+  ends its connections as leaving clients, removes its socket, then
+  releases every resident session as a planned handoff, all at once, each
+  joined within 55 s (a session's work in flight is recorded handed off,
+  and its next open continues it once by itself), and releases the lock.
+  The stop is bounded: the process exits within 60 s of the signal however
+  its work stands, under the unit's `TimeoutStopSec`; a session not
+  released by then is left to the crash law (`owner_lost`). It prints
+  `plak host: serving on <socket> (host <host id>, instance <instance>);
+  tools get <source>` once it accepts.
 
 The unit runs it as a planned stop, not a crash: `KillMode=mixed` signals the
 host alone and kills the rest of the cgroup only after the timeout, so a

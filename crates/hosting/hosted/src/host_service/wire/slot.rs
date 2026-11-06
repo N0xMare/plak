@@ -159,10 +159,16 @@ where
             Slot::Resident {
                 session,
                 attachments,
-                ..
+                worker,
             } => {
                 if session.ended() || attachments.releasing() {
-                    SlotView::Releasing(session.session_id())
+                    // A release whose worker ended is dormant; the next
+                    // trigger only joins it.
+                    if worker.is_finished() {
+                        SlotView::Dormant(session.session_id())
+                    } else {
+                        SlotView::Releasing(session.session_id())
+                    }
                 } else {
                     SlotView::Resident(Arc::clone(session))
                 }

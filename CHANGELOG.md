@@ -130,13 +130,19 @@ an export.
   project's templates in its `[roster] working_set` are on the root's spawn
   menu. Before, the roster read the home alone, so a trusted project's
   templates never reached a tree.
-- `plak host` (hidden, maintainer builds): the per-user host process, as a
-  skeleton that hosts no session yet. One per home and state key
+- `plak host` (hidden, maintainer builds): the per-user host process,
+  serving every session of the home. One per home and state key
   (`state/<key>/host.lock`, a second one refuses naming the first); a control
-  socket `host/run/<key>.sock` for this user only, which refuses every hello
-  `unavailable`; its custody identity and the login shell's `PATH` captured
-  once at start; a `SIGTERM` stops it within 60 s. Spec 02 §4.6 carries the
-  systemd unit. No other face changes.
+  socket `host/run/<key>.sock` for this user only, whose clients use the wire
+  v2 session directory: they list and watch the home's sessions, create one
+  in any directory with `new_session` (a retry of the same request id
+  answers the same session), and attach any, which opens a dormant one in its
+  own workspace. An idle session releases after 300 s. A row names a tree's
+  other custody holder only when it is not proven gone, so a crashed host's
+  or TUI's stale custody reads free. Its custody identity and the login
+  shell's `PATH` are captured once at start (not yet given to its sessions'
+  tools); a `SIGTERM` hands every resident session off as a planned handoff
+  and stops it within 60 s. Spec 02 §4.6 carries the systemd unit.
 - `plak web` (hidden, maintainer builds): one headless session's wire v2 over
   a WebSocket at `/wire`, and a web UI's static build, on a private unix
   socket that `tailscale serve --bg unix:<path>` publishes on the tailnet,

@@ -1,7 +1,11 @@
-use std::io::{BufRead as _, BufReader, Write as _};
+use std::io::{BufRead as _, BufReader};
 use std::os::unix::fs::PermissionsExt as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+
+use plakous_host_protocol::wire::{
+    Answer, ClientFrame, Hello, HostFrame, Op, Outcome, WIRE_VERSION,
+};
 
 use super::*;
 
@@ -13,19 +17,83 @@ fn short_home() -> tempfile::TempDir {
     tempfile::tempdir().unwrap()
 }
 
+/// Sessions as a test scripts them: none.
+struct NoSessions;
+
+impl plakous_hosted::host_service::wire::HostSessions<PlakExtension> for NoSessions {
+    fn rows(
+        &self,
+        _workspace: Option<&str>,
+    ) -> Result<Vec<plakous_host_protocol::wire::SessionRow>, String> {
+        Ok(Vec::new())
+    }
+
+    fn session_of(
+        &self,
+        _node: &plakous_host_protocol::wire::NodeAddress,
+    ) -> Result<Option<String>, String> {
+        Ok(None)
+    }
+
+    fn open(
+        &self,
+        _session: &str,
+    ) -> CliResult<plakous_hosted::host_service::wire::OpenedSession<PlakExtension>> {
+        Err(CliFailure::new("no session"))
+    }
+
+    fn refusal(
+        &self,
+        _session: &str,
+        failure: &CliFailure,
+    ) -> plakous_host_protocol::wire::RequestRefusal {
+        plakous_host_protocol::wire::RequestRefusal::SessionUnavailable {
+            detail: failure.message().to_owned(),
+        }
+    }
+
+    fn create(
+        &self,
+        _workspace: &str,
+        _template: Option<&str>,
+        _request_id: &str,
+    ) -> Result<
+        plakous_hosted::host_service::wire::Created,
+        plakous_host_protocol::wire::RequestRefusal,
+    > {
+        Err(plakous_host_protocol::wire::RequestRefusal::UnknownSession)
+    }
+}
+
+fn send(client: &mut std::os::unix::net::UnixStream, frame: &ClientFrame<PlakExtension>) {
+    client
+        .write_all(
+            plakous_host_protocol::wire::encode_line(frame)
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
+}
+
+fn next(reader: &mut BufReader<std::os::unix::net::UnixStream>) -> HostFrame<PlakExtension> {
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    plakous_host_protocol::wire::decode_line(line.trim_end()).unwrap()
+}
+
 /// The host binds its socket 0600 in private directories, replacing what a
-/// dead host left; a connection of its own user is refused `unavailable`
-/// after its hello; a stop ends the accept loop; and cleanup removes only
-/// the socket this host bound.
+/// dead host left; a connection of its own user is welcomed to no session
+/// and reads the session directory; a stop ends the accept loop and the
+/// connection; and cleanup removes only the socket this host bound.
 #[test]
-fn an_admitted_connection_is_refused_unavailable_and_a_stop_ends_the_host() {
+fn an_admitted_connection_is_welcomed_to_the_directory_and_a_stop_ends_the_host() {
     let home = short_home();
     let socket = home.path().join("host/run/r1.e1.p1.t1.sock");
     std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
     std::fs::write(&socket, "a dead host's socket").unwrap();
     let lock = HostLock::take(&home.path().join("host.lock"), "0123456789ab").unwrap();
     let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(1)
+        .worker_threads(2)
         .enable_all()
         .build()
         .unwrap();
@@ -38,30 +106,92 @@ fn an_admitted_connection_is_refused_unavailable_and_a_stop_ends_the_host() {
     assert_eq!(mode(&socket), 0o600);
     let stop = Arc::new(AtomicBool::new(false));
     let stopping = Arc::clone(&stop);
+    let host = SessionHost::new(NoSessions, "0123456789ab", 7);
     let server = std::thread::spawn(move || {
-        runtime.block_on(bound.serve(move || stopping.load(Ordering::Acquire)));
+        runtime.block_on(bound.serve(&host, move || stopping.load(Ordering::Acquire)));
         bound
     });
 
     let mut client = std::os::unix::net::UnixStream::connect(&socket).unwrap();
-    client.write_all(b"{\"hello\":{\"proto\":3}}\n").unwrap();
-    let mut line = String::new();
-    BufReader::new(&client).read_line(&mut line).unwrap();
-    let frame: plakous_host_protocol::wire::HostFrame<PlakExtension> =
-        plakous_host_protocol::wire::decode_line(line.trim_end()).unwrap();
-    assert!(
-        matches!(
-            &frame,
-            plakous_host_protocol::wire::HostFrame::Refused(HandshakeRefusal::Unavailable { detail })
-                if detail == NO_SESSION
-        ),
-        "{line}"
+    let mut reader = BufReader::new(client.try_clone().unwrap());
+    send(
+        &mut client,
+        &ClientFrame::Hello(Hello {
+            proto: WIRE_VERSION,
+            binary_id: "client".into(),
+            caps: Vec::new(),
+        }),
+    );
+    let HostFrame::Welcome(welcome) = next(&mut reader) else {
+        panic!("not welcomed");
+    };
+    assert_eq!(welcome.session, None, "a host of many sessions names none");
+    send(
+        &mut client,
+        &ClientFrame::Request {
+            id: 1,
+            op: Op::ListSessions { workspace: None },
+        },
+    );
+    assert_eq!(
+        next(&mut reader),
+        HostFrame::Response {
+            id: 1,
+            outcome: Outcome::Ok(Answer::Sessions { rows: Vec::new() }),
+        }
     );
 
     stop.store(true, Ordering::Release);
     let bound = server.join().unwrap();
+    // The stop ended the connection too.
+    let mut rest = String::new();
+    assert_eq!(reader.read_line(&mut rest).unwrap(), 0, "{rest}");
     bound.remove();
     assert!(!socket.exists());
+}
+
+/// A hello of another protocol version is refused, typed, and closed.
+#[test]
+fn a_hello_of_another_version_is_refused() {
+    let home = short_home();
+    let socket = home.path().join("host/run/v.sock");
+    let lock = HostLock::take(&home.path().join("host.lock"), "0123456789ab").unwrap();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    let bound = {
+        let _entered = runtime.enter();
+        Bound::bind(&socket, &lock).unwrap()
+    };
+    let stop = Arc::new(AtomicBool::new(false));
+    let stopping = Arc::clone(&stop);
+    let host = SessionHost::new(NoSessions, "0123456789ab", 7);
+    let server = std::thread::spawn(move || {
+        runtime.block_on(bound.serve(&host, move || stopping.load(Ordering::Acquire)));
+    });
+    let mut client = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+    let mut reader = BufReader::new(client.try_clone().unwrap());
+    send(
+        &mut client,
+        &ClientFrame::Hello(Hello {
+            proto: WIRE_VERSION - 1,
+            binary_id: "client".into(),
+            caps: Vec::new(),
+        }),
+    );
+    assert_eq!(
+        next(&mut reader),
+        HostFrame::Refused(HandshakeRefusal::VersionMismatch {
+            host: WIRE_VERSION,
+            client: WIRE_VERSION - 1,
+        })
+    );
+    let mut rest = String::new();
+    assert_eq!(reader.read_line(&mut rest).unwrap(), 0, "{rest}");
+    stop.store(true, Ordering::Release);
+    server.join().unwrap();
 }
 
 /// Cleanup leaves a socket file another host bound at the path since.
@@ -97,16 +227,16 @@ fn a_socket_path_past_the_platform_limit_is_refused_by_name() {
     assert!(refused.message().contains(&long.display().to_string()));
 }
 
-/// At most the pending limit of connections wait for their hello at once;
-/// a place frees when its connection ends.
+/// At most a limit of places are taken at once; a place frees when its
+/// connection ends.
 #[test]
-fn pending_connections_are_capped() {
+fn places_are_capped() {
     let count = Arc::new(AtomicUsize::new(0));
     let held: Vec<_> = (0..PENDING_LIMIT)
-        .map(|_| Pending::take(&count).unwrap())
+        .map(|_| Place::take(&count, PENDING_LIMIT).unwrap())
         .collect();
-    assert!(Pending::take(&count).is_none());
+    assert!(Place::take(&count, PENDING_LIMIT).is_none());
     drop(held);
     assert_eq!(count.load(Ordering::Acquire), 0);
-    assert!(Pending::take(&count).is_some());
+    assert!(Place::take(&count, PENDING_LIMIT).is_some());
 }

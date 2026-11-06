@@ -68,7 +68,7 @@ pub(crate) fn run_agent(
     let outcome = run_agent_after_admission(
         services,
         None,
-        session_id,
+        session_id.map_or(AgentSession::New, AgentSession::Resume),
         provider,
         platform,
         wire,
@@ -196,6 +196,18 @@ pub(crate) fn new_agent_record(
     Ok(record)
 }
 
+/// The session an agent admission opens. Public, as the command module is,
+/// because only `plak host` (feature `web`) opens an unopened record.
+pub enum AgentSession {
+    /// A new session on the root template's binding and the overrides.
+    New,
+    /// The saved session of this id, exactly.
+    Resume(String),
+    /// A saved session no host has opened yet (`plak host`'s
+    /// `new_session`): its runtime session is created by this open.
+    Unopened(Box<product_sessions::SessionRecord>),
+}
+
 #[allow(clippy::fn_params_excessive_bools, reason = "clap-shaped agent verb")]
 #[allow(
     clippy::too_many_arguments,
@@ -205,7 +217,7 @@ pub(crate) fn new_agent_record(
 pub(crate) fn run_agent_after_admission(
     services: &crate::shell::services::Services,
     context: Option<&crate::home::paths::PlakPaths>,
-    session_id: Option<String>,
+    session: AgentSession,
     provider: Option<NativeProvider>,
     platform: Option<plakous_hosted::binding::PlatformProvider>,
     wire: Option<product_config::ProductWireBinding>,
@@ -237,33 +249,38 @@ pub(crate) fn run_agent_after_admission(
     crate::home::state::ensure_usable_state(paths, &mut io::stderr().lock())
         .map_err(CliFailure::new)?;
     let cwd = paths.workspace().map_err(CliFailure::new)?.to_path_buf();
-    let record = if let Some(session_id) = session_id {
-        crate::carry::load_for_work(
+    let record = match session {
+        AgentSession::Resume(session_id) => crate::carry::load_for_work(
             services,
             load_admitted_product_session(paths, store.as_ref(), &session_id)?,
             &mut io::stderr().lock(),
-        )?
-    } else {
-        let mut record = new_agent_record(
-            &cfg,
-            cwd.clone(),
-            provider,
-            platform,
-            wire,
-            model,
-            effort,
-            effort_explicit,
-            composition,
-        )?;
-        crate::build_features::admit_selected(
-            &cfg,
-            record.account.as_deref(),
-            record.model.as_deref(),
-            record.composition,
-        )?;
-        crate::build_features::admit_session(&record)?;
-        store.save(&mut record).map_err(CliFailure::new)?;
-        record
+        )?,
+        AgentSession::Unopened(record) => {
+            crate::build_features::admit_session(&record)?;
+            *record
+        }
+        AgentSession::New => {
+            let mut record = new_agent_record(
+                &cfg,
+                cwd.clone(),
+                provider,
+                platform,
+                wire,
+                model,
+                effort,
+                effort_explicit,
+                composition,
+            )?;
+            crate::build_features::admit_selected(
+                &cfg,
+                record.account.as_deref(),
+                record.model.as_deref(),
+                record.composition,
+            )?;
+            crate::build_features::admit_session(&record)?;
+            store.save(&mut record).map_err(CliFailure::new)?;
+            record
+        }
     };
     let state_roots = services.state_roots_for(paths)?;
     let account = record.account.clone().ok_or_else(|| {

@@ -466,3 +466,54 @@ fn the_memory_and_sqlite_stores_agree_on_a_random_custody_walk() {
         assert!(kinds.get(kind).copied().unwrap_or(0) > 10, "{kinds:?}");
     }
 }
+
+/// A host's directory names a tree's holder only when it is not proven gone:
+/// a live holder on this machine (its liveness lock held) and a holder on
+/// another machine are named; no take, a released record, this process
+/// itself and a holder whose lock is free are not. A missing lock proves
+/// nothing, so its holder is named too.
+#[test]
+fn holder_elsewhere_names_only_a_holder_not_proven_gone() {
+    use plakous_recursive_subagents::tree::{custody_host, holder_elsewhere};
+    let root = tempfile::tempdir().unwrap();
+    let store = SqliteTreeStore::open(&root.path().join("subagents.sqlite3")).unwrap();
+    let directory = store.liveness_dir().unwrap();
+    std::fs::create_dir_all(&directory).unwrap();
+    let machine = custody_host().host_name.clone();
+    let on = |index: u64, host_name: &str| CustodyHost {
+        host_name: host_name.to_owned(),
+        ..host(index)
+    };
+    let lock = |holder: &CustodyHost| directory.join(format!("{}.lock", holder.instance));
+    assert_eq!(holder_elsewhere(&store, "never").unwrap(), None);
+
+    let live = on(21, &machine);
+    let held = std::fs::File::create(lock(&live)).unwrap();
+    held.lock().unwrap();
+    store.take_custody("live", &live, None).unwrap();
+    assert_eq!(holder_elsewhere(&store, "live").unwrap(), Some(live));
+
+    let dead = on(22, &machine);
+    std::fs::File::create(lock(&dead)).unwrap();
+    store.take_custody("dead", &dead, None).unwrap();
+    assert_eq!(holder_elsewhere(&store, "dead").unwrap(), None);
+
+    let missing = on(23, &machine);
+    store.take_custody("missing", &missing, None).unwrap();
+    assert_eq!(holder_elsewhere(&store, "missing").unwrap(), Some(missing));
+
+    let remote = on(24, "another-machine");
+    let claim = store.take_custody("remote", &remote, None).unwrap();
+    assert_eq!(
+        holder_elsewhere(&store, "remote").unwrap(),
+        Some(remote.clone())
+    );
+    store.release_custody(&claim).unwrap();
+    assert_eq!(holder_elsewhere(&store, "remote").unwrap(), None);
+
+    store.take_custody("own", custody_host(), None).unwrap();
+    assert_eq!(holder_elsewhere(&store, "own").unwrap(), None);
+    // The read takes nothing: the dead holder's lock is still free.
+    assert!(std::fs::File::open(lock(&dead)).unwrap().try_lock().is_ok());
+    drop(held);
+}

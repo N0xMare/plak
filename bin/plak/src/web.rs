@@ -198,7 +198,10 @@ fn open_session(
     crate::commands::agent::run_agent_after_admission(
         services,
         context.as_ref(),
-        command.session.clone(),
+        command.session.clone().map_or(
+            crate::commands::agent::AgentSession::New,
+            crate::commands::agent::AgentSession::Resume,
+        ),
         None,
         None,
         None,

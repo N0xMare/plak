@@ -66,6 +66,8 @@ struct Script {
     /// The fake sessions' observation senders, to end one.
     ends: Mutex<BTreeMap<String, plakous_host_protocol::ObservationSender<Core>>>,
     creates: Mutex<Vec<String>>,
+    /// The tree each session's root is in, when it is not its own.
+    trees: Mutex<BTreeMap<String, String>>,
 }
 
 #[derive(Clone, Default)]
@@ -121,8 +123,16 @@ impl HostSessions<Core> for Fake {
             }
             Ok(())
         });
+        let tree = self
+            .0
+            .trees
+            .lock()
+            .unwrap()
+            .get(session)
+            .cloned()
+            .unwrap_or_else(|| session.to_owned());
         Ok(OpenedSession {
-            root: node(session),
+            root: node(&tree),
             session_id: session.to_owned(),
             actions,
             events,
@@ -281,6 +291,44 @@ fn an_attach_opens_a_dormant_session_once_and_routes_by_tree() {
     assert_eq!(fake.0.opens.load(Ordering::SeqCst), 2);
     first.leave();
     second.leave();
+    handed_off(&host);
+}
+
+/// An attach of a tree a resident session serves goes to that session,
+/// even when the stores name another, older session of the tree first (a
+/// session a rebind or a switch left behind): nothing else opens.
+#[test]
+fn an_attach_goes_to_the_resident_session_of_its_tree() {
+    let (host, fake) = host(&["old", "new"]);
+    for session in ["old", "new"] {
+        fake.0
+            .trees
+            .lock()
+            .unwrap()
+            .insert(session.into(), "tree".into());
+    }
+    for row in fake.0.rows.lock().unwrap().iter_mut() {
+        row.node = node("tree");
+    }
+    // The newer session is resident, opened by its id.
+    let resident = host.slot("new");
+    let (_session, hold) = resident.resident().unwrap();
+    drop(hold);
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    request(&mut connection, 1, Op::Attach { node: node("tree") });
+    attached(&out.take(), 1);
+    assert_eq!(
+        fake.0.opens.load(Ordering::SeqCst),
+        1,
+        "the stores' older session of the tree was opened beside the resident one"
+    );
+    assert_eq!(
+        connection.node.as_ref().unwrap().session.session_id(),
+        "new"
+    );
+    connection.leave();
     handed_off(&host);
 }
 

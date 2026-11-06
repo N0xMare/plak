@@ -468,10 +468,15 @@ enum TopCommand {
         #[arg(long, hide = true)]
         idle_release: Option<u64>,
     },
-    /// The per-user host process: one per home and state key, on a
-    /// private control socket (maintainer builds; hosts no session yet).
+    /// The per-user host process: one per home and state key, serving
+    /// every session of the home on a private control socket (maintainer
+    /// builds).
     #[command(hide = true)]
-    Host,
+    Host {
+        /// Seconds an idle session stays resident (300).
+        #[arg(long, hide = true)]
+        idle_release: Option<u64>,
+    },
     /// Wire v2 tools (maintainer builds).
     #[command(hide = true)]
     Wire {

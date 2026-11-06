@@ -242,6 +242,39 @@ pub fn holder_runs_here(store: &dyn TreeCustody, holder: &CustodyHost) -> bool {
             .is_some_and(|directory| super::liveness::lock_held(&directory, holder.instance))
 }
 
+/// The other host process that holds `tree_id` in `store` and is not proven
+/// gone, or `None`: no take ever ran, the holder released, the holder is
+/// this process, or it is a process on this machine whose liveness lock is
+/// free. A holder on another machine is never proven gone, so it is named.
+/// Reading takes nothing: a lock found free is let go at once.
+///
+/// # Errors
+///
+/// The store's refusal of the read.
+pub fn holder_elsewhere(
+    store: &dyn TreeCustody,
+    tree_id: &str,
+) -> Result<Option<CustodyHost>, super::TreeStoreError> {
+    let Some(record) = store.custody(tree_id)? else {
+        return Ok(None);
+    };
+    let own = custody_host();
+    let holder = record.holding.host;
+    if record.released || holder == *own {
+        return Ok(None);
+    }
+    let gone = store.liveness_dir().is_some_and(|directory| {
+        super::CustodyLiveness::holder_gone(
+            &super::liveness::DirectoryLiveness {
+                directory: &directory,
+                own,
+            },
+            &holder,
+        )
+    });
+    Ok((!gone).then_some(holder))
+}
+
 /// Gives up one holder's share; the last share releases the record.
 ///
 /// # Errors

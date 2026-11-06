@@ -529,6 +529,57 @@ fn fold_handed_off_turn(running: &mut Option<LostRootTurn>, seq: u64, fact: &Fee
     }
 }
 
+/// Where a session's root stands by its durable intents alone, as a host's
+/// session directory and its start scan read it (spec 02 §4.4, §4.6).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RootStanding {
+    /// Nothing holds or continues the root.
+    Clear,
+    /// The root's latest interrupt is a stop: nothing continues it.
+    Stopped,
+    /// The root holds, or has pending, a continuation after its host was
+    /// lost; `handoff` when the loss was a planned handoff, which continues
+    /// by itself at the next open.
+    Continuing {
+        /// The loss was a planned handoff.
+        handoff: bool,
+        /// No decision yet: an `owner_lost` loss waits for the operator.
+        held: bool,
+    },
+}
+
+/// Where the session `session_id`'s root stands by its durable intents.
+///
+/// # Errors
+/// A product store read refused.
+pub fn root_standing(
+    store: &dyn SessionRecordStore,
+    session_id: &str,
+) -> Result<RootStanding, String> {
+    let intents = store.load_intents(session_id)?;
+    let stopped = intents
+        .root_interrupts
+        .iter()
+        .max_by_key(|intent| (intent.anchor, intent.ordinal))
+        .is_some_and(|latest| latest.value.cause == RootInterruptCause::Stopped);
+    if stopped {
+        return Ok(RootStanding::Stopped);
+    }
+    let Some(loss) = latest_loss(&intents) else {
+        return Ok(RootStanding::Clear);
+    };
+    let views = store
+        .load_views(session_id)?
+        .unwrap_or_else(SessionViews::empty);
+    Ok(match state(&loss, &intents, &views) {
+        None | Some(RootLossState::Running) => RootStanding::Clear,
+        Some(standing) => RootStanding::Continuing {
+            handoff: loss.cause == RootContinuationCause::Handoff,
+            held: standing == RootLossState::Held,
+        },
+    })
+}
+
 /// Whether the root's latest loss was a planned handoff, which continues by
 /// itself.
 ///

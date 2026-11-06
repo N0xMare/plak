@@ -25,6 +25,14 @@ pub(crate) struct WebCommand {
     pub(crate) idle_release: Option<std::time::Duration>,
 }
 
+/// `plak host`'s arguments.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct HostCommand {
+    /// How long an idle session stays resident; the product's idle release
+    /// when unset.
+    pub(crate) idle_release: Option<std::time::Duration>,
+}
+
 /// `path` against `launch` when it is relative and the launch directory is
 /// known; otherwise as given.
 fn against(path: PathBuf, launch: Option<&std::path::Path>) -> PathBuf {
@@ -304,8 +312,8 @@ pub(crate) enum Command {
     /// Hidden `plak web`: one headless session's wire v2 and the web UI on
     /// a private listener.
     Web(WebCommand),
-    /// Hidden `plak host`: the per-user host process (skeleton).
-    Host,
+    /// Hidden `plak host`: the per-user host process.
+    Host(HostCommand),
     /// Hidden `plak wire schema`: this build's wire v2 JSON Schema.
     WireSchema,
 }
@@ -457,7 +465,7 @@ impl Command {
             | Self::ContinueSession { .. } => "run",
             Self::Agent { .. } => "agent",
             Self::Web(_) => "web",
-            Self::Host => "host",
+            Self::Host(_) => "host",
             Self::WireSchema => "wire",
         }
     }
@@ -484,7 +492,7 @@ pub(crate) fn command_needs_product_state(command: &Command) -> bool {
             | Command::ContinueSession { .. }
             | Command::Agent { .. }
             | Command::Web(_)
-            | Command::Host
+            | Command::Host(_)
             | Command::SessionList
             | Command::SessionRecover { .. }
             | Command::SessionExport { .. }

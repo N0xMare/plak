@@ -1693,6 +1693,12 @@ the product home. Its authority is exactly the user's own:
   process of the user can already read and write the home. There is no
   port and no network surface; a remote client reaches a host only through
   the web endpoint's gate (§2.10).
+- A connection is a client of the host's session directory (chapter 02
+  §4.4): it reads every session of the home, attaches any of them, and
+  creates one in any existing directory the user can reach. A project's
+  `.plak/` overlay still applies to it only when trusted (`plak config
+  trust`), which no connection can do. A connection is a remote face, so
+  it is refused the intents that exec or hand off the host's build (§4.6).
 
 ## 5. Redaction
 
