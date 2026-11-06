@@ -222,7 +222,7 @@ fn observe_open_workspace_file_at(
         return match openat(
             root,
             ".",
-            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK | OFlags::NOCTTY,
             Mode::empty(),
         ) {
             Ok(descriptor) => {
@@ -252,7 +252,7 @@ fn observe_open_workspace_file_at(
     for (index, name) in names.iter().enumerate() {
         let is_last = index + 1 == names.len();
         let open_flags = if is_last {
-            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK | OFlags::NOCTTY
         } else {
             OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC
         };
@@ -321,7 +321,8 @@ const fn query_entry_kind_is_walkable(file_type: rustix::fs::FileType) -> Option
 fn open_directory_entry_for_query(directory: &fs::File, name: &Path) -> RepositoryQueryEntry {
     // `O_NONBLOCK` keeps an unknown-kind fifo from parking the walk on a
     // writer that may never arrive; regular files and directories ignore it.
-    let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK;
+    let flags =
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK | OFlags::NOCTTY;
     #[cfg(target_os = "linux")]
     let opened = openat2(
         directory,
@@ -477,7 +478,10 @@ pub(super) fn read_workspace_sync(
     snapshots: &Mutex<WorkspaceSnapshotCache>,
 ) -> Result<WorkspaceReadSlice, ExecutionBackendError> {
     control.check_cancelled()?;
-    let mut file = open_workspace_beneath(workspace, request.path(), OFlags::RDONLY)?;
+    // Opening precedes fstat: an untrusted FIFO must not wait for a writer.
+    // NONBLOCK has no effect on the regular files admitted below.
+    let flags = OFlags::RDONLY | OFlags::NONBLOCK | OFlags::NOCTTY;
+    let mut file = open_workspace_beneath(workspace, request.path(), flags)?;
     let metadata = file
         .metadata()
         .map_err(|_| io_error("workspace file metadata failed"))?;
@@ -601,7 +605,11 @@ pub(super) fn query_repository_sync(
         None => query.root().to_path_buf(),
     };
     let pruned = walk_root != query.root();
-    let start_descriptor = match open_workspace_beneath(workspace, &walk_root, OFlags::RDONLY) {
+    let start_descriptor = match open_workspace_beneath(
+        workspace,
+        &walk_root,
+        OFlags::RDONLY | OFlags::NONBLOCK | OFlags::NOCTTY,
+    ) {
         Ok(descriptor) => descriptor,
         // A glob prefix that names nothing traversable matches nothing.
         Err(_) if pruned => return Ok(empty_repository_query_result(1)),
@@ -849,7 +857,7 @@ fn add_ignore_file(
     let Ok(descriptor) = openat(
         directory,
         name,
-        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK | OFlags::NOCTTY,
         Mode::empty(),
     ) else {
         return false;
@@ -1135,7 +1143,7 @@ fn observe_workspace_file(
         match openat2(
             &root,
             &path,
-            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK | OFlags::NOCTTY,
             Mode::empty(),
             ResolveFlags::BENEATH | ResolveFlags::NO_SYMLINKS | ResolveFlags::NO_MAGICLINKS,
         ) {

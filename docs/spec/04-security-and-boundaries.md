@@ -251,6 +251,15 @@ that exists and is not a directory is refused as a pre-effect `NotADirectory`,
 so a write beneath a file is refused before any effect instead of being read as
 a create.
 
+Workspace content reads, repository-query roots, and mutation preflight reads
+open with `O_NONBLOCK | O_NOCTTY` before inspecting the opened handle with `fstat`.
+Content and preflight reads admit only regular files; query roots admit regular
+files or directories. Other kinds are refused without waiting for a FIFO writer.
+`O_NONBLOCK` remains set: it has no effect on admitted regular-file reads.
+Runner file verbs use these same checks. Existing containment and symlink rules
+are unchanged. Regex search context rereads also use the execution backend,
+so replacement of a matched file by a FIFO cannot park the context formatter.
+
 The lexical layer alone does **not** claim race-free containment, and says so.
 Process-tool working directories get the additional per-component symlink check
 and a re-verification that the canonical path is still under the root. A parent

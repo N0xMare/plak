@@ -575,7 +575,7 @@ fn open_job_file(directory: &File, name: &str) -> Option<(File, std::fs::Metadat
     let file = openat(
         directory,
         name,
-        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC | OFlags::NOCTTY,
         Mode::empty(),
     )
     .map(File::from)
@@ -606,7 +606,7 @@ impl IssuedJobOutputLocation {
         let file = openat(
             &directory,
             self.issued.name.as_str(),
-            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC | OFlags::NOCTTY,
             Mode::empty(),
         )
         .map(File::from)

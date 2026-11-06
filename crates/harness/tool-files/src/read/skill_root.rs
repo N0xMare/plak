@@ -68,7 +68,7 @@ pub(super) fn read_leading(
     let mut file = std::fs::File::from(
         rustix::fs::open(
             &canonical,
-            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC | OFlags::NOCTTY,
             Mode::empty(),
         )
         .map_err(|_| unopenable())?,

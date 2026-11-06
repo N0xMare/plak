@@ -278,7 +278,8 @@ async fn execute_regex_search(
         counts_only,
         paths_only,
         issued_lines.as_ref(),
-    )?;
+    )
+    .await?;
     let mut output = BoundedSearchResult::new(STANDARD_SEARCH_RESULT_BYTES - 1024);
     let stamp = generation_stamp_prefix(context);
     let mut clipped = false;
@@ -490,7 +491,7 @@ fn search_notes_header(notes: &[String], incomplete: bool, clipped: bool, advice
 
 /// Formats a regex walk's matches as ripgrep-style rows, one per line, a
 /// count per file, or a path per file.
-fn regex_entries(
+async fn regex_entries(
     context: &ToolContext,
     result: &plakous_tools::RepositoryQueryResult,
     before: usize,
@@ -542,7 +543,8 @@ fn regex_entries(
                     first_hit,
                     issued_lines,
                 },
-            )?;
+            )
+            .await?;
         }
         first_hit = end_hit;
     }
@@ -644,7 +646,7 @@ impl FileLines<'_> {
 }
 
 /// Emits ripgrep-style match (`:`) and context (`-`) lines for one file.
-fn append_context_lines(
+async fn append_context_lines(
     context: &ToolContext,
     path: &Path,
     hits: &[&plakous_tools::RepositoryQueryMatch],
@@ -655,13 +657,8 @@ fn append_context_lines(
     let file_lines = if let Some(lines) = window.issued_lines {
         FileLines::Around(lines)
     } else {
-        let resolved = context.workspace().resolve_existing(path)?;
-        let bytes = fs::read(&resolved).map_err(|_| {
-            ToolRuntimeError::new(
-                ToolRuntimeErrorKind::Execution,
-                "grep could not reread a matching file for context",
-            )
-        })?;
+        let bytes =
+            read_context_bytes(context.environment(), path, operation_context(context)).await?;
         owned = String::from_utf8_lossy(&bytes).into_owned();
         FileLines::Whole(owned.lines().collect())
     };
@@ -728,6 +725,36 @@ impl SearchRepositoryTool {
             )?,
             Self,
         ))
+    }
+}
+
+async fn read_context_bytes(
+    environment: &plakous_tools::ExecutionEnvironment,
+    path: &Path,
+    control: plakous_tools::OperationContext,
+) -> Result<Vec<u8>, ToolRuntimeError> {
+    let resolved = environment.workspace().resolve_existing(path)?;
+    let relative = environment.workspace().relative_input(resolved)?;
+    let mut request = plakous_tools::WorkspaceReadSliceRequest::start(
+        relative,
+        plakous_tools::MAX_STANDARD_TEXT_BYTES,
+    )
+    .map_err(backend_runtime_error)?;
+    let mut bytes = Vec::new();
+    loop {
+        let slice = environment
+            .read_workspace(request, control.clone())
+            .await
+            .map_err(backend_runtime_error)?;
+        bytes.extend_from_slice(slice.bytes());
+        let Some(next) = slice.next().cloned() else {
+            return Ok(bytes);
+        };
+        request = plakous_tools::WorkspaceReadSliceRequest::resume(
+            next,
+            plakous_tools::MAX_STANDARD_TEXT_BYTES,
+        )
+        .map_err(backend_runtime_error)?;
     }
 }
 
@@ -998,6 +1025,7 @@ fn repository_match_cap(args: &SearchArgs, default_match_cap: usize) -> usize {
     reason = "unit tests may assert with expect/unwrap"
 )]
 mod tests {
+    mod context_read;
     use std::error::Error;
 
     use super::*;

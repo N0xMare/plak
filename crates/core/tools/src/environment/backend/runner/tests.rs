@@ -11,6 +11,8 @@ use crate::{
     WorkspaceMutation, WorkspaceReplacement,
 };
 
+mod special_files;
+
 /// A link that answers each call by serving it from `runner`, in process.
 struct DirectLink {
     runner: ExecutionEnvironment,
