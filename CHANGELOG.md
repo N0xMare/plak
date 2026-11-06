@@ -7,6 +7,9 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ## Unreleased
 
+- Add the portable internal runner dial core: Noise IK, pairing proofs, offers,
+  fingerprint confirmation and bounded encrypted transport framing, without a product caller.
+
 ### Format cut
 
 This release changes every persisted store at once (the 0.0.4 format cut), so

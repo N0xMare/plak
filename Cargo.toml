@@ -16,6 +16,7 @@ members = [
     "crates/common/attempt",
     "crates/common/auth",
     "crates/common/runner-protocol",
+    "crates/common/runner-dial",
     "crates/runtimes/cell",
     "crates/runtimes/js-runtime",
     "crates/runtimes/py-worker",
@@ -63,6 +64,12 @@ exclude = ["/tests/", "/benches/", "/fixtures/"]
 
 [workspace.dependencies]
 base64 = "0.22"
+blake2 = "=0.11.0"
+chacha20poly1305 = { version = "=0.10.1", default-features = false, features = ["alloc"] }
+curve25519-dalek = { version = "=4.1.3", default-features = false }
+poly1305 = { version = "=0.8.0", default-features = false }
+snow = { version = "=0.10.0", default-features = false }
+x25519-dalek = { version = "=2.0.1", default-features = false, features = ["static_secrets", "zeroize"] }
 bytes = "1"
 clap = "4"
 diffy = { version = "0.5.1", default-features = false }
@@ -148,6 +155,7 @@ plakous-recursive-subagents-store = { version = "0.0.3", path = "crates/orchestr
 plakous-responses = { version = "0.0.3", path = "crates/protocols/responses", default-features = false }
 plakous-runner = { version = "0.0.3", path = "crates/runtimes/runner", default-features = false }
 plakous-runner-protocol = { version = "0.0.3", path = "crates/common/runner-protocol", default-features = false }
+plakous-runner-dial = { version = "0.0.3", path = "crates/common/runner-dial", default-features = false }
 plakous-store = { version = "0.0.3", path = "crates/store", default-features = false }
 plakous-tool-files = { version = "0.0.3", path = "crates/harness/tool-files", default-features = false }
 plakous-tool-plan = { version = "0.0.3", path = "crates/harness/tool-plan", default-features = false }
@@ -502,6 +510,11 @@ reason = "Existing placement debt; ratchet down as composition-root ports and mo
 [workspace.metadata.plakous.cfg.plakous-cell]
 env-sites = ["src/test_hooks.rs"]
 reason = "The test-hooks cell handshake override is the only environment read. Other builds do not compile that module."
+
+[workspace.metadata.plakous.cfg.plakous-runner-dial]
+feature-ceiling = 1
+test-seam-ceiling = 1
+reason = "The URL validator compiles its ws scheme acceptance only under test-hooks; default builds accept wss only."
 
 [workspace.metadata.plakous.cfg.plakous-compose]
 feature-ceiling = 7

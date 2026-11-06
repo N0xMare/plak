@@ -4517,6 +4517,7 @@ def package_sources(package: Package, repository: Path = ROOT) -> tuple[dict[str
 PORTABLE_CRATES = (
     "plakous-model",
     "plakous-runner-protocol",
+    "plakous-runner-dial",
     "plakous-tools",
     "plakous-agent",
 )

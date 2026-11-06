@@ -1,0 +1,49 @@
+[package]
+name = "plakous-runner-dial"
+description = "Portable Noise IK and pairing core for runner dial-in"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/plakous-runner-dial"
+readme = "README.md"
+keywords = ["llm", "agent", "protocol"]
+categories = ["development-tools", "network-programming"]
+exclude.workspace = true
+
+[package.metadata.plakous]
+layer = "common"
+class = "published-internal"
+
+[features]
+default = []
+test-hooks = []
+
+[dependencies]
+base64.workspace = true
+blake2.workspace = true
+chacha20poly1305.workspace = true
+curve25519-dalek.workspace = true
+getrandom.workspace = true
+plakous-runner-protocol.workspace = true
+poly1305.workspace = true
+secrecy.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+snow.workspace = true
+subtle.workspace = true
+thiserror.workspace = true
+url.workspace = true
+x25519-dalek.workspace = true
+zeroize.workspace = true
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { workspace = true, features = ["wasm_js"] }
+
+[dev-dependencies]
+proptest = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true

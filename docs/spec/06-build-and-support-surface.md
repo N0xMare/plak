@@ -82,7 +82,7 @@ provider qualification, recovery certification, or source compatibility.
 | Published internal | A necessary dependency and deliberate advanced-use implementation surface, released in the exact cohort, with no direct-use compatibility, qualification, or support promise |
 | Repository-only | Test, fixture, and crash-harness packages, kept outside the production dependency closure entirely and never published |
 
-The workspace holds 39 packages: five supported, 31 published internal, three
+The workspace holds 40 packages: five supported, 32 published internal, three
 repository-only.
 
 The root `[workspace].exclude` includes `.plak`, the local operator-state and
@@ -94,7 +94,7 @@ exclusion and continues to reject other unreviewed nested-package exclusions.
 
 `plakous`, `plakous-agent`, `plakous-model`, `plakous-tools`, `plak`.
 
-**Published internal (31)**
+**Published internal (32)**
 
 `plakous-host-protocol`, `plakous-workspace`, `plakous-recursive-subagents`,
 `plakous-recursive-subagents-store`, `plakous-hosted`,
@@ -103,7 +103,7 @@ exclusion and continues to reject other unreviewed nested-package exclusions.
 `plakous-compose`, `plakous-exchange`,
 `plakous-http`, `plakous-cell`, `plakous-mcp`, `plakous-js-runtime`, `plakous-py-worker`, `plakous-messages`, `plakous-openai`,
 `plakous-openrouter`, `plakous-prompts`,
-`plakous-responses`, `plakous-runner`, `plakous-runner-protocol`, `plakous-store`,
+`plakous-responses`, `plakous-runner`, `plakous-runner-protocol`, `plakous-runner-dial`, `plakous-store`,
 `plakous-tool-files`, `plakous-tool-plan`, `plakous-tool-process`,
 `plakous-tool-search`, `plakous-tool-web`, `plakous-xai`.
 
@@ -1836,7 +1836,7 @@ the external `monty-proto` / `monty-types` / `monty-alloc` at
 
 `PORTABLE_CRATES` in `tools/gate/check_workspace.py` is the only portable-crate
 list: `plakous-model` and `plakous-runner-protocol`, whose closure is `serde`
-and `serde_json`, then `plakous-tools` and `plakous-agent`. All four have
+and `serde_json`, `plakous-runner-dial`, then `plakous-tools` and `plakous-agent`. All five have
 portable defaults. A crate joins that tuple only in the change that makes its normal dependency
 closure pass the fence below and its library
 check clean for `wasm32-unknown-unknown`. Joining is not a supported-platform
@@ -1947,6 +1947,22 @@ sets no `getrandom_backend` cfg. Native resolutions do not enable `js` and do
 not link `wasm-bindgen`. The target-dependency table is part of the reviewed
 manifest security-surface digest.
 
+`plakous-runner-dial` is a published-internal common crate with empty defaults,
+no I/O and no product caller. Its sole `test-hooks` feature admits `ws` offers;
+it does not change the cryptographic suite. Both native and wasm use exactly
+`snow =0.10.0` with default features disabled and a local resolver over
+`x25519-dalek =2.0.1`, `curve25519-dalek =4.1.3`,
+`chacha20poly1305 =0.10.1`, `poly1305 =0.8.0` and the existing
+`blake2 =0.11.0`. Direct exact constraints on the two transitive primitives
+keep their reviewed versions fixed. No snow built-in resolver or second blake2
+is linked. The curve pin includes RUSTSEC-2024-0344's fix; the snow pin includes
+RUSTSEC-2024-0011's stateful nonce fix. The additions are checked by cargo-deny.
+The 0.9.6 comparison with the same resolver builds natively but its unconditional
+rand_core/getrandom 0.2 edge fails wasm without a second backend declaration;
+0.10.0 removes that edge and propagates entropy failure. Review of the IK,
+symmetric-state and stateful-transport changes found no regression for this
+suite; the official vector and negative tests pin those paths.
+
 `plakous-agent` calls `getrandom` 0.4 directly for spawn salts, bootstrap
 nonces and checkpoint entropy. That version has no default backend on
 `cfg(all(target_arch = "wasm32", target_os = "unknown"))` and refuses to
@@ -1954,7 +1970,10 @@ compile there, so `plakous-agent` enables `getrandom`'s `wasm_js` feature as a
 target dependency for that cfg only. In 0.4 the feature alone selects the
 WebCrypto backend; no `getrandom_backend` cfg is set. Native resolutions do not
 enable it. A call fails at run time in a host without `globalThis.crypto`, and
-each caller already handles that failure.
+each caller already handles that failure. `plakous-runner-dial` uses the same
+target-specific `wasm_js` declaration for static and ephemeral keys, offer ids,
+pairing secrets and confirmation challenges; every entropy failure is returned
+without a fallback.
 
 The target is not listed in `rust-toolchain.toml`. Listing it would make rustup
 try to download it whenever the toolchain is selected, including inside the

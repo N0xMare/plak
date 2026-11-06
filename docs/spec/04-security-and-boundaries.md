@@ -1725,6 +1725,14 @@ the product home. Its authority is exactly the user's own:
 
 ## 5. Redaction
 
+The portable runner dial core never formats keys, offers, pairing secrets,
+`K_pair`, proofs or cryptographic session state in `Debug`; these types have no
+`Display` implementation. Private keys and pairing material are non-cloneable
+secrecy containers, zeroized on drop. Explicit offer encoding returns a
+zeroizing string for a private operator channel, never a diagnostic. Fingerprints
+and offer ids are not secrets. PairProof's explicit serialization is only for
+encrypted transport; it does not serialize the offer secret or `K_pair`.
+
 Composition named state is session data in the runtime store, not a credential
 store. It is unencrypted like canonical history, bounded to 64 canonical JSON
 values (1 MiB each, 4 MiB total), and subject to the same store permissions.
