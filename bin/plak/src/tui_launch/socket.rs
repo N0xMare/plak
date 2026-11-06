@@ -229,10 +229,10 @@ impl SocketFace {
                 crate::carry::probe_reload(&paths, std::path::Path::new(&workspace), None, None).0;
             let key = crate::home::state::state_key();
             let refusal = target.as_ref().and_then(|target| {
-                if target.state_key.as_deref() != Some(key.as_str()) {
-                    Some("reload refused: the installed client reads another state key; stop the host or run its build".to_owned())
-                } else {
+                if target.state_key.as_deref() == Some(key.as_str()) {
                     target.refusal(&key)
+                } else {
+                    Some("reload refused: the installed client reads another state key; stop the host or run its build".to_owned())
                 }
             });
             state
