@@ -70,17 +70,6 @@ pub async fn abandon_live_agents(tree_id: &str) -> Vec<Agent> {
         .collect()
 }
 
-async fn startup_results_owned(startups: Vec<(String, ChildStartup)>) -> Vec<Result<(), String>> {
-    futures_util::future::join_all(startups.iter().map(|(_, startup)| async move {
-        startup
-            .join_cancel()
-            .await
-            .map(|_| ())
-            .map_err(|error| error.to_string())
-    }))
-    .await
-}
-
 pub(super) async fn shutdown_runtime(
     runtime: Arc<ProductTopologyRuntime>,
 ) -> Result<(), TopologyShutdownError> {
@@ -187,57 +176,89 @@ async fn join_runtime_children(
     runtime: Arc<ProductTopologyRuntime>,
     failure: &mut TopologyShutdownError,
 ) {
-    let startups = {
+    // Every opening is cancelled first, so none becomes resident now; each
+    // settles on its own task and is joined with its node's depth level.
+    let mut settling = {
         let live = runtime.live.lock().await;
         live.openings()
             .map(|(id, startup)| {
                 startup.request_cancel();
-                (id.clone(), startup.clone())
+                let settled = startup.clone();
+                Settling {
+                    id: id.clone(),
+                    task: runtime.driver.tasks().spawn(async move {
+                        settled
+                            .join_cancel()
+                            .await
+                            .map(|_| ())
+                            .map_err(|error| error.to_string())
+                    }),
+                    startup: startup.clone(),
+                    result: None,
+                }
             })
             .collect::<Vec<_>>()
     };
-    let startup_task = runtime
-        .driver
-        .tasks()
-        .spawn(startup_results_owned(startups.clone()));
-    let startup_abort = startup_task.abort_handle();
-    let (retirements, results) = retire_leaf_first(&runtime, failure).await;
+    let (retirements, results) = retire_leaf_first(&runtime, &mut settling, failure).await;
     record_retirement_results(&runtime, failure, retirements, results).await;
-    let startup_results = match tokio::time::timeout(HOST_SHUTDOWN_DETACH_TIMEOUT, startup_task)
-        .await
-    {
-        Ok(Ok(results)) => results,
-        Ok(Err(_)) => {
-            vec![Err("child startup settlement task failed".into()); startups.len()]
-        }
-        Err(_) => {
-            startup_abort.abort();
-            vec![Err("child startup settlement exceeded the shutdown bound".into()); startups.len()]
-        }
-    };
-    for ((id, startup), result) in startups.into_iter().zip(startup_results) {
+    // A startup the bound left unsettled gets the detach allowance, as before
+    // the join was leveled.
+    let _ = tokio::time::timeout(
+        HOST_SHUTDOWN_DETACH_TIMEOUT,
+        futures_util::future::join_all(settling.iter_mut().map(Settling::join)),
+    )
+    .await;
+    for settled in settling {
+        let result = settled.result.unwrap_or_else(|| {
+            settled.task.abort_handle().abort();
+            Err("child startup settlement exceeded the shutdown bound".into())
+        });
         if let Err(error) = result {
             record_retirement_fault(
                 &runtime.driver,
-                &id,
-                startup.expected_attempt.as_ref(),
+                &settled.id,
+                settled.startup.expected_attempt.as_ref(),
                 RetirementFaultSource::Joiner,
                 &error,
             )
             .await;
-            failure.child_failures.push((id, error));
+            failure.child_failures.push((settled.id, error));
+        }
+    }
+}
+
+/// One opening child's cancelled startup, settling on its own task.
+struct Settling {
+    id: String,
+    startup: ChildStartup,
+    task: crate::task_set::TaskHandle<Result<(), String>>,
+    result: Option<Result<(), String>>,
+}
+
+impl Settling {
+    /// Waits for the settlement, once; a later call returns at once.
+    async fn join(&mut self) {
+        if self.result.is_none() {
+            self.result = Some(
+                (&mut self.task)
+                    .await
+                    .unwrap_or_else(|_| Err("child startup settlement task failed".into())),
+            );
         }
     }
 }
 
 /// Retires the live descendants by depth, deepest first, under the one
 /// shutdown bound (spec 03 section 14): a level starts once every node of the
-/// level below has released and its turn waiter has folded, so no node retires
-/// while a descendant of it still does. Siblings within a level retire
+/// level below has released and its turn waiter has folded, and every
+/// cancelled startup of that level has settled, so no node retires while a
+/// descendant of it still releases or opens. Siblings within a level retire
 /// concurrently. Once the bound is spent, the remaining levels start at once
-/// and are read without waiting, so they are reported cut short.
+/// and are read without waiting, so they are reported cut short; their
+/// startups are left to the caller's detach allowance.
 async fn retire_leaf_first(
     runtime: &Arc<ProductTopologyRuntime>,
+    settling: &mut [Settling],
     failure: &mut TopologyShutdownError,
 ) -> (
     Vec<(String, super::Retirement)>,
@@ -251,21 +272,39 @@ async fn retire_leaf_first(
             .chain(live.releasings().map(|(id, _)| id.clone()))
             .collect::<Vec<_>>()
     };
-    let mut levels = std::collections::BTreeMap::<std::cmp::Reverse<u8>, Vec<String>>::new();
-    for id in ids {
-        // A node the tree no longer names has no descendant to wait for.
-        let depth = runtime
+    // A node the tree no longer names has no descendant to wait for.
+    let depth = |id: &str| {
+        runtime
             .driver
-            .read(|tree| tree.node(&id).map(|node| node.depth).ok())
+            .read(|tree| tree.node(id).map(|node| node.depth).ok())
             .ok()
             .flatten()
-            .unwrap_or(u8::MAX);
-        levels.entry(std::cmp::Reverse(depth)).or_default().push(id);
+            .unwrap_or(u8::MAX)
+    };
+    let mut levels = std::collections::BTreeMap::<std::cmp::Reverse<u8>, Vec<String>>::new();
+    for id in ids {
+        levels
+            .entry(std::cmp::Reverse(depth(&id)))
+            .or_default()
+            .push(id);
+    }
+    let opening_depths = settling
+        .iter()
+        .map(|settled| depth(&settled.id))
+        .collect::<Vec<_>>();
+    for depth in &opening_depths {
+        levels.entry(std::cmp::Reverse(*depth)).or_default();
     }
     let mut retirements = Vec::new();
     let mut results = Vec::new();
     let mut in_time = true;
-    for ids in levels.into_values() {
+    for (std::cmp::Reverse(depth), ids) in levels {
+        let opening = settling
+            .iter_mut()
+            .zip(&opening_depths)
+            .filter(|(_, at)| **at == depth)
+            .map(|(settled, _)| settled)
+            .collect::<Vec<_>>();
         let level = {
             let mut live = runtime.live.lock().await;
             ids.iter()
@@ -277,10 +316,13 @@ async fn retire_leaf_first(
         };
         let joined = if in_time {
             tokio::time::timeout_at(deadline, async {
-                let joined = futures_util::future::join_all(
-                    level
-                        .iter()
-                        .map(|(_, retirement)| retirement.completion.clone()),
+                let (joined, _) = futures_util::future::join(
+                    futures_util::future::join_all(
+                        level
+                            .iter()
+                            .map(|(_, retirement)| retirement.completion.clone()),
+                    ),
+                    futures_util::future::join_all(opening.into_iter().map(Settling::join)),
                 )
                 .await;
                 level_waiters_folded(runtime, &level).await;

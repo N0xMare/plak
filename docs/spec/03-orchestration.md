@@ -3867,7 +3867,7 @@ the handoff's fold position past the acceptance of the turn it interrupts, so
 that turn never reads as one admitted after the handoff. The hub's join retires
 children by depth, deepest first, siblings concurrently, under its one
 two-second bound (§16), so no node is released while a descendant of it is
-still releasing. A child whose release
+still releasing or opening (a cancelled startup settles in its depth's level). A child whose release
 outlasts the hub's two-second join (its turn ignores the cancel), and every
 ancestor of it the spent bound then cuts short, keeps its
 `handoff` row and records nothing more: the shutdown's joiner never writes a
@@ -5435,13 +5435,18 @@ Shutdown closes admission (no `recover_node` run starts after that), then gives
 running runs one two-second allowance; at expiry it aborts them and joins each
 for at most 250 ms, so no reopen of a child session outlives the leases
 released next. It
-then retires the live children by depth, deepest first, within one two-second
-allowance for the whole join: a level's active releases start, together with
-any retirement of that level already under way, and the next level up starts
-only once each of them has released and its turn waiter has folded the
-released turn into the tree. Siblings at one depth retire concurrently. So no
-node retires while a descendant of it still does, and a tree's shutdown
-commits in one order run to run. A deaf leaf can spend the allowance; the
+cancels every child still opening, so none becomes resident, and then retires
+the children by depth, deepest first, within one two-second allowance for the
+whole join: a level's active releases start, together with any retirement of
+that level already under way, and the next level up starts only once each of
+them has released, its turn waiter has folded the released turn into the tree,
+and each of that level's cancelled startups has settled. Siblings at one depth
+retire concurrently. So no node retires while a descendant of it still
+releases or opens, and a tree's shutdown commits in one order run to run.
+Until its level starts, a shallower node keeps running: its turn is neither
+cancelled nor released, so it can finish a provider round or run a tool in
+that window (admission and live mail are already closed), and only within the
+one allowance. A deaf leaf can spend the allowance; the
 levels above it then start at once without a wait and are reported cut short
 like any release the bound cut short (for a planned handoff, a warning, and the
 next owner continues each of them once). Tracked tool-side retirement tasks are
