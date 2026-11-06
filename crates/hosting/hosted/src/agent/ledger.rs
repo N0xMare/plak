@@ -678,33 +678,6 @@ pub(super) async fn project_child_feed_through_acceptance(
     .await
 }
 
-/// `feed` without the records after the first one that accepted a command
-/// bound to `turn_id`; all of it when none did.
-fn through_acceptance(
-    feed: std::sync::Arc<crate::agent_tree::TreeFeed>,
-    turn_id: plakous::model::TurnId,
-) -> std::sync::Arc<crate::agent_tree::TreeFeed> {
-    let accepted = feed.records.iter().position(|record| {
-        record.facts().iter().any(|fact| {
-            matches!(
-                fact,
-                plakous::sessions::feed::FeedFact::CommandAccepted {
-                    turn_id: Some(accepted),
-                    ..
-                } if *accepted == turn_id
-            )
-        })
-    });
-    match accepted {
-        Some(at) if at + 1 < feed.records.len() => {
-            let mut bounded = (*feed).clone();
-            bounded.records.truncate(at + 1);
-            std::sync::Arc::new(bounded)
-        }
-        _ => feed,
-    }
-}
-
 /// Brings every running child's projection to its feed's tail, so a record
 /// the tree makes now orders after each command a child's runtime accepted.
 /// The children's sessions are read where their parent created them.
@@ -767,7 +740,7 @@ async fn project_feed_until(
     let (projection, feed) =
         crate::agent::feed_projection::retry_tree_feed(sessions, feed, |feed| {
             let feed = match until {
-                Some(turn_id) => through_acceptance(feed, turn_id),
+                Some(turn_id) => crate::agent::feed_projection::through_acceptance(feed, turn_id),
                 None => feed,
             };
             crate::agent::feed_projection::apply_on_runtime(runtime, feed, recipient)

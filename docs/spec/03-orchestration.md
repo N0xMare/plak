@@ -3936,7 +3936,9 @@ waiting for the parent: its turn waiter releases and reopens the session as
 soon as the turn settles and records the outcome itself (section 14.2). The
 parked set and `waiting_on` are process-local.
 
-A child turn's start projects the child's feed only through the record that
+A child turn's start, whether its assignment's first turn, a turn its
+waiter starts again (an instruction or continuation turn) or a parked
+child's wake, projects the child's feed only through the record that
 accepted its command, which binds the turn. What the running turn commits
 after that is folded at the tree's next record of the child: its waiter's
 terminal, a handoff or a release. The tree's writes therefore do not depend

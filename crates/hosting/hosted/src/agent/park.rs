@@ -509,8 +509,12 @@ async fn start_wake_turn(
                     return Err("child attempt has already been replaced".into());
                 }
                 tree.bind_turn_owner(agent_id, turn_id.to_string());
+                // Through the wake turn's acceptance only: the turn runs
+                // on, and its turn end folds the rest.
                 if let Some(feed) = feed? {
-                    feed.apply(tree, agent_id).map_err(|error| error.message)?;
+                    crate::agent::feed_projection::through_acceptance(Arc::new(feed), turn_id)
+                        .apply(tree, agent_id)
+                        .map_err(|error| error.message)?;
                 }
                 tree.unpark_child(agent_id);
                 persist_or_fault(driver, tree, agent_id);

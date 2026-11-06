@@ -1493,8 +1493,12 @@ pub(in crate::agent) async fn start_instruction_turn(
                     tree.unpark_child(agent_id);
                 }
                 tree.bind_turn_owner(agent_id, turn_id.to_string());
+                // Through the restarted turn's acceptance only: the turn
+                // runs on, and its turn end folds the rest.
                 if let Some(feed) = feed? {
-                    feed.apply(tree, agent_id).map_err(|error| error.message)?;
+                    crate::agent::feed_projection::through_acceptance(Arc::new(feed), turn_id)
+                        .apply(tree, agent_id)
+                        .map_err(|error| error.message)?;
                 }
                 // Once Start was admitted the result must retain a waiter even
                 // when persistence refuses this publication. The fault remains

@@ -1103,7 +1103,8 @@ fn a_start_fold_stops_at_its_turns_acceptance() {
         record(3, None),
         record(4, None),
     ]);
-    let bounded = super::through_acceptance(std::sync::Arc::clone(&running), turn(7));
+    let bounded =
+        crate::agent::feed_projection::through_acceptance(std::sync::Arc::clone(&running), turn(7));
     assert_eq!(
         bounded
             .records
@@ -1114,13 +1115,18 @@ fn a_start_fold_stops_at_its_turns_acceptance() {
         "the fold went past the turn's acceptance"
     );
     assert_eq!(
-        super::through_acceptance(std::sync::Arc::clone(&running), turn(8)).records,
+        crate::agent::feed_projection::through_acceptance(std::sync::Arc::clone(&running), turn(8))
+            .records,
         running.records,
         "a feed without the acceptance is folded whole"
     );
     let accepted_last = feed(vec![record(1, None), record(2, Some(turn(7)))]);
     assert_eq!(
-        super::through_acceptance(std::sync::Arc::clone(&accepted_last), turn(7)).records,
+        crate::agent::feed_projection::through_acceptance(
+            std::sync::Arc::clone(&accepted_last),
+            turn(7)
+        )
+        .records,
         accepted_last.records
     );
 }

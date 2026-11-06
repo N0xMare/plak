@@ -44,6 +44,36 @@ where
         .map_err(TopologyError::from)
 }
 
+/// `feed` without the records after the first one that accepted a command
+/// bound to `turn_id`; all of it when none did. A turn's start folds its
+/// child's feed only this far: the turn runs on while the fold reads, so a
+/// fold to the tail would reach as far as the turn happened to get (spec
+/// 03, child commands).
+pub(crate) fn through_acceptance(
+    feed: Arc<TreeFeed>,
+    turn_id: plakous::model::TurnId,
+) -> Arc<TreeFeed> {
+    let accepted = feed.records.iter().position(|record| {
+        record.facts().iter().any(|fact| {
+            matches!(
+                fact,
+                plakous::sessions::feed::FeedFact::CommandAccepted {
+                    turn_id: Some(accepted),
+                    ..
+                } if *accepted == turn_id
+            )
+        })
+    });
+    match accepted {
+        Some(at) if at + 1 < feed.records.len() => {
+            let mut bounded = (*feed).clone();
+            bounded.records.truncate(at + 1);
+            Arc::new(bounded)
+        }
+        _ => feed,
+    }
+}
+
 /// Where a tree writer leaves the typed projector refusal its closure saw.
 #[derive(Clone, Default)]
 pub(crate) struct RefusalSlot(Arc<Mutex<Option<TreeProjectorError>>>);
