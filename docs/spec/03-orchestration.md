@@ -3952,8 +3952,16 @@ waiter starts again (an instruction or continuation turn) or a parked
 child's wake, projects the child's feed only through the record that
 accepted its command, which binds the turn. What the running turn commits
 after that is folded at the tree's next record of the child: its waiter's
-terminal, a handoff or a release. The tree's writes therefore do not depend
-on how far the child's turn got by the time its start was projected.
+terminal, a handoff or a release. The waiter's fold at a turn's end goes
+only through the record that ended the turn; what the child commits after
+it (a parked job's records, its next turn) is folded by the tree's next
+record of the child. A turn the child's retirement cancelled (a close, the
+host's release) ends while that retirement still publishes its release
+page, so the waiter first waits, within the retirement's own deadline, for
+that retirement to finish: the release page is always folded before the
+turn's end, whichever of the two the scheduler ran first. The tree's writes
+therefore do not depend on how far the child got by the time a turn's start
+or end was projected.
 
 Before a parked child's wake dispatches, the tree projector applies the
 child's feed to its tail (§14.3), which settles the child's await receipts

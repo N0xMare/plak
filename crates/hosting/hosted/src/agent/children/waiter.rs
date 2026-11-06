@@ -274,6 +274,13 @@ impl crate::node::TurnRole<()> for ChildTurns {
         let (attempt, live, observer, feed) =
             (&self.attempt, &self.live, &self.observer, &self.feed);
         let carried = &mut self.carried;
+        // A turn a retirement cancelled (a close, the host's release) ends
+        // while that retirement still publishes its page: wait for it, so
+        // this waiter's fold of the turn's end always comes after the
+        // release's, whichever of the two the scheduler ran first.
+        if child_turn_was_cancelled(&terminal) {
+            crate::topology_runtime::join_release_in_flight(live, &agent_id, completed_turn).await;
+        }
         // A child has no operator to wait for, so a turn its owner fenced
         // is recovered at once: release the stopped session and reopen it,
         // which abandons the turn exactly as a crash reattach would. The
@@ -282,7 +289,7 @@ impl crate::node::TurnRole<()> for ChildTurns {
             && let TurnResultOutcome::RecoveryRequired(error) = result.outcome()
         {
             warn_recovery_required(&agent_id, attempt, completed_turn, error.kind());
-            project_turn_end(&driver, feed.as_ref(), &agent_id).await;
+            project_turn_end(&driver, feed.as_ref(), &agent_id, completed_turn).await;
             if driver
                 .read(|tree| identity.still_owns(tree, &agent_id))
                 .unwrap_or(false)
@@ -414,7 +421,7 @@ impl crate::node::TurnRole<()> for ChildTurns {
             // parent's `wait_agent` settles, sealing and pushing the
             // `result` by the usual rules.
             if terminal.is_ok() {
-                project_turn_end(&driver, feed.as_ref(), &agent_id).await;
+                project_turn_end(&driver, feed.as_ref(), &agent_id, completed_turn).await;
             }
             let pending = driver
                 .mutate({
@@ -459,14 +466,15 @@ impl crate::node::TurnRole<()> for ChildTurns {
         }
         if ending == TurnOutcome::Interrupted {
             if terminal.is_ok() {
-                project_turn_end(&driver, feed.as_ref(), &agent_id).await;
+                project_turn_end(&driver, feed.as_ref(), &agent_id, completed_turn).await;
             }
             finish_interrupted_turn(&driver, live, &agent_id, &identity, observer.as_ref()).await;
             return AfterTerminal::Settled(());
         }
         match terminal {
             Ok(_) if !cancelled => {
-                let ended = project_turn_end(&driver, feed.as_ref(), &agent_id).await;
+                let ended =
+                    project_turn_end(&driver, feed.as_ref(), &agent_id, completed_turn).await;
                 let (submitted, harness_nudge) = driver
                     .read(|tree| {
                         tree.attempt(&agent_id).map_or(
@@ -603,7 +611,8 @@ impl crate::node::TurnRole<()> for ChildTurns {
                 return AfterTerminal::Settled(());
             }
             Ok(_) => {
-                let ended = project_turn_end(&driver, feed.as_ref(), &agent_id).await;
+                let ended =
+                    project_turn_end(&driver, feed.as_ref(), &agent_id, completed_turn).await;
                 if end_attempt_work(&driver, live, &agent_id, &identity)
                     .await
                     .is_err()
@@ -900,7 +909,7 @@ async fn finalize_failed_child_result(
         })
         .await;
     }
-    project_turn_end(driver, feed, agent_id).await;
+    project_turn_end(driver, feed, agent_id, identity.turn).await;
     mutate_child(driver, agent_id, {
         let (identity, agent_id, observer) =
             (identity.clone(), agent_id.to_owned(), observer.cloned());
@@ -1027,15 +1036,19 @@ impl ChildFeedSource {
     }
 }
 
-/// Applies the child's feed to its tail when a turn ends (spec 03 §14.3):
-/// the terminal's usage folds onto the attempt its command served, as every
-/// later pass would derive it. Per-attempt only; cost, quota balances and
-/// subtree rollups never reach a model-visible row. A refused read or page
-/// is the node's fault; the next pass applies the same records.
+/// Applies the child's feed through the record that ended `turn` when that
+/// turn ends (spec 03 §14.3): the terminal's usage folds onto the attempt
+/// its command served, as every later pass would derive it. What the child
+/// commits after the terminal is folded by the tree's next record of it, so
+/// how far this fold reaches never depends on how far the child got.
+/// Per-attempt only; cost, quota balances and subtree rollups never reach a
+/// model-visible row. A refused read or page is the node's fault; the next
+/// pass applies the same records.
 async fn project_turn_end(
     driver: &TreeDriver,
     feed: Option<&ChildFeedSource>,
     agent_id: &str,
+    turn: TurnId,
 ) -> Option<crate::agent_tree::ChildTerminal> {
     let source = feed?;
     let key = source.session.to_string();
@@ -1044,7 +1057,11 @@ async fn project_turn_end(
     {
         Ok(feed) => {
             crate::agent::feed_projection::retry_tree_feed(&source.sessions, feed, |feed| {
-                crate::agent::feed_projection::apply_on_driver(driver, feed, agent_id)
+                crate::agent::feed_projection::apply_on_driver(
+                    driver,
+                    crate::agent::feed_projection::through_terminal(feed, turn),
+                    agent_id,
+                )
             })
             .await
             .map(|(projection, _)| projection)

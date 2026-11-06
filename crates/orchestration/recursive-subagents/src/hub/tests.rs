@@ -3001,3 +3001,80 @@ fn the_custody_attach_scan_runs_once_per_custody_take() {
     assert!(!unattached.begin_attach_scan());
     assert!(runtime("attach-scan-again").begin_attach_scan());
 }
+
+/// A turn waiter whose turn a retirement already under way ended waits for
+/// that retirement to publish before it folds the turn's end, so the
+/// release page is always folded first. With no retirement of that turn
+/// under way it waits for nothing, and it never starts one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_turn_waiter_joins_the_release_already_under_way_and_starts_none() {
+    let root = tempfile::tempdir().unwrap();
+    let runtime = ProductTopologyRuntime::new(
+        bootstrap("join-release", root.path().to_path_buf()),
+        memory_store(),
+        Arc::new(plakous_workspace::occupancy_vcs::fake::FakeVcs::new()),
+        None,
+    );
+    let id = runtime
+        .mutate_then_emit(false, |tree| {
+            Ok(tree
+                .spawn_agent(
+                    "root",
+                    &crate::protocol::SpawnAgentRequest::test_review(),
+                    None,
+                )
+                .unwrap()
+                .agent_id)
+        })
+        .await
+        .unwrap();
+    let turn: TurnId = "00000000-0000-0000-0000-000000000001".parse().unwrap();
+    let other: TurnId = "00000000-0000-0000-0000-000000000002".parse().unwrap();
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let finish = Arc::new(tokio::sync::Notify::new());
+    assert!(
+        runtime
+            .try_occupy_live(
+                id.clone(),
+                Box::new(BarrierChild {
+                    panic_on_release: false,
+                    failure: None,
+                    turn,
+                    entered: entered.clone(),
+                    finish: finish.clone()
+                })
+            )
+            .await
+            .is_ok()
+    );
+    let bound = Duration::from_secs(5);
+    tokio::time::timeout(bound, join_release_in_flight(&runtime.live, &id, turn))
+        .await
+        .expect("a waiter waited with no release under way");
+    assert!(
+        runtime.live.lock().await.get(&id).is_some(),
+        "the join started a retirement"
+    );
+    let retired = runtime
+        .begin_cancel_live_many(std::slice::from_ref(&id))
+        .await;
+    entered.notified().await;
+    tokio::time::timeout(bound, join_release_in_flight(&runtime.live, &id, other))
+        .await
+        .expect("a waiter waited for another turn's release");
+    let joined = tokio::spawn({
+        let (live, id) = (Arc::clone(&runtime.live), id.clone());
+        async move { join_release_in_flight(&live, &id, turn).await }
+    });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        !joined.is_finished(),
+        "the waiter did not wait for the release under way"
+    );
+    finish.notify_one();
+    tokio::time::timeout(bound, joined)
+        .await
+        .expect("the waiter did not resume once the release published")
+        .unwrap();
+    assert!(retired.await.is_clean());
+}

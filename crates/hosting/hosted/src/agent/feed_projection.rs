@@ -53,18 +53,45 @@ pub(crate) fn through_acceptance(
     feed: Arc<TreeFeed>,
     turn_id: plakous::model::TurnId,
 ) -> Arc<TreeFeed> {
-    let accepted = feed.records.iter().position(|record| {
-        record.facts().iter().any(|fact| {
-            matches!(
-                fact,
-                plakous::sessions::feed::FeedFact::CommandAccepted {
-                    turn_id: Some(accepted),
-                    ..
-                } if *accepted == turn_id
-            )
-        })
-    });
-    match accepted {
+    through_first(feed, |fact| {
+        matches!(
+            fact,
+            plakous::sessions::feed::FeedFact::CommandAccepted {
+                turn_id: Some(accepted),
+                ..
+            } if *accepted == turn_id
+        )
+    })
+}
+
+/// `feed` without the records after the first one that ended `turn_id`;
+/// all of it when none did. A turn's end folds its child's feed only this
+/// far: what the child commits after its turn ended (a parked job's
+/// records, its next turn) keeps coming while the fold reads (spec 03,
+/// child commands).
+pub(crate) fn through_terminal(
+    feed: Arc<TreeFeed>,
+    turn_id: plakous::model::TurnId,
+) -> Arc<TreeFeed> {
+    through_first(feed, |fact| {
+        matches!(
+            fact,
+            plakous::sessions::feed::FeedFact::TurnTerminal { turn_id: ended, .. }
+                if *ended == turn_id
+        )
+    })
+}
+
+/// `feed` through the first record with a fact `bound` names, or all of it.
+fn through_first(
+    feed: Arc<TreeFeed>,
+    bound: impl Fn(&plakous::sessions::feed::FeedFact) -> bool,
+) -> Arc<TreeFeed> {
+    let at = feed
+        .records
+        .iter()
+        .position(|record| record.facts().iter().any(&bound));
+    match at {
         Some(at) if at + 1 < feed.records.len() => {
             let mut bounded = (*feed).clone();
             bounded.records.truncate(at + 1);

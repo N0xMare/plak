@@ -149,7 +149,7 @@ pub(super) async fn try_transient_resume(
     if saved.is_err() {
         return Some(Err(()));
     }
-    project_turn_end(driver, feed, agent_id).await;
+    project_turn_end(driver, feed, agent_id, identity.turn).await;
     mutate_child(driver, agent_id, {
         let (agent_id, identity) = (agent_id.to_owned(), identity.clone());
         move |tree| {

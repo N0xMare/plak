@@ -244,6 +244,28 @@ pub async fn retire_live(
         .await
 }
 
+/// Waits, within a retirement's own release deadline, for a retirement of
+/// `agent_id`'s turn `turn` that is already under way, and starts none: a
+/// turn the host's release cancelled ends while that release still
+/// publishes. A turn waiter that waits here folds the turn's end only once
+/// the release page is folded, so which of the two runs first never decides
+/// the tree's writes.
+pub async fn join_release_in_flight(
+    live: &Arc<tokio::sync::Mutex<LiveChildTable>>,
+    agent_id: &str,
+    turn: TurnId,
+) {
+    let completion = {
+        let live = live.lock().await;
+        live.releasing(agent_id)
+            .filter(|retirement| retirement.turn == turn)
+            .map(|retirement| retirement.completion.clone())
+    };
+    if let Some(completion) = completion {
+        let _ = tokio::time::timeout(HOST_RETIRE_JOIN_TIMEOUT, completion).await;
+    }
+}
+
 enum RetirementJoin {
     Startup(ChildStartup),
     Live {

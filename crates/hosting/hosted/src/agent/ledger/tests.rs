@@ -1130,3 +1130,67 @@ fn a_start_fold_stops_at_its_turns_acceptance() {
         accepted_last.records
     );
 }
+
+/// A child turn's end folds its feed through the record that ended the
+/// turn and leaves what the child committed after it (a parked job's
+/// records, a next turn): how far the fold reaches never depends on how far
+/// the child got. With no such terminal in the feed the whole feed is
+/// folded.
+#[test]
+fn a_turn_end_fold_stops_at_its_terminal() {
+    use plakous::sessions::feed::{FeedFact, FeedRecord, FeedTurnOutcome};
+    let turn = |n| plakous::model::TurnId::try_from(uuid::Uuid::from_u128(n)).unwrap();
+    let record = |seq: u64, ended: Option<plakous::model::TurnId>| {
+        let header = serde_json::from_value(serde_json::json!({
+            "session_id": "00000000-0000-4000-8000-000000000001", "seq": seq,
+            "branch_id": "00000000-0000-4000-8000-000000000002", "committed_at_ms": 1000,
+            "change": {"created": {"genesis": "00000000-0000-4000-8000-000000000003", "revision": 1, "line": "00000000-0000-4000-8000-00000000c0de", "generation": 1}}
+        }))
+        .unwrap();
+        let facts = ended
+            .map(|turn_id| FeedFact::TurnTerminal {
+                turn_id,
+                command_id: plakous::agent::CommandId::new(format!("command-{seq}")).unwrap(),
+                outcome: FeedTurnOutcome::Refused,
+                closed_exchange: false,
+                steering_settled_unapplied: false,
+                usage: plakous::agent::TurnUsage::default(),
+            })
+            .into_iter()
+            .collect();
+        FeedRecord::from_store(header, facts)
+    };
+    let feed = |records| {
+        std::sync::Arc::new(crate::agent_tree::TreeFeed {
+            session_id: "00000000-0000-4000-8000-000000000001".into(),
+            retained_from: 1,
+            below_retained: None,
+            heads: Vec::new(),
+            head_turns: std::collections::BTreeMap::new(),
+            records,
+            reads: crate::agent_tree::TreeFeedReads::default(),
+        })
+    };
+    let after = feed(vec![
+        record(1, None),
+        record(2, Some(turn(7))),
+        record(3, None),
+    ]);
+    let bounded =
+        crate::agent::feed_projection::through_terminal(std::sync::Arc::clone(&after), turn(7));
+    assert_eq!(
+        bounded
+            .records
+            .iter()
+            .map(|record| record.header().seq.get())
+            .collect::<Vec<_>>(),
+        [1, 2],
+        "the fold went past the turn's terminal"
+    );
+    assert_eq!(
+        crate::agent::feed_projection::through_terminal(std::sync::Arc::clone(&after), turn(8))
+            .records,
+        after.records,
+        "a feed without the terminal is folded whole"
+    );
+}
