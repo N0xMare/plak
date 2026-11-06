@@ -3925,7 +3925,22 @@ verdicts) are addressed, the session profile and workspace chrome states.
   session stops being resident on the host ends with the host frame
   `detached {attachment}`, and the next attach opens the session again. A
   connection that serves one session (`plak agent --wire v2`, the embedded
-  TUI's) refuses every directory request `unsupported`.
+  TUI's) refuses every directory request `unsupported`. A host of many
+  sessions is `plakous_hosted::host_service::wire::SessionHost` over its
+  product's stores (`HostSessions`: the rows, the newest session of a
+  tree, an open, an open's refusal and a create), and each of its
+  connections a `HostConnection`. The node an attach names finds its
+  session there: a resident session whose tree it is, else the newest
+  session of that tree in the stores, opened first when dormant. The
+  connection's node attachment is one `WireConnection` on that session's
+  shared service; it holds the session resident from the moment the
+  session's slot hands it over until the connection holds no attachment
+  there, so an idle release never takes a session between its open and the
+  attach, and a connection that detached keeps nothing resident. An attach
+  of a node of another session ends the connection's node attachment
+  first. A host attachment reads the directory again whenever the host
+  opened, released or created a session, and at least every second while
+  it is open; a row gone from the stores is said by a fresh snapshot.
 - **Quit and stop.** A `quit` intent never ends a session that outlives its
   clients. On a child attachment it is that attachment's detach, on any
   connection. On a root attachment of a host whose connections detach when

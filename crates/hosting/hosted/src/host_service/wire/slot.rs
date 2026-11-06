@@ -15,7 +15,8 @@
 //! that open is refused for as long as the old worker holds the session's
 //! runtime lease, so a slow release never yields a second live session.
 
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, TryLockError};
 use std::time::{Duration, Instant};
 
 use plakous_host_protocol::wire::NodeAddress;
@@ -70,6 +71,31 @@ pub struct SessionSlot<P: ProtocolExtension> {
     slot: Mutex<Slot<P>>,
     open: Opener<P>,
     release_join: Duration,
+    /// What the slot is doing while its lock is held for an open or a
+    /// release join, for a reader that must not wait ([`Self::peek`]).
+    busy: AtomicU8,
+    /// The session the slot last served or opened, for the same reader.
+    known: Mutex<String>,
+}
+
+/// The slot's lock is held for no long step.
+const BUSY_NONE: u8 = 0;
+/// The slot's lock is held while the session opens.
+const BUSY_OPENING: u8 = 1;
+/// The slot's lock is held while a release joins.
+const BUSY_RELEASING: u8 = 2;
+
+/// A slot as a reader that must not wait sees it ([`SessionSlot::peek`]),
+/// with the session it serves or will open next.
+pub enum SlotView<P: ProtocolExtension> {
+    /// Released; the next trigger opens the session of this id.
+    Dormant(String),
+    /// The session of this id is opening for a trigger.
+    Opening(String),
+    /// Open, and served by this service.
+    Resident(Arc<WireSession<P>>),
+    /// The session of this id is releasing, or its release is joining.
+    Releasing(String),
 }
 
 impl<P: ProtocolExtension> SessionSlot<P>
@@ -85,11 +111,76 @@ where
         opened: OpenedSession<P>,
         open: impl Fn(&str) -> CliResult<OpenedSession<P>> + Send + Sync + 'static,
     ) -> Self {
+        let known = Mutex::new(opened.session_id.clone());
         Self {
             slot: Mutex::new(resident(opened)),
             open: Box::new(open),
             release_join: RELEASE_JOIN,
+            busy: AtomicU8::new(BUSY_NONE),
+            known,
         }
+    }
+
+    /// A slot of the dormant session `session_id`, which `open`
+    /// materializes on its first trigger.
+    #[must_use]
+    pub fn released(
+        session_id: impl Into<String>,
+        open: impl Fn(&str) -> CliResult<OpenedSession<P>> + Send + Sync + 'static,
+    ) -> Self {
+        let session_id = session_id.into();
+        Self {
+            known: Mutex::new(session_id.clone()),
+            slot: Mutex::new(Slot::Dormant { session_id }),
+            open: Box::new(open),
+            release_join: RELEASE_JOIN,
+            busy: AtomicU8::new(BUSY_NONE),
+        }
+    }
+
+    /// The slot as it stands, without waiting for an open or a release
+    /// join that holds it.
+    #[must_use]
+    pub fn peek(&self) -> SlotView<P> {
+        let slot = match self.slot.try_lock() {
+            Ok(slot) => slot,
+            Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+            Err(TryLockError::WouldBlock) => {
+                let known = self.known();
+                return match self.busy.load(Ordering::Acquire) {
+                    BUSY_RELEASING => SlotView::Releasing(known),
+                    // Opening, or held a moment for a trigger's hold.
+                    _ => SlotView::Opening(known),
+                };
+            }
+        };
+        match &*slot {
+            Slot::Dormant { session_id } => SlotView::Dormant(session_id.clone()),
+            Slot::Resident {
+                session,
+                attachments,
+                ..
+            } => {
+                if session.ended() || attachments.releasing() {
+                    SlotView::Releasing(session.session_id())
+                } else {
+                    SlotView::Resident(Arc::clone(session))
+                }
+            }
+        }
+    }
+
+    /// The session the slot last served or opened, without waiting.
+    #[must_use]
+    pub fn known(&self) -> String {
+        self.known
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    fn set_known(&self, session_id: &str) {
+        session_id.clone_into(&mut self.known.lock().unwrap_or_else(PoisonError::into_inner));
     }
 
     /// This slot, giving a release `release_join` to join.
@@ -110,18 +201,27 @@ where
     pub fn resident(&self) -> CliResult<(Arc<WireSession<P>>, ResidencyHold)> {
         let mut slot = self.lock();
         loop {
-            settle(&mut slot, self.release_join)?;
+            if let Slot::Resident { session, .. } = &*slot {
+                self.set_known(&session.session_id());
+            }
+            self.busy.store(BUSY_RELEASING, Ordering::Release);
+            let settled = settle(&mut slot, self.release_join);
+            self.busy.store(BUSY_NONE, Ordering::Release);
+            settled?;
             if let Slot::Dormant { session_id } = &*slot {
                 // On a thread of its own: an open builds the session's own
                 // executor, which a caller's async runtime would refuse.
                 let open = &self.open;
+                self.set_known(session_id);
+                self.busy.store(BUSY_OPENING, Ordering::Release);
                 let opened = std::thread::scope(|scope| {
                     scope
                         .spawn(|| open(session_id))
                         .join()
                         .map_err(|_| CliFailure::new("the session's open panicked"))
-                })??;
-                *slot = resident(opened);
+                });
+                self.busy.store(BUSY_NONE, Ordering::Release);
+                *slot = resident(opened??);
             }
             if let Slot::Resident {
                 session,
@@ -157,16 +257,38 @@ where
     ///
     /// The worker did not end in time, or ended with a failure.
     pub fn quit(&self, deadline: Duration) -> CliResult<()> {
+        self.end(deadline, WireSession::quit)
+    }
+
+    /// Releases a resident session as a planned handoff (a host's stop):
+    /// each node with work in flight is recorded handed off before the
+    /// release, so the next host continues it once by itself; then joins
+    /// its worker within `deadline`. A dormant one has nothing to hand off.
+    ///
+    /// # Errors
+    ///
+    /// The worker did not end in time, or ended with a failure.
+    pub fn hand_off(&self, deadline: Duration) -> CliResult<()> {
+        self.end(deadline, WireSession::hand_off)
+    }
+
+    fn end(&self, deadline: Duration, ask: fn(&WireSession<P>)) -> CliResult<()> {
         let mut slot = self.lock();
         if let Slot::Resident { session, .. } = &*slot {
-            session.quit();
+            ask(session);
         }
         let id = match &*slot {
             Slot::Resident { session, .. } => session.session_id(),
             Slot::Dormant { session_id } => session_id.clone(),
         };
+        self.set_known(&id);
         match std::mem::replace(&mut *slot, Slot::Dormant { session_id: id }) {
-            Slot::Resident { worker, .. } => join(worker, deadline),
+            Slot::Resident { worker, .. } => {
+                self.busy.store(BUSY_RELEASING, Ordering::Release);
+                let joined = join(worker, deadline);
+                self.busy.store(BUSY_NONE, Ordering::Release);
+                joined
+            }
             Slot::Dormant { .. } => Ok(()),
         }
     }

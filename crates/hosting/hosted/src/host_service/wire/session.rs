@@ -163,6 +163,12 @@ impl<P: ProtocolExtension> WireSession<P> {
             .on_served(Arc::clone(&self.served), generation, session)
     }
 
+    /// What the session's service kept that a directory shows.
+    #[must_use]
+    pub fn kept_activity(&self) -> super::super::KeptActivity {
+        served::lock(&self.served).service().kept_activity()
+    }
+
     /// Changes whenever the session published something or ended.
     #[must_use]
     pub fn changes(&self) -> watch::Receiver<u64> {
@@ -179,5 +185,11 @@ impl<P: ProtocolExtension> WireSession<P> {
     /// Asks the session to quit; it ends once it has.
     pub fn quit(&self) {
         let _ = self.actions.send(SessionIntent::Quit);
+    }
+
+    /// Asks the session to release as a planned handoff
+    /// ([`IntentSender::request_handoff_and_release`]); it ends once it has.
+    pub fn hand_off(&self) {
+        self.actions.request_handoff_and_release();
     }
 }

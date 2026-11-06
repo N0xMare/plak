@@ -1,0 +1,629 @@
+//! A host of many sessions (spec 02 §4.4, the session directory): every
+//! session of its stores, served by id on one connection that holds at
+//! most one node attachment and at most one host attachment. A session is
+//! resident in a [`SessionSlot`] while anything keeps it, and dormant
+//! otherwise; an attach of its root, or of a node of its tree, opens it
+//! again. The node an attach names is looked up, never guessed: a resident
+//! session whose tree it is, else the newest session of that tree as the
+//! product's stores say.
+//!
+//! A connection's node attachment is one [`WireConnection`] on that
+//! session's shared service, made when the connection first attaches the
+//! session and kept while it holds an attachment there. It holds the
+//! session resident from the moment the slot hands it over, so an idle
+//! release never takes a session between its open and the attach. The
+//! host attachment is the directory: a snapshot of every row, then each row
+//! that changed, read again whenever the host's sessions change and at least
+//! every [`DIRECTORY_POLL`] while it is open.
+
+use std::collections::BTreeMap;
+use std::io::Write;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Duration, Instant};
+
+use plakous_host_protocol::ProtocolExtension;
+use plakous_host_protocol::wire::{
+    Answer, AttachmentId, ClientFrame, HostFrame, NodeAddress, Op, Outcome, RequestRefusal,
+    SessionActivity, SessionEnvironment, SessionResidency, SessionRow, Welcome, WireError,
+    decode_line,
+};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use tokio::sync::watch;
+
+use super::super::ResidencyHold;
+use super::slot::{OpenedSession, SessionSlot, SlotView};
+use super::{Face, WireConnection, WireSession, host_welcome, write_frame};
+use crate::error::{CliFailure, CliResult};
+
+/// How often an open host attachment reads the directory again when
+/// nothing on the host changed: a session's title and its durable facts
+/// change in its own stores.
+pub const DIRECTORY_POLL: Duration = Duration::from_secs(1);
+
+/// A session `new_session` created.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Created {
+    /// The durable session id.
+    pub session: String,
+    /// Its root node.
+    pub node: NodeAddress,
+    /// The environment its tools run with.
+    pub environment: SessionEnvironment,
+}
+
+/// What a host of many sessions needs of its product's stores.
+pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
+    /// The directory's rows as the stores show them, newest first: each one
+    /// dormant, with the activity its durable facts give, and
+    /// `hosted_elsewhere` only for a holder of its tree that is not proven
+    /// gone.
+    ///
+    /// # Errors
+    ///
+    /// The stores cannot be read.
+    fn rows(&self, workspace: Option<&str>) -> Result<Vec<SessionRow>, String>;
+
+    /// The newest session of the tree `node` is in, or `None`.
+    ///
+    /// # Errors
+    ///
+    /// The stores cannot be read.
+    fn session_of(&self, node: &NodeAddress) -> Result<Option<String>, String>;
+
+    /// Opens `session` on a host worker that releases it once idle.
+    ///
+    /// # Errors
+    ///
+    /// The session does not open.
+    fn open(&self, session: &str) -> CliResult<OpenedSession<P>>;
+
+    /// The refusal of an attach whose session did not open with `failure`:
+    /// `tree_hosted_elsewhere` while another live host process holds its
+    /// tree, `session_unavailable` with why otherwise.
+    fn refusal(&self, session: &str, failure: &CliFailure) -> RequestRefusal;
+
+    /// Creates the session a `new_session` asks for, or finds the one the
+    /// same `request_id` created.
+    ///
+    /// # Errors
+    ///
+    /// The request's refusal: nothing was created.
+    fn create(
+        &self,
+        workspace: &str,
+        template: Option<&str>,
+        request_id: &str,
+    ) -> Result<Created, RequestRefusal>;
+}
+
+/// The sessions one host serves.
+pub struct SessionHost<P: ProtocolExtension> {
+    sessions: Arc<dyn HostSessions<P>>,
+    slots: Mutex<Vec<Arc<SessionSlot<P>>>>,
+    changes: watch::Sender<u64>,
+    next_host_attachment: AtomicU64,
+    binary_id: String,
+    generation: u64,
+}
+
+impl<P: ProtocolExtension> SessionHost<P>
+where
+    P: 'static,
+    P::Intent: Send,
+    P::Observation: Send,
+    HostFrame<P>: Serialize,
+    ClientFrame<P>: DeserializeOwned,
+{
+    /// A host of `sessions`, from the binary `binary_id` in its process
+    /// generation `generation`.
+    #[must_use]
+    pub fn new(
+        sessions: impl HostSessions<P> + 'static,
+        binary_id: impl Into<String>,
+        generation: u64,
+    ) -> Arc<Self> {
+        let (changes, _) = watch::channel(0);
+        Arc::new(Self {
+            sessions: Arc::new(sessions),
+            slots: Mutex::new(Vec::new()),
+            changes,
+            next_host_attachment: AtomicU64::new(1),
+            binary_id: binary_id.into(),
+            generation,
+        })
+    }
+
+    /// The welcome every connection gets: it names no session.
+    #[must_use]
+    pub fn welcome(&self) -> Welcome {
+        host_welcome(self.binary_id.clone(), self.generation)
+    }
+
+    /// A new connection writing its frames to `out`, from a client its
+    /// acceptor marked `face`; it ends once `stopped` turns true.
+    pub fn connect<W: Write + Clone>(
+        self: &Arc<Self>,
+        out: W,
+        face: Face,
+        stopped: impl Fn() -> bool + Send + Sync + 'static,
+    ) -> HostConnection<P, W> {
+        HostConnection {
+            host: Arc::clone(self),
+            host_changes: self.changes.subscribe(),
+            out,
+            face,
+            stopped: Arc::new(stopped),
+            node: None,
+            watch: None,
+        }
+    }
+
+    /// The directory, newest first: the stores' rows with what this host
+    /// holds of each.
+    ///
+    /// # Errors
+    ///
+    /// The stores cannot be read.
+    pub fn rows(&self, workspace: Option<&str>) -> Result<Vec<SessionRow>, String> {
+        let mut rows = self.sessions.rows(workspace)?;
+        let held: BTreeMap<String, SlotView<P>> = self
+            .lock()
+            .iter()
+            .map(|slot| {
+                let view = slot.peek();
+                let id = match &view {
+                    SlotView::Resident(session) => session.session_id(),
+                    SlotView::Dormant(id) | SlotView::Opening(id) | SlotView::Releasing(id) => {
+                        id.clone()
+                    }
+                };
+                (id, view)
+            })
+            .collect();
+        for row in &mut rows {
+            match held.get(&row.session) {
+                None | Some(SlotView::Dormant(_)) => {}
+                Some(SlotView::Opening(_)) => row.residency = SessionResidency::Opening,
+                Some(SlotView::Releasing(_)) => row.residency = SessionResidency::Releasing,
+                Some(SlotView::Resident(session)) => {
+                    row.residency = SessionResidency::Resident;
+                    // This process holds the tree.
+                    row.hosted_elsewhere = None;
+                    let kept = session.kept_activity();
+                    row.live_work.processes = u32::try_from(kept.processes).unwrap_or(u32::MAX);
+                    if kept.busy {
+                        row.activity = SessionActivity::Busy;
+                    } else if kept.awaiting_operator {
+                        row.activity = SessionActivity::AwaitingOperator;
+                    }
+                }
+            }
+        }
+        Ok(rows)
+    }
+
+    /// The slot of the session whose tree `node` is in: the resident one
+    /// serving that tree, or the newest session of that tree.
+    fn resolve(&self, node: &NodeAddress) -> Result<Arc<SessionSlot<P>>, RequestRefusal> {
+        let mut slots = self.lock();
+        for slot in slots.iter() {
+            if let SlotView::Resident(session) = slot.peek()
+                && session.root().tree_id == node.tree_id
+            {
+                return Ok(Arc::clone(slot));
+            }
+        }
+        let session = self
+            .sessions
+            .session_of(node)
+            .map_err(|detail| RequestRefusal::SessionUnavailable { detail })?
+            .ok_or(RequestRefusal::UnknownNode)?;
+        Ok(Self::slot_in(&mut slots, &self.sessions, &session))
+    }
+
+    /// The slot of `session`, made dormant when the host has none yet.
+    pub fn slot(&self, session: &str) -> Arc<SessionSlot<P>> {
+        Self::slot_in(&mut self.lock(), &self.sessions, session)
+    }
+
+    fn slot_in(
+        slots: &mut Vec<Arc<SessionSlot<P>>>,
+        sessions: &Arc<dyn HostSessions<P>>,
+        session: &str,
+    ) -> Arc<SessionSlot<P>> {
+        if let Some(slot) = slots.iter().find(|slot| match slot.peek() {
+            SlotView::Resident(served) => served.session_id() == session,
+            SlotView::Dormant(id) | SlotView::Opening(id) | SlotView::Releasing(id) => {
+                id == session
+            }
+        }) {
+            return Arc::clone(slot);
+        }
+        let opener = Arc::clone(sessions);
+        let slot = Arc::new(SessionSlot::released(session, move |id: &str| {
+            opener.open(id)
+        }));
+        slots.push(Arc::clone(&slot));
+        slot
+    }
+
+    /// Every slot the host holds, resident or not.
+    pub fn slots(&self) -> Vec<Arc<SessionSlot<P>>> {
+        self.lock().clone()
+    }
+
+    /// Changes whenever the host opened, released or created a session.
+    #[must_use]
+    pub fn changes(&self) -> watch::Receiver<u64> {
+        self.changes.subscribe()
+    }
+
+    /// Tells every host attachment that the directory may have changed.
+    pub fn changed(&self) {
+        self.changes
+            .send_modify(|revision| *revision = revision.wrapping_add(1));
+    }
+
+    /// Releases every resident session as a planned handoff, all at once,
+    /// each joined within `deadline`; the sessions that did not release in
+    /// time, or failed to, with why.
+    pub fn hand_off_all(&self, deadline: Duration) -> Vec<(String, CliFailure)> {
+        let slots = self.slots();
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = slots
+                .iter()
+                .map(|slot| scope.spawn(move || (slot.known(), slot.hand_off(deadline))))
+                .collect();
+            handles
+                .into_iter()
+                .filter_map(|handle| match handle.join() {
+                    Ok((_, Ok(()))) => None,
+                    Ok((session, Err(failure))) => Some((session, failure)),
+                    Err(_) => Some((
+                        String::new(),
+                        CliFailure::new("a session's handoff panicked"),
+                    )),
+                })
+                .collect()
+        })
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Arc<SessionSlot<P>>>> {
+        self.slots.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// A connection's node attachment: its connection on one session's shared
+/// service, and its hold on that session's residency.
+struct NodeLink<P: ProtocolExtension, W: Write> {
+    session: Arc<WireSession<P>>,
+    connection: WireConnection<P, W>,
+    changes: watch::Receiver<u64>,
+    _hold: ResidencyHold,
+}
+
+/// A connection's host attachment: the rows it sent last.
+struct Watch {
+    attachment: AttachmentId,
+    seq: u64,
+    sent: Option<BTreeMap<String, SessionRow>>,
+    read_at: Option<Instant>,
+    dirty: bool,
+}
+
+/// One connection to a host of many sessions.
+pub struct HostConnection<P: ProtocolExtension, W: Write> {
+    host: Arc<SessionHost<P>>,
+    host_changes: watch::Receiver<u64>,
+    out: W,
+    face: Face,
+    stopped: Arc<dyn Fn() -> bool + Send + Sync>,
+    node: Option<NodeLink<P, W>>,
+    watch: Option<Watch>,
+}
+
+impl<P: ProtocolExtension, W: Write + Clone> HostConnection<P, W>
+where
+    P: 'static,
+    P::Intent: Send,
+    P::Observation: Send,
+    HostFrame<P>: Serialize,
+    ClientFrame<P>: DeserializeOwned,
+{
+    /// Answers one client line; `false` once the client has left.
+    ///
+    /// An attach of a dormant session opens it first, so this can block
+    /// for as long as that open takes.
+    ///
+    /// # Errors
+    ///
+    /// A lost output.
+    pub fn frame(&mut self, line: Result<String, WireError>) -> CliResult<bool> {
+        let Ok(text) = line else {
+            self.leave();
+            return Ok(false);
+        };
+        let frame = match decode_line::<ClientFrame<P>>(&text) {
+            // A second hello, a bye, or a line that is not a frame: the
+            // client left.
+            Ok(ClientFrame::Hello(_) | ClientFrame::Bye) | Err(_) => {
+                self.leave();
+                return Ok(false);
+            }
+            Ok(frame) => frame,
+        };
+        let ClientFrame::Request { id, op } = frame else {
+            // A blob precedes the intent that names it, on the node
+            // attachment; with none it is no one's.
+            return if self.node.is_some() {
+                self.forward(text)
+            } else {
+                Ok(true)
+            };
+        };
+        match self.request(op, &text)? {
+            Forwarded::Answered(outcome) => {
+                write_frame(&mut self.out, &HostFrame::<P>::Response { id, outcome })?;
+                Ok(true)
+            }
+            Forwarded::Reading(reading) => Ok(reading),
+        }
+    }
+
+    fn request(&mut self, op: Op<P>, text: &str) -> CliResult<Forwarded> {
+        let answered = |outcome| Ok(Forwarded::Answered(outcome));
+        let refused = |refusal| Ok(Forwarded::Answered(Outcome::Refused(refusal)));
+        match op {
+            Op::Ping => answered(Outcome::Ok(Answer::Pong)),
+            Op::ListSessions { workspace } => match self.host.rows(workspace.as_deref()) {
+                Ok(rows) => answered(Outcome::Ok(Answer::Sessions { rows })),
+                Err(detail) => refused(RequestRefusal::SessionUnavailable { detail }),
+            },
+            Op::WatchSessions => {
+                if self.watch.is_some() {
+                    return refused(RequestRefusal::OneInFlight);
+                }
+                let attachment = self
+                    .host
+                    .next_host_attachment
+                    .fetch_add(1, Ordering::Relaxed);
+                self.watch = Some(Watch {
+                    attachment,
+                    seq: 0,
+                    sent: None,
+                    read_at: None,
+                    dirty: true,
+                });
+                answered(Outcome::Ok(Answer::Watching { attachment }))
+            }
+            Op::UnwatchSessions { attachment } => {
+                if self.watch.as_ref().map(|watch| watch.attachment) != Some(attachment) {
+                    return refused(RequestRefusal::NotAttached);
+                }
+                self.watch = None;
+                answered(Outcome::Ok(Answer::Detached))
+            }
+            Op::NewSession {
+                workspace,
+                template,
+                request_id,
+            } => match self
+                .host
+                .sessions
+                .create(&workspace, template.as_deref(), &request_id)
+            {
+                Ok(created) => {
+                    self.host.changed();
+                    answered(Outcome::Ok(Answer::Created {
+                        session: created.session,
+                        node: created.node,
+                        environment: created.environment,
+                    }))
+                }
+                Err(refusal) => refused(refusal),
+            },
+            op @ (Op::ReleaseSession { .. } | Op::StopSession { .. }) => {
+                refused(RequestRefusal::Unsupported {
+                    detail: format!("{} is not available on this host yet", op.name()),
+                })
+            }
+            Op::Attach { node } => self.attach(&node, text),
+            Op::Detach { .. }
+            | Op::Intent { .. }
+            | Op::RetryAttach { .. }
+            | Op::ResumeSession { .. }
+            | Op::Rebind { .. } => {
+                if self.node.is_none() {
+                    return refused(RequestRefusal::NotAttached);
+                }
+                self.forward(text.to_owned()).map(Forwarded::Reading)
+            }
+        }
+    }
+
+    /// Attaches `node`: on the session the connection already serves when
+    /// the node is in its tree, else on its session, opened first when it
+    /// is dormant. The old node attachment ends, as a new attach on one
+    /// session's connection ends the one before it.
+    fn attach(&mut self, node: &NodeAddress, text: &str) -> CliResult<Forwarded> {
+        if self
+            .node
+            .as_ref()
+            .is_some_and(|link| link.session.root().tree_id == node.tree_id)
+        {
+            return self.forward(text.to_owned()).map(Forwarded::Reading);
+        }
+        let slot = match self.host.resolve(node) {
+            Ok(slot) => slot,
+            Err(refusal) => return Ok(Forwarded::Answered(Outcome::Refused(refusal))),
+        };
+        self.host.changed();
+        let resident = slot.resident();
+        self.host.changed();
+        let (session, hold) = match resident {
+            Ok(resident) => resident,
+            Err(failure) => {
+                let refusal = self.host.sessions.refusal(&slot.known(), &failure);
+                return Ok(Forwarded::Answered(Outcome::Refused(refusal)));
+            }
+        };
+        self.unlink();
+        let stopped = Arc::clone(&self.stopped);
+        let connection = session.connect(self.out.clone(), self.face, move || stopped());
+        self.node = Some(NodeLink {
+            changes: session.changes(),
+            session,
+            connection,
+            _hold: hold,
+        });
+        self.forward(text.to_owned()).map(Forwarded::Reading)
+    }
+
+    /// Hands `text` to the node attachment's connection; `false` once the
+    /// client has left. A connection left holding nothing lets its session
+    /// go.
+    fn forward(&mut self, text: String) -> CliResult<bool> {
+        let Some(link) = &mut self.node else {
+            return Ok(true);
+        };
+        if !link.connection.frame(Ok(text))? {
+            self.leave();
+            return Ok(false);
+        }
+        if !link.connection.holding() {
+            self.unlink();
+        }
+        Ok(true)
+    }
+
+    /// Writes what the node attachment and the host attachment owe: a
+    /// node attachment whose session is no longer resident ends with
+    /// `detached`, and the directory goes out when it is due.
+    ///
+    /// # Errors
+    ///
+    /// A lost output, a snapshot that cannot be paged, or a directory that
+    /// cannot be read.
+    pub fn flush(&mut self) -> CliResult<()> {
+        if let Some(link) = &mut self.node {
+            if link.session.ended() {
+                let attachment = link.connection.attachment();
+                self.unlink();
+                if let Some(attachment) = attachment {
+                    write_frame(&mut self.out, &HostFrame::<P>::Detached { attachment })?;
+                }
+                self.host.changed();
+            } else {
+                link.connection.flush()?;
+                if !link.connection.holding() {
+                    self.unlink();
+                }
+            }
+        }
+        self.flush_directory()
+    }
+
+    fn flush_directory(&mut self) -> CliResult<()> {
+        let changed = self.host_changes.has_changed().unwrap_or(false);
+        if changed {
+            self.host_changes.borrow_and_update();
+        }
+        let Some(watch) = &mut self.watch else {
+            return Ok(());
+        };
+        let due = watch.dirty
+            || changed
+            || watch
+                .read_at
+                .is_none_or(|read| read.elapsed() >= DIRECTORY_POLL);
+        if !due {
+            return Ok(());
+        }
+        let rows = self.host.rows(None).map_err(CliFailure::new)?;
+        let watch = self
+            .watch
+            .as_mut()
+            .ok_or_else(|| CliFailure::new("unwatched"))?;
+        watch.read_at = Some(Instant::now());
+        watch.dirty = false;
+        let now: BTreeMap<String, SessionRow> = rows
+            .iter()
+            .map(|row| (row.session.clone(), row.clone()))
+            .collect();
+        let (snapshot, out) = match &watch.sent {
+            // A row gone from the directory is only said by a snapshot.
+            Some(sent) if sent.keys().all(|session| now.contains_key(session)) => (
+                false,
+                rows.into_iter()
+                    .filter(|row| sent.get(&row.session) != Some(row))
+                    .collect::<Vec<_>>(),
+            ),
+            _ => (true, rows),
+        };
+        watch.sent = Some(now);
+        if !snapshot && out.is_empty() {
+            return Ok(());
+        }
+        watch.seq += 1;
+        let frame = HostFrame::<P>::Directory {
+            attachment: watch.attachment,
+            seq: watch.seq,
+            snapshot,
+            rows: out,
+        };
+        write_frame(&mut self.out, &frame)
+    }
+
+    /// Waits until the connection may have something to write: the node
+    /// attachment's session published, the host's sessions changed, or the
+    /// directory is due to be read again.
+    pub async fn changed(&mut self) {
+        let watching = self.watch.is_some();
+        let host = &mut self.host_changes;
+        let session = self.node.as_mut().map(|link| &mut link.changes);
+        let host_changed = tokio::select! {
+            _ = host.changed() => true,
+            () = async {
+                match session {
+                    Some(changes) => {
+                        if changes.changed().await.is_err() {
+                            std::future::pending::<()>().await;
+                        }
+                    }
+                    None => std::future::pending().await,
+                }
+            } => false,
+            () = tokio::time::sleep(DIRECTORY_POLL), if watching => false,
+        };
+        // The wait saw the host's change: the directory is due.
+        if host_changed && let Some(watch) = &mut self.watch {
+            watch.dirty = true;
+        }
+    }
+
+    /// The client left: its node attachment detaches, its host attachment
+    /// closes, and its session hold ends.
+    pub fn leave(&mut self) {
+        self.unlink();
+        self.watch = None;
+    }
+
+    fn unlink(&mut self) {
+        if let Some(mut link) = self.node.take() {
+            link.connection.leave();
+        }
+    }
+}
+
+/// What a request came to: an outcome this connection writes, or the node
+/// attachment's connection answered it itself.
+enum Forwarded {
+    Answered(Outcome),
+    Reading(bool),
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]
+mod tests;

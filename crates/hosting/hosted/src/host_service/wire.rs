@@ -588,6 +588,19 @@ where
             .map(|session| (session, self.service.root().clone()))
     }
 
+    /// The node attachment this connection holds, if any.
+    #[must_use]
+    pub const fn attachment(&self) -> Option<AttachmentId> {
+        self.attachment
+    }
+
+    /// Whether the connection holds an attachment, or owes one a switch's
+    /// replay on its next root attach.
+    #[must_use]
+    pub const fn holding(&self) -> bool {
+        self.attachment.is_some() || self.moved.is_some()
+    }
+
     /// Records that the client was told of `root`, keeping the last
     /// [`TOLD_ROOTS`] of them.
     fn tell(&mut self, root: &NodeAddress) {
@@ -1232,14 +1245,16 @@ where
     }
 }
 
+mod host;
 mod lines;
 mod served;
 mod session;
 mod slot;
 
+pub use host::{Created, HostConnection, HostSessions, SessionHost};
 pub use lines::{Line, LineSender, Lines, lines};
 pub use session::WireSession;
-pub use slot::{OpenedSession, RootResolver, SessionSlot};
+pub use slot::{OpenedSession, RootResolver, SessionSlot, SlotView};
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]

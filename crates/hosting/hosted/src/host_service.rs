@@ -456,6 +456,18 @@ impl AttachmentCount {
     }
 }
 
+/// What a session's host service kept that its host's directory shows
+/// ([`HostService::kept_activity`]).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct KeptActivity {
+    /// A turn runs.
+    pub busy: bool,
+    /// An approval or a credential wait needs the operator.
+    pub awaiting_operator: bool,
+    /// Background processes running or stopping.
+    pub processes: usize,
+}
+
 /// A connection's hold on its session's residency
 /// ([`AttachmentCount::hold`]), from the moment its host hands it the
 /// session until it ends.
@@ -925,6 +937,27 @@ impl<P: ProtocolExtension> HostService<P> {
         drop(state);
         drop(removed);
         taken
+    }
+
+    /// What this service kept of the session that a directory shows: whether
+    /// a turn runs, whether an approval or a credential wait needs the
+    /// operator, and how many background processes run.
+    #[must_use]
+    pub fn kept_activity(&self) -> KeptActivity {
+        let state = self.lock();
+        let snapshot = &state.snapshot;
+        let mut kept = KeptActivity {
+            awaiting_operator: !snapshot.approvals.is_empty() || snapshot.credential_wait.is_some(),
+            ..KeptActivity::default()
+        };
+        for observation in &snapshot.states {
+            match observation {
+                SessionObservation::SetBusy(busy) => kept.busy = *busy,
+                SessionObservation::Processes { running, .. } => kept.processes = *running,
+                _ => {}
+            }
+        }
+        kept
     }
 
     /// Takes one observation from the session: keeps what an attach needs
