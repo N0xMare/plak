@@ -15,7 +15,10 @@ use crate::{
 };
 
 /// Each protocol version's frames, one JSON value per line.
-const PINNED: &[(u32, &str)] = &[(1, include_str!("pinned/v1.jsonl"))];
+const PINNED: &[(u32, &str)] = &[
+    (1, include_str!("pinned/v1.jsonl")),
+    (2, include_str!("pinned/v2.jsonl")),
+];
 
 fn owner() -> LineOwner {
     LineOwner {
@@ -244,6 +247,11 @@ fn runner_frames() -> Vec<RunnerFrame> {
         },
         RunnerFrame::TransferAccepted {
             control_id: "control".into(),
+            stopped: vec![crate::StoppedForeground {
+                call_key: "call:attempt".into(),
+                pid: 42,
+                ended: "Terminated".into(),
+            }],
         },
         RunnerFrame::TransferRefused {
             control_id: "control".into(),

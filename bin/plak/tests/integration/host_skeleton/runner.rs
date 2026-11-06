@@ -5,7 +5,10 @@ use super::*;
 #[test]
 fn an_eof_before_the_local_runner_hello_is_retried() {
     let Some(fixture) = fixture() else { return };
-    let directory = fixture.home().join(format!("host/runner/v{}/run", plakous::runner::protocol::PROTOCOL_VERSION));
+    let directory = fixture.home().join(format!(
+        "host/runner/v{}/run",
+        plakous::runner::protocol::PROTOCOL_VERSION
+    ));
     std::fs::create_dir_all(&directory).unwrap();
     let socket = directory.join("runner.sock");
     let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
@@ -23,14 +26,23 @@ fn an_eof_before_the_local_runner_hello_is_retried() {
 #[test]
 fn a_starter_losing_to_the_exiting_daemons_lock_is_retried() {
     let Some(fixture) = fixture() else { return };
-    let home = fixture.home().join(format!("host/runner/v{}", plakous::runner::protocol::PROTOCOL_VERSION));
+    let home = fixture.home().join(format!(
+        "host/runner/v{}",
+        plakous::runner::protocol::PROTOCOL_VERSION
+    ));
     std::fs::create_dir_all(home.join("run")).unwrap();
     let lock = std::fs::File::create(home.join("run/runner.lock")).unwrap();
     lock.try_lock().unwrap();
     let release = std::thread::spawn(move || {
         let deadline = std::time::Instant::now() + WAIT;
-        while !std::fs::read_to_string(home.join("serve.log")).unwrap_or_default().contains("the local socket lock is still held") {
-            assert!(std::time::Instant::now() < deadline, "no starter lost the socket lock");
+        while !std::fs::read_to_string(home.join("serve.log"))
+            .unwrap_or_default()
+            .contains("the local socket lock is still held")
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "no starter lost the socket lock"
+            );
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         drop(lock);
@@ -48,13 +60,24 @@ fn an_unreachable_user_manager_falls_back_to_a_detached_runner() {
     std::fs::create_dir(&bin).unwrap();
     let marker = fixture.root.join("manager-called");
     let manager = bin.join("systemd-run");
-    std::fs::write(&manager, format!("#!/bin/sh\nprintf called > '{}'\nexit 1\n", marker.display())).unwrap();
+    std::fs::write(
+        &manager,
+        format!(
+            "#!/bin/sh\nprintf called > '{}'\nexit 1\n",
+            marker.display()
+        ),
+    )
+    .unwrap();
     std::fs::set_permissions(&manager, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let mut host = start_env(&fixture, &[], &[
-        ("INVOCATION_ID", "unreachable".into()),
-        ("PLAK_TEST_RUNNER_DETACHED", "0".into()),
-        ("PATH", format!("{}:/usr/bin:/bin", bin.display())),
-    ]);
+    let mut host = start_env(
+        &fixture,
+        &[],
+        &[
+            ("INVOCATION_ID", "unreachable".into()),
+            ("PLAK_TEST_RUNNER_DETACHED", "0".into()),
+            ("PATH", format!("{}:/usr/bin:/bin", bin.display())),
+        ],
+    );
     assert_eq!(std::fs::read_to_string(marker).unwrap(), "called");
     stop(&mut host);
 }
@@ -149,6 +172,139 @@ fn runner_job_survives_host_loss_and_is_readopted_before_attach() {
 }
 
 #[test]
+fn a_foreground_host_cut_stops_at_transfer_and_records_unknown_once() {
+    use std::os::unix::process::ExitStatusExt as _;
+    for policy in ["hold", "continue"] {
+        let Some(fixture) = fixture() else { return };
+        let config = fixture.home().join("config.toml");
+        let text = std::fs::read_to_string(&config).unwrap();
+        std::fs::write(
+            config,
+            format!("{text}\n[host]\nresume_after_loss = \"{policy}\"\n"),
+        )
+        .unwrap();
+        let mut script = job_script(&fixture, false);
+        script["steps"][0]["output"]["tool"]["arguments"]["yield_time_ms"] = json!(30000);
+        fixture.write_script(&script);
+        let mut host = start(&fixture);
+        let mut client = Client::connect(&host);
+        let Outcome::Ok(Answer::Created { session, node, .. }) =
+            client.request(1, new_session(&fixture.workspace()))
+        else {
+            panic!("not created")
+        };
+        let attachment = client.attach(2, &node);
+        assert_eq!(
+            client.request(
+                3,
+                Op::Intent {
+                    attachment,
+                    intent: SessionIntent::Prompt(Draft::from("start foreground")),
+                    blobs: Vec::new()
+                }
+            ),
+            Outcome::Ok(Answer::Accepted)
+        );
+        let deadline = std::time::Instant::now() + WAIT;
+        while !fixture.root.join("local-job.marker").exists() {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let (pid, _) = job(&fixture);
+        kill(&mut host);
+        assert!(alive(pid));
+        // Stop completed, but its transfer answer has not reached a journal.
+        for _ in 0..2 {
+            let (mut child, _) = spawn_env(
+                &fixture,
+                &[],
+                &[("PLAK_TEST_HOST_READOPT_CUT", "transfer".into())],
+            );
+            assert_eq!(child.wait().unwrap().signal(), Some(9));
+            stopped(pid);
+        }
+        let mut host = start(&fixture);
+        stopped(pid);
+        let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
+        let connection = rusqlite::Connection::open(paths.runtime_database()).unwrap();
+        let count: i64 = connection
+            .query_row("SELECT count(*) FROM line_job_terminals", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0, "an unpromoted process is not a durable job");
+        let mut client = Client::connect(&host);
+        client.attach(1, &node);
+        assert_eq!(unknown_effects(&fixture, &session), 1);
+        kill(&mut host);
+        let mut host = start(&fixture);
+        let mut client = Client::connect(&host);
+        client.attach(1, &node);
+        assert_eq!(
+            unknown_effects(&fixture, &session),
+            1,
+            "a recut settled the call twice"
+        );
+        job(&fixture);
+        stop(&mut host);
+    }
+}
+
+fn unknown_effects(fixture: &Fixture, session: &str) -> usize {
+    use plak::store::session_records::SessionRecordStore as _;
+    use plakous::sessions::feed::{
+        FeedCursor, FeedFact, FeedOperationKind, FeedOperationState, FeedPage, FeedPageRequest,
+        FeedSeq,
+    };
+    use plakous::sessions::{AgentSessions, SessionBackend};
+    let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
+    let product = plak::store::session_records::SqliteSessionStore::new(paths.clone());
+    let locator = product.load(session).unwrap().plakous_locator.unwrap();
+    let sessions =
+        AgentSessions::new(SessionBackend::sqlite(paths.runtime_database()).unwrap()).unwrap();
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let mut cursor = FeedSeq::new(0);
+            let mut count = 0;
+            loop {
+                let FeedPage::Records { records, .. } = sessions
+                    .feed_page(FeedPageRequest::after(FeedCursor::new(
+                        locator.session_id(),
+                        cursor,
+                    )))
+                    .await
+                    .unwrap()
+                else {
+                    panic!("unexpected trimmed feed")
+                };
+                if records.is_empty() {
+                    return count;
+                }
+                for record in records {
+                    count += record
+                        .facts()
+                        .iter()
+                        .filter(|fact| {
+                            matches!(
+                                fact,
+                                FeedFact::OperationAdvanced {
+                                    kind: FeedOperationKind::Effect { .. },
+                                    state: FeedOperationState::OutcomeUnknown,
+                                    ..
+                                }
+                            )
+                        })
+                        .count();
+                    cursor = record.header().seq;
+                }
+            }
+        })
+}
+
+#[test]
 fn host_handoff_keeps_jobs_and_continues_the_busy_turn_once() {
     for policy in ["hold", "continue"] {
         handoff_keeps_jobs(policy);
@@ -159,7 +315,11 @@ fn handoff_keeps_jobs(policy: &str) {
     let Some(fixture) = fixture() else { return };
     let config = fixture.home().join("config.toml");
     let text = std::fs::read_to_string(&config).unwrap();
-    std::fs::write(config, format!("{text}\n[host]\nresume_after_loss = \"{policy}\"\n")).unwrap();
+    std::fs::write(
+        config,
+        format!("{text}\n[host]\nresume_after_loss = \"{policy}\"\n"),
+    )
+    .unwrap();
     let (mut host, session, node) = start_job(&fixture, true);
     let (pid, daemon) = job(&fixture);
     stop(&mut host);
@@ -221,22 +381,38 @@ fn a_childs_daemon_job_survives_host_loss_and_handoff() {
         fixture.write_script(&script);
         let mut host = start(&fixture);
         let mut client = Client::connect(&host);
-        let Outcome::Ok(Answer::Created { session, node, .. }) = client.request(1, new_session(&fixture.workspace())) else { panic!("not created") };
+        let Outcome::Ok(Answer::Created { session, node, .. }) =
+            client.request(1, new_session(&fixture.workspace()))
+        else {
+            panic!("not created")
+        };
         let attachment = client.attach(2, &node);
         client.prompt(3, attachment, "delegate a process", ANSWER);
         let deadline = std::time::Instant::now() + WAIT;
         loop {
             use plakous_offline_crash_harness::evidence::{EvidenceKind, read_evidence};
-            let dispatched = read_evidence(fixture.root.join("child-evidence.jsonl")).unwrap_or_default().iter()
-                .filter(|event| event.kind == EvidenceKind::ProviderDispatched).count();
-            if dispatched >= 2 { break; }
-            assert!(std::time::Instant::now() < deadline, "the child never promoted its job");
+            let dispatched = read_evidence(fixture.root.join("child-evidence.jsonl"))
+                .unwrap_or_default()
+                .iter()
+                .filter(|event| event.kind == EvidenceKind::ProviderDispatched)
+                .count();
+            if dispatched >= 2 {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the child never promoted its job"
+            );
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         let (pid, daemon) = job(&fixture);
         assert!(alive(pid));
         assert_ne!(daemon.cast_unsigned(), host.child.as_ref().unwrap().id());
-        if handoff { stop(&mut host); } else { kill(&mut host); }
+        if handoff {
+            stop(&mut host);
+        } else {
+            kill(&mut host);
+        }
         assert!(alive(pid), "the child's job died with its host");
         let mut host = start(&fixture);
         assert!(alive(pid), "the sweep stopped the child's job");
@@ -244,7 +420,10 @@ fn a_childs_daemon_job_survives_host_loss_and_handoff() {
         client.attach(1, &node);
         assert!(alive(pid));
         job(&fixture);
-        assert_eq!(client.request(2, Op::StopSession { session }), Outcome::Ok(Answer::Stopped));
+        assert_eq!(
+            client.request(2, Op::StopSession { session }),
+            Outcome::Ok(Answer::Stopped)
+        );
         stopped(pid);
         stop(&mut host);
     }
@@ -271,7 +450,14 @@ fn host_start_requests_use_each_hosts_captured_login_path() {
                 "max_output_bytes": 8192
             }}}, "finish": "tool_calls"}, {"output": {"text": ANSWER}, "finish": "stop"}
         ]}));
-        let mut host = start_env(&fixture, &[], &[("SHELL", shell.display().to_string()), ("HOME", user_home.display().to_string())]);
+        let mut host = start_env(
+            &fixture,
+            &[],
+            &[
+                ("SHELL", shell.display().to_string()),
+                ("HOME", user_home.display().to_string()),
+            ],
+        );
         let mut client = Client::connect(&host);
         let mut create = new_session(&fixture.workspace());
         if let Op::NewSession { request_id, .. } = &mut create {
@@ -282,7 +468,10 @@ fn host_start_requests_use_each_hosts_captured_login_path() {
         };
         let attachment = client.attach(2, &node);
         client.prompt(3, attachment, "show the host path", ANSWER);
-        assert_eq!(std::fs::read_to_string(marker).unwrap(), format!("{path}\n{}", user_home.display()));
+        assert_eq!(
+            std::fs::read_to_string(marker).unwrap(),
+            format!("{path}\n{}", user_home.display())
+        );
         stop(&mut host);
     }
 }
@@ -393,10 +582,17 @@ fn an_old_stop_never_stops_a_job_of_a_later_admitted_turn() {
     kill(&mut host);
     let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
     let store = plak::store::session_records::SqliteSessionStore::new(paths);
-    store.write_root_loss(&session, RootLossIntent::Interrupt(RootInterrupt {
-        anchor: RootStopAnchor::Command { command_id: "plak:test:old-stop".into() },
-        cause: RootInterruptCause::Stopped,
-    })).unwrap();
+    store
+        .write_root_loss(
+            &session,
+            RootLossIntent::Interrupt(RootInterrupt {
+                anchor: RootStopAnchor::Command {
+                    command_id: "plak:test:old-stop".into(),
+                },
+                cause: RootInterruptCause::Stopped,
+            }),
+        )
+        .unwrap();
     let mut host = start(&fixture);
     stopped(old_pid);
     std::fs::remove_file(fixture.root.join("local-job.marker")).unwrap();
@@ -409,7 +605,10 @@ fn an_old_stop_never_stops_a_job_of_a_later_admitted_turn() {
     assert!(alive(pid), "an old stop killed a newer turn's job");
     let mut client = Client::connect(&host);
     client.attach(1, &node);
-    assert_eq!(client.request(2, Op::StopSession { session }), Outcome::Ok(Answer::Stopped));
+    assert_eq!(
+        client.request(2, Op::StopSession { session }),
+        Outcome::Ok(Answer::Stopped)
+    );
     stopped(pid);
     stop(&mut host);
 }

@@ -716,6 +716,15 @@ widens it.
   before accepting it, so a restart does not reopen the line to an older
   owner. The host's leases and commit fencing remain the authority; the
   runner only reduces late effects.
+- **Foreground calls are instance-owned.** Protocol 2 stops unpromoted
+  processes before a newer line-owner transfer, and at instance-lease lapse
+  without a successor. Transfer reports call keys, former PIDs and how they
+  ended, with no command text or output. The host logs these under
+  `plak.runner`, never writes job terminals, and the next full open settles
+  their unanswered calls through existing recovery, exactly once. A transient link loss
+  inside the lease revokes no foreground authority. Promoted jobs survive.
+  Obsolete protocol daemons are inspected only, their jobs reported unknown,
+  never transferred or re-adopted by the new protocol.
 - **The home-local runner is the home's own, and only its own.** A home's
   home-local runner (`plak runner serve --local`, chapter 01 §8.4) carries
   the local runner's processes for that home's hosts. It accepts only that

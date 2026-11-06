@@ -277,6 +277,22 @@ async fn a_returning_host_readopts_its_line_under_a_lease_only_head() {
     session.release().await.unwrap();
 
     another_store_skips_the_line(directory.path(), &client, adopted.owner.fence()).await;
+    let inspected = client.lines().await.unwrap();
+    crate::runner_adoption::report_obsolete_lines(&sessions, inspected.clone())
+        .await
+        .unwrap();
+    crate::runner_adoption::report_obsolete_lines(&sessions, inspected)
+        .await
+        .unwrap();
+    let still_held = client.lines().await.unwrap();
+    assert_eq!(
+        still_held[0].owner.as_ref().unwrap().fence,
+        adopted.owner.fence()
+    );
+    assert_eq!(
+        adopted_jobs.jobs().await.unwrap()[0].status,
+        JobStatus::Running
+    );
     adopted_jobs
         .stop_jobs(
             plakous::tools::JobStopReason::User,

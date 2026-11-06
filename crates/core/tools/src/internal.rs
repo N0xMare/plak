@@ -27,10 +27,11 @@ pub mod runner {
         RunnerWorkspaceProbe, ServeFailure, ServeFuture, ServeServiceFuture,
         adopt_runner_process_sessions, answer_too_large, call_blocking, decode_jobs_snapshot,
         decode_preempt, encode_preempt, environment_failure, job_capacity, line_sessions,
-        local_daemon_environment, process_runner, requested_workspace, runner_descriptor,
-        runner_environment, select_process_runner, serve, serve_failure, serve_jobs_watch,
-        serve_probe, serve_service_spawn, serve_service_terminate, serve_sessions, service_spawned,
-        terminated_service, with_runner_secrets, workspace_probe, workspace_refusal,
+        local_daemon_environment, lost_process_owner, process_runner, requested_workspace,
+        runner_descriptor, runner_environment, select_process_runner, serve, serve_failure,
+        serve_jobs_watch, serve_probe, serve_service_spawn, serve_service_terminate,
+        serve_sessions, service_spawned, terminated_service, with_runner_secrets, workspace_probe,
+        workspace_refusal,
     };
 }
 
@@ -109,6 +110,33 @@ pub fn stop_jobs_for_owner(
     grace: std::time::Duration,
 ) -> Result<(), crate::ExecutionBackendError> {
     sessions.stop_jobs_for_owner(owner, by, grace)
+}
+
+/// Terminates unpromoted processes after their instance's authority ended.
+///
+/// Successful stops remain reportable even when another process fails cleanup.
+pub fn stop_foreground_after_owner_loss(
+    sessions: &crate::JoinedProcessSessions,
+) -> ForegroundProcessStops {
+    sessions.stop_foreground_after_owner_loss()
+}
+
+/// Completed foreground stops and any still-pending cleanup failure.
+pub struct ForegroundProcessStops {
+    /// Processes the terminate path joined.
+    pub stopped: Vec<ForegroundProcessStop>,
+    /// A remaining process exceeded the cleanup bound.
+    pub failure: Option<crate::ExecutionBackendError>,
+}
+
+/// Diagnostic evidence for an unpromoted process; never a durable job row.
+pub struct ForegroundProcessStop {
+    /// Starting tool call and attempt, or `unkeyed` for a host probe.
+    pub call_key: String,
+    /// Former process leader, for diagnostics only.
+    pub pid: u32,
+    /// Status after the existing terminate path joined it.
+    pub status: crate::JoinedProcessStatus,
 }
 
 pub fn next_job_number(sessions: &crate::JoinedProcessSessions) -> u32 {

@@ -9,6 +9,43 @@ use plakous_hosted::error::{CliFailure, CliResult};
 use super::home::{LocalRunnerHome, private_directory};
 use crate::home::paths::PlakPaths;
 
+/// Old protocols are inspected, never transferred or used for execution.
+pub(crate) async fn older(
+    paths: &PlakPaths,
+) -> CliResult<Vec<plakous::runner::protocol::LineStatus>> {
+    let mut lines = Vec::new();
+    for protocol in 1..super::version().protocol {
+        let socket = paths
+            .home()
+            .join("host/runner")
+            .join(format!("v{protocol}/run/runner.sock"));
+        let Ok(stream) = tokio::net::UnixStream::connect(socket).await else {
+            continue;
+        };
+        let mut bind = super::bind(super::host_id(paths)?, true);
+        bind.version.protocol = protocol;
+        let inspect = async {
+            let (client, _) =
+                RunnerClient::connect_home_local(stream, bind, ClientWindows::default(), None)
+                    .await
+                    .map_err(|error| CliFailure::new(error.to_string()))?;
+            let result = tokio::time::timeout(super::START_WAIT, client.lines()).await;
+            client.disconnect();
+            result
+                .map_err(|_| CliFailure::new("the old runner inspection timed out"))?
+                .map_err(|error| {
+                    CliFailure::new(format!("the old runner inspection failed: {error:?}"))
+                })
+        };
+        lines.extend(
+            tokio::time::timeout(super::START_WAIT, inspect)
+                .await
+                .map_err(|_| CliFailure::new("the old runner did not answer"))??,
+        );
+    }
+    Ok(lines)
+}
+
 /// Dials before starting, and retries both daemon-exit races under one bound.
 pub(crate) async fn dial(paths: &PlakPaths) -> CliResult<RunnerClient> {
     let home = LocalRunnerHome::of(paths);

@@ -12,6 +12,7 @@
 //! and releases the lease. The head's next full open folds those terminals
 //! into its ledger and transfers the line again under its own, newer fence.
 
+use crate::test_support_runner::cut;
 use std::str::FromStr as _;
 
 use plakous::model::LineId;
@@ -85,6 +86,34 @@ pub async fn readopt_lines(
     Ok((readopted, failed))
 }
 
+/// Reports inspected jobs of an obsolete runner without transferring it.
+/// Existing full-open recovery settles missing promoted jobs as unknown.
+///
+/// # Errors
+/// A job snapshot could not be decoded.
+pub async fn report_obsolete_lines(
+    sessions: &AgentSessions,
+    lines: Vec<plakous::runner::protocol::LineStatus>,
+) -> Result<(), String> {
+    for status in lines {
+        let Ok(line) = LineId::from_str(&status.line) else {
+            continue;
+        };
+        if sessions
+            .line_head(line)
+            .await
+            .is_err_and(|error| error.kind() == AgentSessionsErrorKind::NotFound)
+        {
+            continue;
+        }
+        let (_, jobs) = decode_jobs_snapshot(status.jobs).map_err(|error| error.to_string())?;
+        for job in jobs {
+            tracing::info!(target: "plak.runner", line = %line, job = job.number, status = "outcome_unknown", "obsolete_protocol");
+        }
+    }
+    Ok(())
+}
+
 /// Finishes a recorded stop only while holding and transferring the line's head.
 /// The intent identity keys the stop across crashes; another holder is never stopped.
 ///
@@ -128,7 +157,7 @@ async fn readopt_line(
         head.fence(),
     );
     let adopted = async {
-        client
+        let stopped_foreground = client
             .transfer_owner(&owner)
             .await
             .map_err(|error| format!("the runner refused the transfer: {error:?}"))?;
@@ -165,6 +194,9 @@ async fn readopt_line(
                         .map_err(|error| format!("the line's jobs: {error}"))
                 },
             )?;
+        for stopped in stopped_foreground {
+            tracing::info!(target: "plak.runner", line = %line, call_key = %stopped.call_key, pid = stopped.pid, ended = %stopped.ended, "stopped_foreground");
+        }
         let recorded = head
             .record_job_terminals(&jobs)
             .await
@@ -192,15 +224,6 @@ async fn readopt_line(
         recorded,
         running,
     })
-}
-
-fn cut(phase: &str) {
-    #[cfg(feature = "test-support")]
-    if std::env::var("PLAK_TEST_HOST_READOPT_CUT").as_deref() == Ok(phase) {
-        let _ = nix::sys::signal::kill(nix::unistd::Pid::this(), nix::sys::signal::Signal::SIGKILL);
-    }
-    #[cfg(not(feature = "test-support"))]
-    let _ = phase;
 }
 
 #[cfg(test)]

@@ -180,6 +180,7 @@ pub(super) fn cancel_foreground(ownership: &AtomicU8, control: &OperationContext
 }
 
 pub(super) struct JoinedSession {
+    pub(super) pid: u32,
     pub(super) operation: Mutex<()>,
     pub(super) queued: AtomicUsize,
     pub(super) queue_limit: usize,
@@ -244,6 +245,7 @@ impl JoinedSession {
             next_cursor: size,
         };
         Self {
+            pid: 0,
             operation: Mutex::new(()),
             queued: AtomicUsize::new(0),
             queue_limit: service.queue_limit,

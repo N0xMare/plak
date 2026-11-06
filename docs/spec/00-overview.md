@@ -106,7 +106,7 @@ classes and directory policy.
 | `plakous-attempt` | `crates/common/attempt` | `common` | Family-agnostic attempt lifecycle: phase transitions, observation ledger, pure acceptance outcomes |
 | `plakous-http` | `crates/common/http` | `common` | Provider-blind bounded HTTP transport and SSE framing. One fresh connection per execute unless the client is explicitly pooled; no redirect, proxy, retry, or auth semantics |
 | `plakous-auth` | `crates/common/auth` | `common` | Provider-neutral auth foundations: secret containers, OAuth pins and workflow, callback binding, credential metadata, durable private storage |
-| `plakous-runner-protocol` | `crates/common/runner-protocol` | `common` | Runner protocol v1: length-prefixed JSON frames, the hello and bind handshake, request classes, owner transfer and answers |
+| `plakous-runner-protocol` | `crates/common/runner-protocol` | `common` | Runner protocol v3: length-prefixed JSON frames, the hello and bind handshake, request classes, owner transfer and answers |
 | `plakous-runner-dial` | `crates/common/runner-dial` | `common` | Portable Noise IK, pairing proofs, offers, fingerprint confirmation and transport framing; no product caller or I/O |
 | `plakous-cell` | `crates/runtimes/cell` | `engine` | Cell protocol (`plakous-cell-protocol.v2`), worker client and session for isolated interpreter workers; never links an interpreter |
 | `plakous-js-runtime` | `crates/runtimes/js-runtime` | `engine` | QuickJS runtime for the `plakous-js-host` binary and opt-in library embedding |

@@ -52,6 +52,19 @@ pub mod capabilities {
     pub const STREAMS: &str = "streams";
 }
 
+/// Diagnostic report of a foreground process stopped when authority ended.
+/// This is not a job terminal and authorizes no process operation.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct StoppedForeground {
+    /// Tool call and attempt key, or `unkeyed` for a host probe.
+    pub call_key: String,
+    /// Former leader PID, diagnostic only.
+    pub pid: u32,
+    /// How the terminate path joined it.
+    pub ended: String,
+}
+
 /// The runner's first frame on a connection.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -400,6 +413,9 @@ pub enum RunnerFrame {
     TransferAccepted {
         /// The transfer.
         control_id: String,
+        /// Foreground processes stopped after their owner lost authority,
+        /// diagnostic only: the next full open recovers their tool calls.
+        stopped: Vec<StoppedForeground>,
     },
     /// The owner change could not be recorded; the line's owner is
     /// unchanged.

@@ -79,7 +79,8 @@ slow-timeout = { period = "300s", terminate-after = 2 }
 [profile.offline]
 default-filter = '''
 not (
-  test(explicit_leftover_disown_is_released_and_reopen_is_read_only)
+  test(=foreground_owner_lease_expiry_stops_without_a_successor)
+  | test(explicit_leftover_disown_is_released_and_reopen_is_read_only)
   | test(dropping_the_last_pooled_hyper_h1_client_closes_its_socket)
   | test(jj_cli_doctor_kills_hanging_process_group_at_five_seconds)
   | test(cell_startup::)
@@ -220,6 +221,7 @@ not (
   | test(host_crash_sigkill_mid_handoff_continues_each_handed_off_turn_once)
   | test(host_crash_cuts_of_the_start_scan_continue_once_or_hold)
   | test(=host_skeleton::runner::host_crash_mid_readopt_converges_after_every_transfer_boundary)
+  | test(=host_skeleton::runner::a_foreground_host_cut_stops_at_transfer_and_records_unknown_once)
   | test(=host_skeleton::runner::host_crash_mid_stop_finishes_the_recorded_stop_once_after_retransfer)
   | test(=host_skeleton::runner::runner_job_survives_host_loss_and_is_readopted_before_attach)
   | test(=host_skeleton::runner::host_handoff_keeps_jobs_and_continues_the_busy_turn_once)
@@ -271,7 +273,8 @@ not (
 test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
-  test(explicit_leftover_disown_is_released_and_reopen_is_read_only)
+  test(=foreground_owner_lease_expiry_stops_without_a_successor)
+  | test(explicit_leftover_disown_is_released_and_reopen_is_read_only)
   | test(dropping_the_last_pooled_hyper_h1_client_closes_its_socket)
   | test(jj_cli_doctor_kills_hanging_process_group_at_five_seconds)
   | test(cell_startup::)
@@ -419,6 +422,7 @@ default-filter = '''
   | test(host_crash_sigkill_mid_handoff_continues_each_handed_off_turn_once)
   | test(host_crash_cuts_of_the_start_scan_continue_once_or_hold)
   | test(=host_skeleton::runner::host_crash_mid_readopt_converges_after_every_transfer_boundary)
+  | test(=host_skeleton::runner::a_foreground_host_cut_stops_at_transfer_and_records_unknown_once)
   | test(=host_skeleton::runner::host_crash_mid_stop_finishes_the_recorded_stop_once_after_retransfer)
   | test(=host_skeleton::runner::runner_job_survives_host_loss_and_is_readopted_before_attach)
   | test(=host_skeleton::runner::host_handoff_keeps_jobs_and_continues_the_busy_turn_once)

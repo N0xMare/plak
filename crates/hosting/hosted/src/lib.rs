@@ -128,6 +128,12 @@ mod test_diagnostics {
     pub(crate) const fn credential_wait_refused(_: bool) {}
 }
 pub mod runner_adoption;
+#[cfg(feature = "test-support")]
+mod test_support_runner;
+#[cfg(not(feature = "test-support"))]
+mod test_support_runner {
+    pub(crate) const fn cut(_: &str) {}
+}
 #[doc(hidden)]
 pub mod runner_reader;
 

@@ -54,7 +54,7 @@ pub(super) struct JoinedSpawn<'a> {
 
 pub(in crate::environment::backend::process) struct JoinedProcessResources {
     child: JoinedChild,
-    process_group: rustix::process::Pid,
+    pub(super) process_group: rustix::process::Pid,
     readers: Vec<std::thread::JoinHandle<()>>,
     input_thread: Option<std::thread::JoinHandle<()>>,
     input_owner: Option<SyncSender<PtyInputCommand>>,

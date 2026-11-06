@@ -5816,12 +5816,12 @@ agent named on its execution environment at construction
 (`ExecutionEnvironment::with_line_owner`, from the job owner of §8.5). The
 direct local backend carries the owner, class and budget without reading them;
 they are the fence and idempotency key a runner checks once execution leaves
-the process (runner protocol v1, below). The owner a runner checks comes from
+the process (runner protocol v2, below). The owner a runner checks comes from
 the session's current job owner (§8.5), not from an owner a joined process
 service stored when it started. `LineOwner` lives in `plakous-tools`; it never
 enters `plakous-model`.
 
-**Runner protocol v1.** `plakous-runner-protocol` defines what a host and a
+**Runner protocol v2.** `plakous-runner-protocol` defines what a host and a
 runner say to each other over one byte stream, and `plakous-runner` implements
 both ends over an `ExecutionEnvironment` and joins them in process as a
 loopback (both published internal, chapter 06 §3, and reached from the facade
@@ -5836,7 +5836,7 @@ runner for a session yet.
   no effect, since the operation ran.
 - **Handshake.** The runner speaks first: `Hello { version, binary_id,
   runner_id, instance, boot_id, descriptor, capabilities, path, home,
-  job_bound }`. The version triple is the protocol version (1), the source
+  job_bound }`. The version triple is the protocol version (2), the source
   revision and the build flavor, and binding requires an exact match, except
   to a home-local runner (below), which binds by protocol version alone; the
   binary id is evidence and is never compared. `instance` is fresh for every
@@ -5986,6 +5986,22 @@ runner for a session yet.
   command and output cleared. Each names its host, line, accepted owner,
   whether its holder holds it (`adopted`) and its jobs in the
   `jobs.snapshot` schema.
+- **Foreground authority (protocol 2).** An answered start is either a
+  promoted job, which is re-adopted, or an unpromoted process belonging to
+  its call and owning instance. Before transferring a line to a newer owner,
+  the runner stops its unpromoted processes through the existing terminate
+  path. `TransferAccepted.stopped` reports the call key, former PID and how
+  each ended, with no command or output. These are diagnostic reports, not
+  jobs: the host emits one structured `plak.runner` line per process and
+  writes no durable record or `line_job_terminal`. The unanswered tool call
+  is settled by existing call recovery on the next full open:
+  `OutcomeUnknown`, then `RecoveryRequired` or abandonment, never another
+  start. Re-cutting that open cannot settle the call twice. Starts and
+  promotions are serialized with transfer and recheck the holder under that
+  gate. A crash after promotion but before its host record leaves a promoted
+  job on the runner, which the sweep discovers. A crash after termination
+  but before the transfer answer leaves its diagnostic report for the next
+  transfer; it creates no session record.
 - **Owner leases.** Leases are per host instance. An instance holds the lines
   it is the holder of while it has a connection and for the owner lease
   (300 s) after its last one ends; other instances of the same `host_id`
@@ -5998,6 +6014,11 @@ runner for a session yet.
   (a new instance whose lease of the line's head is the proof that the holder
   is gone) takes it with its newer owner at once, inside or past the lease. A
   different `host_id` never re-adopts a line.
+  At lease lapse the runner terminates unpromoted processes even without a
+  successor. Promoted jobs alone survive. A link loss inside the lease does
+  not stop foreground calls: the same instance can reconnect and finish
+  them. Termination failures keep cleanup pending for the next tick; the
+  runner cannot idle-exit while a foreground process or cleanup remains.
 - **Daemon.** The daemon serves one `RunnerService` on a socket of mode 0600
   in a 0700 directory, named after the protocol version and a hash of the
   version triple, and closes a connection from another user before its hello.
@@ -6710,6 +6731,11 @@ environment with no selected runner runtime or no line owner refuses every
 start, `Unsupported` with no effect. No production configuration can name
 a runner. The facade reaches the seam only through the hidden
 `plakous::tools::runner` and `plakous::agent::select_runner_backend`.
+
+An unpromoted runner process never outlives its owning instance's authority:
+transfer or lease lapse stops it and reports `OutcomeUnknown` (§8.4).
+Disconnect alone does not revoke that authority. Embedded mode is unchanged:
+direct calls, no daemon, and instance exit stops its processes.
 
 The home-local transport (unsupported hosting seam; `plak host` selects it
 explicitly through its services, not through the test route's process-global

@@ -122,6 +122,7 @@ pub(super) fn start_joined_host_process(
     let output_io_failed = Arc::new(AtomicBool::new(false));
     let input = resources.start_io(io, &shared, &output_io_failed, limits, request)?;
     let stop = Arc::new(AtomicBool::new(false));
+    let pid = resources.process_group.as_raw_pid().cast_unsigned();
     let thread_stop = Arc::clone(&stop);
     let foreground_control = control.clone();
     let promoted = Arc::new(AtomicU8::new(FOREGROUND));
@@ -167,6 +168,7 @@ pub(super) fn start_joined_host_process(
         }
     };
     Ok(JoinedSession {
+        pid,
         operation: Mutex::new(()),
         queued: AtomicUsize::new(0),
         queue_limit,

@@ -2051,6 +2051,17 @@ deterministic fixtures. Fixtures kill their local daemon and its process
 groups, including on a cut or assertion failure; a daemon restart's surviving
 marked jobs are reaped separately with process-identity checks.
 
+Foreground authority is pinned separately: a host cut before promotion
+stops the process at transfer, writes no job-terminal row, and the next full
+open settles the tool call unknown exactly once despite a re-cut, under both
+loss policies. Runner fixtures
+cover a newer transfer, a cut after promotion before recording, lease lapse
+without a successor, and a same-instance link blip whose foreground call
+completes. Removing the transfer stop, removing its report, stopping on link
+loss, or removing the lapse stop must each fail the corresponding probe.
+The sweep observes the runner's promotion state before recovery: only
+promoted jobs may survive the successor's transfer.
+
 The residency corpus includes `image_residency_admission`,
 `image_residency_tool_batch` and `image_residency_continue`. Each seeds protected
 image history, crosses a mandatory aggregate-image fence with optional scheduled

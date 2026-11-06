@@ -145,31 +145,8 @@ impl Tables {
     ) -> RunnerFrame {
         let line = (host.to_owned(), to.line.clone());
         let current = self.owners.get(&line).map(|owned| owned.owner.clone());
-        if let Some(from) = from
-            && from.line != to.line
-        {
-            return RunnerFrame::TransferRefused {
-                control_id,
-                detail: "a transfer names one line".into(),
-            };
-        }
-        let held_elsewhere = self
-            .owners
-            .get(&line)
-            .is_some_and(|owned| owned.holder != instance);
-        match &current {
-            Some(current) if *current == to && !held_elsewhere => {}
-            Some(current)
-                if *current == to || !to.is_newer_than(current) || from != Some(current) =>
-            {
-                return RunnerFrame::StaleOwner {
-                    request_id: None,
-                    control_id: Some(control_id),
-                    current: current.clone(),
-                };
-            }
-            // With no accepted owner there is nothing to fence.
-            Some(_) | None => {}
+        if let Some(refusal) = self.transfer_refusal(host, instance, &control_id, from, &to) {
+            return refusal;
         }
         if current.as_ref() != Some(&to)
             && let Some(floors) = &self.floors
@@ -194,7 +171,49 @@ impl Tables {
                 holder: instance.to_owned(),
             },
         );
-        RunnerFrame::TransferAccepted { control_id }
+        RunnerFrame::TransferAccepted {
+            control_id,
+            stopped: Vec::new(),
+        }
+    }
+
+    pub(crate) fn transfer_refusal(
+        &self,
+        host: &str,
+        instance: &str,
+        control_id: &str,
+        from: Option<&LineOwner>,
+        to: &LineOwner,
+    ) -> Option<RunnerFrame> {
+        let line = (host.to_owned(), to.line.clone());
+        let current = self.owners.get(&line).map(|owned| owned.owner.clone());
+        if let Some(from) = from
+            && from.line != to.line
+        {
+            return Some(RunnerFrame::TransferRefused {
+                control_id: control_id.to_owned(),
+                detail: "a transfer names one line".into(),
+            });
+        }
+        let held_elsewhere = self
+            .owners
+            .get(&line)
+            .is_some_and(|owned| owned.holder != instance);
+        match &current {
+            Some(current) if current == to && !held_elsewhere => {}
+            Some(current)
+                if current == to || !to.is_newer_than(current) || from != Some(current) =>
+            {
+                return Some(RunnerFrame::StaleOwner {
+                    request_id: None,
+                    control_id: Some(control_id.to_owned()),
+                    current: current.clone(),
+                });
+            }
+            // With no accepted owner there is nothing to fence.
+            Some(_) | None => {}
+        }
+        None
     }
 
     /// Marks every line `instance` of `host` holds as no longer held: its
@@ -206,6 +225,20 @@ impl Tables {
                 owned.adopted = false;
             }
         }
+    }
+
+    pub(crate) fn held_lines(&self, host: &str, instance: &str) -> Vec<LineOwner> {
+        self.owners
+            .iter()
+            .filter(|((owned_host, _), owned)| owned_host == host && owned.holder == instance)
+            .map(|(_, owned)| owned.owner.clone())
+            .collect()
+    }
+
+    pub(crate) fn held_by(&self, host: &str, instance: &str, owner: &LineOwner) -> bool {
+        self.owners
+            .get(&(host.to_owned(), owner.line.clone()))
+            .is_some_and(|owned| owned.adopted && owned.holder == instance && owned.owner == *owner)
     }
 
     /// The accepted owner of `host`'s `line` and whether it holds it.

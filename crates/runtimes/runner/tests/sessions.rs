@@ -373,12 +373,8 @@ async fn a_stale_owner_cannot_control_the_line_after_a_transfer() {
         .unwrap_err();
     assert_eq!(refused.kind(), ExecutionBackendErrorKind::IdentityMismatch);
     assert!(refused.proven_no_effect());
-    // The line's session is the new owner's: it stops it.
-    let status = new
-        .stop_with_grace(id, JobStopReason::Model, Duration::from_millis(200))
-        .await
-        .unwrap();
-    assert!(status.is_terminal());
+    // The transfer already stopped this foreground call; it was never a job.
+    assert!(new.jobs().await.unwrap().is_empty());
 }
 
 /// Echoes a payload larger than the initial stream credit through `cat`.

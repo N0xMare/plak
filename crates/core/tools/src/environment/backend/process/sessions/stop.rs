@@ -1,10 +1,59 @@
 use super::{
-    Duration, ExecutionBackendError, Instant, JoinedProcessSessionId, JoinedProcessSessions,
+    Arc, Duration, ExecutionBackendError, Instant, JoinedProcessSessionId, JoinedProcessSessions,
     JoinedProcessStatus, Ordering, PROMOTED, cleanup_unresolved_error, conflict_error,
     invalid_request, lock, recovery_required_error,
 };
 
 impl JoinedProcessSessions {
+    pub(crate) fn stop_foreground_after_owner_loss(
+        &self,
+    ) -> crate::internal::ForegroundProcessStops {
+        let foreground = {
+            let state = lock(&self.inner.state);
+            state
+                .active
+                .iter()
+                .filter(|(_, session)| {
+                    !lock(&session.shared).status.is_terminal()
+                        && session.promoted.compare_exchange(
+                            super::FOREGROUND,
+                            super::CANCELLING,
+                            Ordering::AcqRel,
+                            Ordering::Acquire,
+                        ) != Err(PROMOTED)
+                })
+                .map(|(id, session)| (*id, Arc::clone(session)))
+                .collect::<Vec<_>>()
+        };
+        let result = self.stop_job_ids(
+            foreground.iter().map(|(id, _)| *id).collect(),
+            crate::JobStopReason::SessionExit,
+            Duration::from_millis(200),
+        );
+        let mut stopped = Vec::new();
+        for (_, session) in foreground {
+            if lock(&session.owner).is_some() {
+                continue;
+            }
+            let call_key = match session.foreground_control.class() {
+                crate::OperationClass::EffectCall {
+                    call_id,
+                    attempt_id,
+                } => format!("{call_id}:{attempt_id}"),
+                _ => "unkeyed".to_owned(),
+            };
+            stopped.push(crate::internal::ForegroundProcessStop {
+                call_key,
+                pid: session.pid,
+                status: lock(&session.shared).status,
+            });
+        }
+        crate::internal::ForegroundProcessStops {
+            stopped,
+            failure: result.err(),
+        }
+    }
+
     /// Joins exactly one exited process without signalling another process.
     ///
     /// # Errors

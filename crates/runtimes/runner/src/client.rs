@@ -123,6 +123,7 @@ struct Inner {
     next: AtomicU64,
     state: Mutex<State>,
     transferred: Mutex<Transferred>,
+    stopped_foreground: Mutex<HashMap<String, Vec<plakous_runner_protocol::StoppedForeground>>>,
 }
 
 struct State {
@@ -171,6 +172,12 @@ struct Transferred {
 }
 
 impl RunnerClient {
+    /// Closes this client's current link without stopping its processes.
+    /// Foreground authority lasts until transfer or owner-lease expiry.
+    pub fn disconnect(&self) {
+        lock(&self.inner.state).closer.cancel();
+    }
+
     /// Reads the runner's hello from `stream`, binds as `bind`, and starts
     /// answering calls.
     ///
@@ -251,6 +258,7 @@ impl RunnerClient {
                 home_local,
                 journal,
                 left: Mutex::new(left),
+                stopped_foreground: Mutex::default(),
                 ids: uuid::Uuid::new_v4().simple().to_string(),
                 next: AtomicU64::new(0),
                 state: Mutex::new(State {
@@ -373,7 +381,8 @@ impl RunnerClient {
     }
 
     /// Makes `owner` the line's owner on the runner before its first call
-    /// (spec 01 §8.4): a no-op when it already is.
+    /// (spec 01 §8.4): a no-op when it already is. Returns foreground
+    /// processes stopped by the transfer as diagnostic reports, not job rows.
     ///
     /// # Errors
     ///
@@ -382,8 +391,11 @@ impl RunnerClient {
     pub async fn transfer_owner(
         &self,
         owner: &plakous_tools::LineOwner,
-    ) -> Result<(), RunnerFailure> {
-        self.inner.transfer(&wire_owner(owner)).await
+    ) -> Result<Vec<plakous_runner_protocol::StoppedForeground>, RunnerFailure> {
+        self.inner.transfer(&wire_owner(owner)).await?;
+        Ok(lock(&self.inner.stopped_foreground)
+            .remove(&owner.line().to_string())
+            .unwrap_or_default())
     }
 
     async fn attach<S>(&self, stream: S, again: bool) -> Result<Hello, ConnectError>
@@ -435,6 +447,7 @@ impl RunnerClient {
         // next call.
         if again {
             *lock(&self.inner.transferred) = Transferred::default();
+            lock(&self.inner.stopped_foreground).clear();
         }
         let inner = Arc::clone(&self.inner);
         tokio::spawn(async move { inner.read(reader, connection, closer).await });
@@ -532,7 +545,7 @@ impl Inner {
 
     fn receive(&self, frame: RunnerFrame) {
         let control = match &frame {
-            RunnerFrame::TransferAccepted { control_id }
+            RunnerFrame::TransferAccepted { control_id, .. }
             | RunnerFrame::TransferRefused { control_id, .. }
             | RunnerFrame::StaleOwner {
                 control_id: Some(control_id),
@@ -674,7 +687,8 @@ impl Inner {
         let mut from = transferred.clone();
         for _ in 0..2 {
             match self.send_transfer(from.clone(), owner).await? {
-                RunnerFrame::TransferAccepted { .. } => {
+                RunnerFrame::TransferAccepted { stopped, .. } => {
+                    lock(&self.stopped_foreground).insert(owner.line.clone(), stopped);
                     *transferred = Some(owner.clone());
                     return Ok(());
                 }

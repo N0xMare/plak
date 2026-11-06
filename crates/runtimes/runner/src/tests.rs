@@ -50,7 +50,8 @@ fn transferred(tables: &mut Tables, owner: &LineOwner) {
     assert_eq!(
         tables.transfer(HOST, INSTANCE, "t".into(), from.as_ref(), owner.clone()),
         RunnerFrame::TransferAccepted {
-            control_id: "t".into()
+            control_id: "t".into(),
+            stopped: Vec::new(),
         }
     );
 }
@@ -197,7 +198,8 @@ fn owners_are_ordered_by_generation_then_fence_and_must_be_transferred() {
     assert_eq!(
         tables.transfer(HOST, INSTANCE, "t3".into(), None, successor.clone()),
         RunnerFrame::TransferAccepted {
-            control_id: "t3".into()
+            control_id: "t3".into(),
+            stopped: Vec::new(),
         }
     );
     transferred(&mut tables, &owner(2, 2));
@@ -213,7 +215,8 @@ fn owners_are_ordered_by_generation_then_fence_and_must_be_transferred() {
     assert_eq!(
         tables.transfer("host-b", INSTANCE, "t4".into(), None, owner(1, 1)),
         RunnerFrame::TransferAccepted {
-            control_id: "t4".into()
+            control_id: "t4".into(),
+            stopped: Vec::new(),
         }
     );
 }
@@ -326,7 +329,8 @@ fn a_transfer_to_a_newer_owner_is_a_compare_and_swap_from_the_accepted_one() {
             first.clone()
         ),
         RunnerFrame::TransferAccepted {
-            control_id: "t1".into()
+            control_id: "t1".into(),
+            stopped: Vec::new(),
         }
     );
     let successor = owner(1, 2);
@@ -343,14 +347,16 @@ fn a_transfer_to_a_newer_owner_is_a_compare_and_swap_from_the_accepted_one() {
     assert_eq!(
         tables.transfer(HOST, INSTANCE, "t3".into(), Some(&first), successor.clone()),
         RunnerFrame::TransferAccepted {
-            control_id: "t3".into()
+            control_id: "t3".into(),
+            stopped: Vec::new(),
         }
     );
     // The accepted owner again is a retry, whatever `from` says.
     assert_eq!(
         tables.transfer(HOST, INSTANCE, "t4".into(), Some(&first), successor.clone()),
         RunnerFrame::TransferAccepted {
-            control_id: "t4".into()
+            control_id: "t4".into(),
+            stopped: Vec::new(),
         }
     );
     let mut other_line = owner(5, 5);
@@ -401,7 +407,8 @@ fn a_keys_answer_and_acknowledgement_belong_to_the_instance_that_last_sent_it() 
     assert_eq!(
         tables.transfer(HOST, "instance-b", "t2".into(), Some(&head), owner(1, 2)),
         RunnerFrame::TransferAccepted {
-            control_id: "t2".into()
+            control_id: "t2".into(),
+            stopped: Vec::new(),
         }
     );
     tables.admit(HOST, "instance-b", &effect("s1", &head, "d", true), now);
@@ -517,6 +524,7 @@ fn transfer_from(
 fn accepted() -> RunnerFrame {
     RunnerFrame::TransferAccepted {
         control_id: "t".into(),
+        stopped: Vec::new(),
     }
 }
 

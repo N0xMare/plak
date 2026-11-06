@@ -914,6 +914,15 @@ pub fn serve_failure(error: &ExecutionBackendError) -> ServeFailure {
     backend_failure(error)
 }
 
+/// A foreground effect fenced out before its process dispatch.
+#[must_use]
+pub fn lost_process_owner() -> ServeFailure {
+    backend_failure(&ExecutionBackendError::new(
+        ExecutionBackendErrorKind::IdentityMismatch,
+        "the process owner lost authority before dispatch",
+    ))
+}
+
 fn backend_failure(error: &ExecutionBackendError) -> ServeFailure {
     ServeFailure::Backend {
         error: wire::encode_error(error),

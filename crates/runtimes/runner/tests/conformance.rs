@@ -672,9 +672,7 @@ async fn a_restarted_host_replays_by_key_and_never_runs_twice() {
     });
     assert_eq!(
         before.ask(transfer).await,
-        RunnerFrame::TransferAccepted {
-            control_id: "t1".into()
-        }
+        accepted("t1", &service.hello().instance)
     );
     let RunnerFrame::Result { payload, .. } =
         before.ask(keyed("r1", first_call, &append, false)).await
@@ -691,7 +689,10 @@ async fn a_restarted_host_replays_by_key_and_never_runs_twice() {
         from: Some(wire_owner()),
         to: wire_owner_of(LINE, 2),
     });
-    assert_eq!(after.ask(take_over).await, accepted("t2"));
+    assert_eq!(
+        after.ask(take_over).await,
+        accepted("t2", &service.hello().instance)
+    );
     assert_eq!(
         after.ask(keyed("r7", first_call, &append, true)).await,
         RunnerFrame::Result {
@@ -1269,9 +1270,10 @@ fn transfer(
     })
 }
 
-fn accepted(control: &str) -> RunnerFrame {
+fn accepted(control: &str, _instance: &str) -> RunnerFrame {
     RunnerFrame::TransferAccepted {
         control_id: control.into(),
+        stopped: Vec::new(),
     }
 }
 
@@ -1321,7 +1323,7 @@ async fn conformance_same_owner_transfer_from_a_non_holder_is_stale() {
     let mut holder = Raw::bound(&service, "instance-1").await;
     assert_eq!(
         holder.ask(transfer("t1", None, wire_owner())).await,
-        accepted("t1")
+        accepted("t1", &service.hello().instance)
     );
     let mut sibling = Raw::bound(&service, "instance-2").await;
     assert_eq!(
@@ -1340,7 +1342,7 @@ async fn conformance_same_owner_transfer_from_a_non_holder_is_stale() {
         sibling
             .ask(transfer("t3", Some(wire_owner()), newer.clone()))
             .await,
-        accepted("t3")
+        accepted("t3", &service.hello().instance)
     );
     // The former holder's retry of its own owner is now stale too.
     assert!(matches!(
@@ -1359,7 +1361,7 @@ async fn conformance_owned_requests_from_a_non_holder_are_not_transferred() {
     let mut holder = Raw::bound(&service, "instance-1").await;
     assert_eq!(
         holder.ask(transfer("t1", None, wire_owner())).await,
-        accepted("t1")
+        accepted("t1", &service.hello().instance)
     );
     let mut sibling = Raw::bound(&service, "instance-2").await;
     let call = "00000000-0000-0000-0000-000000000003";
@@ -1417,13 +1419,13 @@ async fn conformance_expiry_orphans_only_the_holder_lines() {
     let mut holder = Raw::bound(&service, "instance-1").await;
     assert_eq!(
         holder.ask(transfer("t1", None, wire_owner())).await,
-        accepted("t1")
+        accepted("t1", &service.hello().instance)
     );
     let mut sibling = Raw::bound(&service, "instance-2").await;
     let other = wire_owner_of(OTHER_LINE, 1);
     assert_eq!(
         sibling.ask(transfer("t2", None, other.clone())).await,
-        accepted("t2")
+        accepted("t2", &service.hello().instance)
     );
     drop(holder);
     // Past the holder's lease, though its sibling stayed connected.
@@ -1445,7 +1447,7 @@ async fn conformance_expiry_orphans_only_the_holder_lines() {
     // The holder re-adopts its orphan with its own owner.
     assert_eq!(
         returned.ask(transfer("t3", None, wire_owner())).await,
-        accepted("t3")
+        accepted("t3", &service.hello().instance)
     );
     assert!(matches!(
         returned
@@ -1463,7 +1465,7 @@ async fn conformance_after_restart_floor_owner_is_refused_from_a_sibling() {
     let mut holder = Raw::bound(&first, "instance-1").await;
     assert_eq!(
         holder.ask(transfer("t1", None, wire_owner())).await,
-        accepted("t1")
+        accepted("t1", &first.hello().instance)
     );
     drop(holder);
     drop(first);
@@ -1479,13 +1481,13 @@ async fn conformance_after_restart_floor_owner_is_refused_from_a_sibling() {
     let mut holder = Raw::bound(&restarted, "instance-1").await;
     assert_eq!(
         holder.ask(transfer("t3", None, wire_owner())).await,
-        accepted("t3")
+        accepted("t3", &restarted.hello().instance)
     );
     assert_eq!(
         sibling
             .ask(transfer("t4", Some(wire_owner()), wire_owner_of(LINE, 2)))
             .await,
-        accepted("t4")
+        accepted("t4", &restarted.hello().instance)
     );
 }
 
@@ -1502,7 +1504,7 @@ async fn conformance_a_sibling_cannot_take_or_tombstone_the_holder_keys() {
     let mut holder = Raw::bound(&service, "instance-1").await;
     assert_eq!(
         holder.ask(transfer("t1", None, wire_owner())).await,
-        accepted("t1")
+        accepted("t1", &service.hello().instance)
     );
     let running = "00000000-0000-0000-0000-000000000004";
     holder

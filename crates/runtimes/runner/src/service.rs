@@ -37,6 +37,8 @@ use crate::streams::{
     Credit, INITIAL_CREDIT, Outbound, StreamEnds, Window, receive_stream, send_stream,
 };
 
+mod foreground;
+
 /// One runner process: its identity, its environment and the state every
 /// connection to it shares. A new service is a new instance.
 #[derive(Clone)]
@@ -73,6 +75,7 @@ struct Inner {
     /// Each host instance's owner lease: its connections, and since when it
     /// has none. An expired lease is removed.
     leases: Mutex<HashMap<(String, String), HostLease>>,
+    foreground: foreground::Authority,
     next_connection: AtomicU64,
     /// Connections open now, bound or not.
     open: AtomicU64,
@@ -288,6 +291,7 @@ impl RunnerService {
                 home_local: options.home_local,
                 hosts: Mutex::default(),
                 leases: Mutex::default(),
+                foreground: foreground::Authority::default(),
                 next_connection: AtomicU64::new(0),
                 open: AtomicU64::new(0),
                 next_stream: AtomicU64::new(0),
@@ -431,6 +435,8 @@ impl RunnerService {
         sender: &mpsc::UnboundedSender<RunnerFrame>,
         closer: &CancellationToken,
     ) -> u64 {
+        // A late reconnect cannot revive authority before the idle tick runs.
+        self.expire_leases(Instant::now());
         let connection = self.inner.next_connection.fetch_add(1, Ordering::Relaxed);
         let previous = lock(&self.inner.hosts).insert(
             (host.to_owned(), instance.to_owned()),
@@ -520,9 +526,9 @@ impl RunnerService {
     /// and their jobs keep running as orphans until it returns or a newer
     /// owner of the same host takes each line over.
     fn expire_leases(&self, now: Instant) {
-        let expired: Vec<(String, String)> = {
-            let mut leases = lock(&self.inner.leases);
-            let expired = leases
+        let expired = {
+            let leases = lock(&self.inner.leases);
+            leases
                 .iter()
                 .filter(|(_, lease)| {
                     lease.connections == 0
@@ -530,19 +536,16 @@ impl RunnerService {
                             .released
                             .is_some_and(|at| now.duration_since(at) >= self.inner.owner_lease)
                 })
-                .map(|(holder, _)| holder.clone())
-                .collect::<Vec<_>>();
-            for holder in &expired {
-                leases.remove(holder);
-            }
-            expired
+                .filter_map(|(holder, lease)| {
+                    lease.released.map(|released| (holder.clone(), released))
+                })
+                .collect::<Vec<_>>()
         };
         if expired.is_empty() {
             return;
         }
-        let mut tables = lock(&self.inner.tables);
-        for (host, instance) in expired {
-            tables.orphan(&host, &instance);
+        for ((host, instance), released) in expired {
+            self.expire_foreground(host, instance, released);
         }
     }
 
@@ -596,11 +599,13 @@ impl RunnerService {
         }
         let running = lock(&self.inner.lines).values().any(|(sessions, _)| {
             sessions
-                .jobs()
-                .iter()
-                .any(|job| job.status == plakous_tools::JobStatus::Running)
+                .active_session_ids()
+                .into_iter()
+                .any(|id| sessions.joined_terminal_status(id).is_none())
         });
-        !running && !lock(&self.inner.tables).holds_unacknowledged(now)
+        !running
+            && !self.inner.foreground.pending()
+            && !lock(&self.inner.tables).holds_unacknowledged(now)
     }
 
     fn receive(
@@ -635,14 +640,16 @@ impl RunnerService {
                 lock(&self.inner.tables).acknowledge(host, instance, &request_id);
             }
             HostFrame::TransferOwner(transfer) => {
-                let answer = lock(&self.inner.tables).transfer(
-                    host,
-                    instance,
-                    transfer.control_id,
-                    transfer.from.as_ref(),
-                    transfer.to,
-                );
-                let _ = sender.send(answer);
+                let service = self.clone();
+                let host = host.to_owned();
+                let instance = instance.to_owned();
+                let sender = sender.clone();
+                tokio::spawn(async move {
+                    let answer = service
+                        .transfer_foreground(&host, &instance, transfer)
+                        .await;
+                    let _ = sender.send(answer);
+                });
             }
             HostFrame::Lines { request_id } => {
                 let service = self.clone();
@@ -755,8 +762,7 @@ impl RunnerService {
                 self.watch_jobs(&host, connection, &line, &payload)
             }
             RunnerVerbFamily::Sessions => {
-                let line = request.owner.map(|owner| owner.line).unwrap_or_default();
-                self.sessions(&host, &line, verb, payload, control)
+                self.fenced_sessions(&host, &instance, request.owner, verb, payload, control)
             }
             RunnerVerbFamily::Service if verb == RunnerVerb::ServiceSpawn => {
                 self.spawn_service(&host, connection, payload, control)

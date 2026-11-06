@@ -28,6 +28,13 @@ one cross-build carrier (a build imports its own and the previous version).
   terminal restart pilots after stopped-tree settlement, and verify live
   streaming after reattachment.
 
+- Runner protocol 3 ends foreground authority at a newer owner transfer or
+  instance-lease expiry, not at a transient disconnect. Transfers report stopped
+  foreground processes for structured logging only; existing call recovery
+  settles their unanswered tool calls once. Promoted jobs survive and are
+  re-adopted. Home-local daemons use `host/runner/v3/`; obsolete protocols are
+  inspected and reported unknown, never re-adopted. Session formats are unchanged.
+
 ### Format cut
 
 This release changes every persisted store at once (the 0.0.4 format cut), so
