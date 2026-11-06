@@ -2015,20 +2015,32 @@ agent` relaunch.
 socket (`host_skeleton`, the durability lane for the `host_crash_` cases):
 `host_crash_cuts_of_create_materialize_and_release_recover` kills the host at
 every indexed commit of a `new_session`, the first attach that materializes
-it, a turn and a `release_session` (`host_crash_mid_new_session`,
-`host_crash_mid_materialize`, `host_crash_mid_release`), and a restarted host
-answers the replayed request with one session, reads the dead host gone,
-opens the session and answers a turn, with no handoff and, past the turn, no
-loss; `host_crash_sigkill_mid_handoff_continues_each_handed_off_turn_once`
-kills a stopping host at once and after its handoff is durable, and the next
-host's start scan continues a handed-off turn once and leaves an unrecorded
-one held. The parallel lane carries `host_sigterm_handoff` (a running turn
-handed off by `SIGTERM` and continued once by the next start scan, and by
-none after it), `custody_embedded_vs_host` and
-`host_crash_dormant_stale_custody` (a tree in custody held by a live process,
-named and refused; an embedded holder named, killed, read free and taken
-over), the runtime-lease holder of a hubless session named the same way,
-and `host_crash_idle_resident`.
+it, a turn and a `release_session`, and a restarted host answers the
+replayed request with one session, reads the dead host gone, opens the
+session and answers a turn, with no handoff and, past the turn, no loss;
+`host_crash_sigkill_mid_handoff_continues_each_handed_off_turn_once` kills a
+stopping host at once and after its handoff is durable, and the next host's
+start scan continues a handed-off turn once and leaves an unrecorded one
+held; `host_crash_cuts_of_the_start_scan_continue_once_or_hold` kills the
+host after a handoff at every indexed commit of its start scan's open and
+continuation, and a third host continues the root or holds its turn as a
+loss, never with two decisions or a second dispatch, and a fourth continues
+nothing; `host_crash_cuts_of_a_busy_release_lose_no_answered_turn` cuts a
+`release_session` that waits on a running turn at every commit from the
+request on, with no handoff, no decision, no redispatch and no answered turn
+read as lost; `host_crash_cuts_of_a_custody_release_hand_the_tree_to_the_next_host`
+cuts the release of a root whose tree is in custody, and the next host's
+attach takes the custody. The parallel lane carries
+`a_sigterm_hands_a_running_turn_to_the_next_host_which_continues_it_once`
+(a running turn handed off by `SIGTERM` and continued once by the next start
+scan, and by none after it),
+`a_held_loss_continues_at_the_next_start_only_under_continue`,
+`a_tree_in_custody_is_named_by_its_holder_until_the_holder_is_gone` and
+`a_session_an_embedded_face_holds_is_refused_until_its_holder_is_gone` (a
+tree in custody, or a hubless session's runtime lease, held by a live
+process is named and refused; an embedded holder is named, killed, read free
+and taken over), `a_crashed_hosts_sessions_read_free_and_open_again` and
+`an_idle_session_releases_and_the_next_attach_opens_it`.
 Released job coverage distinguishes successful explicit disown, ordinary stop
 and missing-owner unknown outcomes, preserves read-only reopen and consumption,
 and rejects released terminals carrying an exit code or stopper.
