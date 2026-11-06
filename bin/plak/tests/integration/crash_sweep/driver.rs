@@ -529,6 +529,9 @@ fn cut_after_kill(
         traced_reopen(fixture, session, label, None)
             .unwrap_or_else(|outcome| panic!("{label} refused: {:?}", outcome.lines))
     };
+    if shape == "tree_grandchild_survives_loss" {
+        return shapes::lineage::after_kill(fixture, session, commits, false, relaunch);
+    }
     if shape == "tree_child_parked_job_loss" {
         return shapes::lineage::after_kill(fixture, session, commits, true, relaunch);
     }

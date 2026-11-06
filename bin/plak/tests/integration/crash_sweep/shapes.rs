@@ -271,6 +271,16 @@ pub(super) const REGISTRY: &[Shape] = &[
         assert_live: child::assert_owner_lost_live,
     },
     Shape {
+        name: "tree_grandchild_survives_loss",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: lineage::grandchild_script,
+        configure: lineage::configure_grandchild,
+        setup: no_setup,
+        lifecycle: lineage::grandchild_lifecycle,
+        assert_live: lineage::assert_grandchild,
+    },
+    Shape {
         name: "tree_child_parked_job_loss",
         subset: false,
         terminal: ExpectedTerminal::Answer,

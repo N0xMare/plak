@@ -201,49 +201,7 @@ async fn join_runtime_children(
         .tasks()
         .spawn(startup_results_owned(startups.clone()));
     let startup_abort = startup_task.abort_handle();
-    let retirements = {
-        let mut live = runtime.live.lock().await;
-        let ids: Vec<_> = live.residents().map(|(id, _)| id.clone()).collect();
-        for id in ids {
-            live.start_retire(
-                runtime.live.clone(),
-                runtime.driver.clone(),
-                &id,
-                None,
-                true,
-            );
-        }
-        live.releasings()
-            .map(|(id, retirement)| (id.clone(), retirement.clone()))
-            .collect::<Vec<_>>()
-    };
-    let completions = || {
-        futures_util::future::join_all(
-            retirements
-                .iter()
-                .map(|(_, retirement)| retirement.completion.clone()),
-        )
-    };
-    // Shutdown bounds the join, not owned release. Only explicit process-exit
-    // abandonment may abort a retirement while it still owns runtime authority.
-    let results = if let Ok(results) = tokio::time::timeout(HOST_SHUTDOWN_RELEASE_TIMEOUT, async {
-        let results = completions().await;
-        if let Err(error) = runtime.driver.join_retirement_tasks().await {
-            failure.tree_failure.get_or_insert(error);
-        }
-        results.into_iter().map(Some).collect::<Vec<_>>()
-    })
-    .await
-    {
-        results
-    } else {
-        retirements
-            .iter()
-            .map(|(_, retirement)| {
-                futures_util::FutureExt::now_or_never(retirement.completion.clone())
-            })
-            .collect()
-    };
+    let (retirements, results) = retire_leaf_first(&runtime, failure).await;
     record_retirement_results(&runtime, failure, retirements, results).await;
     let startup_results = match tokio::time::timeout(HOST_SHUTDOWN_DETACH_TIMEOUT, startup_task)
         .await
@@ -269,6 +227,102 @@ async fn join_runtime_children(
             .await;
             failure.child_failures.push((id, error));
         }
+    }
+}
+
+/// Retires the live descendants by depth, deepest first, under the one
+/// shutdown bound (spec 03 section 14): a level starts once every node of the
+/// level below has released and its turn waiter has folded, so no node retires
+/// while a descendant of it still does. Siblings within a level retire
+/// concurrently. Once the bound is spent, the remaining levels start at once
+/// and are read without waiting, so they are reported cut short.
+async fn retire_leaf_first(
+    runtime: &Arc<ProductTopologyRuntime>,
+    failure: &mut TopologyShutdownError,
+) -> (
+    Vec<(String, super::Retirement)>,
+    Vec<Option<Result<(), String>>>,
+) {
+    let deadline = tokio::time::Instant::now() + HOST_SHUTDOWN_RELEASE_TIMEOUT;
+    let ids = {
+        let live = runtime.live.lock().await;
+        live.residents()
+            .map(|(id, _)| id.clone())
+            .chain(live.releasings().map(|(id, _)| id.clone()))
+            .collect::<Vec<_>>()
+    };
+    let mut levels = std::collections::BTreeMap::<std::cmp::Reverse<u8>, Vec<String>>::new();
+    for id in ids {
+        // A node the tree no longer names has no descendant to wait for.
+        let depth = runtime
+            .driver
+            .read(|tree| tree.node(&id).map(|node| node.depth).ok())
+            .ok()
+            .flatten()
+            .unwrap_or(u8::MAX);
+        levels.entry(std::cmp::Reverse(depth)).or_default().push(id);
+    }
+    let mut retirements = Vec::new();
+    let mut results = Vec::new();
+    let mut in_time = true;
+    for ids in levels.into_values() {
+        let level = {
+            let mut live = runtime.live.lock().await;
+            ids.iter()
+                .filter_map(|id| {
+                    live.start_retire(runtime.live.clone(), runtime.driver.clone(), id, None, true)
+                        .map(|retirement| (id.clone(), retirement))
+                })
+                .collect::<Vec<_>>()
+        };
+        let joined = if in_time {
+            tokio::time::timeout_at(deadline, async {
+                let joined = futures_util::future::join_all(
+                    level
+                        .iter()
+                        .map(|(_, retirement)| retirement.completion.clone()),
+                )
+                .await;
+                level_waiters_folded(runtime, &level).await;
+                joined
+            })
+            .await
+            .ok()
+        } else {
+            None
+        };
+        if let Some(joined) = joined {
+            results.extend(joined.into_iter().map(Some));
+        } else {
+            in_time = false;
+            results.extend(level.iter().map(|(_, retirement)| {
+                futures_util::FutureExt::now_or_never(retirement.completion.clone())
+            }));
+        }
+        retirements.extend(level);
+    }
+    // Shutdown bounds the join, not owned release. Only explicit process-exit
+    // abandonment may abort a retirement while it still owns runtime authority.
+    if in_time
+        && let Ok(Err(error)) =
+            tokio::time::timeout_at(deadline, runtime.driver.join_retirement_tasks()).await
+    {
+        failure.tree_failure.get_or_insert(error);
+    }
+    (retirements, results)
+}
+
+/// Waits until no node of `level` has a turn waiter left to fold.
+async fn level_waiters_folded(
+    runtime: &ProductTopologyRuntime,
+    level: &[(String, super::Retirement)],
+) {
+    while runtime
+        .driver
+        .read(|tree| level.iter().any(|(id, _)| tree.has_turn_waiter(id)))
+        .unwrap_or(false)
+    {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     }
 }
 

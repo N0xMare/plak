@@ -1964,6 +1964,97 @@ async fn shutdown_deadline_bounds_joiners_but_keeps_release_owner() {
         .unwrap();
 }
 
+/// Live `root` (depth 0) above a live child (depth 1), each releasing behind
+/// its own barrier.
+async fn root_above_a_live_child(
+    label: &str,
+    directory: &Path,
+) -> (
+    Arc<ProductTopologyRuntime>,
+    String,
+    [Arc<tokio::sync::Notify>; 4],
+) {
+    let runtime = Arc::new(ProductTopologyRuntime::new(
+        bootstrap(label, directory.to_path_buf()),
+        memory_store(),
+        Arc::new(plakous_workspace::occupancy_vcs::fake::FakeVcs::new()),
+        None,
+    ));
+    let child = runtime
+        .mutate_then_emit(false, |tree| {
+            tree.spawn_agent(
+                "root",
+                &crate::protocol::SpawnAgentRequest::test_review(),
+                None,
+            )
+            .map(|child| child.agent_id)
+            .map_err(|error| error.message)
+        })
+        .await
+        .unwrap();
+    let barriers: [Arc<tokio::sync::Notify>; 4] = Default::default();
+    let [root_entered, root_finish, child_entered, child_finish] = &barriers;
+    for (id, entered, finish) in [
+        ("root".to_owned(), root_entered, root_finish),
+        (child.clone(), child_entered, child_finish),
+    ] {
+        assert!(
+            runtime
+                .try_occupy_live(id, Box::new(barrier_child(entered, finish)))
+                .await
+                .is_ok()
+        );
+    }
+    (runtime, child, barriers)
+}
+
+/// Shutdown retires by depth, deepest first: a node's release starts only
+/// once every live descendant below it has released (spec 03 section 14).
+#[tokio::test]
+async fn shutdown_retires_the_deepest_level_first() {
+    let directory = tempfile::tempdir().unwrap();
+    let (runtime, _, [root_entered, root_finish, child_entered, child_finish]) =
+        root_above_a_live_child("shutdown-leaf-first", directory.path()).await;
+    let shutdown = tokio::spawn(shutdown_runtime(runtime.clone()));
+    child_entered.notified().await;
+    for _ in 0..64 {
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        FutureExt::now_or_never(root_entered.notified()).is_none(),
+        "the parent started releasing while its child still was"
+    );
+    child_finish.notify_one();
+    root_entered.notified().await;
+    root_finish.notify_one();
+    shutdown.await.unwrap().unwrap();
+    assert!(runtime.live.lock().await.is_empty());
+}
+
+/// A child that never releases spends the one shutdown bound; its parent's
+/// release then starts without a wait and both are reported cut short, with
+/// no fault recorded against either.
+#[tokio::test(start_paused = true)]
+async fn a_deaf_leaf_spends_the_shutdown_bound_and_cuts_its_parent_short() {
+    let directory = tempfile::tempdir().unwrap();
+    let (runtime, child, [_, root_finish, _, child_finish]) =
+        root_above_a_live_child("shutdown-deaf-leaf", directory.path()).await;
+    let started = tokio::time::Instant::now();
+    let result = shutdown_runtime(runtime.clone()).await.unwrap_err();
+    assert!(
+        started.elapsed() < HOST_SHUTDOWN_RELEASE_TIMEOUT * 3,
+        "the bound is one"
+    );
+    assert_eq!(
+        result.cut_short,
+        [child.clone(), "root".to_owned()],
+        "{result:?}"
+    );
+    assert!(result.child_failures.is_empty(), "{result:?}");
+    child_finish.notify_one();
+    root_finish.notify_one();
+}
+
 /// The last lease's shutdown closes the tree's task set, aborting and
 /// joining work that owns no child (projections, join observers), but a
 /// release worker stuck past the shutdown bound keeps its child's runtime

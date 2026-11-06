@@ -1,5 +1,9 @@
 //! A product child that itself has a descendant or a parked process.
 //!
+//! `tree_grandchild_survives_loss`: the child spawns a grandchild whose
+//! request waits. A cut keeps that node. Nothing starts it a second time,
+//! and a second relaunch dispatches nothing more.
+//!
 //! `tree_child_parked_job_loss`: the child is parked on one promoted local
 //! process. A cut leaves that process unknown rather than started again.
 
@@ -45,8 +49,58 @@ fn spawn_step() -> Value {
     }}}, "finish": "tool_calls"})
 }
 
-pub(super) fn parked_script() -> Value {
+pub(super) fn grandchild_script() -> Value {
     json!({"version": 1, "steps": [{"output": {"text": PARKED}}]})
+}
+
+pub(super) fn parked_script() -> Value {
+    grandchild_script()
+}
+
+pub(super) fn configure_grandchild(fixture: &Fixture) {
+    // The second step never opens. Answering would fail the submit schema
+    // and retire the child, which closes the grandchild.
+    let child = json!({
+        "version": 1,
+        "repeat_last_step": true,
+        "steps": [
+            {"output": {"tool": {"name": "spawn_agent", "arguments": {
+                "template": "note",
+                "tier": "read_only",
+                "description": "note",
+                "prompt": "note the diff",
+                "output_schema_json": SCHEMA
+            }}}, "finish": "tool_calls"},
+            {"stream": [{"gate": {"file": fixture.root.join(NEVER)}}],
+             "output": {"text": "child parked"}}
+        ]
+    });
+    let grand = json!({
+        "version": 1,
+        "repeat_last_step": true,
+        "steps": [{"stream": [
+            {"text": "grandchild working"},
+            {"gate": {"file": fixture.root.join(NEVER)}}
+        ], "output": {"text": "grandchild done"}}]
+    });
+    std::fs::write(
+        fixture.root.join(CHILD_SCRIPT),
+        serde_json::to_vec_pretty(&child).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        fixture.root.join(GRAND_SCRIPT),
+        serde_json::to_vec_pretty(&grand).unwrap(),
+    )
+    .unwrap();
+    fixture.write_script(&root(
+        fixture,
+        &json!([
+            spawn_step(),
+            {"stream": [{"gate": {"file": fixture.root.join(CHILD_PARKED)}}],
+             "output": {"text": PARKED}}
+        ]),
+    ));
 }
 
 pub(super) fn configure_parked(fixture: &Fixture) {
@@ -181,12 +235,40 @@ pub(super) fn lifecycle(
     Some(quit_frame())
 }
 
+pub(super) fn grandchild_lifecycle(
+    fixture: &Fixture,
+    records: &[Value],
+    state: &mut Lifecycle,
+) -> Option<Value> {
+    lifecycle(fixture, records, state, false)
+}
+
 pub(super) fn parked_lifecycle(
     fixture: &Fixture,
     records: &[Value],
     state: &mut Lifecycle,
 ) -> Option<Value> {
     lifecycle(fixture, records, state, true)
+}
+
+pub(super) fn assert_grandchild(fixture: &Fixture, outcome: &AgentOutcome, _: &summary::Summary) {
+    assert!(
+        outcome
+            .assistant_text()
+            .iter()
+            .any(|text| text.contains(PARKED))
+    );
+    assert!(evidence_dispatches(fixture, CHILD_EVIDENCE) >= 1);
+    assert_eq!(evidence_dispatches(fixture, GRAND_EVIDENCE), 1);
+    assert!(
+        node_status(fixture, "c2").is_some(),
+        "the grandchild is kept"
+    );
+    assert_ne!(
+        node_status(fixture, "c2"),
+        Some(NodeStatus::RecoveryRequired),
+        "the pilot left the grandchild recovery_required"
+    );
 }
 
 pub(super) fn assert_parked(fixture: &Fixture, outcome: &AgentOutcome, _: &summary::Summary) {
