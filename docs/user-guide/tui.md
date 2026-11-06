@@ -472,6 +472,22 @@ The global ones:
 | `/` | Open the slash palette with an empty draft |
 | `?` | Open Keybinds with an empty draft after a pause in typing; otherwise type `?` |
 
+`Alt+Up` and `Alt+Down` move a marker through the transcript: your prompts,
+the replies, tool blocks, process rows and notices, and the other rows that
+are actually drawn. Folded-away rows are skipped. The first `Alt+Up` marks
+the latest item; the first `Alt+Down` marks the earliest. While the marker is
+showing, `Up` and `Down` move it too, and the view scrolls just enough to
+keep it on screen. `Enter` or `Space` opens or closes that block when the
+block folds, and does not send what you have typed. `Alt+C` copies the whole
+item, the same text as dragging across its rows. `Esc` clears the marker and
+does nothing else: it does not clear the draft and it does not ask to stop
+the turn. The next `Esc` is the ordinary one. Typing, or moving the caret,
+returns you to the composer and the character is typed. `Ctrl+C` is unchanged,
+marker or not, including right after you send a prompt. On an agent's
+transcript the same keys move, fold and copy; `Esc` clears the marker before
+a second `Esc` returns to the Agents list, and `i`, `c`, `y` and the other
+agent keys keep their own meanings.
+
 A few chords need the kitty keyboard protocol (`Ctrl+Shift+A`,
 `Ctrl+Shift+O`). `Alt+O` is the fallback for terminals without it.
 
@@ -901,9 +917,13 @@ keeps its own result status. The Activity title, the Agents and Processes tabs a
 
 | Key | Effect |
 | --- | --- |
-| `Esc` | Back to the Agents list on this agent, however you opened it; never stops the root turn |
-| `↑` / `↓`, `PageUp` / `PageDown` | Scroll |
-| `Enter` | Open or close the focused row |
+| `Esc` | Leave the item marker, or back to the Agents list on this agent; never stops the root turn |
+| `Alt+Up` / `Alt+Down` | Focus the previous or next transcript item |
+| `↑` / `↓` | Move that marker while it is showing; otherwise scroll a line |
+| `PageUp` / `PageDown` | Scroll a page |
+| `Enter` | While the marker is showing, open or close that block; otherwise open or close the focused row |
+| `Space` | While the marker is showing, open or close that block |
+| `Alt+C` | Copy the focused item, the same text as dragging across its rows |
 | `[` / `]` | Previous / next agent in the Agents list's order |
 | `i` / `c` | Interrupt / close this agent (in the confirmation pop-up) |
 | `u` | Recover this child when it is a failed or recovery-required child (in the confirmation pop-up) |

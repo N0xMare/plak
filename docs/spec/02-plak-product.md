@@ -4958,6 +4958,33 @@ composer a printable key that reaches the pop-up closes it and goes into the
 draft, so typing never resolves the approval. `Esc`, or another `Alt` chord,
 cancels.
 
+**Transcript item navigation.** `Alt+↑` and `Alt+↓` move a focus marker
+through the drawn transcript items: a prompt or steer, an answer, a tool
+block, a process or retry row, a notice, and a thought, mail, milestone or
+approval that is actually drawn. A session header is not an item. A row folded
+into a group or a cell is skipped until that fold is opened. The first
+`Alt+↑` from the composer focuses the last item; the first `Alt+↓` focuses
+the first. Further presses, and bare `↑` and `↓` while the marker is active,
+move it and stop at the ends without wrapping. The viewport scrolls only as
+far as that move, or a resize, needs to keep the focused item on screen; the
+wheel and page keys are not pulled back. `Enter` or `Space` toggles the
+focused block where that block folds today, and does not send the draft or
+insert a space. `Alt+C` copies the focused item: the same text as a drag that
+covers every row of that item from its first cell through the width of the
+transcript. `Esc` leaves navigation and clears the marker. It does not clear
+the draft, open the stop pop-up, or pause auto-continue; the next `Esc` is
+the ordinary key of §5.3. A printable key, or a composer caret key, leaves
+navigation and is handled by the composer, including `/` and `?`. `Ctrl+C`
+is never part of this mode: with or without the marker, including during the
+sent-prompt window of §5.3, it is the copy-or-ladder key and nothing else.
+The slash palette, prompt history and the focused queue keep their own arrows;
+navigation does not take those keys, and a key that leaves the queue for the
+composer also leaves navigation. The same marker works on an agent transcript.
+There `Esc` leaves navigation before returning to the Agents list, bare `↑`
+and `↓` move the marker only while it is active and otherwise scroll, and
+the agent's letter keys keep their meanings. Each transcript keeps its own
+marker, so the root's is still there when the agent view closes.
+
 **Menu, Agents list, Activity processes, resume picker, help overlay, and
 confirmation** are covered in §5.5 and §5.7.
 
@@ -5055,9 +5082,10 @@ screen. Terminal initialization does not install an unconditional library panic
 hook that could bypass this owner-thread boundary.
 
 `Esc` is the interrupt key and **`Esc` never quits.** In precedence order: a
-modal, dropdown, secret field, search, history shelf, or selection consumes it
-first; an agent transcript consumes it next: it goes back to Activity > Agents
-at that agent, however the transcript was opened (§5.7), so it never stops the
+modal, dropdown, secret field, search, history shelf, selection, or transcript
+item navigation consumes it first; an agent transcript consumes it next: it
+goes back to Activity > Agents at that agent, however the transcript was
+opened (§5.7), so it never stops the
 turn; mid-turn it opens the destructive confirmation pop-up (§5.7) titled
 `Stop this turn?`: it says the root turn is cancelled and its work in flight
 lost, and that the host-reported running descendants are interrupted,
@@ -7068,7 +7096,7 @@ back, fetches its rows again, and a turn-end re-send keeps open items, their
 fetched detail, the focused row and the camera on the same rows. The root keeps its
 place while hidden: root host events always land in the root transcript and
 show on return, and going back restores the root's exact scroll anchor, or
-follows the tail if it was at the bottom. `Esc` goes back to the Agents list at this agent, however the transcript was opened (§5.3); `Esc` there, the close glyph and `Ctrl+T` close Activity to the root. `Enter` on the list's root row does the same. It
+follows the tail if it was at the bottom. `Esc` leaves transcript item navigation when that marker is active, and otherwise goes back to the Agents list at this agent, however the transcript was opened (§5.3); `Esc` there, the close glyph and `Ctrl+T` close Activity to the root. `Enter` on the list's root row does the same. It
 never stops the root turn or pauses auto-continue. A key the view does not map
 does nothing, and `Enter` opens or closes the focused
 row, so a hidden root draft is never

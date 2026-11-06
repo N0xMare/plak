@@ -203,10 +203,21 @@ impl App {
     /// Printable keys do nothing: the agent view has no composer. `Ctrl`
     /// chords are routed before this, with the promptless set.
     pub(super) fn handle_agent_view_key(&mut self, key: KeyEvent) -> Option<UserAction> {
+        if let super::item_nav::ItemKey::Done(action) =
+            self.handle_item_nav_key(key.code, key.modifiers)
+        {
+            return action;
+        }
         match key.code {
             // Above the stop confirmation: going back never stops the root
-            // turn or pauses auto-continue.
-            KeyCode::Esc => return self.agent_view_back(),
+            // turn or pauses auto-continue. Item navigation is left first.
+            KeyCode::Esc => {
+                if self.pane.item_nav {
+                    self.leave_item_nav();
+                    return None;
+                }
+                return self.agent_view_back();
+            }
             KeyCode::Char(key @ ('i' | 'c')) => {
                 let agent_id = self.viewed_agent_id()?.to_owned();
                 return self.confirm_destructive(if key == 'i' {

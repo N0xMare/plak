@@ -458,6 +458,9 @@ pub(crate) struct App {
     /// [`AgentView::hidden`]; root host events are applied through
     /// [`App::with_root_pane`], so they always land in the root pane.
     pub(crate) pane: pane::TranscriptPane,
+    /// Last `Alt+C` item copy, so tests see it without the terminal.
+    #[cfg(test)]
+    pub(super) last_nav_copy: Option<String>,
     /// The agent transcript shown as the Activity > Agents body.
     agent_view: Option<pane::AgentView>,
     /// The agent transcript the host was last asked to serve.
@@ -885,6 +888,8 @@ impl App {
             attachments: attachments::Attachments::default(),
             hosted,
             pane,
+            #[cfg(test)]
+            last_nav_copy: None,
             agent_view: None,
             host_agent_transcript: None,
             agent_pane_serial: 0,
@@ -1187,6 +1192,14 @@ mod image_paths;
     reason = "unit tests may assert with unwrap/expect"
 )]
 mod instant_confirm_tests;
+mod item_nav;
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "unit tests may assert with unwrap/expect"
+)]
+mod item_nav_tests;
 mod keyed;
 mod keys;
 mod launch;

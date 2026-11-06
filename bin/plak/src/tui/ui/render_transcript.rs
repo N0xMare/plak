@@ -88,6 +88,7 @@ impl App {
         self.tool_hit_rows.clear();
         let content_w = usize::from(area.width.max(1));
         self.last_transcript_width = content_w;
+        self.note_nav_width(content_w);
         let change = std::mem::take(&mut self.pane.pending_transcript_change);
         if change != TranscriptChange::Unchanged {
             self.pane.transcript_revision = self.pane.transcript_revision.wrapping_add(1);
@@ -177,7 +178,10 @@ impl App {
         let body_h = height.saturating_sub(sticky_h).max(1);
         let total_messages = self.pane.transcript_cache.layout().plain.len();
         let vtotal = total_messages.saturating_add(banner_h);
-        let vend = vstart.saturating_add(body_h).min(vtotal);
+        let mut vend = vstart.saturating_add(body_h).min(vtotal);
+        vstart = vend.saturating_sub(body_h);
+        vstart = self.revealed_vstart(vstart, banner_h, body_h, vtotal, total_messages);
+        vend = vstart.saturating_add(body_h).min(vtotal);
         vstart = vend.saturating_sub(body_h);
         let start = vstart.saturating_sub(banner_h);
         let end = vend.saturating_sub(banner_h).min(total_messages);

@@ -163,12 +163,25 @@ impl App {
             return self.route_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         }
         // Where there is no prompt an Alt or Super chord is neither a command
-        // nor typing: it does nothing, so `Alt+s` never reaches `s`.
+        // nor typing: it does nothing, so `Alt+s` never reaches `s`. An agent
+        // transcript is the exception for the item-navigation chords, which
+        // are commands there (spec 02 §5.2).
+        let agent_transcript = self.activity_tab == Some(super::processes::ActivityTab::Agents)
+            && self.viewed_agent_id().is_some();
+        let item_nav_alt = agent_transcript
+            && key.modifiers.contains(KeyModifiers::ALT)
+            && !key.modifiers.contains(KeyModifiers::CONTROL)
+            && !key.modifiers.contains(KeyModifiers::SUPER)
+            && matches!(
+                key.code,
+                KeyCode::Up | KeyCode::Down | KeyCode::Char('c' | 'C')
+            );
         if self.has_no_prompt()
             && self.control_tab.is_none()
             && key
                 .modifiers
                 .intersects(KeyModifiers::ALT | KeyModifiers::SUPER)
+            && !item_nav_alt
         {
             return None;
         }

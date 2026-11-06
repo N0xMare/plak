@@ -359,7 +359,25 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         chord: "Enter",
         when: When::Transcript,
-        effect: "cycle the focused tool row; on the focused queue, send the selected follow-up now (a paused drain too), or only leave when delivery is unavailable",
+        effect: "while navigating items, open or close the focused block; otherwise cycle the focused tool row; on the focused queue, send the selected follow-up now (a paused drain too), or only leave when delivery is unavailable",
+        double_tap: None,
+    },
+    Binding {
+        chord: "Space",
+        when: When::Transcript,
+        effect: "while navigating items, open or close the focused block",
+        double_tap: None,
+    },
+    Binding {
+        chord: "Alt+↑ / Alt+↓",
+        when: When::Transcript,
+        effect: "focus the previous or next transcript item; ↑ and ↓ then move the marker",
+        double_tap: None,
+    },
+    Binding {
+        chord: "Alt+C",
+        when: When::Transcript,
+        effect: "copy the focused transcript item, the same text as a whole-row drag",
         double_tap: None,
     },
     Binding {
@@ -380,13 +398,13 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         chord: "Esc",
         when: When::Agent,
-        effect: "back to the Agents list at this agent; never stops the root turn",
+        effect: "leave item navigation, or back to the Agents list at this agent; never stops the root turn",
         double_tap: None,
     },
     Binding {
         chord: "↑ / ↓",
         when: When::Agent,
-        effect: "scroll a line",
+        effect: "while navigating items, move the marker; otherwise scroll a line",
         double_tap: None,
     },
     Binding {
@@ -399,6 +417,24 @@ pub const BINDINGS: &[Binding] = &[
         chord: "Enter",
         when: When::Agent,
         effect: "open or close the focused row",
+        double_tap: None,
+    },
+    Binding {
+        chord: "Space",
+        when: When::Agent,
+        effect: "while navigating items, open or close the focused block",
+        double_tap: None,
+    },
+    Binding {
+        chord: "Alt+↑ / Alt+↓",
+        when: When::Agent,
+        effect: "focus the previous or next transcript item",
+        double_tap: None,
+    },
+    Binding {
+        chord: "Alt+C",
+        when: When::Agent,
+        effect: "copy the focused transcript item, the same text as a whole-row drag",
         double_tap: None,
     },
     Binding {

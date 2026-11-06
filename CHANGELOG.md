@@ -111,6 +111,10 @@ an export.
 
 ### Plak
 
+- The TUI moves a focus marker through transcript items with `Alt+Up` and
+  `Alt+Down` (then `Up` and `Down`). `Enter` or `Space` folds the focused
+  block, `Alt+C` copies that item, `Esc` leaves the marker without stopping a
+  turn, and typing returns to the composer.
 - The TUI speaks wire v2 to its session: each round's supervisor serves a
   local-face connection of the session's host service over a socket pair
   in the process, and the TUI is a `plakous_host_protocol::client` of it.

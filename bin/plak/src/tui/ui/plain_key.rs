@@ -24,6 +24,25 @@ impl App {
         let shift = modifiers.contains(KeyModifiers::SHIFT);
         let key_alt = modifiers.contains(KeyModifiers::ALT);
         let key_super = modifiers.contains(KeyModifiers::SUPER);
+        // Item navigation consumes its chords before the queue and the
+        // composer. `Ctrl` never matches, so §5.3 is unchanged.
+        if let super::item_nav::ItemKey::Done(action) = self.handle_item_nav_key(code, modifiers) {
+            return action;
+        }
+        if self.pane.item_nav && Self::composer_editing_key(code, modifiers) {
+            self.leave_item_nav();
+        }
+        // Page keys move the caret only while the draft holds text. That is a
+        // composer key, so it leaves the marker; an empty draft still pages
+        // the transcript and keeps the marker (spec 02 §5.2).
+        if self.pane.item_nav
+            && !self.input.is_empty()
+            && !ctrl
+            && !key_super
+            && matches!(code, KeyCode::PageUp | KeyCode::PageDown)
+        {
+            self.leave_item_nav();
+        }
         // Spec 02 §5.2: the focused queue takes the arrows (and `Esc` and
         // `Tab` to leave it). Every other key leaves it for the composer, so
         // no typing or editing key drops, edits or sends a queued prompt.
@@ -41,6 +60,8 @@ impl App {
             if code == KeyCode::Enter && !shift && !key_alt {
                 let sends = self.queue_enter_sends();
                 self.queue_focused = false;
+                // Returning to the composer leaves the marker too.
+                self.leave_item_nav();
                 self.mark_dirty();
                 if sends {
                     return self.queue_activate_selected(true);
@@ -48,6 +69,7 @@ impl App {
                 return None;
             }
             self.queue_focused = false;
+            self.leave_item_nav();
             self.mark_dirty();
         }
         match code {
@@ -80,6 +102,12 @@ impl App {
                     self.composer_selection
                         .set_caret(&self.input, self.input_cursor);
                     self.mark_dirty();
+                    return None;
+                }
+                // Item navigation is an owner, like the history shelf: Esc
+                // leaves it and does not reach the stop ladder.
+                if self.pane.item_nav {
+                    self.leave_item_nav();
                     return None;
                 }
                 let now = Instant::now();

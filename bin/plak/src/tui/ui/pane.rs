@@ -67,6 +67,14 @@ pub(crate) struct TranscriptPane {
     pub(super) transcript_anchor_banner_rows: usize,
     /// Focused transcript row for the §5.3 fold keymap.
     pub(super) focused_block: Option<usize>,
+    /// Keyboard navigation owns [`Self::focused_block`] until `Esc` or typing.
+    ///
+    /// A mouse focus leaves this false, so `Esc` stays the stop ladder.
+    pub(super) item_nav: bool,
+    /// The next paint scrolls just enough to keep the focused item visible.
+    pub(super) reveal_nav: bool,
+    /// Width the marker was last laid out at, so a resize reveals it again.
+    pub(super) nav_width: usize,
     pub(super) selection: TranscriptSelection,
     pub(super) pending_tool_click: Option<(usize, blocks::RowTarget)>,
     /// Presentation-only start instants for correlated activity timing.
@@ -107,6 +115,9 @@ impl TranscriptPane {
             transcript_view_anchor: None,
             transcript_anchor_banner_rows: 0,
             focused_block: None,
+            item_nav: false,
+            reveal_nav: false,
+            nav_width: 0,
             selection: TranscriptSelection::default(),
             pending_tool_click: None,
             tool_started: HashMap::new(),
