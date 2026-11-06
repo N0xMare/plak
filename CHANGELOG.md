@@ -142,7 +142,10 @@ an export.
   or TUI's stale custody reads free. Its custody identity and the login
   shell's `PATH` are captured once at start (not yet given to its sessions'
   tools); a `SIGTERM` hands every resident session off as a planned handoff
-  and stops it within 60 s. Spec 02 §4.6 carries the systemd unit.
+  and stops it within 60 s, and the next host's start scan opens each
+  session whose continuation runs by itself (a handoff, a pending decision,
+  a held loss under `resume_after_loss = "continue"`), so it continues with
+  no client attached. Spec 02 §4.6 carries the systemd unit.
 - `plak host --web`: the host's sessions' wire v2 over
   a WebSocket at `/wire`, and a web UI's static build, on a private unix
   socket that `tailscale serve --bg unix:<path>` publishes on the tailnet,

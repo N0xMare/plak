@@ -112,6 +112,46 @@ impl ProductSessions {
     }
 }
 
+/// Whether the start scan opens a session whose root stands so: a planned
+/// handoff's continuation runs by itself, a decided continuation a crash
+/// left pending is resubmitted at the open, and a held loss continues by
+/// itself only under `resume_after_loss = "continue"`.
+const fn owes_open(standing: RootStanding, continue_losses: bool) -> bool {
+    match standing {
+        RootStanding::Continuing { handoff: true, .. }
+        | RootStanding::Continuing { held: false, .. } => true,
+        RootStanding::Continuing { held: true, .. } => continue_losses,
+        RootStanding::Clear | RootStanding::Stopped => false,
+    }
+}
+
+impl ProductSessions {
+    /// The sessions the host-start scan opens (spec 02 §4.6), among the
+    /// directory's rows, newest first.
+    ///
+    /// # Errors
+    ///
+    /// The stores cannot be read.
+    pub(super) fn owed(&self) -> CliResult<Vec<String>> {
+        let continue_losses = crate::product_config::ProductConfig::load(self.services.paths()?)
+            .map_err(CliFailure::new)?
+            .resume_after_loss
+            == Some(crate::product_config::ResumeAfterLoss::Continue);
+        let store = self.services.session_records()?;
+        let entries = self
+            .with_product(|product| product.directory(None))
+            .map_err(CliFailure::new)?;
+        Ok(entries
+            .into_iter()
+            .filter(|entry| {
+                plakous_hosted::runtime::root_standing(store.as_ref(), &entry.id)
+                    .is_ok_and(|standing| owes_open(standing, continue_losses))
+            })
+            .map(|entry| entry.id)
+            .collect())
+    }
+}
+
 /// What a dormant row's activity is by its root's durable intents.
 const fn activity_of(standing: RootStanding) -> SessionActivity {
     match standing {
@@ -396,6 +436,45 @@ mod tests {
             .to_string();
         assert_eq!(environment_of(&cli), SessionEnvironment::Cli);
         assert_eq!(environment_of("not-a-uuid"), SessionEnvironment::Cli);
+    }
+
+    /// The scan opens what continues by itself, and a held loss only under
+    /// `continue`; never a stopped or a clear root.
+    #[test]
+    fn the_start_scan_opens_what_continues_by_itself() {
+        for continue_losses in [false, true] {
+            for (standing, owed) in [
+                (RootStanding::Clear, false),
+                (RootStanding::Stopped, false),
+                (
+                    RootStanding::Continuing {
+                        handoff: true,
+                        held: true,
+                    },
+                    true,
+                ),
+                (
+                    RootStanding::Continuing {
+                        handoff: false,
+                        held: false,
+                    },
+                    true,
+                ),
+                (
+                    RootStanding::Continuing {
+                        handoff: false,
+                        held: true,
+                    },
+                    continue_losses,
+                ),
+            ] {
+                assert_eq!(
+                    owes_open(standing, continue_losses),
+                    owed,
+                    "{standing:?} under continue={continue_losses}"
+                );
+            }
+        }
     }
 
     #[test]

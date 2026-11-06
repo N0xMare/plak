@@ -57,11 +57,11 @@ pub(crate) fn run_host_command(
     crate::store::tree::bind_custody_host(paths).map_err(CliFailure::new)?;
     let identity = plakous_recursive_subagents::tree::custody_host();
     let environment = environment::HostEnvironment::capture();
-    let host = SessionHost::new(
-        sessions::ProductSessions::new(services, command.idle_release)?,
-        binary,
-        host_generation(),
-    );
+    let sessions = sessions::ProductSessions::new(services, command.idle_release)?;
+    // Read before the host serves, so nothing this host does is mistaken
+    // for what the last one left.
+    let owed = sessions.owed()?;
+    let host = SessionHost::new(sessions, binary, host_generation());
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -98,6 +98,7 @@ pub(crate) fn run_host_command(
         identity.instance,
         environment.describe(),
     );
+    scan(&host, owed, stop);
     // The web endpoint serves beside the control socket and stops with it.
     let web = web.map(|web| runtime.spawn(web.serve()));
     runtime.block_on(bound.serve(&host, move || stop.stopped()));
@@ -132,4 +133,34 @@ fn host_generation() -> u64 {
         .map_or(0, |elapsed| {
             u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX)
         })
+}
+
+/// The host-start scan (spec 02 §4.6): opens, one at a time on a thread of
+/// its own, each session the last host left a continuation it runs by
+/// itself, so it continues with no client attached; each then stays
+/// resident as long as anything keeps it. A stop ends the scan.
+fn scan(
+    host: &Arc<SessionHost<crate::surface_protocol::PlakExtension>>,
+    owed: Vec<String>,
+    stop: crate::web::StopProbe,
+) {
+    if owed.is_empty() {
+        return;
+    }
+    let host = Arc::clone(host);
+    std::thread::spawn(move || {
+        for session in owed {
+            if stop.stopped() {
+                return;
+            }
+            eprintln!("plak host: continuing session {session}");
+            if let Err(failure) = host.slot(&session).resident() {
+                eprintln!(
+                    "plak host: session {session} did not continue: {}",
+                    failure.message()
+                );
+            }
+            host.changed();
+        }
+    });
 }

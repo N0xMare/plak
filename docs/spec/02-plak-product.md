@@ -4520,6 +4520,19 @@ directory (§4.4).
   session is dormant until attached; its `environment` is
   `host-login-shell`, and a session a TUI or `plak agent` created reads
   `cli`. Any existing directory is accepted (chapter 04 §2.10).
+- **Start scan.** Before it serves, it reads which of the directory's
+  sessions the last host left a continuation that runs by itself: a root
+  whose latest loss is a planned handoff, a root continuation decided and
+  not yet admitted (a crash left it pending), and, under `[host]
+  resume_after_loss = "continue"`, a root whose lost turn waits for Resume.
+  Once it serves, a thread of its own opens each, one at a time, printing
+  `plak host: continuing session <id>`; the open runs the continuation as
+  any open does (chapter 03 §14.1), once, and the session stays resident
+  while anything keeps it. A stop ends the scan. A stopped root, or one
+  holding for Resume under `hold`, is not opened. A sub-agent's handoff
+  under an idle root, and a crashed host's turn whose loss no open has
+  recorded yet, are not found by the scan: they continue, or hold, at the
+  session's next open.
 - **Tool environment.** It captures the login shell's `PATH` once at start,
   bounded at 5 s however the shell's startup files behave, as `plak runner
   serve` does when `runner.toml` sets no `path` (the shell runs in a process

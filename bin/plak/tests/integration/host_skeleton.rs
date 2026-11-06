@@ -25,6 +25,7 @@ use plakous_host_protocol::wire::{
     SessionEnvironment, SessionResidency, SessionRow, WIRE_VERSION, decode_line, encode_line,
 };
 use plakous_host_protocol::{Core, Draft, SessionIntent};
+use plakous_hosted::sessions::projector::RootInterruptCause;
 use serde_json::json;
 
 use super::offline_support::*;
@@ -33,6 +34,8 @@ use super::offline_support::*;
 struct Host {
     child: Option<Child>,
     socket: PathBuf,
+    /// Its stderr lines after the start line.
+    lines: mpsc::Receiver<String>,
 }
 
 impl Drop for Host {
@@ -90,6 +93,7 @@ fn start_with(fixture: &Fixture, extra: &[&str]) -> Host {
     Host {
         child: Some(child),
         socket: PathBuf::from(socket),
+        lines,
     }
 }
 
@@ -405,6 +409,97 @@ fn a_session_an_embedded_face_holds_is_refused_until_its_holder_is_gone() {
     agent.wait().unwrap();
     let attachment = client.attach(5, &node);
     client.prompt(6, attachment, "after the holder", ANSWER);
+}
+
+const PREFIX: &str = "the handed-off prefix";
+const CONTINUED: &str = "the continued answer";
+
+/// The root interrupts and continuation decisions the session's product
+/// record holds.
+fn root_record(fixture: &Fixture, session: &str) -> (Vec<RootInterruptCause>, usize) {
+    use plak::store::session_records::SessionRecordStore as _;
+    let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
+    let store = plak::store::session_records::SqliteSessionStore::new(paths);
+    let intents = store.load_intents(session).unwrap();
+    (
+        intents
+            .root_interrupts
+            .iter()
+            .map(|intent| intent.value.cause)
+            .collect(),
+        intents.root_continuations.len(),
+    )
+}
+
+/// A host stopped while a root turn runs hands the turn off; the next
+/// host's start scan continues it once by itself, with no client attached,
+/// and the host after that continues nothing more.
+#[test]
+fn a_sigterm_hands_a_running_turn_to_the_next_host_which_continues_it_once() {
+    let Some(fixture) = fixture() else { return };
+    fixture.write_script(&json!({
+        "version": 1,
+        "steps": [{"stream": [{"text": PREFIX}, {"stall": 30000}]}]
+    }));
+    let mut host = start(&fixture);
+    let mut client = Client::connect(&host);
+    let Outcome::Ok(Answer::Created { session, node, .. }) =
+        client.request(1, new_session(&fixture.workspace()))
+    else {
+        panic!("not created");
+    };
+    let attachment = client.attach(2, &node);
+    client.prompt(3, attachment, "a long turn", PREFIX);
+    stop(&mut host);
+    let (interrupts, decisions) = root_record(&fixture, &session);
+    assert_eq!(interrupts, [RootInterruptCause::Handoff]);
+    assert_eq!(decisions, 0);
+
+    fixture.write_script(&json!({
+        "version": 1,
+        "steps": [{"output": {"text": CONTINUED}}]
+    }));
+    let mut host = start(&fixture);
+    let continuing = format!("plak host: continuing session {session}");
+    assert!(
+        std::iter::from_fn(|| host.lines.recv_timeout(WAIT).ok()).any(|line| line == continuing),
+        "the start scan did not continue the handed-off session"
+    );
+    let deadline = std::time::Instant::now() + WAIT;
+    while root_record(&fixture, &session).1 == 0 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "no continuation decided"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let mut client = Client::connect(&host);
+    client.send(&ClientFrame::Request {
+        id: 1,
+        op: Op::Attach { node: node.clone() },
+    });
+    let deadline = std::time::Instant::now() + WAIT;
+    while !format!("{:?}", client.next()).contains(CONTINUED) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the continuation never answered"
+        );
+    }
+    drop(client);
+    stop(&mut host);
+    assert_eq!(root_record(&fixture, &session).1, 1, "one continuation");
+
+    let host = start(&fixture);
+    let mut client = Client::connect(&host);
+    client.rows(1);
+    assert!(
+        !host
+            .lines
+            .try_iter()
+            .any(|line| line.starts_with("plak host: continuing session ")),
+        "a continued session was continued again"
+    );
+    assert_eq!(root_record(&fixture, &session).1, 1);
 }
 
 /// A request id that is not a uuid, or a workspace that is not a
