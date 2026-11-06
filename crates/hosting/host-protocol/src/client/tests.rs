@@ -80,6 +80,100 @@ fn the_bye_line_is_the_bye_frame() {
 }
 
 #[test]
+fn a_directory_client_selects_a_root_without_a_default_session() {
+    let (mut host, transport) = Host::pair();
+    let client = thread::spawn(move || connect_directory::<Core>(transport, hello()).unwrap());
+    assert!(matches!(host.read(), ClientFrame::Hello(_)));
+    host.send(&HostFrame::Welcome(Welcome {
+        session: None,
+        ..welcome()
+    }));
+    let (sender, receiver, _) = client.join().unwrap();
+    let id = sender
+        .request_operation(Op::ListSessions {
+            workspace: Some("/workspace".into()),
+        })
+        .unwrap();
+    assert_eq!(
+        host.request(),
+        (
+            id,
+            Op::ListSessions {
+                workspace: Some("/workspace".into())
+            }
+        )
+    );
+    host.send(&HostFrame::Response {
+        id,
+        outcome: Outcome::Ok(Answer::Sessions { rows: Vec::new() }),
+    });
+    assert_eq!(
+        receiver.recv_response(Duration::from_secs(5)).unwrap(),
+        (id, Outcome::Ok(Answer::Sessions { rows: Vec::new() }))
+    );
+    sender.attach_to(node("chosen")).unwrap();
+    let (id, op) = host.request();
+    assert_eq!(
+        op,
+        Op::Attach {
+            node: node("chosen")
+        }
+    );
+    host.send(&HostFrame::Response {
+        id,
+        outcome: Outcome::Ok(Answer::Attached { attachment: 7 }),
+    });
+    host.send(&HostFrame::Event {
+        attachment: 7,
+        seq: 1,
+        class: crate::observation::ObservationClass::State,
+        observation: SessionObservation::SetBusy(true),
+        blobs: Vec::new(),
+    });
+    assert_eq!(
+        receiver.recv_timeout(Duration::from_secs(5)).unwrap(),
+        SessionObservation::SetBusy(true)
+    );
+    drop(sender);
+    drop(receiver);
+    assert!(matches!(host.read(), ClientFrame::Bye));
+}
+
+#[test]
+fn directory_responses_keep_refusals_and_disconnect_is_terminal() {
+    let (mut host, transport) = Host::pair();
+    let client = thread::spawn(move || connect_directory::<Core>(transport, hello()).unwrap());
+    assert!(matches!(host.read(), ClientFrame::Hello(_)));
+    host.send(&HostFrame::Welcome(Welcome {
+        session: None,
+        ..welcome()
+    }));
+    let (sender, receiver, _) = client.join().unwrap();
+    assert_eq!(
+        receiver.recv_response(Duration::ZERO),
+        Err(RecvTimeoutError::Timeout)
+    );
+    let id = sender
+        .request_operation(Op::ListSessions { workspace: None })
+        .unwrap();
+    assert_eq!(host.request().0, id);
+    host.send(&HostFrame::Response {
+        id,
+        outcome: Outcome::Refused(RequestRefusal::Backpressure),
+    });
+    assert_eq!(
+        receiver.recv_response(Duration::from_secs(5)).unwrap(),
+        (id, Outcome::Refused(RequestRefusal::Backpressure))
+    );
+    drop(host);
+    assert_eq!(
+        receiver.recv_response(Duration::from_secs(5)),
+        Err(RecvTimeoutError::Disconnected)
+    );
+    assert!(sender.request_operation(Op::Ping).is_none());
+}
+
+#[test]
 fn a_refused_hello_is_the_connect_error() {
     let (mut host, transport) = Host::pair();
     let client = thread::spawn(move || connect::<Core>(transport, hello()).err());

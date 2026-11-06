@@ -4304,6 +4304,11 @@ verdicts) are addressed, the session profile and workspace chrome states.
   has no answer window; it is refused to a child attachment
   (`refused_for_role`, row `readiness`), and `plak agent` never sends it.
 - **The embedded TUI.** The TUI speaks only wire v2 to its session, through
+  the same wire client that can instead say hello to a session directory
+  without attaching: directory operations receive their own correlated
+  answers, then the client attaches the root selected from the directory.
+  A client-side root selection switches only that connection, not any
+  other face of the session. In embedded mode it connects through
   `client` over a socket pair inside its process. Each round, the session
   supervisor (the product side of an interactive launch that owns its
   rounds) serves one connection of the session's own host service on a

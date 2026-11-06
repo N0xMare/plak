@@ -252,6 +252,8 @@ struct State<P: ProtocolExtension> {
     /// The face's mailbox, until the connection ends.
     mailbox: Option<ObservationSender<P>>,
     answers: VecDeque<SessionAnswer>,
+    operations: BTreeSet<RequestId>,
+    responses: VecDeque<(RequestId, Outcome)>,
     /// Intents sent on an attachment, by request id, until their verdict.
     sent: BTreeMap<RequestId, Sent<P>>,
     /// Intents waiting for the next attachment, in the order sent.
@@ -323,7 +325,7 @@ where
     P::Intent: Serialize + DeserializeOwned + Send,
     P::Observation: Serialize + DeserializeOwned + Send,
 {
-    connect_rooted(transport, hello, None)
+    connect_rooted(transport, hello, None, false)
 }
 
 /// [`connect`] to a host of many sessions, whose welcome names none: the
@@ -343,13 +345,33 @@ where
     P::Intent: Serialize + DeserializeOwned + Send,
     P::Observation: Serialize + DeserializeOwned + Send,
 {
-    connect_rooted(transport, hello, Some(root))
+    connect_rooted(transport, hello, Some(root), false)
+}
+
+/// Says hello to a session directory without attaching a node. The caller
+/// selects a root from `list_sessions` or `new_session`, then uses
+/// [`WireSender::attach_to`].
+///
+/// # Errors
+///
+/// As [`connect`].
+pub fn connect_directory<P>(
+    transport: Transport,
+    hello: Hello,
+) -> Result<(WireSender<P>, WireReceiver<P>, Welcome), ConnectError>
+where
+    P: ProtocolExtension,
+    P::Intent: Serialize + DeserializeOwned + Send,
+    P::Observation: Serialize + DeserializeOwned + Send,
+{
+    connect_rooted(transport, hello, None, true)
 }
 
 fn connect_rooted<P>(
     transport: Transport,
     hello: Hello,
     root: Option<NodeAddress>,
+    directory: bool,
 ) -> Result<(WireSender<P>, WireReceiver<P>, Welcome), ConnectError>
 where
     P: ProtocolExtension,
@@ -373,6 +395,8 @@ where
             attaching: None,
             mailbox: Some(mailbox),
             answers: VecDeque::new(),
+            operations: BTreeSet::new(),
+            responses: VecDeque::new(),
             sent: BTreeMap::new(),
             unsent: VecDeque::new(),
             refused: VecDeque::new(),
@@ -405,11 +429,11 @@ where
         None => return Err(ConnectError::Closed),
     };
     // A root the caller names is the one it asked for.
-    let Some(root) = root.or_else(|| welcome.session.as_ref().map(|served| served.root.clone()))
-    else {
+    let root = root.or_else(|| welcome.session.as_ref().map(|served| served.root.clone()));
+    if root.is_none() && !directory {
         return Err(ConnectError::NoSession);
-    };
-    {
+    }
+    if let Some(root) = root {
         let mut state = lock(&inner.state);
         state.root = root;
         inner.attach(&mut state).map_err(ConnectError::Io)?;
@@ -430,6 +454,38 @@ impl<P: ProtocolExtension> WireSender<P>
 where
     P::Intent: Serialize,
 {
+    /// Sends an existing wire operation without waiting. Its response is
+    /// returned by [`WireReceiver::try_response`]. `None` means disconnected.
+    #[must_use]
+    pub fn request_operation(&self, op: Op<P>) -> Option<RequestId> {
+        let inner = &self.connection.inner;
+        let mut state = lock(&inner.state);
+        if state.closed {
+            return None;
+        }
+        let id = state.next_request;
+        state.next_request += 1;
+        state.operations.insert(id);
+        if inner.write(&ClientFrame::Request { id, op }).is_err() {
+            state.operations.remove(&id);
+            return None;
+        }
+        Some(id)
+    }
+
+    /// Attaches a root selected from the session directory. This switches
+    /// only this connection; other faces keep their attachments.
+    ///
+    /// # Errors
+    ///
+    /// The connection's writer stopped.
+    pub fn attach_to(&self, root: NodeAddress) -> std::io::Result<()> {
+        let inner = &self.connection.inner;
+        let mut state = lock(&inner.state);
+        state.root = root;
+        state.agent = None;
+        inner.attach_again(&mut state)
+    }
     /// Sends `intent` without waiting: on the current attachment, or on the
     /// next one while the client re-attaches. The host's verdict comes
     /// later: a refusal, or none within [`ANSWER_DEADLINE`], is given back
@@ -558,6 +614,41 @@ where
 }
 
 impl<P: ProtocolExtension> WireReceiver<P> {
+    /// The next answer to [`WireSender::request_operation`].
+    #[must_use]
+    pub fn try_response(&self) -> Option<(RequestId, Outcome)> {
+        lock(&self.connection.inner.state).responses.pop_front()
+    }
+
+    /// Waits for an operation's next response.
+    ///
+    /// # Errors
+    ///
+    /// `Timeout` at the deadline, or `Disconnected` once the transport ends.
+    pub fn recv_response(
+        &self,
+        timeout: Duration,
+    ) -> Result<(RequestId, Outcome), RecvTimeoutError> {
+        let inner = &self.connection.inner;
+        let deadline = Instant::now() + timeout;
+        let mut state = lock(&inner.state);
+        loop {
+            if let Some(response) = state.responses.pop_front() {
+                return Ok(response);
+            }
+            if state.closed {
+                return Err(RecvTimeoutError::Disconnected);
+            }
+            let left = deadline
+                .checked_duration_since(Instant::now())
+                .ok_or(RecvTimeoutError::Timeout)?;
+            state = inner
+                .changed
+                .wait_timeout(state, left)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+    }
     /// As [`crate::ObservationReceiver::try_recv`].
     ///
     /// # Errors
@@ -914,6 +1005,10 @@ impl<P: ProtocolExtension> Inner<P> {
     {
         match frame {
             HostFrame::Response { id, outcome } => {
+                if state.operations.remove(&id) {
+                    state.responses.push_back((id, outcome));
+                    return Ok(true);
+                }
                 if state.attaching == Some(id) {
                     state.attaching = None;
                     return self.attached(state, outcome).map(|()| false);
