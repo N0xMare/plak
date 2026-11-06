@@ -143,6 +143,38 @@ fn logged_in(status: &McpOAuthStatus) -> bool {
     )
 }
 
+/// The login result and a later store read are the same login. `expires_in`
+/// is the issued lifetime minus a later unix-second clock read, so the read
+/// that crosses that second is one second short. The server's lifetime is
+/// exact; a remainder more than one second short, or longer than issued, is
+/// a real mismatch. The fixture has no clock to pause.
+fn assert_login_reread(login: &McpOAuthStatus, stored: &McpOAuthStatus, issued: Duration) {
+    let (
+        McpOAuthStatus::LoggedIn {
+            expires_in: Some(login_left),
+            refreshable: login_refresh,
+            scope: login_scope,
+        },
+        McpOAuthStatus::LoggedIn {
+            expires_in: Some(stored_left),
+            refreshable: stored_refresh,
+            scope: stored_scope,
+        },
+    ) = (login, stored)
+    else {
+        panic!("login {login:?} was not stored as {stored:?}");
+    };
+    assert_eq!(login_refresh, stored_refresh);
+    assert_eq!(login_scope, stored_scope);
+    for (label, left) in [("login", *login_left), ("stored", *stored_left)] {
+        let short = issued.saturating_sub(left);
+        assert!(
+            left <= issued && short <= Duration::from_secs(1),
+            "{label} expires_in {left:?} is outside one second of the issued lifetime {issued:?}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn callback_extensions_are_ignored_locally_and_in_remote_paste_back() -> TestResult {
     for remote in [false, true] {
@@ -204,7 +236,9 @@ async fn duplicate_callback_state_refuses_before_token_exchange() -> TestResult 
 
 #[tokio::test]
 async fn a_local_login_discovers_registers_and_binds_the_token_to_the_resource() -> TestResult {
-    let setup = setup(OAuthConfig::default()).await?;
+    let config = OAuthConfig::default();
+    let issued = Duration::from_secs(config.access_lifetime);
+    let setup = setup(config).await?;
     let spec = setup.spec(setup.settings())?;
     let pool = McpPool::new();
     let login = pool.login(&spec, McpLoginOptions::new()).await?;
@@ -213,7 +247,8 @@ async fn a_local_login_discovers_registers_and_binds_the_token_to_the_resource()
     drop(login);
     let status = local_login(&pool, &spec).await?;
     assert!(logged_in(&status), "{status:?}");
-    assert_eq!(spec.oauth_status()?, Some(status));
+    let stored = spec.oauth_status()?.ok_or("login was not stored")?;
+    assert_login_reread(&status, &stored, issued);
 
     let resource = setup.fixture.url();
     let registered = setup.gate.requests_to("/register-body");
