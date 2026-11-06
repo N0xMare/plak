@@ -22,7 +22,9 @@ use plakous::agent::CommandId;
 use plakous::sessions::{CreateSessionOutcome, CreateSessionRequest};
 use plakous_offline_crash_harness::gate::GateHandle;
 use plakous_offline_crash_harness::script::ScriptPlan;
-use plakous_offline_crash_harness::{BoundaryController, scripted_pi_runtime_binding};
+use plakous_offline_crash_harness::{
+    BoundaryController, scripted_artifact_runtime_binding, scripted_pi_runtime_binding,
+};
 use plakous_recursive_subagents_store::SqliteTreeStore;
 use serde_json::json;
 
@@ -120,6 +122,36 @@ impl crate::topology_runtime::LiveChildHandle for UnpublishedRelease {
     }
 }
 
+/// A child's scripted runtime: the pi coding packs, or, for a script that
+/// seals family artifacts (a provider program's tool batch), the loopback
+/// effect under the managed artifact fixture. That effect parks at its
+/// dispatch: for the owner until it is killed, for a restored owner until
+/// its turn is cancelled. The loopback runtime has no tool projection, so
+/// the product's reopen refuses it and its test opens the session itself.
+fn child_binding(
+    root: &Path,
+    plan: &Arc<ScriptPlan>,
+    restored: bool,
+) -> Result<plakous::sessions::SessionRuntimeBinding, Box<dyn std::error::Error + Send + Sync>> {
+    use plakous_offline_crash_harness::protocol::CrashBoundary;
+    let evidence = root.join("dispatch.jsonl");
+    if !plan.seal_family_artifacts {
+        let controller =
+            BoundaryController::quiet_from_evidence_path(CrashBoundary::None, evidence)?;
+        return scripted_pi_runtime_binding(root, controller, plan);
+    }
+    let controller = if restored {
+        BoundaryController::quiet_gated_from_evidence_path(
+            CrashBoundary::EffectDispatch,
+            evidence,
+            root.join("never-release"),
+        )?
+    } else {
+        BoundaryController::quiet_from_evidence_path(CrashBoundary::EffectDispatch, evidence)?
+    };
+    scripted_artifact_runtime_binding(root, controller, plan)
+}
+
 struct Fixture {
     runtime: Arc<crate::topology_runtime::ProductTopologyRuntime>,
     parent: SpawnParent,
@@ -128,6 +160,7 @@ struct Fixture {
     plan: Arc<ScriptPlan>,
     reopen_attempts: Arc<AtomicUsize>,
     retry_started: Arc<tokio::sync::Notify>,
+    restored: bool,
 }
 
 impl Fixture {
@@ -140,7 +173,13 @@ impl Fixture {
         );
         let held = json!({"stream": [{"gate": gate}], "output": {"text": "must not redispatch"}});
         let certified = mode == "certified";
-        let steps = if certified && restored {
+        let batch = mode == "batch";
+        let steps = if batch {
+            json!([
+                {"output": {"tool": {"name": "loopback_effect", "arguments": {}, "programmatic": true}}, "finish": "tool_calls"},
+                {"output": {"text": "must not redispatch"}}
+            ])
+        } else if certified && restored {
             json!([{"output": {"text": "certified terminal"}}])
         } else if certified {
             json!([
@@ -164,6 +203,7 @@ impl Fixture {
         };
         let plan: Arc<ScriptPlan> = Arc::new(
             serde_json::from_value(json!({"version": 1, "steps": steps,
+                "seal_family_artifacts": batch,
                 "tool_policy": if certified || mode == "wake-decision" { "decision_required" } else { "allow" }
             }))
             .unwrap(),
@@ -180,13 +220,7 @@ impl Fixture {
                 if restored && reopen_attempts.fetch_add(1, Ordering::SeqCst) >= 1 {
                     retry_started.notify_one();
                 }
-                let controller = BoundaryController::quiet_from_evidence_path(
-                    plakous_offline_crash_harness::protocol::CrashBoundary::None,
-                    root.join("dispatch.jsonl"),
-                )
-                .map_err(|error| error.to_string())?;
-                scripted_pi_runtime_binding(&root, controller, &plan)
-                    .map_err(|error| error.to_string())
+                child_binding(&root, &plan, restored).map_err(|error| error.to_string())
             })
         });
         let roots = binding.with_roots(roots);
@@ -238,16 +272,12 @@ impl Fixture {
             plan,
             reopen_attempts,
             retry_started,
+            restored,
         }
     }
 
     fn binding(&self) -> plakous::sessions::SessionRuntimeBinding {
-        let controller = BoundaryController::quiet_from_evidence_path(
-            plakous_offline_crash_harness::protocol::CrashBoundary::None,
-            self.root.join("dispatch.jsonl"),
-        )
-        .unwrap();
-        scripted_pi_runtime_binding(&self.root, controller, &self.plan).unwrap()
+        child_binding(&self.root, &self.plan, self.restored).unwrap()
     }
 
     async fn cut(&self, mode: &str, gate: &GateHandle) {
@@ -347,6 +377,23 @@ impl Fixture {
                 })
                 .await
                 .unwrap();
+        } else if mode == "batch" {
+            // The batch's effect parks at its dispatch.
+            tokio::time::timeout(Duration::from_secs(20), async {
+                while !plakous_offline_crash_harness::evidence::read_evidence(
+                    self.root.join("dispatch.jsonl"),
+                )
+                .unwrap_or_default()
+                .iter()
+                .any(|row| {
+                    row.kind
+                        == plakous_offline_crash_harness::evidence::EvidenceKind::EffectDispatched
+                }) {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
         } else if mode == "certified" {
             tokio::time::timeout(Duration::from_secs(20), async {
                 loop {
@@ -986,6 +1033,172 @@ fn an_owed_child_at_a_decision_barrier_is_closed_as_abandoned_and_marked_owner_l
         !root.path().join("child.txt").exists(),
         "its pending effect never ran"
     );
+}
+
+/// The outcomes of every turn terminal in a child session's feed.
+async fn terminal_causes(
+    fixture: &Fixture,
+    session: plakous::model::SessionId,
+) -> Vec<plakous::sessions::feed::FeedTurnOutcome> {
+    let sessions = fixture.parent.state_roots().runtime_sessions().unwrap();
+    crate::agent::read_tree_feed(&sessions, session, 0)
+        .await
+        .unwrap()
+        .records
+        .iter()
+        .flat_map(plakous::sessions::feed::FeedRecord::facts)
+        .filter_map(|fact| match fact {
+            plakous::sessions::feed::FeedFact::TurnTerminal { outcome, .. } => Some(*outcome),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Kills a "batch" owner at its runtime commit `cut` and opens the child
+/// session it left; `Some` when that open restored a turn.
+async fn open_batch_cut(
+    root: &Path,
+    cut: u64,
+) -> Option<(
+    Fixture,
+    String,
+    AttachedCodingSession,
+    plakous::agent::RecoveredTurnHandle,
+)> {
+    use plakous::sessions::{OpenSessionOutcome, OpenSessionRequest, SessionOperationId};
+    std::fs::write(root.join("trace-enabled"), "").unwrap();
+    std::fs::write(root.join("kill-ordinal"), cut.to_string()).unwrap();
+    let output = spawn_owner(root, "batch").wait_with_output().unwrap();
+    assert_eq!(
+        output.status.signal(),
+        Some(9),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let created = std::fs::read_to_string(root.join("created-locator"))
+        .ok()?
+        .parse::<plakous::sessions::SessionLocator>()
+        .unwrap();
+    let fixture = Fixture::new(root, "batch", None, true);
+    let id = fixture
+        .runtime
+        .read(|tree| {
+            tree.nodes()
+                .keys()
+                .find(|id| id.as_str() != "root")
+                .cloned()
+        })
+        .unwrap()?;
+    let sessions = fixture.parent.state_roots().runtime_sessions().unwrap();
+    let open = |locator, operation: &str| {
+        sessions.open(OpenSessionRequest::new(
+            SessionOperationId::new(operation).unwrap(),
+            locator,
+            fixture.binding(),
+        ))
+    };
+    // The lost owner advanced the head past the created locator.
+    let opened = match open(created, "batch:take").await {
+        Err(error) => open(error.current_locator()?, "batch:take-head").await,
+        opened => opened,
+    };
+    let Ok(OpenSessionOutcome::RestoredWorking { session, turn, .. }) = opened else {
+        crate::topology_runtime::force_release(&fixture.tree_id).await;
+        return None;
+    };
+    let attached = AttachedCodingSession {
+        output_bound_rederived: None,
+        reachability_probe: None,
+        sessions: sessions.clone(),
+        locator: session.locator(),
+        opened: Some(session),
+        recovered_turn: None,
+        topology_owner: None,
+    };
+    Some((fixture, id, attached, turn))
+}
+
+/// The owner-lost mark of a child whose lost turn is a provider program's
+/// tool batch: the take's open restores the batch (no closure row settles a
+/// program's calls), and `mark_restored_lost` abandons the restored turn
+/// with its previous owner's cause. Its one terminal is `Cancelled` with the
+/// abandonment report, never a requested cancel's. A batch a planned handoff
+/// let go is abandoned as interrupted; one the process lost, as process
+/// lost. The owner is killed at the latest runtime commit whose head an open
+/// still restores, found from a pilot that parks in the batch's effect.
+#[test]
+fn an_owed_childs_restored_tool_batch_is_abandoned_with_its_owners_cause() {
+    let pilot = tempfile::tempdir().unwrap();
+    std::fs::write(pilot.path().join("trace-enabled"), "").unwrap();
+    kill_owner(pilot.path(), "batch");
+    let last = trace_rows(&pilot.path().join("commits.jsonl"))
+        .into_iter()
+        .filter(|row| row["store"] == "runtime" && row["indexed"] == true)
+        .filter_map(|row| row["store_ordinal"].as_u64())
+        .max()
+        .unwrap();
+    let executor = tokio::runtime::Runtime::new().unwrap();
+    let mut cut = None;
+    for candidate in (1..=last).rev() {
+        let root = tempfile::tempdir().unwrap();
+        if let Some((fixture, ..)) = executor.block_on(open_batch_cut(root.path(), candidate)) {
+            executor.block_on(crate::topology_runtime::force_release(&fixture.tree_id));
+            cut = Some(candidate);
+            break;
+        }
+    }
+    let cut = cut.expect("some cut restores the hosted tool batch");
+    for handoff in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        executor.block_on(async {
+            let (fixture, id, attached, turn) =
+                open_batch_cut(root.path(), cut).await.expect("the cut restores");
+            let session = attached.locator.session_id();
+            assert_eq!(terminal_causes(&fixture, session).await, []);
+            if handoff {
+                // The planned handoff the lost owner recorded on its running
+                // child, before it let the turn go.
+                let turn_id = turn.turn_id().to_string();
+                fixture
+                    .runtime
+                    .mutate_then_emit_borrowed_for_test(false, |tree| {
+                        tree.set_active_turn(&id, true)
+                            .map_err(|error| error.message.clone())?;
+                        tree.bind_attempt_turn(&id, &turn_id)
+                            .map_err(|error| error.message.clone())?;
+                        tree.record_handoff()
+                            .map(|_| ())
+                            .map_err(|error| error.message)
+                    })
+                    .await
+                    .unwrap();
+                assert!(
+                    fixture
+                        .runtime
+                        .read(|tree| tree.turn_handed_off(&id))
+                        .unwrap()
+                );
+            }
+            super::super::children::mark_restored_lost(&fixture.runtime, &id, attached, turn)
+                .await;
+            let expected = if handoff {
+                plakous::agent::AbandonmentCause::Interrupted
+            } else {
+                plakous::agent::AbandonmentCause::ProcessLost
+            };
+            let outcomes = terminal_causes(&fixture, session).await;
+            assert!(
+                matches!(
+                    outcomes.as_slice(),
+                    [plakous::sessions::feed::FeedTurnOutcome::Cancelled {
+                        cause: plakous::sessions::feed::FeedCancelCause::Abandoned { cause, .. },
+                    }] if *cause == expected
+                ),
+                "the restored batch ends abandoned as {expected:?}, never as a requested cancel: {outcomes:?}"
+            );
+            crate::topology_runtime::force_release(&fixture.tree_id).await;
+        });
+    }
 }
 
 /// A lost wake that waited at an effect decision: the take's open closes

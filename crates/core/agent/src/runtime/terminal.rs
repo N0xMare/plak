@@ -205,6 +205,71 @@ impl TurnShared {
         &self.cancellation
     }
 
+    fn abandonment(&self) -> std::sync::MutexGuard<'_, crate::runtime::LiveAbandonment> {
+        self.abandonment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Marks the cancel `command` submits as abandoning this turn with
+    /// `cause` rather than cancelling it for the operator. The first wins.
+    pub(crate) fn set_abandonment_cause(
+        &self,
+        command: CommandId,
+        cause: crate::runtime::AbandonmentCause,
+    ) {
+        self.abandonment().cause.get_or_insert((command, cause));
+    }
+
+    /// The cause stored for the cancel `command`, if that cancel abandons.
+    pub(crate) fn abandonment_cause(
+        &self,
+        command: &CommandId,
+    ) -> Option<crate::runtime::AbandonmentCause> {
+        self.abandonment()
+            .cause
+            .as_ref()
+            .and_then(|(abandoning, cause)| (abandoning == command).then_some(*cause))
+    }
+
+    /// Stores the report and history note of the cancel that abandons this
+    /// turn. The first wins.
+    pub(crate) fn record_abandonment(
+        &self,
+        report: crate::runtime::AbandonedTurnReport,
+        note: String,
+    ) {
+        self.abandonment().recorded.get_or_insert((report, note));
+    }
+
+    /// Keeps why the abandonment report could not be built.
+    pub(crate) fn fail_abandonment(&self, error: &AgentError) {
+        self.abandonment()
+            .failure
+            .get_or_insert_with(|| error.clone());
+    }
+
+    /// The report [`Self::record_abandonment`] stored, if this turn was abandoned.
+    pub(crate) fn abandonment_report(&self) -> Option<crate::runtime::AbandonedTurnReport> {
+        self.abandonment()
+            .recorded
+            .as_ref()
+            .map(|(report, _)| report.clone())
+    }
+
+    /// The history note of the recorded abandonment, if any.
+    pub(crate) fn abandonment_note(&self) -> Option<String> {
+        self.abandonment()
+            .recorded
+            .as_ref()
+            .map(|(_, note)| note.clone())
+    }
+
+    /// Why the abandonment report could not be built, if it could not.
+    pub(crate) fn abandonment_failure(&self) -> Option<AgentError> {
+        self.abandonment().failure.clone()
+    }
+
     pub(super) fn start(&self) -> Result<bool, AgentError> {
         let TurnLifecycle::Admitted(lifecycle) = &self.lifecycle;
         let mut lifecycle = lock_mutex(lifecycle);
@@ -983,6 +1048,18 @@ pub(super) fn finalized_operation_evidence(
     checkpoint_id: CheckpointId,
     conversation_identity: Digest,
 ) -> Result<ReconstructiveComponent, AgentError> {
+    finalized_operation_evidence_with(evidence, checkpoint_id, conversation_identity, None)
+}
+
+/// [`finalized_operation_evidence`] that attaches `abandonment` when the
+/// pending record is a cancellation. Any other outcome keeps `None`, so a
+/// plain cancel and every non-cancel finalization stay byte-identical.
+pub(super) fn finalized_operation_evidence_with(
+    evidence: &ReconstructiveComponent,
+    checkpoint_id: CheckpointId,
+    conversation_identity: Digest,
+    abandonment: Option<crate::runtime::AbandonedTurnReport>,
+) -> Result<ReconstructiveComponent, AgentError> {
     let Some(pending) = decode_pending_terminal_record(evidence.bytes()) else {
         return Ok(evidence.clone());
     };
@@ -992,6 +1069,10 @@ pub(super) fn finalized_operation_evidence(
             "terminal result command binding is invalid",
         )
     })?;
+    let abandonment = match &pending.outcome {
+        DurableTerminalOutcome::Cancelled(_) => abandonment,
+        _ => None,
+    };
     let record = DurableTerminalResultRecord {
         version: TERMINAL_RESULT_RECORD_VERSION,
         command_id: pending.command_id,
@@ -1001,7 +1082,7 @@ pub(super) fn finalized_operation_evidence(
         conversation_identity,
         outcome: pending.outcome,
         usage: pending.usage,
-        abandonment: None,
+        abandonment,
         remedy: pending.remedy,
     };
     runtime_component(

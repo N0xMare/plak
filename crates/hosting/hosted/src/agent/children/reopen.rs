@@ -251,8 +251,10 @@ async fn mark_owner_lost(
 /// The owner-lost mark for a child whose exact open restored a turn the
 /// lost owner left. A child's open closes an effect-decision barrier and a
 /// promoted server pause itself, so only a hosted tool batch or a pause the
-/// lost owner never promoted is restored here (spec 03 §14.1). The turn is cancelled
-/// first, so its terminal is in the feed the mark projects. On a child
+/// lost owner never promoted is restored here (spec 03 §14.1). The turn is
+/// abandoned first, with [`restored_loss_cause`], so its one terminal (the
+/// abandonment report and note, never a requested cancel's) is in the feed
+/// the mark projects. On a child
 /// already interrupted (a continuation, wake or mail Start the lost owner
 /// admitted before binding it) the restored turn is lost again: the mark is
 /// recorded anew on that turn, and the child's continuation is decided on it
@@ -263,16 +265,57 @@ pub(in crate::agent) async fn mark_restored_lost(
     session: AttachedCodingSession,
     recovered: RecoveredTurnHandle,
 ) {
-    // The release's shutdown would cancel the turn too; the explicit cancel
+    // The release's shutdown would cancel the turn too; the explicit abandon
     // bounds the wait for its terminal by the host's cancel bound.
+    let cause = restored_loss_cause(runtime, agent_id);
+    let control = recovered.control();
     let _ = crate::interrupt::settle_cancel(
-        recovered.control().cancel(),
+        async {
+            let abandoned = control.abandon(cause).await;
+            if let Err(error) = &abandoned
+                && error.kind() == plakous::agent::ControlErrorKind::Internal
+            {
+                warn_unreported_abandonment(agent_id, recovered.turn_id(), cause, error);
+                return Ok(plakous::agent::CancellationStatus::Requested);
+            }
+            abandoned
+        },
         plakous_host_protocol::limits::HOST_CANCEL_SETTLE_TIMEOUT,
     )
     .await;
     let turn = recovered.turn_id().to_string();
     mark_and_project(runtime, agent_id, Some(session), Some(turn)).await;
     settle_owed(runtime, agent_id).await;
+}
+
+/// The restored turn was cancelled, but its abandonment report could not be
+/// built (a root queued behind it is work no closure row admits), so its
+/// terminal is a plain cancel's and its history carries the operator note.
+fn warn_unreported_abandonment(
+    agent_id: &str,
+    turn_id: TurnId,
+    cause: plakous::agent::AbandonmentCause,
+    error: &plakous::agent::ControlError,
+) {
+    tracing::warn!(target: "plak.topology", agent_id, %turn_id, ?cause,
+        error_kind = ?error.kind(),
+        "restored child turn cancelled without its abandonment report; it carries the operator note");
+}
+
+/// Why a restored turn's previous owner let it go: a planned handoff
+/// interrupted it; any other loss is the process's.
+pub(in crate::agent) fn restored_loss_cause(
+    runtime: &crate::topology_runtime::ProductTopologyRuntime,
+    agent_id: &str,
+) -> plakous::agent::AbandonmentCause {
+    if runtime
+        .read(|tree| tree.turn_handed_off(agent_id))
+        .unwrap_or(false)
+    {
+        plakous::agent::AbandonmentCause::Interrupted
+    } else {
+        plakous::agent::AbandonmentCause::ProcessLost
+    }
 }
 
 async fn mark_and_project(
@@ -948,6 +991,63 @@ pub(super) async fn record_reopen_failure(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::test_kit::BlockOn as _;
+
+    /// A child running when its host let go: handed off with `handoff`,
+    /// otherwise lost with it.
+    fn released_child_tree(
+        id: &str,
+        handoff: bool,
+    ) -> (crate::agent_tree::ProductAgentTree, String) {
+        let dir = std::env::temp_dir();
+        let mut tree = crate::agent_tree::ProductAgentTree::bootstrap_root_for_test(
+            id,
+            "root",
+            "owner",
+            dir,
+            "selected-tuple",
+            crate::agent_tree_protocol::WriterMode::SingleLease,
+        )
+        .unwrap();
+        let child = tree
+            .spawn_agent(
+                "root",
+                &crate::agent_tree_protocol::SpawnAgentRequest::test_review(),
+                None,
+            )
+            .unwrap()
+            .agent_id;
+        tree.bind_session_locator(&child, "locator".to_owned())
+            .unwrap();
+        tree.set_active_turn(&child, true).unwrap();
+        tree.bind_attempt_turn(&child, "00000000-0000-0000-0000-000000000001")
+            .unwrap();
+        if handoff {
+            tree.record_handoff().unwrap();
+        } else {
+            tree.mark_owner_lost(&child);
+        }
+        (tree, child)
+    }
+
+    /// A restored turn a planned handoff let go is abandoned as interrupted;
+    /// one the lost process left, as process lost.
+    #[test]
+    fn a_restored_turn_is_abandoned_with_its_previous_owners_cause() {
+        for (handoff, expected) in [
+            (true, plakous::agent::AbandonmentCause::Interrupted),
+            (false, plakous::agent::AbandonmentCause::ProcessLost),
+        ] {
+            let id = uuid::Uuid::new_v4().to_string();
+            let (tree, child) = released_child_tree(&id, handoff);
+            let runtime = crate::topology_runtime::insert_root(id.clone(), tree, None)
+                .block()
+                .unwrap();
+            assert_eq!(restored_loss_cause(&runtime, &child), expected);
+            drop(runtime);
+            crate::topology_runtime::force_release(&id).block();
+        }
+    }
 
     #[test]
     fn mail_delivery_keeps_reopen_advice_and_remedy() {

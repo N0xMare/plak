@@ -3616,15 +3616,20 @@ retirement owns, or a turn waiter's recycle owns.
   history) the same way, with the same cause, claim `tool_round_completed`
   and the model-round note.
 - **Restored, never rejoined:** an open that still restores the lost turn
-  (`RestoredWorking`: a hosted tool-batch continuation) does not rejoin it. The restored turn is
-  cancelled first, within the host's cancel bound, so its terminal is in the
-  feed, and the child is then marked as below. This residual still closes by
-  a requested cancel: its terminal is `Cancelled { cause: Requested }` and
-  the child's history gets the cancelled-prompt note "the user cancelled the
-  request above before it was answered. Do not continue or act on it unless
-  the user asks for it again.", which the continuation's own instruction then
-  follows; the mail that turn carried stays read once. A cancel that carries
-  the loss's cause is a separate chapter 01 item. A child
+  (`RestoredWorking`: a hosted tool-batch continuation, or a server pause
+  the lost owner never promoted) does not rejoin it. The restored turn is
+  abandoned first, within the host's cancel bound, with `ProcessLost`, or
+  `Interrupted` when a planned handoff let that turn go. Its terminal is
+  `Cancelled` with that cause's abandonment report, the history note is the
+  abandonment note for the claim the ledger supports (chapter 01 §5.5),
+  never the cancelled-prompt note, and the hosted baton is finalized in
+  that same terminal commit. A restored child turn with a root queued
+  behind it has no report (no closure row admits the queued root), so it
+  falls back to a plain cancel's terminal and the operator note, and the
+  host logs a warning naming the turn. The feed then holds that one terminal, and the
+  child is marked as below. The continuation is not told the operator
+  cancelled the request, so it does not treat the assignment as something
+  not to act on; the mail that turn carried stays read once. A child
   already interrupted (a continuation, wake or mail Start the lost owner
   admitted before binding it, so not the turn its attempt binds, which its
   latest interrupt already covers) has its restored turn lost again: the
@@ -3632,7 +3637,7 @@ retirement owns, or a turn waiter's recycle owns.
   child's continuation is decided on it under the policy (§14.1, continuation
   after a loss).
 - **Marked:** every open (the open restored the lost turn and it was
-  cancelled, closed it as abandoned, or found no turn) marks the child right
+  abandoned, closed it as abandoned, or found no turn) marks the child right
   after the open: the interrupt with cause
   `owner_lost` is written first, then the reopened session is released and the
   feed its open left is projected, so the abandoned turn's terminal folds as
@@ -3663,8 +3668,8 @@ running parked child and no interrupt intent; after it they hold one anchored
 mark: before `recover_node`, the bound turn and the child session's head the
 lost process left; after it, the interrupt intent, the feed records the exact
 open wrote (an abandoned terminal or none), the projection of those records,
-and the withdrawn unadmitted commands. A restored turn is cancelled before the
-mark; a crash after that cancel leaves its terminal in the feed, which the next
+and the withdrawn unadmitted commands. A restored turn is abandoned before the
+mark; a crash after that abandon leaves its terminal in the feed, which the next
 `recover_node` folds after its mark. A crash between any two of these leaves rows the next
 reopen classifies the same way: an intent written is folded again, never
 duplicated (it is keyed by its fold position); a child marked but not yet

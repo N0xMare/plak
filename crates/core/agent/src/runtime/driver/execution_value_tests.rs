@@ -54,6 +54,7 @@ fn shared(turn_id: TurnId, events: EventPipeline) -> TestResult<Arc<TurnShared>>
         )),
         settlement: tokio::sync::watch::channel(TurnSettlement::Pending).0,
         cancellation: CancellationToken::new(),
+        abandonment: Mutex::default(),
         result: tokio::sync::watch::channel(None).0,
         terminal_failure: tokio::sync::watch::channel(None).0,
         events,

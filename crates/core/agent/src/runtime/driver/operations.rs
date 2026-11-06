@@ -95,6 +95,7 @@ pub(super) struct CommitPlan {
 fn settled_turn_operations(
     ledger: &RuntimeOperationLedger,
     turn_id: TurnId,
+    closing: &BTreeSet<OperationId>,
 ) -> Result<Vec<OperationId>, AgentError> {
     let mut operations = Vec::new();
     for record in ledger.operations() {
@@ -105,6 +106,17 @@ fn settled_turn_operations(
             DurableOperationState::Completed(_) | DurableOperationState::ProvenNotDispatched(_) => {
                 operations.push(OperationId(record.operation_id()));
             }
+            // A cancel of a restored hosted frame names that baton in
+            // `closing` and finalizes it with the evidence it already
+            // carries. A live continuation is not named, so it still refuses
+            // the commit and the turn recovers. Cancellation is not a
+            // definite refusal, so the fence does not close either first.
+            DurableOperationState::ContinuationRequired(_)
+                if matches!(
+                    record.kind(),
+                    DurableOperationKind::ToolBatchContinuation { .. }
+                        | DurableOperationKind::ServerPauseContinuation { .. }
+                ) && closing.contains(&OperationId(record.operation_id())) => {}
             DurableOperationState::Prepared
             | DurableOperationState::DecisionRequired(_)
             | DurableOperationState::ContinuationRequired(_)
@@ -153,11 +165,20 @@ pub(in crate::runtime) fn failure_prompt_tail(
     error: &AgentError,
     withhold: bool,
     trailing: Option<(usize, Provenance)>,
+    abandonment_note: Option<&str>,
 ) -> Result<TerminalPromptTail, AgentError> {
     match error.kind() {
         AgentErrorKind::OutcomeUnknown => return Ok(TerminalPromptTail::Unchanged),
         AgentErrorKind::Cancelled => {
-            return Ok(TerminalPromptTail::Note(cancelled_prompt_note(turn_id)?));
+            let note = match abandonment_note {
+                Some(note) => turn_note(
+                    turn_id,
+                    b"plakous-agent/abandoned-turn-entry-v1",
+                    note.to_owned(),
+                )?,
+                None => cancelled_prompt_note(turn_id)?,
+            };
+            return Ok(TerminalPromptTail::Note(note));
         }
         _ => {}
     }

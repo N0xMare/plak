@@ -86,6 +86,19 @@ fn sealed_family_artifacts_require_a_supported_registry() {
 }
 
 #[test]
+fn a_programmatic_call_requires_sealed_family_artifacts() {
+    let document = serde_json::json!({"version": 1, "steps": [
+        {"output": {"tool": {"name": "loopback_effect", "programmatic": true}}, "finish": "tool_calls"}
+    ]});
+    let refused: ScriptPlan = serde_json::from_value(document.clone()).expect("document");
+    assert!(refused.validate().is_err());
+    let mut sealed = document;
+    sealed["seal_family_artifacts"] = serde_json::json!(true);
+    let admitted: ScriptPlan = serde_json::from_value(sealed).expect("document");
+    admitted.validate().expect("a sealed programmatic call");
+}
+
+#[test]
 fn an_identity_namespace_must_fit_the_high_half_of_a_call_id() {
     let admitted: ScriptPlan =
         serde_json::from_str(r#"{"version":1,"identity_namespace":2,"steps":[]}"#)

@@ -21,6 +21,16 @@ impl Driver {
             effect,
             command,
         } = restored;
+        // Named before anything can stop the turn, so a cancel that wins the
+        // race with the restored frame's start still closes that frame.
+        self.restored_turn = Some((
+            command.turn_id,
+            match &frame {
+                RestoredContinuationFrame::ToolBatch(frame) => Some(frame.continuation_operation),
+                RestoredContinuationFrame::ServerPause(frame) => Some(frame.continuation_operation),
+                RestoredContinuationFrame::EffectDecision(_) => None,
+            },
+        ));
         self.active_root = Some(command.clone());
         command.shared.start()?;
         // This process's observation view has not seen the original start.
@@ -124,7 +134,9 @@ impl Driver {
         };
         let proposal = TerminalProposal::from_result(result);
         let recovery_required = proposal.recovery_required();
-        self.commit_and_publish_terminal(&command, proposal).await?;
+        let committed = self.commit_and_publish_terminal(&command, proposal).await;
+        self.restored_turn = None;
+        committed?;
         self.active_root = None;
         self.active_model_root_scope = None;
         remove_known_turn(&self.known_turns, command.turn_id);

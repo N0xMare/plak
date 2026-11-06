@@ -956,7 +956,13 @@ impl TurnControl {
     ///
     /// Returns a typed ingress or actor classification failure.
     pub async fn request_cancel(&self) -> Result<CancellationStatus, ControlError> {
-        let command_id = self.transient_id("cancel")?;
+        self.request_cancel_as(self.transient_id("cancel")?).await
+    }
+
+    async fn request_cancel_as(
+        &self,
+        command_id: CommandId,
+    ) -> Result<CancellationStatus, ControlError> {
         let reply = self
             .submit(TurnCommand::Cancel {
                 command_id,
@@ -978,6 +984,48 @@ impl TurnControl {
         let status = self.request_cancel().await?;
         if !matches!(status, CancellationStatus::AlreadyTerminal) {
             self.wait_until_settled().await;
+        }
+        Ok(status)
+    }
+
+    /// Cancels the turn because its owner was lost or let it go, not because
+    /// the operator asked.
+    ///
+    /// The cause is stored on the turn for the one cancel command this
+    /// submits, the same command a plain [`Self::cancel`] submits. When that
+    /// cancel is the one that stops the turn, its terminal is `Cancelled` with an abandonment report and the
+    /// abandonment note, both read from the recovery closure's own fold over
+    /// the head at that point, rather than the operator's note. A cancel the
+    /// turn already had, or a turn already terminal, keeps what it had.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed ingress or actor classification failure, as
+    /// [`Self::cancel`] does. When the turn was cancelled but its abandonment
+    /// report could not be built (the head holds work no closure row admits,
+    /// or a record does not decode), the turn still stops, its terminal is a
+    /// plain cancel's, and this returns [`ControlErrorKind::Internal`].
+    pub async fn abandon(
+        &self,
+        cause: crate::AbandonmentCause,
+    ) -> Result<CancellationStatus, ControlError> {
+        let command_id = self.transient_id("cancel")?;
+        self.shared.set_abandonment_cause(command_id.clone(), cause);
+        let status = self.request_cancel_as(command_id).await?;
+        if matches!(status, CancellationStatus::AlreadyTerminal) {
+            return Ok(status);
+        }
+        self.wait_until_settled().await;
+        if matches!(status, CancellationStatus::Requested)
+            && let Some(error) = self.shared.abandonment_failure()
+        {
+            return Err(ControlError::new(
+                ControlErrorKind::Internal,
+                format!(
+                    "the turn was cancelled, but its abandonment report could not be built: {}",
+                    error.message()
+                ),
+            ));
         }
         Ok(status)
     }

@@ -570,6 +570,7 @@ fn scripted_response(
             &call.name,
             serde_json::to_string(&resolved_arguments(&call.arguments, plan))
                 .map_err(invalid_model_fixture)?,
+            scripted_correlation(call.programmatic, call_identity)?,
         )?],
         // The first call keeps the single-call identity. The others step above
         // the 48-bit namespace (bits 64..112), so no ordinal of any round can
@@ -586,6 +587,7 @@ fn scripted_response(
                     &call.name,
                     serde_json::to_string(&resolved_arguments(&call.arguments, plan))
                         .map_err(invalid_model_fixture)?,
+                    scripted_correlation(call.programmatic, call_identity.saturating_add(step))?,
                 )
             })
             .collect::<Result<_, _>>()?,
@@ -600,6 +602,7 @@ fn scripted_response(
             call_identity,
             CODE_MODE_EXEC_NAME,
             serde_json::to_string(program).map_err(invalid_model_fixture)?,
+            ToolCorrelation::default(),
         )?],
         ScriptOutput::Wait(wait) => {
             let mut arguments = serde_json::Map::new();
@@ -621,6 +624,7 @@ fn scripted_response(
                 CODE_MODE_WAIT_NAME,
                 serde_json::to_string(&serde_json::Value::Object(arguments))
                     .map_err(invalid_model_fixture)?,
+                ToolCorrelation::default(),
             )?]
         }
     };
@@ -758,11 +762,30 @@ fn resolved_arguments(
     fill(arguments, process_session_projection(plan), plan)
 }
 
+/// The correlation of one scripted call: a provider program's call, so the
+/// round is a hosted tool batch, or a direct one.
+fn scripted_correlation(programmatic: bool, identity: u128) -> Result<ToolCorrelation, ModelError> {
+    if !programmatic {
+        return Ok(ToolCorrelation::default());
+    }
+    ToolCorrelation::new(
+        Some(format!("offline-program-call-{identity:032x}")),
+        Some("offline-program-container".to_owned()),
+        plakous::model::ToolCallerLineage::provider_programmatic(
+            NamespaceId::new("offline.program").map_err(invalid_model_fixture)?,
+            "offline-program-execution",
+        )
+        .map_err(invalid_model_fixture)?,
+    )
+    .map_err(invalid_model_fixture)
+}
+
 /// One requested tool call with arguments already in their wire form.
 fn scripted_tool_call(
     identity: u128,
     name: &str,
     arguments: String,
+    correlation: ToolCorrelation,
 ) -> Result<ContentBlock, ModelError> {
     Ok(ContentBlock::ToolCall(
         ToolCallBlock::new(
@@ -770,7 +793,7 @@ fn scripted_tool_call(
             ToolName::new(name.to_owned()).map_err(invalid_model_fixture)?,
             ToolExecutionOwner::Local,
             ToolCallState::Requested,
-            ToolCorrelation::default(),
+            correlation,
             arguments,
         )
         .map_err(invalid_model_fixture)?,

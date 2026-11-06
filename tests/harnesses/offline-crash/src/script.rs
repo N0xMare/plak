@@ -406,6 +406,11 @@ pub struct ScriptToolCall {
     /// The call arguments, serialized to the provider's JSON string.
     #[serde(default)]
     pub arguments: serde_json::Value,
+    /// Make the call a provider program's, so its round is a hosted tool
+    /// batch. Requires [`ScriptPlan::seal_family_artifacts`], since such a
+    /// round must carry the exact family artifact.
+    #[serde(default)]
+    pub programmatic: bool,
 }
 
 /// One scripted `wait` on a Code Mode cell.
@@ -692,6 +697,11 @@ impl ScriptPlan {
             if calls.iter().any(|call| call.name.trim().is_empty()) {
                 return Err(ScriptError(format!(
                     "offline script step {index} names an empty tool"
+                )));
+            }
+            if !self.seal_family_artifacts && calls.iter().any(|call| call.programmatic) {
+                return Err(ScriptError(format!(
+                    "offline script step {index} names a programmatic call without seal_family_artifacts"
                 )));
             }
         }

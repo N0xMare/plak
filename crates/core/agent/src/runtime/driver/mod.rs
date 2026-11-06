@@ -182,6 +182,12 @@ struct Driver {
     /// failed turn in it gets a note after the prompt; one that ended before
     /// its prompt was appended has nothing to annotate.
     prompt_in_history: Option<TurnId>,
+    /// The restored turn this driver is running, and the hosted tool-batch
+    /// or server-pause baton it restored, from its restored admission until
+    /// its terminal. A cancel of that frame finalizes the baton. A
+    /// continuation opened live in this process is not named here, so
+    /// cancellation leaves it for recovery (spec 01 §3.5, §5.5).
+    restored_turn: Option<(TurnId, Option<OperationId>)>,
     /// The entry this root appended as its prompt, unknown for a resumed
     /// continuation whose prompt an earlier frame appended.
     appended_prompt: Option<EntryId>,
@@ -437,6 +443,8 @@ pub(in crate::runtime) mod execution;
 
 pub(in crate::runtime) mod model_cleanup;
 
+#[cfg(test)]
+pub(in crate::runtime) use operations::TerminalPromptTail;
 pub(in crate::runtime) use operations::{
     failure_preserves_artifact, failure_prompt_tail, trailing_prompt,
 };

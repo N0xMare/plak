@@ -32,6 +32,9 @@ impl Driver {
         let mut plan = self.commit_plan()?;
         plan.transitions = closures;
         plan.finalize_turn = true;
+        if let Some(baton) = self.restored_baton_on_cancel(turn_id, &consequence) {
+            plan.finalize.insert(baton);
+        }
         let bytes = match consequence {
             TurnConsequence::Completed { response, artifact } => {
                 plan.artifact = artifact;
@@ -110,6 +113,51 @@ impl Driver {
         self.publish_commit_plan(turn_id, plan).await
     }
 
+    /// The hosted baton the restored turn `turn_id` restored, while that turn
+    /// runs.
+    pub(in crate::runtime::driver) fn restored_baton_of(
+        &self,
+        turn_id: TurnId,
+    ) -> Option<OperationId> {
+        self.restored_turn
+            .and_then(|(restored, baton)| (restored == turn_id).then_some(baton))
+            .flatten()
+    }
+
+    /// The restored hosted baton a cancel of that frame finalizes. A live
+    /// programmatic continuation is a different operation, so cancellation
+    /// leaves it open and the unresolved commit becomes recovery.
+    fn restored_baton_on_cancel(
+        &self,
+        turn_id: TurnId,
+        consequence: &TurnConsequence<'_>,
+    ) -> Option<OperationId> {
+        let TurnConsequence::Ended(error) = consequence else {
+            return None;
+        };
+        if error.kind() != AgentErrorKind::Cancelled {
+            return None;
+        }
+        let baton = self.restored_baton_of(turn_id)?;
+        let open = self
+            .authority
+            .checkpoint()
+            .manifest()
+            .ledger()
+            .operation(baton.0)
+            .is_some_and(|record| {
+                matches!(
+                    record.state(),
+                    DurableOperationState::ContinuationRequired(_)
+                ) && matches!(
+                    record.kind(),
+                    DurableOperationKind::ToolBatchContinuation { .. }
+                        | DurableOperationKind::ServerPauseContinuation { .. }
+                )
+            });
+        open.then_some(baton)
+    }
+
     /// What the terminal commit of a cancelled or failed root adds after its
     /// prompt. Canonical history only appends, so an unanswered prompt gets a
     /// harness note; a prompt that is itself the reason the turn could not be
@@ -122,7 +170,14 @@ impl Driver {
         turn_id: TurnId,
         error: &AgentError,
     ) -> Result<TerminalPromptTail, AgentError> {
-        if self.prompt_in_history != Some(turn_id) {
+        // A restored turn's prompt is in history from its original
+        // admission; its cancel owes that prompt a note even before the
+        // round loop runs (spec 01 §3.4). Its other terminals keep their rule.
+        let restored_cancel = error.kind() == AgentErrorKind::Cancelled
+            && self
+                .restored_turn
+                .is_some_and(|(restored, _)| restored == turn_id);
+        if self.prompt_in_history != Some(turn_id) && !restored_cancel {
             return Ok(TerminalPromptTail::Unchanged);
         }
         let withhold = if matches!(
@@ -142,7 +197,10 @@ impl Driver {
                 Some(prompt),
             )
         });
-        failure_prompt_tail(turn_id, error, withhold, trailing)
+        let abandonment = self
+            .known_turn(turn_id)
+            .and_then(|shared| shared.abandonment_note());
+        failure_prompt_tail(turn_id, error, withhold, trailing, abandonment.as_deref())
     }
 
     /// The terminal shape a recorded `FailTurn` decision committed this turn
@@ -305,8 +363,11 @@ impl Driver {
                     "queued cancellation root was not prepared for its exact turn",
                 ));
             }
+            let abandonment = self
+                .known_turn(turn_id)
+                .and_then(|shared| shared.abandonment_report());
             let terminal = DurableTerminalResultRecord {
-                abandonment: None,
+                abandonment,
                 remedy: None,
                 version: TERMINAL_RESULT_RECORD_VERSION,
                 command_id: root_command_id.as_str().to_owned(),

@@ -17,6 +17,7 @@ mod admission_compaction;
 pub(in crate::runtime) mod controls;
 mod fold_rows;
 mod in_turn_compaction;
+mod live_cancel;
 mod publication;
 mod replay;
 mod terminal;
@@ -29,11 +30,15 @@ use terminal::{local_terminal_from_ledger, terminal_evidence_fold, terminal_turn
 
 use abandonment::{
     abandoned_compaction_evidence, abandoned_effect_evidence, abandoned_operation_evidence,
-    abandoned_process_evidence, abandoned_turn_segment, abandoned_turn_segment_with_note,
-    abandonment_evidence_fold, close_as_unobserved, finalize_not_started,
-    require_readable_provider_records, root_is_only_turn_operation, root_turn_command,
+    abandoned_process_evidence, abandoned_turn_note, abandoned_turn_segment,
+    abandoned_turn_segment_with_note, abandonment_evidence_fold, abandonment_fold,
+    close_as_unobserved, finalize_not_started, require_readable_provider_records,
+    root_is_only_turn_operation, root_turn_command,
 };
 pub(in crate::runtime) use abandonment::{abandoned_turn_claim, abandonment_cause};
+#[cfg(test)]
+pub(in crate::runtime) use live_cancel::live_cancel_report;
+pub(in crate::runtime) use live_cancel::observe_live_abandonment;
 
 use abandonment_rows::{ClosureFacts, TurnFoldFacts, TurnRow};
 pub use verdict::{CheckpointRecoveryVerdict, checkpoint_recovery_verdict};
@@ -462,6 +467,35 @@ const fn uncertain_process_state(state: &DurableOperationState) -> bool {
     )
 }
 
+/// What the abandonment note of `fold` under `claim` and `cause` reads: the
+/// note a recovery closure writes, and the one a live abandonment's
+/// cancelled terminal writes after the prompt.
+fn closure_facts<'a>(
+    source: &'a RuntimeCheckpoint,
+    fold: &'a AbandonedTurnRecoveryFold,
+    claim: AbandonedTurnClaim,
+    cause: AbandonmentCause,
+) -> Result<ClosureFacts<'a>, AgentError> {
+    // A fold row words its own note when its claim is the strongest one.
+    let row = if code_cell_abandonment_fold(source).is_ok_and(|cell| cell.turn_abandonment) {
+        None
+    } else {
+        fold_rows::fold_row(source, fold.turn_id, fold.root_operation)?
+            .filter(|row| row.claim() == claim)
+    };
+    let facts = ClosureFacts {
+        source,
+        fold,
+        claim,
+        cause,
+        row,
+        completed_effect_only: !fold.uncommitted_effect_operations.is_empty()
+            && fold.effect_operations.is_empty()
+            && fold.process_operations.is_empty(),
+    };
+    Ok(facts)
+}
+
 /// The note for one claim under one cause. Each asserts only its own claim:
 /// no billing warning where nothing reached a provider, and no workspace
 /// warning where no command could have run.
@@ -481,23 +515,7 @@ fn abandonment_closure_state(
             ledger = controls::settle_control(&ledger, record, checkpoint_id)?;
         }
     }
-    // A fold row words its own note when its claim is the strongest one.
-    let row = if code_cell_abandonment_fold(source).is_ok_and(|cell| cell.turn_abandonment) {
-        None
-    } else {
-        fold_rows::fold_row(source, fold.turn_id, fold.root_operation)?
-            .filter(|row| row.claim() == claim)
-    };
-    let facts = ClosureFacts {
-        source,
-        fold: &fold,
-        claim,
-        cause: abandonment_cause(&fold),
-        row,
-        completed_effect_only: !fold.uncommitted_effect_operations.is_empty()
-            && fold.effect_operations.is_empty()
-            && fold.process_operations.is_empty(),
-    };
+    let facts = closure_facts(source, &fold, claim, abandonment_cause(&fold))?;
     let segment = abandonment_rows::abandonment_segment(&facts)?;
     let segment = if controls::has_unapplied_steering(&ledger, fold.turn_id) {
         let [ContentBlock::Text(text)] = segment.items()[0].blocks() else {

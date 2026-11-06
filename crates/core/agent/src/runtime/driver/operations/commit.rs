@@ -2,8 +2,8 @@ use super::{
     AgentError, AgentErrorKind, Arc, ArtifactTransition, BTreeSet, CanonicalHistory, CommitPlan,
     ConversationView, Driver, DurableOperationKind, DurableOperationState,
     DurableOperationTransition, OperationId, PreparedCallRecord, RuntimeCheckpoint,
-    SessionStoreError, TurnId, finalized_operation_evidence, operation_turn_id,
-    runtime_manifest_error, settled_turn_operations, working_lifecycle,
+    SessionStoreError, TurnId, operation_turn_id, runtime_manifest_error, settled_turn_operations,
+    working_lifecycle,
 };
 
 impl Driver {
@@ -88,8 +88,12 @@ impl Driver {
             )
         };
         if finalize_turn {
-            required.extend(settled_turn_operations(&ledger, turn_id)?);
+            let closing = required.clone();
+            required.extend(settled_turn_operations(&ledger, turn_id, &closing)?);
         }
+        let abandonment = self
+            .known_turn(turn_id)
+            .and_then(|shared| shared.abandonment_report());
         if (required.is_empty() && !edits_ledger)
             || required.iter().any(|operation_id| {
                 !ledger.operations().into_iter().any(|record| {
@@ -195,8 +199,12 @@ impl Driver {
                         "finalized operation lost its proven terminal evidence",
                     )
                 })?;
-            let evidence =
-                finalized_operation_evidence(evidence, checkpoint_id, history.identity())?;
+            let evidence = crate::runtime::terminal::finalized_operation_evidence_with(
+                evidence,
+                checkpoint_id,
+                history.identity(),
+                abandonment.clone(),
+            )?;
             ledger = ledger
                 .transition_operation(
                     operation_id.0,

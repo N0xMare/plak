@@ -1303,7 +1303,12 @@ impl SessionStore for TestCreateStore {
                     {
                         self.commits_blocked.store(true, Ordering::Release);
                     }
+                    // One cut: a restored owner whose own commits return the
+                    // head to the cut frame's shape (a cancel settling before
+                    // its batch starts) is not cut again.
                     if hosted_tool_prefix {
+                        self.block_after_hosted_effect_count
+                            .store(0, Ordering::Release);
                         self.commits_blocked.store(true, Ordering::Release);
                     }
                     if self.lose_commit_ack_on.load(Ordering::Acquire) == call {

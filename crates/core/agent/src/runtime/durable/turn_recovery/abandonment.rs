@@ -38,13 +38,24 @@ use crate::runtime::continuation::{RestoredContinuationFrame, decode_restored_co
 /// Returns `OutcomeUnknown` when the checkpoint is anything but such a turn,
 /// and a corrupt-store error when one of the turn's provider records does not
 /// decode.
+pub(super) fn abandonment_evidence_fold(
+    checkpoint: &RuntimeCheckpoint,
+    barrier: super::DecisionBarrier,
+) -> Result<AbandonedTurnRecoveryFold, AgentError> {
+    abandonment_fold(checkpoint, barrier, None)
+}
+
+/// [`abandonment_evidence_fold`] as a live cancel reads it: the same rows
+/// over the live head, with `closing` the restored hosted baton the cancel's
+/// terminal finalizes (a tool batch or a server pause, promoted or not).
 #[allow(
     clippy::too_many_lines,
     reason = "Turn abandonment folds recorded provider and effect evidence without inventing successful outcomes for unresolved work"
 )]
-pub(super) fn abandonment_evidence_fold(
+pub(super) fn abandonment_fold(
     checkpoint: &RuntimeCheckpoint,
     barrier: super::DecisionBarrier,
+    closing: Option<OperationId>,
 ) -> Result<AbandonedTurnRecoveryFold, AgentError> {
     let refuse = |message: &'static str| AgentError::new(AgentErrorKind::OutcomeUnknown, message);
     let manifest = checkpoint.manifest();
@@ -107,6 +118,7 @@ pub(super) fn abandonment_evidence_fold(
         },
         super::DecisionBarrier::Restore => (None, None),
     };
+    let closed_continuation = closing.map(|baton| baton.0).or(closed_continuation);
     let facts = TurnFoldFacts {
         ledger,
         turn_id,
@@ -271,6 +283,7 @@ pub(super) fn abandonment_evidence_fold(
             ledger.operations().into_iter().any(|record| {
                 record.operation_id() == operation.0
                     && (matches!(record.kind(), DurableOperationKind::Provider { .. })
+                        || closed_continuation == Some(operation.0)
                         || controls::same_turn_control(ledger, record, turn_id))
             })
         })

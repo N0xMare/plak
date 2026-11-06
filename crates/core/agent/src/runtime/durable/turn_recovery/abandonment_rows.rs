@@ -143,14 +143,16 @@ fn decision_row(action: RecoveryAction, state: &DurableOperationState) -> Option
     }
 }
 
-/// A promoted server pause a closing open does not restore: its response is
-/// already in history, so its baton only owes finalization, the way a
-/// definite refusal finalizes it live before the turn ends.
+/// The hosted baton a closure finalizes instead of restoring: a promoted
+/// server pause a closing open does not restore (its response is already in
+/// history), or the restored frame a live cancel's terminal closes. Either
+/// owes only finalization, the way a definite refusal finalizes it live.
 fn continuation_row(action: RecoveryAction, state: &DurableOperationState) -> Option<TurnRow> {
     match (action, state) {
-        (RecoveryAction::RestoreServerPause, DurableOperationState::ContinuationRequired(_)) => {
-            Some(TurnRow::Settled)
-        }
+        (
+            RecoveryAction::RestoreServerPause | RecoveryAction::RestoreToolBatch,
+            DurableOperationState::ContinuationRequired(_),
+        ) => Some(TurnRow::Settled),
         _ => None,
     }
 }

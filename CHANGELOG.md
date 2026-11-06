@@ -365,6 +365,16 @@ an export.
 - Retention keeps the 4 most recent root terminal results (was 16): a
   duplicate of an older root command is `ControlErrorKind::Reclaimed`, and a
   bridge must settle a handed-off item within 4 further root turns.
+- `TurnControl::abandon(cause)` cancels a turn because its owner was lost
+  or let it go. The terminal is still `Cancelled`, the record carries an
+  abandonment report (the same claim and note a reopen would write for that
+  turn), and history gets the abandonment note instead of "the user
+  cancelled the request above". A plain `cancel` is unchanged. If the report
+  cannot be built, the turn still stops and `abandon` says so.
+  A restored hosted tool-batch, or a server pause the lost owner never
+  promoted, is closed that way: one terminal, and the baton is finalized
+  in that same commit. The next host uses it when it does not continue a
+  restored child turn (`ProcessLost`, or `Interrupted` after a handoff).
 - An agent whose jobs run on a runner reads the line's jobs from the runner
   before it restores them and reports nothing until the restore is done, so
   a terminal an earlier host already reported is not reported again and a job

@@ -776,6 +776,9 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-hosted", "src/agent/children/bind.rs"): {"error"},
     ("plakous-hosted", "src/agent/children/turns.rs"): {"error"},
     ("plakous-hosted", "src/agent/children/waiter.rs"): {"error", "warn"},
+    # A restored child turn cancelled without its abandonment report: typed
+    # agent and turn ids, the cause and the error kind only.
+    ("plakous-hosted", "src/agent/children/reopen.rs"): {"warn"},
     # Background recovery reports only typed child ids and closed recovery
     # dispositions after the pass has settled; it never logs prompt content.
     ("plakous-hosted", "src/agent/recovery.rs"): {"info"},

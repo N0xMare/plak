@@ -2722,6 +2722,13 @@ boundaries. `root_startup_rejoins_certified_decision_once_and_settles_waits` pin
 the root's restored turn; a child's never is: its open closes an effect-decision
 barrier as abandoned
 (`an_owed_child_at_a_decision_barrier_is_closed_as_abandoned_and_marked_owner_lost`).
+A child whose lost turn is a provider program's tool batch is the one shape
+its open still restores; the owner-lost mark abandons that restored turn with
+`process_lost`, or `interrupted` after a handoff, and its one terminal carries
+the abandonment report
+(`an_owed_childs_restored_tool_batch_is_abandoned_with_its_owners_cause`, a
+killed owner reopened directly, since the fixture's loopback runtime has no
+tool projection for the product's own child reopen).
 `operator_recover_waits_for_a_still_held_child_lease` pins the explicit recovery
 wait; `owner_reopen_polls_a_reinstated_lease_with_a_new_operation_id` pins the
 owner's inner lease poll, elapsed wait and incremented open identity. These

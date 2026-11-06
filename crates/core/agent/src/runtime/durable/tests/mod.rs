@@ -86,6 +86,7 @@ mod fence_compaction;
 mod lease_permits;
 mod line_owner;
 mod lineage;
+mod live_abandon;
 mod model_fixtures;
 mod named_state;
 mod pending_decisions;

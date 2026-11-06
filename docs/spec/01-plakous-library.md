@@ -686,7 +686,24 @@ terminal checkpoint, one harness note after it (`User` actor, `Instruction`
 provenance, an entry id derived from the turn): the user cancelled the request
 before it was answered, and the model must not act on it unless asked again.
 Without it the next turn reads the prompt as still pending and answers both. A
-turn cancelled before its prompt was appended adds nothing.
+turn cancelled before its prompt was appended adds nothing. A turn restored
+at a hosted frame (§5.5) has its prompt in history from its original
+admission, so its cancel adds the note even before its round loop runs; its
+other terminals keep their own rule. A plain `TurnControl::cancel` is that
+note and `Cancelled { cause: Requested }`. `TurnControl::abandon(cause)`
+stores the cause on the turn for the one cancel command it submits (the
+first cause wins; it is the runtime's own state, not the model crate's
+`CancellationToken`, so nothing a tool holds can set it, and a plain cancel
+racing it never reads it) and submits the same cancel. When that cancel is the one that stops
+the turn, the terminal is still `Cancelled`, the record carries an
+`AbandonedTurnReport`, and the note is the abandonment note of §5.5 rather
+than this one. A cancel the turn already had keeps the operator's note and a
+null report, and an abandon of a turn already terminal changes nothing. The
+report is read when the cancel is observed: if it cannot be built (the head
+holds work no closure row admits, such as another root queued behind the
+turn, or a record does not decode), the turn
+still stops, its terminal is a plain cancel's, and `abandon` returns
+`ControlErrorKind::Internal` saying so.
 
 When cancellation joins a local tool batch, the driver closes its proposed
 calls as one source-ordered canonical tool exchange before publishing a
@@ -855,8 +872,11 @@ with no provider decision (item 2): the turn enters a round past the cap with
 its wrap-up already taken, before any attempt is prepared. When the previous
 round resumed into a provider-hosted server pause, the driver first finalizes
 that pause's continuation baton, then commits item 2. A terminal commit never
-closes a restorable frame: its finalization covers settled records only, and a
-live `ContinuationRequired` frame is restored, not closed (§5.5). Each cut
+closes a restorable frame except the restored tool-batch or unpromoted
+server pause a caller ends with `TurnControl::cancel` or
+`TurnControl::abandon` (§5.5): its finalization covers settled records
+only, and any other live `ContinuationRequired` frame is restored, not
+closed. Each cut
 between the two has a row. Before the baton's finalization the frame restores,
 and the restored turn, with the same budgets, fails the same way without
 dispatch. After it, P is `Finalized` `Continue` with nothing after it, which
@@ -871,7 +891,7 @@ fence (next-round capacity, zero headroom, resident-image budget). Definite
 means typed `Model` (other than cancellation or outcome unknown),
 `RequestBudget`, `RoundLimit` or `InvalidInput` without a storage failure.
 Cancellation, outcome-unknown, storage and unavailable-binding failures keep
-the baton for their own recovery.
+the baton for their own recovery, except the restored frame §5.5 names.
 
 Before a response's stream ends the provider operation stays `Dispatched`; a
 host lost there closes the turn as an unobserved model request (§5.5). Effect
@@ -2388,17 +2408,37 @@ abandons with the caller's `cause`, claim `ToolRoundCompleted` with the
 model-round note ("this turn was abandoned after its model round completed,
 before the next model request was prepared. The completed model response
 remains in this history; no next request was dispatched or retried."), and
-the report's `model_round_completed`. Two hosted frames are still restored
-under the option, and a caller that does not continue them has only
-`TurnControl::cancel`, which commits `Cancelled { cause: Requested }` and the
-cancelled-prompt note "the user cancelled the request above before it was
-answered. Do not continue or act on it unless the user asks for it again.":
-a tool-batch frame (a provider program awaiting customer tool calls whose
-results no closure row settles), and a server pause never promoted (P still
-`Completed` with the frame recorded and the response not in history). This
-build never writes the latter, because a pause's decision, frame and response
-are one commit (§3.5 item 5); a head that has one restores whether or not the
-option is set.
+the report's `model_round_completed`. Two hosted frames are still restored under the option: a tool-batch frame
+(a provider program awaiting customer tool calls whose results no closure
+row settles), and a server pause never promoted (P still `Completed` with
+the frame recorded and the response not in history). A caller that does
+not continue one closes it with `TurnControl::abandon(cause)`, not
+`TurnControl::cancel`. There is one claim law: when the cancel is observed,
+the report is the one this closure table would write for the live head, read
+from the same fold with the restored baton treated as a baton the closure
+finalizes, and the note is that closure's note. So the claim is
+`RunningTool` when a tool, process or Code Cell of the turn may have run
+(prepared, claimed, dispatched or of unknown outcome) or completed with its
+result never added (that case alone gets the "after a tool finished, but its
+result was not added" note), `ModelRequest` when a provider attempt is open,
+`CompactionNotApplied` when the turn's own compaction workflow is open,
+`ToolRoundCompleted` with the model-round or tool-round note when the head
+rests on a completed round, and `NothingStarted` when nothing the turn asked
+for started (a restored batch whose slots never started, or a queued root
+that never ran). The cancel does not close those operations; the live turn
+settles them as any cancel does. The terminal commit finalizes the restored
+baton with the evidence it already carries, so the head settles Quiescent
+with one terminal, whether the cancel reaches the restored turn before its
+batch starts or after. The
+tool-batch fence still finalizes the baton first on a definite refusal;
+cancellation is not one. A plain `TurnControl::cancel` of the same frame
+still commits `Cancelled { cause: Requested }` and the cancelled-prompt
+note "the user cancelled the request above before it was answered. Do not
+continue or act on it unless the user asks for it again.", and finalizes
+the same baton. This build never writes an unpromoted server pause,
+because a pause's decision, frame and response are one commit (§3.5 item
+5); a head that has one restores whether or not the option is set, and
+`abandon` is how a caller that does not continue it closes it.
 Restore requires a decodable effect-decision, server-pause or tool-batch frame,
 or an explicit Code Cell workflow scope (commit recovery is checked first).
 Bare Finalization debt without a closure row is typed integrity, never Restore.

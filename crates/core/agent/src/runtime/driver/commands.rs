@@ -5,6 +5,7 @@ use crate::runtime::compaction::CompactOrigin;
 use crate::runtime::continuation::runtime_component;
 use crate::runtime::control::{command_binding, command_canonical_bytes};
 use crate::runtime::driver::{Driver, EffectDecisionTombstone};
+use crate::runtime::durable::turn_recovery::observe_live_abandonment;
 use crate::runtime::terminal::{
     cancelled_error, insert_known_turn, queued_turn_machine, remove_known_turn,
 };
@@ -754,6 +755,12 @@ impl Driver {
         } else {
             CancellationStatus::Requested
         };
+        // Only the cancel that stops the turn reads its abandonment.
+        if matches!(status, CancellationStatus::Requested) {
+            let checkpoint = self.authority.checkpoint();
+            let closing = self.restored_baton_of(turn_id);
+            observe_live_abandonment(checkpoint.as_ref(), &shared, &command_id, turn_id, closing);
+        }
         if matches!(status, CancellationStatus::Requested)
             && let Some(position) = queued_position
         {
@@ -1144,6 +1151,7 @@ impl Driver {
             )?)),
             settlement: watch::channel(TurnSettlement::Pending).0,
             cancellation: cancellation.clone(),
+            abandonment: Mutex::default(),
             result: result_sender,
             terminal_failure,
             events: self.events.clone(),
@@ -1353,7 +1361,7 @@ impl Driver {
         sequence
     }
 
-    fn known_turn(&self, turn_id: TurnId) -> Option<Arc<TurnShared>> {
+    pub(super) fn known_turn(&self, turn_id: TurnId) -> Option<Arc<TurnShared>> {
         match self.known_turns.lock() {
             Ok(turns) => turns.get(&turn_id).and_then(Weak::upgrade),
             Err(poisoned) => poisoned.into_inner().get(&turn_id).and_then(Weak::upgrade),

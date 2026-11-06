@@ -663,12 +663,27 @@ struct PreparedTerminalLifecycle {
     lifecycle: TurnMachine,
 }
 
+/// A turn's abandonment as its live cancel observed it.
+#[derive(Debug, Default)]
+pub(crate) struct LiveAbandonment {
+    /// Set by [`crate::TurnControl::abandon`] with the id of the cancel it
+    /// submits; the first wins.
+    cause: Option<(CommandId, AbandonmentCause)>,
+    /// The report and the history note the cancelled terminal carries.
+    recorded: Option<(AbandonedTurnReport, String)>,
+    /// Why the report could not be built; the turn was cancelled anyway.
+    failure: Option<AgentError>,
+}
+
 pub(crate) struct TurnShared {
     pub(crate) storage_pause: checkpoint::storage_pause::StoragePause,
     turn_id: TurnId,
     lifecycle: TurnLifecycle,
     settlement: watch::Sender<TurnSettlement>,
     cancellation: CancellationToken,
+    /// Why this turn is abandoned rather than cancelled by the operator, and
+    /// what its cancelled terminal records. A plain cancel leaves it empty.
+    abandonment: Mutex<LiveAbandonment>,
     result: watch::Sender<Option<Arc<TurnResult>>>,
     terminal_failure: watch::Sender<Option<AgentError>>,
     events: EventPipeline,

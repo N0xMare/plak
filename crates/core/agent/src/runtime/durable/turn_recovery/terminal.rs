@@ -343,6 +343,7 @@ fn landed_terminal_recovery_fold(
                 &error,
                 shape.prompt_withheld,
                 trailing,
+                None,
             )?
             .into_commit()?;
             let family_artifact = if crate::runtime::driver::failure_preserves_artifact(&error) {

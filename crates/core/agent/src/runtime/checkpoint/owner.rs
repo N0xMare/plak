@@ -1012,7 +1012,7 @@ impl DurableBranchFacts {
     }
 }
 
-fn uncommitted_tool_calls(
+pub(in crate::runtime) fn uncommitted_tool_calls(
     checkpoint: &RuntimeCheckpoint,
     turn_id: TurnId,
 ) -> Result<Vec<(CallId, ToolName)>, AgentError> {
