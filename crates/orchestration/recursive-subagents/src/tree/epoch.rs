@@ -220,22 +220,6 @@ impl ProductAgentTree {
         epoch.digest = epoch.compute_digest();
     }
 
-    /// Raises the live epoch's depth ceiling and the root grant together.
-    ///
-    /// A bootstrap tree admits one level. A child that itself spawns needs
-    /// the ceiling at 2 before the first spawn copies the root grant down.
-    pub fn pin_max_depth(&mut self, depth: u8) {
-        let depth = depth.clamp(1, MAX_TREE_DEPTH);
-        {
-            let epoch = self.current_epoch_mut();
-            epoch.max_depth = depth;
-            epoch.digest = epoch.compute_digest();
-        }
-        if let Some(root_grant) = self.grants.get_mut(&self.root_agent_id) {
-            root_grant.max_depth = depth;
-        }
-    }
-
     /// Refusal shown after stop-all until the next admitted root prompt.
     pub const TREE_STOPPED_REFUSAL: &str = "delegation is stopped for this turn; send a new prompt after all agents \
          have retired, or resolve any recovery-required agents first";

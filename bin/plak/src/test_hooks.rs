@@ -263,7 +263,7 @@ fn pin_product_child_roster(
             plakous_hosted::orchestration::RosterBinding::leaf("openrouter", "offline/child"),
         );
         // Depth 1 admits the child and then withholds spawn_agent.
-        tree.pin_max_depth(2);
+        tree.pin_max_depth_for_test(2);
     }
     tree.pin_template("review", review);
     Ok(())

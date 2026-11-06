@@ -104,17 +104,20 @@ pub(super) fn configure_grandchild(fixture: &Fixture) {
 }
 
 pub(super) fn configure_parked(fixture: &Fixture) {
-    let marker = fixture.root.join(MARKER);
-    let quoted = format!("'{}'", marker.display().to_string().replace('\'', "'\\''"));
+    let quote =
+        |path: &std::path::Path| format!("'{}'", path.display().to_string().replace('\'', "'\\''"));
+    let (quoted, fixture_dir) = (quote(&fixture.root.join(MARKER)), quote(&fixture.root));
     // pi presents the process tool as `bash`. `timeout` 0 backgrounds it
     // after the tool's 250 ms first observation, so the process must outlive
     // that to become a job: it has no stdin to block on, so it waits on its
-    // host instead and ends within a second of the host's death (a cut).
+    // host instead and ends within a second of the host's death (a cut), or
+    // of the fixture's removal, whichever comes first.
     // The canonical process_session_start arguments are not in that catalog,
     // so a call under that name is proven not dispatched.
     let command = format!(
         "printf '%s\\n' started >> {quoted}; i=0; \
-         while [ $i -lt 600 ] && kill -0 $PPID 2>/dev/null; do sleep 1; i=$((i+1)); done"
+         while [ $i -lt 600 ] && [ -d {fixture_dir} ] && kill -0 $PPID 2>/dev/null; \
+         do sleep 1; i=$((i+1)); done"
     );
     let child = json!({
         "version": 1,

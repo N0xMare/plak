@@ -125,6 +125,22 @@ impl ProductAgentTree {
         epoch.digest = epoch.compute_digest();
     }
 
+    /// Raises the live epoch's depth ceiling and the root grant together.
+    ///
+    /// A bootstrap tree admits one level. A child that itself spawns needs
+    /// the ceiling at 2 before the first spawn copies the root grant down.
+    pub fn pin_max_depth_for_test(&mut self, depth: u8) {
+        let depth = depth.clamp(1, super::MAX_TREE_DEPTH);
+        {
+            let epoch = self.current_epoch_mut();
+            epoch.max_depth = depth;
+            epoch.digest = epoch.compute_digest();
+        }
+        if let Some(root_grant) = self.grants.get_mut(&self.root_agent_id) {
+            root_grant.max_depth = depth;
+        }
+    }
+
     /// Forces one node's status, so a test can stage a state the tree would
     /// otherwise only reach through a live turn.
     pub fn set_node_status_for_test(&mut self, agent_id: &str, status: NodeStatus) {
