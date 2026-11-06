@@ -114,6 +114,9 @@ pub struct SessionHost<P: ProtocolExtension> {
     binary_id: String,
     generation: u64,
     release_wait: Duration,
+    /// How long `release_session` waits for an open or a release already
+    /// under way ([`RELEASE_JOIN`]).
+    release_join: Duration,
     /// Set once the host stops: nothing opens or is created after it.
     closing: Arc<std::sync::atomic::AtomicBool>,
     /// The directory last read, shared by every host attachment: when, at
@@ -124,6 +127,16 @@ pub struct SessionHost<P: ProtocolExtension> {
 /// One shared read of the directory: when, at which host revision, and its
 /// rows.
 type DirectoryRead = (Instant, u64, Arc<Vec<SessionRow>>);
+
+/// Whether `slot` is `session`. A resident slot is the session it serves
+/// now, which a switch can change while `known` still names the one it
+/// opened; every other state is the id it names.
+fn serves<P: ProtocolExtension>(slot: &SessionSlot<P>, session: &str) -> bool {
+    match slot.peek() {
+        SlotView::Resident(served) => served.session_id() == session,
+        SlotView::Dormant(id) | SlotView::Opening(id) | SlotView::Releasing(id) => id == session,
+    }
+}
 
 /// The refusal of a request that would open or create a session on a
 /// stopping host.
@@ -158,6 +171,7 @@ where
             binary_id: binary_id.into(),
             generation,
             release_wait: RELEASE_WAIT,
+            release_join: RELEASE_JOIN,
             closing: Arc::default(),
             directory: Mutex::new(None),
         })
@@ -206,6 +220,21 @@ where
         let mut host = Self::new(sessions, "b1", 7);
         if let Some(host) = Arc::get_mut(&mut host) {
             host.release_wait = release_wait;
+        }
+        host
+    }
+
+    /// [`Self::with_release_wait`] that also bounds an open or a release
+    /// already under way by `release_join`.
+    #[cfg(test)]
+    pub(crate) fn with_release_bounds(
+        sessions: impl HostSessions<P> + 'static,
+        release_wait: Duration,
+        release_join: Duration,
+    ) -> Arc<Self> {
+        let mut host = Self::with_release_wait(sessions, release_wait);
+        if let Some(host) = Arc::get_mut(&mut host) {
+            host.release_join = release_join;
         }
         host
     }
@@ -316,12 +345,7 @@ where
         closing: &Arc<std::sync::atomic::AtomicBool>,
         session: &str,
     ) -> Arc<SessionSlot<P>> {
-        if let Some(slot) = slots.iter().find(|slot| match slot.peek() {
-            SlotView::Resident(served) => served.session_id() == session,
-            SlotView::Dormant(id) | SlotView::Opening(id) | SlotView::Releasing(id) => {
-                id == session
-            }
-        }) {
+        if let Some(slot) = slots.iter().find(|slot| serves(slot, session)) {
             return Arc::clone(slot);
         }
         let (opener, closing) = (Arc::clone(sessions), Arc::clone(closing));
@@ -592,9 +616,9 @@ where
             Err(refusal) => return Ok(Forwarded::Answered(Outcome::Refused(refusal))),
         };
         self.host.changed();
-        let resident = slot.resident();
+        let resident = slot.resident_at_handoff();
         self.host.changed();
-        let (session, hold) = match resident {
+        let (session, hold, releases) = match resident {
             Ok(resident) => resident,
             Err(failure) => {
                 let refusal = self.host.sessions.refusal(&slot.known(), &failure);
@@ -608,7 +632,7 @@ where
         }
         let mut link = NodeLink {
             changes: session.changes(),
-            releases: session.releases(),
+            releases,
             session,
             connection,
             _hold: hold,
@@ -654,7 +678,7 @@ where
             .host
             .lock()
             .iter()
-            .find(|slot| slot.known() == session)
+            .find(|slot| serves(slot, session))
             .cloned();
         let Some(slot) = slot else {
             return Ok(if self.knows(session) {
@@ -684,11 +708,20 @@ where
         served.request_release();
         self.host.changed();
         let deadline = Instant::now() + self.host.release_wait;
-        while matches!(slot.peek(), SlotView::Resident(_)) && Instant::now() < deadline {
-            self.flush_draining()?;
-            std::thread::sleep(Duration::from_millis(20));
+        let mut lost = Ok(());
+        while lost.is_ok()
+            && matches!(slot.peek(), SlotView::Resident(_))
+            && Instant::now() < deadline
+        {
+            lost = self.flush_draining();
+            if lost.is_ok() {
+                std::thread::sleep(Duration::from_millis(20));
+            }
         }
+        // A lost output must withdraw too: otherwise the request keeps
+        // asking and the session releases the moment it is next idle.
         served.cancel_release();
+        lost?;
         // A release that began by the deadline cannot be withdrawn: it is
         // answered once it committed.
         if !matches!(self.settled(&slot)?, Settled::Resident(_)) {
@@ -711,7 +744,7 @@ where
     /// answered as committed (`Dormant`); an open still running is
     /// `Opening`.
     fn settled(&mut self, slot: &SessionSlot<P>) -> CliResult<Settled<P>> {
-        let joined = Instant::now() + RELEASE_JOIN;
+        let joined = Instant::now() + self.host.release_join;
         loop {
             match slot.peek() {
                 SlotView::Dormant(_) => return Ok(Settled::Dormant),

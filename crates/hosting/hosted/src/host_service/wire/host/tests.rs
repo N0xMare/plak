@@ -129,6 +129,8 @@ struct Script {
     flooded: std::sync::atomic::AtomicBool,
     /// The sessions take stops and settle none until this is cleared.
     hold_stops: std::sync::atomic::AtomicBool,
+    /// Each opened session's attachment count.
+    counts: Mutex<BTreeMap<String, crate::host_service::AttachmentCount>>,
 }
 
 #[derive(Clone, Default)]
@@ -177,6 +179,11 @@ impl HostSessions<Core> for Fake {
         let busy = observations.clone();
         let attachments = crate::host_service::AttachmentCount::default();
         let count = attachments.clone();
+        self.0
+            .counts
+            .lock()
+            .unwrap()
+            .insert(session.to_owned(), count.clone());
         let script = Arc::clone(&self.0);
         let worker = HostWorkerHandle::spawn(move || {
             drop(observations);
@@ -287,7 +294,11 @@ fn host(rows: &[&str]) -> (Arc<SessionHost<Core>>, Fake) {
     (SessionHost::new(fake.clone(), "b1", 7), fake)
 }
 
-fn request(connection: &mut HostConnection<Core, Out>, id: RequestId, op: Op<Core>) -> bool {
+fn request<W: Write + Clone>(
+    connection: &mut HostConnection<Core, W>,
+    id: RequestId,
+    op: Op<Core>,
+) -> bool {
     let line = encode_line(&ClientFrame::<Core>::Request { id, op }).unwrap();
     connection.frame(Ok(line)).unwrap()
 }
@@ -1436,4 +1447,408 @@ fn a_closed_host_opens_and_creates_nothing() {
     );
     assert_eq!(fake.0.opens.load(Ordering::SeqCst), 0);
     assert!(fake.0.creates.lock().unwrap().is_empty());
+}
+
+fn binding(session: &str) -> SessionObservation<Core> {
+    SessionObservation::Binding {
+        session_id: Some(session.to_owned()),
+        account: None,
+        model: None,
+        effort: None,
+        extra: None,
+        composition: plakous_host_protocol::CompositionSelection::FollowCatalog,
+        protocol: plakous_host_protocol::ProtocolSelection::Auto,
+        effective_presentation: "direct".to_owned(),
+    }
+}
+
+/// A host whose slot opened `s1` and now serves `s9`.
+struct Switched {
+    host: Arc<SessionHost<Core>>,
+    fake: Fake,
+    slot: Arc<SessionSlot<Core>>,
+    connection: HostConnection<Core, Out>,
+    out: Out,
+}
+
+/// Attaches `s1` and publishes a binding that switches the served session
+/// to `s9`. The slot is the one that opened `s1`.
+fn switched() -> Switched {
+    let (host, fake) = host(&["s1", "s9"]);
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    attached(&out.take(), 1);
+    let slot = host.slot("s1");
+    fake.0
+        .ends
+        .lock()
+        .unwrap()
+        .get("s1")
+        .unwrap()
+        .send(binding("s9"))
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while row_of(&host, "s9").residency != SessionResidency::Resident {
+        assert!(Instant::now() < deadline, "the switch never showed");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    Switched {
+        host,
+        fake,
+        slot,
+        connection,
+        out,
+    }
+}
+
+fn release_session(connection: &mut HostConnection<Core, Out>, id: RequestId, session: &str) {
+    request(
+        connection,
+        id,
+        Op::ReleaseSession {
+            session: session.into(),
+        },
+    );
+}
+
+/// `release_session` of the session a switch moved the slot onto releases
+/// that session. The slot's `known` id is still the one it opened.
+#[test]
+fn release_of_the_switched_to_session_releases_it() {
+    let Switched {
+        host,
+        fake,
+        slot,
+        mut connection,
+        out,
+    } = switched();
+    release_session(&mut connection, 2, "s9");
+    assert_eq!(outcome(&out.take(), 2), Outcome::Ok(Answer::Released));
+    assert!(
+        !matches!(slot.peek(), SlotView::Resident(_)),
+        "the switched-to session was still resident"
+    );
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
+    connection.leave();
+    handed_off(&host);
+}
+
+/// `release_session` of the session a switch left behind does not release
+/// the one the slot serves now.
+#[test]
+fn release_of_the_switched_from_session_keeps_the_other() {
+    let Switched {
+        host,
+        fake,
+        slot,
+        mut connection,
+        out,
+    } = switched();
+    release_session(&mut connection, 2, "s1");
+    assert_eq!(outcome(&out.take(), 2), Outcome::Ok(Answer::Released));
+    let deadline = Instant::now() + Duration::from_millis(400);
+    while Instant::now() < deadline {
+        match slot.peek() {
+            SlotView::Resident(served) => assert_eq!(served.session_id(), "s9"),
+            SlotView::Dormant(_) | SlotView::Opening(_) | SlotView::Releasing(_) => {
+                panic!("the switched-to session was released");
+            }
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
+    connection.leave();
+    handed_off(&host);
+}
+
+/// One thread attaches `s1` while its open is gated. The sender opens the
+/// gate. The thread detaches once the release does, and returns what it
+/// wrote.
+fn gated_open() -> (
+    Arc<SessionHost<Core>>,
+    Fake,
+    std::sync::mpsc::Sender<()>,
+    std::thread::JoinHandle<Out>,
+) {
+    let (host, fake) = host(&["s1"]);
+    let (open_tx, gate) = std::sync::mpsc::channel();
+    *fake.0.gate.lock().unwrap() = Some(gate);
+    let attaching = {
+        let host = Arc::clone(&host);
+        std::thread::spawn(move || {
+            let out = Out::default();
+            let mut connection = host.connect(out.clone(), Face::Remote, || false);
+            request(&mut connection, 1, Op::Attach { node: node("s1") });
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while connection.node.is_some() {
+                assert!(Instant::now() < deadline, "the attach was not detached");
+                connection.flush().unwrap();
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            connection.leave();
+            out
+        })
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while fake.0.opens.load(Ordering::SeqCst) == 0 {
+        assert!(Instant::now() < deadline, "the open never began");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(row_of(&host, "s1").residency, SessionResidency::Opening);
+    (host, fake, open_tx, attaching)
+}
+
+/// `release_session` of a session that is still opening waits for the open.
+/// Nothing is answered before it finishes; then the attach is detached and
+/// the answer is `released`, from that one open.
+#[test]
+fn release_of_an_opening_session_waits_then_releases_it() {
+    let (host, fake, open_tx, attaching) = gated_open();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let entered = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let releasing = {
+        let host = Arc::clone(&host);
+        let entered = Arc::clone(&entered);
+        std::thread::spawn(move || {
+            let out = Out::default();
+            let mut connection = host.connect(out.clone(), Face::Remote, || false);
+            entered.store(true, Ordering::SeqCst);
+            release_session(&mut connection, 1, "s1");
+            let answer = outcome(&out.take(), 1);
+            connection.leave();
+            done_tx.send(answer).unwrap();
+        })
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !entered.load(Ordering::SeqCst) {
+        assert!(Instant::now() < deadline, "the release never started");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    std::thread::sleep(Duration::from_millis(150));
+    match done_rx.try_recv() {
+        Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        other => panic!("answered while the open was still running: {other:?}"),
+    }
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
+    open_tx.send(()).unwrap();
+    assert_eq!(
+        done_rx.recv_timeout(Duration::from_secs(10)).unwrap(),
+        Outcome::Ok(Answer::Released)
+    );
+    let frames = attaching.join().unwrap().take();
+    assert!(
+        frames
+            .iter()
+            .any(|frame| matches!(frame, HostFrame::Detached { .. })),
+        "the attach was not detached: {frames:?}"
+    );
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
+    releasing.join().unwrap();
+    handed_off(&host);
+}
+
+/// An open still running after the release join is `resident {work}`, not
+/// `released`. Nothing is answered before the join.
+#[test]
+fn release_of_an_open_past_the_join_answers_resident() {
+    let fake = Fake::default();
+    *fake.0.rows.lock().unwrap() = vec![row("s1", 0)];
+    let host = SessionHost::with_release_bounds(
+        fake.clone(),
+        Duration::from_secs(10),
+        Duration::from_millis(300),
+    );
+    let (open_tx, gate) = std::sync::mpsc::channel();
+    *fake.0.gate.lock().unwrap() = Some(gate);
+    let attaching = {
+        let host = Arc::clone(&host);
+        std::thread::spawn(move || {
+            let out = Out::default();
+            let mut connection = host.connect(out.clone(), Face::Remote, || false);
+            request(&mut connection, 1, Op::Attach { node: node("s1") });
+            connection.leave();
+        })
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while row_of(&host, "s1").residency != SessionResidency::Opening {
+        assert!(Instant::now() < deadline, "the open never showed");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let releasing = {
+        let host = Arc::clone(&host);
+        std::thread::spawn(move || {
+            let out = Out::default();
+            let mut connection = host.connect(out.clone(), Face::Remote, || false);
+            let started = Instant::now();
+            release_session(&mut connection, 1, "s1");
+            let answer = (outcome(&out.take(), 1), started.elapsed());
+            connection.leave();
+            done_tx.send(answer).unwrap();
+        })
+    };
+    let (answer, elapsed) = done_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert!(
+        elapsed >= Duration::from_millis(250),
+        "answered before the join: {elapsed:?}"
+    );
+    assert_eq!(
+        answer,
+        Outcome::Ok(Answer::Resident {
+            reason: ResidentReason::Work
+        })
+    );
+    assert_eq!(row_of(&host, "s1").residency, SessionResidency::Opening);
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
+    open_tx.send(()).unwrap();
+    attaching.join().unwrap();
+    releasing.join().unwrap();
+    handed_off(&host);
+}
+
+/// A release withdrawn after the actor has read it, and before the actor
+/// marks, does not begin: the answer is `resident` and the slot stays
+/// resident.
+#[test]
+fn a_release_withdrawn_before_the_actors_mark_stays_resident() {
+    let fake = Fake::default();
+    *fake.0.rows.lock().unwrap() = vec![row("s1", 0)];
+    let host = SessionHost::with_release_wait(fake.clone(), Duration::from_secs(1));
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    attached(&out.take(), 1);
+    let count = fake.0.counts.lock().unwrap().get("s1").unwrap().clone();
+    connection.leave();
+    assert_eq!(count.get(), 0, "the attach still held the session");
+    let (marked_tx, marked_rx) = std::sync::mpsc::channel();
+    let waiting = count.clone();
+    count.around_next_mark(
+        move || {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while waiting.release_now() {
+                assert!(Instant::now() < deadline, "the release was never withdrawn");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        },
+        move |marked| {
+            let _ = marked_tx.send(marked);
+        },
+    );
+    let out = Out::default();
+    let mut releasing = host.connect(out.clone(), Face::Remote, || false);
+    release_session(&mut releasing, 1, "s1");
+    assert_eq!(
+        outcome(&out.take(), 1),
+        Outcome::Ok(Answer::Resident {
+            reason: ResidentReason::Work
+        })
+    );
+    assert!(
+        !marked_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("the actor never decided"),
+        "the release began after it was withdrawn"
+    );
+    let deadline = Instant::now() + Duration::from_millis(300);
+    while Instant::now() < deadline {
+        assert!(
+            matches!(host.slot("s1").peek(), SlotView::Resident(_)),
+            "the session released after the withdrawal"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(!count.releasing());
+    releasing.leave();
+    handed_off(&host);
+}
+
+/// A writer that fails once `fail` is set.
+#[derive(Clone)]
+struct FallibleOut {
+    bytes: Arc<Mutex<Vec<u8>>>,
+    fail: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Write for FallibleOut {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.fail.load(Ordering::SeqCst) {
+            return Err(std::io::Error::other("lost"));
+        }
+        self.bytes.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// A lost output while `release_session` waits withdraws the request
+/// before the error propagates, so the session does not release later.
+#[test]
+fn a_lost_output_during_release_withdraws_the_request() {
+    let fake = Fake::default();
+    *fake.0.rows.lock().unwrap() = vec![row("s1", 0)];
+    fake.0.hold_stops.store(true, Ordering::SeqCst);
+    let host = SessionHost::with_release_wait(fake.clone(), Duration::from_secs(2));
+    let out = FallibleOut {
+        bytes: Arc::default(),
+        fail: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    };
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    request(
+        &mut connection,
+        2,
+        Op::StopSession {
+            session: "s1".into(),
+        },
+    );
+    let session = Arc::clone(&connection.node.as_ref().unwrap().session);
+    let fail = Arc::clone(&out.fail);
+    let watcher = {
+        let fake = fake.clone();
+        std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while session.releases() == 0 {
+                assert!(Instant::now() < deadline, "the release never asked");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            fail.store(true, Ordering::SeqCst);
+            fake.0.hold_stops.store(false, Ordering::SeqCst);
+        })
+    };
+    let line = encode_line(&ClientFrame::<Core>::Request {
+        id: 3,
+        op: Op::ReleaseSession {
+            session: "s1".into(),
+        },
+    })
+    .unwrap();
+    let error = connection
+        .frame(Ok(line))
+        .expect_err("the lost output was not reported");
+    assert!(
+        error.message().contains("stdout failed"),
+        "{}",
+        error.message()
+    );
+    watcher.join().unwrap();
+    let count = fake.0.counts.lock().unwrap().get("s1").unwrap().clone();
+    assert!(
+        !count.release_now(),
+        "the release request leaked past the lost output"
+    );
+    connection.leave();
+    let deadline = Instant::now() + Duration::from_millis(300);
+    while Instant::now() < deadline {
+        assert!(
+            matches!(host.slot("s1").peek(), SlotView::Resident(_)),
+            "the session released after the lost output"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    handed_off(&host);
 }

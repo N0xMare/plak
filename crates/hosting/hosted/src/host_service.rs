@@ -303,9 +303,10 @@ fn baseline_scope<P: ProtocolExtension>(
 /// session itself (its residency, spec 02 §4.4): its host service's
 /// attachments and the holds of connections its host handed it to, and
 /// whether the session has begun to release. Every count taken also bumps a
-/// generation, so the word the session's actor read before it decided
-/// changes with any attach or hold since, even one already gone again. The
-/// release begins only from exactly that word, with nothing counted, in one
+/// generation, and so does withdrawing a release-now request, so the word
+/// the session's actor read before it decided changes with any attach, hold
+/// or withdrawal since, even one already gone again. The release begins
+/// only from exactly that word, with nothing counted, in one
 /// atomic step, and nothing is counted after it: an attach or a hold either
 /// comes first and keeps the session, or is refused and finds it released.
 #[derive(Clone, Debug, Default)]
@@ -328,8 +329,10 @@ struct CountWord {
 const COUNTED: u64 = (1 << 32) - 1;
 /// The bit of the word that says the session is releasing.
 const RELEASING: u64 = 1 << 32;
+/// One generation of the word, and no count. Its carry leaves the word.
+const GENERATION: u64 = 1 << 33;
 /// One count taken: one more counted, and the next generation.
-const TAKEN: u64 = (1 << 33) + 1;
+const TAKEN: u64 = GENERATION + 1;
 
 /// The count's word as the session's actor read it before deciding to
 /// release ([`AttachmentCount::seen`]).
@@ -401,14 +404,20 @@ impl AttachmentCount {
     }
 
     /// Withdraws one [`Self::request_release_now`]; another request still
-    /// in flight keeps asking.
+    /// in flight keeps asking. A withdrawal also advances the word's
+    /// generation, so a release decision that already read the word fails
+    /// its compare-exchange and does not begin.
     pub fn cancel_release_now(&self) {
-        let _ = self
+        let withdrew = self
             .0
             .release_now
             .try_update(Ordering::AcqRel, Ordering::Acquire, |asked| {
                 asked.checked_sub(1)
-            });
+            })
+            .is_ok();
+        if withdrew {
+            self.0.bits.fetch_add(GENERATION, Ordering::AcqRel);
+        }
     }
 
     /// Whether a host asked the session to release now.

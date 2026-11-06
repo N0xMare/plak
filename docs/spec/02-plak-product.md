@@ -4037,13 +4037,13 @@ verdicts) are addressed, the session profile and workspace chrome states.
   it with no attachment and no connection's hold
   (`host_service::AttachmentCount`); after the mark the session takes
   neither, and an attach to it is refused `node_retiring`. Every attach and
-  hold also advances a generation in the same word, and the actor marks
-  only from the exact word it read before the receive whose timeout led to
-  the decision, so a client that attached, sent an intent and left again
-  in between still keeps the session: its intent was accepted and runs. A
-  host's `release_session` asks the actor to decide now rather than after
-  the idle release (`AttachmentCount::request_release_now`); every other
-  condition stands. An
+  hold also advances a generation in the same word, as does withdrawing a
+  release asked for now, and the actor marks only from the exact word it
+  read before the receive whose timeout led to the decision, so a client
+  that attached, sent an intent and left again in between still keeps the
+  session: its intent was accepted and runs. A host's `release_session`
+  asks the actor to decide now rather than after the idle release
+  (`AttachmentCount::request_release_now`); every other condition stands. An
   attach racing the timer therefore either comes first and keeps the
   session, or finds it released. An embedded face's session (the TUI, `plak agent`,
   `plak run`) is never released for being idle. A host serves each session
@@ -4570,8 +4570,10 @@ directory (§4.4).
   keeps it, and so does an attach made since). The answer is `released` once
   the release committed, so another face may open the session at once, or,
   when none began within 10 s, `resident {reason}` (`attachment` when one
-  was made since, `processes` while one runs, `work` otherwise), and then the
-  request is withdrawn, so the session does not release by itself later. A
+  was made since or another connection still holds the session, a stop
+  still draining included, `processes` while one runs, `work` otherwise),
+  and then the request is withdrawn, so the session does not release by
+  itself later. A
   dormant session is `released`; one the host does not know is
   `unknown_session`. The release writes nothing of its own: it is the idle
   release's joined quit.

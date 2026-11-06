@@ -205,6 +205,17 @@ where
     ///
     /// The release did not join in time, or the session does not open.
     pub fn resident(&self) -> CliResult<(Arc<WireSession<P>>, ResidencyHold)> {
+        self.resident_at_handoff()
+            .map(|(session, hold, _releases)| (session, hold))
+    }
+
+    /// [`Self::resident`], and how many releases had already been asked when
+    /// the slot handed the session over. That count is read under the slot
+    /// lock, so a release that waited out this open is still ahead of it and
+    /// the attachment it makes detaches.
+    pub(super) fn resident_at_handoff(
+        &self,
+    ) -> CliResult<(Arc<WireSession<P>>, ResidencyHold, u64)> {
         let mut slot = self.lock();
         loop {
             if let Slot::Resident { session, .. } = &*slot {
@@ -236,7 +247,8 @@ where
             } = &*slot
                 && let Some(hold) = attachments.hold()
             {
-                return Ok((Arc::clone(session), hold));
+                let releases = session.releases();
+                return Ok((Arc::clone(session), hold, releases));
             }
             // It began to release since it was settled: join it, then open
             // it again.
