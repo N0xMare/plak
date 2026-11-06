@@ -126,6 +126,8 @@ pub(crate) use plakous_host_protocol::{
     reason = "inert launch DTO keeps independent host-selected presentation flags explicit"
 )]
 pub struct TuiLaunch {
+    /// Work belongs to a separate host; leaving this face only detaches.
+    pub host_mode: bool,
     /// Workspace package version supplied by the product launcher.
     pub version: &'static str,
     /// Optional session identifier shown in the header when set.
@@ -186,6 +188,7 @@ pub static UTC_ZONE: jiff::tz::TimeZone = jiff::tz::TimeZone::UTC;
 impl Default for TuiLaunch {
     fn default() -> Self {
         Self {
+            host_mode: false,
             version: "",
             session_id: None,
             workspace: PathBuf::from("."),
@@ -522,6 +525,7 @@ mod tests_entry {
         use crossterm::tty::IsTty;
 
         let launch = || TuiLaunch {
+            host_mode: false,
             version: "0.1.0",
             session_id: Some("test-session".into()),
             workspace: PathBuf::from("/tmp"),

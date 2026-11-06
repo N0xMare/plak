@@ -27,6 +27,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("tree", "Open Activity: Agents"),
     ("ps", "Open Activity: Processes"),
     ("stop-all", "Stop all non-root agents"),
+    ("stop", "Stop this session's work, keeping it open"),
     ("fork", "Fork this conversation"),
     ("fork-then-compact", "Fork, then compact the new session"),
     ("drop", "Drop the last queued message"),
@@ -53,6 +54,8 @@ pub struct ParsedSlash {
 /// Effect of resolving a slash command in the TUI.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SlashEffect {
+    /// Stop the attached session through the wire's stop_session operation.
+    StopSession,
     /// Open the Activity overlay's Processes tab.
     OpenProcesses,
     /// Forward a control-plane action to the host (may also clear local view).
@@ -210,6 +213,7 @@ pub fn is_irreversible(name: &str) -> bool {
 /// than ignored: `/compact now` must not start a paid compaction, and
 /// `/new all` must not start a session on the strength of a word it never read.
 const TAKES_NO_ARGUMENTS: &[&str] = &[
+    "stop",
     "ps",
     "help",
     "keybinds",
@@ -241,6 +245,7 @@ pub fn resolve(parsed: &ParsedSlash, _ctx: &SlashContext) -> SlashEffect {
         return SlashEffect::LocalNote(format!("usage: /{name}  —  takes no arguments"));
     }
     match name {
+        "stop" => SlashEffect::StopSession,
         "help" | "" => SlashEffect::OpenInfoOverlay {
             title: "help".to_owned(),
             body: help_text(),

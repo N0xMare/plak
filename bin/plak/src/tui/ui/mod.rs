@@ -419,6 +419,8 @@ type LastTurnUsage = (u64, u64, u64, u64, u64, Option<u64>, Option<u64>);
     reason = "independent session/UI flags, not one state machine"
 )]
 pub(crate) struct App {
+    host_mode: bool,
+    pending_stop_session: bool,
     #[cfg(test)]
     after_draw: Option<fn()>,
     pub(crate) session_id: Option<String>,
@@ -870,6 +872,8 @@ impl App {
         let mut pane = pane::TranscriptPane::new(blocks);
         pane.presentation_session.clone_from(&launch.session_id);
         Self {
+            host_mode: launch.host_mode,
+            pending_stop_session: false,
             #[cfg(test)]
             after_draw: None,
             session_id: launch.session_id,

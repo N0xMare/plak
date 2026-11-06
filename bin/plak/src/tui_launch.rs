@@ -1,8 +1,11 @@
 //! The interactive TUI's launch: the terminal check, the first round's
 //! preparation, and the presentation values every round reads. The rounds
-//! themselves are the session supervisor's ([`supervisor`]).
+//! themselves are the session supervisor's ([`supervisor`]) when embedded;
+//! a running home's host instead supplies the socket face ([`hosted`]).
 
 pub(crate) mod face;
+mod hosted;
+pub(crate) mod socket;
 pub(crate) mod supervisor;
 
 use std::io::{self, IsTerminal as _, Write as _};
@@ -123,6 +126,9 @@ pub(crate) fn launch_tui_with_attacher(
     attacher: &impl TuiAttacher,
 ) -> CliResult<ProcessOutcome> {
     refuse_without_terminal(services, session_id.as_deref(), resume_picker)?;
+    if let Some(face) = socket::SocketFace::discover(services.paths()?)? {
+        return hosted::run(services, face, session_id, resume_picker, opening_note);
+    }
     let (launch, rounds) =
         prepare_tui_launch(services, session_id, resume_picker, opening_note, attacher)?;
     supervisor::run_tui_rounds(services, launch, rounds, attacher)

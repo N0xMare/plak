@@ -729,6 +729,14 @@ pub(super) fn run_app(
             request_terminal_handoff(&mut app, actions, SessionRequest::Rebind { cause });
         }
         app.service_reload_request();
+        if std::mem::take(&mut app.pending_stop_session)
+            && let Some(session) = app.session_id.as_deref()
+            && !actions.is_some_and(|actions| actions.stop_session(session))
+        {
+            app.push_block(ScrollBlock::System(
+                "stop refused: the host is disconnected".to_owned(),
+            ));
+        }
         if let Some(action) = app.new_session_after_stop(Instant::now()) {
             dispatch_action(&mut app, &action, actions);
         }
@@ -901,7 +909,7 @@ pub(super) fn dispatch_action(
                     .take()
                     .unwrap_or_else(|| "switching model…".to_owned()),
             );
-            if send_user_action(app, actions, UserAction::Quit) {
+            if app.host_mode || send_user_action(app, actions, UserAction::Quit) {
                 app.request_reattach = true;
                 app.should_quit = true;
             }
@@ -961,7 +969,8 @@ pub(super) fn request_terminal_handoff(
     if matches!(
         &handoff,
         SessionRequest::ReloadRelease { .. } | SessionRequest::Rebind { .. }
-    ) || send_user_action(app, actions, UserAction::Quit)
+    ) || app.host_mode
+        || send_user_action(app, actions, UserAction::Quit)
     {
         crate::tui_timing::quit_requested();
         app.terminal_handoff = Some(handoff);

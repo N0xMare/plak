@@ -80,6 +80,16 @@ impl App {
         &mut self,
         actions: Option<&crate::tui::FaceActionSender>,
     ) {
+        if self.host_mode {
+            let Some(paths) = self.reload_requests.home.clone() else {
+                return;
+            };
+            let workspace = self.launch_directory.clone();
+            self.start_reload_probe(move || {
+                crate::carry::probe_reload(&paths, &workspace, None, None).0
+            });
+            return;
+        }
         if self.reload_probe.is_some() {
             return;
         }
@@ -113,7 +123,6 @@ impl App {
 
     /// Starts `probe` on its own thread unless one is already running, as
     /// the host's would.
-    #[cfg(test)]
     pub(super) fn start_reload_probe(
         &mut self,
         probe: impl FnOnce() -> Option<crate::carry::ReloadTarget> + Send + 'static,
@@ -122,11 +131,18 @@ impl App {
             return;
         }
         let sender = self.begin_reload_probe();
+        let host_mode = self.host_mode;
         std::thread::spawn(move || {
             let target = probe();
             let refusal = target
                 .as_ref()
-                .and_then(|target| target.refusal(&crate::home::state::state_key()));
+                .and_then(|target| {
+                    if host_mode && target.state_key.as_deref() != Some(crate::home::state::state_key().as_str()) {
+                        Some("reload refused: the installed client reads another state key; stop the host or run its build".to_owned())
+                    } else {
+                        target.refusal(&crate::home::state::state_key())
+                    }
+                });
             let _ = sender.send((target, refusal));
         });
     }

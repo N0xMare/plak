@@ -114,6 +114,12 @@ an export.
 
 ### Plak
 
+- When this home's `plak host` answers, the TUI uses its local socket.
+  Terminal and web attachments share a session; `/new` switches only the
+  terminal, quit detaches, `/stop` stops the attached session, and `/reload`
+  replaces only the client. With no host it still embeds; a wire-version
+  mismatch refuses with a stop-host/run-its-build remedy.
+
 - The TUI moves a focus marker through transcript items with `Alt+Up` and
   `Alt+Down` (then `Up` and `Down`). `Enter` or `Space` folds the focused
   block, `Alt+C` copies that item, `Esc` leaves the marker without stopping a

@@ -202,7 +202,10 @@ impl App {
     /// way out of a stuck cancel stays two presses.
     pub(super) fn request_quit(&mut self) -> Option<UserAction> {
         self.quit_arm = None;
-        if self.turn_in_flight() || self.tree_live_descendants > 0 || self.background_processes > 0
+        if !self.host_mode
+            && (self.turn_in_flight()
+                || self.tree_live_descendants > 0
+                || self.background_processes > 0)
         {
             self.confirm_destructive(UserAction::Quit)
         } else {

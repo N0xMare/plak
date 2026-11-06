@@ -305,7 +305,10 @@ impl App {
     /// The confirmation names that work and offers to stop it first. A busy
     /// root goes to the host, which answers that `/new` waits for idle.
     fn request_new_session(&mut self) -> Option<UserAction> {
-        if self.busy || (self.tree_live_descendants == 0 && self.background_processes == 0) {
+        if self.host_mode
+            || self.busy
+            || (self.tree_live_descendants == 0 && self.background_processes == 0)
+        {
             return Some(UserAction::NewSession);
         }
         self.slash_open = false;
@@ -316,6 +319,10 @@ impl App {
 
     pub(super) fn apply_slash_effect(&mut self, effect: SlashEffect) -> Option<UserAction> {
         match effect {
+            SlashEffect::StopSession => {
+                self.pending_stop_session = true;
+                None
+            }
             SlashEffect::Quit => self.request_quit(),
             SlashEffect::OpenProcesses => {
                 self.clear_input();

@@ -4520,6 +4520,12 @@ session of the home, across workspaces, to the clients of its control
 socket and, with `--web`, of its web endpoint (§4.5), through the session
 directory (§4.4).
 
+The TUI is another client of this socket (§5). A TUI started after this
+host never opens a competing embedded session; a web face and a terminal
+face may attach the same session at once. An embedded TUI already running
+when the host starts keeps its custody, and the per-tree
+`tree_hosted_elsewhere` refusal is unchanged.
+
 - **One per home and state key.** Before anything else it takes an exclusive
   lock on `state/<key>/host.lock` and holds it for its life; the file names
   its pid and binary id. A second `plak host` of the same home and state key
@@ -4650,6 +4656,25 @@ Restart=on-failure
 
 ## 5. The terminal interface
 
+Before opening a session, `plak` and every resume path that opens a TUI
+try this home's `host/run/<state-key>.sock`. With an answering host of the
+same wire version they use wire v2 over that socket, not an embedded
+session. A missing or refused connection (a stale socket included) falls
+back to embedding. Once a connection answers, handshake failures refuse
+the launch; a different wire version names the remedies: stop the host
+with `plak host stop`, or run its build. It never embeds beside that peer.
+
+In host mode the resume picker reads `list_sessions` for the workspace,
+and `/new` sends `new_session` with a fresh request id, then attaches the
+created root. Resuming or creating switches this terminal's attachment
+only; other faces and the old session's work remain in the host. Quit,
+terminal close and terminating signals detach. `/stop` sends
+`stop_session` for the attached session and leaves the face attached.
+After transport loss the TUI reports `product host disconnected`; it
+never retries a prompt automatically. Once the host restarts, `/attach`
+makes a fresh connection and root attach, or the operator can quit and
+run `plak resume` again.
+
 The hosted launch API is frontend-neutral: `HostLaunchPreparation`,
 `HostLaunchMode` and `HostLaunchNativeModelFact` carry launch facts;
 `spawn_deferred_host` starts the host independently of a terminal driver.
@@ -4712,7 +4737,7 @@ nothing but announce a deferred capability is not one of them:
 
 `/help`, `/keybinds`, `/status`, `/settings`, `/agents`, `/providers`, `/mcp`,
 `/usage`, `/context`, `/attach`, `/recover`, `/new`, `/compact`,
-`/config`, `/resume`, `/tree`, `/ps`, `/stop-all`, `/fork`, `/fork-then-compact`,
+`/config`, `/resume`, `/tree`, `/ps`, `/stop`, `/stop-all`, `/fork`, `/fork-then-compact`,
 `/drop`, `/image`, `/reload`, `/rebind`, `/quit`. Two spellings are accepted aliases rather than extra rows:
 `/stop_all` for `/stop-all` and `/exit` for `/quit`.
 
@@ -4825,7 +4850,17 @@ carry returns the committed successor and its locator with that failure. The
 TUI selects that successor and names it in a repair notice, rather than
 remaining on the source and creating another successor at the next reload.
 
-The normal reload handoff carries the session forward when
+In host mode `/reload` probes and re-execs the terminal client only. It
+restores the terminal and detaches, then execs the installed client with
+the same session id; the session remains resident in the host, with no
+export, carry, planned handoff, release or host restart. Build checks and
+the installed-client probe run locally, never as local-face-only intents
+on the host socket. A target with another or unknown state key refuses
+with a stop-host/run-its-build remedy, rather than accidentally opening
+an embedded session on another key. The background-process refusal below
+still applies in host mode.
+
+In embedded mode the normal reload handoff carries the session forward when
 that build has another state key, or the same key and an exact-reopen verdict
 of `binding_changed` (§2.5.1). It is refused while background processes are
 live, or when no installed `plak` resolves on `PATH`, so a refusal never
@@ -4875,7 +4910,19 @@ a JSONL command nor durable authority.
 A running interactive session can also be asked to reload by this user's own
 processes, including the agent's shell: `plak session reload <session>
 --expect-binary <binary-id>`. Requests are off unless the operator sets the
-home-scoped `tui.reload_requests = true` (chapter 07 §3). The command refuses
+home-scoped `tui.reload_requests = true` (chapter 07 §3).
+In host mode the client still announces its attached session in
+`run/reload-requests/` and consumes this channel locally. Every request it
+takes is settled immediately as `refused`, with the transcript note
+`requested reload refused: this session runs in plak host (build <host
+binary id>); restarting the host moves it onto the installed build (plak
+host stop, or restart its unit)`; the parenthetical is omitted when the
+host build is unknown. It never records `reloaded`, posts a continuation,
+redispatches work or hands the session off. A hand `/reload` still replaces
+only the client. Moving a hosted session to another build is a host restart
+(the SIGTERM handoff and start scan), not a client act.
+
+For an embedded TUI the command refuses
 unless the requesting `plak` is itself build `<binary-id>` (the agent runs the
 installed `plak`), and unless an interactive `plak` announced the session (a
 full id, or a prefix that only one announcement matches) and that announcing
@@ -5377,9 +5424,12 @@ processes run, and its lines name what stops (the root turn, the running
 agents, which stay resumable, the processes). Idle with nothing running it
 quits at once, and so does the ladder's second press over a stuck cancel. A bare
 `quit`, `exit` or `:q` without the slash is an ordinary prompt, idle or
-mid-turn. The TUI embeds its session, so its quit stops the session's work;
+mid-turn. An embedded TUI owns its session, so its quit stops the session's work;
 a wire client of a host detaches instead and stops a session's work by
 `stop_session` (§4.4), after which the session stays served.
+The host-mode TUI therefore quits without the stop-work confirmation,
+even while a turn, child or background process runs; `/new` likewise
+leaves the previous session's work running rather than offering to stop it.
 
 `SIGTERM` and `SIGHUP` are quit requests. A watcher thread armed before the
 terminal is taken records the signal and wakes the event loop (§5.8), which

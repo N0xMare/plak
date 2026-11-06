@@ -139,6 +139,7 @@ pub(super) fn provider_rows() -> Vec<ProviderDef> {
 
 pub(super) fn launch_basic() -> TuiLaunch {
     TuiLaunch {
+        host_mode: false,
         version: "0.1.0",
         session_id: Some("s1".into()),
         workspace: PathBuf::from("/tmp/ws"),

@@ -45,6 +45,69 @@ fn new_with_nothing_live_starts_the_session_at_once() {
 }
 
 #[test]
+fn a_host_faces_new_and_quit_leave_running_work_with_the_host() {
+    for host_mode in [false, true] {
+        let launch = crate::tui::TuiLaunch {
+            host_mode,
+            ..launch_basic()
+        };
+        let mut app = App::new(launch, true);
+        app.background_processes = 1;
+        app.tree_live_descendants = 1;
+        assert_eq!(
+            type_new(&mut app),
+            host_mode.then_some(UserAction::NewSession)
+        );
+        assert_eq!(app.destructive_confirm.is_none(), host_mode);
+        let launch = crate::tui::TuiLaunch {
+            host_mode,
+            ..launch_basic()
+        };
+        let mut app = App::new(launch, true);
+        app.background_processes = 1;
+        app.tree_live_descendants = 1;
+        app.busy = true;
+        assert_eq!(app.request_quit(), host_mode.then_some(UserAction::Quit));
+        assert_eq!(app.destructive_confirm.is_none(), host_mode);
+        assert_eq!(app.should_quit, host_mode);
+    }
+}
+
+#[test]
+fn a_host_face_keeps_the_background_process_reload_refusal() {
+    let mut app = App::new(
+        crate::tui::TuiLaunch {
+            host_mode: true,
+            ..launch_basic()
+        },
+        true,
+    );
+    app.background_processes = 1;
+    app.set_input("/reload".into());
+    assert_eq!(app.handle_key(key(KeyCode::Enter)), None);
+    assert!(blocks_contain(&app, "background processes are running"));
+    assert!(!app.pending_reload);
+    assert!(!app.should_quit);
+}
+
+#[test]
+fn a_disconnected_host_face_can_request_a_fresh_attach_without_an_intent() {
+    let mut app = App::new(
+        crate::tui::TuiLaunch {
+            host_mode: true,
+            ..launch_basic()
+        },
+        true,
+    );
+    app.note_host_disconnected();
+    let (actions, intents) = crate::config::user_action_channel();
+    drop(intents);
+    dispatch_action(&mut app, &UserAction::RetryAttach, Some(&actions));
+    assert!(app.request_reattach);
+    assert!(app.should_quit);
+}
+
+#[test]
 fn the_retired_clear_command_is_unknown() {
     let mut app = App::new(launch_basic(), true);
     app.set_input("/clear".into());
