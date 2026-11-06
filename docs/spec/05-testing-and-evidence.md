@@ -2208,8 +2208,11 @@ on one local process; the process appends one line per start, and no cut or
 relaunch may start it twice. It quits with the process still running, so
 its cuts are `HELD` once that work exists and `REQUEUED` or
 `NOT_HANDED_OFF` before it.
-`node_fenced_turn_child` fences a product child with an in-band outcome
-nobody can observe. Eager in-place recovery is the root's: the child stays held, is not dropped,
+`node_fenced_turn` fences the root with an in-band outcome nobody can observe
+and quits only after the live host's in-place `recovered` record (claim
+`model_request`); a quit already deferred when the turn goes idle would skip
+that reopen. `node_fenced_turn_child` is the same fault on a product child.
+Eager in-place recovery is the root's: the child stays held, is not dropped,
 and is not dispatched again.
 `root_transient_resume_cut` quits while the automatic-continuation notice is
 up and the provider has dispatched once. A cut admits at most one
@@ -2286,8 +2289,10 @@ pending with no feed fact), `REFUSED{name}` (typed exit 5 and a signature-keyed
 allowlist name, with durable authority unchanged), `NOT_ADMITTED` (no
 submission and no runtime root command for the prompt, no answer, clean reopen,
 exactly one follow-up dispatch), and `FENCED` (the root turn's one terminal is
-`RecoveryRequired` and the live host's eager in-place recovery closed it before
-the cut, so the reopen is quiescent; exactly one turn is newly fenced, it is
+`RecoveryRequired`, and either the live host's eager in-place recovery closed it
+before the cut, so the reopen is quiescent, or the cut kept only its recorded
+outcome-unknown `FailTurn` decision, so the reopen commits that terminal and
+closes the turn in one closure; exactly one turn is newly fenced, it is
 the shape's own root turn, and after recovery the session log holds exactly
 the shape's expected claim for it once, whether the live host or the reopen
 surfaced it). `UNCLASSIFIED`, invariant violations and
@@ -2620,7 +2625,11 @@ in place (the turn's one terminal is `RecoveryRequired` and nothing is left to
 close) is `FENCED` and requires `OpensQuiescent`, exactly one new fenced turn,
 that turn being the shape's own root turn, and recovered abandonment claims
 equal to exactly the shape's expected claim (`running_tool` for
-`uncertain_mcp_tool`). Completion permits `RecoversSavedTerminal`,
+`uncertain_mcp_tool`, `model_request` for `node_fenced_turn`). A cut between
+that turn's outcome-unknown `FailTurn` decision commit and its
+`RecoveryRequired` consequence is `FENCED` under `RecoversSavedTerminal`: no
+turn is fenced before the reopen, the reopen fences exactly the shape's own
+root turn, and the same claim is surfaced once. Completion permits `RecoversSavedTerminal`,
 `ResolvesCompactionWorkflow`, `RecoversCommit` or `OpensQuiescent`;
 not-admitted and requeued prompts require `OpensQuiescent`, and refusals require
 the rehearsal's typed `Refused`. If the head belongs to a later root, a distinct

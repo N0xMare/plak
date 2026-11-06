@@ -2472,7 +2472,7 @@ contributes zero, just as it does in the live turn.
 | Finalized, terminal other than `RecoveryRequired` | any | Completed or ProvenNotDispatched; uncertain ones closed | finalize each with own evidence; no note, no second terminal |
 | Finalized `RecoveryRequired` | any | any; uncertain ones closed | finalize; one abandonment note, cause `Interrupted`; no second terminal |
 | Prepared, (Command, ProvenNotDispatched) | none | none | cancelled, `NothingStarted`, not requeued |
-| Dispatched | Completed, ProvenNotDispatched or OutcomeUnknown with a recorded `Terminal` or `FailTurn` | any; uncertain process sessions closed | finish: the same `commit_turn_terminal` the live driver runs over the recorded response, decision and budgets; pending steers settle unapplied; usage is the ledger sum; the artifact transitions through the prepared receipt; no abandonment note |
+| Dispatched | Completed, ProvenNotDispatched or OutcomeUnknown with a recorded `Terminal` or `FailTurn` | any; uncertain process sessions closed | finish: the same `commit_turn_terminal` the live driver runs over the recorded response, decision and budgets; pending steers settle unapplied; usage is the ledger sum; the artifact transitions through the prepared receipt; no abandonment note unless the terminal is `RecoveryRequired` (below) |
 | Dispatched | Finalized `Terminal` or `FailTurn` | any | typed integrity: P finalizes only in R's terminal commit |
 | Dispatched | none | open compaction or summary records of the admission fence | closed; cancelled, `CompactionNotApplied`; the prompt is not dispatched |
 | Dispatched | none | controls only, or a TurnFence fold committed at admission | cancelled, `NothingStarted`; a retained committed fold is named |
@@ -2498,6 +2498,17 @@ recorded remedy carried into the durable terminal and read directly by the
 result and feed; it is never recomputed from the conversation. It ends with the
 terminal the live driver would have published, under the original root command,
 and a duplicate of that command afterwards replays it.
+
+A `FailTurn` whose recorded failure is outcome-unknown finishes as
+`RecoveryRequired`. Live, that consequence finalizes only R and its controls
+and leaves P and the turn's other records to the next owner, whose reopen
+takes the `Finalized RecoveryRequired` row. The finish closes those records in
+its own commit, so it applies that row too: one abandonment note, cause
+`Interrupted`, with the claim the closed records support (`ModelRequest` for
+an outcome-unknown P, `RunningTool` for an uncertain process session), and the
+report in R's one terminal record rather than as a later enrichment. A cut
+before or after the live consequence commit therefore reopens to the same
+history, note and report.
 
 When records in one cut support different claims, the note makes the
 strongest: `RunningTool` > `ModelRequest` > `CompactionNotApplied` >

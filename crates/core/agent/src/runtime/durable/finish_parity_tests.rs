@@ -96,34 +96,7 @@ async fn finish_parity(
     } else {
         agent.shutdown().await?;
     }
-    let topology = cut.manifest().topology();
-    let source = DurableSessionAddress {
-        session_id: topology.session_id,
-        branch_id: topology.branch_id,
-        checkpoint_id: topology.checkpoint_id,
-    };
-    {
-        let mut state = lock_mutex(&store.state);
-        let stored = state
-            .stored_commits
-            .get(&cut.id())
-            .ok_or("cut bundle")?
-            .clone();
-        let head = BranchHead::from_store(
-            source.session(),
-            BranchRevision::from_store(topology.branch_revision),
-            stored.reference(),
-        );
-        let session = state.loaded.as_ref().ok_or("branch")?.session();
-        state.loaded = Some(crate::LoadedBranch::from_store(
-            session,
-            head,
-            stored.clone(),
-        ));
-        state.stored = Some(stored);
-        state.active_lease = None;
-        state.released_lease = None;
-    }
+    let source = rewind_to(&store, &cut)?;
     let DurableRuntimeOpen::Opened(reopened) = sessions
         .open(&format!("open:{label}"), source, make()?)
         .await?
@@ -198,6 +171,41 @@ async fn finish_parity(
     }
     reopened.shutdown().await?;
     Ok((replayed, live_anchor))
+}
+
+/// Rewinds the store's branch to `cut`, with no lease held, as a lost owner
+/// leaves it.
+fn rewind_to(
+    store: &TestCreateStore,
+    cut: &RuntimeCheckpoint,
+) -> TestResult<DurableSessionAddress> {
+    let topology = cut.manifest().topology();
+    let source = DurableSessionAddress {
+        session_id: topology.session_id,
+        branch_id: topology.branch_id,
+        checkpoint_id: topology.checkpoint_id,
+    };
+    let mut state = lock_mutex(&store.state);
+    let stored = state
+        .stored_commits
+        .get(&cut.id())
+        .ok_or("cut bundle")?
+        .clone();
+    let head = BranchHead::from_store(
+        source.session(),
+        BranchRevision::from_store(topology.branch_revision),
+        stored.reference(),
+    );
+    let session = state.loaded.as_ref().ok_or("branch")?.session();
+    state.loaded = Some(crate::LoadedBranch::from_store(
+        session,
+        head,
+        stored.clone(),
+    ));
+    state.stored = Some(stored);
+    state.active_lease = None;
+    state.released_lease = None;
+    Ok(source)
 }
 
 fn assert_consequence_parity(
@@ -497,4 +505,115 @@ fn code_cell_builder(directory: &std::path::Path) -> TestResult<AgentBuilder> {
             LocalCompositionLifecycle::AgentIncarnationPersistent,
         ),
     )
+}
+
+/// A recorded `FailTurn` whose failure is outcome-unknown finishes as
+/// `RecoveryRequired`, and live that consequence leaves the unobserved request
+/// to the `Finalized RecoveryRequired` row. Reopening the decision commit runs
+/// both rows in one closure, so it closes the turn as reopening the live
+/// consequence commit does: the same history, note and abandonment report.
+#[tokio::test]
+async fn a_recovered_recovery_required_finish_closes_like_the_reopened_live_terminal() -> TestResult
+{
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let model = artifact_test_model(0, 0xF1_8000)?;
+    model.unknown_round_outcome.store(true, Ordering::Release);
+    let make = || durable_artifact_test_builder(workspace.clone(), model.clone());
+    let store = Arc::new(TestCreateStore::default());
+    let sessions = DurableSessionRuntime::current(
+        store.clone(),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("lease")?,
+    )?;
+    let agent = sessions
+        .create("create:finish-parity:recovery-required", make())
+        .await?;
+    let result = agent
+        .start(
+            CommandId::new("root:finish-parity:recovery-required")?,
+            "finish parity",
+        )
+        .await?
+        .into_turn()
+        .ok_or("live turn was not admitted")?
+        .result()
+        .await?;
+    assert!(
+        matches!(result.outcome(), TurnResultOutcome::RecoveryRequired(_)),
+        "{:?}",
+        result.outcome()
+    );
+    let _ = agent.shutdown().await;
+    let commits = lock_mutex(&store.state)
+        .stored_commits
+        .values()
+        .map(|stored| Arc::clone(stored.checkpoint()))
+        .collect::<Vec<_>>();
+    let decision = commits
+        .iter()
+        .find(|checkpoint| {
+            matches!(
+                root_turn_closure_for_test(checkpoint),
+                Ok(Some(RootClosure::Complete(_)))
+            )
+        })
+        .map(Arc::clone)
+        .ok_or("the turn's decision commit")?;
+    let terminal = commits
+        .iter()
+        .find(|checkpoint| {
+            checkpoint.manifest().topology().parent_checkpoint_id == Some(decision.id())
+        })
+        .map(Arc::clone)
+        .ok_or("the live consequence commit")?;
+    assert!(
+        matches!(
+            root_turn_closure_for_test(&terminal),
+            Ok(Some(RootClosure::Abandon { .. }))
+        ),
+        "the live consequence leaves the request to the RecoveryRequired row"
+    );
+    let mut closures = Vec::new();
+    for (label, cut) in [("decision", &decision), ("terminal", &terminal)] {
+        let source = rewind_to(&store, cut)?;
+        let DurableRuntimeOpen::Opened(reopened) = sessions
+            .open(&format!("open:recovery-required:{label}"), source, make())
+            .await?
+        else {
+            return Err(format!("{label}: the cut did not reopen").into());
+        };
+        let report = reopened
+            .abandoned_turn()
+            .cloned()
+            .ok_or_else(|| format!("{label}: the closure reported no abandonment"))?;
+        let recovered = reopened.checkpoint();
+        assert!(
+            matches!(
+                recovered.manifest().lifecycle(),
+                RuntimeLifecycle::Quiescent
+            ),
+            "{label}"
+        );
+        closures.push((
+            report,
+            recovered.manifest().canonical().history().identity(),
+        ));
+        reopened.shutdown().await?;
+    }
+    assert_eq!(
+        closures[0].0.claim(),
+        crate::runtime::AbandonedTurnClaim::ModelRequest
+    );
+    assert_eq!(
+        closures[0].0.cause(),
+        crate::runtime::AbandonmentCause::Interrupted
+    );
+    assert_eq!(closures[0], closures[1], "one closure from either cut");
+    assert_eq!(
+        model.calls.load(Ordering::Acquire),
+        1,
+        "recovery never redispatches"
+    );
+    Ok(())
 }

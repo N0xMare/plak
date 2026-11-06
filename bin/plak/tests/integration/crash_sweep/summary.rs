@@ -61,7 +61,8 @@ pub(super) fn outcome_allows_verdict(outcome: &str, verdict: &str) -> bool {
                 | "RecoversCommit"
                 | "OpensQuiescent"
         ),
-        "NOT_ADMITTED" | "REQUEUED" | "FENCED" => verdict == "OpensQuiescent",
+        "NOT_ADMITTED" | "REQUEUED" => verdict == "OpensQuiescent",
+        "FENCED" => matches!(verdict, "OpensQuiescent" | "RecoversSavedTerminal"),
         "REFUSED" => verdict == "Refused",
         _ => false,
     }
@@ -157,7 +158,7 @@ fn outcome_verdict_table_rejects_every_mismatch() {
         ),
         ("NOT_ADMITTED", &["OpensQuiescent"]),
         ("REQUEUED", &["OpensQuiescent"]),
-        ("FENCED", &["OpensQuiescent"]),
+        ("FENCED", &["OpensQuiescent", "RecoversSavedTerminal"]),
         ("REFUSED{scope}", &["Refused"]),
         ("unknown", &[]),
     ];

@@ -27,7 +27,7 @@ impl Table {
     pub fn write(&self, rows: &[Value]) {
         let mut jsonl = std::fs::File::create(self.directory.join("sweep.jsonl.tmp")).unwrap();
         let mut table = String::from(
-            "# Crash-Point Sweep\n\nTargets are exact per-store indexed ordinals; cross-store global order is informational.\n\nClasses: COMPLETED_ONCE (one published expected terminal: answer or capacity denial); ABANDONED{claim} (one honest interruption notice); REQUEUED (prompt restored to paused queue); FENCED (the shape's own root turn fenced once, closed in place before the cut, and its claim surfaced once); REFUSED{name} (typed exit 5, named signature); NOT_ADMITTED (no durable prompt, clean reopen and exactly one follow-up dispatch); HANDED_OFF (a durable planned-handoff row: the turn continues once by itself); NOT_HANDED_OFF (no durable handoff row: nothing continues by itself).\n",
+            "# Crash-Point Sweep\n\nTargets are exact per-store indexed ordinals; cross-store global order is informational.\n\nClasses: COMPLETED_ONCE (one published expected terminal: answer or capacity denial); ABANDONED{claim} (one honest interruption notice); REQUEUED (prompt restored to paused queue); FENCED (the shape's own root turn fenced once, closed in place before the cut or by the reopen that commits its recorded fence, and its claim surfaced once); REFUSED{name} (typed exit 5, named signature); NOT_ADMITTED (no durable prompt, clean reopen and exactly one follow-up dispatch); HANDED_OFF (a durable planned-handoff row: the turn continues once by itself); NOT_HANDED_OFF (no durable handoff row: nothing continues by itself).\n",
         );
         class_counts(&mut table, rows);
         refusal_tags(&mut table, rows);

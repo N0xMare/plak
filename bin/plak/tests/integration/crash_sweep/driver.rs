@@ -790,7 +790,10 @@ fn cut_after_kill(
 fn requeued_script(fixture: &Fixture, shape: &str) -> Value {
     let mut script: Value = serde_json::from_slice(&std::fs::read(fixture.script()).unwrap())
         .expect("post-setup configured original script");
-    if matches!(shape, "busy_quit_escalates" | "uncertain_mcp_tool") {
+    if matches!(
+        shape,
+        "busy_quit_escalates" | "uncertain_mcp_tool" | "node_fenced_turn"
+    ) {
         // Only the cut lifecycle is cancellation-deaf. A never-admitted original
         // resumes normally so its queued recovery can finish before the follow-up.
         script["steps"] = json!([{"output": {"text": shapes::ANSWER}}]);
@@ -1264,20 +1267,26 @@ fn classify_expected(
         shapes::ExpectedTerminal::Answer => completed_original_publications(recovered, baseline),
         shapes::ExpectedTerminal::CapacityDenied => expected.published(recovered),
     };
+    // The turn's one terminal is `RecoveryRequired`. Either the live host
+    // already closed it by recovering in place before the cut, so the reopen
+    // has nothing left to close, or the cut kept only its recorded
+    // outcome-unknown failure, and the reopen commits that terminal and closes
+    // the turn in one closure. Either way its claim is durable across the cut:
+    // the reopen surfaces it when the live host could not.
+    let fenced_before = before.runtime_verdict == "OpensQuiescent"
+        && before.fenced_turns.len() > baseline.fenced_turns.len();
+    let fenced_by_reopen = before.runtime_verdict == "RecoversSavedTerminal"
+        && before.fenced_turns.len() == baseline.fenced_turns.len()
+        && recovered.fenced_turns.len() > baseline.fenced_turns.len();
     let outcome = if published == 1 {
         "COMPLETED_ONCE".to_owned()
-    } else if before.runtime_verdict == "OpensQuiescent"
-        && before.fenced_turns.len() > baseline.fenced_turns.len()
-    {
-        // The turn's one terminal is `RecoveryRequired`, and the live host
-        // already closed it by recovering in place before the cut: the
-        // reopen has nothing left to close. Its claim is durable across the
-        // cut: the reopen surfaces it when the live host could not.
+    } else if fenced_before || fenced_by_reopen {
+        let fence = if fenced_before { before } else { recovered };
         assert!(!before.durable_answer, "lost durable answer via a fence");
-        let fenced = &before.fenced_turns[baseline.fenced_turns.len()..];
+        let fenced = &fence.fenced_turns[baseline.fenced_turns.len()..];
         assert_eq!(
             fenced,
-            own_root_turns(before, baseline),
+            own_root_turns(fence, baseline),
             "exactly one new fenced turn, the shape's own root turn"
         );
         let claim = expected
@@ -1399,6 +1408,24 @@ fn fenced_requires_the_own_root_turn_and_its_claim_once() {
         classify_expected(&before, &recovered, &baseline, &rehearsal, shape),
         "FENCED"
     );
+    // A cut that kept only the recorded failure: the reopen commits the
+    // fence and surfaces its claim once.
+    let recorded = summary::Summary {
+        runtime_verdict: "RecoversSavedTerminal".to_owned(),
+        fenced_turns: Vec::new(),
+        ..before.clone()
+    };
+    let saved = json!({"verdict": "RecoversSavedTerminal"});
+    assert_eq!(
+        classify_expected(&recorded, &recovered, &baseline, &saved, shape),
+        "FENCED"
+    );
+    let unclaimed = summary::Summary {
+        abandonment_claims: Vec::new(),
+        ..recovered.clone()
+    };
+    std::panic::catch_unwind(|| classify_expected(&recorded, &unclaimed, &baseline, &saved, shape))
+        .expect_err("a fence the reopen commits without its claim is a finding");
     let lost = summary::Summary {
         abandonment_claims: Vec::new(),
         ..recovered.clone()

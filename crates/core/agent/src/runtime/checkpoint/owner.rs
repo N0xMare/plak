@@ -21,8 +21,9 @@ use crate::runtime::cleanup::{combine_cleanup_results, contain_cleanup_panic};
 use crate::runtime::continuation::checkpoint_bundle_error;
 use crate::runtime::durable::DurableCodeCellAbandonmentDisposition;
 use crate::runtime::durable::turn_recovery::{
-    DecisionBarrier, RootClosure, abandonment_cause, recover_root_turn_publication,
-    verdict_closure_at, verdict_workflow_closure,
+    DecisionBarrier, RootClosure, abandoned_turn_claim, abandonment_cause,
+    recover_root_turn_publication, recovery_required_fold, verdict_closure_at,
+    verdict_workflow_closure,
 };
 use crate::runtime::durable::workflow_closure::{
     WorkflowClosureBranch, WorkflowClosureRuntime, publish_workflow_closure,
@@ -1252,6 +1253,20 @@ pub(in crate::runtime) fn root_closure_report(
     checkpoint: &RuntimeCheckpoint,
     closure: &RootClosure,
 ) -> Result<Option<crate::runtime::AbandonedTurnReport>, AgentError> {
+    let finished;
+    let closure = match closure {
+        RootClosure::Complete(terminal) => {
+            let Some(fold) = recovery_required_fold(checkpoint, terminal)? else {
+                return Ok(None);
+            };
+            finished = RootClosure::Abandon {
+                claim: abandoned_turn_claim(&fold),
+                fold,
+            };
+            &finished
+        }
+        closure => closure,
+    };
     let (turn_id, mut abandoned, mut effects, claim, cause, completed_tool_round) = match closure {
         RootClosure::Abandon { fold, claim } => (
             fold.turn_id,

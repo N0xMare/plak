@@ -148,6 +148,7 @@ impl Shape {
     pub(super) fn fenced_claim(&self) -> Option<&'static str> {
         match self.name {
             "uncertain_mcp_tool" => Some("running_tool"),
+            "node_fenced_turn" => Some("model_request"),
             _ => None,
         }
     }
@@ -278,6 +279,16 @@ pub(super) const REGISTRY: &[Shape] = &[
         setup: no_setup,
         lifecycle: lineage::parked_lifecycle,
         assert_live: lineage::assert_parked,
+    },
+    Shape {
+        name: "node_fenced_turn",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: recovery::fenced_script,
+        configure: recovery::configure_fenced,
+        setup: no_setup,
+        lifecycle: recovery::fenced_lifecycle,
+        assert_live: recovery::assert_fenced,
     },
     Shape {
         name: "node_fenced_turn_child",
@@ -570,6 +581,7 @@ pub(super) fn expects_live_failure(shape: &str) -> bool {
         "uncertain_mcp_tool"
             | "busy_quit_escalates"
             | "capacity_overflow"
+            | "node_fenced_turn"
             | "root_transient_resume_cut"
     )
 }

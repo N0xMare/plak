@@ -516,26 +516,11 @@ fn abandonment_closure_state(
         }
     }
     let facts = closure_facts(source, &fold, claim, abandonment_cause(&fold))?;
-    let segment = abandonment_rows::abandonment_segment(&facts)?;
-    let segment = if controls::has_unapplied_steering(&ledger, fold.turn_id) {
-        let [ContentBlock::Text(text)] = segment.items()[0].blocks() else {
-            return Err(AgentError::from_store(SessionStoreError::corrupt()));
-        };
-        abandoned_turn_segment_with_note(
-            fold.turn_id,
-            &format!(
-                "{} Queued steering was not applied and is not retried.",
-                text.text()
-            ),
-        )?
-    } else {
-        segment
-    };
     let history = source_manifest
         .canonical()
         .history()
         .clone()
-        .append(segment)
+        .append(abandonment_note(&facts, &ledger)?)
         .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
     let ledger = abandonment_rows::close_uncertain_operations(ledger, &fold, checkpoint_id)?;
     let ledger = abandonment_rows::finalize_retained_operations(
@@ -555,14 +540,117 @@ fn abandonment_closure_state(
     })
 }
 
+/// The closure's one note, which names queued steering the closed turn never
+/// applied. `ledger` has the turn's controls settled.
+fn abandonment_note(
+    facts: &ClosureFacts<'_>,
+    ledger: &RuntimeOperationLedger,
+) -> Result<HistorySegment, AgentError> {
+    let segment = abandonment_rows::abandonment_segment(facts)?;
+    if !controls::has_unapplied_steering(ledger, facts.fold.turn_id) {
+        return Ok(segment);
+    }
+    let [ContentBlock::Text(text)] = segment.items()[0].blocks() else {
+        return Err(AgentError::from_store(SessionStoreError::corrupt()));
+    };
+    abandoned_turn_segment_with_note(
+        facts.fold.turn_id,
+        &format!(
+            "{} Queued steering was not applied and is not retried.",
+            text.text()
+        ),
+    )
+}
+
+/// The `Finalized RecoveryRequired` fold a finish carries (spec 01 §5.5).
+///
+/// A finish whose recorded failure is outcome-unknown commits a
+/// `RecoveryRequired` terminal. Live, that consequence finalizes only the root
+/// and its controls and leaves the turn's other records to the next owner's
+/// `Finalized RecoveryRequired` row. A finish closes those records in its own
+/// commit, so it applies that row too: the same note, claim and report a reopen
+/// of the live consequence commit publishes.
+pub(in crate::runtime) fn recovery_required_fold(
+    source: &RuntimeCheckpoint,
+    terminal: &LocalTerminalRecoveryFold,
+) -> Result<Option<AbandonedTurnRecoveryFold>, AgentError> {
+    let Some((root, evidence)) = &terminal.synthesized else {
+        return Ok(None);
+    };
+    let pending = decode_pending_terminal_record(evidence.bytes())
+        .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
+    if !matches!(pending.outcome, DurableTerminalOutcome::RecoveryRequired(_)) {
+        return Ok(None);
+    }
+    let ledger = source.manifest().ledger();
+    let mut provider_operations = Vec::new();
+    let mut process_operations = Vec::new();
+    let mut settled_operations = Vec::new();
+    for operation in terminal
+        .operations
+        .iter()
+        .filter(|operation| *operation != root)
+    {
+        let record = ledger
+            .operation(operation.0)
+            .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
+        let uncertain = uncertain_process_state(record.state())
+            && !controls::same_turn_control(ledger, record, terminal.turn_id);
+        match record.kind() {
+            DurableOperationKind::Provider { .. } if uncertain => {
+                provider_operations.push(*operation);
+            }
+            DurableOperationKind::ProcessSession { .. } if uncertain => {
+                process_operations.push(*operation);
+            }
+            _ => settled_operations.push(*operation),
+        }
+    }
+    Ok(Some(AbandonedTurnRecoveryFold {
+        turn_id: terminal.turn_id,
+        command_id: terminal.command_id.clone(),
+        root_operation: *root,
+        provider_operations,
+        settled_operations,
+        uncommitted_effect_operations: Vec::new(),
+        effect_operations: Vec::new(),
+        unrun_effect_operations: Vec::new(),
+        process_operations,
+        compaction_operations: Vec::new(),
+        root: AbandonedRoot::AlreadyTerminal,
+        tool_round_completed: false,
+        closed_continuation: None,
+        barrier_cause: None,
+    }))
+}
+
+/// The note a finish's `Finalized RecoveryRequired` fold appends, worded as
+/// the abandonment closure words it over a ledger whose controls settled.
+fn recovery_required_note(
+    source: &RuntimeCheckpoint,
+    ledger: &RuntimeOperationLedger,
+    fold: &AbandonedTurnRecoveryFold,
+) -> Result<HistorySegment, AgentError> {
+    let facts = ClosureFacts {
+        source,
+        fold,
+        claim: abandoned_turn_claim(fold),
+        cause: abandonment_cause(fold),
+        row: None,
+        completed_effect_only: false,
+    };
+    abandonment_note(&facts, ledger)
+}
+
 fn terminal_closure_state(
     source: &RuntimeCheckpoint,
     fold: LocalTerminalRecoveryFold,
     code_cell: bool,
     checkpoint_id: CheckpointId,
 ) -> Result<RootClosureState, AgentError> {
+    let abandoned = recovery_required_fold(source, &fold)?;
     let source_manifest = source.manifest();
-    let (mut history, mut ledger) = if code_cell {
+    let (mut history, ledger) = if code_cell {
         let identity = reopen_code_cell_abandonment_identity(source)?;
         let (history, ledger, _) = code_cell_abandonment_state(source, identity, checkpoint_id)?;
         (history, ledger)
@@ -591,13 +679,14 @@ fn terminal_closure_state(
             .append(tail)
             .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
     }
-    for operation in &fold.operations {
-        if let Some(record) = ledger.operation(operation.0)
-            && controls::same_turn_control(&ledger, record, fold.turn_id)
-        {
-            ledger = controls::settle_control(&ledger, record, checkpoint_id)?;
-            continue;
-        }
+    let (mut ledger, operations) =
+        settle_turn_controls(ledger, &fold.operations, fold.turn_id, checkpoint_id)?;
+    if let Some(abandoned) = &abandoned {
+        history = history
+            .append(recovery_required_note(source, &ledger, abandoned)?)
+            .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
+    }
+    for operation in &operations {
         if let Some(record) = ledger.operation(operation.0)
             && matches!(record.kind(), DurableOperationKind::ProcessSession { .. })
             && uncertain_process_state(record.state())
@@ -654,6 +743,25 @@ fn terminal_closure_state(
         command_id: fold.command_id,
         family_artifact: fold.family_artifact,
     })
+}
+
+/// Settles the turn's controls among `operations`, returning the others.
+fn settle_turn_controls(
+    mut ledger: RuntimeOperationLedger,
+    operations: &[OperationId],
+    turn_id: TurnId,
+    checkpoint_id: CheckpointId,
+) -> Result<(RuntimeOperationLedger, Vec<OperationId>), AgentError> {
+    let mut others = Vec::with_capacity(operations.len());
+    for operation in operations {
+        match ledger.operation(operation.0) {
+            Some(record) if controls::same_turn_control(&ledger, record, turn_id) => {
+                ledger = controls::settle_control(&ledger, record, checkpoint_id)?;
+            }
+            _ => others.push(*operation),
+        }
+    }
+    Ok((ledger, others))
 }
 
 struct RootClosureState {

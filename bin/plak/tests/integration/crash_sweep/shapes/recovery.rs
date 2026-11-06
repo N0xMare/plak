@@ -1,7 +1,10 @@
 //! Root fences, a transient continuation, and custody of a dead holder.
 //!
-//! `node_fenced_turn_child` fences a product child with an in-band outcome
-//! nobody can observe. Eager
+//! `node_fenced_turn` fences the root with an in-band outcome nobody can
+//! observe. The live host recovers that turn in place; quit waits until the
+//! `recovered` record, because a quit already deferred at idle skips it.
+//!
+//! `node_fenced_turn_child` is the same fault on a product child. Eager
 //! in-place recovery is root-only, so the child may stay `recovery_required`.
 //! It is not dropped, and it is not dispatched again.
 //!
@@ -29,6 +32,58 @@ pub(super) fn fenced_script() -> Value {
             {"output": {"text": ANSWER}}
         ]
     })
+}
+
+pub(super) fn configure_fenced(_: &Fixture) {}
+
+fn script_still_fences(fixture: &Fixture) -> bool {
+    std::fs::read_to_string(fixture.script())
+        .unwrap_or_default()
+        .contains("outcome_unknown")
+}
+
+pub(super) fn fenced_lifecycle(
+    fixture: &Fixture,
+    records: &[Value],
+    state: &mut Lifecycle,
+) -> Option<Value> {
+    if !state.sent && records.iter().any(|row| row["kind"] == "ready") {
+        state.sent = true;
+        return Some(prompt_frame("crash-sweep-original-prompt"));
+    }
+    if state.sent && !state.quit && records.iter().any(|row| row["kind"] == "recovered") {
+        state.quit = true;
+        return Some(quit_frame());
+    }
+    // A requeued original is rewritten to a plain answer, which never emits
+    // `recovered`. The live script still carries the fault, so this idle
+    // quit cannot skip the in-place reopen.
+    if state.sent
+        && !state.quit
+        && !script_still_fences(fixture)
+        && super::face_idle_after(records, |row| row["kind"] == "assistant_done")
+    {
+        state.quit = true;
+        return Some(quit_frame());
+    }
+    None
+}
+
+pub(super) fn assert_fenced(_: &Fixture, outcome: &AgentOutcome, state: &summary::Summary) {
+    let recovered = outcome
+        .records()
+        .into_iter()
+        .find(|row| row["kind"] == "recovered")
+        .expect("the live host recovered the fenced root");
+    assert_eq!(recovered["claim"], "model_request");
+    assert!(
+        outcome
+            .records()
+            .iter()
+            .any(|row| row["kind"] == "turn_lifecycle" && row["phase"] == "recovery_required")
+    );
+    assert!(!state.fenced_turns.is_empty(), "the fence is durable");
+    let _ = outcome;
 }
 
 const CHILD_SCRIPT: &str = "child-script.json";
