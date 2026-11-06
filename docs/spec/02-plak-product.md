@@ -3963,7 +3963,11 @@ verdicts) are addressed, the session profile and workspace chrome states.
   stopped; any face may send it, remote ones included (chapter 04 §2.10).
   A host serves it only for a session it serves (any other is refused
   `unknown_session`), one in flight per connection (`one_in_flight`), and
-  logs each with the connection's face and login. The stop enters the
+  logs each with the connection's face and login. A host of many sessions
+  serves it for the session the connection's node attachment is in, through
+  that attachment's own session connection; one of its other sessions is
+  refused `unsupported` (attach it first), and one it does not know is
+  `unknown_session`. The stop enters the
   session's mailbox in arrival order. A running root turn takes it at
   once, and a workflow observes it as it observes the operator's
   interrupt, leaving the rest of the stop until the workflow ends. Either

@@ -147,7 +147,8 @@ an export.
   a held loss under `resume_after_loss = "continue"`), so it continues with
   no client attached. `release_session` detaches every attachment of a
   session and releases it now unless something else keeps it resident, so a
-  desk TUI can take it. A session another live process holds (its tree's
+  desk TUI can take it. `stop_session` stops the session the connection
+  is attached to, as on a connection that serves one session. A session another live process holds (its tree's
   custody, or its runtime lease's holder record for any session) is named in
   its row, and its attach is refused `tree_hosted_elsewhere` naming that
   process; a working face whose open is refused for a lease another live

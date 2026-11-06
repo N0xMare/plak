@@ -528,9 +528,26 @@ where
                 Err(refusal) => refused(refusal),
             },
             Op::ReleaseSession { session } => answered(self.release(&session)?),
-            op @ Op::StopSession { .. } => refused(RequestRefusal::Unsupported {
-                detail: format!("{} is not available on this host yet", op.name()),
-            }),
+            Op::StopSession { session } => {
+                // The attached session's own connection stops it, as a
+                // connection that serves one session does.
+                if self
+                    .node
+                    .as_ref()
+                    .is_some_and(|link| link.session.session_id() == session)
+                {
+                    return self.forward(text.to_owned()).map(Forwarded::Reading);
+                }
+                refused(if self.knows(&session) {
+                    RequestRefusal::Unsupported {
+                        detail: "stop_session stops the session this connection is attached \
+                                 to; attach it first"
+                            .to_owned(),
+                    }
+                } else {
+                    RequestRefusal::UnknownSession
+                })
+            }
             Op::Attach { node } => self.attach(&node, text),
             Op::Detach { .. }
             | Op::Intent { .. }
@@ -610,6 +627,17 @@ where
     /// # Errors
     ///
     /// A lost output.
+    /// Whether `session` is one of this host's: a slot holds it, or the
+    /// directory lists it.
+    fn knows(&self, session: &str) -> bool {
+        self.host.lock().iter().any(|slot| slot.known() == session)
+            || self
+                .host
+                .sessions
+                .rows(None)
+                .is_ok_and(|rows| rows.iter().any(|row| row.session == session))
+    }
+
     fn release(&mut self, session: &str) -> CliResult<Outcome> {
         let resident = self.host.lock().iter().find_map(|slot| match slot.peek() {
             SlotView::Resident(served) if served.session_id() == session => {
@@ -618,13 +646,7 @@ where
             _ => None,
         });
         let Some((slot, served)) = resident else {
-            let known = self.host.lock().iter().any(|slot| slot.known() == session)
-                || self
-                    .host
-                    .sessions
-                    .rows(None)
-                    .is_ok_and(|rows| rows.iter().any(|row| row.session == session));
-            return Ok(if known {
+            return Ok(if self.knows(session) {
                 Outcome::Ok(Answer::Released)
             } else {
                 Outcome::Refused(RequestRefusal::UnknownSession)

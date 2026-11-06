@@ -133,6 +133,9 @@ impl HostSessions<Core> for Fake {
                 match intents.recv_timeout(Duration::from_millis(10)) {
                     Ok(delivery) => match &*delivery {
                         SessionIntent::Quit => break,
+                        SessionIntent::StopSession { ticket } => {
+                            intents.settle_stop(*ticket, Ok(()));
+                        }
                         SessionIntent::Prompt(draft) => {
                             script
                                 .images
@@ -726,29 +729,6 @@ fn release_session_answers_resident_and_withdraws_when_nothing_releases() {
     handed_off(&host);
 }
 
-/// The requests this host does not do yet are refused unsupported, naming
-/// the op.
-#[test]
-fn stop_is_refused_unsupported_for_now() {
-    let (host, _) = host(&["s1"]);
-    let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
-    request(
-        &mut connection,
-        1,
-        Op::StopSession {
-            session: "s1".into(),
-        },
-    );
-    let frames = out.take();
-    assert_eq!(
-        outcome(&frames, 1),
-        Outcome::Refused(RequestRefusal::Unsupported {
-            detail: "stop_session is not available on this host yet".into()
-        })
-    );
-}
-
 /// A bye, a second hello or a line that is not a frame is the client
 /// leaving: its node attachment detaches and its host attachment closes.
 #[test]
@@ -922,6 +902,51 @@ fn a_session_awaiting_an_approval_reads_awaiting_operator() {
     }
     connection.leave();
     handed_off(&host);
+}
+
+/// `stop_session` of the attached session is its own connection's, answered
+/// once the stop is durable; one this connection is not attached to is
+/// refused, and one the host does not know is `unknown_session`.
+#[test]
+fn stop_session_stops_the_attached_session() {
+    let (host, _fake) = host(&["s1", "s2"]);
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let stop = |session: &str| Op::StopSession {
+        session: session.into(),
+    };
+    request(&mut connection, 1, stop("s1"));
+    assert_eq!(
+        outcome(&out.take(), 1),
+        Outcome::Refused(RequestRefusal::Unsupported {
+            detail: "stop_session stops the session this connection is attached to; attach it \
+                     first"
+                .into()
+        })
+    );
+    request(&mut connection, 2, stop("nope"));
+    assert_eq!(
+        outcome(&out.take(), 2),
+        Outcome::Refused(RequestRefusal::UnknownSession)
+    );
+    request(&mut connection, 3, Op::Attach { node: node("s1") });
+    attached(&out.take(), 3);
+    request(&mut connection, 4, stop("s1"));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut frames = Vec::new();
+    loop {
+        connection.flush().unwrap();
+        frames.extend(out.take());
+        if frames
+            .iter()
+            .any(|frame| matches!(frame, HostFrame::Response { id: 4, .. }))
+        {
+            break;
+        }
+        assert!(Instant::now() < deadline, "the stop was never answered");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(outcome(&frames, 4), Outcome::Ok(Answer::Stopped));
 }
 
 /// A session resident here is held by this host, whatever the directory's
