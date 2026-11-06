@@ -548,6 +548,8 @@ pub(crate) struct App {
     /// Background intents the session did not take, each armed again when
     /// its instant comes ([`unsent`]).
     rearms: Vec<(Instant, UserAction)>,
+    /// Per-kind wait until the next of those intents is armed again.
+    rearm_backoff: unsent::RearmBackoff,
     /// `/reload` was accepted; the loop starts the installed-build probe.
     pending_reload: bool,
     /// The running installed-build probe; the loop hands off when it answers.
@@ -935,6 +937,7 @@ impl App {
             next_build_check: Instant::now(),
             build_check_sent: None,
             rearms: Vec::new(),
+            rearm_backoff: unsent::RearmBackoff::new(),
             pending_reload: false,
             reload_probe: None,
             reload_probe_answer: None,

@@ -228,6 +228,16 @@ impl App {
         if self.tree_navigator.is_none() {
             self.tree_navigator = Some(crate::tui::TreeNavigator::awaiting());
         }
+        // A label refresh of the agent already showing is not a reopen.
+        // Opening or switching is: a refusal of the previous view does not
+        // delay this one.
+        if self
+            .agent_view
+            .as_ref()
+            .is_none_or(|view| view.agent_id != agent_id)
+        {
+            self.reset_rearm(super::unsent::RearmReset::AgentTranscript);
+        }
         match self.agent_view.as_mut() {
             Some(view) if view.agent_id == agent_id => {
                 view.label = label;
@@ -269,6 +279,8 @@ impl App {
         let Some(view) = self.agent_view.take() else {
             return false;
         };
+        // Closing is the state change that ends a refused open's backoff.
+        self.reset_rearm(super::unsent::RearmReset::AgentTranscript);
         if !view.root_in_front {
             self.pane = view.hidden;
         }

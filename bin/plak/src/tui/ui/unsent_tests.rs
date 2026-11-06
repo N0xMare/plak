@@ -161,3 +161,115 @@ fn background_intents_are_armed_again_silently_after_a_pause() {
     assert!(app.next_rearm().is_none());
     assert_eq!(error_rows(&app), 0);
 }
+
+fn refuse(app: &mut App, action: UserAction) {
+    app.unsent_action(super::unsent::Unsent::Refused(
+        UserActionSendError::Saturated(action),
+    ));
+}
+
+fn rearm_wait(app: &App) -> Duration {
+    app.next_rearm()
+        .expect("a background intent is waiting to be armed again")
+        .saturating_duration_since(app.now())
+}
+
+/// A refused background intent waits 1s, then 2s, 4s, 8s, 16s and 30s.
+/// Another kind keeps its own wait. Success cancels a pending retry and
+/// starts that kind over. A draft the session refused is not part of this.
+#[test]
+fn background_rearm_doubles_to_thirty_seconds_and_resets_when_it_succeeds() {
+    let mut app = App::new(launch_basic(), true);
+    super::test_support::pin_clock(&mut app);
+    app.next_build_check = app.now() + Duration::from_secs(3_600);
+
+    refuse(&mut app, UserAction::Prompt("keep".into()));
+    assert!(app.next_rearm().is_none());
+    assert!(app.input.contains("keep"));
+    app.input.clear();
+
+    let chrome = UserAction::Extension(SurfaceIntent::RefreshComposerChrome);
+    for secs in [1_u64, 2, 4, 8, 16, 30, 30] {
+        app.composer_chrome.refresh_pending = false;
+        refuse(&mut app, chrome.clone());
+        assert_eq!(rearm_wait(&app), Duration::from_secs(secs), "{secs}");
+        assert_eq!(
+            app.next_deadline(app.now()),
+            Some(Duration::from_secs(secs)),
+            "{secs}"
+        );
+        super::test_support::pass_time(&mut app, secs * 1_000);
+        app.rearm_due(app.now());
+        assert!(app.next_rearm().is_none(), "{secs}");
+    }
+
+    // A different kind is not stuck on the chrome wait.
+    let usage = UserAction::Extension(SurfaceIntent::RereadUsage);
+    refuse(&mut app, usage);
+    assert_eq!(rearm_wait(&app), Duration::from_secs(1));
+    super::test_support::pass_time(&mut app, 1_000);
+    app.rearm_due(app.now());
+
+    refuse(&mut app, chrome.clone());
+    assert_eq!(rearm_wait(&app), Duration::from_secs(30));
+    app.apply_host_event(crate::tui::HostEvent::Extension(
+        crate::tui::SurfaceObservation::WorkspaceChrome(crate::tui::WorkspaceChrome::default()),
+    ));
+    assert!(app.next_rearm().is_none());
+    refuse(&mut app, chrome);
+    assert_eq!(rearm_wait(&app), Duration::from_secs(1));
+
+    let build = UserAction::Extension(SurfaceIntent::CheckBuild);
+    refuse(&mut app, build.clone());
+    super::test_support::pass_time(&mut app, 1_000);
+    app.rearm_due(app.now());
+    refuse(&mut app, build);
+    assert_eq!(rearm_wait(&app), Duration::from_secs(2));
+    app.apply_host_event(crate::tui::HostEvent::Extension(
+        crate::tui::SurfaceObservation::BuildStatus {
+            newer_installed: false,
+        },
+    ));
+    assert!(app.next_rearm().is_none());
+    refuse(&mut app, UserAction::Extension(SurfaceIntent::CheckBuild));
+    assert_eq!(rearm_wait(&app), Duration::from_secs(1));
+}
+
+/// Closing or switching an agent view drops a refused open's wait. Renaming
+/// the view that is already open does not.
+#[test]
+fn closing_or_reopening_an_agent_view_resets_its_rearm_backoff() {
+    let mut app = App::new(launch_basic(), true);
+    super::test_support::pin_clock(&mut app);
+    app.open_agent_view("a1".into(), "one".into());
+
+    let open = || UserAction::OpenAgentTranscript {
+        agent_id: "a1".into(),
+    };
+    for secs in [1_u64, 2] {
+        refuse(&mut app, open());
+        assert_eq!(rearm_wait(&app), Duration::from_secs(secs));
+        super::test_support::pass_time(&mut app, secs * 1_000);
+        app.rearm_due(app.now());
+    }
+    app.open_agent_view("a1".into(), "renamed".into());
+    refuse(&mut app, open());
+    assert_eq!(rearm_wait(&app), Duration::from_secs(4));
+    assert!(app.close_agent_view());
+    assert!(app.next_rearm().is_none());
+    refuse(&mut app, open());
+    assert_eq!(rearm_wait(&app), Duration::from_secs(1));
+    super::test_support::pass_time(&mut app, 1_000);
+    app.rearm_due(app.now());
+
+    app.open_agent_view("a1".into(), "one".into());
+    refuse(&mut app, open());
+    super::test_support::pass_time(&mut app, 1_000);
+    app.rearm_due(app.now());
+    refuse(&mut app, open());
+    assert_eq!(rearm_wait(&app), Duration::from_secs(2));
+    app.open_agent_view("a2".into(), "two".into());
+    assert!(app.next_rearm().is_none());
+    refuse(&mut app, open());
+    assert_eq!(rearm_wait(&app), Duration::from_secs(1));
+}

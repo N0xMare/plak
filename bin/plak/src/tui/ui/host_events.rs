@@ -374,6 +374,13 @@ impl App {
                     self.mark_transcript_replaced();
                     return;
                 }
+                if matches!(
+                    scope,
+                    plakous_host_protocol::views::transcript::TranscriptScope::Agent(_)
+                ) {
+                    // The host served the agent transcript: the open landed.
+                    self.reset_rearm(super::unsent::RearmReset::AgentTranscript);
+                }
                 self.presentation_replaced();
                 self.install_keyed_transcript(snapshot.items, true, keep_local, namespace);
             }
@@ -987,6 +994,7 @@ impl App {
                 self.mark_dirty();
             }
             HostEvent::Extension(SurfaceObservation::UsageRefreshAccounts(accounts)) => {
+                self.reset_rearm(super::unsent::RearmReset::RereadUsage);
                 self.usage_refresh.accounts = accounts;
                 self.usage_refresh.focus = self
                     .usage_refresh
@@ -1014,6 +1022,7 @@ impl App {
             }
             HostEvent::Extension(SurfaceObservation::WorkspaceChrome(label)) => {
                 self.workspace_chrome = label;
+                self.reset_rearm(super::unsent::RearmReset::ComposerChrome);
                 self.mark_dirty();
             }
             HostEvent::Extension(SurfaceObservation::McpOverview(body)) => {

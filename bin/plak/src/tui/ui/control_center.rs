@@ -276,7 +276,11 @@ impl App {
     }
 
     pub(super) fn activate_control_tab(&mut self, tab: ControlTab) -> Option<UserAction> {
+        let usage_was_open = self.control_tab == Some(ControlTab::Usage);
         self.control_tab = Some(tab);
+        if usage_was_open != (tab == ControlTab::Usage) {
+            self.reset_rearm(super::unsent::RearmReset::WatchUsage);
+        }
         self.last_control_tab = tab;
         if tab == ControlTab::Keybinds {
             self.keybinds_full = false;
@@ -391,8 +395,12 @@ impl App {
     }
 
     pub(super) fn close_control_center(&mut self) {
+        let usage_was_open = self.control_tab == Some(ControlTab::Usage);
         self.theme = theme_for(self.persisted_theme);
         self.control_tab = None;
+        if usage_was_open {
+            self.reset_rearm(super::unsent::RearmReset::WatchUsage);
+        }
         self.scrollbar_drag = None;
         self.pending_open_settings = false;
         self.pending_open_usage = false;

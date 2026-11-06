@@ -4243,13 +4243,18 @@ verdicts) are addressed, the session profile and workspace chrome states.
   and the session may still run it. A refused reload check ends as failed.
   Every other intent is the TUI's own background work (a resync, the build
   check, the composer chrome, an agent view, a reload answer): it paints
-  nothing and is armed again a second later, so its own sender sends it
-  again; an agent view the session would not open is no longer counted as
-  served. What the TUI has not taken waits in the client under the session
-  mailbox's own rules (a state supersedes its older value, deltas coalesce,
-  and only what a later baseline repays is dropped, its transcript read as
-  lost until that baseline); an observation the client can neither hold nor
-  drop is an overflow, and the client attaches again. Every byte between the
+  nothing and is armed again after one second. Each further refusal of that
+  same kind waits twice as long, up to 30 seconds, and then its own sender
+  sends it again. The wait returns to one second when that kind succeeds or
+  the state it serves changes. An agent view the session would not open is
+  no longer counted as served, and closing or reopening the view starts its
+  wait over. A draft, a queued edit and a `/new` the session did not take
+  still come back at once. What the TUI has not taken waits in the client
+  under the session mailbox's own rules (a state supersedes its older
+  value, deltas coalesce, and only what a later baseline repays is dropped,
+  its transcript read as lost until that baseline); an observation the
+  client can neither hold nor drop is an overflow, and the client attaches
+  again. Every byte between the
   TUI and its session is a frame, apart from two process-local signals of
   the supervisor, each with its reason. Abandon-and-release (and its
   planned-handoff form for a reload) is a flag on the session's mailbox, not

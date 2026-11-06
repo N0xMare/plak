@@ -71,6 +71,8 @@ impl App {
         if self.agent_acks.asked.as_deref() == Some(tree_id) {
             self.agent_acks.asked = None;
             self.agent_acks.retry = Some(tree_id.to_owned());
+            // The host took the ask and answered that it could not read.
+            self.reset_rearm(super::unsent::RearmReset::AgentAcknowledgements);
         }
     }
 
@@ -85,6 +87,7 @@ impl App {
             self.agent_acks.asked = None;
             self.agent_acks.retry = None;
             self.agent_acks.request = Some(tree_id);
+            self.reset_rearm(super::unsent::RearmReset::AgentAcknowledgements);
         }
     }
 
@@ -94,6 +97,7 @@ impl App {
         tree_id: String,
         attempts: Vec<crate::tui::AgentAcknowledgement>,
     ) {
+        self.reset_rearm(super::unsent::RearmReset::AgentAcknowledgements);
         let attempts: std::collections::BTreeSet<_> = attempts.into_iter().collect();
         if let Some(nav) = self.tree_navigator.as_mut() {
             nav.set_acknowledged(&tree_id, &attempts);

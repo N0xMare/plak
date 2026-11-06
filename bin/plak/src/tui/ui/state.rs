@@ -59,6 +59,7 @@ impl App {
     /// The host's answer to the build check.
     pub(super) fn apply_build_status(&mut self, newer_installed: bool) {
         self.build_check_sent = None;
+        self.reset_rearm(super::unsent::RearmReset::CheckBuild);
         if newer_installed != self.newer_build_installed {
             self.newer_build_installed = newer_installed;
             self.mark_dirty();

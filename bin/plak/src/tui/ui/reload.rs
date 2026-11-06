@@ -230,6 +230,7 @@ impl App {
             .accepts
             .push(request.request_id.clone());
         self.reload_requests.pending = Some(request);
+        self.reset_rearm(super::unsent::RearmReset::ReloadAnswer);
     }
 
     /// The reload requests this face took and has not run or settled.
@@ -247,6 +248,7 @@ impl App {
     /// it switched (spec 02 §5.1).
     pub(super) fn drop_reload_requests_of_other_sessions(&mut self, session: &str) {
         let requests = &mut self.reload_requests;
+        let mut dropped = false;
         let mut dropped_active = false;
         for (slot, active) in [(&mut requests.pending, false), (&mut requests.active, true)] {
             if let Some(request) = slot.take_if(|request| request.session_id != session) {
@@ -258,8 +260,12 @@ impl App {
                 requests
                     .accepts
                     .retain(|accepted| *accepted != request.request_id);
+                dropped = true;
                 dropped_active |= active;
             }
+        }
+        if dropped {
+            self.reset_rearm(super::unsent::RearmReset::ReloadAnswer);
         }
         // A reload the dropped request asked for and that has not started
         // does not start; one already probing is refused when it lands,
