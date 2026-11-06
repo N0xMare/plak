@@ -598,6 +598,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
                     super::RootRecovery::Clear
                 },
                 recovered_at_open: abandoned_turn.is_some(),
+                handoff_root_due: false,
                 held_usage,
                 session_ledger,
                 pending_usage,

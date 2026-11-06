@@ -44,6 +44,11 @@ use crate::{product_agent, product_config, product_host, product_paths};
 /// The exact model id this hook answers to.
 pub(crate) const SELECTOR: &str = "offline-loopback-v1";
 
+#[allow(dead_code, reason = "headless builds do not start hosts")]
+pub(crate) fn runner_detached() -> bool {
+    crate::environment::test_runner_detached()
+}
+
 pub(crate) fn storage_capacity_override() -> Option<plakous_hosted::session_store::StorageAdmission>
 {
     use plakous_hosted::session_store::StorageAdmission;

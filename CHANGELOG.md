@@ -157,6 +157,9 @@ an export.
   re-adopts their lines before recovering its journal, and recorded stops
   finish before it serves. Starts carry that host's captured login-shell
   PATH and HOME; files, bindings and embedded-mode exit behavior are unchanged.
+  Daemon teardown races do not strand startup, including an obsolete daemon
+  closing before its inspection Hello. An idle handoff does not revive a
+  cancelled turn from a previous host.
 
 - The TUI moves a focus marker through transcript items with `Alt+Up` and
   `Alt+Down` (then `Up` and `Down`). `Enter` or `Space` folds the focused

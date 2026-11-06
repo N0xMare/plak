@@ -92,7 +92,7 @@ impl Fixture {
         .unwrap();
         let sessions = Arc::new(RunnerSessions::new(&link.backend, &env, owner(1)));
         let script = format!(
-            "echo $$ > '{}'; while [ ! -f '{}' ]; do sleep 0.01; done",
+            "echo $$ > '{}'; n=0; while [ ! -f '{}' ]; do [ \"$n\" -lt 3000 ] || exit 1; n=$((n + 1)); sleep 0.01; done",
             self.marker().display(),
             self.root.path().join("release").display()
         );

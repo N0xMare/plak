@@ -35,7 +35,7 @@ pub(super) fn configure(fixture: &Fixture) {
             let command = command.replace("RUNNER_JOB_MARKER", &quoted).replace(
                 "read line",
                 &format!(
-                    "while [ ! -e {} ]; do sleep 1; done",
+                    "n=0; while [ ! -e {} ]; do [ \"$n\" -lt 300 ] || exit 1; n=$((n + 1)); sleep 1; done",
                     fixture.root.join("host-job-release").display()
                 ),
             );
@@ -148,7 +148,17 @@ pub(in super::super) fn after_kill(
     let mut followup = script();
     followup["steps"] = json!([{"output": {"text": FOLLOWUP}, "finish": "stop"}]);
     fixture.write_script(&followup);
-    let first = crate::host_skeleton::sweep::recover(fixture, session, FOLLOWUP);
+    let unknown_jobs = if shape == "runner_restart_unknown_host" {
+        before
+            .jobs
+            .iter()
+            .filter(|job| job["terminal"] == false)
+            .map(|job| u32::try_from(job["number"].as_u64().unwrap()).unwrap())
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let first = crate::host_skeleton::sweep::recover(fixture, session, FOLLOWUP, &unknown_jobs);
     let after = summary::read_converged(fixture);
     assert!(starts(fixture) <= 1, "recovery started the job again");
     if shape == "host_crash_mid_stop" {
@@ -184,7 +194,7 @@ pub(in super::super) fn after_kill(
         once <= dispatches + 1,
         "recovery dispatched more than one continuation"
     );
-    crate::host_skeleton::sweep::recover(fixture, session, FOLLOWUP);
+    crate::host_skeleton::sweep::recover(fixture, session, FOLLOWUP, &[]);
     assert_eq!(
         invariants::dispatches(fixture).len(),
         once,

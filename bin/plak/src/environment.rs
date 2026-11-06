@@ -1,5 +1,15 @@
 //! Process-local product handoff markers, never session authority.
 
+#[allow(dead_code, reason = "only the web host starts a separate runner")]
+pub(crate) fn service_managed() -> bool {
+    std::env::var_os("INVOCATION_ID").is_some()
+}
+
+#[allow(dead_code, reason = "only gate builds select detached runner fixtures")]
+pub(crate) fn test_runner_detached() -> bool {
+    std::env::var_os("PLAK_TEST_RUNNER_DETACHED").as_deref() == Some(std::ffi::OsStr::new("1"))
+}
+
 /// This process's `PATH`, when set and valid text.
 pub(crate) fn inherited_path() -> Option<String> {
     std::env::var_os("PATH").and_then(|value| value.into_string().ok())

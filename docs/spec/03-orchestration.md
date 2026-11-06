@@ -3970,7 +3970,10 @@ therefore stops even when no child runtime is materialized. A later root
 admission ends an old root stop, and a stop never follows an old product
 record onto a successor head. Terminals are
 recorded under that lease. Only this serving process finishes those stops,
-never an inspecting or embedded process. A planned handoff or a
+never an inspecting or embedded process. An idle host can hand off its
+resident daemon jobs without rebranding a cancelled turn from a previous
+attachment as newly handed off: the root handoff record belongs only to a
+root turn this attachment quit while driving. A planned handoff or a
 later cascade does not replace `stopped` on a child while no turn of
 that attempt was admitted or bound after the stop; a child resumed onto
 a later turn is interrupted again. A child wake does not prompt that

@@ -40,7 +40,27 @@ def module_overmatches(names: list[str], modules: set[str]) -> list[tuple[str, s
     )
 
 
+def predicate_is_defined(
+    name: str, functions: set[str], modules: set[str], qualified: set[str]
+) -> bool:
+    name = name.removeprefix("=")
+    if name.endswith("::"):
+        return name[:-2] in modules
+    if "::" in name:
+        return name in qualified
+    return name in functions or name in modules
+
+
 class NextestLaneTests(unittest.TestCase):
+    def test_exact_predicates_require_an_existing_definition(self) -> None:
+        functions = {"real_test"}
+        modules = {"real_module"}
+        qualified = {"real_module::real_test"}
+        for name in ("real_test", "real_module", "real_module::real_test"):
+            self.assertTrue(predicate_is_defined("=" + name, functions, modules, qualified))
+        for name in ("missing_test", "missing_module::real_test", "real_module::missing_test"):
+            self.assertFalse(predicate_is_defined("=" + name, functions, modules, qualified))
+
     def test_module_predicates_cannot_capture_prefixed_modules(self) -> None:
         self.assertEqual(
             module_overmatches(["application::"], {"application", "terminal_application"}),
@@ -98,21 +118,14 @@ class NextestLaneTests(unittest.TestCase):
                     else path.with_suffix("").parts
                 )
                 for name in names:
+                    name = name.removeprefix("=")
                     if "::" in name and not name.endswith("::"):
                         prefix, function = name.rsplit("::", 1)
                         parts = tuple(prefix.split("::"))
                         if module_path[-len(parts) :] == parts and function in file_functions:
                             qualified.add(name)
         missing = [
-            name
-            for name in names
-            if not (
-                name[:-2] in modules
-                if name.endswith("::")
-                else name in qualified
-                if "::" in name
-                else name in functions
-            )
+            name for name in names if not predicate_is_defined(name, functions, modules, qualified)
         ]
         self.assertEqual(missing, [], f"lane predicates with no definition under {SOURCE_ROOTS}")
 

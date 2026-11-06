@@ -32,7 +32,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             }
         }
         // A quit that reached a running root turn: that turn is handed over.
-        if self.quit_started_at.is_some() && self.role.config.session.store_revision != 0 {
+        if self.role.handoff_root_due && self.role.config.session.store_revision != 0 {
+            crate::test_support_runner::cut("before-root-handoff");
             self.record_root_handoff().await;
         }
         #[cfg(test)]

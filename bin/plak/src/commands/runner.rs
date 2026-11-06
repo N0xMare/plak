@@ -246,7 +246,6 @@ async fn serve_local(paths: &PlakPaths) -> CliResult<()> {
     match daemon::serve_socket(service, &socket, idle).await {
         Ok(()) => Ok(()),
         Err(daemon::DaemonError::AlreadyServing(_)) => {
-            #[cfg(feature = "test-hooks")]
             eprintln!("plak runner: the local socket lock is still held");
             Ok(())
         }

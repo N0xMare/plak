@@ -392,6 +392,8 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
     SourceKey, list[tuple[str, tuple[tuple[str, str], ...]]]
 ] = {
     ("plak", "src/environment.rs"): [
+        ("var_os", (("string", "INVOCATION_ID"),)),
+        ("var_os", (("string", "PLAK_TEST_RUNNER_DETACHED"),)),
         # The runner daemon's PATH and HOME, and the login shell that answers
         # a PATH runner.toml leaves unset (spec 04 §2.9).
         ("var_os", (("string", "PATH"),)),
@@ -441,6 +443,9 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
     # explicit operator knob instead of flaking under nextest load.
     ("plak", "src/test_support.rs"): [
         ("var", (("string", "PLAK_TEST_TIME_SCALE"),)),
+    ],
+    ("plakous-hosted", "src/test_support_runner.rs"): [
+        ("var", (("string", "PLAK_TEST_HOST_READOPT_CUT"),)),
     ],
     # The one-shot CLI face collapses a tool's lifecycle to one line on
     # completion. `PLAK_VERBOSE` restores the per-tool progress lines for a
@@ -530,6 +535,10 @@ EXPECTED_PRODUCT_GENERATED_MACROS: dict[SourceKey, tuple[str, ...]] = {
 EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
     SourceKey, list[tuple[str, tuple[tuple[str, str], ...]]]
 ] = {
+    # A separate process group survives host loss; the daemon clears its environment.
+    ("plak", "src/commands/runner/local.rs"): [
+        ("std::process::Command", (("punct", "&"), ("identifier", "executable"))),
+    ],
     # Doctor's one cleared-env, five-second, own-group local version probe.
     ("plak", "src/product_doctor/jj_cli.rs"): [
         ("Command", (("identifier", "executable"),)),
@@ -647,6 +656,8 @@ ALLOWED_CLI_MACROS = {
 }
 # Per-source additions to ALLOWED_CLI_MACROS.
 ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
+    # Typed, output-free runner diagnostics and the recorded stop's fixed payload.
+    ("plakous-hosted", "src/runner_adoption.rs"): {"info", "json"},
     # The tree stage a VCS effect runs as, read by a runner-backed port.
     ("plakous-workspace", "src/occupancy_vcs/stage.rs"): {"task_local"},
     ("plakous-host-protocol", "src/observation.rs"): {"define_observations"},
@@ -1630,6 +1641,33 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "VersionTriple",
         },
     },
+    # The host starts and journal-binds its home-local daemon before opening sessions.
+    ("plak", "src/commands/runner/local.rs"): {
+        "runner": {
+            "ClientWindows",
+            "ConnectError",
+            "FileCallJournal",
+            "RunnerClient",
+            "protocol",
+            "daemon",
+        },
+    },
+    ("plak", "src/host/environment.rs"): {
+        "runner": {"RunnerClient"},
+        "tools": {"runner"},
+    },
+    ("plak", "src/host/runner.rs"): {"runner": {"RunnerClient"}},
+    ("plak", "src/shell/services.rs"): {
+        "runner": {"RunnerClient"},
+        "tools": {"runner"},
+    },
+    ("plakous-hosted", "src/agent/roots.rs"): {
+        "runner": {"RunnerClient"},
+        "tools": {"runner::LocalDaemonBackend"},
+    },
+    ("plakous-hosted", "src/runtime/host_loop/release.rs"): {
+        "agent": {"preserve_daemon_jobs"},
+    },
     # `test-hooks` only: the offline script's child runner, bound and journaled
     # as a host's dial is, then selected for the process (spec 01 §8.5).
     ("plak", "src/test_hooks.rs"): {
@@ -1645,8 +1683,15 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     },
     # Re-adoption of a runner's lines through a lease-only head (spec 01 §8.4).
     ("plakous-hosted", "src/runner_adoption.rs"): {
-        "runner": {"RunnerClient"},
-        "tools": {"LineOwner", "runner::RunnerFailure", "runner::decode_jobs_snapshot"},
+        "runner": {"RunnerClient", "protocol"},
+        "tools": {
+            "LineOwner",
+            "runner::RunnerFailure",
+            "runner::decode_jobs_snapshot",
+            "runner::RunnerCall",
+            "runner::RunnerLink",
+            "runner::RunnerVerb",
+        },
     },
     # Plak owns the export document, not a second runtime. This one codec
     # reconstructs validated public content data, never mutable authority.

@@ -183,6 +183,8 @@ struct RootRole<'a, P: plakous_host_protocol::ProtocolExtension> {
     /// boundary: consent was given (a Resume, `resume_after_loss =
     /// "continue"`, or a decision a crash left pending).
     root_loss_resume_due: bool,
+    /// This attachment quit while driving a root turn, not from idle.
+    handoff_root_due: bool,
     /// Since when nothing has kept the session resident, while the host
     /// releases idle sessions ([`super::HostConfig::idle_release`]).
     idle_since: Option<Instant>,

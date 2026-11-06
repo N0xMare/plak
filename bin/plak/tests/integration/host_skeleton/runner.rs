@@ -4,23 +4,118 @@ use super::*;
 
 #[test]
 fn an_eof_before_the_local_runner_hello_is_retried() {
+    for protocol in [1, plakous::runner::protocol::PROTOCOL_VERSION] {
+        let Some(fixture) = fixture() else { return };
+        let directory = fixture.home().join(format!("host/runner/v{protocol}/run"));
+        std::fs::create_dir_all(&directory).unwrap();
+        let socket = directory.join("runner.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let dropped = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            drop(listener);
+            std::fs::remove_file(socket).unwrap();
+            drop(stream);
+        });
+        let mut host = start(&fixture);
+        dropped.join().unwrap();
+        stop(&mut host);
+    }
+}
+
+#[test]
+fn an_upgraded_host_inspects_the_old_protocol_and_starts_a_separate_daemon() {
+    use plakous::runner::protocol::{
+        HostFrame as RunnerHostFrame, RunnerFrame, VersionTriple, frame,
+    };
+    use plakous::tools::{
+        ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope, RunnerId,
+    };
+    use std::io::Read as _;
     let Some(fixture) = fixture() else { return };
-    let directory = fixture.home().join(format!(
-        "host/runner/v{}/run",
-        plakous::runner::protocol::PROTOCOL_VERSION
-    ));
+    let directory = fixture.home().join("host/runner/v1/run");
     std::fs::create_dir_all(&directory).unwrap();
     let socket = directory.join("runner.sock");
     let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
-    let dropped = std::thread::spawn(move || {
-        let (stream, _) = listener.accept().unwrap();
-        drop(listener);
-        std::fs::remove_file(socket).unwrap();
-        drop(stream);
+    listener.set_nonblocking(true).unwrap();
+    let environment = ExecutionEnvironment::host(
+        ExecutionEnvironmentScope::Run("00000000-0000-0000-0000-000000000001".parse().unwrap()),
+        fixture.workspace(),
+        ".",
+        ExecutionEnvironmentConfig::default(),
+    )
+    .unwrap();
+    let mut version = VersionTriple::current("old-revision", "old-flavor");
+    version.protocol = 1;
+    let old = plakous::runner::RunnerService::new(
+        environment,
+        plakous::runner::RunnerIdentity {
+            runner_id: RunnerId::new("old-home").unwrap(),
+            version,
+            boot_id: "old-boot".into(),
+            binary_id: None,
+        },
+    )
+    .unwrap();
+    let hello = old.hello().clone();
+    let inspect = std::thread::spawn(move || {
+        let deadline = std::time::Instant::now() + WAIT;
+        let mut stream = loop {
+            match listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "no obsolete-protocol inspection"
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(error) => panic!("old socket: {error}"),
+            }
+        };
+        stream.set_read_timeout(Some(WAIT)).unwrap();
+        stream.set_nonblocking(false).unwrap();
+        stream
+            .write_all(&frame::encode(&RunnerFrame::Hello(hello)).unwrap())
+            .unwrap();
+        let RunnerHostFrame::Bind(bind) = runner_frame(&mut stream) else {
+            panic!("not bound")
+        };
+        assert!(bind.inspect);
+        assert_eq!(bind.version.protocol, 1);
+        let RunnerHostFrame::Lines { request_id } = runner_frame(&mut stream) else {
+            panic!("not inspecting lines")
+        };
+        stream
+            .write_all(
+                &frame::encode(&RunnerFrame::Lines {
+                    request_id,
+                    lines: Vec::new(),
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        let mut byte = [0];
+        assert_eq!(stream.read(&mut byte).unwrap(), 0, "an inspector sent work");
     });
     let mut host = start(&fixture);
-    dropped.join().unwrap();
+    inspect.join().unwrap();
+    assert!(socket.exists());
+    assert!(
+        fixture
+            .home()
+            .join("host/runner/v2/run/runner.sock")
+            .exists()
+    );
     stop(&mut host);
+}
+
+fn runner_frame(stream: &mut UnixStream) -> plakous::runner::protocol::HostFrame {
+    use std::io::Read as _;
+    let mut prefix = [0; 4];
+    stream.read_exact(&mut prefix).unwrap();
+    let mut bytes = vec![0; u32::from_be_bytes(prefix).try_into().unwrap()];
+    stream.read_exact(&mut bytes).unwrap();
+    plakous::runner::protocol::frame::decode(&bytes).unwrap()
 }
 
 #[test]
@@ -137,8 +232,16 @@ fn cut_exit(child: &mut Child) -> std::process::ExitStatus {
 }
 
 fn start_job(fixture: &Fixture, busy: bool) -> (Host, String, NodeAddress) {
+    start_job_env(fixture, busy, &[])
+}
+
+fn start_job_env(
+    fixture: &Fixture,
+    busy: bool,
+    env: &[(&str, String)],
+) -> (Host, String, NodeAddress) {
     fixture.write_script(&job_script(fixture, busy));
-    let host = start(fixture);
+    let host = start_env(fixture, &[], env);
     let mut client = Client::connect(&host);
     let Outcome::Ok(Answer::Created { session, node, .. }) =
         client.request(1, new_session(&fixture.workspace()))
@@ -242,6 +345,14 @@ fn a_foreground_host_cut_stops_at_transfer_and_records_unknown_once() {
 fn start_foreground(fixture: &Fixture) -> (Host, String, NodeAddress) {
     let mut script = job_script(fixture, false);
     script["steps"][0]["output"]["tool"]["arguments"]["yield_time_ms"] = json!(30000);
+    let command = script["steps"][0]["output"]["tool"]["arguments"]["command"]
+        .as_str()
+        .unwrap()
+        .replace(
+            "read line",
+            "n=0; while :; do [ \"$n\" -lt 300 ] || exit 1; n=$((n + 1)); sleep 1; done",
+        );
+    script["steps"][0]["output"]["tool"]["arguments"]["command"] = json!(command);
     fixture.write_script(&script);
     let host = start(fixture);
     let mut client = Client::connect(&host);
@@ -277,6 +388,10 @@ fn a_runner_restart_leaves_an_unpromoted_call_unknown_without_restarting_it() {
     let (pid, _) = job(&fixture);
     kill(&mut host);
     kill_local_daemon_only(&fixture.home());
+    assert!(
+        alive(pid),
+        "this fixture must cover a runner's surviving orphan"
+    );
     let mut host = start(&fixture);
     let mut client = Client::connect(&host);
     client.attach(1, &node);
@@ -288,6 +403,7 @@ fn a_runner_restart_leaves_an_unpromoted_call_unknown_without_restarting_it() {
     client.attach(1, &node);
     assert_eq!(unknown_effects(&fixture, &session), 1);
     stop(&mut host);
+    assert!(alive(pid), "the new runner must not act on an old PID");
     // A dead runner has no safe identifier authority over its old child.
     // Fixture-owned marker identity, never session state, reaps it instead.
     drop(fixture);
@@ -355,6 +471,54 @@ fn host_handoff_keeps_jobs_and_continues_the_busy_turn_once() {
     }
 }
 
+#[test]
+fn an_idle_handoff_does_not_resurrect_a_previously_cancelled_root() {
+    use std::os::unix::process::ExitStatusExt as _;
+    for policy in ["hold", "continue"] {
+        let Some(fixture) = fixture() else { return };
+        let config = fixture.home().join("config.toml");
+        let text = std::fs::read_to_string(&config).unwrap();
+        std::fs::write(
+            config,
+            format!("{text}\n[host]\nresume_after_loss = \"{policy}\"\n"),
+        )
+        .unwrap();
+        let (mut host, session, node) = start_job_env(
+            &fixture,
+            true,
+            &[("PLAK_TEST_HOST_READOPT_CUT", "before-root-handoff".into())],
+        );
+        let (pid, _) = job(&fixture);
+        nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(host.child.as_ref().unwrap().id().cast_signed()),
+            nix::sys::signal::Signal::SIGTERM,
+        )
+        .unwrap();
+        assert_eq!(cut_exit(host.child.as_mut().unwrap()).signal(), Some(9));
+        host.child = None;
+        let mut host = start(&fixture);
+        let mut client = Client::connect(&host);
+        client.attach(1, &node);
+        stop(&mut host);
+        assert!(alive(pid));
+        assert!(
+            !root_record(&fixture, &session)
+                .0
+                .contains(&RootInterruptCause::Handoff),
+            "idle release claimed an earlier host's cancelled turn"
+        );
+        let mut host = start(&fixture);
+        let mut client = Client::connect(&host);
+        client.attach(1, &node);
+        assert_eq!(
+            client.request(2, Op::StopSession { session }),
+            Outcome::Ok(Answer::Stopped)
+        );
+        stopped(pid);
+        stop(&mut host);
+    }
+}
+
 fn handoff_keeps_jobs(policy: &str) {
     let Some(fixture) = fixture() else { return };
     let config = fixture.home().join("config.toml");
@@ -408,47 +572,7 @@ fn a_childs_daemon_job_survives_host_loss_and_handoff() {
     drop(probe);
     for handoff in [false, true] {
         let fixture = fixture().unwrap();
-        let marker = fixture.root.join("local-job.marker");
-        let child = fixture.root.join("child-script.json");
-        std::fs::write(&child, serde_json::to_vec(&json!({"version": 1, "steps": [
-            {"output": {"tool": {"name": "bash", "arguments": {
-                "command": format!("printf '%s %s\\n' \"$$\" \"$PPID\" >> '{}'; sleep 600", marker.display()), "timeout": 0
-            }}}, "finish": "tool_calls"},
-            {"stream": [{"gate": {"file": fixture.root.join("never")}}], "output": {"text": "child held"}}
-        ]})).unwrap()).unwrap();
-        let mut script = spawning_script();
-        script["product_child_script"] = json!(child);
-        script["steps"].as_array_mut().unwrap().truncate(1);
-        script["steps"].as_array_mut().unwrap().push(json!({
-            "stream": [{"gate": {"file": marker}}], "output": {"text": ANSWER}
-        }));
-        fixture.write_script(&script);
-        let mut host = start(&fixture);
-        let mut client = Client::connect(&host);
-        let Outcome::Ok(Answer::Created { session, node, .. }) =
-            client.request(1, new_session(&fixture.workspace()))
-        else {
-            panic!("not created")
-        };
-        let attachment = client.attach(2, &node);
-        client.prompt(3, attachment, "delegate a process", ANSWER);
-        let deadline = std::time::Instant::now() + WAIT;
-        loop {
-            use plakous_offline_crash_harness::evidence::{EvidenceKind, read_evidence};
-            let dispatched = read_evidence(fixture.root.join("child-evidence.jsonl"))
-                .unwrap_or_default()
-                .iter()
-                .filter(|event| event.kind == EvidenceKind::ProviderDispatched)
-                .count();
-            if dispatched >= 2 {
-                break;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "the child never promoted its job"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
+        let (mut host, session, node) = start_child_job(&fixture);
         let (pid, daemon) = job(&fixture);
         assert!(alive(pid));
         assert_ne!(daemon.cast_unsigned(), host.child.as_ref().unwrap().id());
@@ -458,6 +582,9 @@ fn a_childs_daemon_job_survives_host_loss_and_handoff() {
             kill(&mut host);
         }
         assert!(alive(pid), "the child's job died with its host");
+        if !handoff {
+            std::fs::remove_file(fixture.root.join("child-script.json")).unwrap();
+        }
         let mut host = start(&fixture);
         assert!(alive(pid), "the sweep stopped the child's job");
         let mut client = Client::connect(&host);
@@ -469,6 +596,100 @@ fn a_childs_daemon_job_survives_host_loss_and_handoff() {
             Outcome::Ok(Answer::Stopped)
         );
         stopped(pid);
+        stop(&mut host);
+    }
+}
+
+fn start_child_job(fixture: &Fixture) -> (Host, String, NodeAddress) {
+    let marker = fixture.root.join("local-job.marker");
+    let child = fixture.root.join("child-script.json");
+    std::fs::write(&child, serde_json::to_vec(&json!({"version": 1, "steps": [
+        {"output": {"tool": {"name": "bash", "arguments": {
+            "command": format!("printf '%s %s\\n' \"$$\" \"$PPID\" >> '{}'; sleep 600", marker.display()), "timeout": 0
+        }}}, "finish": "tool_calls"},
+        {"stream": [{"gate": {"file": fixture.root.join("never")}}], "output": {"text": "child held"}}
+    ]})).unwrap()).unwrap();
+    let mut script = spawning_script();
+    script["product_child_script"] = json!(child);
+    script["steps"].as_array_mut().unwrap().truncate(1);
+    script["steps"].as_array_mut().unwrap().push(json!({
+        "stream": [{"gate": {"file": marker}}], "output": {"text": ANSWER}
+    }));
+    fixture.write_script(&script);
+    let host = start(fixture);
+    let mut client = Client::connect(&host);
+    let Outcome::Ok(Answer::Created { session, node, .. }) =
+        client.request(1, new_session(&fixture.workspace()))
+    else {
+        panic!("not created")
+    };
+    let attachment = client.attach(2, &node);
+    client.prompt(3, attachment, "delegate a process", ANSWER);
+    let deadline = std::time::Instant::now() + WAIT;
+    loop {
+        use plakous_offline_crash_harness::evidence::{EvidenceKind, read_evidence};
+        let dispatched = read_evidence(fixture.root.join("child-evidence.jsonl"))
+            .unwrap_or_default()
+            .iter()
+            .filter(|event| event.kind == EvidenceKind::ProviderDispatched)
+            .count();
+        if dispatched >= 2 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the child never promoted its job"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    (host, session, node)
+}
+
+#[test]
+fn host_crash_mid_child_stop_finishes_the_recorded_intent_once() {
+    use std::os::unix::process::ExitStatusExt as _;
+    for phase in ["before-stop", "after-stop"] {
+        let Some(fixture) = fixture() else { return };
+        let (mut host, session, node) = start_child_job(&fixture);
+        let (pid, _) = job(&fixture);
+        kill(&mut host);
+        let mut host = start_env(
+            &fixture,
+            &[],
+            &[("PLAK_TEST_HOST_READOPT_CUT", phase.into())],
+        );
+        let mut client = Client::connect(&host);
+        client.attach(1, &node);
+        client.send(&ClientFrame::Request {
+            id: 2,
+            op: Op::StopSession { session },
+        });
+        assert_eq!(cut_exit(host.child.as_mut().unwrap()).signal(), Some(9));
+        host.child = None;
+        for _ in 0..2 {
+            let (mut child, _) = spawn_env(
+                &fixture,
+                &[],
+                &[("PLAK_TEST_HOST_READOPT_CUT", phase.into())],
+            );
+            assert_eq!(cut_exit(&mut child).signal(), Some(9));
+            if phase == "before-stop" {
+                assert!(alive(pid));
+            } else {
+                stopped(pid);
+            }
+        }
+        let mut host = start(&fixture);
+        stopped(pid);
+        job(&fixture);
+        let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
+        let connection = rusqlite::Connection::open(paths.runtime_database()).unwrap();
+        let terminals: i64 = connection
+            .query_row("SELECT count(*) FROM line_job_terminals", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(terminals, 1);
         stop(&mut host);
     }
 }
@@ -618,27 +839,32 @@ fn host_crash_mid_stop_finishes_the_recorded_stop_once_after_retransfer() {
 
 #[test]
 fn an_old_stop_never_stops_a_job_of_a_later_admitted_turn() {
-    use plak::store::session_records::SessionRecordStore as _;
-    use plakous_hosted::sessions::projector::{RootInterrupt, RootLossIntent, RootStopAnchor};
     let Some(fixture) = fixture() else { return };
     let (mut host, session, node) = start_job(&fixture, true);
     let (old_pid, _) = job(&fixture);
-    kill(&mut host);
-    let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
-    let store = plak::store::session_records::SqliteSessionStore::new(paths);
-    store
-        .write_root_loss(
-            &session,
-            RootLossIntent::Interrupt(RootInterrupt {
-                anchor: RootStopAnchor::Command {
-                    command_id: "plak:test:old-stop".into(),
-                },
-                cause: RootInterruptCause::Stopped,
-            }),
-        )
-        .unwrap();
-    let mut host = start(&fixture);
+    let mut client = Client::connect(&host);
+    client.attach(1, &node);
+    assert_eq!(
+        client.request(
+            2,
+            Op::StopSession {
+                session: session.clone()
+            }
+        ),
+        Outcome::Ok(Answer::Stopped)
+    );
     stopped(old_pid);
+    assert_eq!(
+        client.request(
+            3,
+            Op::ReleaseSession {
+                session: session.clone()
+            }
+        ),
+        Outcome::Ok(Answer::Released)
+    );
+    // Admit again on the same host: its startup-only keyed stop was never
+    // spent, so only the later-admission guard can protect this new job.
     std::fs::remove_file(fixture.root.join("local-job.marker")).unwrap();
     let mut client = Client::connect(&host);
     let attachment = client.attach(1, &node);

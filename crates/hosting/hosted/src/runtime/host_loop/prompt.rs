@@ -1223,6 +1223,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             Ok(driven) => driven.quit_after_terminal,
             Err(error) => error.quit_after_terminal,
         };
+        self.role.handoff_root_due = quit_after_terminal;
         let drive = driven
             .map(|driven| driven.outcome)
             .map_err(|error| error.message);

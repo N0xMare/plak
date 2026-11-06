@@ -140,6 +140,13 @@ pub mod telemetry_sink;
 pub mod telemetry_store;
 #[cfg(feature = "test-hooks")]
 mod test_hooks;
+#[cfg(not(feature = "test-hooks"))]
+mod test_hooks {
+    #[allow(dead_code, reason = "headless builds do not start hosts")]
+    pub(crate) const fn runner_detached() -> bool {
+        false
+    }
+}
 #[cfg(test)]
 mod test_support;
 #[doc(hidden)]

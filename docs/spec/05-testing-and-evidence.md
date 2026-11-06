@@ -2042,12 +2042,20 @@ completion of a recorded stop, respectively. The durability cases
 `host_crash_mid_stop_finishes_the_recorded_stop_once_after_retransfer`
 add explicit repeated SIGKILL boundaries after lease acquisition, transfer,
 terminal recording, and immediately before and after the keyed stop.
+The child-stop counterpart cuts the live stop and repeats startup cuts on
+both sides of the child's keyed stop before checking its one terminal.
 `host_handoff_keeps_jobs_and_continues_the_busy_turn_once` checks both loss
-policies; `a_childs_daemon_job_survives_host_loss_and_handoff` covers a real
+policies; an idle handoff after a previous host's cancelled turn records
+no new handoff and revives nothing, under both policies. That probe cuts
+between settling the original host's cancellation and recording its handoff,
+so the idle successor cannot borrow an earlier attachment's authority.
+`a_childs_daemon_job_survives_host_loss_and_handoff` covers a real
 child's process. Start-environment coverage uses two hosts sharing one daemon
 with distinct login-shell PATHs and HOMEs. An EOF before Hello, contention
 with an exiting daemon's socket lock, and an unreachable user manager have
-deterministic fixtures. Fixtures kill their local daemon and its process
+deterministic fixtures. A version-1 socket accepts only an inspecting bind
+from an upgraded host, which starts a separate version-2 daemon alongside it.
+Fixtures kill their local daemon and its process
 groups, including on a cut or assertion failure; a daemon restart's surviving
 marked jobs are reaped separately with process-identity checks. Cleanup waits
 for each marked live identity to disappear before releasing its evidence.

@@ -13,7 +13,7 @@ pub(crate) fn run(
 ) -> AgentOutcome {
     if matches!(shape, "host_crash_mid_readopt" | "host_crash_mid_stop") {
         let mut host = start(fixture);
-        drive(&host, session, true, false, answer);
+        drive(&host, session, true, false, answer, &[]);
         kill(&mut host);
         if shape == "host_crash_mid_stop" {
             record_stop(fixture, session);
@@ -57,6 +57,7 @@ pub(crate) fn run(
                 true,
                 shape == "host_handoff_keeps_jobs",
                 answer,
+                &[],
             );
         }
     }));
@@ -78,7 +79,14 @@ pub(crate) fn run(
     }
 }
 
-fn drive(host: &Host, session: &str, prompt: bool, busy: bool, answer: &str) -> Vec<String> {
+fn drive(
+    host: &Host,
+    session: &str,
+    prompt: bool,
+    busy: bool,
+    answer: &str,
+    unknown_jobs: &[u32],
+) -> Vec<String> {
     let mut client = Client::connect(host);
     let row = client
         .rows(1)
@@ -117,16 +125,36 @@ fn drive(host: &Host, session: &str, prompt: bool, busy: bool, answer: &str) -> 
         );
     }
     let mut answered = answer.is_empty();
+    let mut settled = answer.is_empty();
+    let mut idle = false;
+    let mut unknown = records
+        .iter()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|row| row["kind"] == "job_terminal" && row["status"] == "outcome_unknown")
+        .filter_map(|row| row["job_id"].as_str().map(str::to_owned))
+        .collect::<std::collections::BTreeSet<_>>();
     loop {
         if let HostFrame::Event { observation, .. } = client.next() {
             answered |= format!("{observation:?}").contains(answer);
+            settled |= matches!(&observation, plakous_host_protocol::SessionObservation::TurnLifecycle(lifecycle) if lifecycle.phase != plakous_host_protocol::TurnPhase::Admitted);
+            idle |= matches!(
+                observation,
+                plakous_host_protocol::SessionObservation::SetBusy(false)
+            );
+            if let plakous_host_protocol::SessionObservation::JobTerminal { job_id, status, .. } =
+                &observation
+                && status == "outcome_unknown"
+            {
+                unknown.insert(job_id.clone());
+            }
             project(&observation, &mut records);
             if answered
                 && (busy
-                    || matches!(
-                        observation,
-                        plakous_host_protocol::SessionObservation::SetBusy(false)
-                    ))
+                    || (settled
+                        && idle
+                        && unknown_jobs
+                            .iter()
+                            .all(|job| unknown.contains(&format!("p{job}")))))
             {
                 break;
             }
@@ -166,7 +194,12 @@ fn finish(host: &mut Host) -> std::process::ExitStatus {
     }
 }
 
-pub(crate) fn recover(fixture: &Fixture, session: &str, answer: &str) -> AgentOutcome {
+pub(crate) fn recover(
+    fixture: &Fixture,
+    session: &str,
+    answer: &str,
+    unknown_jobs: &[u32],
+) -> AgentOutcome {
     use plakous_hosted::runtime::RootStanding;
     let store = plak::store::session_records::SqliteSessionStore::new(
         plak::home::paths::PlakPaths::explicit(fixture.home()),
@@ -177,7 +210,14 @@ pub(crate) fn recover(fixture: &Fixture, session: &str, answer: &str) -> AgentOu
             | RootStanding::Continuing { held: false, .. }
     );
     let mut host = start(fixture);
-    let records = drive(&host, session, false, false, if owes { answer } else { "" });
+    let records = drive(
+        &host,
+        session,
+        false,
+        false,
+        if owes { answer } else { "" },
+        unknown_jobs,
+    );
     let status = finish(&mut host);
     assert!(status.success());
     AgentOutcome {

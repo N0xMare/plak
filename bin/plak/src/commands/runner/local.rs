@@ -25,10 +25,19 @@ pub(crate) async fn older(
         let mut bind = super::bind(super::host_id(paths)?, true);
         bind.version.protocol = protocol;
         let inspect = async {
-            let (client, _) =
-                RunnerClient::connect_home_local(stream, bind, ClientWindows::default(), None)
-                    .await
-                    .map_err(|error| CliFailure::new(error.to_string()))?;
+            let (client, _) = match RunnerClient::connect_home_local(
+                stream,
+                bind,
+                ClientWindows::default(),
+                None,
+            )
+            .await
+            {
+                Ok(connected) => connected,
+                // An obsolete daemon can idle-exit with this inspection queued.
+                Err(ConnectError::Closed) => return Ok(Vec::new()),
+                Err(error) => return Err(CliFailure::new(error.to_string())),
+            };
             let result = tokio::time::timeout(super::START_WAIT, client.lines()).await;
             client.disconnect();
             result
@@ -98,7 +107,7 @@ async fn start(paths: &PlakPaths, home: &LocalRunnerHome) -> std::io::Result<()>
     use std::os::unix::fs::OpenOptionsExt as _;
 
     let executable = std::env::current_exe()?;
-    if std::env::var_os("INVOCATION_ID").is_some() && !force_detached() {
+    if crate::environment::service_managed() && !crate::test_hooks::runner_detached() {
         use sha2::{Digest as _, Sha256};
         let digest = Sha256::digest(paths.home().as_os_str().as_encoded_bytes());
         let hash = digest[..12]
@@ -152,15 +161,4 @@ async fn start(paths: &PlakPaths, home: &LocalRunnerHome) -> std::io::Result<()>
     }
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
     command.spawn().map(drop)
-}
-
-fn force_detached() -> bool {
-    #[cfg(feature = "test-hooks")]
-    {
-        std::env::var_os("PLAK_TEST_RUNNER_DETACHED").as_deref() == Some(std::ffi::OsStr::new("1"))
-    }
-    #[cfg(not(feature = "test-hooks"))]
-    {
-        false
-    }
 }

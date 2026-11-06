@@ -260,9 +260,6 @@ async fn a_returning_host_readopts_its_line_under_a_lease_only_head() {
     // The adopted owner sees the job running; the lease-only hold is gone,
     // so the head opens fully.
     let adopted_jobs = RunnerSessions::new(&backend, &environment, adopted.owner);
-    let jobs = adopted_jobs.jobs().await.unwrap();
-    assert_eq!(jobs.len(), 1);
-    assert_eq!(jobs[0].status, JobStatus::Running);
     let OpenSessionOutcome::Opened { session, .. } = sessions
         .open(OpenSessionRequest::new(
             SessionOperationId::new("readopt:open").unwrap(),
@@ -277,22 +274,7 @@ async fn a_returning_host_readopts_its_line_under_a_lease_only_head() {
     session.release().await.unwrap();
 
     another_store_skips_the_line(directory.path(), &client, adopted.owner.fence()).await;
-    let inspected = client.lines().await.unwrap();
-    crate::runner_adoption::report_obsolete_lines(&sessions, inspected.clone())
-        .await
-        .unwrap();
-    crate::runner_adoption::report_obsolete_lines(&sessions, inspected)
-        .await
-        .unwrap();
-    let still_held = client.lines().await.unwrap();
-    assert_eq!(
-        still_held[0].owner.as_ref().unwrap().fence,
-        adopted.owner.fence()
-    );
-    assert_eq!(
-        adopted_jobs.jobs().await.unwrap()[0].status,
-        JobStatus::Running
-    );
+    obsolete_inspection_preserves_jobs(&sessions, &client, adopted.owner.fence()).await;
     adopted_jobs
         .stop_jobs(
             plakous::tools::JobStopReason::User,
@@ -302,4 +284,24 @@ async fn a_returning_host_readopts_its_line_under_a_lease_only_head() {
         .unwrap();
     runner.kill().unwrap();
     runner.wait().unwrap();
+}
+
+async fn obsolete_inspection_preserves_jobs(
+    sessions: &AgentSessions,
+    client: &RunnerClient,
+    fence: u64,
+) {
+    let inspected = client.lines().await.unwrap();
+    crate::runner_adoption::report_obsolete_lines(sessions, inspected.clone())
+        .await
+        .unwrap();
+    crate::runner_adoption::report_obsolete_lines(sessions, inspected)
+        .await
+        .unwrap();
+    let still_held = client.lines().await.unwrap();
+    assert_eq!(still_held[0].owner.as_ref().unwrap().fence, fence);
+    let (_, jobs) =
+        plakous::tools::runner::decode_jobs_snapshot(still_held[0].jobs.clone()).unwrap();
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(jobs[0].status, JobStatus::Running);
 }

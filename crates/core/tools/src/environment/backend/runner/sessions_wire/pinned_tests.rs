@@ -28,7 +28,10 @@ use super::{
 use crate::{JobStatus, JobStopReason, JobView};
 
 /// Each protocol version's session payloads, one JSON value per line.
-const PINNED: &[(u32, &str)] = &[(1, include_str!("pinned/v1.jsonl"))];
+const PINNED: &[(u32, &str)] = &[
+    (1, include_str!("pinned/v1.jsonl")),
+    (2, include_str!("pinned/v2.jsonl")),
+];
 
 fn session() -> JoinedProcessSessionId {
     JoinedProcessSessionId([7; 16])
