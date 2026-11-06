@@ -52,10 +52,16 @@ pub(super) fn parked_script() -> Value {
 pub(super) fn configure_parked(fixture: &Fixture) {
     let marker = fixture.root.join(MARKER);
     let quoted = format!("'{}'", marker.display().to_string().replace('\'', "'\\''"));
-    // pi presents the process tool as `bash`. `timeout` 0 backgrounds it.
+    // pi presents the process tool as `bash`. `timeout` 0 backgrounds it
+    // after the tool's 250 ms first observation, so the process must outlive
+    // that to become a job: it has no stdin to block on, so it waits on its
+    // host instead and ends within a second of the host's death (a cut).
     // The canonical process_session_start arguments are not in that catalog,
     // so a call under that name is proven not dispatched.
-    let command = format!("printf '%s\\n' started >> {quoted}; read line");
+    let command = format!(
+        "printf '%s\\n' started >> {quoted}; i=0; \
+         while [ $i -lt 600 ] && kill -0 $PPID 2>/dev/null; do sleep 1; i=$((i+1)); done"
+    );
     let child = json!({
         "version": 1,
         "repeat_last_step": true,
@@ -192,6 +198,47 @@ pub(super) fn assert_parked(fixture: &Fixture, outcome: &AgentOutcome, _: &summa
     );
     assert_eq!(marker_lines(fixture), 1, "the parked job started once");
     assert!(node_status(fixture, "c1").is_some());
+    assert_job_parked(outcome);
+}
+
+/// The shape's precondition: the child's process became a promoted job and
+/// was still running when the root answered, so every cut after its start
+/// finds a parked job rather than a finished command.
+fn assert_job_parked(outcome: &AgentOutcome) {
+    let records = outcome.records();
+    let kind = |row: &Value, kind: &str| row["kind"] == kind;
+    let started = records
+        .iter()
+        .find(|row| {
+            kind(row, "job_started")
+                && row["command"]
+                    .as_str()
+                    .is_some_and(|command| command.contains(MARKER))
+        })
+        .unwrap_or_else(|| panic!("the child's process never became a job"));
+    let job = &started["job_id"];
+    let answered = records
+        .iter()
+        .position(|row| {
+            kind(row, "assistant")
+                && row["text"]
+                    .as_str()
+                    .is_some_and(|text| text.contains(PARKED))
+        })
+        .unwrap();
+    let before = &records[..answered];
+    assert!(
+        before
+            .iter()
+            .any(|row| kind(row, "job_promoted") && &row["job_id"] == job),
+        "the parked job was not promoted before the root answered"
+    );
+    assert!(
+        !before
+            .iter()
+            .any(|row| kind(row, "job_terminal") && &row["job_id"] == job),
+        "the parked job ended before the root answered"
+    );
 }
 
 fn follow_up(fixture: &Fixture) {
