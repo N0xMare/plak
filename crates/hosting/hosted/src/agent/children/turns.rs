@@ -599,7 +599,10 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
         }
         return Err(error.into());
     }
-    if let Err(error) = crate::agent::ledger::project_child_feed(runtime, agent_id, &attached).await
+    if let Err(error) = crate::agent::ledger::project_child_feed_through_acceptance(
+        runtime, agent_id, &attached, turn_id,
+    )
+    .await
     {
         super::TurnWaiterRegistration::release_taken(&mut registration).await;
         release_startup(runtime, agent_id, startup, attached).await;

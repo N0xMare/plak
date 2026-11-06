@@ -654,6 +654,57 @@ pub(super) async fn project_child_feed(
     .await
 }
 
+/// [`project_child_feed`] through the record that accepted the command
+/// bound to `turn_id`, and no further: a child turn's start binds that
+/// turn, and what the running turn commits after its acceptance is folded
+/// at the tree's next record of the child (its waiter's terminal, a
+/// handoff, a release). How far the start's fold reaches, and so how many
+/// tree writes follow it, never depends on how far the child's turn got
+/// meanwhile. When the feed shows no such acceptance, the fold goes to the
+/// tail as [`project_child_feed`]'s does.
+pub(super) async fn project_child_feed_through_acceptance(
+    runtime: &crate::topology_runtime::ProductTopologyRuntime,
+    recipient: &str,
+    attached: &crate::agent::AttachedCodingSession,
+    turn_id: plakous::model::TurnId,
+) -> Result<bool, String> {
+    project_feed_until(
+        runtime,
+        recipient,
+        attached.sessions(),
+        attached.locator().session_id(),
+        Some(turn_id),
+    )
+    .await
+}
+
+/// `feed` without the records after the first one that accepted a command
+/// bound to `turn_id`; all of it when none did.
+fn through_acceptance(
+    feed: std::sync::Arc<crate::agent_tree::TreeFeed>,
+    turn_id: plakous::model::TurnId,
+) -> std::sync::Arc<crate::agent_tree::TreeFeed> {
+    let accepted = feed.records.iter().position(|record| {
+        record.facts().iter().any(|fact| {
+            matches!(
+                fact,
+                plakous::sessions::feed::FeedFact::CommandAccepted {
+                    turn_id: Some(accepted),
+                    ..
+                } if *accepted == turn_id
+            )
+        })
+    });
+    match accepted {
+        Some(at) if at + 1 < feed.records.len() => {
+            let mut bounded = (*feed).clone();
+            bounded.records.truncate(at + 1);
+            std::sync::Arc::new(bounded)
+        }
+        _ => feed,
+    }
+}
+
 /// Brings every running child's projection to its feed's tail, so a record
 /// the tree makes now orders after each command a child's runtime accepted.
 /// The children's sessions are read where their parent created them.
@@ -696,6 +747,18 @@ pub(super) async fn project_feed(
     sessions: &plakous::sessions::AgentSessions,
     session: plakous::model::SessionId,
 ) -> Result<bool, String> {
+    project_feed_until(runtime, recipient, sessions, session, None).await
+}
+
+/// [`project_feed`], through the acceptance of `until`'s command when given
+/// ([`project_child_feed_through_acceptance`]).
+async fn project_feed_until(
+    runtime: &crate::topology_runtime::ProductTopologyRuntime,
+    recipient: &str,
+    sessions: &plakous::sessions::AgentSessions,
+    session: plakous::model::SessionId,
+    until: Option<plakous::model::TurnId>,
+) -> Result<bool, String> {
     let key = session.to_string();
     let cursor = runtime
         .read(|tree| tree.feed_read_cursor(&key))
@@ -703,6 +766,10 @@ pub(super) async fn project_feed(
     let feed = crate::agent::read_tree_feed(sessions, session, cursor).await?;
     let (projection, feed) =
         crate::agent::feed_projection::retry_tree_feed(sessions, feed, |feed| {
+            let feed = match until {
+                Some(turn_id) => through_acceptance(feed, turn_id),
+                None => feed,
+            };
             crate::agent::feed_projection::apply_on_runtime(runtime, feed, recipient)
         })
         .await

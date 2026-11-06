@@ -1056,3 +1056,71 @@ async fn a_child_parents_next_command_names_its_held_grandchild_once() {
     assert_eq!(next.prompt, "continue", "named once per host generation");
     crate::topology_runtime::force_release(&id).await;
 }
+
+/// A child turn's start folds its feed through the record that accepted its
+/// command and leaves what the running turn committed after it: how far the
+/// fold reaches never depends on how far the turn got. With no such
+/// acceptance in the feed the whole feed is folded.
+#[test]
+fn a_start_fold_stops_at_its_turns_acceptance() {
+    use plakous::sessions::feed::{FeedCommandKind, FeedFact, FeedRecord};
+    let turn = |n| plakous::model::TurnId::try_from(uuid::Uuid::from_u128(n)).unwrap();
+    let record = |seq: u64, accepted: Option<plakous::model::TurnId>| {
+        let header = serde_json::from_value(serde_json::json!({
+            "session_id": "00000000-0000-4000-8000-000000000001", "seq": seq,
+            "branch_id": "00000000-0000-4000-8000-000000000002", "committed_at_ms": 1000,
+            "change": {"created": {"genesis": "00000000-0000-4000-8000-000000000003", "revision": 1, "line": "00000000-0000-4000-8000-00000000c0de", "generation": 1}}
+        }))
+        .unwrap();
+        let facts = accepted
+            .map(|turn_id| FeedFact::CommandAccepted {
+                command_id: plakous::agent::CommandId::new(format!("command-{seq}")).unwrap(),
+                kind: FeedCommandKind::Root {
+                    origin: plakous::model::TurnOrigin::UserPrompt,
+                },
+                turn_id: Some(turn_id),
+                sequence: seq,
+                operation_id: None,
+            })
+            .into_iter()
+            .collect();
+        FeedRecord::from_store(header, facts)
+    };
+    let feed = |records| {
+        std::sync::Arc::new(crate::agent_tree::TreeFeed {
+            session_id: "00000000-0000-4000-8000-000000000001".into(),
+            retained_from: 1,
+            below_retained: None,
+            heads: Vec::new(),
+            head_turns: std::collections::BTreeMap::new(),
+            records,
+            reads: crate::agent_tree::TreeFeedReads::default(),
+        })
+    };
+    let running = feed(vec![
+        record(1, None),
+        record(2, Some(turn(7))),
+        record(3, None),
+        record(4, None),
+    ]);
+    let bounded = super::through_acceptance(std::sync::Arc::clone(&running), turn(7));
+    assert_eq!(
+        bounded
+            .records
+            .iter()
+            .map(|record| record.header().seq.get())
+            .collect::<Vec<_>>(),
+        [1, 2],
+        "the fold went past the turn's acceptance"
+    );
+    assert_eq!(
+        super::through_acceptance(std::sync::Arc::clone(&running), turn(8)).records,
+        running.records,
+        "a feed without the acceptance is folded whole"
+    );
+    let accepted_last = feed(vec![record(1, None), record(2, Some(turn(7)))]);
+    assert_eq!(
+        super::through_acceptance(std::sync::Arc::clone(&accepted_last), turn(7)).records,
+        accepted_last.records
+    );
+}
