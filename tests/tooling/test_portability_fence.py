@@ -68,10 +68,16 @@ TOKIO = """\
 
 
 class PortabilityFenceTests(unittest.TestCase):
-    def test_the_portable_set_is_the_model_runner_protocol_tools_and_agent(self):
+    def test_the_portable_set_includes_the_runner_dial_core(self):
         self.assertEqual(
             checker.PORTABLE_CRATES,
-            ("plakous-model", "plakous-runner-protocol", "plakous-tools", "plakous-agent"),
+            (
+                "plakous-model",
+                "plakous-runner-protocol",
+                "plakous-runner-dial",
+                "plakous-tools",
+                "plakous-agent",
+            ),
         )
 
     def test_portable_crates_flag_prints_only_that_set(self):
@@ -83,7 +89,13 @@ class PortabilityFenceTests(unittest.TestCase):
             self.assertEqual(checker.main(), 0)
         self.assertEqual(
             buffer.getvalue().splitlines(),
-            ["plakous-model", "plakous-runner-protocol", "plakous-tools", "plakous-agent"],
+            [
+                "plakous-model",
+                "plakous-runner-protocol",
+                "plakous-runner-dial",
+                "plakous-tools",
+                "plakous-agent",
+            ],
         )
         with patch.object(sys, "argv", ["check_workspace.py", "--nope"]):
             self.assertEqual(checker.main(), 2)

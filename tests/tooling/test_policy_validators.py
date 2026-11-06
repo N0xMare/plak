@@ -1365,7 +1365,7 @@ class RepositoryPolicyTests(unittest.TestCase):
 
     def test_every_package_carries_layer_metadata_and_the_tree_is_clean(self) -> None:
         workspace = self.workspace
-        self.assertEqual(len(workspace.packages), 39)
+        self.assertEqual(len(workspace.packages), 40)
         for validator in (
             workspace_policy.validate_package_metadata,
             workspace_policy.validate_layout,
@@ -1455,6 +1455,7 @@ class RepositoryPolicyTests(unittest.TestCase):
                 "plakous-responses",
                 "plakous-store",
                 "plakous-runner-protocol",
+                "plakous-runner-dial",
                 "plakous-runner",
                 "plakous-xai",
             },
@@ -1466,7 +1467,7 @@ class RepositoryPolicyTests(unittest.TestCase):
         }
         actual = workspace_policy.package_classifications(self.workspace)
         self.assertEqual(actual, expected)
-        self.assertEqual(sum(map(len, actual.values())), 39)
+        self.assertEqual(sum(map(len, actual.values())), 40)
 
     def test_layers_and_neutral_packages_are_as_designed(self) -> None:
         by_layer = {
