@@ -155,6 +155,7 @@ where
             out,
             face,
             stopped: Arc::new(stopped),
+            login: None,
             node: None,
             watch: None,
         }
@@ -320,6 +321,9 @@ pub struct HostConnection<P: ProtocolExtension, W: Write> {
     out: W,
     face: Face,
     stopped: Arc<dyn Fn() -> bool + Send + Sync>,
+    /// The login its transport admitted, which each session connection it
+    /// makes is identified by.
+    login: Option<String>,
     node: Option<NodeLink<P, W>>,
     watch: Option<Watch>,
 }
@@ -332,6 +336,13 @@ where
     HostFrame<P>: Serialize,
     ClientFrame<P>: DeserializeOwned,
 {
+    /// This connection, its transport having admitted `login`.
+    #[must_use]
+    pub fn identified(mut self, login: impl Into<String>) -> Self {
+        self.login = Some(login.into());
+        self
+    }
+
     /// Answers one client line; `false` once the client has left.
     ///
     /// An attach of a dormant session opens it first, so this can block
@@ -471,7 +482,10 @@ where
         };
         self.unlink();
         let stopped = Arc::clone(&self.stopped);
-        let connection = session.connect(self.out.clone(), self.face, move || stopped());
+        let mut connection = session.connect(self.out.clone(), self.face, move || stopped());
+        if let Some(login) = &self.login {
+            connection = connection.identified(login.clone());
+        }
         self.node = Some(NodeLink {
             changes: session.changes(),
             session,

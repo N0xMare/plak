@@ -173,14 +173,14 @@ max_age_days = 90
 # type: enum · default: (unset) · hold|continue; unset holds; home-scoped
 # resume_after_loss = "continue"
 
-# The maintainer web endpoint (plak web): who it admits and where it is served.
+# The maintainer web endpoint (plak host --web): who it admits and where it is served.
 # [web]
 
-# The tailnet logins (Tailscale-User-Login) plak web admits through tailscale serve. Read when plak web starts; a 0.0.3 build refuses a config.toml that sets it.
+# The tailnet logins (Tailscale-User-Login) plak host --web admits through tailscale serve. Read when plak host starts with --web; a 0.0.3 build refuses a config.toml that sets it.
 # type: array of string · default: (unset) · tailnet logins, no duplicates; unset admits no one; home-scoped
 # allow = ["you@example.com"]
 
-# The exact origin tailscale serve publishes plak web at; every request must name its host and a WebSocket upgrade its origin. Read when plak web starts; a 0.0.3 build refuses a config.toml that sets it.
+# The exact origin tailscale serve publishes plak host --web at; every request must name its host and a WebSocket upgrade its origin. Read when plak host starts with --web; a 0.0.3 build refuses a config.toml that sets it.
 # type: string · default: (unset) · https://<host>[:port], nothing after it; home-scoped
 # origin = "https://host.example.ts.net"
 

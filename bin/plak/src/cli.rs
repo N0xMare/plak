@@ -444,35 +444,22 @@ enum TopCommand {
     Resume {
         session: Option<String>,
     },
-    /// Serves one headless session's wire v2 at `/wire`, and the web UI,
-    /// on a private listener (maintainer builds).
-    #[command(hide = true)]
-    Web {
-        /// `unix:<path>` (the `tailscale serve unix:` deployment) or, in
-        /// dev mode, `127.0.0.1:<port>`.
-        #[arg(long)]
-        listen: String,
-        /// The web UI's build directory, with its `csp.json`.
-        #[arg(long)]
-        ui: Option<std::path::PathBuf>,
-        /// Resume this session instead of opening a new one.
-        #[arg(long, conflicts_with = "cwd")]
-        session: Option<String>,
-        /// Open the new session in this directory.
-        #[arg(long)]
-        cwd: Option<std::path::PathBuf>,
-        /// Dev mode, loopback only: every request is this login.
-        #[arg(long)]
-        dev_login: Option<String>,
-        /// Seconds the session stays resident with nothing to do (300).
-        #[arg(long, hide = true)]
-        idle_release: Option<u64>,
-    },
     /// The per-user host process: one per home and state key, serving
     /// every session of the home on a private control socket (maintainer
     /// builds).
     #[command(hide = true)]
     Host {
+        /// Also serve the sessions' wire v2 at `/wire`, and the web UI, on
+        /// `unix:<path>` (the `tailscale serve unix:` deployment) or, in dev
+        /// mode, `127.0.0.1:<port>`.
+        #[arg(long)]
+        web: Option<String>,
+        /// The web UI's build directory, with its `csp.json`.
+        #[arg(long, requires = "web")]
+        ui: Option<std::path::PathBuf>,
+        /// Dev mode, loopback only: every web request is this login.
+        #[arg(long, requires = "web")]
+        dev_login: Option<String>,
         /// Seconds an idle session stays resident (300).
         #[arg(long, hide = true)]
         idle_release: Option<u64>,

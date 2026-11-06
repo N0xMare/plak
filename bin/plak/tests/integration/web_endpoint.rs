@@ -1,6 +1,7 @@
-//! `plak web` end to end: the real binary on a private unix socket, the
-//! scripted offline model behind it, and a WebSocket client that comes in
-//! the way `tailscale serve` would, with the tailnet identity header.
+//! `plak host --web` end to end: the real binary's web endpoint on a private
+//! unix socket, the scripted offline model behind it, and a WebSocket client
+//! that comes in the way `tailscale serve` would, with the tailnet identity
+//! header, and uses the host's session directory.
 //!
 //! Every wait here is for an event (a line on stderr, a frame, a closed
 //! socket) bounded by the fixture's liveness deadline; nothing asserts on
@@ -37,7 +38,7 @@ const ANSWER: &str = "the web answer";
 const DEVICE: &str = "192.0.2.10";
 const CSP: &str = "default-src 'self'; frame-ancestors 'none'";
 
-/// A running `plak web`.
+/// A running `plak host --web`.
 struct Web {
     child: Option<Child>,
     socket: PathBuf,
@@ -65,18 +66,23 @@ fn socket_dir(fixture: &Fixture) -> PathBuf {
 
 fn start(fixture: &Fixture) -> Web {
     let (web, ready) = launch(fixture);
-    assert!(ready, "plak web started");
+    assert!(ready, "plak host started");
     web
 }
 
-/// Starts `plak web` on the fixture's socket; `true` once it serves,
+/// Starts `plak host --web` on the fixture's socket; `true` once it serves,
 /// `false` when it exited first.
 fn launch(fixture: &Fixture) -> (Web, bool) {
     launch_with(fixture, &[])
 }
 
-/// [`launch`] with `extra` arguments to `plak web`.
+/// [`launch`] with `extra` arguments to `plak host`.
 fn launch_with(fixture: &Fixture, extra: &[&str]) -> (Web, bool) {
+    launch_on(fixture, &socket_dir(fixture).join("plak.sock"), extra)
+}
+
+/// [`launch_with`] on the web socket `socket`.
+fn launch_on(fixture: &Fixture, socket: &std::path::Path, extra: &[&str]) -> (Web, bool) {
     let config = fixture.home().join("config.toml");
     let mut text = std::fs::read_to_string(&config).unwrap();
     if !text.contains("\n[web]\n") {
@@ -90,11 +96,12 @@ fn launch_with(fixture: &Fixture, extra: &[&str]) -> (Web, bool) {
     std::fs::create_dir_all(&ui).unwrap();
     std::fs::write(ui.join("csp.json"), format!(r#"{{"header": "{CSP}"}}"#)).unwrap();
     std::fs::write(ui.join("index.html"), "<!doctype html>web").unwrap();
-    let socket = socket_dir(fixture).join("plak.sock");
+    WORKSPACE.with(|workspace| *workspace.borrow_mut() = fixture.workspace().display().to_string());
+    let socket = socket.to_path_buf();
     let mut command = fixture.command();
     command
-        .arg("web")
-        .arg("--listen")
+        .arg("host")
+        .arg("--web")
         .arg(format!("unix:{}", socket.display()))
         .arg("--ui")
         .arg(&ui)
@@ -102,13 +109,13 @@ fn launch_with(fixture: &Fixture, extra: &[&str]) -> (Web, bool) {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
-    let mut child = command.spawn().expect("plak web spawned");
+    let mut child = command.spawn().expect("plak host spawned");
     let stderr = child.stderr.take().unwrap();
     let (ready, started) = mpsc::channel();
     let (forward, lines) = mpsc::channel();
     std::thread::spawn(move || {
         for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-            if line.starts_with("plak web: serving on ") {
+            if line.starts_with("plak host: serving on ") {
                 let _ = ready.send(true);
             } else {
                 let _ = forward.send(line);
@@ -118,7 +125,7 @@ fn launch_with(fixture: &Fixture, extra: &[&str]) -> (Web, bool) {
     });
     let served = started
         .recv_timeout(WAIT)
-        .expect("plak web started or exited");
+        .expect("plak host started or exited");
     (
         Web {
             child: Some(child),
@@ -270,7 +277,12 @@ fn next_frame(socket: &mut WebSocket<UnixStream>) -> Value {
     }
 }
 
-/// The handshake; the welcome names the session's root node.
+/// The request id every connection's `new_session` names, so they all
+/// reach one session.
+const REQUEST: &str = "00000000-0000-4000-8000-0000000000b1";
+
+/// The handshake, whose welcome names no session, then the session of
+/// [`REQUEST`], created by the first connection to ask; its root node.
 fn hello(socket: &mut WebSocket<UnixStream>) -> NodeAddress {
     send(
         socket,
@@ -282,7 +294,30 @@ fn hello(socket: &mut WebSocket<UnixStream>) -> NodeAddress {
     );
     let welcome = next_frame(socket);
     assert_eq!(welcome["frame"], "welcome", "{welcome}");
-    serde_json::from_value(welcome["session"]["root"].clone()).expect("the welcome names the root")
+    assert_eq!(
+        welcome.get("session"),
+        None,
+        "a host of many sessions names none"
+    );
+    send(
+        socket,
+        &ClientFrame::Request {
+            id: 900,
+            op: Op::NewSession {
+                workspace: WORKSPACE.with(|workspace| workspace.borrow().clone()),
+                template: None,
+                request_id: REQUEST.into(),
+            },
+        },
+    );
+    let created = response(socket, 900);
+    assert_eq!(created["ok"]["answer"], "created", "{created}");
+    serde_json::from_value(created["ok"]["node"].clone()).expect("created names the root")
+}
+
+thread_local! {
+    /// The workspace this test's `new_session` names.
+    static WORKSPACE: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
 }
 
 /// The response to request `id`, skipping the events before it.
@@ -321,7 +356,10 @@ fn interrupt_and_wait(web: &mut Web) {
     std::thread::spawn(move || {
         let _ = done.send(child.wait());
     });
-    let status = exited.recv_timeout(WAIT).expect("plak web exited").unwrap();
+    let status = exited
+        .recv_timeout(WAIT)
+        .expect("plak host exited")
+        .unwrap();
     assert!(status.success(), "{status}");
 }
 
@@ -481,7 +519,9 @@ fn every_failed_check_is_refused_alike() {
 fn a_live_socket_is_never_replaced() {
     let fixture = Fixture::new(&json!({"version": 1, "steps": [{"output": {"text": ANSWER}}]}));
     let web = start(&fixture);
-    let (mut second, served) = launch(&fixture);
+    // Another home's host, so its own lock does not refuse it first.
+    let other = Fixture::new(&json!({"version": 1, "steps": []}));
+    let (mut second, served) = launch_on(&other, &web.socket, &[]);
     assert!(!served, "a second endpoint started on a live socket");
     let status = second.child.take().unwrap().wait().unwrap();
     assert!(!status.success());
@@ -533,7 +573,7 @@ fn an_idle_session_releases_and_the_next_connection_wakes_it() {
         "steps": [{"output": {"text": ANSWER}}, {"output": {"text": ANSWER}}]
     }));
     let (mut web, ready) = launch_with(&fixture, &["--idle-release", "1"]);
-    assert!(ready, "plak web started");
+    assert!(ready, "plak host started");
     let woke = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| wake(&mut web)));
     if let Err(error) = woke {
         let lines: Vec<String> = web.lines.try_iter().collect();
@@ -542,7 +582,7 @@ fn an_idle_session_releases_and_the_next_connection_wakes_it() {
             .cloned()
             .or_else(|| error.downcast_ref::<&str>().map(|text| (*text).to_owned()))
             .unwrap_or_default();
-        panic!("{text}; plak web said: {lines:#?}");
+        panic!("{text}; plak host said: {lines:#?}");
     }
     interrupt_and_wait(&mut web);
 }
@@ -577,44 +617,39 @@ fn wake(web: &mut Web) {
     prompt(&mut socket, attachment, "before the release", ANSWER);
     socket.close(None).unwrap();
     drop(socket);
-    // Released once idle, the session is opened again by the next
-    // connection, which says so; until then a connection only waits.
-    let mut woken = None;
+    // The first open's lines are not the wake's.
+    let _: Vec<String> = web.lines.try_iter().collect();
+    // Released once idle, the directory reads it dormant; the next attach
+    // opens it again, which the host says.
+    let mut again = upgrade(web, &cookie);
+    let root_again = hello(&mut again);
+    assert_eq!(root_again, root, "the same session is served");
     let deadline = std::time::Instant::now() + WAIT;
-    while woken.is_none() && std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        let mut again = upgrade(web, &cookie);
-        let root_again = hello(&mut again);
-        assert_eq!(root_again, root, "the same session is served");
-        if web
-            .lines
-            .try_iter()
-            .any(|line| line.starts_with("plak web: opening released session "))
-        {
-            woken = Some((again, root_again));
+    let mut id = 10;
+    loop {
+        id += 1;
+        send(
+            &mut again,
+            &ClientFrame::Request {
+                id,
+                op: Op::ListSessions { workspace: None },
+            },
+        );
+        let rows = response(&mut again, id);
+        if rows["ok"]["rows"][0]["residency"] == "dormant" {
+            break;
         }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "never released: {rows}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(200));
     }
-    let (mut again, root_again) = woken.expect("the released session was opened again");
-    let attachment = attach(&mut again, &root_again, 1);
+    let attachment = attach(&mut again, &root_again, 2);
+    let opened = std::iter::from_fn(|| web.lines.recv_timeout(WAIT).ok())
+        .any(|line| line.starts_with("plak host: opening session "));
+    assert!(opened, "the released session was not opened again");
     // The scripted model behind the reopened session answers as before.
     prompt(&mut again, attachment, "after the wake", ANSWER);
     drop(again);
-}
-
-/// A connection holds its session resident from the moment the endpoint
-/// hands it the session, before it attaches: a client that waits past the
-/// idle release between its welcome and its attach still attaches the
-/// session it was handed, which a release would have refused it
-/// (`node_retiring`) or ended under it.
-#[test]
-fn a_connection_holds_its_session_before_it_attaches() {
-    let fixture = Fixture::new(&json!({"version": 1, "steps": [{"output": {"text": ANSWER}}]}));
-    let (web, ready) = launch_with(&fixture, &["--idle-release", "1"]);
-    assert!(ready, "plak web started");
-    let cookie = cookie(&web);
-    let mut socket = upgrade(&web, &cookie);
-    let root = hello(&mut socket);
-    // Several idle releases' worth of decisions pass before the attach.
-    std::thread::sleep(std::time::Duration::from_secs(4));
-    attach(&mut socket, &root, 1);
 }

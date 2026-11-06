@@ -284,22 +284,17 @@ impl TopCommand {
             Self::Telemetry {
                 action: Some(action),
             } => action.into_command(),
-            Self::Web {
-                listen,
+            Self::Host {
+                web,
                 ui,
-                session,
-                cwd,
                 dev_login,
                 idle_release,
-            } => Ok(Command::Web(crate::command::WebCommand {
-                listen,
-                ui,
-                session,
-                cwd,
-                dev_login,
-                idle_release: idle_release.map(std::time::Duration::from_secs),
-            })),
-            Self::Host { idle_release } => Ok(Command::Host(crate::command::HostCommand {
+            } => Ok(Command::Host(crate::command::HostCommand {
+                web: web.map(|listen| crate::command::HostWeb {
+                    listen,
+                    ui,
+                    dev_login,
+                }),
                 idle_release: idle_release.map(std::time::Duration::from_secs),
             })),
             Self::Wire {

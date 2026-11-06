@@ -64,21 +64,28 @@ impl Ui {
     /// that allows framing; a build past its file or byte caps.
     pub(crate) fn load(root: &Path) -> CliResult<Self> {
         let root = std::fs::canonicalize(root).map_err(|_| {
-            CliFailure::new(format!("plak web: no UI directory {}", root.display()))
+            CliFailure::new(format!(
+                "plak host --web: no UI directory {}",
+                root.display()
+            ))
         })?;
         let text = std::fs::read_to_string(root.join("csp.json")).map_err(|_| {
-            CliFailure::new("plak web: the UI directory has no csp.json; serve a complete build")
+            CliFailure::new(
+                "plak host --web: the UI directory has no csp.json; serve a complete build",
+            )
         })?;
-        let file: CspFile = serde_json::from_str(&text)
-            .map_err(|_| CliFailure::new("plak web: csp.json is not {\"header\": \"...\"}"))?;
+        let file: CspFile = serde_json::from_str(&text).map_err(|_| {
+            CliFailure::new("plak host --web: csp.json is not {\"header\": \"...\"}")
+        })?;
         if !forbids_framing(&file.header) {
             return Err(CliFailure::new(
-                "plak web: csp.json's header must carry frame-ancestors 'none'",
+                "plak host --web: csp.json's header must carry frame-ancestors 'none'",
             ));
         }
         let value = |text: &str| {
-            HeaderValue::from_str(text)
-                .map_err(|_| CliFailure::new("plak web: csp.json holds a header that is not valid"))
+            HeaderValue::from_str(text).map_err(|_| {
+                CliFailure::new("plak host --web: csp.json holds a header that is not valid")
+            })
         };
         let mut files = BTreeMap::new();
         let mut total = 0_u64;
@@ -116,7 +123,12 @@ fn collect(
     files: &mut BTreeMap<String, File>,
     total: &mut u64,
 ) -> CliResult<()> {
-    let unreadable = || CliFailure::new(format!("plak web: cannot read {}", directory.display()));
+    let unreadable = || {
+        CliFailure::new(format!(
+            "plak host --web: cannot read {}",
+            directory.display()
+        ))
+    };
     let mut entries: Vec<PathBuf> = std::fs::read_dir(directory)
         .map_err(|_| unreadable())?
         .map(|entry| entry.map(|entry| entry.path()))
@@ -154,7 +166,7 @@ fn collect(
         *total = total.saturating_add(size);
         if size > MAX_FILE_BYTES || *total > MAX_BUILD_BYTES || files.len() >= MAX_FILES {
             return Err(CliFailure::new(format!(
-                "plak web: the UI build is past its caps ({MAX_FILES} files, \
+                "plak host --web: the UI build is past its caps ({MAX_FILES} files, \
                  {MAX_FILE_BYTES} bytes a file, {MAX_BUILD_BYTES} in all)"
             )));
         }

@@ -1,4 +1,5 @@
-//! The sweep's `plak web` face: the real endpoint on a private unix socket,
+//! The sweep's web face: `plak host --web`'s real endpoint on a private unix
+//! socket,
 //! entered through its gate as `tailscale serve` would (the tailnet login,
 //! the exact host and origin, the issued cookie), and the wire v2 client
 //! (`plakous_host_protocol::client`) over the WebSocket, one wire line per
@@ -38,7 +39,8 @@ const ORIGIN: &str = "https://plak.example.ts.net";
 /// address, never assigned).
 const DEVICE: &str = "192.0.2.10";
 
-/// Adds the `[web]` keys and the UI directory `plak web` serves; repeatable.
+/// Adds the `[web]` keys and the UI directory the web endpoint serves;
+/// repeatable.
 pub(super) fn configure(fixture: &Fixture) {
     let config = fixture.home().join("config.toml");
     let mut text = std::fs::read_to_string(&config).unwrap();
@@ -59,17 +61,18 @@ pub(super) fn configure(fixture: &Fixture) {
     std::fs::write(ui.join("index.html"), "<!doctype html>sweep").unwrap();
 }
 
-/// The dormant shape's lifecycle on `plak web --session <session>`, which
-/// releases its session one second after nothing keeps it: a connection
-/// prompts and reads the answer, then leaves; once the session's runtime
-/// lease is released, the next connection wakes it, and an interrupt ends
-/// the process while that connection holds the woken session.
+/// The dormant shape's lifecycle on `plak host --web`, which releases a
+/// session one second after nothing keeps it: a connection attaches
+/// `session`, prompts and reads the answer, then leaves; once the session's
+/// runtime lease is released, the next connection's attach wakes it, and an
+/// interrupt ends the process while that connection holds the woken
+/// session.
 pub(super) fn dormant_lifecycle(
     fixture: &Fixture,
     command: Command,
     session: &str,
 ) -> AgentOutcome {
-    let mut web = Web::start(fixture, command, session);
+    let mut web = Web::start(fixture, command);
     let mut records = Vec::new();
     let _ = dormant_steps(fixture, &mut web, session, &mut records);
     web.finish(&records)
@@ -102,7 +105,7 @@ fn dormant_steps(
     records.push(json!({"kind": "released"}));
     let woken = web.connect(session)?;
     woken.attached(web)?;
-    if !web.said("plak web: opened session ") {
+    if web.said("plak host: opened session ") < 2 {
         return web.lost("served a released session without opening it");
     }
     records.push(json!({"kind": "woke"}));
@@ -129,7 +132,7 @@ fn holds_runtime_lease(fixture: &Fixture) -> bool {
         .is_ok_and(|owners| owners > 0)
 }
 
-/// A running `plak web`.
+/// A running `plak host --web`.
 struct Web {
     child: Child,
     socket: PathBuf,
@@ -140,26 +143,26 @@ struct Web {
 }
 
 impl Web {
-    fn start(fixture: &Fixture, mut command: Command, session: &str) -> Self {
+    fn start(fixture: &Fixture, mut command: Command) -> Self {
         let socket = socket_path(fixture);
         command
-            .arg("web")
-            .arg("--listen")
+            .arg("host")
+            .arg("--web")
             .arg(format!("unix:{}", socket.display()))
             .arg("--ui")
             .arg(fixture.root.join("ui"))
-            .args(["--session", session, "--idle-release", "1"])
+            .args(["--idle-release", "1"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
-        let mut child = command.spawn().expect("plak web spawned");
+        let mut child = command.spawn().expect("plak host spawned");
         let stderr = Arc::new(Mutex::new(Vec::new()));
         let (ready, serving) = mpsc::channel();
         let reader = {
             let (pipe, stderr) = (child.stderr.take().unwrap(), Arc::clone(&stderr));
             std::thread::spawn(move || {
                 for line in BufReader::new(pipe).lines().map_while(Result::ok) {
-                    if line.starts_with("plak web: serving on ") {
+                    if line.starts_with("plak host: serving on ") {
                         let _ = ready.send(true);
                     }
                     stderr.lock().unwrap().push(line);
@@ -201,22 +204,24 @@ impl Web {
             std::thread::sleep(Duration::from_millis(10));
         }
         panic!(
-            "plak web {what}; stderr: {:#?}",
+            "plak host {what}; stderr: {:#?}",
             self.stderr.lock().unwrap()
         );
     }
 
-    fn said(&self, prefix: &str) -> bool {
+    /// How many stderr lines so far start with `prefix`.
+    fn said(&self, prefix: &str) -> usize {
         self.stderr
             .lock()
             .unwrap()
             .iter()
-            .any(|line| line.starts_with(prefix))
+            .filter(|line| line.starts_with(prefix))
+            .count()
     }
 
-    /// A connection through the gate, welcomed to `session`.
+    /// A connection through the gate, attached to `session`'s root.
     fn connect(&mut self, session: &str) -> Option<Connection> {
-        match connect(&self.socket) {
+        match connect(&self.socket, session) {
             Ok(connection) if connection.session == session => Some(connection),
             Ok(connection) => self.lost(&format!(
                 "welcomed a connection to {}, not {session}",
@@ -348,7 +353,7 @@ impl Drop for Connection {
     }
 }
 
-fn connect(socket: &std::path::Path) -> Result<Connection, String> {
+fn connect(socket: &std::path::Path, session: &str) -> Result<Connection, String> {
     let cookie = cookie(socket)?;
     let mut stream = stream(socket)?;
     let mut headers = serve_headers();
@@ -372,15 +377,20 @@ fn connect(socket: &std::path::Path) -> Result<Connection, String> {
         binary_id: "crash-sweep".into(),
         caps: Vec::new(),
     };
-    let (sender, receiver, welcome) =
-        client::connect::<PlakExtension>(transport, hello).map_err(|error| error.to_string())?;
+    // A genesis session's tree, and so its root, is named after it.
+    let root = plakous_host_protocol::wire::NodeAddress {
+        tree_id: session.to_owned(),
+        agent_id: session.to_owned(),
+    };
+    let (sender, receiver, welcome) = client::connect_to::<PlakExtension>(transport, hello, root)
+        .map_err(|error| error.to_string())?;
+    if welcome.session.is_some() {
+        return Err("a host of many sessions welcomed the connection to one".to_owned());
+    }
     Ok(Connection {
         sender,
         receiver,
-        session: welcome
-            .session
-            .map(|served| served.session_id)
-            .unwrap_or_default(),
+        session: session.to_owned(),
         bridge,
     })
 }

@@ -1,4 +1,4 @@
-//! `residency_dormant_materialize`: a session served by `plak web` goes
+//! `residency_dormant_materialize`: a session served by `plak host` goes
 //! dormant once its last connection leaves and is materialized again by the
 //! next one (spec 02 §4.4). Its lifecycle is the web face's
 //! (`web_face::dormant_lifecycle`); every cut kills the endpoint at one of
@@ -21,18 +21,16 @@ pub(super) fn assert_dormant(fixture: &Fixture, outcome: &AgentOutcome, state: &
         ["assistant", "released", "woke"],
         "the web face's milestones"
     );
-    for said in [
-        "plak web: opening released session ",
-        "plak web: opened session ",
-    ] {
+    // Opened once for the first connection and once more for the wake.
+    for said in ["plak host: opening session ", "plak host: opened session "] {
         assert_eq!(
             outcome
                 .stderr
                 .lines()
                 .filter(|line| line.starts_with(said))
                 .count(),
-            1,
-            "{said:?} once: {}",
+            2,
+            "{said:?} twice: {}",
             outcome.stderr
         );
     }

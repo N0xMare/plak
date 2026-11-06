@@ -178,7 +178,7 @@ pub const CONFIG_SECTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "web",
-        "The maintainer web endpoint (plak web): who it admits and where it is served.",
+        "The maintainer web endpoint (plak host --web): who it admits and where it is served.",
     ),
 ];
 
@@ -688,7 +688,7 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         field: ConfigField::WebAllow,
         kind: "array of string",
         constraint: "tailnet logins, no duplicates; unset admits no one; home-scoped",
-        doc: "The tailnet logins (Tailscale-User-Login) plak web admits through tailscale serve. Read when plak web starts; a 0.0.3 build refuses a config.toml that sets it.",
+        doc: "The tailnet logins (Tailscale-User-Login) plak host --web admits through tailscale serve. Read when plak host starts with --web; a 0.0.3 build refuses a config.toml that sets it.",
         example: "[\"you@example.com\"]",
         scope: ConfigScope::Immediate,
     },
@@ -697,7 +697,7 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         field: ConfigField::WebOrigin,
         kind: "string",
         constraint: "https://<host>[:port], nothing after it; home-scoped",
-        doc: "The exact origin tailscale serve publishes plak web at; every request must name its host and a WebSocket upgrade its origin. Read when plak web starts; a 0.0.3 build refuses a config.toml that sets it.",
+        doc: "The exact origin tailscale serve publishes plak host --web at; every request must name its host and a WebSocket upgrade its origin. Read when plak host starts with --web; a 0.0.3 build refuses a config.toml that sets it.",
         example: "\"https://host.example.ts.net\"",
         scope: ConfigScope::Immediate,
     },

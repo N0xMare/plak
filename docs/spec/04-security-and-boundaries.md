@@ -724,19 +724,25 @@ widens it.
 
 ### 2.10 The web endpoint
 
-`plak web` (chapter 02 §4.5) serves one session to browsers on the tailnet.
-Everything a client admitted there can do, an operator at the TUI can do,
-except the local-face intents of §4.6: it holds the serving user's shell.
-That includes the wire's session requests (`retry_attach`,
+`plak host --web` (chapter 02 §4.5) serves the host's sessions to browsers
+on the tailnet. Everything a client admitted there can do, an operator at
+the TUI can do, except the local-face intents of §4.6: it holds the serving
+user's shell. That includes the wire's session requests (`retry_attach`,
 `resume_session`, `rebind`), which act on the serving user's own sessions
-as the TUI's `/attach`, `/resume` and rebind do, and `stop_session`, which
-stops the served session's work as the TUI's interrupt, process stop and
-stop-all together do (every face can already send those) and leaves it
-resumable. It names a session rather than an attachment, so it is bounded:
-a host stops only a session it serves (any other is `unknown_session`,
-and a session another live host holds is that host's to stop), one at a
-time per connection, and it logs each with the connection's face and
-login, since it acts without an attachment. What it is shown is what
+as the TUI's `/attach`, `/resume` and rebind do, the session directory's
+(chapter 02 §4.4), and `stop_session`. The directory reads every session of
+the home (titles, workspaces, profiles and states), attaches any of them,
+and creates a session in any existing directory the user can reach. A
+workspace allowlist would add no boundary: an attached session already runs
+shell wherever the user can. A project's `.plak/` overlay still applies to
+a session only when the project is trusted (`plak config trust`), and no
+web client can trust one. `stop_session` stops the served session's work as
+the TUI's interrupt, process stop and stop-all together do (every face can
+already send those) and leaves it resumable. It names a session rather than
+an attachment, so it is bounded: a host stops only a session it serves (any
+other is `unknown_session`, and a session another live host holds is that
+host's to stop), one at a time per connection, and it logs each with the
+connection's face and login, since it acts without an attachment. What it is shown is what
 the TUI shows, redacted as the TUI's rows are: the session's process rows
 (chapter 02 §4.4) carry each command redacted as the raw command it shows
 (§5) and each output tail through the same display redactor as a tool
@@ -921,7 +927,7 @@ as the runner user, could not read anyway.
 
 **The web cookie key** is a third shelf under the same rules:
 `<plak home>/secrets/web/cookie-key.secret`, 32 random bytes as hex, which
-`plak web` makes on its first start and verifies on every read like any
+the web endpoint makes on its first start and verifies on every read like any
 secret file. It is created without replacing one (two first starts agree on
 the first one's key), and its bytes are zeroized after use. It signs the endpoint's session cookies (§2.10) and nothing else;
 it is never logged, exported or carried by a session. Removing or replacing it

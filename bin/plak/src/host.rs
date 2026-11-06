@@ -6,8 +6,9 @@
 //! `<home>/host/run/<state key>.sock` for this user only (spec 04 §4.7);
 //! names its custody identity (the home's host id and this process's
 //! instance); and captures the login shell's environment once for the tools
-//! its sessions will run. Each connection is a client of the host's session
-//! directory (spec 02 §4.4). A `SIGTERM` or `SIGINT` hands every resident
+//! its sessions will run. Each connection, on the control socket or on the
+//! web endpoint `--web` adds, is a client of the host's session directory
+//! (spec 02 §4.4). A `SIGTERM` or `SIGINT` hands every resident
 //! session off and ends the process within [`HANDOFF_DEADLINE`].
 
 mod environment;
@@ -15,6 +16,7 @@ mod lock;
 mod sessions;
 mod socket;
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use plakous_hosted::error::{CliFailure, CliResult, ProcessOutcome};
@@ -68,6 +70,27 @@ pub(crate) fn run_host_command(
     let entered = runtime.enter();
     let bound = socket::Bound::bind(&paths.host_socket(), &lock)?;
     drop(entered);
+    let web = match &command.web {
+        Some(args) => {
+            let bound_web = runtime.block_on(crate::web::WebEndpoint::bind(
+                services,
+                args,
+                Arc::clone(&host),
+                crate::web::StopProbe::armed(),
+            ));
+            match bound_web {
+                Ok(endpoint) => {
+                    eprintln!("plak host: web on {}", endpoint.listener());
+                    Some(endpoint)
+                }
+                Err(failure) => {
+                    bound.remove();
+                    return Err(failure);
+                }
+            }
+        }
+        None => None,
+    };
     eprintln!(
         "plak host: serving on {} (host {}, instance {}); tools get {}",
         bound.path().display(),
@@ -75,7 +98,12 @@ pub(crate) fn run_host_command(
         identity.instance,
         environment.describe(),
     );
+    // The web endpoint serves beside the control socket and stops with it.
+    let web = web.map(|web| runtime.spawn(web.serve()));
     runtime.block_on(bound.serve(&host, move || stop.stopped()));
+    if let Some(web) = web {
+        let _ = runtime.block_on(web);
+    }
     let stopping = Instant::now();
     // The socket goes first, so no client reaches a host that is handing
     // its sessions off, and before the lock: a host that takes the lock

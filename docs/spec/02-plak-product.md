@@ -281,13 +281,14 @@ Everything the product derives from a workspace (the project root and its
 `.plak/` overlay, project templates, the session lookup's workspace, a new
 session's workspace root) is a product context resolved from an explicit
 workspace path: the launch directory for the CLI's own faces, or the
-workspace a command names (`plak web --cwd`). Every context of the home the
+workspace a request names (`plak host`'s `new_session`, and the session a
+host opens in its own workspace). Every context of the home the
 environment resolved comes from one discovery, so a workspace's project root
 is the same whichever path built its context: neither the product home nor
 the default `$HOME/.plak` is ever a project overlay. Nothing below the CLI edge reads or changes the
 process working directory, so one process can hold the contexts of several
 workspaces, and nothing a face sends is resolved against it: a relative path
-on the command line (an export's `--out`, an import, `--ui`, `--cwd`) is made
+on the command line (an export's `--out`, an import, `--ui`) is made
 absolute against the launch directory at the edge. What a host process
 shares across its sessions is home-wide, never a workspace's: one bound on
 running process starts (128) over every session's jobs, the per-account
@@ -3944,7 +3945,7 @@ verdicts) are addressed, the session profile and workspace chrome states.
 - **Quit and stop.** A `quit` intent never ends a session that outlives its
   clients. On a child attachment it is that attachment's detach, on any
   connection. On a root attachment of a host whose connections detach when
-  they leave (`plak web`, and `plak host` when it serves sessions) it is the
+  they leave (`plak host`) it is the
   attachment's detach too, and the session runs on; only on `plak agent
   --wire v2`, whose one connection is the session's only client, does it
   quit the session. Either detach answers `detached`. Stopping a session's
@@ -4052,8 +4053,8 @@ verdicts) are addressed, the session profile and workspace chrome states.
   whose attachment asked, never another that used the same id. The session host serves `resume_session` as the
   session's own resume; `retry_attach` and `rebind` reopen the session,
   which only a launcher that owns the session's host can do, so a host
-  that serves one session (`plak agent --wire v2`, `plak web`) refuses
-  them `session_unavailable` and keeps its session.
+  that does not own its sessions' launcher (`plak agent --wire v2`, `plak
+  host`) refuses them `session_unavailable` and keeps its session.
 - **Observation classes.** Every observation is one class. A **state** is
   broadcast as the latest value of its kind and is part of the attach
   snapshot. An **event** is broadcast as it happens; a *required* event is
@@ -4380,12 +4381,10 @@ verdicts) are addressed, the session profile and workspace chrome states.
 
 ### 4.5 The web endpoint
 
-The hidden maintainer command `plak web --listen <unix:path|127.0.0.1:port>
-[--ui <dir>] [--session <id> | --cwd <dir>] [--dev-login <login>]` (feature
-`web`, in maintainer builds) hosts one headless session, new or resumed as
-`plak agent` opens it, and serves it to browsers: wire v2 over a WebSocket at
-`/wire`, and the web UI's static build. Its security model is chapter 04
-§2.10; its keys are `[web]` (chapter 07 §3).
+`plak host --web <unix:path|127.0.0.1:port> [--ui <dir>] [--dev-login
+<login>]` (§4.6) serves the host's sessions to browsers: wire v2 over a
+WebSocket at `/wire`, and the web UI's static build. Its security model is
+chapter 04 §2.10; its keys are `[web]` (chapter 07 §3).
 
 - **Deployment.** The listener is a unix socket in a `0700` directory of the
   user (created so, or refused when it is anything else); `tailscale serve
@@ -4399,24 +4398,18 @@ The hidden maintainer command `plak web --listen <unix:path|127.0.0.1:port>
   accepts on it; a live one is refused, and the process removes only the
   socket it bound. A `127.0.0.1` listener is dev mode only: it needs
   `--dev-login`, warns at start, and its origin is
-  `http://127.0.0.1:<port>`. The process binds before it opens the session,
-  prints `plak web: serving on <listener>` once it accepts, and serves until
-  `SIGINT` or `SIGTERM`; then it quits the session and removes the socket.
-  Its session releases idle (§4.4, residency in a host; the hidden
-  `--idle-release <seconds>` sets the idle release, 300 s by default), and
-  the next connection opens it again by its id through the exact reopen,
-  printing `plak web: opening released session <id>`; a session that does
-  not open refuses that connection `unavailable`, and the endpoint serves
-  on. The connection's `welcome` names the session, its tree
-  and its root node (§4.4). A stop ends every hello wait and connection as a
-  leaving client does. When the session switches to another (`/new`,
-  `/resume`, a rebind), every connection's attachment ends with `moved`
-  naming the new session's root, as on stdio (§4.4); each moved
-  connection's next root attach gets what the attach snapshot does not
-  carry, and a connection that arrives later is welcomed to the new
-  session. A switch whose new root
-  cannot be read ends the endpoint as the session's end does; a connection
-  that arrives after the end is refused `unavailable`. Nothing before the gate is refused in a wire frame: it gets
+  `http://127.0.0.1:<port>`. The host binds it after its control socket, and
+  a listener that cannot be bound stops the host before it serves; it prints
+  `plak host: web on <listener>` before its start line, and stops serving
+  when the host stops. A connection is a client of the host's session
+  directory (§4.4), as one on the control socket is: its `welcome` names no
+  session, it finds its sessions with `list_sessions` or `watch_sessions`,
+  creates one with `new_session`, and attaches a row's node, which opens a
+  dormant session first (printing `plak host: opening session <id>`). One
+  `/wire` serves every session, chosen in the protocol by id; the UI's own
+  routes (`/s/<session>`, say) are the static fallback's, and the host never
+  routes by path. A stop ends every hello wait and connection as a leaving
+  client does. Nothing before the gate is refused in a wire frame: it gets
   the uniform `403`, so no failure text reaches an unauthenticated peer.
 - **What Serve forwards.** Serve proxies to a unix backend as
   `http://localhost`: a request arrives with `Host: localhost`, the name the
@@ -4439,13 +4432,11 @@ The hidden maintainer command `plak web --listen <unix:path|127.0.0.1:port>
   s), or a client more than 8192 frames or 10 s per frame or ping behind ends
   that connection with a close code and nothing else. `/wire` upgrades a
   `GET` only. Each connection is a
-  `plakous_hosted::host_service::wire::WireConnection` on the session's one
-  shared service (`WireSession`, fed by one pump that is the session's only
-  observation consumer); a connection that leaves, by `bye`, close, or any
-  of the above, detaches, and the session runs on for the next connection. A
-  `quit` intent on the root attachment detaches it as well (§4.4, quit and
-  stop). A login
-  holds at most 4 connections and opens at most 30 a minute.
+  `plakous_hosted::host_service::wire::HostConnection` of the host; a
+  connection that leaves, by `bye`, close, or any of the above, detaches,
+  and its sessions run on for the next connection. A `quit` intent on a
+  root attachment detaches it as well (§4.4, quit and stop). A login holds
+  at most 4 connections and opens at most 30 a minute.
 - **Static files.** `--ui <dir>` must hold `csp.json`
   (`{"header": "...", "report_only_header": "..."}`, the second optional),
   whose `header` must carry `frame-ancestors 'none'`; without `--ui` only
@@ -4477,7 +4468,8 @@ The hidden maintainer command `plak host` (feature `web`, in maintainer
 builds) is the per-user host process, run in the foreground under a systemd
 user unit or a terminal multiplexer on the host machine. It serves every
 session of the home, across workspaces, to the clients of its control
-socket, through the session directory (§4.4).
+socket and, with `--web`, of its web endpoint (§4.5), through the session
+directory (§4.4).
 
 - **One per home and state key.** Before anything else it takes an exclusive
   lock on `state/<key>/host.lock` and holds it for its life; the file names
@@ -4552,7 +4544,7 @@ session's processes are never signalled before the host has handed them off.
 
 ```ini
 [Service]
-ExecStart=%h/.local/bin/plak host
+ExecStart=%h/.local/bin/plak host --web unix:%h/.plak/host/web/web.sock --ui %h/.plak/web-ui
 KillMode=mixed
 KillSignal=SIGTERM
 TimeoutStopSec=90

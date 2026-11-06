@@ -341,6 +341,7 @@ fn open_session(
     let session_id = host.session.id.clone();
     let state_roots = host.state_roots.clone();
     let (actions, events, worker) = spawn_host_worker(host)?;
+    eprintln!("plak host: opened session {session}");
     Ok(OpenedSession {
         root,
         session_id,

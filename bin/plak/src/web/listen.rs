@@ -1,4 +1,4 @@
-//! The private listener `plak web` binds: a unix socket in a 0700 directory
+//! The private listener the web endpoint binds: a unix socket in a 0700 directory
 //! (the `tailscale serve unix:<path>` deployment), or 127.0.0.1 in dev mode,
 //! and the HTTP/1.1 connections it accepts.
 
@@ -24,7 +24,7 @@ const MAX_REQUEST_BUFFER: usize = 64 * 1024;
 /// How often the accept loop looks at the session and the interrupt count.
 const WATCH: Duration = Duration::from_millis(200);
 
-/// Where `plak web` listens.
+/// Where the web endpoint listens.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Listen {
     /// A unix socket; its directory is made 0700 and must be the user's.
@@ -94,27 +94,29 @@ pub(crate) struct SocketFile {
 pub(crate) async fn bind(listen: &Listen) -> CliResult<(Bound, Option<SocketFile>)> {
     match listen {
         Listen::Unix(path) => {
-            let directory = path
-                .parent()
-                .ok_or_else(|| CliFailure::new("plak web: the socket path has no directory"))?;
+            let directory = path.parent().ok_or_else(|| {
+                CliFailure::new("plak host --web: the socket path has no directory")
+            })?;
             private_directory(directory)?;
             match std::fs::symlink_metadata(path) {
                 Ok(metadata) if is_socket(&metadata) => {
                     match std::os::unix::net::UnixStream::connect(path) {
                         Ok(_) => {
                             return Err(CliFailure::new(format!(
-                                "plak web: {} is in use by a running endpoint",
+                                "plak host --web: {} is in use by a running endpoint",
                                 path.display()
                             )));
                         }
                         Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused => {
                             std::fs::remove_file(path).map_err(|_| {
-                                CliFailure::new("plak web: could not replace the stale socket")
+                                CliFailure::new(
+                                    "plak host --web: could not replace the stale socket",
+                                )
                             })?;
                         }
                         Err(_) => {
                             return Err(CliFailure::new(format!(
-                                "plak web: cannot tell whether {} is in use",
+                                "plak host --web: cannot tell whether {} is in use",
                                 path.display()
                             )));
                         }
@@ -122,7 +124,7 @@ pub(crate) async fn bind(listen: &Listen) -> CliResult<(Bound, Option<SocketFile
                 }
                 Ok(_) => {
                     return Err(CliFailure::new(format!(
-                        "plak web: {} exists and is not a socket",
+                        "plak host --web: {} exists and is not a socket",
                         path.display()
                     )));
                 }
@@ -130,12 +132,13 @@ pub(crate) async fn bind(listen: &Listen) -> CliResult<(Bound, Option<SocketFile
             }
             let listener = tokio::net::UnixListener::bind(path).map_err(|error| {
                 CliFailure::new(format!(
-                    "plak web: could not bind {}: {error}",
+                    "plak host --web: could not bind {}: {error}",
                     path.display()
                 ))
             })?;
-            let metadata = std::fs::symlink_metadata(path)
-                .map_err(|_| CliFailure::new("plak web: could not inspect the bound socket"))?;
+            let metadata = std::fs::symlink_metadata(path).map_err(|_| {
+                CliFailure::new("plak host --web: could not inspect the bound socket")
+            })?;
             let file = {
                 use std::os::unix::fs::MetadataExt as _;
                 SocketFile {
@@ -150,7 +153,9 @@ pub(crate) async fn bind(listen: &Listen) -> CliResult<(Bound, Option<SocketFile
             let listener = tokio::net::TcpListener::bind(address)
                 .await
                 .map_err(|error| {
-                    CliFailure::new(format!("plak web: could not bind {address}: {error}"))
+                    CliFailure::new(format!(
+                        "plak host --web: could not bind {address}: {error}"
+                    ))
                 })?;
             Ok((Bound::Loopback(listener), None))
         }
@@ -171,16 +176,18 @@ fn private_directory(directory: &Path) -> CliResult<()> {
         std::fs::DirBuilder::new()
             .mode(0o700)
             .create(directory)
-            .map_err(|_| CliFailure::new("plak web: could not create the socket directory"))?;
+            .map_err(|_| {
+                CliFailure::new("plak host --web: could not create the socket directory")
+            })?;
     }
     let metadata = std::fs::symlink_metadata(directory)
-        .map_err(|_| CliFailure::new("plak web: could not inspect the socket directory"))?;
+        .map_err(|_| CliFailure::new("plak host --web: could not inspect the socket directory"))?;
     if !metadata.is_dir()
         || metadata.uid() != rustix::process::geteuid().as_raw()
         || metadata.permissions().mode() & 0o077 != 0
     {
         return Err(CliFailure::new(format!(
-            "plak web: {} must be a 0700 directory of this user",
+            "plak host --web: {} must be a 0700 directory of this user",
             directory.display()
         )));
     }

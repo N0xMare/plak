@@ -58,7 +58,7 @@ an export.
 - Configuration compatibility: `config.toml` accepts `[host]
   resume_after_loss` (`hold` or `continue`, default `hold`), `[mcp_servers.<id>]
   placement` (`host` or `runner`, default `host`), `[runners.<name>]` and
-  `[web] allow` / `[web] origin` (read by `plak web`, below);
+  `[web] allow` / `[web] origin` (read by `plak host --web`, below);
   `resume_after_loss` applies to the root and sub-agents a lost host
   interrupted. `plak` writes them only when you set them, and `plak doctor` warns `config uses
   0.0.4-only keys` while one is set.
@@ -143,7 +143,7 @@ an export.
   shell's `PATH` are captured once at start (not yet given to its sessions'
   tools); a `SIGTERM` hands every resident session off as a planned handoff
   and stops it within 60 s. Spec 02 §4.6 carries the systemd unit.
-- `plak web` (hidden, maintainer builds): one headless session's wire v2 over
+- `plak host --web`: the host's sessions' wire v2 over
   a WebSocket at `/wire`, and a web UI's static build, on a private unix
   socket that `tailscale serve --bg unix:<path>` publishes on the tailnet,
   from a tagged node. Access is the tailnet login Serve stamps, checked
@@ -151,10 +151,10 @@ an export.
   exact `[web] origin` from a source that is not the serving machine; and on
   the upgrade the exact `Origin` and an HttpOnly `__Host-` session cookie,
   bound to the login and origin and signed with a key in `secrets/web/`. A
-  loopback listener is dev mode and needs `--dev-login`. A session switch
-  (`/new`, `/resume`, a rebind) moves every attached connection to the new
-  session's root with `moved`, and a later connection is welcomed to the new
-  session. Spec 04 §2.10 states
+  loopback listener is dev mode and needs `--dev-login`. Each connection is a
+  client of the host's session directory, as one on the control socket is;
+  one `/wire` serves every session, chosen by id. There is no `plak web`.
+  Spec 04 §2.10 states
   which check stops which attacker and the residual risks. A 0.0.3 build refuses a
   `config.toml` that sets `[web]`, so `plak` writes it only when you set it,
   and `plak doctor` lists it with the other 0.0.4-only keys.
@@ -166,10 +166,13 @@ an export.
   `release_session`), their answers, the `directory` and `detached` host
   frames and the `unknown_session` and `tree_hosted_elsewhere` refusals are
   new; a connection that serves one session refuses the requests
-  `unsupported`. A protocol 3 client is refused `version_mismatch`.
+  `unsupported`. A protocol 3 client is refused `version_mismatch`. The typed
+  client's `connect` refuses a welcome that names no session
+  (`ConnectError::NoSession`), and `connect_to` attaches a root the caller
+  names from the directory.
 - The wire v2 connection moved into `plakous-hosted`
   (`host_service::wire::WireConnection`), shared by `plak agent --wire v2` and
-  `plak web`; `WireSession` serves one session to many connections. A switch
+  `plak host`; `WireSession` serves one session to many connections. A switch
   ends every attachment of a shared service (`HostService::move_attachments`,
   which queues the new `Outbound::Moved`). Embedder break: the new
   `Outbound` variant.
@@ -493,7 +496,7 @@ an export.
   has since switched, is refused `moved` with the served session's root
   (`RequestRefusal::Moved`), not `unknown_node`: a connection welcomed
   before a switch learns where the session went.
-- Wire v2 quit and stop: a `quit` intent on a root attachment of `plak web`
+- Wire v2 quit and stop: a `quit` intent on a root attachment of `plak host`
   (a host whose connections detach) detaches that attachment, answered
   `detached`, and the session runs on; on `plak agent --wire v2` it still
   quits the session. A child attachment's quit-as-detach now answers

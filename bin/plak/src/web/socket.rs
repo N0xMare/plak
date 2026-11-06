@@ -1,5 +1,5 @@
-//! `/wire`: the WebSocket upgrade and one connection's wire v2 on the
-//! session's shared host service. One frame per text message; a binary
+//! `/wire`: the WebSocket upgrade and one connection's wire v2 as a client
+//! of the host's session directory. One frame per text message; a binary
 //! message, a message past the line cap, a slow reader, a silent peer or a
 //! client that floods intents ends the connection, which detaches.
 
@@ -17,10 +17,8 @@ use hyper::header::{self, HeaderMap, HeaderValue};
 use hyper::upgrade::Upgraded;
 use hyper::{Response, StatusCode};
 use hyper_util::rt::TokioIo;
-use plakous_host_protocol::wire::{HandshakeRefusal, MAX_LINE_BYTES};
-use plakous_hosted::host_service::wire::{
-    Face, HELLO_DEADLINE, WireConnection, WireSession, handshake, refuse,
-};
+use plakous_host_protocol::wire::MAX_LINE_BYTES;
+use plakous_hosted::host_service::wire::{Face, HELLO_DEADLINE, HostConnection, handshake};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
@@ -32,6 +30,8 @@ use crate::surface_protocol::PlakExtension;
 
 /// The RFC 6455 key suffix.
 const ACCEPT_GUID: &[u8] = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+/// How often a connection looks for a stop.
+const STOP_POLL: Duration = Duration::from_millis(200);
 /// How often the host pings, and how long a ping may go unanswered.
 const PING_EVERY: Duration = Duration::from_secs(15);
 const PONG_DEADLINE: Duration = Duration::from_secs(30);
@@ -181,7 +181,7 @@ pub(crate) async fn serve(upgraded: Upgraded, served: Arc<Served>, slot: Connect
         })),
     )
     .await;
-    tracing::info!(target: "plak::web", ended = reason.as_str(), "plak web connection closed");
+    tracing::info!(target: "plak::web", ended = reason.as_str(), "web connection closed");
     drop(slot);
 }
 
@@ -198,7 +198,7 @@ impl Ended {
     const fn as_str(&self) -> &'static str {
         match self {
             Self::Left => "client left",
-            Self::SessionClosed => "session ended",
+            Self::SessionClosed => "host stopping",
             Self::Policy(reason) | Self::Lost(reason) => reason,
             Self::Unsupported => "binary message",
         }
@@ -250,39 +250,9 @@ async fn drive(socket: &mut Socket, served: &Arc<Served>, login: &str) -> Ended 
     let _ = lines.send(Ok(hello));
     drop(lines);
     let stop = served.stop;
-    // The connection is the session's trigger: a session that released
-    // itself is opened again for it, and the connection holds it resident
-    // until it ends. One that does not open is refused in a v2 frame; the
-    // connection passed the gate, so the reason is its own. A release join
-    // or an open can take a while, so it waits off the runtime's workers.
-    let resident = {
-        let served = Arc::clone(served);
-        tokio::task::spawn_blocking(move || served.slot.resident()).await
-    };
-    let (session, _hold) = match resident {
-        Ok(Ok(resident)) => resident,
-        Err(_) => return Ended::Lost("the session's open failed"),
-        Ok(Err(failure)) => {
-            let _ = refuse::<PlakExtension>(
-                &mut outbox.clone(),
-                HandshakeRefusal::Unavailable {
-                    detail: failure.message().to_owned(),
-                },
-            );
-            let _ = send_pending(socket, &outbox).await;
-            return Ended::SessionClosed;
-        }
-    };
-    // Connected before the welcome, which names the session and root of
-    // the connection's own handle: a switch after it moves the connection.
-    let mut connection = session
-        // The web endpoint is never a local face, however its client
-        // authenticated: it may not exec or hand off the host's build.
-        .connect(outbox.clone(), Face::Remote, move || stop.stopped())
-        .identified(login);
     let admitted = handshake::<PlakExtension>(
         &first,
-        served.welcome(&connection, &session),
+        served.host.welcome(),
         &mut outbox.clone(),
         &move || stop.stopped(),
     );
@@ -292,32 +262,28 @@ async fn drive(socket: &mut Socket, served: &Arc<Served>, login: &str) -> Ended 
     if !matches!(admitted, Ok(true)) {
         return Ended::Policy("handshake refused");
     }
-    let ended = attached(
-        socket,
-        served,
-        &session,
-        &mut connection,
-        &outbox,
-        &mut pong,
-    )
-    .await;
-    // Every way out detaches, so the session never holds a dead attachment.
+    // The web endpoint is never a local face, however its client
+    // authenticated: it may not exec or hand off the host's build.
+    let mut connection = served
+        .host
+        .connect(outbox.clone(), Face::Remote, move || stop.stopped())
+        .identified(login);
+    let ended = attached(socket, served, &mut connection, &outbox, &mut pong).await;
+    // Every way out detaches, so no session holds a dead attachment.
     connection.leave();
     ended
 }
 
-type Connection = WireConnection<PlakExtension, Outbox>;
+type Connection = HostConnection<PlakExtension, Outbox>;
 
 /// Serves an admitted connection until it ends.
 async fn attached(
     socket: &mut Socket,
     served: &Served,
-    session: &WireSession<PlakExtension>,
     connection: &mut Connection,
     outbox: &Outbox,
     pong: &mut Option<Instant>,
 ) -> Ended {
-    let mut changes = session.changes();
     let mut pinger = tokio::time::interval(PING_EVERY);
     pinger.tick().await;
     let mut rate = Rate::new();
@@ -328,9 +294,7 @@ async fn attached(
         if let Err(ended) = send_pending(socket, outbox).await {
             return ended;
         }
-        // A session that released itself ends its connections; the next
-        // one wakes it.
-        if session.ended() || served.stop.stopped() {
+        if served.stop.stopped() {
             return Ended::SessionClosed;
         }
         tokio::select! {
@@ -342,13 +306,16 @@ async fn attached(
                 if !rate.admit() {
                     return Ended::Policy("message rate");
                 }
-                if !connection.frame(Ok(line)).unwrap_or(false) {
+                // An attach may open a session, which takes a while.
+                if !tokio::task::block_in_place(|| connection.frame(Ok(line))).unwrap_or(false) {
                     let _ = connection.flush();
                     let _ = send_pending(socket, outbox).await;
                     return Ended::Left;
                 }
             }
-            _ = changes.changed() => {}
+            () = connection.changed() => {}
+            // A stop ends the connection as a leaving client's.
+            () = tokio::time::sleep(STOP_POLL) => {}
             _ = pinger.tick() => {
                 if pong.is_some_and(|sent| sent.elapsed() >= PONG_DEADLINE) {
                     return Ended::Lost("no pong");

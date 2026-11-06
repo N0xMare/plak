@@ -711,12 +711,13 @@ fork   compact   compatibility
 session rehearse <full-session-uuid>  # hidden, offline, read-only
 ```
 
-`maintainer` also enables `web`, the hidden `plak web` endpoint (chapter 02
-§4.5): `hyper` and `hyper-util` (HTTP/1.1 server and upgrades),
-`http-body-util`, `bytes`, `futures-util`, `ring` (the cookie HMAC and the
-WebSocket accept digest) and `tokio-tungstenite`. Without it `plak web`
-parses and refuses with a typed error; the default product links none of the
-endpoint's crates.
+`maintainer` also enables `web`, the hidden `plak host` and its web endpoint
+(chapter 02 §4.5, §4.6): `hyper` and `hyper-util` (HTTP/1.1 server and
+upgrades), `http-body-util`, `bytes`, `futures-util`, `ring` (the cookie
+HMAC, the WebSocket accept digest and `new_session`'s name-based ids) and
+`tokio-tungstenite`. Without it `plak host` parses and refuses with a typed
+error; the default product links none of the endpoint's crates. There is
+no `plak web`: the web endpoint is `plak host --web`.
 
 `models` is not gated — it is an ordinary product verb alongside `login`,
 `logout`, `status`, `refresh`, `key`, `run`, `agent`, `resume`, `session`,

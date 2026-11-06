@@ -563,7 +563,7 @@ pub enum SecretShelf {
     Named,
     /// `secrets/runner/` (`plak runner secret set`).
     Runner,
-    /// `secrets/web/`: `plak web`'s cookie key, which it makes itself.
+    /// `secrets/web/`: the web endpoint's cookie key, which it makes itself.
     Web,
 }
 

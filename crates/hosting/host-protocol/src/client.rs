@@ -323,6 +323,39 @@ where
     P::Intent: Serialize + DeserializeOwned + Send,
     P::Observation: Serialize + DeserializeOwned + Send,
 {
+    connect_rooted(transport, hello, None)
+}
+
+/// [`connect`] to a host of many sessions, whose welcome names none: the
+/// client attaches `root`, a session's root node from the host's session
+/// directory. A welcome that names a session attaches that one's.
+///
+/// # Errors
+///
+/// As [`connect`].
+pub fn connect_to<P>(
+    transport: Transport,
+    hello: Hello,
+    root: NodeAddress,
+) -> Result<(WireSender<P>, WireReceiver<P>, Welcome), ConnectError>
+where
+    P: ProtocolExtension,
+    P::Intent: Serialize + DeserializeOwned + Send,
+    P::Observation: Serialize + DeserializeOwned + Send,
+{
+    connect_rooted(transport, hello, Some(root))
+}
+
+fn connect_rooted<P>(
+    transport: Transport,
+    hello: Hello,
+    root: Option<NodeAddress>,
+) -> Result<(WireSender<P>, WireReceiver<P>, Welcome), ConnectError>
+where
+    P: ProtocolExtension,
+    P::Intent: Serialize + DeserializeOwned + Send,
+    P::Observation: Serialize + DeserializeOwned + Send,
+{
     let Transport { reader, writer } = transport;
     let mut lines = Lines::new(reader);
     let (outbox, outgoing) = mpsc::channel();
@@ -371,12 +404,17 @@ where
         Some(Err(error)) => return Err(ConnectError::Wire(error)),
         None => return Err(ConnectError::Closed),
     };
-    let Some(served) = &welcome.session else {
+    let Some(root) = welcome
+        .session
+        .as_ref()
+        .map(|served| served.root.clone())
+        .or(root)
+    else {
         return Err(ConnectError::NoSession);
     };
     {
         let mut state = lock(&inner.state);
-        state.root = served.root.clone();
+        state.root = root;
         inner.attach(&mut state).map_err(ConnectError::Io)?;
     }
     let follower = Arc::clone(&inner);

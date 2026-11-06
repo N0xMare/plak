@@ -1,4 +1,4 @@
-//! The gate every `plak web` request passes, and the router behind it.
+//! The gate every web endpoint request passes, and the router behind it.
 //!
 //! Identity is the tailnet's: `tailscale serve` stamps `Tailscale-User-Login`
 //! on what it proxies, and the header is trusted only on the private unix
@@ -134,7 +134,7 @@ impl CookieKey {
         // never replaced, so the operator decides.
         Self::load(paths)?.ok_or_else(|| {
             CliFailure::new(format!(
-                "plak web: {} holds no cookie key; remove it to make a new one (every web client is logged out)",
+                "plak host --web: {} holds no cookie key; remove it to make a new one (every web client is logged out)",
                 paths
                     .secret_shelf_file(SecretShelf::Web, COOKIE_KEY_NAME)
                     .display()
@@ -152,7 +152,9 @@ impl CookieKey {
                 decode_hex(stored.expose_secret())
                     .map(|bytes| Self::from_bytes(&bytes))
                     .ok_or_else(|| {
-                        CliFailure::new("plak web: the cookie key is not 32 hex-encoded bytes")
+                        CliFailure::new(
+                            "plak host --web: the cookie key is not 32 hex-encoded bytes",
+                        )
                     })
             })
             .transpose()
@@ -209,7 +211,7 @@ fn signed(origin: &str, body: &str) -> String {
 fn random(bytes: &mut [u8]) -> CliResult<()> {
     SystemRandom::new()
         .fill(bytes)
-        .map_err(|_| CliFailure::new("plak web: no randomness"))
+        .map_err(|_| CliFailure::new("plak host --web: no randomness"))
 }
 
 fn decode_hex(hex: &str) -> Option<Zeroizing<[u8; 32]>> {
@@ -300,9 +302,9 @@ impl Gate {
     /// The gate for `access`, signing with `key`. Dev mode says so.
     pub(crate) fn new(access: WebAccess, key: CookieKey) -> Self {
         if let WebAccess::Dev { login, .. } = &access {
-            tracing::warn!(target: "plak::web", login = %login, "plak web in dev mode: every local connection is this login");
+            tracing::warn!(target: "plak::web", login = %login, "web endpoint in dev mode: every local connection is this login");
             eprintln!(
-                "plak web: dev mode, every local connection is {login}; never expose this listener"
+                "plak host --web: dev mode, every local connection is {login}; never expose this listener"
             );
         }
         Self {
@@ -398,7 +400,7 @@ impl Gate {
             "{COOKIE}={value}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age={}",
             COOKIE_LIFETIME.as_secs()
         ))
-        .map_err(|_| CliFailure::new("plak web: could not encode a cookie"))
+        .map_err(|_| CliFailure::new("plak host --web: could not encode a cookie"))
     }
 
     /// Takes a connection slot for `login` and counts its upgrade.
@@ -446,7 +448,7 @@ impl Gate {
             path = %log_path(path),
             login = login.unwrap_or("-"),
             unlogged,
-            "plak web refused a request"
+            "web endpoint refused a request"
         );
     }
 }
@@ -509,7 +511,7 @@ fn route(mut request: Request<Incoming>, served: &Arc<Served>) -> Routed {
         let slot = gate.admit_connection(served, &login).map_err(refused)?;
         let upgrade = hyper::upgrade::on(&mut request);
         let session = Arc::clone(served);
-        tracing::info!(target: "plak::web", login = %login, "plak web connection opened");
+        tracing::info!(target: "plak::web", login = %login, "web connection opened");
         tokio::spawn(async move {
             if let Ok(upgraded) = upgrade.await {
                 super::socket::serve(upgraded, session, slot).await;
@@ -520,7 +522,7 @@ fn route(mut request: Request<Incoming>, served: &Arc<Served>) -> Routed {
     let mut response = super::ui::respond(served.ui.as_ref(), &request);
     if !gate.cookie_holds(request.headers(), &login) {
         if let Ok(cookie) = gate.set_cookie(&login) {
-            tracing::info!(target: "plak::web", login = %login, "plak web login");
+            tracing::info!(target: "plak::web", login = %login, "web login");
             response.headers_mut().append(header::SET_COOKIE, cookie);
         }
     }

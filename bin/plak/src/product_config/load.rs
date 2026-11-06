@@ -232,9 +232,9 @@ pub struct ProductConfig {
     pub resume_after_loss: Option<ResumeAfterLoss>,
     /// `[runners.<name>]`, home-scoped; parsed and validated only.
     pub runners: BTreeMap<String, super::RunnerConfig>,
-    /// `[web] allow`, home-scoped: the logins `plak web` admits.
+    /// `[web] allow`, home-scoped: the logins `plak host --web` admits.
     pub web_allow: Vec<String>,
-    /// `[web] origin`, home-scoped: the origin `plak web` is served at.
+    /// `[web] origin`, home-scoped: the origin `plak host --web` is served at.
     pub web_origin: Option<String>,
     pub(super) forward: super::forward::ForwardPresence,
 }

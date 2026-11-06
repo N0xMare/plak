@@ -7,30 +7,26 @@ use plakous::subscriptions::{NativeLoginMode, NativeProvider};
 
 use crate::{CliFailureKind, product_config};
 
-/// `plak web`'s arguments, parsed by the web module when it starts.
+/// `plak host`'s arguments.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct HostCommand {
+    /// The web endpoint, when the host serves one.
+    pub(crate) web: Option<HostWeb>,
+    /// How long an idle session stays resident; the product's idle release
+    /// when unset.
+    pub(crate) idle_release: Option<std::time::Duration>,
+}
+
+/// `plak host --web`'s arguments, parsed by the web module when the host
+/// starts.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct WebCommand {
+pub(crate) struct HostWeb {
     /// `unix:<path>` or `127.0.0.1:<port>`.
     pub(crate) listen: String,
     /// The web UI's build directory; none serves `/wire` only.
     pub(crate) ui: Option<PathBuf>,
-    /// The session to resume; none opens a new one.
-    pub(crate) session: Option<String>,
-    /// The working directory a new session opens in.
-    pub(crate) cwd: Option<PathBuf>,
     /// Dev mode on a loopback listener: every request is this login.
     pub(crate) dev_login: Option<String>,
-    /// How long the session stays resident with nothing to do; the
-    /// product's idle release when unset.
-    pub(crate) idle_release: Option<std::time::Duration>,
-}
-
-/// `plak host`'s arguments.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub(crate) struct HostCommand {
-    /// How long an idle session stays resident; the product's idle release
-    /// when unset.
-    pub(crate) idle_release: Option<std::time::Duration>,
 }
 
 /// `path` against `launch` when it is relative and the launch directory is
@@ -70,10 +66,11 @@ impl Command {
                 directory: at(directory),
             },
             Self::CarryProbe { path } => Self::CarryProbe { path: at(path) },
-            Self::Web(mut web) => {
-                web.ui = web.ui.map(at);
-                web.cwd = web.cwd.map(at);
-                Self::Web(web)
+            Self::Host(mut host) => {
+                if let Some(web) = &mut host.web {
+                    web.ui = web.ui.take().map(at);
+                }
+                Self::Host(host)
             }
             other => other,
         }
@@ -309,9 +306,6 @@ pub(crate) enum Command {
         /// supported).
         wire_v2: bool,
     },
-    /// Hidden `plak web`: one headless session's wire v2 and the web UI on
-    /// a private listener.
-    Web(WebCommand),
     /// Hidden `plak host`: the per-user host process.
     Host(HostCommand),
     /// Hidden `plak wire schema`: this build's wire v2 JSON Schema.
@@ -464,7 +458,6 @@ impl Command {
             | Self::RunPlatform { .. }
             | Self::ContinueSession { .. } => "run",
             Self::Agent { .. } => "agent",
-            Self::Web(_) => "web",
             Self::Host(_) => "host",
             Self::WireSchema => "wire",
         }
@@ -491,7 +484,6 @@ pub(crate) fn command_needs_product_state(command: &Command) -> bool {
             | Command::RunPlatform { .. }
             | Command::ContinueSession { .. }
             | Command::Agent { .. }
-            | Command::Web(_)
             | Command::Host(_)
             | Command::SessionList
             | Command::SessionRecover { .. }

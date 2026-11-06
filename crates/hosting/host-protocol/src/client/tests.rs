@@ -91,6 +91,35 @@ fn a_refused_hello_is_the_connect_error() {
     ));
 }
 
+/// A host of many sessions welcomes the client to none: `connect` refuses
+/// it, and `connect_to` attaches the root it was given; a welcome that
+/// names a session is that session's either way.
+#[test]
+fn a_welcome_that_names_no_session_attaches_the_root_the_client_names() {
+    let unnamed = || Welcome {
+        session: None,
+        ..welcome()
+    };
+    let (mut host, transport) = Host::pair();
+    let client = thread::spawn(move || connect::<Core>(transport, hello()).err());
+    assert!(matches!(host.read(), ClientFrame::Hello(_)));
+    host.send(&HostFrame::Welcome(unnamed()));
+    assert!(matches!(
+        client.join().unwrap(),
+        Some(ConnectError::NoSession)
+    ));
+    for (welcome, attached) in [(unnamed(), node("t9")), (welcome(), node("t1"))] {
+        let (mut host, transport) = Host::pair();
+        let client =
+            thread::spawn(move || connect_to::<Core>(transport, hello(), node("t9")).unwrap());
+        assert!(matches!(host.read(), ClientFrame::Hello(_)));
+        host.send(&HostFrame::Welcome(welcome));
+        let _connected = client.join().unwrap();
+        let (_, op) = host.request();
+        assert_eq!(op, Op::Attach { node: attached });
+    }
+}
+
 /// The client attaches the welcome's root, follows a refusal `moved` to
 /// the root it names, takes only its own attachment's events, marks the
 /// root transcript lost across a `moved` until the next root snapshot,
