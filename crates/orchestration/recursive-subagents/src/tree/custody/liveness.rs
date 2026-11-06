@@ -37,6 +37,35 @@ const LOCK_ATTEMPTS: u32 = 3;
 /// This process's locks, one per custody directory, held until it exits.
 static LOCKS: OnceLock<Mutex<HashMap<PathBuf, File>>> = OnceLock::new();
 
+/// Serializes this process's probes of other instances' locks. A lock
+/// belongs to an open file description, so two probes of one dead holder's
+/// lock from this process would each see the other's momentary lock and
+/// read the holder alive.
+static PROBES: Mutex<()> = Mutex::new(());
+
+/// How many times a probe asks again before it reads a lock as held: another
+/// process may be probing the same dead holder's lock at that moment.
+const PROBE_ATTEMPTS: u32 = 3;
+
+/// [`free_lock`], asked again a moment later while another process may be
+/// probing the same lock, and serialized with every other probe of this
+/// process.
+fn free_lock_probed(path: &Path) -> Option<File> {
+    let _probing = PROBES.lock().unwrap_or_else(PoisonError::into_inner);
+    for attempt in 0..PROBE_ATTEMPTS {
+        if !std::fs::symlink_metadata(path).is_ok_and(|named| named.is_file()) {
+            return None;
+        }
+        if let Some(file) = free_lock(path) {
+            return Some(file);
+        }
+        if attempt + 1 < PROBE_ATTEMPTS {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+    None
+}
+
 fn identity(metadata: &std::fs::Metadata) -> (u64, u64) {
     (metadata.dev(), metadata.ino())
 }
@@ -164,7 +193,10 @@ fn sweep(directory: &Path, own: HostInstance, store: &dyn TreeCustody) {
             continue;
         };
         let path = entry.path();
-        if let Some(file) = free_lock(&path) {
+        let probing = PROBES.lock().unwrap_or_else(PoisonError::into_inner);
+        let found = free_lock(&path);
+        drop(probing);
+        if let Some(file) = found {
             free.push((instance, path, file));
         }
     }
@@ -204,6 +236,7 @@ fn free_lock(path: &Path) -> Option<File> {
 /// proof either way.
 pub(super) fn lock_held(directory: &Path, instance: HostInstance) -> bool {
     let path = lock_path(directory, instance);
+    let _probing = PROBES.lock().unwrap_or_else(PoisonError::into_inner);
     std::fs::symlink_metadata(&path).is_ok_and(|named| named.is_file())
         && File::open(&path)
             .is_ok_and(|file| matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock)))
@@ -227,7 +260,7 @@ impl CustodyLiveness for DirectoryLiveness<'_> {
         // A holder locked its file before its take and holds it while it
         // lives. A missing file may have been removed under it, so only a
         // lock taken here proves it gone.
-        free_lock(&lock_path(self.directory, holder.instance)).is_some()
+        free_lock_probed(&lock_path(self.directory, holder.instance)).is_some()
     }
 }
 

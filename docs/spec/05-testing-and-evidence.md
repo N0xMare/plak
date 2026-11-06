@@ -2011,6 +2011,24 @@ session` and `opened session` lines twice each (the first attach's open and
 the wake's). Its cuts kill the endpoint at every indexed commit, the idle
 release's and the wake's included, and recover through the ordinary `plak
 agent` relaunch.
+`plak host`'s crash windows run against the real binary on its control
+socket (`host_skeleton`, the durability lane for the `host_crash_` cases):
+`host_crash_cuts_of_create_materialize_and_release_recover` kills the host at
+every indexed commit of a `new_session`, the first attach that materializes
+it, a turn and a `release_session` (`host_crash_mid_new_session`,
+`host_crash_mid_materialize`, `host_crash_mid_release`), and a restarted host
+answers the replayed request with one session, reads the dead host gone,
+opens the session and answers a turn, with no handoff and, past the turn, no
+loss; `host_crash_sigkill_mid_handoff_continues_each_handed_off_turn_once`
+kills a stopping host at once and after its handoff is durable, and the next
+host's start scan continues a handed-off turn once and leaves an unrecorded
+one held. The parallel lane carries `host_sigterm_handoff` (a running turn
+handed off by `SIGTERM` and continued once by the next start scan, and by
+none after it), `custody_embedded_vs_host` and
+`host_crash_dormant_stale_custody` (a tree in custody held by a live process,
+named and refused; an embedded holder named, killed, read free and taken
+over), the runtime-lease holder of a hubless session named the same way,
+and `host_crash_idle_resident`.
 Released job coverage distinguishes successful explicit disown, ordinary stop
 and missing-owner unknown outcomes, preserves read-only reopen and consumption,
 and rejects released terminals carrying an exit code or stopper.

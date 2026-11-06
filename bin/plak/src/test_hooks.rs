@@ -1420,6 +1420,7 @@ impl OfflineSelection {
             rebind_builds: std::sync::Mutex::new(Vec::new()),
         });
         let policy = product_config::SessionPolicy::load(paths)?;
+        let lease_holder = Some(crate::store::holders::lease_holder(paths, &session.id));
         Ok(product_host::HostConfig {
             product_home: paths.home().to_path_buf(),
             home: paths.session_home(),
@@ -1452,6 +1453,7 @@ impl OfflineSelection {
             seed_line: None,
             source_releases: product_host::SourceReleases::default(),
             idle_release: None,
+            lease_holder,
             continuation: (face == OfflineFace::Attached)
                 .then(crate::reload_request::take_reload_continuation)
                 .flatten(),

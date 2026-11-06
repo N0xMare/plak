@@ -321,7 +321,9 @@ async fn connection(
     let stop = Arc::clone(&stopped);
     let mut connection = host.connect(outbox.clone(), Face::Remote, move || stop());
     loop {
-        if connection.flush().is_err() || send(&mut write, &outbox).await.is_err() || stopped() {
+        // A flush may read the session directory from the stores.
+        let flushed = tokio::task::block_in_place(|| connection.flush());
+        if flushed.is_err() || send(&mut write, &outbox).await.is_err() || stopped() {
             break;
         }
         if let Some(line) = reader.queued.pop_front() {

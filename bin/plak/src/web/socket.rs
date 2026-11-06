@@ -168,7 +168,7 @@ pub(crate) async fn serve(upgraded: Upgraded, served: Arc<Served>, slot: Connect
         WebSocketStream::from_raw_socket(TokioIo::new(upgraded), Role::Server, Some(config)).await;
     let reason = drive(&mut socket, &served, slot.login()).await;
     let code = match reason {
-        Ended::Left | Ended::SessionClosed => CloseCode::Normal,
+        Ended::Left | Ended::Stopping => CloseCode::Normal,
         Ended::Policy(_) => CloseCode::Policy,
         Ended::Unsupported => CloseCode::Unsupported,
         Ended::Lost(_) => CloseCode::Away,
@@ -188,7 +188,7 @@ pub(crate) async fn serve(upgraded: Upgraded, served: Arc<Served>, slot: Connect
 /// How a connection ended; the log's words.
 enum Ended {
     Left,
-    SessionClosed,
+    Stopping,
     Policy(&'static str),
     Unsupported,
     Lost(&'static str),
@@ -198,7 +198,7 @@ impl Ended {
     const fn as_str(&self) -> &'static str {
         match self {
             Self::Left => "client left",
-            Self::SessionClosed => "host stopping",
+            Self::Stopping => "host stopping",
             Self::Policy(reason) | Self::Lost(reason) => reason,
             Self::Unsupported => "binary message",
         }
@@ -288,14 +288,15 @@ async fn attached(
     pinger.tick().await;
     let mut rate = Rate::new();
     loop {
-        if connection.flush().is_err() {
+        // A flush may read the session directory from the stores.
+        if tokio::task::block_in_place(|| connection.flush()).is_err() {
             return Ended::Lost("client fell behind");
         }
         if let Err(ended) = send_pending(socket, outbox).await {
             return ended;
         }
         if served.stop.stopped() {
-            return Ended::SessionClosed;
+            return Ended::Stopping;
         }
         tokio::select! {
             message = next_text(socket, pong) => {

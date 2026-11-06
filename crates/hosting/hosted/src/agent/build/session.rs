@@ -34,6 +34,9 @@ pub struct CodingSessionOpenFailure {
     /// A verification refused because the head holds unsettled work (a turn
     /// still running in its owner), so nothing past it was compared.
     pub unsettled_work: bool,
+    /// The open refused because another owner holds the branch's lease and
+    /// is not proven gone (`HostConfig::lease_holder` names it).
+    pub lease_held: bool,
 }
 
 impl From<CliFailure> for CodingSessionOpenFailure {
@@ -43,6 +46,7 @@ impl From<CliFailure> for CodingSessionOpenFailure {
             current_locator: None,
             binding_change: None,
             unsettled_work: false,
+            lease_held: false,
         }
     }
 }
@@ -95,6 +99,7 @@ impl From<AgentSessionsError> for CodingSessionOpenFailure {
     fn from(error: AgentSessionsError) -> Self {
         let current_locator = error.current_locator();
         let binding_change = error.binding_change().cloned().map(Box::new);
+        let lease_held = error.kind() == AgentSessionsErrorKind::Ownership;
         let failure = if error.kind() == AgentSessionsErrorKind::IncompatibleBuild {
             CliFailure::new(incompatible_session_message(&error))
                 .with_optional_advice(crate::error::incompatible_session_advice(&error))
@@ -106,6 +111,7 @@ impl From<AgentSessionsError> for CodingSessionOpenFailure {
             current_locator,
             binding_change,
             unsettled_work: false,
+            lease_held,
         }
     }
 }
@@ -1000,6 +1006,7 @@ async fn attach_native_source(
                 current_locator: error.current_locator,
                 binding_change: error.binding_change,
                 unsettled_work: error.unsettled_work,
+                lease_held: error.lease_held,
             });
         }
         return result;
@@ -1217,6 +1224,7 @@ async fn attach_api_source(
                     current_locator: error.current_locator,
                     binding_change: error.binding_change,
                     unsettled_work: error.unsettled_work,
+                    lease_held: error.lease_held,
                 });
             }
         }
@@ -1267,6 +1275,7 @@ async fn attach_runtime_source(
         current_locator: error.current_locator(),
         binding_change: error.binding_change().cloned().map(Box::new),
         unsettled_work: false,
+        lease_held: error.kind() == AgentSessionsErrorKind::Ownership,
     };
     if let RuntimeTarget::Verify(locator) = target {
         if seed.is_some() {
@@ -1317,7 +1326,10 @@ async fn attach_runtime_source(
             OpenSessionOutcome::RecoveryRequired {
                 retry_after_seconds,
                 ..
-            } => Err(reopen_refusal(wording.reopen_needs_recovery, retry_after_seconds).into()),
+            } => Err(recovery_refusal(
+                wording.reopen_needs_recovery,
+                retry_after_seconds,
+            )),
             _ => Err(CliFailure::new(wording.reopen_unavailable).into()),
         };
     }
@@ -1366,6 +1378,17 @@ fn create_request(
         }
         None => request,
     }
+}
+
+/// An open that needs recovery; a retry time is the lease's, whose holder is
+/// alive, or not provably gone, and renews it.
+pub(in crate::agent) fn recovery_refusal(
+    reason: &str,
+    retry_after_seconds: Option<u64>,
+) -> CodingSessionOpenFailure {
+    let mut refused = CodingSessionOpenFailure::from(reopen_refusal(reason, retry_after_seconds));
+    refused.lease_held = retry_after_seconds.is_some();
+    refused
 }
 
 /// A verification that found unsettled work at the head: only an owning

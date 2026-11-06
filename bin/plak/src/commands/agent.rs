@@ -196,16 +196,14 @@ pub(crate) fn new_agent_record(
     Ok(record)
 }
 
-/// The session an agent admission opens. Public, as the command module is,
-/// because only `plak host` (feature `web`) opens an unopened record.
-pub enum AgentSession {
+/// The session an agent admission opens.
+pub(crate) enum AgentSession {
     /// A new session on the root template's binding and the overrides.
     New,
-    /// The saved session of this id, exactly.
+    /// The saved session of this id, exactly; one no face has opened yet
+    /// (`plak host`'s `new_session`) has its runtime session created by
+    /// this open.
     Resume(String),
-    /// A saved session no host has opened yet (`plak host`'s
-    /// `new_session`): its runtime session is created by this open.
-    Unopened(Box<product_sessions::SessionRecord>),
 }
 
 #[allow(clippy::fn_params_excessive_bools, reason = "clap-shaped agent verb")]
@@ -255,10 +253,6 @@ pub(crate) fn run_agent_after_admission(
             load_admitted_product_session(paths, store.as_ref(), &session_id)?,
             &mut io::stderr().lock(),
         )?,
-        AgentSession::Unopened(record) => {
-            crate::build_features::admit_session(&record)?;
-            *record
-        }
         AgentSession::New => {
             let mut record = new_agent_record(
                 &cfg,

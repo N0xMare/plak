@@ -72,29 +72,54 @@ impl ProductSessions {
         read(store)
     }
 
-    /// The live host process other than this one that holds `tree_id`.
-    fn elsewhere(&self, tree_id: &str) -> Option<HostedElsewhere> {
-        holder_elsewhere(&self.tree, tree_id)
-            .ok()
-            .flatten()
-            .map(|holder| HostedElsewhere {
+    /// The live process other than this one that holds the session of
+    /// `tree_id` and `locator`: its tree's custody holder, else its runtime
+    /// lease's holder, each unless proven gone.
+    ///
+    /// # Errors
+    ///
+    /// The tree store cannot be read: a holder is never read free on an
+    /// error.
+    fn elsewhere(
+        &self,
+        tree_id: &str,
+        locator: Option<plakous::sessions::SessionLocator>,
+    ) -> Result<Option<HostedElsewhere>, String> {
+        let custody = holder_elsewhere(&self.tree, tree_id)
+            .map_err(|error| format!("the tree store could not be read: {error}"))?;
+        if let Some(holder) = custody {
+            return Ok(Some(HostedElsewhere {
                 host_name: holder.host_name,
                 binary: holder.binary,
                 pid: holder.instance.pid(),
-            })
+            }));
+        }
+        let paths = self
+            .services
+            .paths()
+            .map_err(|failure| failure.message().to_owned())?;
+        Ok(locator
+            .and_then(|locator| crate::store::holders::runtime_holder(paths, locator))
+            .map(|holder| HostedElsewhere {
+                host_name: holder.host_name,
+                binary: None,
+                pid: holder.pid,
+            }))
     }
 
-    fn row(&self, entry: DirectoryEntry) -> SessionRow {
-        let activity = self
+    fn row(&self, entry: DirectoryEntry) -> Result<SessionRow, String> {
+        let store = self
             .services
             .session_records()
-            .ok()
-            .and_then(|store| {
-                plakous_hosted::runtime::root_standing(store.as_ref(), &entry.id).ok()
-            })
-            .map_or(SessionActivity::Idle, activity_of);
-        SessionRow {
-            hosted_elsewhere: self.elsewhere(&entry.node.tree_id),
+            .map_err(|failure| failure.message().to_owned())?;
+        let activity = activity_of(plakous_hosted::runtime::root_standing(
+            store.as_ref(),
+            &entry.id,
+        )?);
+        let hosted_elsewhere = self.elsewhere(&entry.node.tree_id, entry.locator)?;
+        Ok(SessionRow {
+            environment: environment_of(hosted_elsewhere.is_some()),
+            hosted_elsewhere,
             node: NodeAddress {
                 tree_id: entry.node.tree_id.clone(),
                 agent_id: entry.node.agent_id.clone(),
@@ -106,9 +131,8 @@ impl ProductSessions {
             residency: SessionResidency::Dormant,
             activity,
             live_work: plakous_host_protocol::wire::LiveWork::default(),
-            environment: environment_of(&entry.id),
             session: entry.id,
-        }
+        })
     }
 }
 
@@ -160,7 +184,8 @@ const fn activity_of(standing: RootStanding) -> SessionActivity {
             handoff: false,
             held: true,
         } => SessionActivity::HeldAfterLoss,
-        RootStanding::Clear | RootStanding::Continuing { .. } => SessionActivity::Idle,
+        RootStanding::Continuing { .. } => SessionActivity::Continuing,
+        RootStanding::Clear => SessionActivity::Idle,
     }
 }
 
@@ -181,19 +206,20 @@ fn profile_of(entry: &DirectoryEntry) -> Option<String> {
     }
 }
 
-/// A session `plak host` created has a name-based (v5) id drawn from its
-/// request; one a TUI or `plak agent` created a random (v4) one.
-fn environment_of(session: &str) -> SessionEnvironment {
-    match uuid::Uuid::parse_str(session).map(|id| id.get_version()) {
-        Ok(Some(uuid::Version::Sha1)) => SessionEnvironment::HostLoginShell,
-        _ => SessionEnvironment::Cli,
+/// A session another process holds runs its tools there; any other is, or
+/// would be, served by this host, with its environment.
+const fn environment_of(held_elsewhere: bool) -> SessionEnvironment {
+    if held_elsewhere {
+        SessionEnvironment::Cli
+    } else {
+        SessionEnvironment::Host
     }
 }
 
 impl HostSessions<PlakExtension> for ProductSessions {
     fn rows(&self, workspace: Option<&str>) -> Result<Vec<SessionRow>, String> {
         let entries = self.with_product(|store| store.directory(workspace.map(Path::new)))?;
-        Ok(entries.into_iter().map(|entry| self.row(entry)).collect())
+        entries.into_iter().map(|entry| self.row(entry)).collect()
     }
 
     fn session_of(&self, node: &NodeAddress) -> Result<Option<String>, String> {
@@ -211,12 +237,10 @@ impl HostSessions<PlakExtension> for ProductSessions {
     fn refusal(&self, session: &str, failure: &CliFailure) -> RequestRefusal {
         let held = (failure.code() == Some("tree_hosted_elsewhere"))
             .then(|| {
-                let tree = self
-                    .with_product(|store| store.load(session))
-                    .ok()?
-                    .node
-                    .tree_id;
-                self.elsewhere(&tree)
+                let record = self.with_product(|store| store.load(session)).ok()?;
+                self.elsewhere(&record.node.tree_id, record.plakous_locator)
+                    .ok()
+                    .flatten()
             })
             .flatten();
         match held {
@@ -250,27 +274,81 @@ impl HostSessions<PlakExtension> for ProductSessions {
                 agent_id: session.clone(),
             },
             session,
-            environment: SessionEnvironment::HostLoginShell,
+            environment: SessionEnvironment::Host,
         };
         let unavailable = |failure: CliFailure| RequestRefusal::SessionUnavailable {
             detail: failure.message().to_owned(),
         };
         let store = self.services.session_records().map_err(unavailable)?;
+        let replayed = |existing: &crate::store::sessions::SessionRecord| {
+            if replays(&self.services, existing, workspace, template) {
+                Ok(created(session.clone()))
+            } else {
+                Err(RequestRefusal::Malformed {
+                    detail: "new_session's request_id names a session made with another \
+                             workspace or template"
+                        .to_owned(),
+                })
+            }
+        };
         // A replay of the same request finds the session it created.
-        if store.load(&session).is_ok() {
-            return Ok(created(session));
+        if let Ok(existing) = store.load(&session) {
+            return replayed(&existing);
         }
         let mut record =
             new_record(&self.services, workspace, template, &session).map_err(unavailable)?;
         match store.save(&mut record) {
             Ok(()) => Ok(created(session)),
             // A concurrent replay created it first.
-            Err(_) if store.load(&session).is_ok() => Ok(created(session)),
-            Err(error) => Err(RequestRefusal::SessionUnavailable {
-                detail: error.to_string(),
-            }),
+            Err(error) => match store.load(&session) {
+                Ok(existing) => replayed(&existing),
+                Err(_) => Err(RequestRefusal::SessionUnavailable {
+                    detail: error.to_string(),
+                }),
+            },
         }
     }
+}
+
+/// Whether a `new_session` naming `workspace` and `template` asks again for
+/// `existing`, the session its request id made: the same workspace, and,
+/// while that workspace's configuration can still be read, the binding
+/// `template` (or its `[root] agent`) gives.
+fn replays(
+    services: &Services,
+    existing: &crate::store::sessions::SessionRecord,
+    workspace: &str,
+    template: Option<&str>,
+) -> bool {
+    let Ok(path) = std::fs::canonicalize(workspace) else {
+        // The workspace went since: its parent, if it stands, still names it.
+        let asked = Path::new(workspace);
+        let canonical_parent = asked
+            .parent()
+            .and_then(|parent| std::fs::canonicalize(parent).ok())
+            .zip(asked.file_name())
+            .map(|(parent, name)| parent.join(name));
+        return canonical_parent.as_deref().unwrap_or(asked) == existing.workspace_root;
+    };
+    if path != existing.workspace_root {
+        return false;
+    }
+    let Ok(config) = services.paths().and_then(|paths| {
+        crate::commands::support::admit_product_config(
+            &paths.for_workspace(&path),
+            &mut std::io::sink(),
+        )
+    }) else {
+        return true;
+    };
+    let named = template.map_or_else(
+        || config.root_template(),
+        |template| config.templates.get(template),
+    );
+    named.is_some_and(|named| {
+        existing.account.as_deref() == Some(named.account.as_str())
+            && existing.model.as_deref() == Some(named.model.as_str())
+    })
 }
 
 /// The session a `new_session` request creates: a name-based uuid of the
@@ -348,16 +426,11 @@ fn open_session(
     let context = services.paths()?.for_workspace(&record.workspace_root);
     eprintln!("plak host: opening session {session}");
     // A session `new_session` made has no runtime session until its first
-    // open creates it; every later open is the exact reopen.
-    let opened = if record.plakous_locator.is_none() && record.carry_intent.is_none() {
-        crate::commands::agent::AgentSession::Unopened(Box::new(record))
-    } else {
-        crate::commands::agent::AgentSession::Resume(session.to_owned())
-    };
+    // open, by this host or any face, creates it.
     let mut host = crate::commands::agent::run_agent_after_admission(
         services,
         Some(&context),
-        opened,
+        crate::commands::agent::AgentSession::Resume(session.to_owned()),
         None,
         None,
         None,
@@ -410,7 +483,6 @@ mod tests {
             plakous_hosted::sessions::canonical_product_session_id(&session),
             Ok(session.as_str())
         );
-        assert_eq!(environment_of(&session), SessionEnvironment::HostLoginShell);
         let other = uuid::Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap();
         assert_ne!(session, session_for_request(host, other));
         assert_ne!(
@@ -425,17 +497,12 @@ mod tests {
         );
     }
 
+    /// A session another process holds runs its tools there; any other is
+    /// this host's.
     #[test]
-    fn a_host_created_session_reads_host_login_shell_and_any_other_cli() {
-        let host = uuid::Builder::from_sha1_bytes([7; 16])
-            .into_uuid()
-            .to_string();
-        assert_eq!(environment_of(&host), SessionEnvironment::HostLoginShell);
-        let cli = uuid::Builder::from_random_bytes([7; 16])
-            .into_uuid()
-            .to_string();
-        assert_eq!(environment_of(&cli), SessionEnvironment::Cli);
-        assert_eq!(environment_of("not-a-uuid"), SessionEnvironment::Cli);
+    fn a_rows_environment_is_its_holders() {
+        assert_eq!(environment_of(false), SessionEnvironment::Host);
+        assert_eq!(environment_of(true), SessionEnvironment::Cli);
     }
 
     /// The scan opens what continues by itself, and a held loss only under
@@ -492,7 +559,7 @@ mod tests {
         for (handoff, held) in [(true, true), (false, false), (true, false)] {
             assert_eq!(
                 activity_of(RootStanding::Continuing { handoff, held }),
-                SessionActivity::Idle
+                SessionActivity::Continuing
             );
         }
     }
@@ -508,6 +575,7 @@ mod tests {
             model: Some("gpt".into()),
             node: plakous_hosted::sessions::SessionNode::genesis("s"),
             root_profile: None,
+            locator: None,
         };
         assert_eq!(profile_of(&entry).as_deref(), Some("codex/gpt"));
         entry.root_profile = Some(plakous_hosted::sessions::RootProfile {

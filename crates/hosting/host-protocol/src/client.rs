@@ -328,7 +328,7 @@ where
 
 /// [`connect`] to a host of many sessions, whose welcome names none: the
 /// client attaches `root`, a session's root node from the host's session
-/// directory. A welcome that names a session attaches that one's.
+/// directory, whatever the welcome names.
 ///
 /// # Errors
 ///
@@ -404,11 +404,8 @@ where
         Some(Err(error)) => return Err(ConnectError::Wire(error)),
         None => return Err(ConnectError::Closed),
     };
-    let Some(root) = welcome
-        .session
-        .as_ref()
-        .map(|served| served.root.clone())
-        .or(root)
+    // A root the caller names is the one it asked for.
+    let Some(root) = root.or_else(|| welcome.session.as_ref().map(|served| served.root.clone()))
     else {
         return Err(ConnectError::NoSession);
     };

@@ -33,8 +33,9 @@ pub struct SessionRow {
     pub live_work: LiveWork,
     /// The environment its tools run with.
     pub environment: SessionEnvironment,
-    /// The other host process that holds its tree, proven running or on
-    /// another machine; a holder proven gone is not named.
+    /// The other process that holds it (its tree's custody, or its runtime
+    /// lease), unless that process is proven gone: one on another machine,
+    /// or one whose lock file is missing, is named unproven.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hosted_elsewhere: Option<HostedElsewhere>,
 }
@@ -65,6 +66,9 @@ pub enum SessionActivity {
     AwaitingOperator,
     /// Its host was lost and it holds for the operator's Resume.
     HeldAfterLoss,
+    /// A continuation that runs by itself waits for the next open (a
+    /// planned handoff, or a decided continuation a crash left pending).
+    Continuing,
     /// Its work was stopped.
     Stopped,
 }
@@ -76,11 +80,12 @@ pub enum SessionActivity {
 )]
 #[serde(deny_unknown_fields)]
 pub struct LiveWork {
-    /// Its running sub-agents.
+    /// Its running sub-agents (not yet counted: always 0).
     pub children: u32,
     /// Its running background processes.
     pub processes: u32,
-    /// Its tree's sub-agents held for the operator.
+    /// Its tree's sub-agents held for the operator (not yet counted: always
+    /// 0).
     pub held_children: u32,
 }
 
@@ -88,9 +93,10 @@ pub struct LiveWork {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum SessionEnvironment {
-    /// The login-shell environment `plak host` captured once at its start.
-    HostLoginShell,
-    /// The environment of the shell a TUI or `plak agent` was started in.
+    /// The host process's own: a session it serves, or would open.
+    Host,
+    /// Another process's: the shell a TUI or `plak agent` that holds the
+    /// session was started in.
     Cli,
 }
 

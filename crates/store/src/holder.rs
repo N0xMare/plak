@@ -307,9 +307,72 @@ impl HolderClaims {
         {
             return false;
         }
+        let _probing = PROBES.lock().unwrap_or_else(PoisonError::into_inner);
         open_regular(&lock_path(root, &record.identity))
             .is_ok_and(|lock| lock_exclusive_nonblocking(&lock))
     }
+}
+
+/// A runtime branch's holder that is not proven gone ([`branch_holder`]).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BranchHolder {
+    /// The machine its record names.
+    pub host_name: String,
+    /// Its process id, from its identity.
+    pub pid: u32,
+}
+
+/// Serializes this process's probes of other processes' locks: a lock
+/// belongs to an open file description, so two probes of one dead holder's
+/// lock from this process would each see the other's momentary lock and
+/// read the holder alive.
+static PROBES: Mutex<()> = Mutex::new(());
+
+/// How many times a probe asks again before it reads a lock as held: another
+/// process may be probing the same dead holder's lock at that moment.
+const PROBE_ATTEMPTS: u32 = 3;
+
+/// Whether the lock at `path` is held by some process: it exists, and this
+/// process could not take it in [`PROBE_ATTEMPTS`] tries.
+fn lock_held(path: &Path) -> bool {
+    let _probing = PROBES.lock().unwrap_or_else(PoisonError::into_inner);
+    for attempt in 0..PROBE_ATTEMPTS {
+        let Ok(lock) = open_regular(path) else {
+            return false;
+        };
+        if lock_exclusive_nonblocking(&lock) {
+            return false;
+        }
+        if attempt + 1 < PROBE_ATTEMPTS {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+    true
+}
+
+/// The process that holds the runtime branch `branch` of session `session`
+/// in the SQLite database at `database`, unless it is this process or is
+/// proven gone: its holder record names it, and it runs on another machine
+/// (never proven gone from here) or on this one with its lock held. `None`
+/// when no record names a holder, the directory is not this user's private
+/// one, the record names this process, or the named process's lock is free
+/// or missing (a missing lock names no live process, since a live holder
+/// keeps its lock while it holds any record). A host's directory names an
+/// embedded face's session with it (`plak host`).
+#[must_use]
+pub fn branch_holder(database: &Path, session: &str, branch: &str) -> Option<BranchHolder> {
+    let root = lock_root(database)?;
+    private_directory(&root)?;
+    let record = read_record(&root.join(format!("{session}.{branch}.holder")))?;
+    if record.identity == identity() {
+        return None;
+    }
+    let pid = record.identity.split_once('-')?.0.parse().ok()?;
+    let held = record.host != host() || lock_held(&lock_path(&root, &record.identity));
+    held.then_some(BranchHolder {
+        host_name: record.host,
+        pid,
+    })
 }
 
 #[derive(Debug)]

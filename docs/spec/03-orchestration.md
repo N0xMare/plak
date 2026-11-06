@@ -3424,7 +3424,13 @@ taken over or released. When a take finds another instance holding the tree,
 the process asks the sealed liveness module, which proves that holder gone
 only when it ran on this machine and this process can take its lock, and only
 while the path still names the file it locked (the inode check after the
-lock); a link is never read as a lock. A missing lock file or directory proves
+lock); a link is never read as a lock. The process's probes of other
+instances' locks (this proof, a sweep's, a running-holder read) are
+serialized, since a lock belongs to an open file description and two probes
+of one dead holder's lock would each see the other's, and a lock found held
+is asked again twice, 5 ms apart, before the holder reads alive. A
+`holder_elsewhere` read (a host's session directory) names a tree's holder
+only when this proof does not prove it gone. A missing lock file or directory proves
 nothing, since it may have been removed under a live holder: such a holder
 waits for the break-glass. With that
 `HolderGone` the take supersedes the holder under the next fence. A holder on

@@ -1193,7 +1193,29 @@ async fn open_head<P: plakous_host_protocol::ProtocolExtension>(
     stderr: &mut Vec<u8>,
 ) -> Result<AttachedCodingSession, crate::agent::CodingSessionOpenFailure> {
     let factory = config.runtime_factory.clone();
-    factory.open_head(config, head, stderr).await
+    let opened = factory.open_head(config, head, stderr).await;
+    name_lease_holder(config, head, opened)
+}
+
+/// A refusal for a held lease names its live holder when the product knows
+/// it (`HostConfig::lease_holder`), typed `tree_hosted_elsewhere`; the
+/// lease's own refusal follows, so its retry time is kept.
+fn name_lease_holder<P: plakous_host_protocol::ProtocolExtension>(
+    config: &HostConfig<P>,
+    head: plakous::sessions::SessionLocator,
+    opened: Result<AttachedCodingSession, crate::agent::CodingSessionOpenFailure>,
+) -> Result<AttachedCodingSession, crate::agent::CodingSessionOpenFailure> {
+    opened.map_err(|mut refused| {
+        if refused.lease_held
+            && let Some(holder) = config.lease_holder.as_ref().and_then(|name| name(head))
+        {
+            refused.failure = Box::new(CliFailure::hosted_elsewhere(format!(
+                "{holder}; the open refused: {}",
+                refused.failure.message()
+            )));
+        }
+        refused
+    })
 }
 async fn create_session<P: plakous_host_protocol::ProtocolExtension>(
     config: &mut HostConfig<P>,
@@ -1221,10 +1243,11 @@ pub(super) async fn open_session_for_host<P: plakous_host_protocol::ProtocolExte
     stderr: &mut Vec<u8>,
     role: RuntimeRole,
 ) -> Result<AttachedCodingSession, crate::agent::CodingSessionOpenFailure> {
-    config
+    let opened = config
         .runtime_factory
         .open(config, record, head, role, stderr)
-        .await
+        .await;
+    name_lease_holder(config, head, opened)
 }
 
 pub(super) async fn api_runtime_for_record<P: plakous_host_protocol::ProtocolExtension>(

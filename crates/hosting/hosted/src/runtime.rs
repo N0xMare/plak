@@ -151,7 +151,7 @@ pub(crate) mod fault_store;
 #[cfg(test)]
 mod handoff_tests;
 mod host_policy;
-pub use host_policy::{IDLE_RELEASE, IdleRelease, ResumeAfterLoss};
+pub use host_policy::{IDLE_RELEASE, IdleRelease, LeaseHolder, ResumeAfterLoss};
 #[cfg(test)]
 mod idle_release_tests;
 #[cfg(test)]
@@ -871,6 +871,10 @@ pub struct HostConfig<P: plakous_host_protocol::ProtocolExtension = plakous_host
     /// (spec 02 §4.4); `None` for an embedded face, whose session lives as
     /// long as the face.
     pub idle_release: Option<IdleRelease>,
+    /// Names the holder of a lease an open of the session's head is refused
+    /// for, so the refusal is `tree_hosted_elsewhere` naming that process;
+    /// `None` keeps the lease refusal as it is.
+    pub lease_holder: Option<LeaseHolder>,
 }
 
 /// What an exact reopen of a session's head would do on this build.

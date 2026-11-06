@@ -1439,6 +1439,16 @@ directory lives in the build's keyed state directory (chapter 02 §2.5), and a
 holder-format change must ride a state-key bump, so builds with different
 holder formats never share holder files.
 
+A product names who holds a branch from the same records, read-only:
+`plakous::sessions::holder::sqlite_branch_holder(database, locator)` answers the
+`BranchHolder` (machine and process id) a branch's record names, unless it
+names this process, or names this machine and its process lock is free or
+missing; a record of another machine is answered unproven. Every probe of
+another process's lock is serialized within the process, this one's and the
+gone-holder proof's, and this one asks a lock found held again twice, 5 ms
+apart (another process may be probing it), so it never names a dead holder
+because another probe of the same lock held it that moment.
+
 The facade grants a 30 s session lease. `test-hooks` builds may set
 `PLAK_TEST_SESSION_LEASE_SECONDS` to a whole second from 1 through 30; other
 builds ignore it. The stored duration is whole seconds, so a test that waits

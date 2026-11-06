@@ -3593,6 +3593,14 @@ fn a_cancel_on_a_running_node_is_not_read_as_an_interrupt() {
 /// the user reads a broken session and stops trying. A refusal that waiting
 /// will not fix says nothing about retrying, because it would not be true.
 #[test]
+fn an_open_refused_for_a_live_lease_is_marked_held_and_no_other_is() {
+    let held = build::recovery_refusal("exact session reopen requires recovery", Some(30));
+    assert!(held.lease_held, "a retry time is the lease's");
+    let recovery = build::recovery_refusal("exact session reopen requires recovery", None);
+    assert!(!recovery.lease_held, "a recovery is not a held lease");
+}
+
+#[test]
 fn a_reopen_refused_only_by_a_live_lease_says_when_to_retry() {
     let waiting = build::reopen_refusal("exact session reopen requires recovery", Some(30));
     let message = waiting.message();

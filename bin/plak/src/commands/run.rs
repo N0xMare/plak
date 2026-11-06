@@ -544,6 +544,7 @@ impl PlakousApplication {
                 limits,
             );
         }
+        let lease_holder = Some(crate::store::holders::lease_holder(paths, &session.id));
         let config = product_host::HostConfig {
             product_home: paths.home().to_path_buf(),
             home: paths.session_home(),
@@ -576,6 +577,7 @@ impl PlakousApplication {
             seed_line: None,
             source_releases: product_host::SourceReleases::default(),
             idle_release: None,
+            lease_holder,
             continuation: None,
             event_renderer: None,
         };

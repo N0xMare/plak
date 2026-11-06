@@ -126,7 +126,12 @@ fn a_lock_replaced_between_the_open_and_the_lock_proves_nothing() {
         let proven = gone(&directory, &own, &holder);
         BEFORE_LOCK.with(|hook| hook.borrow_mut().take());
         assert!(!proven, "locked the new file: {lock_the_new_file}");
-        assert_eq!(kept.borrow().len(), 1, "the hook ran");
+        // Each attempt of the probe met a replaced file.
+        assert_eq!(
+            kept.borrow().len(),
+            usize::try_from(super::PROBE_ATTEMPTS).unwrap(),
+            "the hook ran"
+        );
     }
 }
 
@@ -189,4 +194,33 @@ fn taking_the_own_lock_sweeps_only_unnamed_free_locks() {
     );
     assert!(live.exists() && other.exists());
     drop(held);
+}
+
+/// Probes of one dead holder's free lock from two threads of this process
+/// always prove it gone: each probe is serialized, so neither sees the
+/// other's momentary lock as a live holder.
+#[test]
+fn concurrent_probes_never_read_a_dead_holder_alive() {
+    let root = tempfile::tempdir().unwrap();
+    let directory = root.path().join("custody-hosts");
+    std::fs::create_dir(&directory).unwrap();
+    let own = host(31, "machine");
+    let dead = host(32, "machine");
+    File::create(lock_path(&directory, dead.instance)).unwrap();
+    let alive = std::thread::scope(|scope| {
+        let probes: Vec<_> = (0..2)
+            .map(|_| {
+                scope.spawn(|| {
+                    (0..2_000)
+                        .filter(|_| !gone(&directory, &own, &dead))
+                        .count()
+                })
+            })
+            .collect();
+        probes
+            .into_iter()
+            .map(|probe| probe.join().unwrap())
+            .sum::<usize>()
+    });
+    assert_eq!(alive, 0, "a dead holder was read alive");
 }

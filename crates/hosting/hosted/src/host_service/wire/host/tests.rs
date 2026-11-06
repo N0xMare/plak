@@ -51,7 +51,7 @@ fn row(session: &str, updated_at: u64) -> SessionRow {
         residency: SessionResidency::Dormant,
         activity: SessionActivity::Idle,
         live_work: LiveWork::default(),
-        environment: SessionEnvironment::HostLoginShell,
+        environment: SessionEnvironment::Host,
         hosted_elsewhere: None,
     }
 }
@@ -70,6 +70,14 @@ struct Script {
     trees: Mutex<BTreeMap<String, String>>,
     /// The sessions keep themselves resident: nothing releases.
     stay: std::sync::atomic::AtomicBool,
+    /// An open waits for this to be sent (or dropped) before it opens.
+    gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    /// How long a releasing session's worker lingers before it ends.
+    linger: AtomicU64,
+    /// The image byte counts of every prompt a session took.
+    images: Mutex<Vec<usize>>,
+    /// A flood of required events was sent whole.
+    flooded: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Clone, Default)]
@@ -101,6 +109,10 @@ impl HostSessions<Core> for Fake {
 
     fn open(&self, session: &str) -> CliResult<OpenedSession<Core>> {
         self.0.opens.fetch_add(1, Ordering::SeqCst);
+        let gate = self.0.gate.lock().unwrap().take();
+        if let Some(gate) = gate {
+            let _ = gate.recv();
+        }
         if self.0.refuse.lock().unwrap().contains_key(session) {
             return Err(CliFailure::new("refused by the script"));
         }
@@ -121,8 +133,40 @@ impl HostSessions<Core> for Fake {
                 match intents.recv_timeout(Duration::from_millis(10)) {
                     Ok(delivery) => match &*delivery {
                         SessionIntent::Quit => break,
-                        SessionIntent::Prompt(_) => {
-                            let _ = busy.send(SessionObservation::SetBusy(true));
+                        SessionIntent::Prompt(draft) => {
+                            script
+                                .images
+                                .lock()
+                                .unwrap()
+                                .push(draft.images.iter().map(|image| image.bytes.len()).sum());
+                            match draft.text.as_str() {
+                                "approve" => {
+                                    let _ = busy.send(SessionObservation::ApprovalRequired {
+                                        approval_id: "a1".into(),
+                                        call_id: None,
+                                        tool_name: "shell".into(),
+                                        subject: None,
+                                        prompt: None,
+                                        expires_at_ms: 1,
+                                    });
+                                }
+                                // More required events than an attachment holds.
+                                "flood" => {
+                                    for index in 0..5_000 {
+                                        let _ = busy.send(SessionObservation::ApprovalResolved {
+                                            approval_id: format!("f{index}"),
+                                            resolution: "denied".into(),
+                                        });
+                                        if index % 200 == 0 {
+                                            std::thread::sleep(Duration::from_millis(2));
+                                        }
+                                    }
+                                    script.flooded.store(true, Ordering::SeqCst);
+                                }
+                                _ => {
+                                    let _ = busy.send(SessionObservation::SetBusy(true));
+                                }
+                            }
                         }
                         _ => {}
                     },
@@ -132,6 +176,8 @@ impl HostSessions<Core> for Fake {
                             && count.release_now()
                             && count.begin_release(count.seen())
                         {
+                            let linger = script.linger.load(Ordering::SeqCst);
+                            std::thread::sleep(Duration::from_millis(linger));
                             break;
                         }
                     }
@@ -192,7 +238,7 @@ impl HostSessions<Core> for Fake {
         Ok(Created {
             node: node(&session),
             session,
-            environment: SessionEnvironment::HostLoginShell,
+            environment: SessionEnvironment::Host,
         })
     }
 }
@@ -494,7 +540,7 @@ fn the_directory_sends_a_snapshot_then_the_rows_that_changed() {
     );
     let deadline = Instant::now() + Duration::from_secs(10);
     let busy = loop {
-        connection.watch.as_mut().unwrap().dirty = true;
+        host.changed();
         connection.flush().unwrap();
         let frames = directory(&out.take());
         if let Some(frame) = frames.into_iter().next() {
@@ -506,7 +552,7 @@ fn the_directory_sends_a_snapshot_then_the_rows_that_changed() {
     assert_eq!(busy.0, 3);
     assert_eq!(busy.2[0].activity, SessionActivity::Busy);
     fake.0.rows.lock().unwrap().remove(1);
-    connection.watch.as_mut().unwrap().dirty = true;
+    host.changed();
     connection.flush().unwrap();
     let frames = directory(&out.take());
     assert_eq!(frames.len(), 1);
@@ -571,7 +617,7 @@ fn new_session_answers_created_and_a_replay_answers_the_same() {
     let created = Outcome::Ok(Answer::Created {
         session: "new-r1".into(),
         node: node("new-r1"),
-        environment: SessionEnvironment::HostLoginShell,
+        environment: SessionEnvironment::Host,
     });
     assert_eq!(outcome(&frames, 1), created);
     assert_eq!(outcome(&frames, 2), created);
@@ -738,4 +784,312 @@ fn hand_off_all_releases_every_resident_session() {
         assert!(matches!(slot.peek(), SlotView::Dormant(_)));
     }
     assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
+}
+
+fn prompt(
+    connection: &mut HostConnection<Core, Out>,
+    id: RequestId,
+    attachment: AttachmentId,
+    text: &str,
+) {
+    request(
+        connection,
+        id,
+        Op::Intent {
+            attachment,
+            intent: SessionIntent::Prompt(text.into()),
+            blobs: Vec::new(),
+        },
+    );
+}
+
+fn row_of(host: &SessionHost<Core>, session: &str) -> SessionRow {
+    host.changed();
+    host.directory()
+        .unwrap()
+        .iter()
+        .find(|row| row.session == session)
+        .cloned()
+        .unwrap()
+}
+
+/// An attach of a node in the tree the connection already serves stays on
+/// that session's connection: nothing on the host changes, so no host
+/// attachment reads the directory again.
+#[test]
+fn an_attach_in_the_served_tree_changes_nothing_on_the_host() {
+    let (host, fake) = host(&["s1"]);
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    attached(&out.take(), 1);
+    let mut changes = host.changes();
+    changes.borrow_and_update();
+    request(&mut connection, 2, Op::Attach { node: node("s1") });
+    attached(&out.take(), 2);
+    assert!(
+        !changes.has_changed().unwrap(),
+        "the same tree's attach went through the host"
+    );
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
+    connection.leave();
+    handed_off(&host);
+}
+
+/// A refused attach of a node in another tree leaves the connection's node
+/// attachment as it was.
+#[test]
+fn a_refused_cross_tree_attach_keeps_the_attachment() {
+    let (host, _) = host(&["s1", "s2"]);
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    let attachment = attached(&out.take(), 1);
+    // A node of s2's tree that is not its root: no such child.
+    request(
+        &mut connection,
+        2,
+        Op::Attach {
+            node: NodeAddress {
+                tree_id: "s2".into(),
+                agent_id: "no-such-child".into(),
+            },
+        },
+    );
+    assert!(matches!(outcome(&out.take(), 2), Outcome::Refused(_)));
+    assert_eq!(
+        connection
+            .node
+            .as_ref()
+            .and_then(|link| link.connection.attachment()),
+        Some(attachment),
+        "a refused attach ended the attachment"
+    );
+    connection.leave();
+    handed_off(&host);
+}
+
+/// An attachment the session's service ended by itself (it fell behind on
+/// required events) lets the session go: the connection holds nothing, and
+/// no hold keeps the session resident.
+#[test]
+fn an_attachment_its_service_ended_lets_the_session_go() {
+    let (host, fake) = host(&["s1"]);
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    let attachment = attached(&out.take(), 1);
+    let session = Arc::clone(&connection.node.as_ref().unwrap().session);
+    prompt(&mut connection, 2, attachment, "flood");
+    // Nothing takes the attachment's queue while the flood fills it.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !fake.0.flooded.load(Ordering::SeqCst) {
+        assert!(Instant::now() < deadline, "the flood was never sent");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while connection.node.is_some() {
+        assert!(
+            Instant::now() < deadline,
+            "the flooded attachment was never ended"
+        );
+        connection.flush().unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        out.take()
+            .contains(&HostFrame::ResyncRequired { attachment })
+    );
+    assert_eq!(session.attached(), 0, "an ended attachment kept its hold");
+    connection.leave();
+    handed_off(&host);
+}
+
+/// A resident session awaiting an approval reads awaiting_operator.
+#[test]
+fn a_session_awaiting_an_approval_reads_awaiting_operator() {
+    let (host, _) = host(&["s1"]);
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    let attachment = attached(&out.take(), 1);
+    prompt(&mut connection, 2, attachment, "approve");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while row_of(&host, "s1").activity != SessionActivity::AwaitingOperator {
+        assert!(Instant::now() < deadline, "the approval never showed");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    connection.leave();
+    handed_off(&host);
+}
+
+/// A session resident here is held by this host, whatever the directory's
+/// read said of it: a read that raced its open names its last holder.
+#[test]
+fn a_resident_sessions_row_names_no_holder_elsewhere() {
+    let (host, fake) = host(&["s1"]);
+    fake.0.rows.lock().unwrap()[0].hosted_elsewhere =
+        Some(plakous_host_protocol::wire::HostedElsewhere {
+            host_name: "elsewhere".into(),
+            binary: None,
+            pid: 7,
+        });
+    assert!(row_of(&host, "s1").hosted_elsewhere.is_some());
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    attached(&out.take(), 1);
+    let row = row_of(&host, "s1");
+    assert_eq!(row.residency, SessionResidency::Resident);
+    assert_eq!(row.hosted_elsewhere, None);
+}
+
+/// A session reads opening while its open runs, and releasing while its
+/// release runs, both when its actor began to release and while a trigger
+/// joins that release.
+#[test]
+fn a_rows_residency_follows_the_open_and_the_release() {
+    let (host, fake) = host(&["s1"]);
+    let (open, gate) = std::sync::mpsc::channel();
+    *fake.0.gate.lock().unwrap() = Some(gate);
+    let opening = {
+        let host = Arc::clone(&host);
+        std::thread::spawn(move || {
+            let out = Out::default();
+            let mut connection = host.connect(out.clone(), Face::Remote, || false);
+            request(&mut connection, 1, Op::Attach { node: node("s1") });
+            attached(&out.take(), 1);
+            connection.leave();
+        })
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while fake.0.opens.load(Ordering::SeqCst) == 0 {
+        assert!(Instant::now() < deadline, "the open never began");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(row_of(&host, "s1").residency, SessionResidency::Opening);
+    open.send(()).unwrap();
+    opening.join().unwrap();
+    assert_eq!(row_of(&host, "s1").residency, SessionResidency::Resident);
+    // The release lingers in its worker for a while.
+    fake.0.linger.store(1_500, Ordering::SeqCst);
+    let releasing = {
+        let host = Arc::clone(&host);
+        std::thread::spawn(move || {
+            let out = Out::default();
+            let mut connection = host.connect(out.clone(), Face::Remote, || false);
+            request(
+                &mut connection,
+                1,
+                Op::ReleaseSession {
+                    session: "s1".into(),
+                },
+            );
+            outcome(&out.take(), 1)
+        })
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while row_of(&host, "s1").residency != SessionResidency::Releasing {
+        assert!(Instant::now() < deadline, "the release never showed");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // A trigger now joins the lingering release under the slot's lock; its
+    // open after the join is refused, so the slot stays dormant.
+    fake.0.refuse.lock().unwrap().insert(
+        "s1".into(),
+        RequestRefusal::SessionUnavailable {
+            detail: "refused by the script".into(),
+        },
+    );
+    let joining = {
+        let slot = host.slot("s1");
+        std::thread::spawn(move || drop(slot.resident()))
+    };
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(row_of(&host, "s1").residency, SessionResidency::Releasing);
+    assert_eq!(releasing.join().unwrap(), Outcome::Ok(Answer::Released));
+    joining.join().unwrap();
+    handed_off(&host);
+}
+
+/// A blob sent before the intent that names it reaches the session with
+/// the intent's image.
+#[test]
+fn a_blob_reaches_the_session_with_its_intent() {
+    let (host, fake) = host(&["s1"]);
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    let attachment = attached(&out.take(), 1);
+    let mut intent = SessionIntent::<Core>::Prompt(plakous_host_protocol::Draft {
+        text: "look".into(),
+        images: vec![plakous_host_protocol::intent::DraftImage {
+            name: "a.png".into(),
+            media_type: "image/png".into(),
+            bytes: vec![7; 4096],
+            source_dimensions: None,
+        }],
+    });
+    let taken = plakous_host_protocol::wire::take_images(&mut intent, "c1");
+    for chunk in taken.chunks {
+        let line = encode_line(&ClientFrame::<Core>::Blob(chunk)).unwrap();
+        assert!(connection.frame(Ok(line)).unwrap());
+    }
+    request(
+        &mut connection,
+        2,
+        Op::Intent {
+            attachment,
+            intent,
+            blobs: taken.ids,
+        },
+    );
+    assert_eq!(outcome(&out.take(), 2), Outcome::Ok(Answer::Accepted));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while fake.0.images.lock().unwrap().is_empty() {
+        assert!(Instant::now() < deadline, "the prompt never arrived");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(*fake.0.images.lock().unwrap(), [4096]);
+    connection.leave();
+    handed_off(&host);
+}
+
+/// A stopping host opens nothing more and creates nothing: an attach of a
+/// dormant session and a new session are refused, and an open already
+/// asked for is refused too.
+#[test]
+fn a_closed_host_opens_and_creates_nothing() {
+    let (host, fake) = host(&["s1"]);
+    let dormant = host.slot("s1");
+    assert_eq!(host.hand_off_all(Duration::from_secs(1)), Vec::new());
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    request(
+        &mut connection,
+        2,
+        Op::NewSession {
+            workspace: "/w".into(),
+            template: None,
+            request_id: "r9".into(),
+        },
+    );
+    let frames = out.take();
+    for id in [1, 2] {
+        assert!(
+            matches!(
+                outcome(&frames, id),
+                Outcome::Refused(RequestRefusal::SessionUnavailable { .. })
+            ),
+            "{frames:?}"
+        );
+    }
+    assert!(
+        dormant.resident().is_err(),
+        "a slot opened on a stopping host"
+    );
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 0);
+    assert!(fake.0.creates.lock().unwrap().is_empty());
 }

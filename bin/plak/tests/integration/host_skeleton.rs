@@ -54,10 +54,20 @@ fn spawn(fixture: &Fixture) -> (Child, mpsc::Receiver<String>) {
 
 /// [`spawn`] with `extra` arguments to `plak host`.
 fn spawn_with(fixture: &Fixture, extra: &[&str]) -> (Child, mpsc::Receiver<String>) {
+    spawn_env(fixture, extra, &[])
+}
+
+/// [`spawn_with`] with `env` set for the host.
+fn spawn_env(
+    fixture: &Fixture,
+    extra: &[&str],
+    env: &[(&str, String)],
+) -> (Child, mpsc::Receiver<String>) {
     let mut child = fixture
         .command()
         .arg("host")
         .args(extra)
+        .envs(env.iter().map(|(name, value)| (*name, value.as_str())))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -78,9 +88,18 @@ fn start(fixture: &Fixture) -> Host {
 }
 
 fn start_with(fixture: &Fixture, extra: &[&str]) -> Host {
-    let (child, lines) = spawn_with(fixture, extra);
+    start_env(fixture, extra, &[])
+}
+
+fn start_env(fixture: &Fixture, extra: &[&str], env: &[(&str, String)]) -> Host {
+    try_start(fixture, extra, env).expect("plak host started")
+}
+
+/// [`start_env`], or `None` when the host ended before it served.
+fn try_start(fixture: &Fixture, extra: &[&str], env: &[(&str, String)]) -> Option<Host> {
+    let (child, lines) = spawn_env(fixture, extra, env);
     let line = loop {
-        let line = lines.recv_timeout(WAIT).expect("plak host started");
+        let line = lines.recv_timeout(WAIT).ok()?;
         if line.starts_with("plak host: serving on ") {
             break line;
         }
@@ -90,11 +109,11 @@ fn start_with(fixture: &Fixture, extra: &[&str]) -> Host {
         .and_then(|rest| rest.split(" (host ").next())
         .unwrap_or_else(|| panic!("start line: {line}"));
     assert!(line.contains(", instance "), "{line}");
-    Host {
+    Some(Host {
         child: Some(child),
         socket: PathBuf::from(socket),
         lines,
-    }
+    })
 }
 
 /// The host fixture, or `None` where this platform's socket path limit is
@@ -114,7 +133,12 @@ struct Client {
 impl Client {
     /// Connects and says hello; the welcome names no session.
     fn connect(host: &Host) -> Self {
-        let stream = UnixStream::connect(&host.socket).unwrap();
+        Self::connect_at(&host.socket)
+    }
+
+    /// [`Self::connect`] to the socket at `socket`.
+    fn connect_at(socket: &std::path::Path) -> Self {
+        let stream = UnixStream::connect(socket).unwrap();
         let mut client = Self {
             reader: BufReader::new(stream.try_clone().unwrap()),
             stream,
@@ -252,7 +276,7 @@ fn a_client_creates_attaches_and_prompts_a_session_across_host_restarts() {
     else {
         panic!("not created: {created:?}");
     };
-    assert_eq!(environment, SessionEnvironment::HostLoginShell);
+    assert_eq!(environment, SessionEnvironment::Host);
     assert_eq!(
         client.request(2, new_session(&fixture.workspace())),
         created
@@ -349,10 +373,75 @@ fn a_crashed_hosts_sessions_read_free_and_open_again() {
     client.prompt(3, attachment, "after the crash", ANSWER);
 }
 
-/// An embedded `plak agent` that holds a session: the host's attach opens
-/// no second live session (its open is refused while the agent holds the
-/// session's lease); once the holder is killed, its free process lock
-/// proves it gone and the next attach opens the session.
+/// An embedded `plak agent` started on `session`, once it said hello.
+struct Agent {
+    child: Child,
+    /// Its JSONL records after the hello, kept so its stdout stays read.
+    _records: mpsc::Receiver<serde_json::Value>,
+}
+
+impl Drop for Agent {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// Starts `plak agent --session <session>`; `Ok` once it opened the session,
+/// `Err` with its first JSONL error record when it was refused.
+fn embedded(fixture: &Fixture, session: &str) -> Result<Agent, serde_json::Value> {
+    let mut child = fixture
+        .command()
+        .args(["agent", "--session", session])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let (send, records) = mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if let Ok(record) = serde_json::from_str::<serde_json::Value>(&line) {
+                let _ = send.send(record);
+            }
+        }
+    });
+    loop {
+        let record = records
+            .recv_timeout(WAIT)
+            .expect("plak agent said something");
+        match record["kind"].as_str() {
+            Some("hello") => {
+                return Ok(Agent {
+                    child,
+                    _records: records,
+                });
+            }
+            Some("error") => return Err(record),
+            _ => {}
+        }
+    }
+}
+
+/// Waits until the directory reads `session`'s row dormant.
+fn dormant(client: &mut Client, from: RequestId) -> RequestId {
+    let deadline = std::time::Instant::now() + WAIT;
+    let mut id = from;
+    while client.rows(id)[0].residency != SessionResidency::Dormant {
+        assert!(std::time::Instant::now() < deadline, "never released");
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        id += 1;
+    }
+    id + 1
+}
+
+/// An embedded `plak agent` that holds a session (its runtime lease, a
+/// session with no tree hub and so no custody): the directory names it with
+/// its pid and its environment, the host's attach is refused
+/// `tree_hosted_elsewhere` naming it and opens nothing; once the holder is
+/// killed, its free process lock proves it gone, the row reads free and the
+/// next attach opens the session.
 #[test]
 fn a_session_an_embedded_face_holds_is_refused_until_its_holder_is_gone() {
     let Some(fixture) = fixture() else { return };
@@ -367,48 +456,365 @@ fn a_session_an_embedded_face_holds_is_refused_until_its_holder_is_gone() {
     else {
         panic!("not created");
     };
-    // The host's first open creates the runtime session; once it released
-    // the idle session, an embedded face may open it.
     let attachment = client.attach(10, &node);
     client.prompt(11, attachment, "the first turn", ANSWER);
     client.request(12, Op::Detach { attachment });
-    let deadline = std::time::Instant::now() + WAIT;
-    let mut id = 13;
-    while client.rows(id)[0].residency != SessionResidency::Dormant {
-        assert!(std::time::Instant::now() < deadline, "never released");
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        id += 1;
+    let id = dormant(&mut client, 13);
+    let agent = embedded(&fixture, &session).expect("plak agent opened the session");
+    let pid = agent.child.id();
+    let row = client.rows(id).remove(0);
+    assert_eq!(row.hosted_elsewhere.map(|held| held.pid), Some(pid));
+    assert_eq!(row.environment, SessionEnvironment::Cli);
+    assert_eq!(row.residency, SessionResidency::Dormant);
+    match client.request(id + 1, Op::Attach { node: node.clone() }) {
+        Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::TreeHostedElsewhere {
+            pid: named,
+            ..
+        }) => assert_eq!(named, pid),
+        other => panic!("not refused as held elsewhere: {other:?}"),
     }
-    let mut agent = fixture
-        .command()
-        .args(["agent", "--session", &session])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-    let stdout = agent.stdout.take().unwrap();
-    let (said, hello) = mpsc::channel();
-    std::thread::spawn(move || {
-        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            if line.contains("\"kind\":\"hello\"") {
-                let _ = said.send(());
+    drop(agent);
+    let row = client.rows(id + 2).remove(0);
+    assert_eq!(
+        row.hosted_elsewhere, None,
+        "a killed holder still reads held"
+    );
+    assert_eq!(row.environment, SessionEnvironment::Host);
+    let attachment = client.attach(id + 3, &node);
+    client.prompt(id + 4, attachment, "after the holder", ANSWER);
+}
+
+/// A root turn that spawns a sub-agent, waits for it and answers: the
+/// session's tree is durable, and its hub holds the tree's custody while the
+/// session is open.
+fn spawning_script() -> serde_json::Value {
+    json!({
+        "version": 1,
+        "tree": true,
+        "durable_tree": true,
+        "repeat_last_step": true,
+        "steps": [
+            {"output": {"tool": {"name": "spawn_agent", "arguments": {
+                "template": "review",
+                "tier": "read_only",
+                "description": "reviewer",
+                "prompt": "review the diff",
+                "output_schema_json": "{\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"],\"additionalProperties\":false}"
+            }}}, "finish": "tool_calls"},
+            {"output": {"tool": {"name": "wait_agent", "arguments": {
+                "agent_ids": ["$result.agent_id"]
+            }}}, "finish": "tool_calls"},
+            {"output": {"text": ANSWER}}
+        ]
+    })
+}
+
+/// The tree's stored custody holder's process id, when a record is held.
+fn custody_pid(fixture: &Fixture, tree: &str) -> Option<u32> {
+    use plakous_recursive_subagents::tree::TreeCustody as _;
+    let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
+    let store =
+        plakous_recursive_subagents_store::SqliteTreeStore::open(&paths.subagents_database())
+            .unwrap();
+    store
+        .custody(tree)
+        .unwrap()
+        .filter(|record| !record.released)
+        .map(|record| record.holding.host.instance.pid())
+}
+
+/// A tree in custody (its root spawned a sub-agent) is held by its custody
+/// holder: while another live process (this test) holds the custody of the
+/// dormant tree, the directory names that process and the host's attach is
+/// refused `tree_hosted_elsewhere` naming it. An embedded `plak agent` that
+/// opens the session holds the tree's custody and is named; killed, its
+/// stale custody reads free (its instance lock is free), and the host's next
+/// attach takes the tree over, its custody now naming the host.
+#[test]
+fn a_tree_in_custody_is_named_by_its_holder_until_the_holder_is_gone() {
+    let Some(fixture) = fixture() else { return };
+    fixture.write_script(&spawning_script());
+    let host = start_with(&fixture, &["--idle-release", "1"]);
+    let host_pid = host.child.as_ref().unwrap().id();
+    let mut client = Client::connect(&host);
+    let Outcome::Ok(Answer::Created { session, node, .. }) =
+        client.request(1, new_session(&fixture.workspace()))
+    else {
+        panic!("not created");
+    };
+    let attachment = client.attach(2, &node);
+    client.prompt(3, attachment, "delegate this", ANSWER);
+    assert_eq!(custody_pid(&fixture, &node.tree_id), Some(host_pid));
+    client.request(4, Op::Detach { attachment });
+    let id = dormant(&mut client, 5);
+    assert_eq!(
+        custody_pid(&fixture, &node.tree_id),
+        None,
+        "a dormant tree is released"
+    );
+
+    // This process takes the dormant tree's custody: a live holder elsewhere.
+    let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
+    let store =
+        plakous_recursive_subagents_store::SqliteTreeStore::open(&paths.subagents_database())
+            .unwrap();
+    let hold = plakous_recursive_subagents::tree::acquire_custody(&store, &node.tree_id).unwrap();
+    let me = std::process::id();
+    let row = client.rows(id).remove(0);
+    assert_eq!(row.hosted_elsewhere.map(|held| held.pid), Some(me));
+    match client.request(id + 1, Op::Attach { node: node.clone() }) {
+        Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::TreeHostedElsewhere {
+            pid,
+            ..
+        }) => assert_eq!(pid, me),
+        other => panic!("not refused as held elsewhere: {other:?}"),
+    }
+    plakous_recursive_subagents::tree::release_custody_hold(&store, hold).unwrap();
+    assert_eq!(client.rows(id + 2)[0].hosted_elsewhere, None);
+
+    // An embedded face takes it, and is killed holding it.
+    let agent = embedded(&fixture, &session).expect("plak agent opened the session");
+    let agent_pid = agent.child.id();
+    assert_eq!(custody_pid(&fixture, &node.tree_id), Some(agent_pid));
+    assert_eq!(
+        client.rows(id + 3)[0]
+            .hosted_elsewhere
+            .as_ref()
+            .map(|held| held.pid),
+        Some(agent_pid)
+    );
+    let mut agent = agent;
+    agent.child.kill().unwrap();
+    agent.child.wait().unwrap();
+    assert_eq!(
+        custody_pid(&fixture, &node.tree_id),
+        Some(agent_pid),
+        "the killed holder's custody record stays held"
+    );
+    assert_eq!(
+        client.rows(id + 4)[0].hosted_elsewhere,
+        None,
+        "a crashed holder's stale custody reads held"
+    );
+    client.attach(id + 5, &node);
+    assert_eq!(
+        custody_pid(&fixture, &node.tree_id),
+        Some(host_pid),
+        "the host did not take the tree over"
+    );
+}
+
+/// One indexed commit of a traced run: its store and its ordinal there.
+fn indexed_commits(trace: &std::path::Path) -> Vec<(u64, String, u64)> {
+    std::fs::read_to_string(trace)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|commit| commit["indexed"] == true)
+        .map(|commit| {
+            (
+                commit["ordinal"].as_u64().unwrap(),
+                commit["store"].as_str().unwrap().to_owned(),
+                commit["store_ordinal"].as_u64().unwrap(),
+            )
+        })
+        .collect()
+}
+
+/// The last indexed commit's ordinal so far.
+fn traced(trace: &std::path::Path) -> u64 {
+    indexed_commits(trace).last().map_or(0, |commit| commit.0)
+}
+
+/// The cut lifecycle: a new session, its first attach (materializing it), a
+/// turn, and a `release_session`. `Some` with the trace ordinals at which
+/// the turn and the release began, `None` once the host was killed.
+fn host_lifecycle(fixture: &Fixture, host: &Host, trace: &std::path::Path) -> Option<(u64, u64)> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut client = Client::connect(host);
+        let Outcome::Ok(Answer::Created { session, node, .. }) =
+            client.request(1, new_session(&fixture.workspace()))
+        else {
+            panic!("not created");
+        };
+        let attachment = client.attach(2, &node);
+        let turn = traced(trace);
+        client.prompt(3, attachment, "a turn before the release", ANSWER);
+        let release = traced(trace);
+        assert_eq!(
+            client.request(4, Op::ReleaseSession { session }),
+            Outcome::Ok(Answer::Released)
+        );
+        (turn, release)
+    }))
+    .ok()
+}
+
+/// `host_crash_mid_new_session`, `host_crash_mid_materialize` and
+/// `host_crash_mid_release` (spec 05): the real host is killed at every
+/// indexed commit of a new session's creation, its first open, a turn and
+/// its release, and a restarted host recovers each cut: the replayed
+/// request answers one session (never two), the crashed host reads gone,
+/// an attach opens the session; no cut leaves a
+/// handoff, a cut after the turn ended leaves no loss, and a cut before or
+/// after the turn answers the next one.
+#[test]
+fn host_crash_cuts_of_create_materialize_and_release_recover() {
+    let Some(probe) = fixture() else { return };
+    drop(probe);
+    let script = json!({
+        "version": 1,
+        "repeat_last_step": true,
+        "steps": [{"output": {"text": ANSWER}}]
+    });
+    let baseline = fixture().unwrap();
+    baseline.write_script(&script);
+    let trace = baseline.root.join("baseline-trace.jsonl");
+    let mut host = start_env(
+        &baseline,
+        &[],
+        &[(
+            plakous_offline_crash_harness::commit_trace::TRACE_ENV,
+            trace.display().to_string(),
+        )],
+    );
+    let (turn, release) = host_lifecycle(&baseline, &host, &trace).expect("the baseline ran");
+    stop(&mut host);
+    let commits = indexed_commits(&trace);
+    assert!(commits.len() > 2, "{commits:?}");
+    let mut outcomes = std::collections::BTreeMap::<&str, usize>::new();
+    for (ordinal, store, store_ordinal) in &commits {
+        let fixture = fixture().unwrap();
+        fixture.write_script(&script);
+        let cut_trace = fixture.root.join("cut-trace.jsonl");
+        let env = [
+            (
+                plakous_offline_crash_harness::commit_trace::TRACE_ENV,
+                cut_trace.display().to_string(),
+            ),
+            (
+                plakous_offline_crash_harness::commit_trace::KILL_ENV,
+                format!("{store}:{store_ordinal}"),
+            ),
+        ];
+        if let Some(mut host) = try_start(&fixture, &[], &env) {
+            if host_lifecycle(&fixture, &host, &cut_trace).is_some() {
+                // The cut fell after the lifecycle (a renewal, a late write).
+                *outcomes.entry("after").or_default() += 1;
+                stop(&mut host);
+            } else {
+                let status = host.child.take().unwrap().wait().unwrap();
+                assert!(
+                    !status.success(),
+                    "cut {store}:{store_ordinal}: the host ended cleanly"
+                );
             }
         }
-    });
-    hello
-        .recv_timeout(WAIT)
-        .expect("plak agent opened the session");
-    match client.request(3, Op::Attach { node: node.clone() }) {
-        Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::SessionUnavailable {
-            detail,
-        }) => assert!(detail.contains("lease is held"), "{detail}"),
-        other => panic!("a second live session opened: {other:?}"),
+        eprintln!(
+            "checking cut {store}:{store_ordinal} (ordinal {ordinal}; turn {turn}, release {release})"
+        );
+        let host = start(&fixture);
+        let mut client = Client::connect(&host);
+        let Outcome::Ok(Answer::Created { session, node, .. }) =
+            client.request(1, new_session(&fixture.workspace()))
+        else {
+            panic!("cut {store}:{store_ordinal}: the replay made no session");
+        };
+        let rows = client.rows(2);
+        assert_eq!(rows.len(), 1, "cut {store}:{store_ordinal}: {rows:?}");
+        assert_eq!(
+            rows[0].hosted_elsewhere, None,
+            "cut {store}:{store_ordinal}: the crashed host reads alive"
+        );
+        let attachment = client.attach(3, &node);
+        // A cut inside the turn is the open law's (a loss held, or the
+        // prompt restored to a paused queue, which takes no new turn); every
+        // cut before or after it answers the next turn.
+        let in_turn = *ordinal >= turn && *ordinal < release;
+        if !in_turn {
+            client.prompt(4, attachment, "after the cut", ANSWER);
+        }
+        let (interrupts, decisions) = root_record(&fixture, &session);
+        assert!(
+            !interrupts.contains(&RootInterruptCause::Handoff),
+            "cut {store}:{store_ordinal}: {interrupts:?}"
+        );
+        assert_eq!(
+            decisions, 0,
+            "cut {store}:{store_ordinal}: nothing continues by itself"
+        );
+        let window = if *ordinal >= release {
+            assert!(
+                !interrupts.contains(&RootInterruptCause::OwnerLost),
+                "cut {store}:{store_ordinal} in the release lost the ended turn: {interrupts:?}"
+            );
+            "release"
+        } else if *ordinal >= turn {
+            "turn"
+        } else {
+            "create-or-materialize"
+        };
+        *outcomes.entry(window).or_default() += 1;
     }
-    agent.kill().unwrap();
-    agent.wait().unwrap();
-    let attachment = client.attach(5, &node);
-    client.prompt(6, attachment, "after the holder", ANSWER);
+    eprintln!("host crash cuts by window: {outcomes:?}");
+    assert!(
+        outcomes.contains_key("release"),
+        "no cut fell in the release: {outcomes:?}"
+    );
+}
+
+/// An embedded face asking for a session the host serves is refused,
+/// typed `tree_hosted_elsewhere`, naming plak host's pid and the way to hand
+/// the session over; after `release_session` it opens it.
+#[test]
+fn an_embedded_face_is_refused_a_session_the_host_serves_until_released() {
+    let Some(fixture) = fixture() else { return };
+    fixture.write_script(&json!({
+        "version": 1,
+        "steps": [{"output": {"text": ANSWER}}]
+    }));
+    let host = start(&fixture);
+    let mut client = Client::connect(&host);
+    let Outcome::Ok(Answer::Created { session, node, .. }) =
+        client.request(1, new_session(&fixture.workspace()))
+    else {
+        panic!("not created");
+    };
+    let attachment = client.attach(2, &node);
+    client.prompt(3, attachment, "held by the host", ANSWER);
+    let refused = embedded(&fixture, &session)
+        .err()
+        .expect("a second live session opened");
+    assert_eq!(refused["code"], "tree_hosted_elsewhere", "{refused}");
+    let message = refused["message"].as_str().unwrap();
+    let pid = host.child.as_ref().unwrap().id();
+    assert!(message.contains(&format!("pid {pid}")), "{message}");
+    assert!(message.contains("it is plak host"), "{message}");
+    assert_eq!(
+        client.request(
+            4,
+            Op::ReleaseSession {
+                session: session.clone()
+            }
+        ),
+        Outcome::Ok(Answer::Released)
+    );
+    embedded(&fixture, &session).expect("plak agent opened the released session");
+}
+
+/// A session the host created and nothing ever opened opens in an embedded
+/// face first, which creates its runtime session.
+#[test]
+fn a_host_created_session_nothing_opened_opens_in_an_embedded_face() {
+    let Some(fixture) = fixture() else { return };
+    let host = start(&fixture);
+    let mut client = Client::connect(&host);
+    let Outcome::Ok(Answer::Created { session, .. }) =
+        client.request(1, new_session(&fixture.workspace()))
+    else {
+        panic!("not created");
+    };
+    embedded(&fixture, &session).expect("plak agent opened the unopened session");
 }
 
 const PREFIX: &str = "the handed-off prefix";
@@ -564,6 +970,112 @@ fn a_released_session_is_free_for_an_embedded_face_at_once() {
     agent.wait().unwrap();
 }
 
+/// `host_sigkill_mid_handoff` (spec 05): a host stopping with a root turn
+/// running is killed during its handoff, once at once and once after the
+/// handoff is durable. A session whose handoff was recorded is continued
+/// once by the next host's start scan; one whose handoff was not is not
+/// continued by itself, and its next open records the loss and holds it.
+/// No session is continued twice.
+#[test]
+fn host_crash_sigkill_mid_handoff_continues_each_handed_off_turn_once() {
+    for after_handoff in [false, true] {
+        let Some(fixture) = fixture() else { return };
+        fixture.write_script(&json!({
+            "version": 1,
+            "steps": [{"stream": [{"text": PREFIX}, {"stall": 30000}]}]
+        }));
+        let mut host = start(&fixture);
+        let mut client = Client::connect(&host);
+        let Outcome::Ok(Answer::Created { session, node, .. }) =
+            client.request(1, new_session(&fixture.workspace()))
+        else {
+            panic!("not created");
+        };
+        let attachment = client.attach(2, &node);
+        client.prompt(3, attachment, "a long turn", PREFIX);
+        let pid = host.child.as_ref().unwrap().id().to_string();
+        assert!(
+            std::process::Command::new("kill")
+                .args(["-TERM", &pid])
+                .status()
+                .unwrap()
+                .success()
+        );
+        if after_handoff {
+            let deadline = std::time::Instant::now() + WAIT;
+            while !root_record(&fixture, &session)
+                .0
+                .contains(&RootInterruptCause::Handoff)
+            {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the handoff was never recorded"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
+        kill(&mut host);
+        drop(client);
+        let handed_off = root_record(&fixture, &session)
+            .0
+            .contains(&RootInterruptCause::Handoff);
+        assert!(!after_handoff || handed_off);
+        fixture.write_script(&json!({
+            "version": 1,
+            "repeat_last_step": true,
+            "steps": [{"output": {"text": CONTINUED}}]
+        }));
+        let mut host = start(&fixture);
+        let continuing = format!("plak host: continuing session {session}");
+        if handed_off {
+            assert!(
+                std::iter::from_fn(|| host.lines.recv_timeout(WAIT).ok())
+                    .any(|line| line == continuing),
+                "a handed-off session was not continued"
+            );
+            let deadline = std::time::Instant::now() + WAIT;
+            while root_record(&fixture, &session).1 == 0 {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "no continuation decided"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        } else {
+            let mut client = Client::connect(&host);
+            client.rows(1);
+            assert!(
+                !host.lines.try_iter().any(|line| line == continuing),
+                "a turn not handed off was continued by itself"
+            );
+            client.attach(2, &node);
+            let deadline = std::time::Instant::now() + WAIT;
+            while !root_record(&fixture, &session)
+                .0
+                .contains(&RootInterruptCause::OwnerLost)
+            {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the loss was never recorded"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+        stop(&mut host);
+        let decisions = root_record(&fixture, &session).1;
+        assert_eq!(
+            decisions,
+            usize::from(handed_off),
+            "after_handoff={after_handoff}"
+        );
+        // A third host continues nothing more.
+        let mut host = start(&fixture);
+        Client::connect(&host).rows(1);
+        stop(&mut host);
+        assert_eq!(root_record(&fixture, &session).1, decisions);
+    }
+}
+
 /// A request id that is not a uuid, or a workspace that is not a
 /// directory, creates nothing.
 #[test]
@@ -610,6 +1122,86 @@ fn a_new_session_that_cannot_be_made_creates_nothing() {
     std::fs::remove_dir(&made).unwrap();
     assert_eq!(client.request(6, new_session(&made)), created);
     assert_eq!(client.rows(7).len(), 1);
+    // The same request id with another workspace asks for something else.
+    assert!(matches!(
+        client.request(8, new_session(&fixture.workspace())),
+        Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::Malformed { .. })
+    ));
+    // A file is not a workspace.
+    let file = fixture.root.join("a-file");
+    std::fs::write(&file, "not a directory").unwrap();
+    assert!(matches!(
+        client.request(
+            9,
+            Op::NewSession {
+                workspace: file.display().to_string(),
+                template: None,
+                request_id: "00000000-0000-4000-8000-0000000000a2".into(),
+            }
+        ),
+        Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::SessionUnavailable { .. })
+    ));
+    assert_eq!(client.rows(10).len(), 1);
+}
+
+/// Replays of one request racing on several connections make one session,
+/// and every one of them is answered it.
+#[test]
+fn concurrent_replays_of_one_request_make_one_session() {
+    let Some(fixture) = fixture() else { return };
+    let host = start(&fixture);
+    let socket = host.socket.clone();
+    let answers: Vec<Outcome> = std::thread::scope(|scope| {
+        let replays: Vec<_> = (0..8)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut client = Client::connect_at(&socket);
+                    client.request(1, new_session(&fixture.workspace()))
+                })
+            })
+            .collect();
+        replays
+            .into_iter()
+            .map(|replay| replay.join().unwrap())
+            .collect()
+    });
+    assert!(
+        matches!(answers[0], Outcome::Ok(Answer::Created { .. })),
+        "{answers:?}"
+    );
+    assert!(
+        answers.iter().all(|answer| *answer == answers[0]),
+        "{answers:?}"
+    );
+    assert_eq!(Client::connect(&host).rows(1).len(), 1);
+}
+
+/// A web endpoint that cannot bind stops the host before it serves, and
+/// the host leaves no control socket behind.
+#[test]
+fn a_web_endpoint_that_cannot_bind_leaves_no_control_socket() {
+    let Some(fixture) = fixture() else { return };
+    let config = fixture.home().join("config.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    write_private(
+        &config,
+        &format!(
+            "{text}\n[web]\nallow = [\"a@example.com\"]\norigin = \"https://h.example.ts.net\"\n"
+        ),
+    );
+    // The socket's directory is a file: the listener cannot be made.
+    let blocked = fixture.root.join("blocked");
+    std::fs::write(&blocked, "a file").unwrap();
+    let (mut child, _lines) = spawn_with(
+        &fixture,
+        &["--web", &format!("unix:{}/web.sock", blocked.display())],
+    );
+    assert!(!child.wait().unwrap().success());
+    let run = fixture.home().join("host/run");
+    let sockets: Vec<_> = std::fs::read_dir(&run)
+        .map(|entries| entries.flatten().map(|entry| entry.path()).collect())
+        .unwrap_or_default();
+    assert_eq!(sockets, Vec::<PathBuf>::new(), "a control socket was left");
 }
 
 /// An idle session releases itself, the directory reads it dormant, and the

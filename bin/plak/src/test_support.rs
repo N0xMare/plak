@@ -188,6 +188,7 @@ pub fn run_actual_host(
             seed_line: None,
             source_releases: product_host::SourceReleases::default(),
             idle_release: None,
+            lease_holder: None,
             continuation: None,
             event_renderer: None,
         },

@@ -38,6 +38,8 @@ use rusqlite::{
 
 use super::lease_clock::SystemLeaseClock;
 
+pub use crate::holder::{BranchHolder, branch_holder};
+
 mod actor;
 #[cfg(test)]
 mod actor_tests;

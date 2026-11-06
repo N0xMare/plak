@@ -23,6 +23,8 @@ pub struct DirectoryEntry {
     pub model: Option<String>,
     pub node: plakous_hosted::sessions::SessionNode,
     pub root_profile: Option<plakous_hosted::sessions::RootProfile>,
+    /// The runtime head the session's lease is on, once a face opened it.
+    pub locator: Option<plakous::sessions::SessionLocator>,
 }
 
 impl ProductStore {
@@ -41,7 +43,7 @@ impl ProductStore {
         let mut statement = self
             .connection
             .prepare(
-                "SELECT id,workspace_root,updated_at,title,account,model,node_tree_id,node_agent_id,root_profile FROM sessions WHERE ?1 IS NULL OR workspace_identity=?1 ORDER BY updated_at DESC, id ASC LIMIT ?2",
+                "SELECT sessions.id,sessions.workspace_root,sessions.updated_at,sessions.title,sessions.account,sessions.model,sessions.node_tree_id,sessions.node_agent_id,sessions.root_profile,CASE WHEN v.session_id IS NULL THEN sessions.locator ELSE v.head_locator END FROM sessions LEFT JOIN session_views v ON v.session_id=sessions.id WHERE ?1 IS NULL OR sessions.workspace_identity=?1 ORDER BY sessions.updated_at DESC, sessions.id ASC LIMIT ?2",
             )
             .map_err(|_| "could not query the session directory".to_owned())?;
         let rows = statement
@@ -55,6 +57,10 @@ impl ProductStore {
                     model: row.get(5)?,
                     node: decode_node(row, 6)?,
                     root_profile: decode_root_profile(row, 8)?,
+                    locator: row
+                        .get::<_, Option<String>>(9)?
+                        .map(|value| value.parse().map_err(|_| rusqlite::Error::InvalidQuery))
+                        .transpose()?,
                 })
             })
             .map_err(|_| "could not query the session directory".to_owned())?

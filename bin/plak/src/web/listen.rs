@@ -21,7 +21,7 @@ const HEADER_DEADLINE: Duration = Duration::from_secs(10);
 const MAX_CONNECTIONS: usize = 128;
 /// The read buffer one connection may hold (its request head).
 const MAX_REQUEST_BUFFER: usize = 64 * 1024;
-/// How often the accept loop looks at the session and the interrupt count.
+/// How often the accept loop looks for a stop.
 const WATCH: Duration = Duration::from_millis(200);
 
 /// Where the web endpoint listens.
@@ -44,17 +44,17 @@ impl Listen {
             let path = PathBuf::from(path);
             if !path.is_absolute() || path.file_name().is_none() {
                 return Err(format!(
-                    "--listen {value}: a unix socket path must be absolute"
+                    "--web {value}: a unix socket path must be absolute"
                 ));
             }
             return Ok(Self::Unix(path));
         }
         let address: SocketAddr = value
             .parse()
-            .map_err(|_| format!("--listen {value}: expected unix:<path> or 127.0.0.1:<port>"))?;
+            .map_err(|_| format!("--web {value}: expected unix:<path> or 127.0.0.1:<port>"))?;
         if address.ip() != std::net::IpAddr::from([127, 0, 0, 1]) {
             return Err(format!(
-                "--listen {value}: a TCP listener binds 127.0.0.1 only"
+                "--web {value}: a TCP listener binds 127.0.0.1 only"
             ));
         }
         Ok(Self::Loopback(address))
@@ -207,8 +207,7 @@ pub(crate) fn cleanup(file: Option<SocketFile>) {
     }
 }
 
-/// Accepts and serves connections until an interrupt arrives; a session
-/// that released itself is woken by the next connection.
+/// Accepts and serves connections until the host is asked to stop.
 pub(crate) async fn serve(listener: Bound, served: Arc<Served>) {
     let open = Arc::new(tokio::sync::Semaphore::new(MAX_CONNECTIONS));
     let mut watch = tokio::time::interval(WATCH);

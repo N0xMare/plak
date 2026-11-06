@@ -311,7 +311,8 @@ impl CliFailure {
     /// Another live host process holds the agent tree: exit code 7, the
     /// stable `tree_hosted_elsewhere` code and its attach cause. `message` is
     /// the refusal itself.
-    pub(crate) fn hosted_elsewhere(message: impl Into<String>) -> Self {
+    #[must_use]
+    pub fn hosted_elsewhere(message: impl Into<String>) -> Self {
         Self::classified(CliFailureKind::HostedElsewhere, message)
             .with_attach_failure(AttachFailure::TreeHostedElsewhere)
     }

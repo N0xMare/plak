@@ -530,6 +530,7 @@ fn attached_oauth_ready_refresh_never_rebinds_canonical_agent() {
         seed_line: None,
         source_releases: SourceReleases::default(),
         idle_release: None,
+        lease_holder: None,
         continuation: None,
         event_renderer: None,
     };

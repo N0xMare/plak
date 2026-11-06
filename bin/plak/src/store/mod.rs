@@ -1424,6 +1424,8 @@ pub mod acknowledgements;
 pub(crate) mod benchmark;
 /// What a host's session directory reads.
 pub mod directory;
+/// Who holds a session another process has open.
+pub mod holders;
 /// The product's SQLite implementation of the hosted session-record port.
 pub mod session_records;
 /// The product session record's durable half: the free functions that open

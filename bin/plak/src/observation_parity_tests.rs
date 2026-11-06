@@ -1005,6 +1005,7 @@ impl Fixture {
             seed_line: None,
             source_releases: crate::product_host::SourceReleases::default(),
             idle_release: None,
+            lease_holder: None,
             continuation: None,
             event_renderer: None,
         }

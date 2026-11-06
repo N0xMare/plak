@@ -1694,7 +1694,13 @@ record, with its stable create operation id, its carried-forward link and its
 intent, only after it. A crash in between leaves a record that names exactly
 the create it was waiting for. No other path creates that runtime: a host
 asked to open a record that still has a `carry_intent` refuses to create an
-empty session under its operation.
+empty session under its operation. A record with neither a locator nor a
+`carry_intent` is a create that has not reached the runtime (`plak host`'s
+`new_session`, or a crash between a new session's product save and its
+runtime create): every working face's open (`plak agent --session`, the
+TUI's resume, `plak host`'s attach) creates its runtime session under its
+`plak:create:<id>`, which the runtime store creates once; a read refuses it
+as having no locator.
 
 Every startup of a working face (TUI launch and resume, the in-TUI session
 switch, `plak run --session` and `plak agent --session`) settles the
@@ -2648,7 +2654,7 @@ not have or a command that would only print help.
 | 4 | the turn was interrupted, or `SIGTERM` or `SIGHUP` stopped the process |
 | 5 | agent or product failure, model refusal, a `plak run` answer committed truncated at its output limit (`turn_failed:output-limit`), or `RecoveryRequired` |
 | 6 | `plak run` reached its admitted-turn or wall-clock bound |
-| 7 | `tree_hosted_elsewhere`: the session's agent tree is in another live `plak` process's custody (chapter 03 §14); nothing was attached or written |
+| 7 | `tree_hosted_elsewhere`: the session's agent tree is in another live `plak` process's custody (chapter 03 §14), or its open was refused for a runtime lease another live `plak` process holds (§4.6); nothing was attached or written |
 | 130 | quit exhausted its terminal join and selected lease-only abandonment, including when `SIGTERM`/`SIGHUP` requested the stop; an idle quit or a quit whose terminal joined still exits 0 |
 | 1 | anything else, including an invalid `config.toml` |
 
@@ -3919,10 +3925,11 @@ verdicts) are addressed, the session profile and workspace chrome states.
   the session, its root `node`, its `title`, `workspace`, `profile` and
   `updated_at` (unix seconds), its `residency` (`dormant`, `opening`,
   `resident` or `releasing`), its `activity` (`idle`, `busy`,
-  `awaiting_operator`, `held_after_loss` or `stopped`), its `live_work
-  {children, processes, held_children}`, its tools' `environment`
-  (`host-login-shell` or `cli`) and `hosted_elsewhere {host_name, binary?,
-  pid}` when another host process holds its tree. A node attachment whose
+  `awaiting_operator`, `held_after_loss`, `continuing` or `stopped`), its
+  `live_work {children, processes, held_children}`, its tools'
+  `environment` (`host`, the host process's own, or `cli`, another
+  process's that holds the session) and `hosted_elsewhere {host_name,
+  binary?, pid}` when another process holds it. A node attachment whose
   session stops being resident on the host ends with the host frame
   `detached {attachment}`, and the next attach opens the session again. A
   connection that serves one session (`plak agent --wire v2`, the embedded
@@ -3939,9 +3946,11 @@ verdicts) are addressed, the session profile and workspace chrome states.
   there, so an idle release never takes a session between its open and the
   attach, and a connection that detached keeps nothing resident. An attach
   of a node of another session ends the connection's node attachment
-  first. A host attachment reads the directory again whenever the host
-  opened, released or created a session, and at least every second while
-  it is open; a row gone from the stores is said by a fresh snapshot.
+  first. The directory is read once per host change (an open, a
+  `release_session`, a create) and at most once a second otherwise, and
+  that read is shared by every host attachment; an idle release is seen by
+  the next read. A read that fails is a skipped tick, not a lost
+  connection. A row gone from the stores is said by a fresh snapshot.
 - **Quit and stop.** A `quit` intent never ends a session that outlives its
   clients. On a child attachment it is that attachment's detach, on any
   connection. On a root attachment of a host whose connections detach when
@@ -4498,19 +4507,34 @@ directory (§4.4).
   attaches it, and stays resident while anything keeps it (§4.4, residency
   in a host); it releases after the idle release, 300 s (the hidden
   `--idle-release <seconds>` sets it), and the next attach opens it again.
-  An open refused because another live host process holds the session's
-  tree is `tree_hosted_elsewhere` with that process's machine, binary and
-  pid; any other failed open is `session_unavailable` with why (a session
-  whose tree runs no hub holds no custody, and another process's open of
-  it is refused by its lease, `session_unavailable`). The
-  directory's rows are the home's newest 256 sessions. A dormant row's
-  activity is its root's durable record: `stopped` after a stop,
-  `held_after_loss` while a lost host's turn waits for Resume, `idle`
-  otherwise; its live work is none, and `held_children` is not yet counted.
-  `hosted_elsewhere` names a tree's custody holder only when it is not this
-  process and not proven gone: a holder on this machine whose instance lock
-  is free is a crashed host's or TUI's, and its session reads free; one on
-  another machine always reads held.
+  An open refused because another live process holds the session is
+  `tree_hosted_elsewhere` with that process's machine, binary (when it
+  recorded one) and pid; any other failed open is `session_unavailable`
+  with why. A working face (`plak agent --session`, `plak run --session`,
+  the TUI's resume) whose open is refused for a lease another live process
+  holds is refused the same way, exit 7, naming that process, and a running
+  `plak host` as such with how to release the session there; the lease's
+  own refusal, with its retry time, follows. Only the open's refusal is
+  named: a holder whose lease lapsed while it lives (a stopped process) is
+  taken over under the lease law (§2.6), not refused. The directory's rows are the home's newest 256 sessions. A
+  dormant row's activity is its root's durable record: `stopped` after a
+  stop, `held_after_loss` while a lost host's turn waits for Resume,
+  `continuing` while a continuation that runs by itself waits for the next
+  open (a planned handoff, or a decided continuation a crash left pending),
+  `idle` otherwise; its live work is none. `children` and `held_children`
+  are not yet counted (0). A session is held elsewhere by its tree's
+  custody holder or, for every session, by the holder of its runtime
+  lease, whose holder record names the process (spec 01's runtime store
+  holder proof; `plakous::sessions::holder::sqlite_branch_holder`); either is
+  named only when it is not this process and not proven gone: a holder on
+  this machine whose lock is free is a crashed host's or TUI's, and its
+  session reads free; one on another machine reads held. A missing lock
+  file reads a custody holder held (it may have been removed under a live
+  one, chapter 03 §14) and a lease holder free (a live holder keeps its
+  lock while it holds any record). A store that cannot be read fails the read rather than
+  read a holder free. This process's probes of a lock are serialized, and
+  a lock found held is asked again twice, 5 ms apart, so a probe never reads
+  a dead holder alive because another probe held its lock that moment.
 - **New session.** `new_session {workspace, template?, request_id}` creates
   a session in `workspace`, an existing directory, canonicalized, on the
   binding of `template` from that workspace's context, or of its `[root]
@@ -4520,9 +4544,11 @@ directory (§4.4).
   the session it made and answers the same `created`, and never makes a
   second one. The record is one product commit; the runtime session is
   created when it is first opened, under the open's own law (§2.6). The
-  session is dormant until attached; its `environment` is
-  `host-login-shell`, and a session a TUI or `plak agent` created reads
-  `cli`. Any existing directory is accepted (chapter 04 §2.10).
+  session is dormant until attached, and any face may open it first: the
+  first open of a session no face has opened creates its runtime session.
+  A replay whose workspace, or whose template's binding, is not the
+  session's is refused `malformed`. Any existing directory is accepted
+  (chapter 04 §2.10).
 - **Release.** `release_session {session}` hands a session to a desk TUI
   without waiting out the idle release: every attachment of the session
   ends, the asker's own included, each with the host frame `detached`, and
@@ -4558,7 +4584,9 @@ directory (§4.4).
   It does not yet hand that environment to its sessions' tools, which run
   with the host process's own.
 - **Stopping.** `SIGTERM`, `SIGHUP` or `SIGINT` stops it: it stops accepting,
-  ends its connections as leaving clients, removes its socket, then
+  ends its connections as leaving clients, removes its socket, refuses every
+  open and create from then on (`session_unavailable`, the host is stopping;
+  an open already running finishes, and is handed off with the rest), then
   releases every resident session as a planned handoff, all at once, each
   joined within 55 s (a session's work in flight is recorded handed off,
   and its next open continues it once by itself), and releases the lock.

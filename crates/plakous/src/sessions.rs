@@ -89,6 +89,11 @@ pub const RUNTIME_FORMAT_EPOCH: u32 = plakous_agent::internal::RUNTIME_FORMAT_EP
 
 mod attached;
 
+/// Who holds a session's runtime branch, read from the SQLite store's holder
+/// records.
+#[cfg(feature = "sessions-sqlite")]
+pub mod holder;
+
 /// Repository-only read-only reload diagnostics; not supported public API.
 #[cfg(feature = "sessions-sqlite")]
 #[doc(hidden)]

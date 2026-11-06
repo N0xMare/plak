@@ -147,7 +147,15 @@ an export.
   a held loss under `resume_after_loss = "continue"`), so it continues with
   no client attached. `release_session` detaches every attachment of a
   session and releases it now unless something else keeps it resident, so a
-  desk TUI can take it. Spec 02 §4.6 carries the systemd unit.
+  desk TUI can take it. A session another live process holds (its tree's
+  custody, or its runtime lease's holder record for any session) is named in
+  its row, and its attach is refused `tree_hosted_elsewhere` naming that
+  process; a working face whose open is refused for a lease another live
+  process holds (the host included) is refused the same way, typed, naming
+  it, and told how to release a host's, while a holder whose lease lapsed
+  is still taken over. A stopping host opens and creates nothing more.
+  A session no face has opened yet (the host's `new_session`) opens in any
+  working face first. Spec 02 §4.6 carries the systemd unit.
 - `plak host --web`: the host's sessions' wire v2 over
   a WebSocket at `/wire`, and a web UI's static build, on a private unix
   socket that `tailscale serve --bg unix:<path>` publishes on the tailnet,
@@ -371,6 +379,12 @@ an export.
 
 ### Plakous
 
+- `plakous::sessions::holder::{sqlite_branch_holder, BranchHolder}` (feature
+  `sessions-sqlite`): the process a runtime branch's holder record names,
+  unless it is this process or its free lock proves it gone. Probes of
+  another process's lock, there and in the gone-holder proof and tree
+  custody's liveness, are serialized within the process and retried
+  briefly, so a dead holder no longer reads alive under concurrent probes.
 - A long turn no longer keeps every checkpoint it commits: between two model
   rounds the owner prunes superseded history at its Working head under the
   same 64-checkpoint minimum as the idle sweep, and that prune also keeps the

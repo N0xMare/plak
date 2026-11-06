@@ -301,6 +301,13 @@ pub(crate) fn private_directory(directory: &Path) -> CliResult<()> {
             directory.display()
         )));
     }
+    // The owner is who may speak on a socket there: never another user.
+    if metadata.uid() != rustix::process::geteuid().as_raw() {
+        return Err(CliFailure::new(format!(
+            "{} belongs to another user",
+            directory.display()
+        )));
+    }
     if metadata.mode() & 0o077 != 0 {
         std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700))
             .map_err(failed)?;

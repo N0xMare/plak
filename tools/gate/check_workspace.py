@@ -1832,6 +1832,11 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     ("plak", "src/commands/reload_rehearsal.rs"): {
         "sessions": {"rehearsal", "inspect_sqlite", "OfflineReopenOutcome"},
     },
+    # A host names who holds a session another process has open (spec 02
+    # §4.6): the runtime store's holder record, read-only.
+    ("plak", "src/store/holders.rs"): {
+        "sessions": {"holder::BranchHolder", "holder::sqlite_branch_holder"},
+    },
     ("plakous-hosted", "src/capabilities.rs"): {
         "model": {"HostedRetrievalTable"},
     },

@@ -57,8 +57,10 @@ fn load_product_session(
         )));
     }
     // A face that works on the session settles an interrupted carry's
-    // record first (spec 02 §2.6); a read names the exact record only.
-    if record.plakous_locator.is_none() && !(for_work && record.carry_intent.is_some()) {
+    // record first (spec 02 §2.6), and creates the runtime session of one
+    // no face has opened yet (`plak host`'s `new_session`); a read names
+    // the exact record only.
+    if record.plakous_locator.is_none() && !for_work {
         return Err(CliFailure::new(
             "session has no exact canonical Plakous locator",
         ));

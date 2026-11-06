@@ -220,7 +220,7 @@ fn row() -> SessionRow {
         residency: SessionResidency::Dormant,
         activity: SessionActivity::Idle,
         live_work: LiveWork::default(),
-        environment: SessionEnvironment::HostLoginShell,
+        environment: SessionEnvironment::Host,
         hosted_elsewhere: None,
     }
 }
@@ -311,7 +311,7 @@ fn the_directory_answers_and_frames_round_trip_with_pinned_bytes() {
                 id: 1,
                 outcome: Outcome::Ok(Answer::Sessions { rows: vec![row()] }),
             },
-            r#"{"frame":"response","id":1,"outcome":{"ok":{"answer":"sessions","rows":[{"session":"s1","node":{"tree_id":"s1","agent_id":"s1"},"workspace":"/w","updated_at":9,"residency":"dormant","activity":"idle","live_work":{"children":0,"processes":0,"held_children":0},"environment":"host-login-shell"}]}}}"#,
+            r#"{"frame":"response","id":1,"outcome":{"ok":{"answer":"sessions","rows":[{"session":"s1","node":{"tree_id":"s1","agent_id":"s1"},"workspace":"/w","updated_at":9,"residency":"dormant","activity":"idle","live_work":{"children":0,"processes":0,"held_children":0},"environment":"host"}]}}}"#,
         ),
         (
             Host::Response {
@@ -326,10 +326,10 @@ fn the_directory_answers_and_frames_round_trip_with_pinned_bytes() {
                 outcome: Outcome::Ok(Answer::Created {
                     session: "s1".into(),
                     node: row().node,
-                    environment: SessionEnvironment::HostLoginShell,
+                    environment: SessionEnvironment::Host,
                 }),
             },
-            r#"{"frame":"response","id":4,"outcome":{"ok":{"answer":"created","session":"s1","node":{"tree_id":"s1","agent_id":"s1"},"environment":"host-login-shell"}}}"#,
+            r#"{"frame":"response","id":4,"outcome":{"ok":{"answer":"created","session":"s1","node":{"tree_id":"s1","agent_id":"s1"},"environment":"host"}}}"#,
         ),
         (
             Host::Response {

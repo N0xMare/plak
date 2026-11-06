@@ -333,6 +333,7 @@ pub fn build_host_config(
 ) -> Result<product_host::HostConfig<crate::surface_protocol::PlakExtension>, crate::CliFailure> {
     let policy = product_config::SessionPolicy::load(paths)?;
     policy.install_request_budget();
+    let lease_holder = Some(crate::store::holders::lease_holder(paths, &session.id));
     // The repository gate's offline model, when this build carries the hook and
     // the process was started with one. It is resolved before any credential or
     // catalog authority is consulted, so a scripted lifecycle never touches a
@@ -442,6 +443,7 @@ pub fn build_host_config(
                 seed_line: None,
                 source_releases: product_host::SourceReleases::default(),
                 idle_release: None,
+                lease_holder: lease_holder.clone(),
                 continuation: crate::reload_request::take_reload_continuation(),
                 event_renderer: Some(crate::log_text::render),
             });
@@ -563,6 +565,7 @@ pub fn build_host_config(
         seed_line: None,
         source_releases: product_host::SourceReleases::default(),
         idle_release: None,
+        lease_holder,
         continuation: crate::reload_request::take_reload_continuation(),
         event_renderer: Some(crate::log_text::render),
     })

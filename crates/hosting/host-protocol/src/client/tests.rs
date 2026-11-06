@@ -92,8 +92,8 @@ fn a_refused_hello_is_the_connect_error() {
 }
 
 /// A host of many sessions welcomes the client to none: `connect` refuses
-/// it, and `connect_to` attaches the root it was given; a welcome that
-/// names a session is that session's either way.
+/// it, and `connect_to` attaches the root it was given, whatever the
+/// welcome names.
 #[test]
 fn a_welcome_that_names_no_session_attaches_the_root_the_client_names() {
     let unnamed = || Welcome {
@@ -108,7 +108,7 @@ fn a_welcome_that_names_no_session_attaches_the_root_the_client_names() {
         client.join().unwrap(),
         Some(ConnectError::NoSession)
     ));
-    for (welcome, attached) in [(unnamed(), node("t9")), (welcome(), node("t1"))] {
+    for (welcome, attached) in [(unnamed(), node("t9")), (welcome(), node("t9"))] {
         let (mut host, transport) = Host::pair();
         let client =
             thread::spawn(move || connect_to::<Core>(transport, hello(), node("t9")).unwrap());
@@ -117,6 +117,40 @@ fn a_welcome_that_names_no_session_attaches_the_root_the_client_names() {
         let _connected = client.join().unwrap();
         let (_, op) = host.request();
         assert_eq!(op, Op::Attach { node: attached });
+    }
+}
+
+/// A `detached` for an attachment the client no longer holds is ignored;
+/// one for its own attachment ends the connection.
+#[test]
+fn only_its_own_attachments_detached_ends_the_connection() {
+    let (mut host, transport) = Host::pair();
+    let client = thread::spawn(move || connect::<Core>(transport, hello()).unwrap());
+    assert!(matches!(host.read(), ClientFrame::Hello(_)));
+    host.send(&HostFrame::Welcome(welcome()));
+    let (_sender, receiver, _) = client.join().unwrap();
+    let (id, _) = host.request();
+    host.send(&HostFrame::Response {
+        id,
+        outcome: Outcome::Ok(Answer::Attached { attachment: 4 }),
+    });
+    host.send(&HostFrame::Detached { attachment: 3 });
+    host.send(&HostFrame::Event {
+        attachment: 4,
+        seq: 1,
+        class: SessionObservation::<Core>::SetBusy(true).class(),
+        observation: SessionObservation::SetBusy(true),
+        blobs: Vec::new(),
+    });
+    assert_eq!(
+        receiver.recv_timeout(Duration::from_secs(10)).unwrap(),
+        SessionObservation::SetBusy(true)
+    );
+    host.send(&HostFrame::Detached { attachment: 4 });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while receiver.ended().is_none() {
+        assert!(Instant::now() < deadline, "its own detached did not end it");
+        thread::sleep(Duration::from_millis(10));
     }
 }
 

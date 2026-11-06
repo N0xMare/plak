@@ -76,7 +76,7 @@ pub(crate) fn run_host_command(
                 services,
                 args,
                 Arc::clone(&host),
-                crate::web::StopProbe::armed(),
+                stop,
             ));
             match bound_web {
                 Ok(endpoint) => {
@@ -110,6 +110,8 @@ pub(crate) fn run_host_command(
     // its sessions off, and before the lock: a host that takes the lock
     // next finds no socket of this one.
     bound.remove();
+    // The handoff first closes the host: no session opens or is created
+    // from then on.
     let deadline = HANDOFF_DEADLINE.saturating_sub(STOP_MARGIN);
     for (session, failure) in host.hand_off_all(deadline) {
         eprintln!(

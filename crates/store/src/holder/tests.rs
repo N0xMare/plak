@@ -992,3 +992,86 @@ fn two_processes_claim_concurrently_and_each_proves_only_its_own_death() {
     second.kill();
     assert!(second_grants().all(|grant| claims.holder_is_gone(&grant)));
 }
+
+/// A host's directory names a branch's holder only while it is not this
+/// process and not proven gone: a live holder on this machine (its lock
+/// held) and one on another machine are named with their process id; no
+/// record, this process's own record, a free lock and a missing one name
+/// nobody.
+#[test]
+fn branch_holder_names_only_a_holder_not_proven_gone() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let database = directory.path().join("runtime.sqlite3");
+    let (session_id, branch_id) = (
+        session().session_id().to_string(),
+        session().branch_id().to_string(),
+    );
+    let holder = || super::branch_holder(&database, &session_id, &branch_id);
+    assert_eq!(holder(), None, "no record");
+    let live = "424242-00000000000000c1";
+    let held = plant(directory.path(), live, session(), 2, owner(1));
+    lock(&held);
+    assert_eq!(
+        holder(),
+        Some(super::BranchHolder {
+            host_name: host(),
+            pid: 424_242
+        })
+    );
+    drop(held);
+    assert_eq!(holder(), None, "a free lock is a gone holder");
+    std::fs::remove_file(lock_path(directory.path(), live)).expect("remove lock");
+    assert_eq!(holder(), None, "a missing lock names no live holder");
+    std::fs::write(
+        record_path(directory.path(), session()),
+        format!(
+            "{FORMAT} another-machine {live}\nfence 2\nowner {}\n",
+            owner(1)
+        ),
+    )
+    .expect("remote record");
+    assert_eq!(
+        holder().map(|holder| holder.host_name),
+        Some("another-machine".to_owned()),
+        "a holder elsewhere is never proven gone"
+    );
+    std::fs::write(
+        record_path(directory.path(), session()),
+        local_record(identity(), 2, owner(1)),
+    )
+    .expect("own record");
+    assert_eq!(holder(), None, "this process is not elsewhere");
+}
+
+/// Probes of one dead holder's free lock from two threads of this process
+/// never read it alive: each probe is serialized, so neither sees the
+/// other's momentary lock.
+#[test]
+fn concurrent_probes_never_read_a_dead_holder_alive() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let database = directory.path().join("runtime.sqlite3");
+    let dead = "999999-00000000000000c2";
+    drop(plant(directory.path(), dead, session(), 2, owner(1)));
+    let (session_id, branch_id) = (
+        session().session_id().to_string(),
+        session().branch_id().to_string(),
+    );
+    let named = std::thread::scope(|scope| {
+        let probes: Vec<_> = (0..2)
+            .map(|_| {
+                scope.spawn(|| {
+                    (0..2_000)
+                        .filter(|_| {
+                            super::branch_holder(&database, &session_id, &branch_id).is_some()
+                        })
+                        .count()
+                })
+            })
+            .collect();
+        probes
+            .into_iter()
+            .map(|probe| probe.join().expect("probe"))
+            .sum::<usize>()
+    });
+    assert_eq!(named, 0, "a dead holder was read alive");
+}

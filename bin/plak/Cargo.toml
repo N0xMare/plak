@@ -140,7 +140,7 @@ mcp = ["plakous/mcp", "plakous-hosted/mcp"]
 git-cli = ["plakous-hosted/git-cli", "plakous-recursive-subagents/git-cli", "plakous-recursive-subagents-store/git-cli"]
 jj = ["plakous-hosted/jj-lib", "plakous-recursive-subagents/jj-lib", "plakous-recursive-subagents-store/jj-lib"]
 maintainer = ["jj", "web"]
-# The maintainer web endpoint (`plak web`): HTTP/1.1 and WebSocket on a
+# The maintainer web endpoint (`plak host --web`): HTTP/1.1 and WebSocket on a
 # private listener, the web UI's static files.
 web = [
     "dep:bytes",

@@ -56,8 +56,6 @@ pub(crate) use profile::selected_harness_profile;
 pub(crate) use profile::{
     enroll_product_instructions, product_prompt_variant, subagent_catalog_profile_id,
 };
-#[cfg(test)]
-pub(super) use session::reopen_refusal;
 pub(super) use session::require_reconstructed_coding_projection;
 pub use session::{
     AttachedCodingSession, AttachedReleaseError, CodingSessionOpenFailure, SeededHistory,
@@ -68,6 +66,8 @@ pub(crate) use session::{
     build_api_coding_session_seed, build_coding_session_seed, open_api_coding_session_with_fence,
     verify_api_coding_session, verify_coding_session,
 };
+#[cfg(test)]
+pub(super) use session::{recovery_refusal, reopen_refusal};
 #[cfg(test)]
 pub(crate) use tools::coding_tool_registry;
 pub(crate) use tools::coding_tool_registry_with_extensions;

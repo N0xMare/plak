@@ -114,6 +114,23 @@ pub struct SessionHost<P: ProtocolExtension> {
     binary_id: String,
     generation: u64,
     release_wait: Duration,
+    /// Set once the host stops: nothing opens or is created after it.
+    closing: Arc<std::sync::atomic::AtomicBool>,
+    /// The directory last read, shared by every host attachment: when, at
+    /// which host revision, and its rows.
+    directory: Mutex<Option<DirectoryRead>>,
+}
+
+/// One shared read of the directory: when, at which host revision, and its
+/// rows.
+type DirectoryRead = (Instant, u64, Arc<Vec<SessionRow>>);
+
+/// The refusal of a request that would open or create a session on a
+/// stopping host.
+fn stopping() -> RequestRefusal {
+    RequestRefusal::SessionUnavailable {
+        detail: "the host is stopping".to_owned(),
+    }
 }
 
 impl<P: ProtocolExtension> SessionHost<P>
@@ -141,7 +158,43 @@ where
             binary_id: binary_id.into(),
             generation,
             release_wait: RELEASE_WAIT,
+            closing: Arc::default(),
+            directory: Mutex::new(None),
         })
+    }
+
+    /// Stops the host: from now on no session opens and none is created,
+    /// so the sessions it holds are all it will hold.
+    fn close(&self) {
+        self.closing.store(true, Ordering::SeqCst);
+    }
+
+    fn closed(&self) -> bool {
+        self.closing.load(Ordering::SeqCst)
+    }
+
+    /// The whole directory, read at most once per host revision and per
+    /// `DIRECTORY_POLL` (1 s), whichever comes first, and shared by every host
+    /// attachment: a read in flight is waited for, not repeated.
+    ///
+    /// # Errors
+    ///
+    /// The stores cannot be read.
+    pub fn directory(&self) -> Result<Arc<Vec<SessionRow>>, String> {
+        let revision = *self.changes.borrow();
+        let mut cached = self
+            .directory
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some((read, at, rows)) = &*cached
+            && *at == revision
+            && read.elapsed() < DIRECTORY_POLL
+        {
+            return Ok(Arc::clone(rows));
+        }
+        let rows = Arc::new(self.rows(None)?);
+        *cached = Some((Instant::now(), revision, Arc::clone(&rows)));
+        Ok(rows)
     }
 
     /// [`Self::new`] whose `release_session` waits `release_wait`.
@@ -243,17 +296,23 @@ where
             .session_of(node)
             .map_err(|detail| RequestRefusal::SessionUnavailable { detail })?
             .ok_or(RequestRefusal::UnknownNode)?;
-        Ok(Self::slot_in(&mut slots, &self.sessions, &session))
+        Ok(Self::slot_in(
+            &mut slots,
+            &self.sessions,
+            &self.closing,
+            &session,
+        ))
     }
 
     /// The slot of `session`, made dormant when the host has none yet.
     pub fn slot(&self, session: &str) -> Arc<SessionSlot<P>> {
-        Self::slot_in(&mut self.lock(), &self.sessions, session)
+        Self::slot_in(&mut self.lock(), &self.sessions, &self.closing, session)
     }
 
     fn slot_in(
         slots: &mut Vec<Arc<SessionSlot<P>>>,
         sessions: &Arc<dyn HostSessions<P>>,
+        closing: &Arc<std::sync::atomic::AtomicBool>,
         session: &str,
     ) -> Arc<SessionSlot<P>> {
         if let Some(slot) = slots.iter().find(|slot| match slot.peek() {
@@ -264,8 +323,12 @@ where
         }) {
             return Arc::clone(slot);
         }
-        let opener = Arc::clone(sessions);
+        let (opener, closing) = (Arc::clone(sessions), Arc::clone(closing));
         let slot = Arc::new(SessionSlot::released(session, move |id: &str| {
+            // A stopping host opens nothing its handoff would miss.
+            if closing.load(Ordering::SeqCst) {
+                return Err(CliFailure::new("the host is stopping"));
+            }
             opener.open(id)
         }));
         slots.push(Arc::clone(&slot));
@@ -289,10 +352,13 @@ where
             .send_modify(|revision| *revision = revision.wrapping_add(1));
     }
 
-    /// Releases every resident session as a planned handoff, all at once,
+    /// Stops the host, so no session opens or is created from here on, then
+    /// releases every resident session as a planned handoff, all at once,
     /// each joined within `deadline`; the sessions that did not release in
     /// time, or failed to, with why.
     pub fn hand_off_all(&self, deadline: Duration) -> Vec<(String, CliFailure)> {
+        // Closed first, so the slots below are every session this host holds.
+        self.close();
         let slots = self.slots();
         std::thread::scope(|scope| {
             let handles: Vec<_> = slots
@@ -441,6 +507,7 @@ where
                 self.watch = None;
                 answered(Outcome::Ok(Answer::Detached))
             }
+            Op::NewSession { .. } if self.host.closed() => refused(stopping()),
             Op::NewSession {
                 workspace,
                 template,
@@ -480,8 +547,9 @@ where
 
     /// Attaches `node`: on the session the connection already serves when
     /// the node is in its tree, else on its session, opened first when it
-    /// is dormant. The old node attachment ends, as a new attach on one
-    /// session's connection ends the one before it.
+    /// is dormant. The old node attachment ends once the new one is made,
+    /// as a new attach on one session's connection ends the one before it;
+    /// a refused attach leaves it.
     fn attach(&mut self, node: &NodeAddress, text: &str) -> CliResult<Forwarded> {
         if self
             .node
@@ -504,20 +572,31 @@ where
                 return Ok(Forwarded::Answered(Outcome::Refused(refusal)));
             }
         };
-        self.unlink();
         let stopped = Arc::clone(&self.stopped);
         let mut connection = session.connect(self.out.clone(), self.face, move || stopped());
         if let Some(login) = &self.login {
             connection = connection.identified(login.clone());
         }
-        self.node = Some(NodeLink {
+        let mut link = NodeLink {
             changes: session.changes(),
             releases: session.releases(),
             session,
             connection,
             _hold: hold,
-        });
-        self.forward(text.to_owned()).map(Forwarded::Reading)
+        };
+        // The connection's attachment moves only once the new one is made:
+        // a refused attach leaves it as it was.
+        if !link.connection.frame(Ok(text.to_owned()))? {
+            self.leave();
+            return Ok(Forwarded::Reading(false));
+        }
+        if link.connection.holding() {
+            self.unlink();
+            self.node = Some(link);
+        } else {
+            link.connection.leave();
+        }
+        Ok(Forwarded::Reading(true))
     }
 
     /// `release_session`: every attachment of `session` detaches (this
@@ -665,7 +744,14 @@ where
         if !due {
             return Ok(());
         }
-        let rows = self.host.rows(None).map_err(CliFailure::new)?;
+        // A read that failed is a skipped tick: the next one reads again.
+        let Ok(rows) = self.host.directory() else {
+            if let Some(watch) = &mut self.watch {
+                watch.read_at = Some(Instant::now());
+            }
+            return Ok(());
+        };
+        let rows: Vec<SessionRow> = rows.as_ref().clone();
         let watch = self
             .watch
             .as_mut()
