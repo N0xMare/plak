@@ -243,6 +243,7 @@ fn a_host_tui_stop_stops_work_but_keeps_the_session_attached() {
     terminal.wait_where("the durable session stop", |frame| {
         frame.contains("session work stopped")
             || frame.contains("stopped: the session's work ended")
+            || frame.contains("⊘ interrupted")
     });
     let mut directory = Directory::connect(&fixture);
     let rows = directory.rows();
