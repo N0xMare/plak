@@ -117,6 +117,7 @@ impl Fixture {
             .env("HOME", self.root.join("fake-home"))
             .env("TMPDIR", self.root.join("tmp"))
             .env("PLAK_HOME", self.home())
+            .env("PLAK_TEST_RUNNER_DETACHED", "1")
             .env("PLAK_TEST_MODEL", "offline-loopback-v1")
             .env("PLAK_TEST_SCRIPT", self.script())
             .env("PLAK_TEST_EVIDENCE", self.root.join("evidence.jsonl"));
@@ -161,6 +162,12 @@ pub(super) fn write_private(path: &Path, body: &str) {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
+        if self.home().join("host/runner").exists() {
+            for entry in std::fs::read_dir(&self.root).into_iter().flatten().flatten() {
+                if entry.path().extension().is_some_and(|ext| ext == "marker") { kill_marked_jobs(&entry.path()); }
+            }
+        }
+        kill_home_local_runner(&self.home());
         // A child runner's daemons and the jobs they started outlive every
         // host process; they end with the fixture, preserved or not.
         let runner = ChildRunner::at(self);
@@ -183,6 +190,83 @@ impl Drop for Fixture {
             return;
         }
         let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
+pub(super) fn kill_local_daemon_only(home: &Path) {
+    for version in std::fs::read_dir(home.join("host/runner")).into_iter().flatten().flatten() {
+        for lock in std::fs::read_dir(version.path().join("run")).into_iter().flatten().flatten() {
+            if lock.path().extension().is_some_and(|ext| ext == "lock") {
+                for pid in opened_by(&lock.path()).into_iter().filter_map(rustix::process::Pid::from_raw) {
+                    let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
+                }
+                let deadline = Instant::now() + WAIT;
+                while !opened_by(&lock.path()).is_empty() {
+                    assert!(Instant::now() < deadline, "the old daemon did not exit");
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+        }
+    }
+}
+
+/// Reaps this fixture's local daemon and the process groups below it.
+pub(super) fn kill_home_local_runner(home: &Path) {
+    let versions = home.join("host/runner");
+    for version in std::fs::read_dir(versions).into_iter().flatten().flatten() {
+        for lock in std::fs::read_dir(version.path().join("run"))
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            if lock.path().extension().is_none_or(|ext| ext != "lock") {
+                continue;
+            }
+            for daemon in opened_by(&lock.path()) {
+                let output = Command::new("ps")
+                    .args(["-axo", "pid=,ppid="])
+                    .output()
+                    .expect("process tree");
+                let pairs = String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .filter_map(|line| {
+                        let mut columns = line.split_whitespace();
+                        Some((
+                            columns.next()?.parse::<i32>().ok()?,
+                            columns.next()?.parse::<i32>().ok()?,
+                        ))
+                    })
+                    .collect::<Vec<_>>();
+                let mut owned = vec![daemon];
+                let mut index = 0;
+                while index < owned.len() {
+                    let parent = owned[index];
+                    owned.extend(
+                        pairs
+                            .iter()
+                            .filter(|(_, ppid)| *ppid == parent)
+                            .map(|(pid, _)| *pid),
+                    );
+                    index += 1;
+                }
+                for pid in owned
+                    .into_iter()
+                    .rev()
+                    .filter_map(rustix::process::Pid::from_raw)
+                {
+                    let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+                    let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
+                }
+            }
+            let deadline = Instant::now() + WAIT;
+            while !opened_by(&lock.path()).is_empty() {
+                assert!(
+                    Instant::now() < deadline,
+                    "a home-local daemon outlived fixture cleanup"
+                );
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
     }
 }
 
@@ -585,6 +669,10 @@ fn kill_marked_jobs(marker: &Path) {
             .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
             .unwrap_or_default();
         if pid > 1 && command.contains(&marker_name) {
+            let _ = nix::sys::signal::killpg(
+                nix::unistd::Pid::from_raw(pid),
+                nix::sys::signal::Signal::SIGKILL,
+            );
             let _ = nix::sys::signal::kill(
                 nix::unistd::Pid::from_raw(pid),
                 nix::sys::signal::Signal::SIGKILL,

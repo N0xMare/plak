@@ -9,6 +9,7 @@ pub(super) mod c1;
 pub(super) mod child;
 pub(super) mod dormant;
 pub(super) mod handoff;
+pub(super) mod host_runner;
 pub(super) mod lineage;
 pub(super) mod recovery;
 mod residency;
@@ -180,6 +181,31 @@ pub(super) enum ExpectedTerminal {
 }
 
 pub(super) const REGISTRY: &[Shape] = &[
+    Shape {
+        name: "runner_job_survives_host_loss_host", subset: false, terminal: ExpectedTerminal::Answer,
+        script: host_runner::script, configure: host_runner::configure, setup: no_setup,
+        lifecycle: prompt_then_quit, assert_live: host_runner::assert_running,
+    },
+    Shape {
+        name: "runner_restart_unknown_host", subset: false, terminal: ExpectedTerminal::Answer,
+        script: host_runner::script, configure: host_runner::configure, setup: no_setup,
+        lifecycle: prompt_then_quit, assert_live: host_runner::assert_running,
+    },
+    Shape {
+        name: "host_handoff_keeps_jobs", subset: false, terminal: ExpectedTerminal::Answer,
+        script: host_runner::script, configure: host_runner::configure_handoff, setup: no_setup,
+        lifecycle: prompt_then_quit, assert_live: host_runner::assert_running,
+    },
+    Shape {
+        name: "host_crash_mid_readopt", subset: false, terminal: ExpectedTerminal::Answer,
+        script: host_runner::script, configure: host_runner::configure, setup: no_setup,
+        lifecycle: prompt_then_quit, assert_live: host_runner::assert_running,
+    },
+    Shape {
+        name: "host_crash_mid_stop", subset: false, terminal: ExpectedTerminal::Answer,
+        script: host_runner::script, configure: host_runner::configure, setup: no_setup,
+        lifecycle: prompt_then_quit, assert_live: host_runner::assert_stopped,
+    },
     Shape {
         name: "image_residency_admission",
         subset: false,

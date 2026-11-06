@@ -411,18 +411,21 @@ pub(super) async fn api_session_runtime_binding_with_owner(
             ))
             .await?;
             Ok(PreparedApiRuntime {
-                runtime: prepared.runtime.with_job_host(
-                    parent.state_roots.job_registry().for_agent(
-                        parent
-                            .topology_caller_id
-                            .clone()
-                            .unwrap_or_else(|| "root".to_owned()),
-                        parent
-                            .topology_tree_id
-                            .as_deref()
-                            .unwrap_or(parent.plan_state_authority.as_str()),
+                runtime: parent
+                    .state_roots
+                    .bind_process_transport(prepared.runtime)
+                    .with_job_host(
+                        parent.state_roots.job_registry().for_agent(
+                            parent
+                                .topology_caller_id
+                                .clone()
+                                .unwrap_or_else(|| "root".to_owned()),
+                            parent
+                                .topology_tree_id
+                                .as_deref()
+                                .unwrap_or(parent.plan_state_authority.as_str()),
+                        ),
                     ),
-                ),
                 output_bound_rederived: prepared.output_bound_rederived,
                 evidence: Some(prepared.evidence),
             })
@@ -438,18 +441,21 @@ pub(super) async fn api_session_runtime_binding_with_owner(
             .await?;
             Ok(PreparedApiRuntime {
                 output_bound_rederived: None,
-                runtime: runtime.with_job_host(
-                    parent.state_roots.job_registry().for_agent(
-                        parent
-                            .topology_caller_id
-                            .clone()
-                            .unwrap_or_else(|| "root".to_owned()),
-                        parent
-                            .topology_tree_id
-                            .as_deref()
-                            .unwrap_or(parent.plan_state_authority.as_str()),
+                runtime: parent
+                    .state_roots
+                    .bind_process_transport(runtime)
+                    .with_job_host(
+                        parent.state_roots.job_registry().for_agent(
+                            parent
+                                .topology_caller_id
+                                .clone()
+                                .unwrap_or_else(|| "root".to_owned()),
+                            parent
+                                .topology_tree_id
+                                .as_deref()
+                                .unwrap_or(parent.plan_state_authority.as_str()),
+                        ),
                     ),
-                ),
                 evidence: None,
             })
         }
@@ -1056,13 +1062,13 @@ pub(in crate::agent) async fn coding_session_runtime_binding_for(
         })?;
     }
 
-    Ok(SessionRuntimeBinding::new(
+    Ok(state_roots.bind_process_transport(SessionRuntimeBinding::new(
         builder
             .config(config)
             .request_policy(request_policy)
             .tool_result_images(product_extensions.tool_result_images())
             .image_normalizer(crate::visual_read::normalizer()),
-    ))
+    )))
     }, binding_span)
     .await
 }

@@ -3959,7 +3959,18 @@ observed as the operator's interrupt is, and the rest of the stop waits
 until the workflow ends. *Durable before and after:* a crash before the
 root record is an ordinary loss, held or continued under the loss policy.
 After it, with no root turn admitted since, the whole tree reads stopped
-and nothing continues it under either policy. A planned handoff or a
+and nothing continues it under either policy. In `plak host`, the returning
+process finishes recorded stops of daemon-held lines after its re-adoption
+sweep and journal recovery, before serving. It takes a fresh head lease and
+transfers the line before stopping remaining jobs, keyed by the recorded
+stop intent; a re-cut repeats the key, not the process effect. Child stops
+use the current attempt's existing anchored interrupt operation, and find
+the line through its recorded session locator; a held child's daemon job
+therefore stops even when no child runtime is materialized. A later root
+admission ends an old root stop, and a stop never follows an old product
+record onto a successor head. Terminals are
+recorded under that lease. Only this serving process finishes those stops,
+never an inspecting or embedded process. A planned handoff or a
 later cascade does not replace `stopped` on a child while no turn of
 that attempt was admitted or bound after the stop; a child resumed onto
 a later turn is interrupted again. A child wake does not prompt that

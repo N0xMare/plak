@@ -223,6 +223,16 @@ pub struct SessionInputWindow {
 }
 
 impl SessionRuntimeBinding {
+    /// Selects the host's home-local process transport, not a binding fact.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_local_daemon(
+        mut self,
+        backend: plakous_tools::internal::runner::LocalDaemonBackend,
+    ) -> Self {
+        self.builder = plakous_agent::internal::select_local_daemon(self.builder, backend);
+        self
+    }
     /// The configured route's total window (when reported) and input ceiling,
     /// after this builder's shared-window output reservation. This advisory
     /// snapshot is not request admission or a token measurement.

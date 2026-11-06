@@ -13,6 +13,7 @@
 
 mod environment;
 mod lock;
+mod runner;
 mod sessions;
 mod socket;
 
@@ -57,11 +58,6 @@ pub(crate) fn run_host_command(
     crate::store::tree::bind_custody_host(paths).map_err(CliFailure::new)?;
     let identity = plakous_recursive_subagents::tree::custody_host();
     let environment = environment::HostEnvironment::capture();
-    let sessions = sessions::ProductSessions::new(services, command.idle_release)?;
-    // Read before the host serves, so nothing this host does is mistaken
-    // for what the last one left.
-    let owed = sessions.owed()?;
-    let host = SessionHost::new(sessions, binary, host_generation());
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -70,10 +66,16 @@ pub(crate) fn run_host_command(
     let entered = runtime.enter();
     let bound = socket::Bound::bind(&paths.host_socket(), &lock)?;
     drop(entered);
+    let services = runner::prepare(services, &environment, &runtime)?;
+    let sessions = sessions::ProductSessions::new(&services, command.idle_release)?;
+    // Read before the host serves, so nothing this host does is mistaken
+    // for what the last one left.
+    let owed = sessions.owed()?;
+    let host = SessionHost::new(sessions, binary, host_generation());
     let web = match &command.web {
         Some(args) => {
             let bound_web = runtime.block_on(crate::web::WebEndpoint::bind(
-                services,
+                &services,
                 args,
                 Arc::clone(&host),
                 stop,

@@ -176,14 +176,7 @@ fn lifecycle(
 ) -> AgentOutcome {
     let _orphans = Orphans(fixture);
     (shapes::get(shape).configure)(fixture);
-    if shape == shapes::dormant::NAME {
-        let mut command = fixture.command();
-        command.env(TRACE_ENV, fixture.root.join("commit-trace.jsonl"));
-        if let Some(k) = cut {
-            command.env(KILL_ENV, format!("{}:{}", k.store, k.store_ordinal));
-        }
-        return super::web_face::dormant_lifecycle(fixture, command, session);
-    }
+    if let Some(outcome) = alternate_lifecycle(fixture, session, shape, cut) { return outcome; }
     let mut round_gates = super::round_gates::RoundGates::new(fixture, shape);
     let mut command = fixture.command();
     command
@@ -275,6 +268,21 @@ fn lifecycle(
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     agent.finish()
+}
+
+fn alternate_lifecycle(fixture: &Fixture, session: &str, shape: &str, cut: Option<&trace::Commit>) -> Option<AgentOutcome> {
+    if shapes::host_runner::is_host(shape) {
+        let mut env = vec![(TRACE_ENV, fixture.root.join("commit-trace.jsonl").display().to_string())];
+        if let Some(cut) = cut { env.push((KILL_ENV, format!("{}:{}", cut.store, cut.store_ordinal))); }
+        return Some(crate::host_skeleton::sweep::run(fixture, session, shape, shapes::ANSWER, &env));
+    }
+    if shape == shapes::dormant::NAME {
+        let mut command = fixture.command();
+        command.env(TRACE_ENV, fixture.root.join("commit-trace.jsonl"));
+        if let Some(k) = cut { command.env(KILL_ENV, format!("{}:{}", k.store, k.store_ordinal)); }
+        return Some(super::web_face::dormant_lifecycle(fixture, command, session));
+    }
+    None
 }
 
 pub(super) fn pilot(seed: &Fixture, session: &str, shape: &str) -> Vec<trace::Commit> {
@@ -506,6 +514,9 @@ fn cut_after_kill(
     before: &summary::Summary,
     baseline: &summary::Summary,
 ) -> Value {
+    if shapes::host_runner::is_host(shape) {
+        return shapes::host_runner::after_kill(fixture, session, shape, commits);
+    }
     if shape == "handoff_resume" {
         return shapes::handoff::after_kill(fixture, session, commits, |label| {
             traced_reopen(fixture, session, label, None)

@@ -151,6 +151,8 @@ pub struct ProcessJobs(Arc<plakous::tools::JobHostCapacity>);
 
 #[derive(Clone)]
 pub struct ProductStateRoots {
+    local_daemon: Option<plakous::tools::runner::LocalDaemonBackend>,
+    daemon_client: Option<plakous::runner::RunnerClient>,
     child_runtime: Arc<dyn super::children::runtime_factory::ChildRuntimeFactory>,
     job_registry: Arc<crate::jobs::JobRegistry>,
     job_config: plakous::tools::JobConfig,
@@ -298,6 +300,8 @@ impl ProductStateRoots {
             runtime_database: std::fs::canonicalize(&runtime_database).unwrap_or(runtime_database),
             state_home,
             subscriptions: std::fs::canonicalize(&subscriptions).unwrap_or(subscriptions),
+            local_daemon: None,
+            daemon_client: None,
             runtime_sessions: Arc::new(Mutex::new(None)),
             store_fill: Arc::default(),
             storage_shutdown: None,
@@ -356,6 +360,47 @@ impl ProductStateRoots {
     pub fn with_process_jobs(mut self, jobs: &ProcessJobs) -> Self {
         self.job_registry = Arc::new(crate::jobs::JobRegistry::under(Arc::clone(&jobs.0)));
         self
+    }
+
+    /// Binds the serving host's local process transport to every node.
+    #[must_use]
+    pub fn with_local_daemon(
+        mut self,
+        backend: plakous::tools::runner::LocalDaemonBackend,
+        client: plakous::runner::RunnerClient,
+    ) -> Self {
+        self.local_daemon = Some(backend);
+        self.daemon_client = Some(client);
+        self
+    }
+
+    pub(crate) async fn finish_child_process_stops(&self, tree_id: &str) -> CliResult<()> {
+        let Some(client) = &self.daemon_client else { return Ok(()) };
+        let stops = self.tree_store()?.load(tree_id).map_err(|error| CliFailure::new(error.detail))?
+            .map_or_else(Vec::new, |tree| tree.rows().recorded_process_stops());
+        let sessions = self.runtime_sessions()?;
+        for (locator, intent) in stops {
+            let locator = locator.parse::<plakous::sessions::SessionLocator>().map_err(|error| CliFailure::new(error.to_string()))?;
+            let head = sessions.line_head_of(locator).await.map_err(|error| CliFailure::new(error.to_string()))?;
+            crate::runner_adoption::finish_recorded_stop(client, &sessions, head.line(), &intent).await.map_err(CliFailure::new)?;
+        }
+        Ok(())
+    }
+
+    /// Applies this host's transport without changing a session's binding.
+    #[must_use]
+    pub fn bind_process_transport(
+        &self,
+        runtime: plakous::sessions::SessionRuntimeBinding,
+    ) -> plakous::sessions::SessionRuntimeBinding {
+        match &self.local_daemon {
+            Some(backend) => runtime.with_local_daemon(backend.clone()),
+            None => runtime,
+        }
+    }
+
+    pub(crate) fn daemon_processes(&self) -> bool {
+        self.local_daemon.is_some()
     }
 
     /// Whether these roots' registry is under `jobs`, the process's bound.
@@ -745,6 +790,8 @@ impl ProductStateRoots {
             runtime_database: product.join("runtime.sqlite3"),
             product,
             state_home,
+            local_daemon: None,
+            daemon_client: None,
             runtime_sessions: Arc::new(Mutex::new(None)),
             store_fill: Arc::default(),
             storage_shutdown: None,

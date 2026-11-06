@@ -21,7 +21,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 pub(in crate::environment) use local::LocalDaemon;
-pub use local::local_daemon_environment;
+pub use local::{LocalDaemonBackend, local_daemon_environment};
 use plakous_model::{AttemptId, CallId, CancellationToken, Timestamp};
 pub use probe::{RunnerWorkspaceProbe, serve_probe};
 pub use process::{ProcessRunner, process_runner, select_process_runner, workspace_probe};
@@ -256,6 +256,8 @@ pub enum RunnerClass {
     /// A control of the owner line's processes: the link mints its control
     /// id, and it runs at most once per id.
     Control,
+    /// A durable host intent's control, stable across host restarts.
+    RecordedControl(String),
     /// One step of a tree operation: at most once per tree and operation
     /// id, fenced by the tree's custody rather than a line owner.
     Tree {
@@ -294,6 +296,19 @@ pub struct RunnerCall {
 }
 
 impl RunnerCall {
+    /// A line control keyed by an already recorded host intent.
+    #[must_use]
+    pub fn recorded_control(
+        verb: RunnerVerb,
+        payload: Value,
+        owner: LineOwner,
+        intent: String,
+    ) -> Self {
+        let mut call = Self::unkeyed(verb, payload);
+        call.owner = Some(owner);
+        call.class = RunnerClass::RecordedControl(intent);
+        call
+    }
     fn new(verb: RunnerVerb, payload: Value, control: &OperationContext) -> Self {
         Self {
             verb,

@@ -144,6 +144,12 @@ an export.
   embedded-to-host transition or with two terminal faces, and an unanswered
   `/new` reuses its identity on the next explicit retry after reconnect.
 
+- `plak host` runs root and child process sessions on the home-local runner:
+  jobs survive a host crash or signal handoff, the next host sweeps and
+  re-adopts their lines before recovering its journal, and recorded stops
+  finish before it serves. Starts carry that host's captured login-shell
+  PATH and HOME; files, bindings and embedded-mode exit behavior are unchanged.
+
 - The TUI moves a focus marker through transcript items with `Alt+Up` and
   `Alt+Down` (then `Up` and `Down`). `Enter` or `Space` folds the focused
   block, `Alt+C` copies that item, `Esc` leaves the marker without stopping a

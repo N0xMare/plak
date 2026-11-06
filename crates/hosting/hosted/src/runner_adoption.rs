@@ -17,7 +17,9 @@ use std::str::FromStr as _;
 use plakous::model::LineId;
 use plakous::runner::RunnerClient;
 use plakous::sessions::{AgentSessions, AgentSessionsErrorKind, SessionOperationId};
-use plakous::tools::runner::{RunnerFailure, decode_jobs_snapshot};
+use plakous::tools::runner::{
+    RunnerCall, RunnerFailure, RunnerLink, RunnerVerb, decode_jobs_snapshot,
+};
 use plakous::tools::{JobStatus, LineOwner};
 
 /// One line a returning host re-adopted.
@@ -72,7 +74,7 @@ pub async fn readopt_lines(
         {
             continue;
         }
-        match readopt_line(client, sessions, operation_prefix, &status.line).await {
+        match readopt_line(client, sessions, operation_prefix, &status.line, None).await {
             Ok(line) => readopted.push(line),
             Err(reason) => failed.push(ReadoptFailure {
                 line: status.line,
@@ -83,11 +85,33 @@ pub async fn readopt_lines(
     Ok((readopted, failed))
 }
 
+/// Finishes a recorded stop only while holding and transferring the line's head.
+/// The intent identity keys the stop across crashes; another holder is never stopped.
+///
+/// # Errors
+/// The lease, transfer, stop or terminal recording failed.
+pub async fn finish_recorded_stop(
+    client: &RunnerClient,
+    sessions: &AgentSessions,
+    line: LineId,
+    intent: &str,
+) -> Result<Readopted, String> {
+    readopt_line(
+        client,
+        sessions,
+        "plak:host:stop",
+        &line.to_string(),
+        Some(intent),
+    )
+    .await
+}
+
 async fn readopt_line(
     client: &RunnerClient,
     sessions: &AgentSessions,
     operation_prefix: &str,
     line: &str,
+    stop: Option<&str>,
 ) -> Result<Readopted, String> {
     let line = LineId::from_str(line).map_err(|error| format!("line id: {error}"))?;
     let operation = SessionOperationId::new(format!("{operation_prefix}:{line}"))
@@ -96,6 +120,7 @@ async fn readopt_line(
         .open_lease_only(&operation, line)
         .await
         .map_err(|error| format!("the line's head could not be held: {error}"))?;
+    cut("lease");
     let owner = LineOwner::new(
         line,
         head.generation(),
@@ -107,6 +132,24 @@ async fn readopt_line(
             .transfer_owner(&owner)
             .await
             .map_err(|error| format!("the runner refused the transfer: {error:?}"))?;
+        cut("transfer");
+        if let Some(intent) = stop {
+            cut("before-stop");
+            let stopped = client
+                .call(RunnerCall::recorded_control(
+                    RunnerVerb::JobsStop,
+                    serde_json::json!({"session": null, "reason": "user", "grace_ms": 200}),
+                    owner,
+                    intent.to_owned(),
+                ))
+                .await;
+            if let Err(error) = stopped
+                && error != RunnerFailure::Spent
+            {
+                return Err(format!("the recorded stop failed: {error:?}"));
+            }
+            cut("after-stop");
+        }
         // The line table read after the transfer is the one this owner holds.
         let jobs = client
             .lines()
@@ -126,10 +169,14 @@ async fn readopt_line(
             .record_job_terminals(&jobs)
             .await
             .map_err(|error| format!("the job terminals could not be recorded: {error}"))?;
+        cut("terminals");
         let running = jobs
             .iter()
             .filter(|job| job.status == JobStatus::Running)
             .count();
+        if stop.is_some() && running != 0 {
+            return Err("the recorded stop left running jobs".to_owned());
+        }
         Ok::<_, String>((recorded, running))
     }
     .await;
@@ -145,6 +192,15 @@ async fn readopt_line(
         recorded,
         running,
     })
+}
+
+fn cut(phase: &str) {
+    #[cfg(feature = "test-support")]
+    if std::env::var("PLAK_TEST_HOST_READOPT_CUT").as_deref() == Ok(phase) {
+        let _ = nix::sys::signal::kill(nix::unistd::Pid::this(), nix::sys::signal::Signal::SIGKILL);
+    }
+    #[cfg(not(feature = "test-support"))]
+    let _ = phase;
 }
 
 #[cfg(test)]

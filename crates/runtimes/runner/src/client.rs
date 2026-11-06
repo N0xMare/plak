@@ -788,6 +788,9 @@ impl Inner {
                 RunnerClass::Control => RequestClass::OwnerControl {
                     control_id: self.next_id("c"),
                 },
+                RunnerClass::RecordedControl(control_id) => RequestClass::OwnerControl {
+                    control_id: control_id.clone(),
+                },
                 RunnerClass::Tree {
                     tree_id,
                     operation_id,

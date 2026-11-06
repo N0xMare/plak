@@ -283,9 +283,18 @@ impl AgentBuilder {
             model_reresolver: None,
             request_slots: None,
             runner_backend: None,
+            local_daemon: None,
             #[cfg(test)]
             target_backend: None,
         }
+    }
+
+    pub(crate) fn with_local_daemon(
+        mut self,
+        backend: plakous_tools::internal::runner::LocalDaemonBackend,
+    ) -> Self {
+        self.local_daemon = Some(backend);
+        self
     }
 
     /// Runs the agent's environment on `backend`'s runner instead of the
@@ -1219,14 +1228,20 @@ fn attach_job_environment(
     job_owner: plakous_tools::JobOwner,
     run_id: RunId,
 ) -> Result<(ExecutionEnvironment, plakous_tools::JoinedProcessSessions), AgentError> {
-    let mut environment = run_environment(
+    let environment = run_environment(
         &builder.workspace,
         run_id,
         builder.host_process_options.clone(),
         builder.job_config,
         builder.runner_backend.as_ref(),
-    )?
-    .with_line_owner(plakous_tools::LineOwner::from(&job_owner));
+    )?;
+    let environment = match &builder.local_daemon {
+        Some(daemon) => daemon
+            .attach(environment)
+            .map_err(|error| AgentError::new(AgentErrorKind::InvalidInput, error.to_string()))?,
+        None => environment,
+    };
+    let mut environment = environment.with_line_owner(plakous_tools::LineOwner::from(&job_owner));
     if let Some(normalizer) = &builder.image_normalizer {
         environment = install_visual_read(
             environment,
@@ -1243,7 +1258,7 @@ fn attach_job_environment(
         .map_err(|error| AgentError::from_tool(&plakous_tools::backend_runtime_error(error)))?;
     // A session on another runner holds the runner port: its processes and
     // job events are that runner's.
-    let fresh = if builder.runner_backend.is_some() {
+    let fresh = if builder.runner_backend.is_some() || builder.local_daemon.is_some() {
         plakous_tools::JoinedSessionsPort::runner(fresh_sessions)
     } else {
         plakous_tools::JoinedSessionsPort::local(fresh_sessions)

@@ -114,6 +114,14 @@ mod usage;
 /// Items in this namespace are deliberately nameable but are not part of the
 /// supported `plakous-agent` compatibility inventory.
 pub mod internal {
+    /// Selects a home-local transport without changing the runner binding.
+    #[must_use]
+    pub fn select_local_daemon(
+        builder: AgentBuilder,
+        backend: plakous_tools::internal::runner::LocalDaemonBackend,
+    ) -> AgentBuilder {
+        builder.with_local_daemon(backend)
+    }
     /// Runs `builder`'s agent on the runner behind `backend` instead of the
     /// local runner (spec 01 §8.5): its environment's operations and process
     /// sessions go to that runner, and a checkpoint of another runner does
@@ -223,7 +231,8 @@ pub mod internal {
         RequestSlots, ReresolvedModel, Turn, TurnContextCapacity, TurnRecoveryOperationId,
         TurnResult, TurnResultHandle, TurnResultOutcome, TurnSubmission, WeakAgent,
         abandon_and_release_many, checkpoint_closes_on_reopen, checkpoint_recovery_verdict,
-        close_admission, compile_explicit_runtime_profile, lease_released, shutdown_for_transfer,
+        close_admission, compile_explicit_runtime_profile, lease_released, preserve_daemon_jobs,
+        shutdown_for_transfer,
     };
     pub use crate::session::{
         AcquireBranch, ArchiveReceipt, ArchiveSession, BranchHead, BranchLease, BranchRevision,

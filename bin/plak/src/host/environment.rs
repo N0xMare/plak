@@ -26,6 +26,18 @@ pub(super) struct HostEnvironment {
 const MINIMAL_PATH: &str = "/usr/bin:/bin";
 
 impl HostEnvironment {
+    pub(super) fn backend(
+        &self,
+        client: plakous::runner::RunnerClient,
+        runtime: tokio::runtime::Handle,
+    ) -> plakous::tools::runner::LocalDaemonBackend {
+        plakous::tools::runner::LocalDaemonBackend::new(
+            std::sync::Arc::new(client),
+            runtime,
+            self.path.clone(),
+            self.home.as_ref().map(std::path::PathBuf::from),
+        )
+    }
     /// Asks the login shell once, with the runner's 5 s bound.
     pub(super) fn capture() -> Self {
         Self::from_sources(

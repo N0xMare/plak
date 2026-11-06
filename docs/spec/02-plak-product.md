@@ -341,7 +341,8 @@ another session's jobs.
                               runner-id, owners.json (its owner floors, as below), empty/ (where a
                               request naming no workspace is answered), run/ (0700: the 0600
                               runner.sock and the 0600 lock file its daemon holds for its life); not
-                              state, and never reached by `runner connect --stdio`
+                              state, and never reached by `runner connect --stdio`;
+                              calls/<state key>/ (the serving host's journal) and serve.log (0600)
   runners/<name>/runner.json  a paired runner's identity and version, 0600
   runners/<name>/calls/       the keyed calls this host sent the runner and has no answer for (chapter 01 §8.4)
   runner/                     this machine's runner home, 0700 (an existing one is closed to 0700):
@@ -2469,7 +2470,7 @@ version. There is no top-level prompt positional.
 | `state prune-legacy [--yes] [--forget-missing-launches] [--prune-orphaned-references]` | Confirm and delete unused non-current state and older-schema telemetry (including its SQLite sidecars); retain current/newer telemetry and session references unless explicitly selected; refuse locks or unsafe paths (§2.5). |
 | `telemetry status [--views]`, `telemetry sql [<query>] [--json]`, `telemetry prune [--max-age-days <n>] [--max-bytes <n>] [--yes]` | the local analytics store |
 | `models [<account>]` | read-only catalog discovery, in every build |
-| `runner serve`, `runner connect --stdio`, `runner allow <host-id>`, `runner ps [<name>]`, `runner pair <name>` | Runners (chapter 01 §8.4, chapter 04 §2.9). On a runner machine, `serve` runs the runner daemon in the foreground until it is idle (07 §3.7), with the tree's version control registered as its extension: it answers only absolute paths without `..` that resolve under the roots or the `copies` root and outside the product home, and takes copies carried from another runner under `copies` (chapter 01 §8.5); the hidden `serve --local` runs this home's home-local runner in the foreground until it is idle (300 s): it needs no `runner.toml`, binds only this home's `host-id` from any build of its runner protocol version, carries only process sessions, serves any workspace outside the product home, and is started by nothing yet; `connect --stdio` bridges standard input and output to the daemon of this build's version triple and, when none answers, starts `plak runner serve` detached in its own process group with a cleared environment (`PATH`, `HOME`, `PLAK_HOME`) and its stderr in `runner/serve.log`; a host's ssh runs it. `allow` pairs a host by adding its id, a lowercase uuid, to `runner.toml` `hosts`. `ps` lists the daemon's lines for every host through an inspecting connection bound under this machine's own host id (a remote inspection sees only its own host's lines, without job commands or output), each `held` or `orphaned` with its job count, or prints `no runner is running`. On a host, `pair <name>` refuses a build whose source revision is `unknown`, runs `plak runner allow <host-id>` on `[runners.<name>]` over ssh with the strict options, binds to prove it (an unpaired bind is reported at once) and records the runner's identity in `runners/<name>/runner.json`; `ps <name>` lists what that runner holds for this host. `secret set|rm|list <name>` manages this machine's runner secrets (`secrets/runner/`, chapter 04 §3.1), which an MCP server placed on this runner reads; `set` reads the value from a hidden prompt. No session is placed on a runner yet. |
+| `runner serve`, `runner connect --stdio`, `runner allow <host-id>`, `runner ps [<name>]`, `runner pair <name>` | Runners (chapter 01 §8.4, chapter 04 §2.9). On a runner machine, `serve` runs the runner daemon in the foreground until it is idle (07 §3.7), with the tree's version control registered as its extension: it answers only absolute paths without `..` that resolve under the roots or the `copies` root and outside the product home, and takes copies carried from another runner under `copies` (chapter 01 §8.5); the hidden `serve --local` runs this home's home-local runner in the foreground until it is idle (300 s): it needs no `runner.toml`, binds only this home's `host-id` from any build of its runner protocol version, carries only process sessions, serves any workspace outside the product home, and is started by `plak host` before it serves; `connect --stdio` bridges standard input and output to the daemon of this build's version triple and, when none answers, starts `plak runner serve` detached in its own process group with a cleared environment (`PATH`, `HOME`, `PLAK_HOME`) and its stderr in `runner/serve.log`; a host's ssh runs it. `allow` pairs a host by adding its id, a lowercase uuid, to `runner.toml` `hosts`. `ps` lists the daemon's lines for every host through an inspecting connection bound under this machine's own host id (a remote inspection sees only its own host's lines, without job commands or output), each `held` or `orphaned` with its job count, or prints `no runner is running`. On a host, `pair <name>` refuses a build whose source revision is `unknown`, runs `plak runner allow <host-id>` on `[runners.<name>]` over ssh with the strict options, binds to prove it (an unpaired bind is reported at once) and records the runner's identity in `runners/<name>/runner.json`; `ps <name>` lists what that runner holds for this host. `secret set|rm|list <name>` manages this machine's runner secrets (`secrets/runner/`, chapter 04 §3.1), which an MCP server placed on this runner reads; `set` reads the value from a hidden prompt. No session is placed on a runner yet. |
 | `version`, `help [<command>]` | |
 
 `session show` also inspects the root session's canonical Plakous branch head
@@ -4641,19 +4642,37 @@ when the host starts keeps its custody, and the per-tree
   under an idle root, and a crashed host's turn whose loss no open has
   recorded yet, are not found by the scan: they continue, or hold, at the
   session's next open.
+- **Local process daemon.** After binding its control socket, before serving
+  either endpoint or opening sessions, it dials the home-local runner of this
+  protocol, binds journaled to `host/runner/v<N>/calls/<state key>`, and
+  selects `LocalDaemonBackend` through its services for every root and child.
+  It retries connect, start and connect under one 10 s bound, including an EOF
+  before Hello and a starter losing to an idle daemon's final socket/lock
+  cleanup. It then sweeps the runner's lines known to its runtime store,
+  under each head's lease, transferring owners and recording ended jobs;
+  recovers the journal after those transfers; and finishes recorded stops
+  before serving. A live embedded holder refuses the head lease and is
+  skipped. Other state keys' lines are never transferred or stopped.
+  Under a user service it starts the daemon through `systemd-run --user`
+  in its own collected unit; without a reachable user manager, or outside
+  a service, it starts detached in its own process group. The daemon's
+  environment never supplies a later host's process context.
 - **Tool environment.** It captures the login shell's `PATH` once at start,
   bounded at 5 s however the shell's startup files behave, as `plak runner
   serve` does when `runner.toml` sets no `path` (the shell runs in a process
   group of its own, killed once it answered or the deadline passed), falling back to its own `PATH` and then `/usr/bin:/bin`, with its
   own `HOME`; the start line names the source but never the directories.
-  It does not yet hand that environment to its sessions' tools, which run
-  with the host process's own.
+  Every process start carries that captured `PATH` and `HOME`, with the
+  session's cwd, required prefix identity and discovery ceiling; two hosts
+  using the same daemon keep their own captured environments. No other
+  variable or delegated secret value crosses the process wire. Files and
+  version control remain direct and the binding descriptor remains `local`.
 - **Stopping.** `SIGTERM`, `SIGHUP` or `SIGINT` stops it: it stops accepting,
   ends its connections as leaving clients, removes its socket, refuses every
   open and create from then on (`session_unavailable`, the host is stopping;
   an open already running finishes, and is handed off with the rest), then
   releases every resident session as a planned handoff, all at once, each
-  joined within 55 s (a session's work in flight is recorded handed off,
+  joined within 55 s, leaving daemon-held jobs running (a session's work in flight is recorded handed off,
   and its next open continues it once by itself), and releases the lock.
   The stop is bounded: the process exits within 60 s of the signal however
   its work stands, under the unit's `TimeoutStopSec`; a session not
@@ -4662,8 +4681,10 @@ when the host starts keeps its custody, and the per-tree
   tools get <source>` once it accepts.
 
 The unit runs it as a planned stop, not a crash: `KillMode=mixed` signals the
-host alone and kills the rest of the cgroup only after the timeout, so a
-session's processes are never signalled before the host has handed them off.
+host alone. The home-local daemon runs outside that unit's cgroup when
+started through the user manager, so a host stop or restart leaves its jobs
+running until they end or reach their caps; the daemon exits after its idle
+period. Embedded mode keeps direct process calls and exit = stop.
 
 ```ini
 [Service]

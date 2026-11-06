@@ -21,6 +21,76 @@ pub(in crate::environment) struct LocalDaemon {
     runtime: tokio::runtime::Handle,
 }
 
+/// Host-scoped local process transport and captured login-shell authority.
+#[derive(Clone)]
+pub struct LocalDaemonBackend {
+    daemon: LocalDaemon,
+    path: String,
+    home: Option<std::path::PathBuf>,
+}
+
+impl LocalDaemonBackend {
+    /// Captures the host's environment without inheriting the daemon's.
+    #[must_use]
+    pub fn new(
+        link: Arc<dyn RunnerLink>,
+        runtime: tokio::runtime::Handle,
+        path: String,
+        home: Option<std::path::PathBuf>,
+    ) -> Self {
+        Self {
+            daemon: LocalDaemon { link, runtime },
+            path,
+            home,
+        }
+    }
+
+    /// Attaches only process sessions, retaining the local descriptor and files.
+    ///
+    /// # Errors
+    /// Refuses delegated values or unavailable local process authority.
+    pub fn attach(
+        &self,
+        mut environment: ExecutionEnvironment,
+    ) -> Result<ExecutionEnvironment, ExecutionEnvironmentError> {
+        if !environment
+            .descriptor()
+            .config()
+            .environment_delegations()
+            .is_empty()
+            || !environment
+                .descriptor()
+                .config()
+                .credential_delegations()
+                .is_empty()
+        {
+            return Err(ExecutionEnvironmentError::new(
+                ExecutionEnvironmentErrorKind::InvalidDelegationSourceAuthority,
+                "a home-local runner carries no delegated value",
+            ));
+        }
+        let invalid = || {
+            ExecutionEnvironmentError::new(
+                ExecutionEnvironmentErrorKind::Workspace,
+                "local process authority is unavailable",
+            )
+        };
+        let mut facts = environment
+            .host_process
+            .as_ref()
+            .ok_or_else(invalid)?
+            .facts()
+            .map_err(|_| invalid())?;
+        facts.path.clone_from(&self.path);
+        facts.home.clone_from(&self.home);
+        environment.host_process = Some(Arc::new(
+            super::super::process::HostProcessContext::from_facts(facts).map_err(|_| invalid())?,
+        ));
+        environment.local_daemon = Some(self.daemon.clone());
+        Ok(environment)
+    }
+}
+
 /// A local-runner environment, as [`ExecutionEnvironment::host_with_policy_and_process_options`]
 /// builds it, whose process sessions run on the home-local runner behind
 /// `link` (on `runtime`). Its descriptor and run-stable facts are the

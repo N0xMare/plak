@@ -180,6 +180,9 @@ pub mod agent {
     };
     // The one compaction-scheduling rule (spec 01 §10.3), from the
     // unsupported internal tier: a host's idle fence reads it.
+    /// Unsupported host handoff plumbing for home-local daemon processes.
+    #[doc(hidden)]
+    pub use plakous_agent::internal::preserve_daemon_jobs;
     /// Unsupported runner selection for official hosting (spec 01 §8.5).
     #[doc(hidden)]
     pub use plakous_agent::internal::select_runner_backend;

@@ -28,6 +28,13 @@ pub struct DirectoryEntry {
 }
 
 impl ProductStore {
+    /// Every record's identity for startup recovery, without the face's row limit.
+    pub(crate) fn session_ids(&self) -> Result<Vec<String>, String> {
+        self.connection
+            .prepare("SELECT id FROM sessions ORDER BY id")
+            .and_then(|mut statement| statement.query_map([], |row| row.get(0))?.collect())
+            .map_err(|error| format!("the session identities could not be read: {error}"))
+    }
     /// The newest sessions, at most [`MAX_DIRECTORY_ROWS`], of `workspace`
     /// when given, else of the whole home.
     ///

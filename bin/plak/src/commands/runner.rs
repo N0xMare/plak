@@ -10,6 +10,7 @@
 
 mod dial;
 mod home;
+pub(crate) mod local;
 
 pub(crate) use home::{host_id, private_directory};
 
@@ -242,7 +243,12 @@ async fn serve_local(paths: &PlakPaths) -> CliResult<()> {
     .map_err(|error| CliFailure::new(format!("the home-local runner did not start: {error}")))?;
     let idle = home::RunnerToml::default().idle_exit();
     match daemon::serve_socket(service, &socket, idle).await {
-        Ok(()) | Err(daemon::DaemonError::AlreadyServing(_)) => Ok(()),
+        Ok(()) => Ok(()),
+        Err(daemon::DaemonError::AlreadyServing(_)) => {
+            #[cfg(feature = "test-hooks")]
+            eprintln!("plak runner: the local socket lock is still held");
+            Ok(())
+        }
         Err(error) => Err(CliFailure::new(error.to_string())),
     }
 }

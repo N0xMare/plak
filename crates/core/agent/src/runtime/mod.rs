@@ -103,7 +103,10 @@ pub(crate) use terminal::{
 pub(crate) use terminal::{checkpoint_retained_history, history_prunable_at};
 
 mod agent;
-pub use agent::{abandon_and_release_many, close_admission, lease_released, shutdown_for_transfer};
+pub use agent::{
+    abandon_and_release_many, close_admission, lease_released, preserve_daemon_jobs,
+    shutdown_for_transfer,
+};
 mod operation_record;
 
 mod cleanup;
@@ -201,6 +204,7 @@ pub struct AgentBuilder {
     /// The runner the run's environment executes on, when it is not the
     /// local runner (unsupported; see [`crate::internal::select_runner_backend`]).
     runner_backend: Option<Arc<plakous_tools::internal::runner::RunnerBackend>>,
+    local_daemon: Option<plakous_tools::internal::runner::LocalDaemonBackend>,
     /// Another runner's backend descriptor a test stands in for a branch
     /// target's own.
     #[cfg(test)]

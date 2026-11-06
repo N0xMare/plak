@@ -6087,9 +6087,11 @@ The at-most-once law across restarts:
   stopping or reporting them; an embedded instance never sweeps, and re-adopts
   a session's line only by opening that session, whose first runner request
   transfers the line to the session's newer owner, so its exit never stops a
-  line it did not open. No product process runs the sweep yet; it is
-  `plakous_hosted::runner_adoption::readopt_lines`, exercised by its tests,
-  for the host mode to call. A
+  line it did not open. `plak host` runs
+  `plakous_hosted::runner_adoption::readopt_lines` before recovering its
+  home-local runner journal or serving clients. Only process verbs reach
+  that journal; the sweep reconciles starts before recovery settles their
+  answered keys. A
   host re-adopts its lines by holding each line's head lease-only (§5.1),
   transferring the line to that lease's `(generation, fence)`, recording the
   terminals of the line's ended jobs into the head's line terminal table
@@ -6709,8 +6711,9 @@ start, `Unsupported` with no effect. No production configuration can name
 a runner. The facade reaches the seam only through the hidden
 `plakous::tools::runner` and `plakous::agent::select_runner_backend`.
 
-The home-local transport (unsupported; only tests select it, and no product
-path does yet). `local_daemon_environment` builds the local runner's host
+The home-local transport (unsupported hosting seam; `plak host` selects it
+explicitly through its services, not through the test route's process-global
+runner selection). `local_daemon_environment` builds the local runner's host
 environment, with the local descriptor, run-stable facts, files, version
 control and process options of `host_with_policy_and_process_options`, whose
 `joined_process_sessions` is a runner arm over the line's sessions on the

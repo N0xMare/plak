@@ -480,7 +480,7 @@ fn product_child_binding(
         }
         .map_err(|error| error.to_string())?;
         binding = binding.with_job_host(roots.test_job_host(agent_id.to_owned()));
-        Ok(binding)
+        Ok(roots.bind_process_transport(binding))
     })
 }
 
@@ -1412,6 +1412,7 @@ impl OfflineSelection {
         let runtime_controller = controller;
         let runtime_tree = prepared;
         let telemetry = state_roots.telemetry_emitter();
+        let transport_roots = state_roots.clone();
         let runtime = Arc::new(move |role: product_host::RuntimeRole| {
             if role == product_host::RuntimeRole::Compact {
                 let tree_tools = runtime_tree.as_ref().map(tree_registrations).transpose()?;
@@ -1475,6 +1476,7 @@ impl OfflineSelection {
                     telemetry.clone(),
                 )
             }
+            .map(|runtime| transport_roots.bind_process_transport(runtime))
             .map_err(|error| error.to_string())
         });
         let injection = Arc::new(product_host::ScriptedRuntimeFactory {

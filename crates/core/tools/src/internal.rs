@@ -21,16 +21,16 @@ pub use plakous_model::redaction as preview;
 #[doc(hidden)]
 pub mod runner {
     pub use crate::environment::runner::{
-        ProcessRunner, RunnerBackend, RunnerCall, RunnerCallFuture, RunnerClass, RunnerExtension,
-        RunnerFailure, RunnerLink, RunnerOpenFuture, RunnerSecretResolver, RunnerSessions,
-        RunnerStreams, RunnerVerb, RunnerVerbFamily, RunnerWorkspaceProbe, ServeFailure,
-        ServeFuture, ServeServiceFuture, adopt_runner_process_sessions, answer_too_large,
-        call_blocking, decode_jobs_snapshot, decode_preempt, encode_preempt, environment_failure,
-        job_capacity, line_sessions, local_daemon_environment, process_runner, requested_workspace,
-        runner_descriptor, runner_environment, select_process_runner, serve, serve_failure,
-        serve_jobs_watch, serve_probe, serve_service_spawn, serve_service_terminate,
-        serve_sessions, service_spawned, terminated_service, with_runner_secrets, workspace_probe,
-        workspace_refusal,
+        LocalDaemonBackend, ProcessRunner, RunnerBackend, RunnerCall, RunnerCallFuture,
+        RunnerClass, RunnerExtension, RunnerFailure, RunnerLink, RunnerOpenFuture,
+        RunnerSecretResolver, RunnerSessions, RunnerStreams, RunnerVerb, RunnerVerbFamily,
+        RunnerWorkspaceProbe, ServeFailure, ServeFuture, ServeServiceFuture,
+        adopt_runner_process_sessions, answer_too_large, call_blocking, decode_jobs_snapshot,
+        decode_preempt, encode_preempt, environment_failure, job_capacity, line_sessions,
+        local_daemon_environment, process_runner, requested_workspace, runner_descriptor,
+        runner_environment, select_process_runner, serve, serve_failure, serve_jobs_watch,
+        serve_probe, serve_service_spawn, serve_service_terminate, serve_sessions, service_spawned,
+        terminated_service, with_runner_secrets, workspace_probe, workspace_refusal,
     };
 }
 

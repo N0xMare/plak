@@ -23,6 +23,7 @@ pub(crate) type TelemetrySinkFactory = fn() -> Option<Arc<dyn ExtraTelemetrySink
 
 /// Handles every product command shares for the life of the process.
 pub(crate) struct Services {
+    local_daemon: Option<(plakous::tools::runner::LocalDaemonBackend, plakous::runner::RunnerClient)>,
     clock: Arc<dyn plakous::model::Clock>,
     home: Home,
     session_records: OnceLock<Arc<crate::store::session_records::SqliteSessionStore>>,
@@ -36,6 +37,7 @@ impl Services {
     #[cfg(test)]
     pub(crate) fn for_home(paths: PlakPaths) -> Self {
         Self {
+            local_daemon: None,
             clock: crate::commands::application::test_clock(),
             home: Home::explicit(paths.clone(), paths.home().join("test-state")),
             session_records: OnceLock::new(),
@@ -70,6 +72,7 @@ impl Services {
             crate::product_doctor::install_credential_state_home(state.to_path_buf());
         }
         Self {
+            local_daemon: None,
             clock: Arc::new(plakous::model::SystemClock),
             home,
             session_records: OnceLock::new(),
@@ -98,6 +101,7 @@ impl Clone for Services {
             let _ = extra_telemetry_sink.set(sink.clone());
         }
         Self {
+            local_daemon: self.local_daemon.clone(),
             clock: Arc::clone(&self.clock),
             home: self.home.clone(),
             session_records,
@@ -109,6 +113,15 @@ impl Clone for Services {
 }
 
 impl Services {
+    pub(crate) fn with_local_daemon(
+        &self,
+        backend: plakous::tools::runner::LocalDaemonBackend,
+        client: plakous::runner::RunnerClient,
+    ) -> Self {
+        let mut services = self.clone();
+        services.local_daemon = Some((backend, client));
+        services
+    }
     pub(crate) fn now_unix_seconds(&self) -> u64 {
         self.clock.now().seconds()
     }
@@ -153,13 +166,17 @@ impl Services {
         &self,
         context: &PlakPaths,
     ) -> CliResult<plakous_hosted::agent::ProductStateRoots> {
-        crate::commands::support::product_state_roots_from(
+        let roots = crate::commands::support::product_state_roots_from(
             context,
             self.home.state()?.to_path_buf(),
             self.extra_telemetry_sink(),
             self.session_records()?,
             &self.jobs,
-        )
+        )?;
+        Ok(match &self.local_daemon {
+            Some((backend, client)) => roots.with_local_daemon(backend.clone(), client.clone()),
+            None => roots,
+        })
     }
 
     /// The process's one job bound.

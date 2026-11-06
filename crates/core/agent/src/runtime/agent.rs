@@ -74,6 +74,18 @@ pub fn close_admission(agent: &Agent) {
     );
 }
 
+/// Marks a daemon-backed owner's release as a transfer, without stopping its driver.
+pub fn preserve_daemon_jobs(agent: &Agent) {
+    let mut mode = agent
+        .inner
+        .job_release_mode
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if *mode == super::JobReleaseMode::Pending {
+        *mode = super::JobReleaseMode::Transfer;
+    }
+}
+
 /// Unsupported facade plumbing for an explicit same-branch owner transfer.
 ///
 /// # Errors

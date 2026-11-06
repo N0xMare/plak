@@ -728,7 +728,8 @@ widens it.
   machine runner under `runner/run/`, never to `host/runner/`. Nothing but
   process-session verbs crosses this wire, and no secret value does either:
   each start carries only the paths and the `PATH` text of the host's process
-  context, an environment that delegates a variable or a credential is
+  context, captured by that host from its login shell, not from the daemon
+  or the first host that started it. An environment that delegates a variable or a credential is
   refused before anything is sent, and the runner answers no service spawn.
 
 ### 2.10 The web endpoint
