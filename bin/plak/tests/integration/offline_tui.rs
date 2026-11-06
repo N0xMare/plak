@@ -562,6 +562,7 @@ pub(super) struct Terminal {
 /// How the terminal is launched.
 #[derive(Clone, Copy)]
 enum Launch<'a> {
+    OnPathWithEnv(&'a Path, &'a [(&'a str, &'a str)]),
     /// A fresh session in the fixture workspace.
     Fresh,
     Faulted {
@@ -588,7 +589,9 @@ impl Terminal {
 
     fn spawn_sized(fixture: &Fixture, launch: Launch<'_>, rows: u16, cols: u16) -> Self {
         match launch {
-            Launch::WithEnv(env) => fixture.ensure_host_with_env(env),
+            Launch::WithEnv(env) | Launch::OnPathWithEnv(_, env) => {
+                fixture.ensure_host_with_env(env);
+            }
             Launch::Faulted { faults, .. } => {
                 fixture.ensure_host_with_env(&[("PLAK_TEST_FAULTS", faults)]);
             }
@@ -604,7 +607,7 @@ impl Terminal {
             .expect("pty opened");
         let inherited = std::env::var("PATH").unwrap_or_default();
         let (mut command, path) = match launch {
-            Launch::OnPath(first) => {
+            Launch::OnPath(first) | Launch::OnPathWithEnv(first, _) => {
                 let real = fixture.root.join("real-bin");
                 std::fs::create_dir_all(&real).expect("real bin dir");
                 let link = real.join("plak");
@@ -622,6 +625,7 @@ impl Terminal {
         match launch {
             Launch::Fresh
             | Launch::OnPath(_)
+            | Launch::OnPathWithEnv(_, _)
             | Launch::WithEnv(_)
             | Launch::Faulted { resume: None, .. } => {}
             Launch::Faulted {
@@ -639,7 +643,7 @@ impl Terminal {
         if let Launch::Faulted { faults, .. } = launch {
             command.env("PLAK_TEST_FAULTS", faults);
         }
-        if let Launch::WithEnv(env) = launch {
+        if let Launch::WithEnv(env) | Launch::OnPathWithEnv(_, env) = launch {
             for (name, value) in env {
                 command.env(name, value);
             }

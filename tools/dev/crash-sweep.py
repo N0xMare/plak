@@ -9,6 +9,7 @@ import subprocess
 
 
 TERMINAL_SHAPES = {
+    "review_tui_host_restart_switch": "host_skeleton::crash::tui::review_tui_host_restart_switch",
     "tui_host_restart": "host_skeleton::crash::tui::tui_host_restart",
 }
 

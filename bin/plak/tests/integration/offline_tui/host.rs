@@ -6,6 +6,8 @@ use plakous_host_protocol::wire::{ClientFrame, Hello, Op, WIRE_VERSION, encode_l
 use std::io::{BufRead as _, BufReader};
 use std::os::unix::net::UnixStream;
 
+mod lifecycle;
+
 struct Directory {
     stream: UnixStream,
     read: BufReader<UnixStream>,
@@ -312,9 +314,194 @@ fn a_host_tui_reports_loss_and_attaches_after_the_host_restarts() {
     terminal.wait_screen("host transcript survives");
     fixture.kill_host();
     terminal.wait_screen("product host disconnected");
+    terminal.wait_screen("host transport ended:");
     fixture.ensure_host();
     terminal.send(b"/attach\r");
     terminal.wait_ready();
     terminal.wait_screen("host transcript survives");
+    terminal.quit();
+}
+
+#[test]
+fn a_host_tui_refuses_a_handed_off_embedded_reload_without_a_continuation() {
+    let mut fixture =
+        Fixture::with_mode(&tool_then_answer("answer before the host"), Mode::Embedded);
+    enable_reload_requests(&fixture);
+    let installed = fixture.root.join("handoff-install");
+    std::fs::create_dir_all(&installed).unwrap();
+    let mut terminal = Terminal::spawn(&fixture, Launch::OnPath(&installed));
+    terminal.wait_ready();
+    terminal.send(b"answer before becoming a client\r");
+    terminal.wait_screen("answer before the host");
+    terminal.wait_absent("Esc stop");
+    let session = fixture.session_ids()[0].clone();
+    let binary = running_binary_id(&fixture);
+    let paid = provider_dispatches(&fixture);
+    fixture.mode = Mode::Host;
+    fixture.ensure_host();
+    let outcome = ask_reload_until_announced(&fixture, &session, &binary);
+    let written = wait_for_outcome(&outcome);
+    assert_eq!(written["outcome"], "refused");
+    assert!(
+        written["reason"]
+            .as_str()
+            .unwrap()
+            .contains("the session now runs in plak host")
+    );
+    terminal.wait_screen("requested reload refused: the session now runs in plak host");
+    assert_eq!(
+        provider_dispatches(&fixture),
+        paid,
+        "no host-authored continuation"
+    );
+    let mut directory = Directory::connect(&fixture);
+    let rows = directory.rows();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["residency"], "resident");
+    terminal.quit();
+}
+
+#[test]
+fn a_host_tui_names_the_embedded_holder_and_keeps_its_previous_attachment() {
+    let mut fixture = Fixture::with_mode(
+        &tool_then_answer("answer held by the first terminal"),
+        Mode::Embedded,
+    );
+    let mut owner = Terminal::spawn_ready(&fixture);
+    owner.send(b"the embedded owner\r");
+    owner.wait_screen("answer held by the first terminal");
+    owner.wait_absent("Esc stop");
+    let held = fixture.session_ids()[0].clone();
+    let pid = owner.pid().to_string();
+    fixture.mode = Mode::Host;
+    fixture.ensure_host();
+    let mut refused = Terminal::spawn(&fixture, Launch::Resume(&held));
+    let refusal = refused.wait_screen(&pid);
+    assert!(refusal.contains("tree_hosted_elsewhere"));
+    assert!(!refusal.contains("product host disconnected"));
+    assert!(!refused.finish().success());
+    let mut client = Terminal::spawn_ready(&fixture);
+    client.send(b"the client session\r");
+    client.wait_screen("answer held by the first terminal");
+    client.send(format!("/resume {held}\r").as_bytes());
+    let screen = client.wait_screen(&pid);
+    assert!(screen.contains("resume refused") && !screen.contains("product host disconnected"));
+    assert!(client.is_alive());
+    client.send(b"/new\r");
+    client.wait_absent("the client session");
+    client.quit();
+    owner.quit();
+}
+
+#[test]
+fn a_client_reload_clears_an_inherited_epoch_handoff_environment() {
+    let fixture = Fixture::with_mode(&tool_then_answer("client only epoch"), Mode::Host);
+    let installed = fixture.root.join("epoch-install");
+    std::fs::create_dir_all(&installed).unwrap();
+    let mut terminal = Terminal::spawn(
+        &fixture,
+        Launch::OnPathWithEnv(
+            &installed,
+            &[("PLAK_RELOAD_APPLY_ORCHESTRATION", "must-be-cleared")],
+        ),
+    );
+    terminal.wait_ready();
+    fixture.wait_for_identity_cache();
+    let marker = fixture.root.join("epoch-after-exec");
+    write_script_file(
+        &installed.join("plak"),
+        &format!(
+            "#!/bin/sh\nif [ \"$1\" != version ]; then printf '%s\\n' \"${{PLAK_RELOAD_APPLY_ORCHESTRATION-unset}}\" >> '{}'; fi\nexec '{}' \"$@\"\n",
+            marker.display(),
+            env!("CARGO_BIN_EXE_plak")
+        ),
+    );
+    assert_client_reload_keeps_host(&fixture, &mut terminal);
+    let until = Instant::now() + WAIT;
+    let recorded = loop {
+        let recorded = std::fs::read_to_string(&marker).unwrap_or_default();
+        if !recorded.is_empty() {
+            break recorded;
+        }
+        assert!(
+            Instant::now() < until,
+            "the client never exec'd the wrapper"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert_eq!(recorded.lines().last(), Some("unset"));
+    terminal.quit();
+}
+
+#[test]
+fn an_embedded_tui_explains_that_stop_is_host_only() {
+    let fixture = Fixture::embedded(
+        &json!({"version": 1, "repeat_last_step": true, "steps": [{"stream": [{"text": "embedded stop work"}, {"stall": 30000}]}]}),
+    );
+    let mut terminal = Terminal::spawn_ready(&fixture);
+    terminal.send(b"work until stopped\r");
+    terminal.wait_screen("embedded stop work");
+    terminal.send(b"/stop\r");
+    let screen = terminal.wait_screen("/stop is a host-mode command");
+    assert!(
+        screen.contains("Esc stop"),
+        "the hidden command did not stop embedded work"
+    );
+    terminal.quit();
+}
+
+#[test]
+fn a_host_tui_rereads_mouse_preferences_after_the_config_editor() {
+    let fixture = Fixture::with_mode(&tool_then_answer("editor round trip"), Mode::Host);
+    let editor = fixture.root.join("editor");
+    write_script_file(
+        &editor,
+        "#!/bin/sh\nprintf '\n[tui]\nmouse = false\n' >> \"$1\"\n",
+    );
+    let mut terminal = Terminal::spawn(
+        &fixture,
+        Launch::WithEnv(&[("EDITOR", editor.to_str().unwrap())]),
+    );
+    terminal.wait_ready();
+    assert!(String::from_utf8_lossy(&terminal.raw_since(0)).contains("\x1b[?1000h"));
+    let before = terminal.raw_len();
+    terminal.send(b"/config\r");
+    let until = Instant::now() + WAIT;
+    loop {
+        let raw = terminal.raw_since(before);
+        if String::from_utf8_lossy(&raw).contains("\x1b[?1049h") {
+            break;
+        }
+        assert!(Instant::now() < until, "the config editor never returned");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    terminal.wait_ready();
+    assert!(
+        !String::from_utf8_lossy(&terminal.raw_since(before)).contains("\x1b[?1000h"),
+        "mouse capture was enabled with stale preferences"
+    );
+    terminal.quit();
+}
+
+#[test]
+fn a_host_tui_reports_rebind_refusal_without_changing_its_attachment() {
+    let fixture = Fixture::with_mode(&tool_then_answer("rebind stays hosted"), Mode::Host);
+    let mut terminal = Terminal::spawn_ready(&fixture);
+    terminal.send(b"the original host binding\r");
+    terminal.wait_screen("rebind stays hosted");
+    terminal.wait_absent("Esc stop");
+    let mut directory = Directory::connect(&fixture);
+    let before = directory.rows();
+    let pid = fixture.host.lock().unwrap().as_ref().unwrap().child.id();
+    terminal.send(b"/rebind\r");
+    terminal.wait_screen("rebind refused:");
+    terminal.wait_screen("keeps the session it serves");
+    assert_eq!(directory.rows(), before);
+    assert_eq!(
+        fixture.host.lock().unwrap().as_ref().unwrap().child.id(),
+        pid
+    );
+    terminal.send(b"the rebound session\r");
+    terminal.wait_screen("the rebound session");
     terminal.quit();
 }

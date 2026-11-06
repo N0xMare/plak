@@ -554,8 +554,9 @@ fn composer_slash_busy_and_queue_actions_use_the_real_input_routes() {
             .iter()
             .filter(|id| id.starts_with("select-command:"))
             .count(),
-        crate::tui::slash::COMMANDS.len()
+        crate::tui::slash::COMMANDS.len() - 1
     );
+    assert!(!action_ids(&slash).contains(&"select-command:stop".to_owned()));
     slash
         .dispatch_pilot_action(PilotAction::Invoke("select-command:settings".to_owned()))
         .unwrap();

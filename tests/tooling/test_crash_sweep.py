@@ -86,7 +86,7 @@ class CrashSweepTests(unittest.TestCase):
 
     def test_strict_default_defers_to_all_registered_shapes_even_with_inherited_selection(self):
         with tempfile.TemporaryDirectory() as directory:
-            code, calls = self.run_sweep(Path(directory), [0, 0, 0], ["--strict"])
+            code, calls = self.run_sweep(Path(directory), [0, 0, 0, 0], ["--strict"])
             self.assertEqual(code, 0)
             for call in calls:
                 self.assertNotIn("PLAK_CRASH_SWEEP_SHAPES", call.kwargs["env"])

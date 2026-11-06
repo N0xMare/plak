@@ -206,6 +206,7 @@ not (
   | test(pending_wakes_return_the_wait_and_are_consumed)
   | test(durability::)
   | test(tui_host_restart)
+  | test(review_tui_host_restart_switch)
   | test(image_residency_crash_cuts_recover_without_redispatch)
   | test(released_leftover_terminal_recording_sigkill_cuts_preserve_no_signal_authority)
   | test(endpoint_fallback_receipt_cuts_recover_the_same_unpaid_target)
@@ -397,6 +398,7 @@ test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
   test(tui_host_restart)
+  | test(review_tui_host_restart_switch)
   | test(image_residency_crash_cuts_recover_without_redispatch)
   | test(released_leftover_terminal_recording_sigkill_cuts_preserve_no_signal_authority)
   | test(endpoint_fallback_receipt_cuts_recover_the_same_unpaid_target)

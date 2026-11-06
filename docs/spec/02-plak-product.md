@@ -4881,6 +4881,9 @@ next operator `/new` reuses that id rather than creating an orphaned second
 session. It is never replayed automatically. `/stop` is host-mode only and
 hidden from the embedded palette. Config-editor return reloads terminal
 preferences before opening the terminal again.
+Declining the launch resume picker explicitly creates and attaches a fresh
+session; reconnecting with an unknown creation instead lists sessions and
+waits for the operator's next act.
 
 In embedded mode the normal reload handoff carries the session forward when
 that build has another state key, or the same key and an exact-reopen verdict

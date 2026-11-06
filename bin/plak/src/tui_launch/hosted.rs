@@ -78,10 +78,12 @@ pub(super) fn run(
                     face = reconnect(paths, &face)?;
                     face.select(Some(&id))?;
                 }
-                tui::SessionRequest::RetryAttach { .. } => {
+                tui::SessionRequest::RetryAttach {
+                    declined_resume_picker,
+                } => {
                     let selected = face.session();
                     face = reconnect(paths, &face)?;
-                    picker = select_or_list(&face, selected.as_deref())?;
+                    picker = retry_selection(&face, selected.as_deref(), declined_resume_picker)?;
                 }
                 tui::SessionRequest::EditConfig => {
                     let errors = terminal.close();
@@ -168,6 +170,18 @@ fn launch(
         opening_note: note,
         ..Default::default()
     })
+}
+
+fn retry_selection(
+    face: &SocketFace,
+    selected: Option<&str>,
+    declined_resume_picker: bool,
+) -> CliResult<bool> {
+    if declined_resume_picker && selected.is_none() {
+        face.select(None)?;
+        return Ok(false);
+    }
+    select_or_list(face, selected)
 }
 
 fn select_or_list(face: &SocketFace, selected: Option<&str>) -> CliResult<bool> {

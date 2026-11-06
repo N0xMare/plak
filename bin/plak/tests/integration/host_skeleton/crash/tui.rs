@@ -6,6 +6,193 @@ use plak::wire_transport::PlakExtension;
 use plakous_host_protocol::client::{self, Transport};
 use std::fmt::Write as _;
 
+// Directory switching is driven by the terminal while the host owns the work.
+
+fn review_rows(host: &Host) -> Vec<SessionRow> {
+    let stream = UnixStream::connect(&host.socket).unwrap();
+    stream.set_read_timeout(Some(WAIT)).unwrap();
+    let (send, receive, _) = client::connect_directory::<PlakExtension>(
+        Transport::new(stream.try_clone().unwrap(), stream),
+        Hello {
+            proto: WIRE_VERSION,
+            binary_id: "review".into(),
+            caps: Vec::new(),
+        },
+    )
+    .unwrap();
+    send.request_operation(Op::ListSessions { workspace: None })
+        .unwrap();
+    match receive.recv_response(WAIT).unwrap().1 {
+        Outcome::Ok(Answer::Sessions { rows }) => rows,
+        other => panic!("{other:?}"),
+    }
+}
+
+/// [`drive`], with the terminal's own directory acts in the middle: after
+/// the answer (a busy root's stall, or a real running child) the TUI makes
+/// a session with `/new` (its own `new_session` and attach), switches back
+/// with `/resume <id>`, then stops the original.
+fn review_drive_switch(fixture: &Fixture, session: &str, cut: bool, child: bool) {
+    let mut terminal = super::super::super::offline_tui::attach_to_host(&fixture.root, session);
+    let until = Instant::now() + WAIT;
+    let mut step = 0;
+    loop {
+        let screen = terminal.screen();
+        if cut && (screen.contains("host disconnected") || !terminal.is_alive()) {
+            assert!(screen.contains("host"), "loss must be plain: {screen}");
+            if terminal.is_alive() {
+                terminal.quit();
+            } else {
+                let _ = terminal.finish_with_screen();
+            }
+            return;
+        }
+        let ready = screen.contains("%/") && screen.contains("/ commands");
+        match step {
+            0 if ready => {
+                terminal.send(b"crash terminal original prompt\r");
+                step = 1;
+            }
+            1 if screen.contains(ANSWER) && (!child || child_dispatches(fixture) > 0) => {
+                terminal.send(b"/new\r");
+                step = 2;
+            }
+            2 if ready && !screen.contains(ANSWER) && !screen.contains(PREFIX) => {
+                terminal.send(format!("/resume {session}\r").as_bytes());
+                step = 3;
+            }
+            3 if screen.contains(ANSWER) => {
+                terminal.send(b"/stop\r");
+                step = 4;
+            }
+            4 if screen.contains("session work stopped")
+                || screen.contains("stopped: the session's work ended") =>
+            {
+                terminal.quit();
+                return;
+            }
+            _ => {}
+        }
+        assert!(
+            Instant::now() < until,
+            "TUI made no progress at step {step}: {screen}"
+        );
+        std::thread::sleep(Duration::from_millis(15));
+    }
+}
+
+fn review_pilot(child: bool) -> (Vec<Commit>, Signature) {
+    let baseline = fixture().unwrap();
+    script(&baseline, child);
+    let trace = baseline.root.join("trace.jsonl");
+    let mut host = start_env(&baseline, &[], &[trace_env(&trace)]);
+    let session = create(&host, &baseline).unwrap();
+    review_drive_switch(&baseline, &session, false, child);
+    let rows = review_rows(&host);
+    assert_eq!(rows.len(), 2, "the pilot made one more session: {rows:?}");
+    host.child.as_mut().unwrap().kill().unwrap();
+    host.child.take().unwrap().wait().unwrap();
+    let commits = indexed_commits(&trace);
+    assert_ne!(commits.len(), 0);
+    (commits, signature(&trace))
+}
+
+#[test]
+fn review_tui_host_restart_switch() {
+    let Some(probe) = fixture() else { return };
+    drop(probe);
+    let evidence = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/crash-sweep")
+        .join(format!(
+            "review-tui-host-restart-switch-{}.jsonl",
+            std::process::id()
+        ));
+    std::fs::create_dir_all(evidence.parent().unwrap()).unwrap();
+    let mut table = String::new();
+    for child in [false, true] {
+        let (commits, expected) = review_pilot(child);
+        assert_eq!(expected, review_pilot(child).1, "twin pilots");
+        for (_, store, ordinal) in commits {
+            let fixture = fixture().unwrap();
+            script(&fixture, child);
+            let trace = fixture.root.join("cut.jsonl");
+            if let Some(mut host) = try_start(&fixture, &[], &cut_env(&trace, &store, ordinal)) {
+                if let Some(session) = create(&host, &fixture) {
+                    review_drive_switch(&fixture, &session, true, child);
+                }
+                let status = host.child.take().unwrap().wait().unwrap();
+                assert!(
+                    !status.success(),
+                    "cut {store}:{ordinal} did not kill the host"
+                );
+            }
+            let actual = signature(&trace);
+            let label = expected
+                .iter()
+                .find(|(seen_store, seen_ordinal, _)| {
+                    *seen_store == store && *seen_ordinal == ordinal
+                })
+                .cloned();
+            assert_eq!(
+                actual
+                    .iter()
+                    .find(|(seen_store, seen_ordinal, _)| *seen_store == store
+                        && *seen_ordinal == ordinal)
+                    .cloned(),
+                label,
+                "cut {store}:{ordinal} must hit its pilot label"
+            );
+            let before = dispatches(&fixture);
+            let children_before = child_dispatches(&fixture);
+            let mut restarted = start(&fixture);
+            let session = create(&restarted, &fixture).unwrap();
+            let rows = review_rows(&restarted);
+            assert!(
+                rows.len() <= 2 && rows.iter().filter(|row| row.session == session).count() == 1,
+                "cut {store}:{ordinal}: {rows:?}"
+            );
+            let mut terminal =
+                super::super::super::offline_tui::attach_to_host(&fixture.root, &session);
+            terminal.wait_ready();
+            let (interrupts, decisions) = root_record(&fixture, &session);
+            assert!(!interrupts.contains(&RootInterruptCause::Handoff));
+            assert_eq!(
+                decisions, 0,
+                "cut {store}:{ordinal}: a continuation was decided"
+            );
+            assert_eq!(
+                dispatches(&fixture),
+                before,
+                "cut {store}:{ordinal} replayed a turn"
+            );
+            assert_eq!(
+                child_dispatches(&fixture),
+                children_before,
+                "cut {store}:{ordinal} replayed a child"
+            );
+            terminal.send(b"/stop\r");
+            terminal.wait_where("the durable session stop", |frame| {
+                frame.contains("session work stopped")
+                    || frame.contains("stopped: the session's work ended")
+            });
+            terminal.quit();
+            stop(&mut restarted);
+            writeln!(
+                table,
+                "{}",
+                json!({"shape": "review_tui_host_restart_switch", "child": child, "store": store, "cut": ordinal, "label": label.map(|label| label.2), "sessions_after_restart": rows.len(), "dispatches_before_restart": before, "child_dispatches_before_restart": children_before, "invariants": true})
+            )
+            .unwrap();
+            std::fs::write(&evidence, &table).unwrap();
+        }
+    }
+    eprintln!(
+        "review_tui_host_restart_switch: {} cuts; {}",
+        table.lines().count(),
+        evidence.display()
+    );
+}
+
 fn create(host: &Host, fixture: &Fixture) -> Option<String> {
     let stream = UnixStream::connect(&host.socket).ok()?;
     stream.set_read_timeout(Some(WAIT)).unwrap();
