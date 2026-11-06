@@ -695,11 +695,6 @@ impl JoinedProcessSessions {
         state.active.is_empty() && state.starting == 0
     }
 
-    #[cfg(test)]
-    pub(super) fn cleanup_duration(&self) -> Duration {
-        self.inner.limits.cleanup_duration()
-    }
-
     /// Counts the sessions whose group is still running.
     ///
     /// The active limit bounds concurrent children, not remembered ones: a

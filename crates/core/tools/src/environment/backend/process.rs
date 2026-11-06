@@ -160,16 +160,21 @@ mod process_policy_tests;
 #[cfg(test)]
 mod job_tests;
 
-/// Retries `join_all` for a few of this service's cleanup windows.
+/// Retries `join_all` until the service is drained or the liveness bound.
 ///
-/// Joins run concurrently under one window. A busy operation stays active and
-/// the drain reports `CleanupUnresolved`; that is a retry, not one window per
-/// admitted session.
+/// Each attempt still uses this service's own cleanup window, so a held
+/// operation returns `CleanupUnresolved` inside that window and an admission
+/// test can tell a busy lock from a hang. The outer bound is not a multiple
+/// of the window. Contention fixtures shorten it to a few hundred
+/// milliseconds, and three of those windows is a scheduling budget: under
+/// parallel load the shared process-group scan can miss every window before
+/// a live child is reaped. Thirty seconds only guards against cleanup never
+/// converging.
 #[cfg(test)]
 pub(super) fn join_until_drained(
     sessions: &JoinedProcessSessions,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let deadline = Instant::now() + sessions.cleanup_duration().saturating_mul(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         match sessions.join_all() {
             Ok(()) => return Ok(()),

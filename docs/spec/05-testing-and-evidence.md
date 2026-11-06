@@ -1450,7 +1450,16 @@ to detect waiting on an unfinished supervisor. The retirement checks
 `promoted_short_job_is_retired_without_observer_polling` and
 `promoted_monitor_exits_on_owner_drop_without_terminal_publication` use
 thirty-second hang watchdogs: they prove eventual retirement without observer
-polling and monitor exit after owner drop, not subsecond latency.
+polling and monitor exit after owner drop, not subsecond latency. A live
+child's test teardown retries `join_all` until the service is drained or
+thirty seconds pass. Each attempt still uses the fixture's cleanup window,
+which contention tests shorten so a held operation returns inside the
+admission bound; the outer wait is not three of those windows, because a
+shared process-group scan under parallel load can miss a few hundred
+milliseconds three times without the child being unreapable. Closed-stdin
+completion (`cat` and a finished `printf`) uses the same thirty-second
+yield: the assertion is that the process exits on EOF, not that the host
+scheduled it inside one second.
 
 A test's wall-clock wait that only guards against something never happening
 (a `tokio::time::timeout`, `recv_timeout` or deadline loop whose expiry fails

@@ -48,6 +48,12 @@ fn a_failed_spool_is_reported_before_the_full_output_line() {
     assert_eq!(output, "full output: /p.log");
 }
 
+/// How long a test waits to observe a process that should already have
+/// exited. A liveness bound, not a latency budget: one second measures
+/// whether the host scheduled the child, and a stall then looks like a
+/// closed stdin still being read.
+const FINISHED_PROCESS_YIELD_MS: u64 = 30_000;
+
 #[tokio::test]
 async fn process_values_are_demand_driven_and_leave_canonical_text_unchanged()
 -> Result<(), Box<dyn Error>> {
@@ -69,7 +75,9 @@ async fn process_values_are_demand_driven_and_leave_canonical_text_unchanged()
             CallId::from_str("00000000-0000-0000-0000-000000000583")?,
             ToolName::new(PROCESS_SESSION_CAPABILITY_NAME)?,
             ToolCorrelation::default(),
-            r#"{"command":"PGPASSWORD=hunter2 printf typed-output","workdir":".","login":false,"tty":false,"keep_stdin_open":false,"yield_time_ms":1000,"max_output_bytes":4096}"#,
+            format!(
+                r#"{{"command":"PGPASSWORD=hunter2 printf typed-output","workdir":".","login":false,"tty":false,"keep_stdin_open":false,"yield_time_ms":{FINISHED_PROCESS_YIELD_MS},"max_output_bytes":4096}}"#
+            ),
         ))?.with_want_value(want_value);
         let mut outcome =
             execute_process_invocation(&registry, environment.clone(), invocation).await?;
@@ -169,7 +177,7 @@ async fn unified_exec_non_tty_has_null_stdin_and_pty_accepts_input() -> Result<(
         let result = tools
             .exec_command_with_update(
                 &environment,
-                &json!({"cmd": command, "login": false, "yield_time_ms": 1000}).to_string(),
+                &json!({"cmd": command, "login": false, "yield_time_ms": FINISHED_PROCESS_YIELD_MS}).to_string(),
                 control.clone(),
             )
             .await?;
@@ -184,7 +192,7 @@ async fn unified_exec_non_tty_has_null_stdin_and_pty_accepts_input() -> Result<(
     let handle = result.projection.session_id.ok_or("missing PTY session")?;
     let result = ProcessSessionTools::write_stdin_with_update(
         &environment,
-        &json!({"session_id": handle, "chars": "hello\n", "yield_time_ms": 1000}).to_string(),
+        &json!({"session_id": handle, "chars": "hello\n", "yield_time_ms": FINISHED_PROCESS_YIELD_MS}).to_string(),
         &control,
     )
     .await?;
@@ -2267,7 +2275,8 @@ async fn production_unified_exec_lowering_gives_non_tty_null_stdin() -> Result<(
         let registry = process_session_registry()?;
         let map = unified_exec_projection(registry.clone(), kind)?;
         for tty in [None, Some(false)] {
-            let mut arguments = json!({"cmd":"cat", "login":false, "yield_time_ms":1000});
+            let mut arguments =
+                json!({"cmd":"cat", "login":false, "yield_time_ms": FINISHED_PROCESS_YIELD_MS});
             if let Some(tty) = tty {
                 arguments["tty"] = json!(tty);
             }
