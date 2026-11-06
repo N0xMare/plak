@@ -473,6 +473,16 @@ fn a_session_an_embedded_face_holds_is_refused_until_its_holder_is_gone() {
         }) => assert_eq!(named, pid),
         other => panic!("not refused as held elsewhere: {other:?}"),
     }
+    // A second embedded face is refused naming the holder, which is not
+    // plak host.
+    let refused = embedded(&fixture, &session)
+        .err()
+        .expect("a second embedded face opened the held session");
+    assert_eq!(refused["code"], "tree_hosted_elsewhere", "{refused}");
+    let message = refused["message"].as_str().unwrap();
+    assert!(message.contains(&format!("pid {pid}")), "{message}");
+    assert!(message.contains("use that process"), "{message}");
+    assert!(!message.contains("it is plak host"), "{message}");
     drop(agent);
     let row = client.rows(id + 2).remove(0);
     assert_eq!(
@@ -1127,6 +1137,26 @@ fn a_new_session_that_cannot_be_made_creates_nothing() {
         client.request(8, new_session(&fixture.workspace())),
         Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::Malformed { .. })
     ));
+    // The same request id with another template's binding asks for
+    // something else too.
+    write_private(
+        &fixture.home().join("agents").join("other.toml"),
+        "account = \"codex\"\nmodel = \"another-model\"\neffort = \"medium\"\ncomposition = \"direct\"\ndescription = \"another binding\"\n",
+    );
+    let request_id = "00000000-0000-4000-8000-0000000000a3";
+    let made = |template: Option<&str>| Op::NewSession {
+        workspace: fixture.workspace().display().to_string(),
+        template: template.map(str::to_owned),
+        request_id: request_id.into(),
+    };
+    assert!(matches!(
+        client.request(11, made(None)),
+        Outcome::Ok(Answer::Created { .. })
+    ));
+    assert!(matches!(
+        client.request(12, made(Some("other"))),
+        Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::Malformed { .. })
+    ));
     // A file is not a workspace.
     let file = fixture.root.join("a-file");
     std::fs::write(&file, "not a directory").unwrap();
@@ -1141,7 +1171,7 @@ fn a_new_session_that_cannot_be_made_creates_nothing() {
         ),
         Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::SessionUnavailable { .. })
     ));
-    assert_eq!(client.rows(10).len(), 1);
+    assert_eq!(client.rows(10).len(), 2);
 }
 
 /// Replays of one request racing on several connections make one session,
@@ -1278,6 +1308,110 @@ fn a_second_host_refuses_and_a_sigterm_stops_the_first() {
     assert!(!first.socket.exists());
     let next = start(&fixture);
     assert_eq!(next.socket, first.socket);
+}
+
+/// A tree store that cannot be read fails the directory's read: a holder is
+/// never read free on an error.
+#[test]
+fn a_tree_store_that_cannot_be_read_fails_the_directory() {
+    let Some(fixture) = fixture() else { return };
+    let host = start(&fixture);
+    let mut client = Client::connect(&host);
+    let Outcome::Ok(Answer::Created { node, .. }) =
+        client.request(1, new_session(&fixture.workspace()))
+    else {
+        panic!("not created");
+    };
+    let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
+    rusqlite::Connection::open(paths.subagents_database())
+        .unwrap()
+        .execute(
+            "INSERT INTO agent_tree_custody(tree_id,fence,host_id,host_instance,host_name,claimed_at,renewed_at,released) VALUES(?1,1,'h','not an instance','m',0,0,0)",
+            [&node.tree_id],
+        )
+        .unwrap();
+    match client.request(2, Op::ListSessions { workspace: None }) {
+        Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::SessionUnavailable {
+            detail,
+        }) => assert!(detail.contains("tree store"), "{detail}"),
+        other => panic!("the directory read through a broken tree store: {other:?}"),
+    }
+}
+
+/// A root turn its host lost and an open held is continued by the next
+/// host's start scan only under `resume_after_loss = "continue"`.
+#[test]
+fn a_held_loss_continues_at_the_next_start_only_under_continue() {
+    let Some(fixture) = fixture() else { return };
+    fixture.write_script(&json!({
+        "version": 1,
+        "steps": [{"stream": [{"text": PREFIX}, {"stall": 30000}]}]
+    }));
+    let mut host = start(&fixture);
+    let mut client = Client::connect(&host);
+    let Outcome::Ok(Answer::Created { session, node, .. }) =
+        client.request(1, new_session(&fixture.workspace()))
+    else {
+        panic!("not created");
+    };
+    let attachment = client.attach(2, &node);
+    client.prompt(3, attachment, "a turn the host loses", PREFIX);
+    drop(client);
+    kill(&mut host);
+    fixture.write_script(&json!({
+        "version": 1,
+        "repeat_last_step": true,
+        "steps": [{"output": {"text": CONTINUED}}]
+    }));
+    // The next open records the loss and holds it.
+    let mut host = start(&fixture);
+    let mut client = Client::connect(&host);
+    client.attach(1, &node);
+    let deadline = std::time::Instant::now() + WAIT;
+    while !root_record(&fixture, &session)
+        .0
+        .contains(&RootInterruptCause::OwnerLost)
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the loss was never recorded"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    drop(client);
+    stop(&mut host);
+    let continuing = format!("plak host: continuing session {session}");
+    // Under the default hold, the next host leaves it held.
+    let mut host = start(&fixture);
+    Client::connect(&host).rows(1);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert!(
+        !host.lines.try_iter().any(|line| line == continuing),
+        "a held loss continued under hold"
+    );
+    stop(&mut host);
+    assert_eq!(root_record(&fixture, &session).1, 0);
+    // Under continue, the next host's scan continues it by itself.
+    let config = fixture.home().join("config.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    write_private(
+        &config,
+        &format!("{text}\n[host]\nresume_after_loss = \"continue\"\n"),
+    );
+    let mut host = start(&fixture);
+    assert!(
+        std::iter::from_fn(|| host.lines.recv_timeout(WAIT).ok()).any(|line| line == continuing),
+        "a held loss did not continue under continue"
+    );
+    let deadline = std::time::Instant::now() + WAIT;
+    while root_record(&fixture, &session).1 == 0 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "no continuation decided"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    stop(&mut host);
 }
 
 /// A stop of a running turn whose attachment detaches before the stop

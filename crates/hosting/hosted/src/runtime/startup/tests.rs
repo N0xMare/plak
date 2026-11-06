@@ -845,3 +845,44 @@ fn api_target_runtime_builds_run_inside_the_host_executor() {
         }
     }
 }
+
+/// Only an open refused for a held lease is renamed for its live holder,
+/// typed `tree_hosted_elsewhere` with the lease's refusal kept; any other
+/// refusal (a binding change, say) stays as it is while a holder record
+/// names a live process, and with no product naming nothing is renamed.
+#[test]
+fn only_a_held_lease_refusal_names_its_holder() {
+    let holder: LeaseHolder = Arc::new(|_| {
+        Some("tree_hosted_elsewhere: session s is open in another plak process (pid 7 on m)".into())
+    });
+    let head: plakous::sessions::SessionLocator = "00000000-0000-4000-8000-0000000000a1/00000000-0000-4000-8000-0000000000b1/00000000-0000-4000-8000-0000000000c1"
+        .parse()
+        .unwrap();
+    let refused = |lease_held| {
+        let mut failure =
+            crate::agent::CodingSessionOpenFailure::from(CliFailure::new("the binding changed"));
+        failure.lease_held = lease_held;
+        Err::<AttachedCodingSession, _>(failure)
+    };
+    let Err(kept) = name_lease_holder(Some(&holder), head, refused(false)) else {
+        panic!("opened");
+    };
+    assert_eq!(kept.failure.code(), None);
+    assert_eq!(kept.failure.message(), "the binding changed");
+    let Err(named) = name_lease_holder(Some(&holder), head, refused(true)) else {
+        panic!("opened");
+    };
+    assert_eq!(named.failure.code(), Some("tree_hosted_elsewhere"));
+    assert!(
+        named
+            .failure
+            .message()
+            .ends_with("; the open refused: the binding changed"),
+        "{}",
+        named.failure.message()
+    );
+    let Err(unnamed) = name_lease_holder(None, head, refused(true)) else {
+        panic!("opened");
+    };
+    assert_eq!(unnamed.failure.code(), None);
+}

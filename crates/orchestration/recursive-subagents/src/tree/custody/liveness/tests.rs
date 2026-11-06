@@ -224,3 +224,33 @@ fn concurrent_probes_never_read_a_dead_holder_alive() {
     });
     assert_eq!(alive, 0, "a dead holder was read alive");
 }
+
+/// A probe of whether a holder's lock is held waits for any other probe of
+/// this process, so it never sees that probe's momentary lock.
+#[test]
+fn a_held_lock_probe_waits_for_another_probe() {
+    let root = tempfile::tempdir().unwrap();
+    let directory = root.path().join("custody-hosts");
+    std::fs::create_dir(&directory).unwrap();
+    let dead = host(33, "machine");
+    File::create(lock_path(&directory, dead.instance)).unwrap();
+    let probing = super::PROBES.lock().unwrap();
+    let (done, held) = std::sync::mpsc::channel();
+    let prober = {
+        let directory = directory.clone();
+        std::thread::spawn(move || {
+            let _ = done.send(super::lock_held(&directory, dead.instance));
+        })
+    };
+    assert!(
+        held.recv_timeout(std::time::Duration::from_millis(200))
+            .is_err(),
+        "the probe ran beside another probe"
+    );
+    drop(probing);
+    assert_eq!(
+        held.recv_timeout(std::time::Duration::from_secs(10)),
+        Ok(false)
+    );
+    prober.join().unwrap();
+}

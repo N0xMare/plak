@@ -3931,7 +3931,11 @@ verdicts) are addressed, the session profile and workspace chrome states.
   process's that holds the session) and `hosted_elsewhere {host_name,
   binary?, pid}` when another process holds it. A node attachment whose
   session stops being resident on the host ends with the host frame
-  `detached {attachment}`, and the next attach opens the session again. A
+  `detached {attachment}`, and the next attach opens the session again. An
+  attach of a node in another session's tree moves the node attachment only
+  once the new one is made, so a refused one leaves it; the other session is
+  opened first, as any attach of a dormant session opens it, so even a
+  refused attach can leave it resident and running a continuation it owed. A
   connection that serves one session (`plak agent --wire v2`, the embedded
   TUI's) refuses every directory request `unsupported`. A host of many
   sessions is `plakous_hosted::host_service::wire::SessionHost` over its

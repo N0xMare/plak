@@ -1400,3 +1400,34 @@ fn rows_an_older_bound_stored_are_redacted_on_read() {
     assert!(!format!("{:?}", inspected.transcript).contains("ghp_"));
     assert_eq!(stored_rows(&paths), stored);
 }
+
+/// A directory row's locator is its views' head once a face projected it, so
+/// a head branch that moved is the one whose holder is named; before that it
+/// is the record's.
+#[test]
+fn a_directory_rows_locator_is_its_views_head_once_projected() {
+    let root = tempdir().unwrap();
+    let paths = PlakPaths::explicit(root.path().join("home"));
+    let workspace = root.path().join("w");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let mut store = ProductStore::open(&paths).unwrap();
+    let locator = |n: u8| -> SessionLocator {
+        format!(
+            "00000000-0000-4000-8000-0000000000a1/00000000-0000-4000-8000-0000000000b{n}/00000000-0000-4000-8000-0000000000c{n}"
+        )
+        .parse()
+        .unwrap()
+    };
+    let mut record = SessionRecord::new(workspace);
+    record.plakous_locator = Some(locator(1));
+    store.commit(&mut record).unwrap();
+    assert_eq!(store.directory(None).unwrap()[0].locator, Some(locator(1)));
+    store
+        .connection
+        .execute(
+            "INSERT INTO session_views(session_id,head_locator,root_turn_count,tool_call_count,compaction_count,state) VALUES(?1,?2,0,0,0,'{}')",
+            (&record.id, locator(2).to_string()),
+        )
+        .unwrap();
+    assert_eq!(store.directory(None).unwrap()[0].locator, Some(locator(2)));
+}

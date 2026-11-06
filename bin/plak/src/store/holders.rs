@@ -22,16 +22,16 @@ pub fn runtime_holder(paths: &PlakPaths, locator: SessionLocator) -> Option<Bran
     plakous::sessions::holder::sqlite_branch_holder(&paths.runtime_database(), locator)
 }
 
-/// The process id of the `plak host` serving this home's state, when one
-/// runs: its `host.lock` is held, and it names the holder.
-#[must_use]
-pub fn running_host(paths: &PlakPaths) -> Option<u32> {
-    let mut file = std::fs::File::open(paths.host_lock()).ok()?;
-    if !matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock)) {
-        return None;
-    }
+/// The process id the `plak host` of this home's state wrote into its
+/// `host.lock`, read without taking the lock: a host starting now must not
+/// find it taken. The pid names the running host only when the caller has
+/// proven that process alive.
+fn host_lock_pid(paths: &PlakPaths) -> Option<u32> {
     let mut holder = String::new();
-    file.read_to_string(&mut holder).ok()?;
+    std::fs::File::open(paths.host_lock())
+        .ok()?
+        .read_to_string(&mut holder)
+        .ok()?;
     holder.split_whitespace().next()?.parse().ok()
 }
 
@@ -49,8 +49,9 @@ pub fn lease_holder(paths: &PlakPaths, id: &str) -> LeaseHolder {
 }
 
 fn held_elsewhere(paths: &PlakPaths, id: &str, locator: SessionLocator) -> Option<String> {
+    // The runtime holder's lock proved its process alive.
     let holder = runtime_holder(paths, locator)?;
-    let remedy = if running_host(paths) == Some(holder.pid) {
+    let remedy = if host_lock_pid(paths) == Some(holder.pid) {
         "it is plak host, which serves this home's sessions: release the session there \
          (release_session from its web app, or wait for its idle release) or stop the host"
     } else {

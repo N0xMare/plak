@@ -297,6 +297,12 @@ async fn a_lease_only_holder_records_terminals_and_the_head_folds_them_once() {
         .await
         .unwrap_err();
     assert_eq!(busy.kind(), AgentSessionsErrorKind::Ownership);
+    // An open refused for the held lease is marked so, and no other is.
+    assert!(crate::agent::CodingSessionOpenFailure::from(busy).lease_held);
+    let invalid = "not a locator"
+        .parse::<plakous::sessions::SessionLocator>()
+        .unwrap_err();
+    assert!(!crate::agent::CodingSessionOpenFailure::from(invalid).lease_held);
     registry.stop_all(Duration::from_millis(250)).await.unwrap();
     let views = registry.views();
     assert_eq!(held.record_job_terminals(&views).await.unwrap(), [number]);

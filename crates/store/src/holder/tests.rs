@@ -1018,6 +1018,14 @@ fn branch_holder_names_only_a_holder_not_proven_gone() {
             pid: 424_242
         })
     );
+    // A holder directory others could write names nobody.
+    std::fs::set_permissions(
+        holders(directory.path()),
+        std::fs::Permissions::from_mode(0o770),
+    )
+    .expect("group-writable holder directory");
+    assert_eq!(holder(), None, "a directory others can write was read");
+    private_holders(directory.path());
     drop(held);
     assert_eq!(holder(), None, "a free lock is a gone holder");
     std::fs::remove_file(lock_path(directory.path(), live)).expect("remove lock");
@@ -1074,4 +1082,27 @@ fn concurrent_probes_never_read_a_dead_holder_alive() {
             .sum::<usize>()
     });
     assert_eq!(named, 0, "a dead holder was read alive");
+}
+
+/// The gone-holder proof waits for any other probe of this process: it
+/// takes the lock only while no other probe holds one.
+#[test]
+fn the_gone_holder_proof_waits_for_another_probe() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let database = directory.path().join("runtime.sqlite3");
+    let dead = "999999-00000000000000c3";
+    drop(plant(directory.path(), dead, session(), 2, owner(1)));
+    let probing = super::PROBES.lock().expect("probes");
+    let (done, proved) = std::sync::mpsc::channel();
+    let prober = std::thread::spawn(move || {
+        let claims = HolderClaims::beside(&database);
+        let _ = done.send(claims.holder_is_gone(&lease(session(), 2, owner(1))));
+    });
+    assert!(
+        proved.recv_timeout(Duration::from_millis(200)).is_err(),
+        "the proof probed beside another probe"
+    );
+    drop(probing);
+    assert_eq!(proved.recv_timeout(Duration::from_secs(10)), Ok(true));
+    prober.join().expect("prober");
 }

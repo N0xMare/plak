@@ -151,18 +151,50 @@ fn scan(
     }
     let host = Arc::clone(host);
     std::thread::spawn(move || {
-        for session in owed {
-            if stop.stopped() {
-                return;
-            }
-            eprintln!("plak host: continuing session {session}");
-            if let Err(failure) = host.slot(&session).resident() {
-                eprintln!(
-                    "plak host: session {session} did not continue: {}",
-                    failure.message()
-                );
-            }
-            host.changed();
-        }
+        continue_each(
+            owed,
+            || stop.stopped(),
+            |session| {
+                eprintln!("plak host: continuing session {session}");
+                if let Err(failure) = host.slot(session).resident() {
+                    eprintln!(
+                        "plak host: session {session} did not continue: {}",
+                        failure.message()
+                    );
+                }
+                host.changed();
+            },
+        );
     });
+}
+
+/// Opens each of `owed` in turn with `open`, until `stopped`.
+fn continue_each(owed: Vec<String>, stopped: impl Fn() -> bool, mut open: impl FnMut(&str)) {
+    for session in owed {
+        if stopped() {
+            return;
+        }
+        open(&session);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::continue_each;
+
+    /// A stop ends the start scan before its next session.
+    #[test]
+    fn a_stop_ends_the_start_scan() {
+        let mut opened = Vec::new();
+        let stopped = std::cell::Cell::new(false);
+        continue_each(
+            vec!["a".into(), "b".into()],
+            || stopped.get(),
+            |session| {
+                opened.push(session.to_owned());
+                stopped.set(true);
+            },
+        );
+        assert_eq!(opened, ["a"]);
+    }
 }

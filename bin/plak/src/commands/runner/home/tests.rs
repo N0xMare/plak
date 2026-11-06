@@ -82,3 +82,18 @@ fn racing_first_uses_agree_on_one_host_id() {
         assert!(staged.is_empty(), "{staged:?}");
     }
 }
+
+/// A directory another user owns is never taken for a private one, even
+/// where its mode could not be changed anyway.
+#[test]
+fn another_users_directory_is_never_private() {
+    if rustix::process::geteuid().is_root() {
+        return;
+    }
+    let refused = private_directory(Path::new("/")).unwrap_err();
+    assert!(
+        refused.message().contains("belongs to another user"),
+        "{}",
+        refused.message()
+    );
+}
