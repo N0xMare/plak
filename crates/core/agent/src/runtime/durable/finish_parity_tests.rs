@@ -507,41 +507,59 @@ fn code_cell_builder(directory: &std::path::Path) -> TestResult<AgentBuilder> {
     )
 }
 
+/// What else is outstanding when a turn's outcome-unknown `FailTurn` is
+/// recorded.
+#[derive(Clone, Copy, Debug)]
+enum RecoveryRequiredCut {
+    /// Only the unobserved request.
+    Request,
+    /// A steer queued while the request was in flight, never applied.
+    QueuedSteer,
+}
+
 /// A recorded `FailTurn` whose failure is outcome-unknown finishes as
-/// `RecoveryRequired`, and live that consequence leaves the unobserved request
-/// to the `Finalized RecoveryRequired` row. Reopening the decision commit runs
-/// both rows in one closure, so it closes the turn as reopening the live
+/// `RecoveryRequired`, and live that consequence leaves the turn's unresolved
+/// work to the `Finalized RecoveryRequired` row. Reopening the decision commit
+/// runs both rows in one closure, so it closes the turn as reopening the live
 /// consequence commit does: the same history, note and abandonment report.
-#[tokio::test]
-async fn a_recovered_recovery_required_finish_closes_like_the_reopened_live_terminal() -> TestResult
-{
+/// Returns that report, the closed history's last text, and the two cuts.
+async fn recovery_required_finish_parity(
+    cut: RecoveryRequiredCut,
+) -> TestResult<RecoveryRequiredCuts> {
+    let label = format!("finish-parity:recovery-required:{cut:?}");
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
     let model = artifact_test_model(0, 0xF1_8000)?;
-    model.unknown_round_outcome.store(true, Ordering::Release);
-    let make = || durable_artifact_test_builder(workspace.clone(), model.clone());
+    let release = Arc::new(Notify::new());
+    if matches!(cut, RecoveryRequiredCut::QueuedSteer) {
+        *lock_mutex(&model.held_call_release) = Some(release.clone());
+        model.held_call.store(0, Ordering::Release);
+    }
+    model.unknown_outcome_from_call.store(0, Ordering::Release);
+    let (registry, _) = session_update_registry(SessionUpdateFixtureMode::Active)?;
+    let make = || session_update_builder(workspace.clone(), model.clone(), registry.clone());
     let store = Arc::new(TestCreateStore::default());
     let sessions = DurableSessionRuntime::current(
         store.clone(),
         RuntimeDurability::Required,
         NonZeroU64::new(30).ok_or("lease")?,
     )?;
-    let agent = sessions
-        .create("create:finish-parity:recovery-required", make())
-        .await?;
-    let result = agent
-        .start(
-            CommandId::new("root:finish-parity:recovery-required")?,
-            "finish parity",
-        )
+    let agent = sessions.create(&format!("create:{label}"), make()?).await?;
+    let turn = agent
+        .start(CommandId::new(format!("root:{label}"))?, "finish parity")
         .await?
         .into_turn()
-        .ok_or("live turn was not admitted")?
-        .result()
-        .await?;
+        .ok_or("live turn was not admitted")?;
+    if matches!(cut, RecoveryRequiredCut::QueuedSteer) {
+        // A liveness bound only: generous, so load never trips it.
+        tokio::time::timeout(Duration::from_secs(30), model.held_call_started.notified()).await?;
+        turn.control().steer("queued instruction").await?;
+        release.notify_one();
+    }
+    let result = turn.result().await?;
     assert!(
         matches!(result.outcome(), TurnResultOutcome::RecoveryRequired(_)),
-        "{:?}",
+        "{cut:?}: {:?}",
         result.outcome()
     );
     let _ = agent.shutdown().await;
@@ -572,48 +590,180 @@ async fn a_recovered_recovery_required_finish_closes_like_the_reopened_live_term
             root_turn_closure_for_test(&terminal),
             Ok(Some(RootClosure::Abandon { .. }))
         ),
-        "the live consequence leaves the request to the RecoveryRequired row"
+        "{cut:?}: the live consequence leaves the turn to the RecoveryRequired row"
     );
     let mut closures = Vec::new();
-    for (label, cut) in [("decision", &decision), ("terminal", &terminal)] {
-        let source = rewind_to(&store, cut)?;
+    for (side, at) in [("decision", &decision), ("terminal", &terminal)] {
+        let source = rewind_to(&store, at)?;
         let DurableRuntimeOpen::Opened(reopened) = sessions
-            .open(&format!("open:recovery-required:{label}"), source, make())
+            .open(&format!("open:{label}:{side}"), source, make()?)
             .await?
         else {
-            return Err(format!("{label}: the cut did not reopen").into());
+            return Err(format!("{cut:?} {side}: the cut did not reopen").into());
         };
         let report = reopened
             .abandoned_turn()
             .cloned()
-            .ok_or_else(|| format!("{label}: the closure reported no abandonment"))?;
+            .ok_or_else(|| format!("{cut:?} {side}: the closure reported no abandonment"))?;
         let recovered = reopened.checkpoint();
         assert!(
             matches!(
                 recovered.manifest().lifecycle(),
                 RuntimeLifecycle::Quiescent
             ),
-            "{label}"
+            "{cut:?} {side}"
         );
+        let note = recovered
+            .manifest()
+            .canonical()
+            .projection()
+            .items()
+            .into_iter()
+            .last()
+            .map(text_of)
+            .unwrap_or_default();
         closures.push((
             report,
             recovered.manifest().canonical().history().identity(),
+            note,
         ));
         reopened.shutdown().await?;
     }
     assert_eq!(
-        closures[0].0.claim(),
-        crate::runtime::AbandonedTurnClaim::ModelRequest
+        closures[0].0.cause(),
+        crate::runtime::AbandonmentCause::Interrupted,
+        "{cut:?}"
     );
     assert_eq!(
-        closures[0].0.cause(),
-        crate::runtime::AbandonmentCause::Interrupted
+        closures[0], closures[1],
+        "{cut:?}: one closure from either cut"
     );
-    assert_eq!(closures[0], closures[1], "one closure from either cut");
     assert_eq!(
         model.calls.load(Ordering::Acquire),
         1,
-        "recovery never redispatches"
+        "{cut:?}: recovery never redispatches"
+    );
+    let (report, _, note) = closures.swap_remove(0);
+    Ok(RecoveryRequiredCuts {
+        report,
+        note,
+        decision,
+        terminal,
+    })
+}
+
+/// What [`recovery_required_finish_parity`] closed, and the two cuts it
+/// reopened: the decision commit and the live consequence commit.
+struct RecoveryRequiredCuts {
+    report: crate::runtime::AbandonedTurnReport,
+    note: String,
+    decision: Arc<RuntimeCheckpoint>,
+    terminal: Arc<RuntimeCheckpoint>,
+}
+
+#[tokio::test]
+async fn a_recovered_recovery_required_finish_closes_like_the_reopened_live_terminal() -> TestResult
+{
+    let closed = recovery_required_finish_parity(RecoveryRequiredCut::Request).await?;
+    assert_eq!(
+        closed.report.claim(),
+        crate::runtime::AbandonedTurnClaim::ModelRequest
+    );
+    Ok(())
+}
+
+/// A process session the turn left running (still `Dispatched`) at the
+/// recorded failure makes the strongest claim a running tool, and both cuts
+/// close it alike. The live driver closes the sessions it can before its
+/// decision commit, so the open session is set into both recorded cuts.
+#[tokio::test]
+async fn a_recovered_recovery_required_finish_with_an_open_process_claims_a_running_tool()
+-> TestResult {
+    use super::super::turn_recovery::closure_for_test;
+    use super::super::turn_recovery::review_tests::checkpoint_with_review_state;
+    let RecoveryRequiredCuts {
+        decision, terminal, ..
+    } = recovery_required_finish_parity(RecoveryRequiredCut::Request).await?;
+    let RuntimeLifecycle::Working {
+        root: RuntimeWorkingRoot::Turn { turn_id, .. },
+        ..
+    } = decision.manifest().lifecycle()
+    else {
+        return Err("the decision cut is a working turn".into());
+    };
+    let open_process = |cut: &RuntimeCheckpoint| -> TestResult<RuntimeCheckpoint> {
+        let mut records = cut
+            .manifest()
+            .ledger()
+            .operations()
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        let next = records
+            .iter()
+            .map(DurableOperationRecord::operation_id)
+            .max()
+            .unwrap_or_default()
+            + 1;
+        records.push(DurableOperationRecord::new(
+            next,
+            DurableOperationKind::ProcessSession {
+                turn_id: *turn_id,
+                session_id: crate::manifest::ProcessSessionId::new([0x94; 16])?,
+                owner_generation: crate::manifest::ProcessSessionOwnerGeneration::new(1)?,
+            },
+            runtime_component(
+                RuntimeComponentKind::Operation,
+                b"open process request".to_vec(),
+            )?,
+            vec![
+                DurableOperationTransition::new(
+                    CheckpointId::try_from(uuid::Uuid::from_u128(0xF1_8A00))?,
+                    DurableOperationState::Prepared,
+                ),
+                DurableOperationTransition::new(
+                    CheckpointId::try_from(uuid::Uuid::from_u128(0xF1_8A01))?,
+                    DurableOperationState::Dispatched,
+                ),
+            ],
+        )?);
+        checkpoint_with_review_state(
+            cut,
+            records,
+            cut.manifest().canonical().history().clone(),
+            false,
+        )
+    };
+    let (finished, finished_report) = closure_for_test(&open_process(&decision)?)?;
+    let (reopened, reopened_report) = closure_for_test(&open_process(&terminal)?)?;
+    let report = finished_report.ok_or("the finish reported no abandonment")?;
+    assert_eq!(
+        report.claim(),
+        crate::runtime::AbandonedTurnClaim::RunningTool
+    );
+    assert_eq!(report.effects().len(), 1, "{report:?}");
+    assert_eq!(Some(report), reopened_report, "one report from either cut");
+    assert_eq!(
+        finished.identity(),
+        reopened.identity(),
+        "one history from either cut"
+    );
+    Ok(())
+}
+
+/// A steer queued during the unobserved request is named unapplied in the
+/// one note, from either cut.
+#[tokio::test]
+async fn a_recovered_recovery_required_finish_names_its_unapplied_steer() -> TestResult {
+    let RecoveryRequiredCuts { report, note, .. } =
+        recovery_required_finish_parity(RecoveryRequiredCut::QueuedSteer).await?;
+    assert_eq!(
+        report.claim(),
+        crate::runtime::AbandonedTurnClaim::ModelRequest
+    );
+    assert!(
+        note.ends_with("Queued steering was not applied and is not retried."),
+        "{note}"
     );
     Ok(())
 }

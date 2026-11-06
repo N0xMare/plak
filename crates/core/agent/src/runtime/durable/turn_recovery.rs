@@ -316,6 +316,39 @@ pub(in crate::runtime::durable) fn close_root_turn_for_test(
     Ok((closed.history, closed.ledger))
 }
 
+/// The history and abandonment report the closure an open publishes at this
+/// cut carries, as `recover_root_turn_publication` builds them, without a
+/// store.
+#[cfg(test)]
+pub(in crate::runtime::durable) fn closure_for_test(
+    checkpoint: &RuntimeCheckpoint,
+) -> Result<
+    (
+        plakous_model::CanonicalHistory,
+        Option<crate::runtime::AbandonedTurnReport>,
+    ),
+    AgentError,
+> {
+    let closure = newest_root_turn_closure(checkpoint, DecisionBarrier::Restore)?
+        .ok_or_else(|| AgentError::new(AgentErrorKind::Session, "test cut has no closure"))?;
+    let report = crate::runtime::checkpoint::owner::root_closure_report(checkpoint, &closure)?;
+    let target = CheckpointId::try_from(uuid::Uuid::from_u128(0xA2_FFFE))
+        .map_err(|error| AgentError::from_identity(&error))?;
+    let closed = match closure {
+        RootClosure::Abandon { fold, claim } => {
+            abandonment_closure_state(checkpoint, fold, claim, target)?
+        }
+        RootClosure::FinalizeRecorded {
+            terminal,
+            code_cell,
+        } => terminal_closure_state(checkpoint, terminal, code_cell.is_some(), target)?,
+        RootClosure::Complete(terminal) => {
+            terminal_closure_state(checkpoint, terminal, false, target)?
+        }
+    };
+    Ok((closed.history, report))
+}
+
 /// Whether a newly opened owner closes this working head itself. Such a head
 /// is not recovery-only; opening it is how it recovers.
 pub(crate) fn reopen_closes_working_turn(checkpoint: &RuntimeCheckpoint) -> bool {
@@ -594,8 +627,9 @@ pub(in crate::runtime) fn recovery_required_fold(
         let record = ledger
             .operation(operation.0)
             .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
-        let uncertain = uncertain_process_state(record.state())
-            && !controls::same_turn_control(ledger, record, terminal.turn_id);
+        // Controls are Command records, so only the kinds below can be
+        // uncertain work; a control falls through to settled.
+        let uncertain = uncertain_process_state(record.state());
         match record.kind() {
             DurableOperationKind::Provider { .. } if uncertain => {
                 provider_operations.push(*operation);

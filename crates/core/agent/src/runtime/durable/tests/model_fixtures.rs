@@ -131,6 +131,9 @@ pub(super) struct ArtifactModel {
     pub(super) reject_round_dispatch: AtomicBool,
     /// Ends every ordinary round with an unknown provider outcome.
     pub(super) unknown_round_outcome: AtomicBool,
+    /// Ends every ordinary round from this call on with an unknown provider
+    /// outcome; a held call ends so once released.
+    pub(super) unknown_outcome_from_call: AtomicUsize,
     pub(super) provider_pause_calls: BTreeSet<usize>,
     pub(super) assistant_continuation_calls: Mutex<BTreeSet<usize>>,
     pub(super) report_usage: bool,
@@ -270,6 +273,7 @@ impl ArtifactModel {
             ordinary_calls: AtomicUsize::new(0),
             reject_round_dispatch: AtomicBool::new(false),
             unknown_round_outcome: AtomicBool::new(false),
+            unknown_outcome_from_call: AtomicUsize::new(usize::MAX),
             provider_pause_calls: BTreeSet::new(),
             assistant_continuation_calls: Mutex::new(BTreeSet::new()),
             report_usage: false,
@@ -1045,8 +1049,18 @@ impl LanguageModel for ArtifactModel {
             if !compaction_request && self.reject_round_dispatch.load(Ordering::Acquire) {
                 return Box::pin(async move { Err(rejection) });
             }
-            if !compaction_request && self.unknown_round_outcome.load(Ordering::Acquire) {
-                return Box::pin(async {
+            if !compaction_request
+                && (self.unknown_round_outcome.load(Ordering::Acquire)
+                    || call >= self.unknown_outcome_from_call.load(Ordering::Acquire))
+            {
+                let held = (self.held_call.load(Ordering::Acquire) == call)
+                    .then(|| lock_mutex(&self.held_call_release).clone())
+                    .flatten();
+                return Box::pin(async move {
+                    if let Some(release) = held {
+                        self.held_call_started.notify_one();
+                        release.notified().await;
+                    }
                     Err(ModelError::new(
                         ModelErrorKind::OutcomeUnknown,
                         "the provider's outcome is unknown",
