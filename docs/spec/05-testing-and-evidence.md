@@ -2203,6 +2203,25 @@ request ignores its cancel, so the releasing host's two-second hub join is cut
 short with the child still running: its handoff row stands and nothing else is
 recorded for it, a cut after the row continues it once, any earlier cut holds
 it. In every child shape a cut never leaves the child `recovery_required`.
+`tree_child_parked_job_loss` parks the child
+on one local process; the process appends one line per start, and no cut or
+relaunch may start it twice. It quits with the process still running, so
+its cuts are `HELD` once that work exists and `REQUEUED` or
+`NOT_HANDED_OFF` before it.
+`node_fenced_turn_child` fences a product child with an in-band outcome
+nobody can observe. Eager in-place recovery is the root's: the child stays held, is not dropped,
+and is not dispatched again.
+`root_transient_resume_cut` quits while the automatic-continuation notice is
+up and the provider has dispatched once. A cut admits at most one
+`plak:resume-transient:root:` continuation, and a second relaunch admits none.
+`custody_takeover` is a durable-tree answer. A cut whose custody row is still
+held is taken by the relaunch (exit 0 and a higher fence). A clean quit
+releases the row. Exit 7 (`tree_hosted_elsewhere`) is not a recovered class.
+`cross_runner_fork_stages` stays the in-process durability test named above:
+the sweep drives one product process, and that process has one runner port.
+Profile-switch cuts stay on the durability carry law. The agent face has no
+switch or rebind command, so a sweep shape cannot apply one and keep the
+rebind scripted.
 The opt-in `uncertain_mcp_tool` shape drives the fake MCP server's escaped
 result into an uncertain tool outcome; its pilot's host recovers the fenced
 root in place before quit, so its cuts cover that reopen's commits, including

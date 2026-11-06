@@ -9,6 +9,8 @@ pub(super) mod c1;
 pub(super) mod child;
 pub(super) mod dormant;
 pub(super) mod handoff;
+pub(super) mod lineage;
+pub(super) mod recovery;
 mod residency;
 pub(super) mod runner;
 mod sw3a;
@@ -268,6 +270,46 @@ pub(super) const REGISTRY: &[Shape] = &[
         assert_live: child::assert_owner_lost_live,
     },
     Shape {
+        name: "tree_child_parked_job_loss",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: lineage::parked_script,
+        configure: lineage::configure_parked,
+        setup: no_setup,
+        lifecycle: lineage::parked_lifecycle,
+        assert_live: lineage::assert_parked,
+    },
+    Shape {
+        name: "node_fenced_turn_child",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: recovery::child_fenced_script,
+        configure: recovery::configure_child_fenced,
+        setup: no_setup,
+        lifecycle: recovery::child_fenced_lifecycle,
+        assert_live: recovery::assert_child_fenced,
+    },
+    Shape {
+        name: "root_transient_resume_cut",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: recovery::transient_script,
+        configure: recovery::configure_transient,
+        setup: no_setup,
+        lifecycle: recovery::transient_lifecycle,
+        assert_live: recovery::assert_transient,
+    },
+    Shape {
+        name: "custody_takeover",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: recovery::custody_script,
+        configure: recovery::configure_custody,
+        setup: no_setup,
+        lifecycle: prompt_then_quit,
+        assert_live: recovery::assert_custody,
+    },
+    Shape {
         name: "busy_quit_escalates",
         subset: false,
         terminal: ExpectedTerminal::Answer,
@@ -520,6 +562,17 @@ pub(super) const REGISTRY: &[Shape] = &[
         assert_live: dormant::assert_dormant,
     },
 ];
+
+/// Pilots that deliberately publish a failed or fenced terminal before they quit.
+pub(super) fn expects_live_failure(shape: &str) -> bool {
+    matches!(
+        shape,
+        "uncertain_mcp_tool"
+            | "busy_quit_escalates"
+            | "capacity_overflow"
+            | "root_transient_resume_cut"
+    )
+}
 
 pub(super) fn get(name: &str) -> &'static Shape {
     REGISTRY

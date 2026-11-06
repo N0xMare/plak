@@ -238,6 +238,37 @@ struct PreparedTree {
     product_tools: Option<Vec<plakous::tools::ToolRegistration>>,
 }
 
+/// Pins the product child roster when the script names one.
+///
+/// A grandchild script beside the child script lets the `review` card spawn
+/// `note` and raises the depth ceiling to 2, so that child's grant can spawn.
+/// Without the file the card stays a leaf and existing child shapes keep the
+/// spawn menu they had.
+fn pin_product_child_roster(
+    tree: &mut plakous_hosted::agent_tree::ProductAgentTree,
+    plan: &ScriptPlan,
+) -> Result<(), String> {
+    let Some(script) = plan.product_child_script.as_ref() else {
+        return Ok(());
+    };
+    tree.pin_bind_hints_for_test(crate::roster_input::product_bind_hints());
+    let mut review =
+        plakous_hosted::orchestration::RosterBinding::leaf("openrouter", "offline/child");
+    if script.with_file_name("grandchild-script.json").is_file() {
+        let note = plakous_recursive_subagents::protocol::TemplateName::parse("note")
+            .map_err(|error| format!("offline script grandchild template: {error}"))?;
+        review.spawns = vec![note];
+        tree.pin_template(
+            "note",
+            plakous_hosted::orchestration::RosterBinding::leaf("openrouter", "offline/child"),
+        );
+        // Depth 1 admits the child and then withholds spawn_agent.
+        tree.pin_max_depth(2);
+    }
+    tree.pin_template("review", review);
+    Ok(())
+}
+
 /// Builds the one tree a `tree` script's runtimes all compile against, and
 /// attaches it to the process hub.
 ///
@@ -296,13 +327,7 @@ fn prepare_scripted_tree(
         WriterMode::SingleLease,
     )
     .map_err(|error| format!("offline scripted tree: {}", error.message))?;
-    if plan.product_child_script.is_some() {
-        tree.pin_bind_hints_for_test(crate::roster_input::product_bind_hints());
-        tree.pin_template(
-            "review",
-            plakous_hosted::orchestration::RosterBinding::leaf("openrouter", "offline/child"),
-        );
-    }
+    pin_product_child_roster(&mut tree, plan)?;
     let inner: Arc<dyn TreeStore> = if plan.durable_tree {
         paths
             .ensure_layout()
@@ -392,6 +417,7 @@ fn attach_product_children(
             product_child_binding(
                 script.clone(),
                 evidence.with_file_name("child-evidence.jsonl"),
+                Arc::clone(&prepared.runtime),
             ),
             continue_after_loss,
         ),
@@ -402,25 +428,52 @@ fn attach_product_children(
 /// A product child's binding: a real scripted session over `script`, read
 /// whenever the child binds (a spawn, or a reopen on a later build), whose
 /// provider requests append to `evidence`.
+///
+/// The direct child is `c1`. Any later id reads `grandchild-script.json`
+/// beside `script` when that file exists. A child that can spawn (that file
+/// is present) compiles topology tools for its own caller. Every product
+/// child takes the root's job host so a parked process stays on the tree
+/// instead of the binding.
 fn product_child_binding(
     script: PathBuf,
     evidence: PathBuf,
+    runtime: Arc<plakous_hosted::topology_runtime::ProductTopologyRuntime>,
 ) -> Arc<plakous_hosted::runtime::ScriptedChildBinding> {
-    Arc::new(move |_, path, _| {
+    Arc::new(move |agent_id, path, roots| {
         let workspace = Path::new(path);
         std::fs::create_dir_all(workspace).map_err(|error| error.to_string())?;
+        let grandchild = script.with_file_name("grandchild-script.json");
+        let nested = grandchild.is_file() && agent_id != "c1";
+        let script = if nested { grandchild } else { script.clone() };
+        let evidence = if nested {
+            evidence.with_file_name("grandchild-evidence.jsonl")
+        } else {
+            evidence.clone()
+        };
         let plan = ScriptPlan::read(&script).map_err(|error| error.message().to_owned())?;
         let controller =
             BoundaryController::quiet_from_evidence_path(CrashBoundary::None, &evidence)
                 .map_err(|error| error.to_string())?;
+        let plan = Arc::new(plan);
         // The product reopens a child only over a coding projection; the
         // pi pack is the one an `OpenRouter` parent's child compiles.
-        plakous_offline_crash_harness::scripted_pi_runtime_binding(
-            workspace,
-            controller,
-            &Arc::new(plan),
-        )
-        .map_err(|error| error.to_string())
+        let mut binding = if !nested && script.with_file_name("grandchild-script.json").is_file() {
+            let tools = plakous_hosted::runtime::test_kit::scripted_caller_topology_tools(
+                Arc::clone(&runtime),
+                agent_id,
+                workspace,
+                roots.clone(),
+            )
+            .map_err(|error| error.message().to_owned())?;
+            plakous_offline_crash_harness::scripted_pi_runtime_binding_with_extensions(
+                workspace, controller, &plan, tools,
+            )
+        } else {
+            plakous_offline_crash_harness::scripted_pi_runtime_binding(workspace, controller, &plan)
+        }
+        .map_err(|error| error.to_string())?;
+        binding = binding.with_job_host(roots.test_job_host(agent_id.to_owned()));
+        Ok(binding)
     })
 }
 
@@ -1305,6 +1358,9 @@ impl OfflineSelection {
         } else {
             None
         };
+        let child_runtime_hub = prepared
+            .as_ref()
+            .map(|prepared| Arc::clone(&prepared.runtime));
         // The rebind target is metadata read off a binding; it shares the same
         // cursor as every other runtime this selection builds, so constructing
         // it cannot advance or strand the script.
@@ -1414,9 +1470,18 @@ impl OfflineSelection {
             runtime,
             rebind_target: target,
             observe: Arc::new(seeded_create_cut(self.evidence.with_file_name("carry-cut"))),
-            child_runtime: self.plan.product_child_script.clone().map(|script| {
-                product_child_binding(script, self.evidence.with_file_name("child-evidence.jsonl"))
-            }),
+            child_runtime: self
+                .plan
+                .product_child_script
+                .clone()
+                .zip(child_runtime_hub)
+                .map(|(script, runtime)| {
+                    product_child_binding(
+                        script,
+                        self.evidence.with_file_name("child-evidence.jsonl"),
+                        runtime,
+                    )
+                }),
             rebind_builds: std::sync::Mutex::new(Vec::new()),
         });
         let policy = product_config::SessionPolicy::load(paths)?;

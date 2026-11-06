@@ -599,6 +599,7 @@ pub fn projected_terminal_failure_runtime_binding(
         &descriptor,
         account,
         plakous::tools::CodingPresentation::Codex,
+        Vec::new(),
     )?;
     Ok(SessionRuntimeBinding::new(builder))
 }
@@ -624,6 +625,7 @@ pub fn projected_scripted_runtime_binding(
         &descriptor,
         account,
         plakous::tools::CodingPresentation::Codex,
+        Vec::new(),
     )?;
     Ok(SessionRuntimeBinding::new(builder))
 }
@@ -644,6 +646,22 @@ pub fn scripted_pi_runtime_binding(
     controller: BoundaryController,
     script: &Arc<ScriptPlan>,
 ) -> HarnessResult<SessionRuntimeBinding> {
+    scripted_pi_runtime_binding_with_extensions(workspace, controller, script, Vec::new())
+}
+
+/// [`scripted_pi_runtime_binding`] whose Direct catalog also lists `extensions`
+/// (a child's topology tools), so a product child can spawn.
+///
+/// # Errors
+///
+/// Returns an error when the scripted model, the coding packs, an extension,
+/// or the projection is invalid.
+pub fn scripted_pi_runtime_binding_with_extensions(
+    workspace: &Path,
+    controller: BoundaryController,
+    script: &Arc<ScriptPlan>,
+    extensions: Vec<ToolRegistration>,
+) -> HarnessResult<SessionRuntimeBinding> {
     let account = b"offline-loopback-account";
     let descriptor = script_descriptor(account, script)?;
     let model = ScriptedOperation::Turn(Arc::new(AtomicU64::new(1))).model(
@@ -658,6 +676,7 @@ pub fn scripted_pi_runtime_binding(
         &descriptor,
         account,
         plakous::tools::CodingPresentation::Pi,
+        extensions,
     )?
     .config(scripted_agent_config(script))
     .tool_policy(scripted_tool_policy(script));
@@ -673,6 +692,7 @@ fn projected_coding_builder(
     descriptor: &ResolvedModelDescriptor,
     account: &[u8],
     presentation: plakous::tools::CodingPresentation,
+    extensions: Vec<ToolRegistration>,
 ) -> HarnessResult<AgentBuilder> {
     use plakous::tools::CodingPresentationExt as _;
     // A fixed plan-state identity, so a reopen's fresh binding names the same
@@ -689,6 +709,13 @@ fn projected_coding_builder(
         ),
         &mut registry,
     )?;
+    let extra_names = extensions
+        .iter()
+        .map(|tool| tool.name().clone())
+        .collect::<Vec<_>>();
+    for extension in extensions {
+        registry.register(extension)?;
+    }
     let registry = registry.freeze();
     // The agent's default exposure lists the registry in canonical-name
     // order, and the configured tools must match it exactly.
@@ -718,10 +745,11 @@ fn projected_coding_builder(
         configured.configuration().effective_identity(),
         plakous::tools::PROCESS_TOOL_PROJECTION_REVISION,
     )?;
-    let projection = presentation.projection_map(
+    let projection = presentation.projection_map_with_extensions(
         plakous::tools::JobConfig::default(),
         registry.clone(),
         target,
+        &extra_names,
     )?;
     Ok(AgentBuilder::new(
         configured,

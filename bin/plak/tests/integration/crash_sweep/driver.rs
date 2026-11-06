@@ -57,12 +57,7 @@ fn unexpected_pilot_terminal<'a>(
     records: &'a [Value],
 ) -> Option<&'a Value> {
     // These pilots deliberately end in recovery, an escalated quit, or capacity denial.
-    if is_cut
-        || matches!(
-            shape,
-            "uncertain_mcp_tool" | "busy_quit_escalates" | "capacity_overflow"
-        )
-    {
+    if is_cut || shapes::expects_live_failure(shape) {
         return None;
     }
     records.iter().find(|record| {
@@ -79,10 +74,7 @@ fn a_success_pilot_refuses_failed_terminals_without_waiting_for_more_progress() 
     ] {
         let records = [terminal];
         for shape in shapes::REGISTRY {
-            let expected = !matches!(
-                shape.name,
-                "uncertain_mcp_tool" | "busy_quit_escalates" | "capacity_overflow"
-            );
+            let expected = !shapes::expects_live_failure(shape.name);
             assert_eq!(
                 unexpected_pilot_terminal(shape.name, false, &records).is_some(),
                 expected,
@@ -533,6 +525,20 @@ fn cut_after_kill(
                 .unwrap_or_else(|outcome| panic!("{label} refused: {:?}", outcome.lines))
         });
     }
+    let relaunch = |label: &str| {
+        traced_reopen(fixture, session, label, None)
+            .unwrap_or_else(|outcome| panic!("{label} refused: {:?}", outcome.lines))
+    };
+    if shape == "tree_child_parked_job_loss" {
+        return shapes::lineage::after_kill(fixture, session, commits, true, relaunch);
+    }
+    if shape == "node_fenced_turn_child" {
+        return shapes::recovery::child_fenced_after_kill(fixture, session, commits, relaunch);
+    }
+    if shape == "root_transient_resume_cut" {
+        return shapes::recovery::transient_after_kill(fixture, session, commits, relaunch);
+    }
+    let custody = (shape == "custody_takeover").then(|| shapes::recovery::holder(fixture));
     let rehearsal = summary::rehearse(fixture, session);
     let dispatch_before = invariants::dispatches(fixture);
     let summaries_before = invariants::summary_dispatches(fixture);
@@ -568,24 +574,39 @@ fn cut_after_kill(
     (shapes::get(shape).configure)(fixture);
     let provider_release =
         (capacity && requeued).then(|| shapes::c1::capacity_release_file(fixture));
-    let mut reopened =
-        match traced_reopen(fixture, session, "relaunch-1", provider_release.as_deref()) {
-            Ok(agent) => agent,
-            Err(outcome) => {
-                let mut result = refused(
-                    fixture,
-                    session,
-                    shape,
-                    before,
-                    &rehearsal,
-                    &outcome,
-                    &dispatch_before,
-                );
-                result["global_order"] = json!(commits);
-                result["global_ordinal"] = json!(commits.last().unwrap().ordinal);
-                return result;
+    let mut reopened = match traced_reopen(
+        fixture,
+        session,
+        "relaunch-1",
+        provider_release.as_deref(),
+    ) {
+        Ok(agent) => {
+            if let Some(holder) = &custody {
+                shapes::recovery::assert_taken(fixture, holder);
             }
-        };
+            agent
+        }
+        Err(outcome) => {
+            assert!(
+                shape != "custody_takeover",
+                "custody takeover relaunch failed with status {:?}: expected a dead holder to be taken, not refused; stderr={}",
+                outcome.status.code(),
+                outcome.stderr
+            );
+            let mut result = refused(
+                fixture,
+                session,
+                shape,
+                before,
+                &rehearsal,
+                &outcome,
+                &dispatch_before,
+            );
+            result["global_order"] = json!(commits);
+            result["global_ordinal"] = json!(commits.last().unwrap().ordinal);
+            return result;
+        }
+    };
     let recovered = summary::read_reopened(fixture);
     if shape == "scheduled_compaction_workflow" {
         super::workflow_recovery::assert_admitted_abandonment(fixture, before, &recovered);

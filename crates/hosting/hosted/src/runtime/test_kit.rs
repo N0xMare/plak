@@ -1127,6 +1127,54 @@ pub async fn scripted_root_topology(
     )
 }
 
+/// Topology tools for a non-root caller, in that caller's pack spelling.
+///
+/// The root helper parks the parent and rewrites a missing caller to the
+/// root. A child that can spawn must be the caller, or `spawn_agent` binds
+/// as the root.
+///
+/// # Errors
+/// The hub's tree is unreadable or the topology tools do not compile.
+pub fn scripted_caller_topology_tools(
+    runtime: Arc<crate::topology_runtime::ProductTopologyRuntime>,
+    caller_id: &str,
+    workspace: &std::path::Path,
+    state_roots: crate::agent::ProductStateRoots,
+) -> CliResult<Vec<plakous::tools::ToolRegistration>> {
+    let tree_id = runtime
+        .read(|tree| tree.tree_id.clone())
+        .map_err(|error| CliFailure::new(error.message))?;
+    let parent = crate::agent::SpawnParent::Api(crate::agent::ApiTopologyParent {
+        prompt_host_facts: plakous_host_protocol::PromptHostFacts::default(),
+        created_output_bound: None,
+        product_home: None,
+        tool_selection: crate::tool_plan::NodeToolSelection::default(),
+        workspace_root: workspace.to_path_buf(),
+        cwd: workspace.to_path_buf(),
+        plan_state_authority: tree_id.clone(),
+        composition: CompositionSelection::Direct,
+        topology_tree_id: Some(tree_id),
+        topology_caller_id: Some(caller_id.to_owned()),
+        state_roots,
+        model: "offline/parent".to_owned(),
+        effort: None,
+        target: crate::binding::ApiTarget::OpenRouter {
+            wire: crate::binding::ResolvedProtocol::Chat,
+        },
+        scheduled_compaction: false,
+        max_model_rounds: crate::agent::NATIVE_RUN_MAX_MODEL_ROUNDS,
+        topology_enabled: true,
+        continue_after_loss: false,
+    });
+    Ok(
+        crate::agent::build::topology::topology_extensions_from_runtime(
+            runtime, &parent, caller_id, None,
+        )?
+        .registrations()
+        .to_vec(),
+    )
+}
+
 struct ScriptedChildRuntimeFactory(Arc<ScriptedChildBinding>);
 impl crate::agent::children::runtime_factory::ChildRuntimeFactory for ScriptedChildRuntimeFactory {
     fn bind<'a>(
