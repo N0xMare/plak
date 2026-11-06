@@ -116,8 +116,8 @@ fn a_draft_with_no_verdict_says_the_session_may_still_run_it() {
 }
 
 /// Background intents come back silently and are armed again only after a
-/// pause: the composer chrome, the usage read, the agent view the host
-/// would not serve, and a reload acknowledgement.
+/// pause: the composer chrome, the usage read, and the agent view the host
+/// would not serve. A reload acknowledgement is put back on this frame.
 #[test]
 fn background_intents_are_armed_again_silently_after_a_pause() {
     let mut app = App::new(launch_basic(), true);
@@ -146,20 +146,67 @@ fn background_intents_are_armed_again_silently_after_a_pause() {
         ],
     );
     assert_eq!(error_rows(&app), 0);
-    // Not on the next frame.
+    // The reload answer is already back. The rest is not on this frame.
+    assert_eq!(app.reload_requests.accepts, ["r1"]);
+    assert!(!app.reload_requests.handed_over.contains("r1"));
     assert!(!app.composer_chrome.refresh_pending);
     assert!(!app.usage_refresh.pending_read);
     assert!(app.host_agent_transcript.is_some());
-    assert_eq!(app.reload_requests.accepts, Vec::<String>::new());
     assert!(app.next_rearm().is_some());
     app.rearm_due(Instant::now() + Duration::from_secs(2));
     assert!(app.composer_chrome.refresh_pending);
     assert!(app.usage_refresh.pending_read);
     assert!(app.host_agent_transcript.is_none());
     assert_eq!(app.reload_requests.accepts, ["r1"]);
-    assert!(!app.reload_requests.handed_over.contains("r1"));
     assert!(app.next_rearm().is_none());
     assert_eq!(error_rows(&app), 0);
+}
+
+/// A reload answer the session keeps refusing is requeued at once each
+/// time. The wait does not double, and it does not advance another kind's.
+#[test]
+fn a_refused_reload_answer_is_requeued_without_a_growing_wait() {
+    let mut app = App::new(launch_basic(), true);
+    super::test_support::pin_clock(&mut app);
+    let accept = UserAction::Extension(SurfaceIntent::AcceptReloadRequest {
+        request_id: "r1".into(),
+    });
+    for _ in 0..4 {
+        app.reload_requests.handed_over.insert("r1".into());
+        app.reload_requests.accepts.clear();
+        refuse(&mut app, accept.clone());
+        assert_eq!(rearm_wait(&app), Duration::ZERO);
+        app.rearm_due(app.now());
+        assert_eq!(app.reload_requests.accepts, ["r1"]);
+        assert!(app.next_rearm().is_none());
+    }
+    app.reload_requests.accepts.clear();
+    app.reload_requests.handed_over.insert("r1".into());
+    refuse(
+        &mut app,
+        UserAction::Extension(SurfaceIntent::RefuseReloadRequest {
+            request_id: "r1".into(),
+            reason: "changed".into(),
+        }),
+    );
+    assert_eq!(rearm_wait(&app), Duration::ZERO);
+    app.rearm_due(app.now());
+    assert!(app.next_rearm().is_none());
+    let (actions, intents) = crate::config::user_action_channel();
+    app.send_reload_answers(Some(&actions));
+    assert_eq!(
+        intents.try_recv().expect("the refusal is sent again"),
+        UserAction::Extension(SurfaceIntent::RefuseReloadRequest {
+            request_id: "r1".into(),
+            reason: "changed".into(),
+        })
+    );
+
+    refuse(
+        &mut app,
+        UserAction::Extension(SurfaceIntent::RefreshComposerChrome),
+    );
+    assert_eq!(rearm_wait(&app), Duration::from_secs(1));
 }
 
 fn refuse(app: &mut App, action: UserAction) {

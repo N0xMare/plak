@@ -16,6 +16,18 @@ const REARM_MIN: Duration = Duration::from_secs(1);
 /// is not asked every second forever.
 const REARM_CAP: Duration = Duration::from_secs(30);
 
+/// A reload answer the session did not take. It is armed again on this
+/// frame, not on [`REARM_MIN`]: the reload is in progress, and the
+/// doubling can outlast the turn it has to catch.
+fn reload_answer(action: &UserAction) -> bool {
+    matches!(
+        action,
+        UserAction::Extension(
+            SurfaceIntent::AcceptReloadRequest { .. } | SurfaceIntent::RefuseReloadRequest { .. }
+        )
+    )
+}
+
 /// Which background intent a refusal belonged to. Payloads that do not
 /// change the kind (an agent id, a request id) share one wait.
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
@@ -85,7 +97,8 @@ impl App {
     /// reload check ends as failed. Any other intent is background work and
     /// is armed again, silently. The wait for one kind starts at
     /// [`REARM_MIN`] and doubles, up to [`REARM_CAP`], until that kind
-    /// succeeds or the state it serves changes.
+    /// succeeds or the state it serves changes. A reload answer is the
+    /// exception: it is armed again on the frame that learns the refusal.
     pub(super) fn unsent_action(&mut self, unsent: Unsent) {
         let (action, reason) = match unsent {
             Unsent::Refused(error) => {
@@ -132,8 +145,17 @@ impl App {
                 return;
             }
             background => {
-                let due = self.now() + self.rearm_backoff.take(rearm_kind(&background));
-                self.rearms.push((due, background));
+                // A reload answer does not take a backoff slot. The doubling
+                // would hold an in-progress reload past the turn it has to
+                // catch. An agent view the operator opened stays on the
+                // schedule: a view another attachment holds is a persistent
+                // refusal, and closing or reopening the view resets it.
+                let wait = if reload_answer(&background) {
+                    Duration::ZERO
+                } else {
+                    self.rearm_backoff.take(rearm_kind(&background))
+                };
+                self.rearms.push((self.now() + wait, background));
                 return;
             }
         }

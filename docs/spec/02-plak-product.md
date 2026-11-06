@@ -4242,13 +4242,14 @@ verdicts) are addressed, the session profile and workspace chrome states.
   another attachment holds the session's agent view), or that no answer came
   and the session may still run it. A refused reload check ends as failed.
   Every other intent is the TUI's own background work (a resync, the build
-  check, the composer chrome, an agent view, a reload answer): it paints
-  nothing and is armed again after one second. Each further refusal of that
-  same kind waits twice as long, up to 30 seconds, and then its own sender
-  sends it again. The wait returns to one second when that kind succeeds or
-  the state it serves changes. An agent view the session would not open is
-  no longer counted as served, and closing or reopening the view starts its
-  wait over. A draft, a queued edit and a `/new` the session did not take
+  check, the composer chrome, an agent view): it paints nothing and is armed
+  again after one second. Each further refusal of that same kind waits twice
+  as long, up to 30 seconds, and then its own sender sends it again. The
+  wait returns to one second when that kind succeeds or the state it serves
+  changes. An agent view the session would not open is no longer counted as
+  served, and closing or reopening the view starts its wait over. A reload
+  answer is not that work: the session's refusal is armed again on the frame
+  that learns it, so a reload in progress is not held for the doubling. A draft, a queued edit and a `/new` the session did not take
   still come back at once. What the TUI has not taken waits in the client
   under the session mailbox's own rules (a state supersedes its older
   value, deltas coalesce, and only what a later baseline repays is dropped,
