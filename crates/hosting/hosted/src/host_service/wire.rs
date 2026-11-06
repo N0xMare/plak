@@ -24,8 +24,8 @@ use std::time::{Duration, Instant};
 use plakous_host_protocol::views::transcript::{NoticeTone, TranscriptRow, TranscriptScope};
 use plakous_host_protocol::wire::{
     Answer, AttachmentId, BlobAssembler, ClientFrame, HandshakeRefusal, HostFrame, NodeAddress, Op,
-    Outcome, RequestId, RequestRefusal, WIRE_VERSION, Welcome, WireError, admit_hello, decode_line,
-    encode_line, page_snapshot, take_observation_images,
+    Outcome, RequestId, RequestRefusal, WIRE_VERSION, Welcome, WelcomeSession, WireError,
+    admit_hello, decode_line, encode_line, page_snapshot, take_observation_images,
 };
 use plakous_host_protocol::{
     IntentSendError, IntentSender, ObservationReceiver, ProtocolExtension, SessionIntent,
@@ -115,9 +115,25 @@ pub fn session_welcome(
         binary_id,
         host_generation,
         caps: Vec::new(),
-        session_id,
-        tree_id: root.tree_id.clone(),
-        root,
+        session: Some(WelcomeSession {
+            session_id,
+            tree_id: root.tree_id.clone(),
+            root,
+        }),
+    }
+}
+
+/// The welcome of a connection to a host of many sessions, from the host
+/// binary `binary_id` in its process generation `host_generation`: it names
+/// no session, and the client finds them in the session directory.
+#[must_use]
+pub const fn host_welcome(binary_id: String, host_generation: u64) -> Welcome {
+    Welcome {
+        proto: WIRE_VERSION,
+        binary_id,
+        host_generation,
+        caps: Vec::new(),
+        session: None,
     }
 }
 
@@ -782,6 +798,14 @@ where
                 self.session_request(id, op)
             }
             Op::StopSession { session } => self.stop_request(id, &session),
+            // A connection that serves one session has no directory.
+            op @ (Op::ListSessions { .. }
+            | Op::WatchSessions
+            | Op::UnwatchSessions { .. }
+            | Op::NewSession { .. }
+            | Op::ReleaseSession { .. }) => refused(RequestRefusal::Unsupported {
+                detail: format!("{} needs a host of many sessions", op.name()),
+            }),
             Op::Attach { node } => {
                 // An attach and the replay it takes are one step against
                 // the session's observations.

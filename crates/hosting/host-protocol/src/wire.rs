@@ -39,9 +39,16 @@ use crate::observation::{ObservationClass, SessionObservation};
 use crate::views::PresentationSnapshot;
 use crate::views::transcript::{TranscriptItem, TranscriptScope};
 
-/// The wire protocol version; a peer with another is refused. 3 drops
-/// `hello`'s locality.
-pub const WIRE_VERSION: u32 = 3;
+mod directory;
+pub use directory::{
+    HostedElsewhere, LiveWork, ResidentReason, SessionActivity, SessionEnvironment,
+    SessionResidency, SessionRow,
+};
+
+/// The wire protocol version; a peer with another is refused. 3 dropped
+/// `hello`'s locality; 4 lets a welcome name no session and adds the
+/// session directory's requests and frames.
+pub const WIRE_VERSION: u32 = 4;
 
 /// The most bytes one line holds, newline included.
 pub const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
@@ -111,7 +118,18 @@ pub struct Welcome {
     pub host_generation: u64,
     /// Optional functions the host supports.
     pub caps: Vec<String>,
-    /// The session this connection serves.
+    /// The session this connection serves, when it serves one: a host of
+    /// many sessions names none, and its client finds them in the
+    /// session directory ([`Op::ListSessions`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<WelcomeSession>,
+}
+
+/// The one session a connection serves, as its welcome names it.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WelcomeSession {
+    /// The durable session id.
     pub session_id: String,
     /// The session's agent tree; not always the session id (a rebound
     /// session's tree is its lineage's).
@@ -237,6 +255,61 @@ pub enum Op<P: ProtocolExtension> {
         /// The durable session id.
         session: String,
     },
+    /// The host's sessions, newest first: a one-shot read of the session
+    /// directory, needing no attachment.
+    ListSessions {
+        /// Only the sessions of this workspace, when given.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workspace: Option<String>,
+    },
+    /// Opens the connection's one host attachment: the session directory,
+    /// as a snapshot of its rows and then each row that changes.
+    WatchSessions,
+    /// Closes the host attachment.
+    UnwatchSessions {
+        /// The host attachment.
+        attachment: AttachmentId,
+    },
+    /// Creates a session in `workspace`, dormant until attached.
+    NewSession {
+        /// An existing directory, the session's workspace.
+        workspace: String,
+        /// The root template; the workspace's `[root] agent` when absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        template: Option<String>,
+        /// A uuid the client draws for each new-session action. It decides
+        /// the new session's id, so a retry of the same action answers the
+        /// session it created and never makes a second one.
+        request_id: String,
+    },
+    /// Detaches every attachment of `session` and releases it now, unless
+    /// something other than an attachment keeps it resident.
+    ReleaseSession {
+        /// The durable session id.
+        session: String,
+    },
+}
+
+impl<P: ProtocolExtension> Op<P> {
+    /// The op's wire name.
+    #[must_use]
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Self::Attach { .. } => "attach",
+            Self::Detach { .. } => "detach",
+            Self::Intent { .. } => "intent",
+            Self::Ping => "ping",
+            Self::RetryAttach { .. } => "retry_attach",
+            Self::ResumeSession { .. } => "resume_session",
+            Self::Rebind { .. } => "rebind",
+            Self::StopSession { .. } => "stop_session",
+            Self::ListSessions { .. } => "list_sessions",
+            Self::WatchSessions => "watch_sessions",
+            Self::UnwatchSessions { .. } => "unwatch_sessions",
+            Self::NewSession { .. } => "new_session",
+            Self::ReleaseSession { .. } => "release_session",
+        }
+    }
 }
 
 /// The answer to an admitted request.
@@ -262,6 +335,35 @@ pub enum Answer {
         /// The new session's root.
         node: NodeAddress,
     },
+    /// The session directory's rows (`list_sessions`).
+    Sessions {
+        /// Newest first.
+        rows: Vec<SessionRow>,
+    },
+    /// The host attachment is open (`watch_sessions`); its `directory`
+    /// frames follow.
+    Watching {
+        /// The host attachment.
+        attachment: AttachmentId,
+    },
+    /// The session `new_session` created, or had created for the same
+    /// request id.
+    Created {
+        /// The durable session id.
+        session: String,
+        /// Its root node, which an attach names.
+        node: NodeAddress,
+        /// The environment its tools run with.
+        environment: SessionEnvironment,
+    },
+    /// The session released (`release_session`): it is dormant.
+    Released,
+    /// The session stays resident (`release_session`): its attachments
+    /// were detached, and this keeps it.
+    Resident {
+        /// What keeps it.
+        reason: ResidentReason,
+    },
 }
 
 /// Why a request was refused. Nothing it asked for happened.
@@ -284,6 +386,16 @@ pub enum RequestRefusal {
     /// No such session on this host: `stop_session` named one it does not
     /// serve. A session another host serves is stopped by that host.
     UnknownSession,
+    /// Another host process holds the node's tree; nothing was opened.
+    TreeHostedElsewhere {
+        /// The machine the holder runs on.
+        host_name: String,
+        /// The holder's binary id, when it recorded one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        binary: Option<String>,
+        /// The holder's process id.
+        pid: u32,
+    },
     /// The node was the root of the session the connection's welcome named,
     /// which has since switched to the one rooted at `node`: attach that.
     Moved {
@@ -462,6 +574,25 @@ pub enum HostFrame<P: ProtocolExtension> {
         /// id; absent for a switch no session request caused.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         request_id: Option<String>,
+    },
+    /// The session directory, on the host attachment: a snapshot replaces
+    /// every row the client holds, and a change replaces the rows it names.
+    Directory {
+        /// The host attachment.
+        attachment: AttachmentId,
+        /// Its sequence number on the host attachment, from one.
+        seq: u64,
+        /// Whether `rows` is the whole directory.
+        snapshot: bool,
+        /// The rows, newest first.
+        rows: Vec<SessionRow>,
+    },
+    /// The attachment ended because its session is no longer resident on
+    /// this host (`release_session`, or the session ended); an attach
+    /// opens it again.
+    Detached {
+        /// The attachment that ended.
+        attachment: AttachmentId,
     },
     /// The host is closing the connection.
     Bye,

@@ -3,7 +3,7 @@ use std::os::unix::net::UnixStream;
 
 use super::*;
 use crate::Core;
-use crate::wire::{WIRE_VERSION, decode_line};
+use crate::wire::{WIRE_VERSION, WelcomeSession, decode_line};
 
 fn hello() -> Hello {
     Hello {
@@ -26,9 +26,11 @@ fn welcome() -> Welcome {
         binary_id: "host".into(),
         host_generation: 1,
         caps: Vec::new(),
-        session_id: "s1".into(),
-        tree_id: "t1".into(),
-        root: node("t1"),
+        session: Some(WelcomeSession {
+            session_id: "s1".into(),
+            tree_id: "t1".into(),
+            root: node("t1"),
+        }),
     }
 }
 
@@ -101,7 +103,7 @@ fn the_client_follows_the_host() {
     assert!(matches!(host.read(), ClientFrame::Hello(_)));
     host.send(&HostFrame::Welcome(welcome()));
     let (sender, receiver, welcomed) = client.join().unwrap();
-    assert_eq!(welcomed.session_id, "s1");
+    assert_eq!(welcomed.session.unwrap().session_id, "s1");
     let (id, op) = host.request();
     assert_eq!(op, Op::Attach { node: node("t1") });
     // The session switched before the attach reached it.

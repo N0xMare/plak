@@ -3833,12 +3833,14 @@ verdicts) are addressed, the session profile and workspace chrome states.
   validates the reassembled snapshot as the host does before it emits one.
 - **Handshake.** The client's first frame is `hello` (protocol version,
   binary id and capabilities). The host answers `welcome` (version, binary id, host
-  generation, capabilities, and the session it serves: its id, its tree id
-  and its root node's address, which an attach to the root names; the tree
-  id is the session's durable tree, not always the session id) or
+  generation, capabilities, and, as `session`, the session it serves: its
+  id, its tree id and its root node's address, which an attach to the root
+  names; the tree id is the session's durable tree, not always the session
+  id; a host of many sessions names none, below) or
   `refused` with `version_mismatch`, `malformed`, `busy` or `unavailable`
   (the session could not be opened, with why), and closes. The version must
-  match exactly; it is 3 (`WIRE_VERSION`; 3 dropped `hello`'s locality). The session opens before the welcome is sent, so any
+  match exactly; it is 4 (`WIRE_VERSION`; 3 dropped `hello`'s locality, 4
+  let a welcome name no session and added the session directory). The session opens before the welcome is sent, so any
   failure before dispatch, `plak agent --wire v2` included, is that
   `unavailable` frame and never a JSONL record. Its detail is the failure's
   own text only for an authenticated peer (stdio's parent process, a web
@@ -3882,8 +3884,8 @@ verdicts) are addressed, the session profile and workspace chrome states.
   numbered, so the attachment's sequence shows no gap for them.
 - **Requests.** A `request` carries a client-chosen id and an `op`:
   `attach` (a node, by tree and agent id), `detach`, `intent` (an
-  attachment and a session intent), `ping`, a session request, or
-  `stop_session {session}`. It gets exactly one `response` with that id:
+  attachment and a session intent), `ping`, a session request,
+  `stop_session {session}`, or a directory request (below). It gets exactly one `response` with that id:
   `attached`, `detached` (a `detach`, or a `quit` intent that detached its
   attachment), `accepted` (the intent entered the node's mailbox; what it
   does arrives as observations), `pong`, `stopped` or `moved` (a session
@@ -3895,8 +3897,35 @@ verdicts) are addressed, the session profile and workspace chrome states.
   told its client of, in its welcome or a `moved`, of a session that has
   since switched, so the client attaches that node instead), `node_closed`, `node_retiring`,
   `out_of_reach`, `mail_refused` (with the tree's reason), `not_attached`,
-  `session_unavailable` (with why), `malformed` or `unsupported` (with what
+  `session_unavailable` (with why), `unknown_session`,
+  `tree_hosted_elsewhere {host_name, binary?, pid}` (another host process
+  holds the node's tree), `malformed` or `unsupported` (with what
   the host does not do yet). A refused request did nothing.
+- **The session directory.** A host of many sessions serves its sessions
+  by id on one connection, which holds at most one node attachment and at
+  most one host attachment; the welcome names no session, and the node an
+  attach names comes from the directory's row, never guessed. Its requests
+  are `list_sessions {workspace?}` (a one-shot read, answered `sessions
+  {rows}`, newest first), `watch_sessions` (opens the host attachment,
+  answered `watching {attachment}`; a second is `one_in_flight`),
+  `unwatch_sessions {attachment}` (`detached`), `new_session {workspace,
+  template?, request_id}` (`created {session, node, environment}`) and
+  `release_session {session}` (`released`, or `resident {reason}` with
+  `work`, `processes`, `children` or `attachment`). The host attachment
+  takes `directory {attachment, seq, snapshot, rows}` frames, its sequence
+  from 1 as an attachment's events: first a snapshot of every row, which
+  replaces what the client holds, then the rows that changed. A row names
+  the session, its root `node`, its `title`, `workspace`, `profile` and
+  `updated_at` (unix seconds), its `residency` (`dormant`, `opening`,
+  `resident` or `releasing`), its `activity` (`idle`, `busy`,
+  `awaiting_operator`, `held_after_loss` or `stopped`), its `live_work
+  {children, processes, held_children}`, its tools' `environment`
+  (`host-login-shell` or `cli`) and `hosted_elsewhere {host_name, binary?,
+  pid}` when another host process holds its tree. A node attachment whose
+  session stops being resident on the host ends with the host frame
+  `detached {attachment}`, and the next attach opens the session again. A
+  connection that serves one session (`plak agent --wire v2`, the embedded
+  TUI's) refuses every directory request `unsupported`.
 - **Quit and stop.** A `quit` intent never ends a session that outlives its
   clients. On a child attachment it is that attachment's detach, on any
   connection. On a root attachment of a host whose connections detach when

@@ -19,12 +19,14 @@ fn welcome() -> Welcome {
         binary_id: "b1".into(),
         host_generation: 7,
         caps: Vec::new(),
-        session_id: "s1".into(),
-        tree_id: "t1".into(),
-        root: NodeAddress {
+        session: Some(WelcomeSession {
+            session_id: "s1".into(),
             tree_id: "t1".into(),
-            agent_id: "t1".into(),
-        },
+            root: NodeAddress {
+                tree_id: "t1".into(),
+                agent_id: "t1".into(),
+            },
+        }),
     }
 }
 
@@ -202,6 +204,193 @@ fn session_requests_round_trip_as_lines() {
     })
     .unwrap();
     assert!(!line.contains("request_id"), "{line}");
+}
+
+fn row() -> SessionRow {
+    SessionRow {
+        session: "s1".into(),
+        node: NodeAddress {
+            tree_id: "s1".into(),
+            agent_id: "s1".into(),
+        },
+        title: None,
+        workspace: "/w".into(),
+        profile: None,
+        updated_at: 9,
+        residency: SessionResidency::Dormant,
+        activity: SessionActivity::Idle,
+        live_work: LiveWork::default(),
+        environment: SessionEnvironment::HostLoginShell,
+        hosted_elsewhere: None,
+    }
+}
+
+/// The session directory's requests round trip, and their bytes are
+/// pinned: a client reads them by these names, and an absent optional
+/// field is absent, not null.
+#[test]
+fn the_directory_requests_round_trip_with_pinned_bytes() {
+    let client = [
+        (
+            Client::Request {
+                id: 1,
+                op: Op::ListSessions { workspace: None },
+            },
+            r#"{"frame":"request","id":1,"op":{"op":"list_sessions"}}"#,
+        ),
+        (
+            Client::Request {
+                id: 2,
+                op: Op::WatchSessions,
+            },
+            r#"{"frame":"request","id":2,"op":{"op":"watch_sessions"}}"#,
+        ),
+        (
+            Client::Request {
+                id: 3,
+                op: Op::UnwatchSessions { attachment: 4 },
+            },
+            r#"{"frame":"request","id":3,"op":{"op":"unwatch_sessions","attachment":4}}"#,
+        ),
+        (
+            Client::Request {
+                id: 4,
+                op: Op::NewSession {
+                    workspace: "/w".into(),
+                    template: Some("coder".into()),
+                    request_id: "00000000-0000-4000-8000-000000000001".into(),
+                },
+            },
+            r#"{"frame":"request","id":4,"op":{"op":"new_session","workspace":"/w","template":"coder","request_id":"00000000-0000-4000-8000-000000000001"}}"#,
+        ),
+        (
+            Client::Request {
+                id: 5,
+                op: Op::ReleaseSession {
+                    session: "s1".into(),
+                },
+            },
+            r#"{"frame":"request","id":5,"op":{"op":"release_session","session":"s1"}}"#,
+        ),
+    ];
+    for (frame, pinned) in client {
+        let line = encode_line(&frame).unwrap();
+        assert_eq!(line.trim_end(), pinned);
+        assert_eq!(decode_line::<Client>(&line).unwrap(), frame);
+    }
+}
+
+fn held_elsewhere() -> SessionRow {
+    SessionRow {
+        title: Some("fix the build".into()),
+        profile: Some("coder".into()),
+        residency: SessionResidency::Resident,
+        activity: SessionActivity::Busy,
+        live_work: LiveWork {
+            children: 1,
+            processes: 2,
+            held_children: 0,
+        },
+        environment: SessionEnvironment::Cli,
+        hosted_elsewhere: Some(HostedElsewhere {
+            host_name: "desk".into(),
+            binary: None,
+            pid: 42,
+        }),
+        ..row()
+    }
+}
+
+/// The directory's answers, refusals and host frames round trip with pinned
+/// bytes, as its requests do.
+#[test]
+fn the_directory_answers_and_frames_round_trip_with_pinned_bytes() {
+    let host = [
+        (
+            Host::Response {
+                id: 1,
+                outcome: Outcome::Ok(Answer::Sessions { rows: vec![row()] }),
+            },
+            r#"{"frame":"response","id":1,"outcome":{"ok":{"answer":"sessions","rows":[{"session":"s1","node":{"tree_id":"s1","agent_id":"s1"},"workspace":"/w","updated_at":9,"residency":"dormant","activity":"idle","live_work":{"children":0,"processes":0,"held_children":0},"environment":"host-login-shell"}]}}}"#,
+        ),
+        (
+            Host::Response {
+                id: 2,
+                outcome: Outcome::Ok(Answer::Watching { attachment: 4 }),
+            },
+            r#"{"frame":"response","id":2,"outcome":{"ok":{"answer":"watching","attachment":4}}}"#,
+        ),
+        (
+            Host::Response {
+                id: 4,
+                outcome: Outcome::Ok(Answer::Created {
+                    session: "s1".into(),
+                    node: row().node,
+                    environment: SessionEnvironment::HostLoginShell,
+                }),
+            },
+            r#"{"frame":"response","id":4,"outcome":{"ok":{"answer":"created","session":"s1","node":{"tree_id":"s1","agent_id":"s1"},"environment":"host-login-shell"}}}"#,
+        ),
+        (
+            Host::Response {
+                id: 5,
+                outcome: Outcome::Ok(Answer::Released),
+            },
+            r#"{"frame":"response","id":5,"outcome":{"ok":{"answer":"released"}}}"#,
+        ),
+        (
+            Host::Response {
+                id: 5,
+                outcome: Outcome::Ok(Answer::Resident {
+                    reason: ResidentReason::Processes,
+                }),
+            },
+            r#"{"frame":"response","id":5,"outcome":{"ok":{"answer":"resident","reason":"processes"}}}"#,
+        ),
+        (
+            Host::Response {
+                id: 6,
+                outcome: Outcome::Refused(RequestRefusal::TreeHostedElsewhere {
+                    host_name: "desk".into(),
+                    binary: Some("0123456789ab".into()),
+                    pid: 42,
+                }),
+            },
+            r#"{"frame":"response","id":6,"outcome":{"refused":{"refusal":"tree_hosted_elsewhere","host_name":"desk","binary":"0123456789ab","pid":42}}}"#,
+        ),
+        (
+            Host::Response {
+                id: 7,
+                outcome: Outcome::Refused(RequestRefusal::UnknownSession),
+            },
+            r#"{"frame":"response","id":7,"outcome":{"refused":{"refusal":"unknown_session"}}}"#,
+        ),
+        (
+            Host::Directory {
+                attachment: 4,
+                seq: 2,
+                snapshot: false,
+                rows: vec![held_elsewhere()],
+            },
+            r#"{"frame":"directory","attachment":4,"seq":2,"snapshot":false,"rows":[{"session":"s1","node":{"tree_id":"s1","agent_id":"s1"},"title":"fix the build","workspace":"/w","profile":"coder","updated_at":9,"residency":"resident","activity":"busy","live_work":{"children":1,"processes":2,"held_children":0},"environment":"cli","hosted_elsewhere":{"host_name":"desk","pid":42}}]}"#,
+        ),
+        (
+            Host::Detached { attachment: 3 },
+            r#"{"frame":"detached","attachment":3}"#,
+        ),
+        (
+            Host::Welcome(Welcome {
+                session: None,
+                ..welcome()
+            }),
+            r#"{"frame":"welcome","proto":4,"binary_id":"b1","host_generation":7,"caps":[]}"#,
+        ),
+    ];
+    for (frame, pinned) in host {
+        let line = encode_line(&frame).unwrap();
+        assert_eq!(line.trim_end(), pinned);
+        assert_eq!(decode_host_line::<Core>(&line).unwrap(), frame);
+    }
 }
 
 /// A line over the cap is refused when written and when read, and the

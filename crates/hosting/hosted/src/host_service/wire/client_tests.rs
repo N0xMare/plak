@@ -214,7 +214,7 @@ fn a_client_connects_sends_and_reconnects() {
     let served = Served::start();
     let (transport, _) = served.transport(Face::Local);
     let (sender, receiver, welcome) = client::connect::<Core>(transport, hello()).unwrap();
-    assert_eq!(welcome.root, root_of("s1"));
+    assert_eq!(welcome.session.unwrap().root, root_of("s1"));
     wait_for(&receiver, |observation| {
         matches!(observation, SessionObservation::PresentationSnapshot(_))
     });

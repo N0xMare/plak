@@ -1485,7 +1485,42 @@ fn a_stop_whose_session_ended_first_is_not_answered_stopped() {
     assert!(!text.contains("stopped\""), "{text}");
 }
 
-/// A child attachment's quit is its detach on any connection, and answers
+/// A connection that serves one session has no session directory: each of
+/// its requests is refused unsupported, naming the op, and nothing reaches
+/// the session.
+#[test]
+fn a_single_session_connection_refuses_the_directory_requests() {
+    let (actions, intents) = plakous_host_protocol::intent_channel::<plakous_host_protocol::Core>();
+    let mut stdout = Vec::new();
+    let mut connection = WireConnection::new(root(), &mut stdout, actions);
+    for (op, name) in [
+        (Op::ListSessions { workspace: None }, "list_sessions"),
+        (Op::WatchSessions, "watch_sessions"),
+        (Op::UnwatchSessions { attachment: 1 }, "unwatch_sessions"),
+        (
+            Op::NewSession {
+                workspace: "/w".to_owned(),
+                template: None,
+                request_id: "r".to_owned(),
+            },
+            "new_session",
+        ),
+        (
+            Op::ReleaseSession {
+                session: "s1".to_owned(),
+            },
+            "release_session",
+        ),
+    ] {
+        assert_eq!(
+            connection.request(1, op),
+            Some(Outcome::Refused(RequestRefusal::Unsupported {
+                detail: format!("{name} needs a host of many sessions"),
+            }))
+        );
+    }
+    assert!(intents.try_recv().is_err());
+}
 /// `detached` as a host's root quit does: one answer for one meaning.
 #[test]
 fn a_childs_quit_answers_detached() {

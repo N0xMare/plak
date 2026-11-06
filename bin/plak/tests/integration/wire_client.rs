@@ -50,7 +50,7 @@ fn the_wire_client_drives_plak_agent_over_stdio() {
     };
     let (sender, receiver, welcome) =
         client::connect::<PlakExtension>(transport, hello).expect("welcomed");
-    assert_ne!(welcome.session_id, "");
+    assert_ne!(welcome.session.expect("a served session").session_id, "");
     sender
         .send(SessionIntent::Prompt(Draft::from("answer, please")))
         .unwrap_or_else(|refused| panic!("{refused:?}: {:?}", receiver.ended()));

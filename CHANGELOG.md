@@ -154,6 +154,13 @@ an export.
   and `plak doctor` lists it with the other 0.0.4-only keys.
 - `plak wire schema` (hidden) prints this build's wire v2 JSON Schema with its
   protocol version.
+- Wire v2 is protocol 4: a welcome names its session as `session`, and a host
+  of many sessions names none. The session directory's requests
+  (`list_sessions`, `watch_sessions`, `unwatch_sessions`, `new_session`,
+  `release_session`), their answers, the `directory` and `detached` host
+  frames and the `unknown_session` and `tree_hosted_elsewhere` refusals are
+  new; a connection that serves one session refuses the requests
+  `unsupported`. A protocol 3 client is refused `version_mismatch`.
 - The wire v2 connection moved into `plakous-hosted`
   (`host_service::wire::WireConnection`), shared by `plak agent --wire v2` and
   `plak web`; `WireSession` serves one session to many connections. A switch

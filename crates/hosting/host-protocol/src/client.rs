@@ -95,6 +95,8 @@ pub enum ConnectError {
     /// The host closed before it welcomed the client, or answered the
     /// hello with something other than a welcome.
     Closed,
+    /// The host serves many sessions and its welcome named none to attach.
+    NoSession,
 }
 
 impl std::fmt::Display for ConnectError {
@@ -104,6 +106,8 @@ impl std::fmt::Display for ConnectError {
             Self::Wire(error) => write!(formatter, "a wire frame failed: {error}"),
             Self::Refused(refusal) => write!(formatter, "the host refused the hello: {refusal:?}"),
             Self::Closed => formatter.write_str("the host closed before welcoming the client"),
+            Self::NoSession => formatter
+                .write_str("the host serves many sessions and welcomed this client to none"),
         }
     }
 }
@@ -113,7 +117,7 @@ impl std::error::Error for ConnectError {
         match self {
             Self::Io(error) => Some(error),
             Self::Wire(error) => Some(error),
-            Self::Refused(_) | Self::Closed => None,
+            Self::Refused(_) | Self::Closed | Self::NoSession => None,
         }
     }
 }
@@ -367,9 +371,12 @@ where
         Some(Err(error)) => return Err(ConnectError::Wire(error)),
         None => return Err(ConnectError::Closed),
     };
+    let Some(served) = &welcome.session else {
+        return Err(ConnectError::NoSession);
+    };
     {
         let mut state = lock(&inner.state);
-        state.root = welcome.root.clone();
+        state.root = served.root.clone();
         inner.attach(&mut state).map_err(ConnectError::Io)?;
     }
     let follower = Arc::clone(&inner);
@@ -944,6 +951,16 @@ impl<P: ProtocolExtension> Inner<P> {
                 state.gaps.insert(TranscriptScope::Root);
                 self.attach(state).map(|()| false)
             }
+            HostFrame::Detached { attachment } => {
+                if state.attachment != Some(attachment) {
+                    return Ok(false);
+                }
+                Err(std::io::Error::other("the host released the session"))
+            }
+            // This client never opens a host attachment.
+            HostFrame::Directory { .. } => Err(std::io::Error::other(
+                "the host sent a session directory this client did not watch",
+            )),
             HostFrame::Bye | HostFrame::Welcome(_) | HostFrame::Refused(_) => {
                 Err(std::io::Error::other("the host closed the connection"))
             }

@@ -282,7 +282,7 @@ fn hello(socket: &mut WebSocket<UnixStream>) -> NodeAddress {
     );
     let welcome = next_frame(socket);
     assert_eq!(welcome["frame"], "welcome", "{welcome}");
-    serde_json::from_value(welcome["root"].clone()).expect("the welcome names the root")
+    serde_json::from_value(welcome["session"]["root"].clone()).expect("the welcome names the root")
 }
 
 /// The response to request `id`, skipping the events before it.

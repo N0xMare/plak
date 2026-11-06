@@ -13,7 +13,7 @@ use plakous_host_protocol::views::PresentationSnapshot;
 use plakous_host_protocol::wire::{
     Answer, BlobAssembler, ClientFrame, HandshakeRefusal, Hello, HostFrame, LineReader,
     NodeAddress, Op, Outcome, RequestRefusal, SnapshotAssembler, WIRE_VERSION, Welcome,
-    admit_hello, decode_line, encode_line, page_snapshot, take_images,
+    WelcomeSession, admit_hello, decode_line, encode_line, page_snapshot, take_images,
 };
 
 type Client = ClientFrame<Core>;
@@ -72,12 +72,14 @@ fn stub_host(stream: UnixStream) {
         binary_id: "host".into(),
         host_generation: 1,
         caps: Vec::new(),
-        session_id: "s1".into(),
-        tree_id: "t1".into(),
-        root: NodeAddress {
+        session: Some(WelcomeSession {
+            session_id: "s1".into(),
             tree_id: "t1".into(),
-            agent_id: "t1".into(),
-        },
+            root: NodeAddress {
+                tree_id: "t1".into(),
+                agent_id: "t1".into(),
+            },
+        }),
     };
     match admit_hello(&hello, welcome) {
         Ok(welcome) => end.send(&Host::Welcome(welcome)),
@@ -125,10 +127,15 @@ fn stub_host(stream: UnixStream) {
                     id,
                     outcome: Outcome::Ok(Answer::Pong),
                 }),
-                Op::StopSession { .. } => end.send(&Host::Response {
+                Op::StopSession { .. }
+                | Op::ListSessions { .. }
+                | Op::WatchSessions
+                | Op::UnwatchSessions { .. }
+                | Op::NewSession { .. }
+                | Op::ReleaseSession { .. } => end.send(&Host::Response {
                     id,
                     outcome: Outcome::Refused(RequestRefusal::Unsupported {
-                        detail: "the stub does not stop sessions".to_owned(),
+                        detail: "the stub serves one session".to_owned(),
                     }),
                 }),
                 Op::RetryAttach { .. } | Op::ResumeSession { .. } | Op::Rebind { .. } => {

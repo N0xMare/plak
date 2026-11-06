@@ -377,7 +377,10 @@ fn connect(socket: &std::path::Path) -> Result<Connection, String> {
     Ok(Connection {
         sender,
         receiver,
-        session: welcome.session_id,
+        session: welcome
+            .session
+            .map(|served| served.session_id)
+            .unwrap_or_default(),
         bridge,
     })
 }
