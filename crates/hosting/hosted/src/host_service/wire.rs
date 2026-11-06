@@ -601,6 +601,12 @@ where
         self.attachment.is_some() || self.moved.is_some()
     }
 
+    /// Whether a `stop_session` this connection took is not answered yet.
+    #[must_use]
+    pub const fn stopping(&self) -> bool {
+        self.stop.is_some()
+    }
+
     /// Records that the client was told of `root`, keeping the last
     /// [`TOLD_ROOTS`] of them.
     fn tell(&mut self, root: &NodeAddress) {

@@ -33,6 +33,55 @@ impl Out {
     }
 }
 
+/// What the fake session does with a prompt: `approve` asks for an
+/// approval, `process` runs a background process, `flood` sends more
+/// required events than an attachment holds, and anything else is busy.
+fn prompted(
+    script: &Script,
+    busy: &plakous_host_protocol::ObservationSender<Core>,
+    draft: &plakous_host_protocol::intent::Draft,
+) {
+    script
+        .images
+        .lock()
+        .unwrap()
+        .push(draft.images.iter().map(|image| image.bytes.len()).sum());
+    match draft.text.as_str() {
+        "approve" => {
+            let _ = busy.send(SessionObservation::ApprovalRequired {
+                approval_id: "a1".into(),
+                call_id: None,
+                tool_name: "shell".into(),
+                subject: None,
+                prompt: None,
+                expires_at_ms: 1,
+            });
+        }
+        "process" => {
+            let _ = busy.send(SessionObservation::Processes {
+                views: Vec::new(),
+                running: 1,
+            });
+        }
+        // More required events than an attachment holds.
+        "flood" => {
+            for index in 0..5_000 {
+                let _ = busy.send(SessionObservation::ApprovalResolved {
+                    approval_id: format!("f{index}"),
+                    resolution: "denied".into(),
+                });
+                if index % 200 == 0 {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+            }
+            script.flooded.store(true, Ordering::SeqCst);
+        }
+        _ => {
+            let _ = busy.send(SessionObservation::SetBusy(true));
+        }
+    }
+}
+
 fn node(session: &str) -> NodeAddress {
     NodeAddress {
         tree_id: session.into(),
@@ -78,6 +127,8 @@ struct Script {
     images: Mutex<Vec<usize>>,
     /// A flood of required events was sent whole.
     flooded: std::sync::atomic::AtomicBool,
+    /// The sessions take stops and settle none until this is cleared.
+    hold_stops: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Clone, Default)]
@@ -129,48 +180,18 @@ impl HostSessions<Core> for Fake {
         let script = Arc::clone(&self.0);
         let worker = HostWorkerHandle::spawn(move || {
             drop(observations);
+            let mut stops = Vec::new();
             loop {
+                if !script.hold_stops.load(Ordering::SeqCst) {
+                    for ticket in stops.drain(..) {
+                        intents.settle_stop(ticket, Ok(()));
+                    }
+                }
                 match intents.recv_timeout(Duration::from_millis(10)) {
                     Ok(delivery) => match &*delivery {
                         SessionIntent::Quit => break,
-                        SessionIntent::StopSession { ticket } => {
-                            intents.settle_stop(*ticket, Ok(()));
-                        }
-                        SessionIntent::Prompt(draft) => {
-                            script
-                                .images
-                                .lock()
-                                .unwrap()
-                                .push(draft.images.iter().map(|image| image.bytes.len()).sum());
-                            match draft.text.as_str() {
-                                "approve" => {
-                                    let _ = busy.send(SessionObservation::ApprovalRequired {
-                                        approval_id: "a1".into(),
-                                        call_id: None,
-                                        tool_name: "shell".into(),
-                                        subject: None,
-                                        prompt: None,
-                                        expires_at_ms: 1,
-                                    });
-                                }
-                                // More required events than an attachment holds.
-                                "flood" => {
-                                    for index in 0..5_000 {
-                                        let _ = busy.send(SessionObservation::ApprovalResolved {
-                                            approval_id: format!("f{index}"),
-                                            resolution: "denied".into(),
-                                        });
-                                        if index % 200 == 0 {
-                                            std::thread::sleep(Duration::from_millis(2));
-                                        }
-                                    }
-                                    script.flooded.store(true, Ordering::SeqCst);
-                                }
-                                _ => {
-                                    let _ = busy.send(SessionObservation::SetBusy(true));
-                                }
-                            }
-                        }
+                        SessionIntent::StopSession { ticket } => stops.push(*ticket),
+                        SessionIntent::Prompt(draft) => prompted(&script, &busy, draft),
                         _ => {}
                     },
                     // The actor's idle release, asked to release now.
@@ -729,6 +750,128 @@ fn release_session_answers_resident_and_withdraws_when_nothing_releases() {
     handed_off(&host);
 }
 
+/// A host that releases nothing within the wait, for the session `s1`.
+fn staying_host() -> (Arc<SessionHost<Core>>, Fake) {
+    let fake = Fake::default();
+    *fake.0.rows.lock().unwrap() = vec![row("s1", 0)];
+    fake.0.stay.store(true, Ordering::SeqCst);
+    let host = SessionHost::with_release_wait(fake.clone(), Duration::from_millis(200));
+    (host, fake)
+}
+
+fn release_s1(connection: &mut HostConnection<Core, Out>, id: RequestId) {
+    request(
+        connection,
+        id,
+        Op::ReleaseSession {
+            session: "s1".into(),
+        },
+    );
+}
+
+/// What keeps a session resident is named: an attachment made since (one
+/// that has not seen the request yet), or a background process.
+#[test]
+fn release_session_names_an_attachment_or_a_process_that_keeps_it() {
+    let (host, _fake) = staying_host();
+    let other = Out::default();
+    let mut attached_elsewhere = host.connect(other.clone(), Face::Remote, || false);
+    request(&mut attached_elsewhere, 1, Op::Attach { node: node("s1") });
+    attached(&other.take(), 1);
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    release_s1(&mut connection, 1);
+    assert_eq!(
+        outcome(&out.take(), 1),
+        Outcome::Ok(Answer::Resident {
+            reason: ResidentReason::Attachment
+        })
+    );
+    attached_elsewhere.leave();
+
+    request(&mut connection, 2, Op::Attach { node: node("s1") });
+    let attachment = attached(&out.take(), 2);
+    prompt(&mut connection, 3, attachment, "process");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while row_of(&host, "s1").live_work.processes == 0 {
+        assert!(Instant::now() < deadline, "the process never showed");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    release_s1(&mut connection, 4);
+    assert_eq!(
+        outcome(&out.take(), 4),
+        Outcome::Ok(Answer::Resident {
+            reason: ResidentReason::Processes
+        })
+    );
+    handed_off(&host);
+}
+
+/// An attach made after a withdrawn release is not ended by that release.
+#[test]
+fn an_attach_after_a_withdrawn_release_stays_attached() {
+    let (host, _fake) = staying_host();
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    attached(&out.take(), 1);
+    release_s1(&mut connection, 2);
+    assert!(matches!(
+        outcome(&out.take(), 2),
+        Outcome::Ok(Answer::Resident { .. })
+    ));
+    request(&mut connection, 3, Op::Attach { node: node("s1") });
+    let attachment = attached(&out.take(), 3);
+    connection.flush().unwrap();
+    assert!(
+        !out
+            .take()
+            .iter()
+            .any(|frame| matches!(frame, HostFrame::Detached { attachment: ended } if *ended == attachment)),
+        "the new attachment was detached"
+    );
+    assert!(connection.node.is_some());
+    handed_off(&host);
+}
+
+/// A release request on a session already releasing waits for that release
+/// to commit before it answers `released`, so another face may open the
+/// session at once.
+#[test]
+fn release_session_of_a_releasing_session_answers_once_it_released() {
+    let (host, fake) = host(&["s1"]);
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    attached(&out.take(), 1);
+    connection.leave();
+    // The release lingers in its worker for a while.
+    fake.0.linger.store(1_000, Ordering::SeqCst);
+    let first = {
+        let host = Arc::clone(&host);
+        std::thread::spawn(move || {
+            let out = Out::default();
+            let mut connection = host.connect(out.clone(), Face::Remote, || false);
+            release_s1(&mut connection, 1);
+            outcome(&out.take(), 1)
+        })
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while row_of(&host, "s1").residency != SessionResidency::Releasing {
+        assert!(Instant::now() < deadline, "the release never showed");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    release_s1(&mut connection, 2);
+    assert_eq!(outcome(&out.take(), 2), Outcome::Ok(Answer::Released));
+    assert!(
+        matches!(host.slot("s1").peek(), SlotView::Dormant(_)),
+        "released was answered before the release committed"
+    );
+    assert_eq!(first.join().unwrap(), Outcome::Ok(Answer::Released));
+}
+
 /// A bye, a second hello or a line that is not a frame is the client
 /// leaving: its node attachment detaches and its host attachment closes.
 #[test]
@@ -931,22 +1074,198 @@ fn stop_session_stops_the_attached_session() {
     );
     request(&mut connection, 3, Op::Attach { node: node("s1") });
     attached(&out.take(), 3);
-    request(&mut connection, 4, stop("s1"));
+    // Attached to s1, a stop of s2 is not this connection's.
+    request(&mut connection, 4, stop("s2"));
+    assert!(matches!(
+        outcome(&out.take(), 4),
+        Outcome::Refused(RequestRefusal::Unsupported { .. })
+    ));
+    request(&mut connection, 5, stop("s1"));
+    assert_eq!(
+        answer(&mut connection, &out, 5),
+        Outcome::Ok(Answer::Stopped)
+    );
+}
+
+/// Flushes `connection` until request `id` is answered, within 10 s.
+fn answer(connection: &mut HostConnection<Core, Out>, out: &Out, id: RequestId) -> Outcome {
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut frames = Vec::new();
     loop {
         connection.flush().unwrap();
         frames.extend(out.take());
-        if frames
-            .iter()
-            .any(|frame| matches!(frame, HostFrame::Response { id: 4, .. }))
-        {
-            break;
+        if frames.iter().any(
+            |frame| matches!(frame, HostFrame::Response { id: answered, .. } if *answered == id),
+        ) {
+            return outcome(&frames, id);
         }
-        assert!(Instant::now() < deadline, "the stop was never answered");
+        assert!(
+            Instant::now() < deadline,
+            "request {id} was never answered: {frames:?}"
+        );
         std::thread::sleep(Duration::from_millis(5));
     }
-    assert_eq!(outcome(&frames, 4), Outcome::Ok(Answer::Stopped));
+}
+
+/// A stop is answered even when its node attachment ends first, by a
+/// detach or by an attach of another session: the stop's own session
+/// connection outlives the attachment until the stop settles.
+#[test]
+fn a_stop_is_answered_after_its_attachment_ends() {
+    let (host, fake) = host(&["s1", "s2"]);
+    for then in ["detach", "attach another"] {
+        // The stop settles only after the attachment ended.
+        fake.0.hold_stops.store(true, Ordering::SeqCst);
+        let out = Out::default();
+        let mut connection = host.connect(out.clone(), Face::Remote, || false);
+        request(&mut connection, 1, Op::Attach { node: node("s1") });
+        let attachment = attached(&out.take(), 1);
+        request(
+            &mut connection,
+            2,
+            Op::StopSession {
+                session: "s1".into(),
+            },
+        );
+        if then == "detach" {
+            request(&mut connection, 3, Op::Detach { attachment });
+        } else {
+            request(&mut connection, 3, Op::Attach { node: node("s2") });
+        }
+        connection.flush().unwrap();
+        fake.0.hold_stops.store(false, Ordering::SeqCst);
+        assert_eq!(
+            answer(&mut connection, &out, 2),
+            Outcome::Ok(Answer::Stopped),
+            "then {then}"
+        );
+        connection.leave();
+    }
+}
+
+/// The settle of a stop whose attachment ended wakes a connection that
+/// waits for something to write, though it attaches and watches nothing.
+#[test]
+fn a_draining_stops_settle_wakes_the_connection() {
+    let (host, fake) = host(&["s1"]);
+    fake.0.hold_stops.store(true, Ordering::SeqCst);
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    let attachment = attached(&out.take(), 1);
+    request(
+        &mut connection,
+        2,
+        Op::StopSession {
+            session: "s1".into(),
+        },
+    );
+    request(&mut connection, 3, Op::Detach { attachment });
+    connection.flush().unwrap();
+    let release = {
+        let fake = fake.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            fake.0.hold_stops.store(false, Ordering::SeqCst);
+        })
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let woke = runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(10), connection.changed())
+            .await
+            .is_ok()
+    });
+    release.join().unwrap();
+    assert!(woke, "the settle did not wake the connection");
+    assert_eq!(
+        answer(&mut connection, &out, 2),
+        Outcome::Ok(Answer::Stopped)
+    );
+}
+
+/// A stop still to be answered after its attachment ended is the
+/// connection's one stop in flight: another is refused until it is
+/// answered.
+#[test]
+fn a_draining_stop_is_the_connections_one_in_flight() {
+    let (host, fake) = host(&["s1"]);
+    fake.0.hold_stops.store(true, Ordering::SeqCst);
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let stop = Op::StopSession {
+        session: "s1".into(),
+    };
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    let attachment = attached(&out.take(), 1);
+    request(&mut connection, 2, stop.clone());
+    request(&mut connection, 3, Op::Detach { attachment });
+    request(&mut connection, 4, Op::Attach { node: node("s1") });
+    attached(&out.take(), 4);
+    request(&mut connection, 5, stop);
+    assert_eq!(
+        outcome(&out.take(), 5),
+        Outcome::Refused(RequestRefusal::OneInFlight)
+    );
+    fake.0.hold_stops.store(false, Ordering::SeqCst);
+    assert_eq!(
+        answer(&mut connection, &out, 2),
+        Outcome::Ok(Answer::Stopped)
+    );
+}
+
+/// A client that leaves owes no stop an answer: its draining session
+/// connection goes too, and with it its hold on the session's residency.
+#[test]
+fn a_leaving_client_lets_a_draining_stops_session_go() {
+    let fake = Fake::default();
+    *fake.0.rows.lock().unwrap() = vec![row("s1", 0)];
+    fake.0.hold_stops.store(true, Ordering::SeqCst);
+    let host = SessionHost::with_release_wait(fake.clone(), Duration::from_millis(500));
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    let attachment = attached(&out.take(), 1);
+    request(
+        &mut connection,
+        2,
+        Op::StopSession {
+            session: "s1".into(),
+        },
+    );
+    request(&mut connection, 3, Op::Detach { attachment });
+    connection.leave();
+    let other = Out::default();
+    let mut releasing = host.connect(other.clone(), Face::Remote, || false);
+    release_s1(&mut releasing, 1);
+    assert_eq!(outcome(&other.take(), 1), Outcome::Ok(Answer::Released));
+}
+
+/// A session request pending when its attachment ends is answered
+/// `not_attached`, as on a connection that serves one session.
+#[test]
+fn a_pending_session_request_is_not_attached_once_its_attachment_ends() {
+    let (host, _fake) = host(&["s1"]);
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    let attachment = attached(&out.take(), 1);
+    request(
+        &mut connection,
+        2,
+        Op::ResumeSession {
+            attachment,
+            request_id: "r1".into(),
+            session: "s9".into(),
+        },
+    );
+    request(&mut connection, 3, Op::Detach { attachment });
+    assert_eq!(
+        answer(&mut connection, &out, 2),
+        Outcome::Refused(RequestRefusal::NotAttached)
+    );
 }
 
 /// A session resident here is held by this host, whatever the directory's

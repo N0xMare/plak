@@ -1279,3 +1279,39 @@ fn a_second_host_refuses_and_a_sigterm_stops_the_first() {
     let next = start(&fixture);
     assert_eq!(next.socket, first.socket);
 }
+
+/// A stop of a running turn whose attachment detaches before the stop
+/// settles is still answered, with no other frame to carry it.
+#[test]
+fn a_stop_is_answered_after_its_attachment_detaches() {
+    let Some(fixture) = fixture() else { return };
+    fixture.write_script(&json!({
+        "version": 1,
+        "steps": [{"stream": [{"text": PREFIX}, {"stall": 30000}]}]
+    }));
+    let host = start(&fixture);
+    let mut client = Client::connect(&host);
+    let Outcome::Ok(Answer::Created { session, node, .. }) =
+        client.request(1, new_session(&fixture.workspace()))
+    else {
+        panic!("not created");
+    };
+    let attachment = client.attach(2, &node);
+    client.prompt(3, attachment, "a turn to stop", PREFIX);
+    client.send(&ClientFrame::Request {
+        id: 4,
+        op: Op::StopSession { session },
+    });
+    client.send(&ClientFrame::Request {
+        id: 5,
+        op: Op::Detach { attachment },
+    });
+    let mut answered = std::collections::BTreeMap::new();
+    while answered.len() < 2 {
+        if let HostFrame::Response { id, outcome } = client.next() {
+            answered.insert(id, outcome);
+        }
+    }
+    assert_eq!(answered[&4], Outcome::Ok(Answer::Stopped));
+    assert_eq!(answered[&5], Outcome::Ok(Answer::Detached));
+}

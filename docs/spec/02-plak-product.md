@@ -3967,7 +3967,11 @@ verdicts) are addressed, the session profile and workspace chrome states.
   serves it for the session the connection's node attachment is in, through
   that attachment's own session connection; one of its other sessions is
   refused `unsupported` (attach it first), and one it does not know is
-  `unknown_session`. The stop enters the
+  `unknown_session`. Its answer comes even when the node attachment ends
+  first: the session connection, and its hold on the session's residency,
+  stay until the stop is answered (at most 90 s), and only then let the
+  session go; a pending session request of the ended attachment is
+  answered `not_attached` at once. The stop enters the
   session's mailbox in arrival order. A running root turn takes it at
   once, and a workflow observes it as it observes the operator's
   interrupt, leaving the rest of the stop until the workflow ends. Either

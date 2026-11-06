@@ -232,6 +232,7 @@ where
             stopped: Arc::new(stopped),
             login: None,
             node: None,
+            draining: None,
             watch: None,
         }
     }
@@ -416,6 +417,10 @@ pub struct HostConnection<P: ProtocolExtension, W: Write> {
     /// makes is identified by.
     login: Option<String>,
     node: Option<NodeLink<P, W>>,
+    /// A node attachment that ended while its `stop_session` was in flight:
+    /// its session connection, and its hold on the session's residency,
+    /// stay until the stop is answered.
+    draining: Option<NodeLink<P, W>>,
     watch: Option<Watch>,
 }
 
@@ -479,6 +484,8 @@ where
         let refused = |refusal| Ok(Forwarded::Answered(Outcome::Refused(refusal)));
         match op {
             Op::Ping => answered(Outcome::Ok(Answer::Pong)),
+            // A one-shot list is a fresh read, so it names a holder the
+            // moment it holds; only a watch shares the cached read.
             Op::ListSessions { workspace } => match self.host.rows(workspace.as_deref()) {
                 Ok(rows) => answered(Outcome::Ok(Answer::Sessions { rows })),
                 Err(detail) => refused(RequestRefusal::SessionUnavailable { detail }),
@@ -536,6 +543,11 @@ where
                     .as_ref()
                     .is_some_and(|link| link.session.session_id() == session)
                 {
+                    // One stop in flight per connection, the ended
+                    // attachment's included.
+                    if self.draining.is_some() {
+                        return refused(RequestRefusal::OneInFlight);
+                    }
                     return self.forward(text.to_owned()).map(Forwarded::Reading);
                 }
                 refused(if self.knows(&session) {
@@ -616,41 +628,49 @@ where
         Ok(Forwarded::Reading(true))
     }
 
-    /// `release_session`: every attachment of `session` detaches (this
-    /// connection's own first, ended with `detached` like the others), then
-    /// the session releases as soon as nothing else keeps it resident.
-    /// Answered `released` once the release committed (its worker ended), or
-    /// `resident` with what keeps it when none began within
-    /// [`RELEASE_WAIT`], and the request is withdrawn; a dormant session is
-    /// `released`.
-    ///
-    /// # Errors
-    ///
-    /// A lost output.
     /// Whether `session` is one of this host's: a slot holds it, or the
     /// directory lists it.
     fn knows(&self, session: &str) -> bool {
         self.host.lock().iter().any(|slot| slot.known() == session)
             || self
                 .host
-                .sessions
-                .rows(None)
+                .directory()
                 .is_ok_and(|rows| rows.iter().any(|row| row.session == session))
     }
 
+    /// `release_session`: every attachment of `session` detaches (this
+    /// connection's own first, ended with `detached` like the others), then
+    /// the session releases as soon as nothing else keeps it resident.
+    /// Answered `released` once the release committed (its worker ended), or
+    /// `resident` with what keeps it when none began within
+    /// [`RELEASE_WAIT`], and the request is withdrawn; a dormant session is
+    /// `released`. An open or a release already under way settles first.
+    ///
+    /// # Errors
+    ///
+    /// A lost output.
     fn release(&mut self, session: &str) -> CliResult<Outcome> {
-        let resident = self.host.lock().iter().find_map(|slot| match slot.peek() {
-            SlotView::Resident(served) if served.session_id() == session => {
-                Some((Arc::clone(slot), served))
-            }
-            _ => None,
-        });
-        let Some((slot, served)) = resident else {
+        let slot = self
+            .host
+            .lock()
+            .iter()
+            .find(|slot| slot.known() == session)
+            .cloned();
+        let Some(slot) = slot else {
             return Ok(if self.knows(session) {
                 Outcome::Ok(Answer::Released)
             } else {
                 Outcome::Refused(RequestRefusal::UnknownSession)
             });
+        };
+        let served = match self.settled(&slot)? {
+            Settled::Dormant => return Ok(Outcome::Ok(Answer::Released)),
+            Settled::Opening => {
+                return Ok(Outcome::Ok(Answer::Resident {
+                    reason: ResidentReason::Work,
+                }));
+            }
+            Settled::Resident(served) => served,
         };
         if self
             .node
@@ -664,25 +684,17 @@ where
         served.request_release();
         self.host.changed();
         let deadline = Instant::now() + self.host.release_wait;
-        // A release that began cannot be withdrawn: it is answered once it
-        // committed (its worker ended), bounded as a slot bounds a join.
-        let joined = Instant::now() + RELEASE_JOIN;
-        loop {
-            match slot.peek() {
-                SlotView::Dormant(_) => {
-                    self.host.changed();
-                    return Ok(Outcome::Ok(Answer::Released));
-                }
-                SlotView::Releasing(_) | SlotView::Opening(_) if Instant::now() < joined => {}
-                SlotView::Releasing(_) | SlotView::Opening(_) => {
-                    return Ok(Outcome::Ok(Answer::Released));
-                }
-                SlotView::Resident(_) if Instant::now() >= deadline => break,
-                SlotView::Resident(_) => {}
-            }
+        while matches!(slot.peek(), SlotView::Resident(_)) && Instant::now() < deadline {
+            self.flush_draining()?;
             std::thread::sleep(Duration::from_millis(20));
         }
         served.cancel_release();
+        // A release that began by the deadline cannot be withdrawn: it is
+        // answered once it committed.
+        if !matches!(self.settled(&slot)?, Settled::Resident(_)) {
+            self.host.changed();
+            return Ok(Outcome::Ok(Answer::Released));
+        }
         let kept = served.kept_activity();
         let reason = if served.attached() > 0 {
             ResidentReason::Attachment
@@ -692,6 +704,25 @@ where
             ResidentReason::Work
         };
         Ok(Outcome::Ok(Answer::Resident { reason }))
+    }
+
+    /// Waits, bounded by [`RELEASE_JOIN`], until `slot` is neither opening
+    /// nor releasing. A release still running past the bound began and is
+    /// answered as committed (`Dormant`); an open still running is
+    /// `Opening`.
+    fn settled(&mut self, slot: &SessionSlot<P>) -> CliResult<Settled<P>> {
+        let joined = Instant::now() + RELEASE_JOIN;
+        loop {
+            match slot.peek() {
+                SlotView::Dormant(_) => return Ok(Settled::Dormant),
+                SlotView::Resident(served) => return Ok(Settled::Resident(served)),
+                SlotView::Releasing(_) if Instant::now() >= joined => return Ok(Settled::Dormant),
+                SlotView::Opening(_) if Instant::now() >= joined => return Ok(Settled::Opening),
+                SlotView::Releasing(_) | SlotView::Opening(_) => {}
+            }
+            self.flush_draining()?;
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     /// Ends the node attachment with the host frame `detached`, and lets its
@@ -734,6 +765,7 @@ where
     /// A lost output, a snapshot that cannot be paged, or a directory that
     /// cannot be read.
     pub fn flush(&mut self) -> CliResult<()> {
+        self.flush_draining()?;
         if let Some(link) = &mut self.node {
             // A session that ended, or one a `release_session` since the
             // link asked for, is no longer this connection's.
@@ -748,6 +780,18 @@ where
             }
         }
         self.flush_directory()
+    }
+
+    /// Answers the ended attachment's stop once it settled, and then lets
+    /// its session go.
+    fn flush_draining(&mut self) -> CliResult<()> {
+        if let Some(link) = &mut self.draining {
+            link.connection.flush()?;
+            if !link.connection.stopping() {
+                self.draining = None;
+            }
+        }
+        Ok(())
     }
 
     fn flush_directory(&mut self) -> CliResult<()> {
@@ -815,18 +859,11 @@ where
         let watching = self.watch.is_some();
         let host = &mut self.host_changes;
         let session = self.node.as_mut().map(|link| &mut link.changes);
+        let draining = self.draining.as_mut().map(|link| &mut link.changes);
         let host_changed = tokio::select! {
             _ = host.changed() => true,
-            () = async {
-                match session {
-                    Some(changes) => {
-                        if changes.changed().await.is_err() {
-                            std::future::pending::<()>().await;
-                        }
-                    }
-                    None => std::future::pending().await,
-                }
-            } => false,
+            () = session_changed(session) => false,
+            () = session_changed(draining) => false,
             () = tokio::time::sleep(DIRECTORY_POLL), if watching => false,
         };
         // The wait saw the host's change: the directory is due.
@@ -839,14 +876,44 @@ where
     /// closes, and its session hold ends.
     pub fn leave(&mut self) {
         self.unlink();
+        // No one is left to answer.
+        self.draining = None;
         self.watch = None;
     }
 
+    /// Ends the node attachment. What its end owes goes out now (a pending
+    /// request's `not_attached`), and a stop in flight keeps its session
+    /// connection draining until the stop is answered.
     fn unlink(&mut self) {
         if let Some(mut link) = self.node.take() {
             link.connection.leave();
+            // A lost output is seen by the next write.
+            let _ = link.connection.flush();
+            if link.connection.stopping() {
+                self.draining = Some(link);
+            }
         }
     }
+}
+
+/// Resolves once `changes`, when there are any, changed; a session that
+/// ended changes no more.
+async fn session_changed(changes: Option<&mut watch::Receiver<u64>>) {
+    match changes {
+        Some(changes) => {
+            if changes.changed().await.is_err() {
+                std::future::pending::<()>().await;
+            }
+        }
+        None => std::future::pending().await,
+    }
+}
+
+/// Where a slot's open or release in flight came to.
+enum Settled<P: ProtocolExtension> {
+    Dormant,
+    Opening,
+    Resident(Arc<WireSession<P>>),
 }
 
 /// What a request came to: an outcome this connection writes, or the node

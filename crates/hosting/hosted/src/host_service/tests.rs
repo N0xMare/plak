@@ -719,3 +719,18 @@ fn a_face_takes_what_its_publisher_publishes() {
     assert_eq!(face.try_recv(), Ok(Observation::SetBusy(true)));
     assert_eq!(face.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty));
 }
+
+/// Each `release_session` asks on its own: one request's withdrawal leaves
+/// another's in flight asking.
+#[test]
+fn a_withdrawn_release_request_leaves_another_asking() {
+    let count = AttachmentCount::default();
+    count.request_release_now();
+    count.request_release_now();
+    count.cancel_release_now();
+    assert!(count.release_now(), "the other request still asks");
+    count.cancel_release_now();
+    assert!(!count.release_now());
+    count.cancel_release_now();
+    assert!(!count.release_now(), "a withdrawal never asks");
+}

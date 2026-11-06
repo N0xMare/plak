@@ -742,7 +742,15 @@ already send those) and leaves it resumable. It names a session rather than
 an attachment, so it is bounded: a host stops only a session it serves (any
 other is `unknown_session`, and a session another live host holds is that
 host's to stop), one at a time per connection, and it logs each with the
-connection's face and login, since it acts without an attachment. What it is shown is what
+connection's face and login, since it acts without an attachment. `plak
+host`, a host of many sessions, serves it only for the session the
+connection's node attachment is in, through that attachment's own session
+connection, and refuses another of its sessions `unsupported` (attach it
+first). The stop is answered even when that attachment ends before it
+settles (a detach, an attach of another session, a `release_session`): the
+session connection, and with it its hold on the session's residency, stays
+until the stop is answered, at most 90 s, so the session is not released
+under the stop. What it is shown is what
 the TUI shows, redacted as the TUI's rows are: the session's process rows
 (chapter 02 §4.4) carry each command redacted as the raw command it shows
 (§5) and each output tail through the same display redactor as a tool

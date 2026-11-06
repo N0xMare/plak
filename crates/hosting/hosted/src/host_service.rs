@@ -317,9 +317,10 @@ pub struct AttachmentCount(Arc<CountWord>);
 #[derive(Debug, Default)]
 struct CountWord {
     bits: AtomicU64,
-    /// A host asked the session to release as soon as nothing keeps it,
-    /// without waiting out the idle release (`release_session`).
-    release_now: std::sync::atomic::AtomicBool,
+    /// How many host requests ask the session to release as soon as
+    /// nothing keeps it, without waiting out the idle release
+    /// (`release_session`).
+    release_now: std::sync::atomic::AtomicU32,
     #[cfg(test)]
     seam: Mutex<MarkSeam>,
 }
@@ -396,17 +397,23 @@ impl AttachmentCount {
     /// without waiting out the idle release; an attach or a hold still
     /// keeps it.
     pub fn request_release_now(&self) {
-        self.0.release_now.store(true, Ordering::Release);
+        self.0.release_now.fetch_add(1, Ordering::AcqRel);
     }
 
-    /// Withdraws [`Self::request_release_now`].
+    /// Withdraws one [`Self::request_release_now`]; another request still
+    /// in flight keeps asking.
     pub fn cancel_release_now(&self) {
-        self.0.release_now.store(false, Ordering::Release);
+        let _ = self
+            .0
+            .release_now
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |asked| {
+                asked.checked_sub(1)
+            });
     }
 
     /// Whether a host asked the session to release now.
     pub(crate) fn release_now(&self) -> bool {
-        self.0.release_now.load(Ordering::Acquire)
+        self.0.release_now.load(Ordering::Acquire) > 0
     }
 
     /// Holds the session resident until the hold is dropped; `None` once it
