@@ -18,6 +18,7 @@ pub(super) fn run(
 ) -> CliResult<ProcessOutcome> {
     crate::signals::install_interactive(tui::force_restore_terminal);
     let paths = services.paths()?;
+    note = refuse_reload_handoff(paths, &face).or(note);
     if let Some(requested) = session.as_deref() {
         let store = services.session_records()?;
         let workspace = paths.workspace().map_err(CliFailure::new)?;
@@ -37,7 +38,7 @@ pub(super) fn run(
         face.send(crate::surface_protocol::UserAction::ResumeSession { id: None })
             .map_err(|_| CliFailure::new("the host disconnected before listing sessions"))?;
     }
-    let cfg = crate::product_config::ProductConfig::load(paths).map_err(CliFailure::new)?;
+    let mut cfg = crate::product_config::ProductConfig::load(paths).map_err(CliFailure::new)?;
     crate::build_identity::prepare_binary_id(None);
     tui::warm_highlighting();
     let mut terminal = tui::PersistentTerminal::open(cfg.tui_mouse)
@@ -74,13 +75,13 @@ pub(super) fn run(
                 attached_session,
             }) => match request {
                 tui::SessionRequest::ResumeSession { id, .. } => {
-                    face = reconnect(paths)?;
+                    face = reconnect(paths, &face)?;
                     face.select(Some(&id))?;
                 }
                 tui::SessionRequest::RetryAttach { .. } => {
                     let selected = face.session();
-                    face = reconnect(paths)?;
-                    face.select(selected.as_deref())?;
+                    face = reconnect(paths, &face)?;
+                    picker = select_or_list(&face, selected.as_deref())?;
                 }
                 tui::SessionRequest::EditConfig => {
                     let errors = terminal.close();
@@ -88,9 +89,11 @@ pub(super) fn run(
                         return Err(CliFailure::new(errors.join("; ")));
                     }
                     crate::commands::support::edit_config_file(paths)?;
+                    cfg = crate::product_config::ProductConfig::load(paths)
+                        .map_err(CliFailure::new)?;
                     let selected = face.session();
-                    face = reconnect(paths)?;
-                    face.select(selected.as_deref())?;
+                    face = reconnect(paths, &face)?;
+                    picker = select_or_list(&face, selected.as_deref())?;
                     terminal = tui::PersistentTerminal::open(cfg.tui_mouse)
                         .map_err(|error| CliFailure::new(error.to_string()))?;
                 }
@@ -113,6 +116,22 @@ pub(super) fn run(
             }
         }
     }
+}
+
+fn refuse_reload_handoff(
+    paths: &crate::product_paths::PlakPaths,
+    face: &SocketFace,
+) -> Option<String> {
+    let request = crate::reload_request::take_handoff()?;
+    let reason = face.reload_refusal(true);
+    crate::reload_request::record(
+        paths,
+        &request.request_id,
+        &crate::reload_request::ReloadOutcome::Refused {
+            reason: reason.clone(),
+        },
+    );
+    Some(format!("requested reload refused: {reason}"))
 }
 
 fn launch(
@@ -151,8 +170,23 @@ fn launch(
     })
 }
 
-fn reconnect(paths: &crate::product_paths::PlakPaths) -> CliResult<Arc<SocketFace>> {
-    SocketFace::discover(paths)?.ok_or_else(|| CliFailure::new("the host disconnected; restart it, then re-attach with `plak resume`; no embedded session was started"))
+fn select_or_list(face: &SocketFace, selected: Option<&str>) -> CliResult<bool> {
+    if let Some(session) = selected {
+        face.select(Some(session))?;
+        return Ok(false);
+    }
+    face.send(crate::surface_protocol::UserAction::ResumeSession { id: None })
+        .map_err(|_| CliFailure::new("the host disconnected before listing sessions"))?;
+    Ok(true)
+}
+
+fn reconnect(
+    paths: &crate::product_paths::PlakPaths,
+    previous: &SocketFace,
+) -> CliResult<Arc<SocketFace>> {
+    let face = SocketFace::discover(paths)?.ok_or_else(|| CliFailure::new("the host disconnected; restart it, then re-attach with `plak resume`; no embedded session was started"))?;
+    face.restore_new_request(previous.take_new_request());
+    Ok(face)
 }
 
 fn reload(
@@ -178,3 +212,7 @@ fn reload(
         target.executable.display()
     )))
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, reason = "socket fixture")]
+mod tests;

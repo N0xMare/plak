@@ -419,7 +419,7 @@ impl App {
         self.host_disconnected = true;
         self.restore_pending_drafts();
         self.push_root_block(ScrollBlock::Error(
-            "product host disconnected — unsafely unacknowledged draft text was restored; quit and retry"
+            "product host disconnected — unsafely unacknowledged draft text was restored; restart the host and /attach, or quit and retry"
                 .to_owned(),
         ));
     }
@@ -558,7 +558,14 @@ impl App {
     }
 
     pub(super) fn slash_matches(&self) -> Vec<(&'static str, &'static str)> {
-        fuzzy_list(&self.slash_filter())
+        let filter = self.slash_filter();
+        if !self.host_mode && filter == "stop" {
+            return Vec::new();
+        }
+        fuzzy_list(&filter)
+            .into_iter()
+            .filter(|(name, _)| self.host_mode || *name != "stop")
+            .collect()
     }
 
     pub(super) fn sync_slash_open(&mut self) {

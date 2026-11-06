@@ -320,7 +320,14 @@ impl App {
     pub(super) fn apply_slash_effect(&mut self, effect: SlashEffect) -> Option<UserAction> {
         match effect {
             SlashEffect::StopSession => {
-                self.pending_stop_session = true;
+                if self.host_mode {
+                    self.pending_stop_session = true;
+                } else {
+                    self.push_block(ScrollBlock::System(
+                        "/stop is a host-mode command; use Esc to interrupt embedded work"
+                            .to_owned(),
+                    ));
+                }
                 None
             }
             SlashEffect::Quit => self.request_quit(),

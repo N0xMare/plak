@@ -49,7 +49,15 @@ pub fn host_socket(path: &Path) -> io::Result<Transport> {
     // The path checks name what is wrong; the peer's credentials decide,
     // since a directory above the socket's may be another user's to swap.
     peer_is(peer_uid(&stream), user)?;
-    Ok(Transport::new(stream.try_clone()?, stream))
+    let interrupt = stream.try_clone()?;
+    Ok(
+        Transport::new(stream.try_clone()?, stream).with_welcome_deadline(
+            std::time::Duration::from_secs(10),
+            move || {
+                let _ = interrupt.shutdown(std::net::Shutdown::Both);
+            },
+        ),
+    )
 }
 
 /// The uid of `stream`'s peer (`SO_PEERCRED`, or `getpeereid` on macOS).

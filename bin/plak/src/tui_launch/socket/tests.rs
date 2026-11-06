@@ -1,5 +1,5 @@
 use std::io::{BufRead as _, BufReader, Write as _};
-use std::os::unix::net::UnixListener;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::thread;
 
 use plakous_host_protocol::wire::{
@@ -21,6 +21,11 @@ fn paths() -> (tempfile::TempDir, product_paths::PlakPaths) {
     let paths =
         product_paths::PlakPaths::explicit(root.path().join("h")).for_workspace(root.path());
     std::fs::create_dir_all(paths.host_socket().parent().unwrap()).unwrap();
+    std::fs::set_permissions(
+        paths.host_socket().parent().unwrap(),
+        std::fs::Permissions::from_mode(0o700),
+    )
+    .unwrap();
     std::fs::set_permissions(paths.home(), std::fs::Permissions::from_mode(0o700)).unwrap();
     (root, paths)
 }
@@ -308,6 +313,294 @@ fn an_unanswered_new_session_has_unknown_outcome_and_is_never_replayed() {
         face.try_unsent(),
         Some(client::SendError::OutcomeUnknown(UserAction::NewSession))
     ));
+    drop(face);
+    host.join().unwrap();
+}
+
+#[test]
+fn a_non_private_run_directory_refuses_instead_of_embedding() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let (_root, paths) = paths();
+    std::fs::set_permissions(
+        paths.host_socket().parent().unwrap(),
+        std::fs::Permissions::from_mode(0o777),
+    )
+    .unwrap();
+    let error = SocketFace::discover(&paths)
+        .err()
+        .expect("not an embedded fallback");
+    assert!(error.message().contains("private to this user"), "{error}");
+}
+
+#[test]
+fn an_unbindable_socket_path_uses_the_embedded_launcher() {
+    let (root, _) = paths();
+    let paths = product_paths::PlakPaths::explicit(root.path().join("h".repeat(120)))
+        .for_workspace(root.path());
+    assert!(SocketFace::discover(&paths).unwrap().is_none());
+}
+
+#[test]
+fn a_locked_host_without_a_socket_refuses_until_its_lock_is_free() {
+    let (_root, paths) = paths();
+    std::fs::create_dir_all(paths.host_lock().parent().unwrap()).unwrap();
+    std::fs::write(paths.host_lock(), "4242 fixture\n").unwrap();
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(paths.host_lock())
+        .unwrap();
+    lock.try_lock().unwrap();
+    for stale in [false, true] {
+        if stale {
+            drop(UnixListener::bind(paths.host_socket()).unwrap());
+        }
+        let error = discovery::connect(&paths, Duration::ZERO).err().unwrap();
+        assert!(error.message().contains("pid 4242"), "{error}");
+        assert!(
+            error.message().contains("starting or stopping; retry"),
+            "{error}"
+        );
+    }
+    drop(lock);
+    assert!(SocketFace::discover(&paths).unwrap().is_none());
+}
+
+#[test]
+fn a_host_that_answers_during_its_start_window_is_used() {
+    let (_root, paths) = paths();
+    std::fs::create_dir_all(paths.host_lock().parent().unwrap()).unwrap();
+    std::fs::write(paths.host_lock(), "4242 fixture\n").unwrap();
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(paths.host_lock())
+        .unwrap();
+    lock.try_lock().unwrap();
+    let socket = paths.host_socket();
+    let peer = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(30));
+        let listener = UnixListener::bind(socket).unwrap();
+        let mut peer = Peer::accept(&listener);
+        peer.send(HostFrame::Welcome(welcome()));
+        assert!(matches!(peer.read(), ClientFrame::Bye));
+    });
+    let face = SocketFace::discover(&paths).unwrap().unwrap();
+    drop(face);
+    peer.join().unwrap();
+}
+
+#[test]
+fn transport_loss_settles_new_and_stop_immediately_without_forgetting_new_identity() {
+    let (_root, paths) = paths();
+    let listener = UnixListener::bind(paths.host_socket()).unwrap();
+    let host = thread::spawn(move || {
+        let mut peer = Peer::accept(&listener);
+        peer.send(HostFrame::Welcome(welcome()));
+        assert!(matches!(peer.request().1, Op::NewSession { .. }));
+        assert!(matches!(peer.request().1, Op::StopSession { .. }));
+    });
+    let face = SocketFace::discover(&paths).unwrap().unwrap();
+    face.send(UserAction::NewSession).unwrap();
+    let request = face.state().new_request.clone().unwrap();
+    assert!(face.stop_session(SESSION));
+    host.join().unwrap();
+    let until = Instant::now() + Duration::from_secs(2);
+    while face.receiver.ended().is_none() {
+        assert!(Instant::now() < until);
+        thread::yield_now();
+    }
+    assert!(matches!(
+        face.try_unsent(),
+        Some(client::SendError::OutcomeUnknown(UserAction::NewSession))
+    ));
+    assert!(format!("{:?}", event(&face)).contains("stop outcome unknown"));
+    assert_eq!(face.take_new_request().as_deref(), Some(request.as_str()));
+    face.restore_new_request(Some(request.clone()));
+    let Op::NewSession { request_id, .. } = face.new_session() else {
+        panic!("not new")
+    };
+    assert_eq!(request_id, request);
+}
+
+#[test]
+fn a_hosted_elsewhere_row_refuses_locally_and_keeps_the_current_session() {
+    let (_root, paths) = paths();
+    let listener = UnixListener::bind(paths.host_socket()).unwrap();
+    let host = thread::spawn(move || {
+        let mut peer = Peer::accept(&listener);
+        peer.send(HostFrame::Welcome(welcome()));
+        let (id, _) = peer.request();
+        let mut held = row();
+        held.hosted_elsewhere = Some(plakous_host_protocol::wire::HostedElsewhere {
+            host_name: "holder".into(),
+            binary: None,
+            pid: 4242,
+        });
+        peer.answer(
+            id,
+            Answer::Sessions {
+                rows: vec![held.clone()],
+            },
+        );
+        let (id, _) = peer.request();
+        peer.answer(id, Answer::Sessions { rows: vec![held] });
+        assert!(
+            matches!(peer.read(), ClientFrame::Bye),
+            "no refused row is attached"
+        );
+    });
+    let face = SocketFace::discover(&paths).unwrap().unwrap();
+    face.state().session = Some(NEXT.into());
+    let error = face.select(Some(SESSION)).unwrap_err();
+    assert!(
+        error.message().contains("pid 4242") && error.message().contains("release_session"),
+        "{error}"
+    );
+    face.send(UserAction::ResumeSession {
+        id: Some(SESSION.into()),
+    })
+    .unwrap();
+    assert!(format!("{:?}", event(&face)).contains("pid 4242"));
+    assert_eq!(face.session().as_deref(), Some(NEXT));
+    drop(face);
+    host.join().unwrap();
+}
+
+#[test]
+fn two_remote_faces_preserve_the_live_announcement_and_either_refuses_its_request() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let (_root, paths) = paths();
+    paths.ensure_layout().unwrap();
+    let config = paths.home().join("config.toml");
+    std::fs::write(&config, "[tui]\nreload_requests = true\n").unwrap();
+    std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let listener = UnixListener::bind(paths.host_socket()).unwrap();
+    let host = thread::spawn(move || {
+        let mut peers = Vec::new();
+        for _ in 0..2 {
+            let mut peer = Peer::accept(&listener);
+            peer.send(HostFrame::Welcome(welcome()));
+            peers.push(peer);
+        }
+        for mut peer in peers {
+            assert!(matches!(peer.read(), ClientFrame::Bye));
+        }
+    });
+    let first = SocketFace::discover(&paths).unwrap().unwrap();
+    let second = SocketFace::discover(&paths).unwrap().unwrap();
+    first.state().session = Some(SESSION.into());
+    second.state().session = Some(SESSION.into());
+    let check = UserAction::Extension(crate::surface_protocol::SurfaceIntent::CheckBuild);
+    first.send(check.clone()).unwrap();
+    let announcement = paths
+        .run_dir()
+        .join("reload-requests")
+        .join(format!("{SESSION}.listener"));
+    let before = std::fs::read(&announcement).unwrap();
+    second.send(check.clone()).unwrap();
+    assert_eq!(std::fs::read(&announcement).unwrap(), before);
+    let (_, outcome) =
+        crate::reload_request::request(&paths, SESSION, "0123456789ab", "0123456789ab").unwrap();
+    second.send(check.clone()).unwrap();
+    first.send(check).unwrap();
+    let written: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(outcome).unwrap()).unwrap();
+    assert_eq!(written["outcome"], "refused");
+    assert!(
+        written["reason"]
+            .as_str()
+            .unwrap()
+            .contains("this session runs in plak host")
+    );
+    let notes: Vec<_> = std::iter::from_fn(|| second.try_recv().ok()).collect();
+    assert!(format!("{notes:?}").contains("requested reload refused"));
+    assert_eq!(std::fs::read(&announcement).unwrap(), before);
+    let (_, outcome) =
+        crate::reload_request::request(&paths, SESSION, "0123456789ab", "0123456789ab").unwrap();
+    let mut dead: serde_json::Value = serde_json::from_slice(&before).unwrap();
+    dead["pid"] = serde_json::json!(i32::MAX);
+    std::fs::write(&announcement, serde_json::to_vec(&dead).unwrap()).unwrap();
+    second
+        .send(UserAction::Extension(
+            crate::surface_protocol::SurfaceIntent::CheckBuild,
+        ))
+        .unwrap();
+    let written: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(outcome).unwrap()).unwrap();
+    assert_eq!(
+        written["outcome"], "refused",
+        "re-announcement must not erase a pending request"
+    );
+    drop((first, second));
+    host.join().unwrap();
+}
+
+#[test]
+fn an_attach_refusal_keeps_the_previous_selection_and_names_the_request_failure() {
+    let (_root, paths) = paths();
+    let listener = UnixListener::bind(paths.host_socket()).unwrap();
+    let (seen, seen_attach) = std::sync::mpsc::channel();
+    let (allow, proceed) = std::sync::mpsc::channel();
+    let host = thread::spawn(move || {
+        let mut peer = Peer::accept(&listener);
+        peer.send(HostFrame::Welcome(welcome()));
+        let (id, _) = peer.request();
+        peer.answer(id, Answer::Sessions { rows: vec![row()] });
+        peer.attach(SESSION, false);
+        let (id, _) = peer.request();
+        let mut next = row();
+        next.session = NEXT.into();
+        next.node = node(NEXT);
+        peer.answer(id, Answer::Sessions { rows: vec![next] });
+        let (id, op) = peer.request();
+        assert!(matches!(op, Op::Attach { .. }));
+        seen.send(()).unwrap();
+        proceed.recv().unwrap();
+        peer.send(HostFrame::Response {
+            id,
+            outcome: Outcome::Refused(
+                plakous_host_protocol::wire::RequestRefusal::SessionUnavailable {
+                    detail: "node retiring".into(),
+                },
+            ),
+        });
+        let (id, op) = peer.request();
+        assert!(matches!(op, Op::ListSessions { .. }));
+        peer.answer(id, Answer::Sessions { rows: Vec::new() });
+        assert!(matches!(peer.read(), ClientFrame::Bye));
+    });
+    let face = SocketFace::discover(&paths).unwrap().unwrap();
+    face.select(Some(SESSION)).unwrap();
+    assert_eq!(event(&face), HostEvent::SetBusy(false));
+    face.send(UserAction::ResumeSession {
+        id: Some(NEXT.into()),
+    })
+    .unwrap();
+    let until = Instant::now() + Duration::from_secs(2);
+    while seen_attach.try_recv().is_err() {
+        face.responses();
+        assert!(Instant::now() < until);
+        thread::yield_now();
+    }
+    assert_eq!(
+        face.session().as_deref(),
+        Some(SESSION),
+        "a requested attach is not an attached session"
+    );
+    allow.send(()).unwrap();
+    let note = format!("{:?}", event(&face));
+    assert!(
+        note.contains("attach refused") && note.contains("node retiring"),
+        "{note}"
+    );
+    assert_eq!(face.session().as_deref(), Some(SESSION));
+    assert_eq!(face.ended(), None);
+    face.send(UserAction::ResumeSession {
+        id: Some("missing".into()),
+    })
+    .unwrap();
+    assert!(format!("{:?}", event(&face)).contains("resume refused"));
     drop(face);
     host.join().unwrap();
 }

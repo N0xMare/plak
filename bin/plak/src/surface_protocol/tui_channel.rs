@@ -27,11 +27,7 @@ impl TuiActionSender {
     pub fn stop_session(&self, session: &str) -> bool {
         match self {
             Self::Socket(face) => face.stop_session(session),
-            Self::Wire(wire) => wire
-                .request_operation(plakous_host_protocol::wire::Op::StopSession {
-                    session: session.to_owned(),
-                })
-                .is_some(),
+            Self::Wire(_) => false,
             #[cfg(test)]
             Self::InProcess(_) => false,
         }
@@ -100,6 +96,17 @@ impl TuiEventReceiver {
             Self::InProcess(face) => face.try_recv(),
             #[cfg(test)]
             Self::Refusing(_) => Err(std::sync::mpsc::TryRecvError::Empty),
+        }
+    }
+
+    /// Why the underlying transport ended, when it has.
+    #[must_use]
+    pub fn ended(&self) -> Option<String> {
+        match self {
+            Self::Socket(face) => face.ended(),
+            Self::Wire(wire) => wire.ended(),
+            #[cfg(test)]
+            _ => None,
         }
     }
 

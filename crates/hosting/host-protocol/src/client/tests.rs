@@ -174,6 +174,107 @@ fn directory_responses_keep_refusals_and_disconnect_is_terminal() {
 }
 
 #[test]
+fn a_refused_selection_keeps_the_old_attachment_and_can_select_again() {
+    let (mut host, transport) = Host::pair();
+    let client = thread::spawn(move || connect_directory::<Core>(transport, hello()).unwrap());
+    assert!(matches!(host.read(), ClientFrame::Hello(_)));
+    host.send(&HostFrame::Welcome(Welcome {
+        session: None,
+        ..welcome()
+    }));
+    let (sender, receiver, _) = client.join().unwrap();
+    let first = sender.attach_to(node("old")).unwrap();
+    assert_eq!(host.request().0, first);
+    host.send(&HostFrame::Response {
+        id: first,
+        outcome: Outcome::Ok(Answer::Attached { attachment: 7 }),
+    });
+    assert_eq!(
+        receiver.recv_response(Duration::from_secs(2)).unwrap().0,
+        first
+    );
+    let refused = sender.attach_to(node("held")).unwrap();
+    assert_eq!(host.request().0, refused);
+    let reason = RequestRefusal::TreeHostedElsewhere {
+        host_name: "holder".into(),
+        binary: None,
+        pid: 4242,
+    };
+    host.send(&HostFrame::Response {
+        id: refused,
+        outcome: Outcome::Refused(reason.clone()),
+    });
+    assert_eq!(
+        receiver.recv_response(Duration::from_secs(2)).unwrap(),
+        (refused, Outcome::Refused(reason))
+    );
+    assert_eq!(receiver.ended(), None);
+    assert_eq!(lock(&sender.connection.inner.state).root, node("old"));
+    sender.send(SessionIntent::Quit).unwrap();
+    assert!(matches!(host.request().1, Op::Intent { attachment: 7, .. }));
+    let next = sender.attach_to(node("next")).unwrap();
+    assert_eq!(host.request().0, next);
+    host.send(&HostFrame::Response {
+        id: next,
+        outcome: Outcome::Ok(Answer::Attached { attachment: 9 }),
+    });
+    assert_eq!(
+        receiver.recv_response(Duration::from_secs(2)).unwrap().0,
+        next
+    );
+    assert_eq!(receiver.ended(), None);
+}
+
+#[test]
+fn the_welcome_deadline_interrupts_only_a_missing_welcome() {
+    for welcome_now in [false, true] {
+        let (mut host, transport) = Host::pair();
+        let shutdown = host.stream.try_clone().unwrap();
+        let transport = transport.with_welcome_deadline(Duration::from_millis(1000), move || {
+            shutdown.shutdown(std::net::Shutdown::Both).unwrap();
+        });
+        let (deliver, result) = mpsc::channel();
+        let client = thread::spawn(move || {
+            let _ = deliver.send(connect_directory::<Core>(transport, hello()));
+        });
+        assert!(matches!(host.read(), ClientFrame::Hello(_)));
+        if !welcome_now {
+            assert!(matches!(
+                result
+                    .recv_timeout(Duration::from_secs(3))
+                    .expect("the welcome deadline did not unblock the reader"),
+                Err(ConnectError::HandshakeTimeout(_))
+            ));
+            client.join().unwrap();
+            continue;
+        }
+        host.send(&HostFrame::Welcome(Welcome {
+            session: None,
+            ..welcome()
+        }));
+        let (sender, receiver, _) = result
+            .recv_timeout(Duration::from_secs(3))
+            .unwrap()
+            .unwrap();
+        client.join().unwrap();
+        let id = sender
+            .request_operation(Op::ListSessions { workspace: None })
+            .unwrap();
+        assert_eq!(host.request().0, id);
+        thread::sleep(Duration::from_millis(1100));
+        host.send(&HostFrame::Response {
+            id,
+            outcome: Outcome::Ok(Answer::Sessions { rows: Vec::new() }),
+        });
+        assert_eq!(
+            receiver.recv_response(Duration::from_secs(2)).unwrap().0,
+            id
+        );
+        assert_eq!(receiver.ended(), None);
+    }
+}
+
+#[test]
 fn a_refused_hello_is_the_connect_error() {
     let (mut host, transport) = Host::pair();
     let client = thread::spawn(move || connect::<Core>(transport, hello()).err());
@@ -418,9 +519,7 @@ fn a_large_send_does_not_hold_up_the_face() {
 fn rows_a_slow_face_cannot_hold_leave_the_transcript_lost() {
     let (mut host, sender, receiver) = attached(1);
     for index in 0..=crate::limits::OBSERVATION_QUEUE_CAPACITY {
-        let observation = SessionObservation::Row(crate::views::transcript::TranscriptRow::user(
-            format!("row {index}"),
-        ));
+        let observation = SessionObservation::Row(TranscriptRow::user(format!("row {index}")));
         host.send(&HostFrame::Event {
             attachment: 1,
             seq: 1,
@@ -597,7 +696,7 @@ fn an_intent_sent_while_attaching_goes_on_the_next_attachment() {
 }
 
 /// A root attach refused `backpressure` is asked once more; a second
-/// refusal ends the connection, naming it.
+/// refusal is a per-request outcome and leaves the connection usable.
 #[test]
 fn a_backpressured_attach_is_asked_once_more() {
     let (mut host, transport) = Host::pair();
@@ -614,11 +713,17 @@ fn a_backpressured_attach_is_asked_once_more() {
         });
     }
     assert!(matches!(
-        receiver.recv_timeout(Duration::from_secs(5)),
-        Err(RecvTimeoutError::Disconnected)
+        receiver.recv_response(Duration::from_secs(5)).unwrap().1,
+        Outcome::Refused(RequestRefusal::Backpressure)
     ));
-    let ended = receiver.ended().unwrap();
-    assert!(ended.contains("Backpressure"), "{ended}");
+    assert!(
+        format!(
+            "{:?}",
+            receiver.recv_timeout(Duration::from_secs(2)).unwrap()
+        )
+        .contains("attach refused")
+    );
+    assert_eq!(receiver.ended(), None);
 }
 
 /// An event for an attachment that is no longer the client's drops the

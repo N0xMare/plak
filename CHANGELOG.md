@@ -120,6 +120,12 @@ an export.
   replaces only the client. With no host it still embeds; a wire-version
   mismatch refuses with a stop-host/run-its-build remedy.
 
+- Host-mode attachment refusals preserve the previous attachment and show
+  the holder's remedy. Discovery enforces same-user socket checks and waits
+  through host start/stop windows. Requested reloads settle even across an
+  embedded-to-host transition or with two terminal faces, and an unanswered
+  `/new` reuses its identity on the next explicit retry after reconnect.
+
 - The TUI moves a focus marker through transcript items with `Alt+Up` and
   `Alt+Down` (then `Up` and `Down`). `Enter` or `Space` folds the focused
   block, `Alt+C` copies that item, `Esc` leaves the marker without stopping a

@@ -1723,6 +1723,12 @@ the product home. Its authority is exactly the user's own:
   process of the user can already read and write the home. There is no
   port and no network surface; a remote client reaches a host only through
   the web endpoint's gate (§2.10).
+- Socket clients, including the TUI, check the private run directory,
+  socket ownership and connected peer uid through the same client transport.
+  A failed same-user check refuses, never embeds. The client welcome has a
+  10 s watchdog that shuts down an unanswered transport and is cancelled
+  before the follower starts; it does not leave a receive timeout on the
+  shared socket.
 - A connection is a client of the host's session directory (chapter 02
   §4.4): it reads every session of the home, attaches any of them, and
   creates one in any existing directory the user can reach. A project's

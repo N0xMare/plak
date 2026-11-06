@@ -4660,7 +4660,8 @@ Before opening a session, `plak` and every resume path that opens a TUI
 try this home's `host/run/<state-key>.sock`. With an answering host of the
 same wire version they use wire v2 over that socket, not an embedded
 session. A missing or refused connection (a stale socket included) falls
-back to embedding. Once a connection answers, handshake failures refuse
+back to embedding only when the host lock is free; a starting or stopping
+host gets the bounded retry below. Once a connection answers, handshake failures refuse
 the launch; a different wire version names the remedies: stop the host
 with `plak host stop`, or run its build. It never embeds beside that peer.
 
@@ -4860,6 +4861,27 @@ with a stop-host/run-its-build remedy, rather than accidentally opening
 an embedded session on another key. The background-process refusal below
 still applies in host mode.
 
+Socket discovery applies the same-user run-directory, socket-owner and
+peer-uid checks (§4.6, chapter 04 §4.7). An unbindably long socket path
+cannot name a host and embeds. For a missing or refused connection it
+try-locks `host.lock` without blocking: only a free lock permits embedding.
+A held lock retries connection for at most 10 s, then refuses with
+`plak host (pid N) is starting or stopping; retry`. Other connection errors
+refuse with their message. Only the welcome is bounded by the 10 s
+handshake deadline; no socket receive timeout remains on the follower.
+
+A directory row held elsewhere refuses locally, naming its holder and
+pid with the use/release/stop remedy. A refused attach is a per-request
+outcome, not a transport end: it preserves the previous attachment and
+selection. The selected session changes only after `attached` or `binding`.
+Transport-loss notes include the ended reason. Stop and resume refusals,
+and stop/attach outcomes unknown at timeout or transport end, are visible.
+An unanswered `new_session` retains its request id across reconnect; the
+next operator `/new` reuses that id rather than creating an orphaned second
+session. It is never replayed automatically. `/stop` is host-mode only and
+hidden from the embedded palette. Config-editor return reloads terminal
+preferences before opening the terminal again.
+
 In embedded mode the normal reload handoff carries the session forward when
 that build has another state key, or the same key and an exact-reopen verdict
 of `binding_changed` (§2.5.1). It is refused while background processes are
@@ -4921,6 +4943,15 @@ host build is unknown. It never records `reloaded`, posts a continuation,
 redispatches work or hands the session off. A hand `/reload` still replaces
 only the client. Moving a hosted session to another build is a host restart
 (the SIGTERM handoff and start scan), not a client act.
+
+Any remote face may refuse a request naming its attached session regardless
+of the announcing nonce. It leaves a live announcement in place, replacing
+one only after its pid is dead; requests are taken before re-announcement
+can discard stale files. A private, transient announcements lock serializes
+the live-pid check with publication across client processes. An embedded requested reload landing in a running
+host takes its handed-off request and settles `refused` with `the session
+now runs in plak host` and the same restart remedy, never `reloaded` or a
+host-authored continuation.
 
 For an embedded TUI the command refuses
 unless the requesting `plak` is itself build `<binary-id>` (the agent runs the

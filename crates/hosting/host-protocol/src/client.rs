@@ -50,7 +50,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::channel::transcript_observation;
-use crate::views::transcript::TranscriptScope;
+use crate::views::transcript::{NoticeScope, TranscriptRow, TranscriptScope};
 use crate::wire::{
     Answer, AttachmentId, BlobAssembler, ClientFrame, HandshakeRefusal, Hello, HostFrame,
     LineReader, NodeAddress, Op, Outcome, RequestId, RequestRefusal, SnapshotAssembler, Welcome,
@@ -70,6 +70,7 @@ pub const ANSWER_DEADLINE: Duration = Duration::from_secs(30);
 pub struct Transport {
     reader: Box<dyn Read + Send>,
     writer: Box<dyn Write + Send>,
+    welcome_deadline: Option<(Duration, Box<dyn FnOnce() + Send>)>,
 }
 
 impl Transport {
@@ -79,13 +80,29 @@ impl Transport {
         Self {
             reader: Box::new(reader),
             writer: Box::new(writer),
+            welcome_deadline: None,
         }
+    }
+
+    /// Bounds only the welcome. `interrupt` must unblock the reader when
+    /// the deadline expires; the watchdog is cancelled and joined before
+    /// the follower starts.
+    #[must_use]
+    pub fn with_welcome_deadline(
+        mut self,
+        timeout: Duration,
+        interrupt: impl FnOnce() + Send + 'static,
+    ) -> Self {
+        self.welcome_deadline = Some((timeout, Box::new(interrupt)));
+        self
     }
 }
 
 /// Why a connection was not made.
 #[derive(Debug)]
 pub enum ConnectError {
+    /// The welcome did not arrive within its transport's deadline.
+    HandshakeTimeout(Duration),
     /// The transport failed.
     Io(std::io::Error),
     /// A frame could not be written or read.
@@ -102,6 +119,11 @@ pub enum ConnectError {
 impl std::fmt::Display for ConnectError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::HandshakeTimeout(timeout) => write!(
+                formatter,
+                "the host did not answer its handshake in {} s",
+                timeout.as_secs()
+            ),
             Self::Io(error) => write!(formatter, "the wire transport failed: {error}"),
             Self::Wire(error) => write!(formatter, "a wire frame failed: {error}"),
             Self::Refused(refusal) => write!(formatter, "the host refused the hello: {refusal:?}"),
@@ -117,7 +139,7 @@ impl std::error::Error for ConnectError {
         match self {
             Self::Io(error) => Some(error),
             Self::Wire(error) => Some(error),
-            Self::Refused(_) | Self::Closed | Self::NoSession => None,
+            Self::HandshakeTimeout(_) | Self::Refused(_) | Self::Closed | Self::NoSession => None,
         }
     }
 }
@@ -247,12 +269,14 @@ struct State<P: ProtocolExtension> {
     /// The root to attach: the welcome's, then each `moved` node's.
     root: NodeAddress,
     attachment: Option<AttachmentId>,
+    previous_attachment: Option<AttachmentId>,
     /// The attach in flight.
     attaching: Option<RequestId>,
     /// The face's mailbox, until the connection ends.
     mailbox: Option<ObservationSender<P>>,
     answers: VecDeque<SessionAnswer>,
     operations: BTreeSet<RequestId>,
+    selections: BTreeMap<RequestId, NodeAddress>,
     responses: VecDeque<(RequestId, Outcome)>,
     /// Intents sent on an attachment, by request id, until their verdict.
     sent: BTreeMap<RequestId, Sent<P>>,
@@ -378,7 +402,23 @@ where
     P::Intent: Serialize + DeserializeOwned + Send,
     P::Observation: Serialize + DeserializeOwned + Send,
 {
-    let Transport { reader, writer } = transport;
+    let Transport {
+        reader,
+        writer,
+        welcome_deadline,
+    } = transport;
+    let watchdog = welcome_deadline.map(|(timeout, interrupt)| {
+        let (cancel, wait) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            if wait.recv_timeout(timeout) == Err(RecvTimeoutError::Timeout) {
+                interrupt();
+                true
+            } else {
+                false
+            }
+        });
+        (cancel, worker, timeout)
+    });
     let mut lines = Lines::new(reader);
     let (outbox, outgoing) = mpsc::channel();
     let (mailbox, observations) = observation_channel();
@@ -392,10 +432,12 @@ where
                 agent_id: String::new(),
             },
             attachment: None,
+            previous_attachment: None,
             attaching: None,
             mailbox: Some(mailbox),
             answers: VecDeque::new(),
             operations: BTreeSet::new(),
+            selections: BTreeMap::new(),
             responses: VecDeque::new(),
             sent: BTreeMap::new(),
             unsent: VecDeque::new(),
@@ -419,7 +461,14 @@ where
     inner
         .write(&ClientFrame::<P>::Hello(hello))
         .map_err(ConnectError::Io)?;
-    let welcome = match lines.next_line() {
+    let first = lines.next_line();
+    if let Some((cancel, worker, timeout)) = watchdog {
+        let _ = cancel.send(());
+        if worker.join().unwrap_or(true) {
+            return Err(ConnectError::HandshakeTimeout(timeout));
+        }
+    }
+    let welcome = match first {
         Some(Ok(line)) => match decode_host_line::<P>(&line).map_err(ConnectError::Wire)? {
             HostFrame::Welcome(welcome) => welcome,
             HostFrame::Refused(refusal) => return Err(ConnectError::Refused(refusal)),
@@ -474,17 +523,24 @@ where
     }
 
     /// Attaches a root selected from the session directory. This switches
-    /// only this connection; other faces keep their attachments.
+    /// only this connection; other faces keep their attachments. Its request
+    /// id identifies the answer on [`WireReceiver::try_response`]. A refused
+    /// selection keeps the previous attachment and does not end the transport.
     ///
     /// # Errors
     ///
     /// The connection's writer stopped.
-    pub fn attach_to(&self, root: NodeAddress) -> std::io::Result<()> {
+    pub fn attach_to(&self, root: NodeAddress) -> std::io::Result<RequestId> {
         let inner = &self.connection.inner;
         let mut state = lock(&inner.state);
-        state.root = root;
-        state.agent = None;
-        inner.attach_again(&mut state)
+        let id = state.next_request;
+        state.next_request += 1;
+        inner.write(&ClientFrame::Request {
+            id,
+            op: Op::Attach { node: root.clone() },
+        })?;
+        state.selections.insert(id, root);
+        Ok(id)
     }
     /// Sends `intent` without waiting: on the current attachment, or on the
     /// next one while the client re-attaches. The host's verdict comes
@@ -509,7 +565,10 @@ where
             intent,
             at: Instant::now(),
         };
-        match state.attachment {
+        match state
+            .attachment
+            .filter(|_| state.attaching.is_none() && state.selections.is_empty())
+        {
             Some(attachment) => inner.write_intent(&mut state, attachment, sent),
             None => state.unsent.push_back(sent),
         }
@@ -588,7 +647,10 @@ where
             if state.closed {
                 return None;
             }
-            if let Some(attachment) = state.attachment {
+            if let Some(attachment) = state
+                .attachment
+                .filter(|_| state.attaching.is_none() && state.selections.is_empty())
+            {
                 break attachment;
             }
             let left = deadline.checked_duration_since(Instant::now())?;
@@ -825,7 +887,9 @@ impl<P: ProtocolExtension> Inner<P> {
     {
         let id = state.next_request;
         state.next_request += 1;
-        state.attachment = None;
+        if state.attachment.is_some() {
+            state.previous_attachment = state.attachment.take();
+        }
         state.attaching = Some(id);
         self.write(&ClientFrame::Request {
             id,
@@ -878,13 +942,14 @@ impl<P: ProtocolExtension> Inner<P> {
     }
 
     /// Takes the host's answer to the root attach in flight.
-    fn attached(&self, state: &mut State<P>, outcome: Outcome) -> std::io::Result<()>
+    fn attached(&self, state: &mut State<P>, id: RequestId, outcome: Outcome) -> std::io::Result<()>
     where
         P::Intent: Serialize,
     {
         match outcome {
             Outcome::Ok(Answer::Attached { attachment }) => {
                 state.attachment = Some(attachment);
+                state.previous_attachment = None;
                 state.attach_retried = false;
                 // The face's agent transcript, which the last attachment's
                 // end closed, opens on this one first.
@@ -918,9 +983,23 @@ impl<P: ProtocolExtension> Inner<P> {
             Outcome::Ok(answer) => Err(std::io::Error::other(format!(
                 "the host answered the attach of the session's root with {answer:?}"
             ))),
-            Outcome::Refused(refusal) => Err(std::io::Error::other(format!(
-                "the host refused the attach of the session's root: {refusal:?}"
-            ))),
+            Outcome::Refused(refusal) => {
+                state.attachment = state.previous_attachment.take();
+                if let Some(attachment) = state.attachment {
+                    for sent in std::mem::take(&mut state.unsent) {
+                        self.write_intent(state, attachment, sent);
+                    }
+                }
+                self.deliver(
+                    state,
+                    SessionObservation::Row(TranscriptRow::warning(
+                        NoticeScope::Host,
+                        format!("attach refused: {refusal:?}"),
+                    )),
+                )?;
+                state.responses.push_back((id, Outcome::Refused(refusal)));
+                Ok(())
+            }
         }
     }
 
@@ -997,6 +1076,25 @@ impl<P: ProtocolExtension> Inner<P> {
         }
     }
 
+    fn selected(&self, state: &mut State<P>, root: NodeAddress, outcome: &Outcome)
+    where
+        P::Intent: Serialize,
+    {
+        if let Outcome::Ok(Answer::Attached { attachment }) = outcome {
+            state.root = root;
+            state.agent = None;
+            state.attachment = Some(*attachment);
+            state.previous_attachment = None;
+            state.attach_retried = false;
+            state.gaps.insert(TranscriptScope::Root);
+        }
+        if let Some(attachment) = state.attachment {
+            for sent in std::mem::take(&mut state.unsent) {
+                self.write_intent(state, attachment, sent);
+            }
+        }
+    }
+
     /// Takes one host frame; whether the face has something new. `Err` when
     /// the connection must end.
     fn take(&self, state: &mut State<P>, frame: HostFrame<P>) -> std::io::Result<bool>
@@ -1005,13 +1103,18 @@ impl<P: ProtocolExtension> Inner<P> {
     {
         match frame {
             HostFrame::Response { id, outcome } => {
+                if let Some(root) = state.selections.remove(&id) {
+                    self.selected(state, root, &outcome);
+                    state.responses.push_back((id, outcome));
+                    return Ok(true);
+                }
                 if state.operations.remove(&id) {
                     state.responses.push_back((id, outcome));
                     return Ok(true);
                 }
                 if state.attaching == Some(id) {
                     state.attaching = None;
-                    return self.attached(state, outcome).map(|()| false);
+                    return self.attached(state, id, outcome).map(|()| true);
                 }
                 if let Some(request_id) = state.sessions.remove(&id) {
                     state.answers.push_back(SessionAnswer {

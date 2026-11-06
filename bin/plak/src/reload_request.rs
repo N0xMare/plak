@@ -211,6 +211,40 @@ pub struct Listener {
 }
 
 impl Listener {
+    /// A remote face leaves a live announcer in place. All remote faces
+    /// refuse requests for the session, so the announcing nonce is irrelevant.
+    pub(crate) fn announce_remote(paths: &PlakPaths, session: &str) -> Option<Self> {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        if !enabled(paths) {
+            return None;
+        }
+        // Serialize the live-pid check with publication across client
+        // processes; neither may erase a request for a just-published peer.
+        let lock = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .mode(0o600)
+            .open(private_directory(paths).ok()?.join("announcements.lock"))
+            .ok()?;
+        lock.try_lock().ok()?;
+        if read_announcement(&listener_path(paths, session)).is_some_and(|announcement| {
+            rustix::process::Pid::from_raw(announcement.pid)
+                .is_some_and(|pid| rustix::process::test_kill_process(pid).is_ok())
+        }) {
+            return None;
+        }
+        Self::announce(paths, session)
+    }
+
+    /// Takes a hosted session's request without requiring this face's nonce.
+    pub(crate) fn take_remote(paths: &PlakPaths, session: &str) -> Option<ReloadRequest> {
+        if !enabled(paths) {
+            return None;
+        }
+        Self::take_inner(paths, session, None)
+    }
     /// Announces `session` as accepting requests, when the home opted in. A
     /// request left from before this instance is discarded, and outcomes past
     /// their retention are pruned.
@@ -250,6 +284,10 @@ impl Listener {
     /// another session or another instance of this host is discarded; a
     /// well-formed one for another instance is told so.
     pub fn take(&self, paths: &PlakPaths, session: &str) -> Option<ReloadRequest> {
+        Self::take_inner(paths, session, Some(&self.nonce))
+    }
+
+    fn take_inner(paths: &PlakPaths, session: &str, nonce: Option<&str>) -> Option<ReloadRequest> {
         uuid::Uuid::parse_str(session).ok()?;
         let path = request_path(paths, session);
         let bytes = read_private(&path);
@@ -271,7 +309,7 @@ impl Listener {
         if !request.is_valid() || request.session_id != session {
             return None;
         }
-        if request.nonce != self.nonce {
+        if nonce.is_some_and(|nonce| request.nonce != nonce) {
             record(
                 paths,
                 &request.request_id,
@@ -475,6 +513,11 @@ pub fn accept_handoff(request: Option<ReloadRequest>) {
     }
 }
 
+/// Takes a handed-off request before choosing the destination's face mode.
+pub(crate) fn take_handoff() -> Option<ReloadRequest> {
+    HANDED_OFF.lock().ok().and_then(|mut slot| slot.take())
+}
+
 /// Completes the request a reload handoff passed, when `session` resumes on
 /// the new build.
 pub fn complete_handoff(
@@ -482,7 +525,7 @@ pub fn complete_handoff(
     session: &crate::store::sessions::SessionRecord,
     resumed: bool,
 ) {
-    let request = HANDED_OFF.lock().ok().and_then(|mut slot| slot.take());
+    let request = take_handoff();
     if resumed && let Some(request) = request {
         complete(paths, &request, session, crate::build_identity::binary_id());
     }

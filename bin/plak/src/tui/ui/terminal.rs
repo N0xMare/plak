@@ -642,6 +642,11 @@ pub(super) fn drain_host_events(
                 *host_connected = false;
                 if !app.should_quit {
                     app.note_host_disconnected();
+                    if let Some(reason) = events.ended() {
+                        app.push_root_block(ScrollBlock::Error(format!(
+                            "host transport ended: {reason}"
+                        )));
+                    }
                 }
                 return drain;
             }

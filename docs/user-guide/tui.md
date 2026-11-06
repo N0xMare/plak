@@ -218,11 +218,42 @@ If an old queued prompt already ran through another face and its result is no
 longer retained, Plak consumes it without rerunning it and says
 `queued prompt already ran; its result is no longer kept`.
 
+### Connecting to a running host
+
+When `plak host` is running for this home and state key, the TUI attaches
+over its private local socket instead of embedding a session. The resume
+picker lists the host's sessions. `/new` creates and attaches another session;
+`/resume <id>` switches this terminal's attachment. A web app can stay attached
+to the same session at the same time.
+
+Quit, terminal close and terminating signals detach: the host's turn and
+children keep running. `/stop` stops the attached session's work without
+closing the terminal. It is hidden from the embedded-mode palette; use Esc
+to interrupt embedded work. If the host is lost, the TUI explains why and
+restores unacknowledged draft text without resending it. Restart the host,
+then `/attach`, or quit and `plak resume <id>`. After an unanswered `/new`,
+the next `/new` after reconnect reuses its request identity and finds the
+session it may already have created.
+
+With no answering host and no held host lock, the TUI embeds as usual. While
+a host starts or stops it waits briefly, then asks you to retry rather than
+embedding beside it. An incompatible host or a socket that fails same-user
+checks refuses the launch; it never silently falls back beside that peer.
+
 ### The hint line and `/reload`
 
 The line under the composer border reads `/ commands · Ctrl+X menu · ?
 keybinds`, plus a red `Esc stop` while a turn runs. When a newer `plak` is
-installed on `PATH` it says `new build installed · /reload`. `/reload` restarts
+installed on `PATH` it says `new build installed · /reload`.
+In host mode, `/reload` replaces only this client and reattaches the same
+resident session. It never exports, carries or hands off the session; a
+different or unknown destination state key refuses. Background processes
+still refuse reload. A requested `plak session reload --expect-binary`
+receives an immediate local refusal explaining that this session runs in
+`plak host`: restart the host to move its sessions to another build. This
+also applies if an embedded requested reload lands in a running host.
+
+In embedded mode, `/reload` restarts
 on that build and resumes this session. A turn that is running and sub-agents
 that are running are handed over: the new build continues each of them once,
 by itself. `/reload` is refused, with a transcript note, while:
