@@ -2051,6 +2051,33 @@ session` and `opened session` lines twice each (the first attach's open and
 the wake's). Its cuts kill the endpoint at every indexed commit, the idle
 release's and the wake's included, and recover through the ordinary `plak
 agent` relaunch.
+
+The `tui_host_restart` shape uses the ordinary offline TUI PTY fixture
+against a test-hooks `plak host`. Its specialized driver is registered in
+the strict crash-sweep entry point and the durability lane (excluded from
+offline by its exact test name). It cuts every indexed host commit of
+creation, terminal attach, a busy turn and `stop_session`, once with a
+root alone and once with a real child running. Twin pilots must have the
+same indexed labels per store, and every cut must reach that pilot label.
+A live terminal reports
+transport loss plainly; a handshake cut may end before a TUI takes the
+terminal. A restarted host replays the create idempotently, and a fresh
+TUI attach opens that session without replaying the prompt. The driver
+records each per-store cut and dispatch count under
+`target/crash-sweep/tui-host-restart-*.jsonl`. Client reload has no session
+authority handoff or host commit to cut: the deterministic PTY case checks
+that the host process and resident session survive it.
+
+The offline TUI corpus shares one fixture for embedded and socket modes;
+`PLAK_TEST_TUI_MODE=embedded|host` selects whether it starts a test-hooks
+host for the home before launching the same terminal driver. Dedicated
+socket cases check `/new`, `/stop`, quit-as-detach and re-attachment after
+loss; a real web endpoint and a real terminal also share one transcript.
+Shared crash and reload cases assert each mode's own law: losing or
+re-execing a client leaves the host's root and children running. Binding
+carry and embedded-launch attribution cases explicitly select an embedded
+owner. Requested-reload continuation cases are embedded-only; host cases
+require an immediate local refusal with no host intent or dispatch.
 `plak host`'s crash windows run against the real binary on its control
 socket (`host_skeleton`, the durability lane for the `host_crash_` cases):
 `host_crash_cuts_of_create_materialize_and_release_recover` kills the host at

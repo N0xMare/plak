@@ -44,6 +44,20 @@ const QUEUE_STALL_MS: u64 = 16_000;
 const TUI_ROWS: u16 = 30;
 const TUI_COLS: u16 = 100;
 
+mod host;
+
+/// A real terminal on a fixture whose host is already running. It borrows
+/// the home; the fixture that started the host remains its cleanup owner.
+pub(super) fn attach_to_host(root: &Path, session: &str) -> Terminal {
+    let fixture = Fixture {
+        root: root.to_path_buf(),
+        mode: Mode::Embedded,
+        host: Mutex::default(),
+        owns_root: false,
+    };
+    Terminal::spawn(&fixture, Launch::Resume(session))
+}
+
 // ---------------------------------------------------------------------------
 // Fixture
 // ---------------------------------------------------------------------------
@@ -51,12 +65,40 @@ const TUI_COLS: u16 = 100;
 /// One disposable product home, workspace and script document.
 struct Fixture {
     root: PathBuf,
+    mode: Mode,
+    host: Mutex<Option<HostProcess>>,
+    owns_root: bool,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Mode {
+    Embedded,
+    Host,
+}
+
+struct HostProcess {
+    child: std::process::Child,
+    socket: PathBuf,
 }
 
 static FIXTURE_ORDINAL: AtomicU32 = AtomicU32::new(0);
 
 impl Fixture {
+    /// Binding carry and embedded launch-attribution cases need an embedded
+    /// owner; shared lifecycle cases compare the two modes' distinct laws.
+    fn embedded(script: &Value) -> Self {
+        Self::with_mode(script, Mode::Embedded)
+    }
     fn new(script: &Value) -> Self {
+        let mode = match std::env::var("PLAK_TEST_TUI_MODE").as_deref() {
+            Ok("host") => Mode::Host,
+            Ok("embedded") | Err(_) => Mode::Embedded,
+            Ok(other) => panic!("unknown TUI fixture mode: {other}"),
+        };
+        Self::with_mode(script, mode)
+    }
+
+    fn with_mode(script: &Value, mode: Mode) -> Self {
         let ordinal = FIXTURE_ORDINAL.fetch_add(1, Ordering::Relaxed);
         // Under `TMPDIR`, like every other test's scratch, so the gate's
         // storage placement (`PLAK_TEST_TMPDIR`) reaches these sessions too.
@@ -64,7 +106,12 @@ impl Fixture {
             .join("offline-tui")
             .join(format!("{}-{ordinal}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        let fixture = Self { root };
+        let fixture = Self {
+            root,
+            mode,
+            host: Mutex::default(),
+            owns_root: true,
+        };
         std::fs::create_dir_all(fixture.home().join("agents")).expect("home");
         std::fs::create_dir_all(fixture.workspace()).expect("workspace");
         std::fs::create_dir_all(fixture.root.join("tmp")).expect("tmp");
@@ -190,6 +237,73 @@ impl Fixture {
 }
 
 impl Fixture {
+    fn command(&self) -> Command {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_plak"));
+        command
+            .current_dir(self.workspace())
+            .env_clear()
+            .env("PATH", std::env::var("PATH").unwrap_or_default())
+            .env("HOME", self.root.join("fake-home"))
+            .env("TMPDIR", self.root.join("tmp"))
+            .env("PLAK_HOME", self.home())
+            .env("PLAK_TEST_MODEL", "offline-loopback-v1")
+            .env("PLAK_TEST_SCRIPT", self.script())
+            .env("PLAK_TEST_EVIDENCE", self.evidence());
+        command
+    }
+
+    fn ensure_host(&self) {
+        self.ensure_host_with_env(&[]);
+    }
+
+    fn ensure_host_with_env(&self, env: &[(&str, &str)]) {
+        use std::io::{BufRead as _, BufReader};
+        use std::process::Stdio;
+        if self.mode != Mode::Host {
+            return;
+        }
+        let mut slot = self.host.lock().unwrap();
+        if slot.is_some() {
+            return;
+        }
+        let mut child = self
+            .command()
+            .envs(env.iter().copied())
+            .arg("host")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("fixture host");
+        let stderr = child.stderr.take().unwrap();
+        let (send, lines) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                let _ = send.send(line);
+            }
+        });
+        let until = Instant::now() + WAIT;
+        let socket = loop {
+            let line = lines
+                .recv_timeout(until.saturating_duration_since(Instant::now()))
+                .expect("host start line");
+            if let Some(socket) = line
+                .strip_prefix("plak host: serving on ")
+                .and_then(|line| line.split(" (host ").next())
+            {
+                break PathBuf::from(socket);
+            }
+        };
+        *slot = Some(HostProcess { child, socket });
+    }
+
+    fn kill_host(&self) {
+        if let Some(mut host) = self.host.lock().unwrap().take() {
+            host.child.kill().unwrap();
+            host.child.wait().unwrap();
+        }
+    }
+
     /// One CLI command in this fixture, read to completion.
     fn cli(&self, args: &[&str]) -> std::process::Output {
         Command::new(env!("CARGO_BIN_EXE_plak"))
@@ -260,7 +374,10 @@ fn write_private(path: &Path, body: &str) {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.root);
+        self.kill_host();
+        if self.owns_root {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
     }
 }
 
@@ -432,7 +549,7 @@ struct Capture {
 }
 
 /// One real terminal running the shipped binary on a pseudoterminal.
-struct Terminal {
+pub(super) struct Terminal {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn std::io::Write + Send>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
@@ -470,6 +587,13 @@ impl Terminal {
     }
 
     fn spawn_sized(fixture: &Fixture, launch: Launch<'_>, rows: u16, cols: u16) -> Self {
+        match launch {
+            Launch::WithEnv(env) => fixture.ensure_host_with_env(env),
+            Launch::Faulted { faults, .. } => {
+                fixture.ensure_host_with_env(&[("PLAK_TEST_FAULTS", faults)]);
+            }
+            _ => fixture.ensure_host(),
+        }
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows,
@@ -573,13 +697,23 @@ impl Terminal {
         terminal
     }
 
-    fn wait_ready(&mut self) -> String {
+    pub(super) fn wait_ready(&mut self) -> String {
         self.wait_where("the ready shell", |frame| {
             frame.contains("%/") && frame.contains("/ commands")
         })
     }
 
-    fn screen(&self) -> String {
+    fn select_resume_prompt(&mut self, prompt: &str) {
+        let needle = format!("│ {prompt}");
+        let mut current = self.screen();
+        while !current.contains(&needle) {
+            self.send(b"\x1b[B");
+            let previous = current;
+            current = self.wait_where("the next session selected", |frame| frame != previous);
+        }
+    }
+
+    pub(super) fn screen(&self) -> String {
         self.capture.lock().unwrap().parser.screen().contents()
     }
 
@@ -605,7 +739,7 @@ impl Terminal {
         self.child.process_id().expect("child pid")
     }
 
-    fn send(&mut self, bytes: &[u8]) {
+    pub(super) fn send(&mut self, bytes: &[u8]) {
         self.writer.write_all(bytes).expect("pty write");
         self.writer.flush().expect("pty flush");
     }
@@ -643,12 +777,16 @@ impl Terminal {
         self.capture.lock().unwrap().parser.set_size(rows, cols);
     }
 
-    fn is_alive(&mut self) -> bool {
+    pub(super) fn is_alive(&mut self) -> bool {
         self.child.try_wait().expect("wait").is_none()
     }
 
     /// Waits for a stable frame matching `predicate`.
-    fn wait_where(&mut self, description: &str, predicate: impl Fn(&str) -> bool) -> String {
+    pub(super) fn wait_where(
+        &mut self,
+        description: &str,
+        predicate: impl Fn(&str) -> bool,
+    ) -> String {
         let deadline = Instant::now() + WAIT;
         loop {
             let first = self.screen();
@@ -670,7 +808,7 @@ impl Terminal {
         }
     }
 
-    fn wait_screen(&mut self, needle: &str) -> String {
+    pub(super) fn wait_screen(&mut self, needle: &str) -> String {
         self.wait_where(&format!("a screen containing `{needle}`"), |frame| {
             frame.contains(needle)
         })
@@ -736,7 +874,7 @@ impl Terminal {
     }
 
     /// [`Self::finish`], with the last screen the process left.
-    fn finish_with_screen(mut self) -> (portable_pty::ExitStatus, String) {
+    pub(super) fn finish_with_screen(mut self) -> (portable_pty::ExitStatus, String) {
         let deadline = Instant::now() + WAIT;
         // A quit that lands while a turn still settles asks first (spec 02
         // §5.3): confirm it once, as the operator would.
@@ -770,8 +908,8 @@ impl Terminal {
         (status, screen)
     }
 
-    fn quit(mut self) {
-        self.send(b"/quit\r");
+    pub(super) fn quit(mut self) {
+        self.send(b"\x11");
         let home = self.home.clone();
         let (status, screen) = self.finish_with_screen();
         assert!(
@@ -1370,6 +1508,11 @@ fn a_terminal_killed_mid_turn_relaunches_with_one_recovery_note_and_answers() {
     let ids = fixture.session_ids();
     assert_eq!(ids.len(), 1, "one session in the workspace: {ids:?}");
     let session = ids[0].clone();
+
+    if fixture.mode == Mode::Host {
+        host::assert_client_loss_keeps_work(&fixture, &session, "the stalled answer");
+        return;
+    }
 
     fixture.reset_evidence();
     fixture.write_script(&recovery_answer_script());
@@ -2401,8 +2544,15 @@ fn the_launch_picker_lists_earlier_sessions_and_reopens_the_chosen_one() {
                 || panel_shows(frame, "beta session prompt"))
     });
     assert!(
-        listing.matches("offline-loopback-v1").count() >= 2,
-        "both rows name the model:\n{listing}"
+        listing
+            .matches(if fixture.mode == Mode::Host {
+                "lead"
+            } else {
+                "offline-loopback-v1"
+            })
+            .count()
+            >= 2,
+        "both rows name their binding or host profile:\n{listing}"
     );
     let started_on_alpha = panel_shows(&listing, "alpha session prompt");
     picker.send(b"\x1b[B");
@@ -2448,13 +2598,8 @@ fn the_launch_picker_lists_earlier_sessions_and_reopens_the_chosen_one() {
     // The second row is the older session; Enter reopens it with its own
     // transcript and nothing of the other.
     let mut reopened = Terminal::spawn(&fixture, Launch::Picker);
-    let opened = reopened.wait_screen("Resume session");
-    if !panel_shows(&opened, "alpha session prompt") {
-        reopened.send(b"\x1b[B");
-        reopened.wait_where("the older session selected", |frame| {
-            panel_shows(frame, "alpha session prompt")
-        });
-    }
+    reopened.wait_screen("Resume session");
+    reopened.select_resume_prompt("alpha session prompt");
     // The picker's `Enter` acts once it has been open for 600 ms.
     std::thread::sleep(Duration::from_millis(700));
     reopened.send(b"\r");
@@ -2701,7 +2846,7 @@ fn rebind_and_epoch_reload_preserve_committed_named_state() {
         let mut script = tool_then_answer("state source answer");
         script["tree"] = json!(true);
         script["durable_tree"] = json!(true);
-        let fixture = Fixture::new(&script);
+        let fixture = Fixture::embedded(&script);
         let config_path = fixture.home().join("config.toml");
         let config = std::fs::read_to_string(&config_path).unwrap();
         write_private(
@@ -2785,7 +2930,7 @@ fn rebind_and_epoch_reload_preserve_committed_named_state() {
 /// session in one step, naming the change, instead of leaving it unattached.
 #[test]
 fn a_reload_whose_binding_changed_carries_in_one_step_naming_the_change() {
-    let fixture = Fixture::new(&tool_then_answer("the answer before the new adapter"));
+    let fixture = Fixture::embedded(&tool_then_answer("the answer before the new adapter"));
     let fake_bin = fixture.root.join("fake-bin-binding");
     std::fs::create_dir_all(&fake_bin).expect("fake bin");
     let mut terminal = Terminal::spawn(&fixture, Launch::OnPath(&fake_bin));
@@ -2829,7 +2974,7 @@ fn a_slow_identity_hash_still_carries_a_changed_binding() {
         script["identity_hash_delay_ms"] = json!(12_000);
         script
     };
-    let fixture = Fixture::new(&slow("the answer before the slow hash"));
+    let fixture = Fixture::embedded(&slow("the answer before the slow hash"));
     let fake_bin = fixture.root.join("fake-bin-slow-identity");
     std::fs::create_dir_all(&fake_bin).expect("fake bin");
     let mut terminal = Terminal::spawn(&fixture, Launch::OnPath(&fake_bin));
@@ -2859,7 +3004,7 @@ fn a_slow_identity_hash_still_carries_a_changed_binding() {
 /// handed-off turn continues once in this build.
 #[test]
 fn a_reload_whose_binding_changed_keeps_a_running_turn_here_and_continues_it_once() {
-    let fixture = Fixture::new(&stalled_then_answers(0));
+    let fixture = Fixture::embedded(&stalled_then_answers(0));
     let gate = ProviderGate::new(&fixture);
     let mut script = stalled_then_answers(0);
     script["steps"][0]["gate"] = json!({"file": gate.path});
@@ -2991,7 +3136,7 @@ fn the_reopen_probe_leaves_a_live_durable_tree_unchanged() {
 fn a_binding_carry_counts_the_finished_sub_agents_it_does_not_restore() {
     let mut script = tree_turn_script();
     script["durable_tree"] = json!(true);
-    let fixture = Fixture::new(&script);
+    let fixture = Fixture::embedded(&script);
     enable_subagents(&fixture);
     let fake_bin = fixture.root.join("fake-bin-children");
     std::fs::create_dir_all(&fake_bin).expect("fake bin");
@@ -3122,7 +3267,7 @@ fn wait_for_outcome(path: &Path) -> Value {
 /// boundary, and finished by a host-authored continuation the new build posts.
 #[test]
 fn a_requested_reload_lands_on_the_named_build_and_wakes_the_root() {
-    let fixture = Fixture::new(&tool_then_answer("the answer around the reload"));
+    let fixture = Fixture::embedded(&tool_then_answer("the answer around the reload"));
     enable_reload_requests(&fixture);
     let fake_bin = fixture.root.join("fake-bin-request");
     std::fs::create_dir_all(&fake_bin).expect("fake bin");
@@ -3161,7 +3306,7 @@ fn a_requested_reload_lands_on_the_named_build_and_wakes_the_root() {
 /// the destination completes the request it was handed for the successor.
 #[test]
 fn a_requested_reload_onto_another_state_key_carries_and_wakes_the_successor() {
-    let fixture = Fixture::new(&tool_then_answer("the answer across the key"));
+    let fixture = Fixture::embedded(&tool_then_answer("the answer across the key"));
     enable_reload_requests(&fixture);
     let fake_bin = fixture.root.join("fake-bin-other-key");
     std::fs::create_dir_all(&fake_bin).expect("fake bin");
@@ -3204,7 +3349,7 @@ fn a_requested_reload_onto_another_state_key_carries_and_wakes_the_successor() {
 /// so. (Running sub-agents are handed off, chapter 03 §14.1.)
 #[test]
 fn a_requested_reload_is_refused_while_a_background_process_runs() {
-    let fixture = Fixture::new(&json!({
+    let fixture = Fixture::embedded(&json!({
         "version": 1,
         "process_tools": true,
         "repeat_last_step": true,
@@ -3287,6 +3432,11 @@ fn a_reload_during_a_running_turn_hands_it_to_the_new_build_once() {
         "repeat_last_step": true,
         "steps": [{"output": {"text": "continued after the reload"}}]
     }));
+    if fixture.mode == Mode::Host {
+        host::assert_client_reload_keeps_host(&fixture, &mut terminal);
+        terminal.quit();
+        return;
+    }
     terminal.send(b"/reload\r");
     terminal.wait_screen("continued after the reload");
     gate.release();
@@ -3379,6 +3529,11 @@ fn a_reload_during_a_running_child_turn_continues_the_child_once_on_the_new_buil
     terminal.wait_absent("Esc stop");
     wait_for_child_dispatches(&fixture, 1);
     let session = fixture.session_ids()[0].clone();
+    if fixture.mode == Mode::Host {
+        host::assert_client_reload_keeps_host(&fixture, &mut terminal);
+        terminal.quit();
+        return;
+    }
     // The new build's child request waits on its own gate, so the
     // continuation is still running when it is counted.
     write_json(&child_script, &gated_child(&second_gate));
@@ -3435,6 +3590,11 @@ fn a_reload_with_a_deaf_child_on_an_idle_root_continues_the_child_once() {
     terminal.wait_absent("Esc stop");
     wait_for_child_dispatches(&fixture, 1);
     let session = fixture.session_ids()[0].clone();
+    if fixture.mode == Mode::Host {
+        host::assert_client_reload_keeps_host(&fixture, &mut terminal);
+        terminal.quit();
+        return;
+    }
     write_json(&child_script, &gated_child(&second_gate));
     fixture.write_script(&product_child_root(
         &child_script,
@@ -3498,6 +3658,10 @@ fn a_crashed_running_child_is_named_once_and_its_notice_never_reads_as_user_text
     wait_for_child_dispatches(&fixture, 1);
     let session = fixture.session_ids()[0].clone();
     assert!(!first.kill_hard().success());
+    if fixture.mode == Mode::Host {
+        host::assert_client_loss_keeps_work(&fixture, &session, "the child is running");
+        return;
+    }
     fixture.write_script(&product_child_root(
         &child_script,
         &json!([{"output": {"text": "the root answered after the crash"}}]),
@@ -3667,7 +3831,10 @@ fn assert_same_key_reload_starts_installed_build(changed_orchestration: bool) {
     assert!(restore < notice, "restore precedes reload notice");
     eprintln!("TUI reload: {}ms", reload_started.elapsed().as_millis());
     assert!(terminal.finish().success());
-    assert_eq!(std::fs::read_to_string(marker).unwrap(), "1");
+    assert_eq!(
+        std::fs::read_to_string(marker).unwrap(),
+        if fixture.mode == Mode::Host { "" } else { "1" }
+    );
     assert_eq!(
         std::fs::read_to_string(args).expect("reload args"),
         format!("--resume\n{session}\n")
@@ -3702,7 +3869,7 @@ fn install_carry_target(fixture: &Fixture, fake_bin: &Path, admitted: u64) -> (P
 /// committed) and starts that build with `--import-resume <file>`.
 #[test]
 fn a_reload_onto_another_state_key_hands_the_new_build_an_export() {
-    let fixture = Fixture::new(&tool_then_answer("the answer before reload"));
+    let fixture = Fixture::embedded(&tool_then_answer("the answer before reload"));
     let fake_bin = fixture.root.join("fake-bin");
     std::fs::create_dir_all(&fake_bin).expect("fake bin");
     let mut terminal = Terminal::spawn(&fixture, Launch::OnPath(&fake_bin));
@@ -3762,7 +3929,7 @@ fn a_reload_onto_another_state_key_hands_the_new_build_an_export() {
 
 #[test]
 fn reload_warns_about_a_smaller_destination_before_closing_the_old_session() {
-    let fixture = Fixture::new(&tool_then_answer("answer before capacity warning"));
+    let fixture = Fixture::embedded(&tool_then_answer("answer before capacity warning"));
     let fake_bin = fixture.root.join("fake-bin");
     std::fs::create_dir_all(&fake_bin).unwrap();
     let mut terminal = Terminal::spawn(&fixture, Launch::OnPath(&fake_bin));
@@ -3822,6 +3989,8 @@ fn resuming_another_builds_session_carries_it_once_through_its_snapshot() {
     std::fs::write(&export, serde_json::to_vec(&document).expect("json")).expect("stash");
 
     // This build's state becomes another build's.
+    // A host must close its stores before the fixture moves their directory.
+    fixture.kill_host();
     let state = fixture.home().join("state");
     let current = std::fs::read_dir(&state)
         .expect("state")
@@ -3886,7 +4055,7 @@ fn tui_exit_bound_idle_and_stalled_turn() {
         } else {
             terminal.send(b"\x11");
         }
-        if stalled && !ctrl_c {
+        if stalled && !ctrl_c && fixture.mode == Mode::Embedded {
             // Mid-turn quit asks first; the bound runs from `[ Quit ]`.
             terminal.wait_screen("Quit plak?");
         }
@@ -3894,7 +4063,7 @@ fn tui_exit_bound_idle_and_stalled_turn() {
         if ctrl_c {
             // A stuck cancel's confirmed Ctrl+C ladder quits without a new dialog.
             terminal.send(b"\x03\x03");
-        } else if stalled {
+        } else if stalled && fixture.mode == Mode::Embedded {
             terminal.send(b"\r");
         }
         while terminal.is_alive() {
@@ -3908,7 +4077,11 @@ fn tui_exit_bound_idle_and_stalled_turn() {
         let status = terminal.finish();
         assert_eq!(
             status.exit_code(),
-            if stalled { 130 } else { 0 },
+            if stalled && fixture.mode == Mode::Embedded {
+                130
+            } else {
+                0
+            },
             "stalled={stalled}, ctrl_c={ctrl_c}: {status:?}"
         );
         eprintln!(
@@ -3932,7 +4105,7 @@ fn product_event_count(database: &rusqlite::Connection, kind: &str) -> i64 {
 fn tui_local_launch_budget_new_and_resume_with_network_faults() {
     let mut measurements = [Vec::new(), Vec::new()];
     for sample in 1..=3 {
-        let fixture = Fixture::new(&tool_then_answer("warm startup answer"));
+        let fixture = Fixture::embedded(&tool_then_answer("warm startup answer"));
         let mut session = None;
         for resumed in [false, true] {
             let started = Instant::now();

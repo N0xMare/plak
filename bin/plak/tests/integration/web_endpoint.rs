@@ -412,6 +412,66 @@ fn a_tailnet_client_attaches_prompts_and_reads_the_answer() {
     assert!(!web.socket.exists(), "the socket is removed on exit");
 }
 
+#[test]
+fn a_web_face_and_a_terminal_share_one_hosts_transcript() {
+    let fixture = Fixture::new(&json!({
+        "version": 1,
+        "repeat_last_step": true,
+        "steps": [{"output": {"text": "both attachments see this answer"}}]
+    }));
+    let mut web = start(&fixture);
+    let cookie = cookie(&web);
+    let mut socket = upgrade(&web, &cookie);
+    let root = hello(&mut socket);
+    let attachment = attach(&mut socket, &root, 1);
+    send(
+        &mut socket,
+        &ClientFrame::Request {
+            id: 901,
+            op: Op::ListSessions { workspace: None },
+        },
+    );
+    let listed = response(&mut socket, 901);
+    let session = listed["ok"]["rows"][0]["session"].as_str().unwrap();
+    let mut terminal = super::offline_tui::attach_to_host(&fixture.root, session);
+    terminal.wait_ready();
+    terminal.send(b"a prompt from the terminal\r");
+    terminal.wait_screen("both attachments see this answer");
+    loop {
+        let frame = next_frame(&mut socket);
+        if frame
+            .to_string()
+            .contains("both attachments see this answer")
+        {
+            break;
+        }
+    }
+    send(
+        &mut socket,
+        &ClientFrame::Request {
+            id: 902,
+            op: Op::Intent {
+                attachment,
+                intent: SessionIntent::Prompt(Draft::from("a prompt from the web")),
+                blobs: Vec::new(),
+            },
+        },
+    );
+    assert_eq!(response(&mut socket, 902)["ok"]["answer"], "accepted");
+    terminal.wait_screen("a prompt from the web");
+    terminal.quit();
+    send(
+        &mut socket,
+        &ClientFrame::Request {
+            id: 903,
+            op: Op::Ping,
+        },
+    );
+    assert_eq!(response(&mut socket, 903)["ok"]["answer"], "pong");
+    drop(socket);
+    interrupt_and_wait(&mut web);
+}
+
 /// Everything that fails a check gets the same 403: no identity, a login
 /// not on the list, another forwarded host, a request in any shape but
 /// Serve's (sent to the socket directly, or with no or a local source), an

@@ -13,6 +13,8 @@ use plakous_offline_crash_harness::evidence::{EvidenceKind, read_evidence};
 
 use super::*;
 
+mod tui;
+
 /// The physical provider dispatches the fixture has seen.
 fn dispatches(fixture: &Fixture) -> usize {
     read_evidence(fixture.root.join("evidence.jsonl"))

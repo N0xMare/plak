@@ -8,6 +8,11 @@ from pathlib import Path
 import subprocess
 
 
+TERMINAL_SHAPES = {
+    "tui_host_restart": "host_skeleton::crash::tui::tui_host_restart",
+}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--shapes")
@@ -28,10 +33,16 @@ def main() -> int:
         PLAK_CRASH_SWEEP_REPEAT=str(args.repeat),
         PLAK_CRASH_SWEEP_STRICT=str(int(args.strict)),
     )
+    terminal_shapes = []
+    generic_shapes = None
     if args.shapes is not None:
-        env["PLAK_CRASH_SWEEP_SHAPES"] = args.shapes
+        selected = args.shapes.split(",")
+        terminal_shapes = [name for name in selected if name in TERMINAL_SHAPES]
+        generic_shapes = [name for name in selected if name not in TERMINAL_SHAPES]
+        env["PLAK_CRASH_SWEEP_SHAPES"] = ",".join(generic_shapes)
     elif args.strict:
         env.pop("PLAK_CRASH_SWEEP_SHAPES", None)
+        terminal_shapes = list(TERMINAL_SHAPES)
     else:
         env["PLAK_CRASH_SWEEP_SHAPES"] = "final_only,direct_tool_then_final"
     # Use the gate's test build, including both cell workers. Building only
@@ -52,23 +63,44 @@ def main() -> int:
     # `--workspace` keeps the feature resolution of the build above: `-p plak`
     # resolves plak's features alone and recompiled about twenty crates (and
     # the product binary the sweep launches) into a second artifact set.
-    return subprocess.call(
-        [
-            "cargo",
-            "test",
-            "--locked",
-            "--workspace",
-            "--all-features",
-            "--test",
-            "integration",
-            "crash_sweep::full_sweep",
-            "--",
-            "--ignored",
-            "--exact",
-            "--nocapture",
-        ],
-        env=env,
-    )
+    command = [
+        "cargo",
+        "test",
+        "--locked",
+        "--workspace",
+        "--all-features",
+        "--test",
+        "integration",
+    ]
+    if generic_shapes != []:
+        result = subprocess.call(
+            [
+                "cargo",
+                "test",
+                "--locked",
+                "--workspace",
+                "--all-features",
+                "--test",
+                "integration",
+                "crash_sweep::full_sweep",
+                "--",
+                "--ignored",
+                "--exact",
+                "--nocapture",
+            ],
+            env=env,
+        )
+        if result:
+            return result
+    for name in terminal_shapes:
+        for _ in range(args.repeat):
+            result = subprocess.call(
+                [*command, TERMINAL_SHAPES[name], "--", "--exact", "--nocapture"],
+                env=env,
+            )
+            if result:
+                return result
+    return 0
 
 
 if __name__ == "__main__":

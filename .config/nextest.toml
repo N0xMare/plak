@@ -205,6 +205,7 @@ not (
   | test(jj_cli_doctor_bounds_output_wait_after_leader_exit)
   | test(pending_wakes_return_the_wait_and_are_consumed)
   | test(durability::)
+  | test(tui_host_restart)
   | test(image_residency_crash_cuts_recover_without_redispatch)
   | test(released_leftover_terminal_recording_sigkill_cuts_preserve_no_signal_authority)
   | test(endpoint_fallback_receipt_cuts_recover_the_same_unpaid_target)
@@ -395,7 +396,8 @@ default-filter = '''
 test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
-  test(image_residency_crash_cuts_recover_without_redispatch)
+  test(tui_host_restart)
+  | test(image_residency_crash_cuts_recover_without_redispatch)
   | test(released_leftover_terminal_recording_sigkill_cuts_preserve_no_signal_authority)
   | test(endpoint_fallback_receipt_cuts_recover_the_same_unpaid_target)
   | test(approval_resume::)
@@ -446,6 +448,10 @@ default-filter = '''
   | test(mcp_on_a_runner_runs_there_and_restarts_after_the_runner_does)
   | test(mcp_on_a_runner_ends_with_its_host)
 '''
+
+[[profile.default.overrides]]
+filter = 'test(tui_host_restart)'
+slow-timeout = { period = "600s", terminate-after = 2 }
 
 # Per-test timing: each lane writes target/nextest/<profile>/junit.xml
 # (gitignored). `just dev test-timing` summarizes them; nothing gates on it.
