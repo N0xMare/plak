@@ -293,7 +293,7 @@ impl AgentBuilder {
         mut self,
         backend: plakous_tools::internal::runner::LocalDaemonBackend,
     ) -> Self {
-        self.local_daemon = Some(backend);
+        self.local_daemon = Some(Box::new(backend));
         self
     }
 

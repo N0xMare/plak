@@ -29,6 +29,10 @@ pub struct DirectoryEntry {
 
 impl ProductStore {
     /// Every record's identity for startup recovery, without the face's row limit.
+    #[allow(
+        dead_code,
+        reason = "the optional hosting product reads the full directory"
+    )]
     pub(crate) fn session_ids(&self) -> Result<Vec<String>, String> {
         self.connection
             .prepare("SELECT id FROM sessions ORDER BY id")

@@ -10,6 +10,7 @@
 
 mod dial;
 mod home;
+#[cfg(feature = "web")]
 pub(crate) mod local;
 
 pub(crate) use home::{host_id, private_directory};

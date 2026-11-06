@@ -5997,8 +5997,9 @@ runner for a session yet.
   is settled by existing call recovery on the next full open:
   `OutcomeUnknown`, then `RecoveryRequired` or abandonment, never another
   start. Re-cutting that open cannot settle the call twice. Starts and
-  promotions are serialized with transfer and recheck the holder under that
-  gate. A crash after promotion but before its host record leaves a promoted
+  promotions are serialized with transfer and recheck both the holder and
+  its instance lease under that gate; admission before lapse grants no
+  authority to a start still queued after it. A crash after promotion but before its host record leaves a promoted
   job on the runner, which the sweep discovers. A crash after termination
   but before the transfer answer leaves its diagnostic report for the next
   transfer; it creates no session record.

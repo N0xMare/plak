@@ -60,13 +60,27 @@ impl RunnerService {
             } else {
                 None
             };
-            if guard.is_some() && !lock(&service.inner.tables).held_by(&host, &instance, &owner) {
+            if guard.is_some()
+                && (!service.instance_authority(&host, &instance)
+                    || !lock(&service.inner.tables).held_by(&host, &instance, &owner))
+            {
                 return Err(lost_process_owner());
             }
             service
                 .sessions(&host, &owner.line, verb, payload, control)
                 .await
         })
+    }
+
+    fn instance_authority(&self, host: &str, instance: &str) -> bool {
+        lock(&self.inner.leases)
+            .get(&(host.to_owned(), instance.to_owned()))
+            .is_some_and(|lease| {
+                lease.connections != 0
+                    || lease
+                        .released
+                        .is_some_and(|at| at.elapsed() < self.inner.owner_lease)
+            })
     }
 
     async fn stop_line_foreground(&self, host: &str, line: &str) -> Result<(), String> {
@@ -193,3 +207,6 @@ impl RunnerService {
         });
     }
 }
+
+#[cfg(test)]
+mod tests;

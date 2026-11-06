@@ -116,6 +116,7 @@ impl Clone for Services {
 }
 
 impl Services {
+    #[allow(dead_code, reason = "selected only by the optional hosting product")]
     pub(crate) fn with_local_daemon(
         &self,
         backend: plakous::tools::runner::LocalDaemonBackend,

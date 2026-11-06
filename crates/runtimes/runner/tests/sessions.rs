@@ -374,7 +374,7 @@ async fn a_stale_owner_cannot_control_the_line_after_a_transfer() {
     assert_eq!(refused.kind(), ExecutionBackendErrorKind::IdentityMismatch);
     assert!(refused.proven_no_effect());
     // The transfer already stopped this foreground call; it was never a job.
-    assert!(new.jobs().await.unwrap().is_empty());
+    assert_eq!(new.jobs().await.unwrap().len(), 0);
 }
 
 /// Echoes a payload larger than the initial stream credit through `cat`.

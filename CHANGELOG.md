@@ -32,7 +32,8 @@ one cross-build carrier (a build imports its own and the previous version).
   instance-lease expiry, not at a transient disconnect. Transfers report stopped
   foreground processes for structured logging only; existing call recovery
   settles their unanswered tool calls once. Promoted jobs survive and are
-  re-adopted. Home-local daemons use `host/runner/v3/`; obsolete protocols are
+  re-adopted. Queued starts and promotions recheck line and instance authority
+  when execution begins. Home-local daemons use `host/runner/v3/`; obsolete protocols are
   inspected and reported unknown, never re-adopted. Session formats are unchanged.
 
 ### Format cut

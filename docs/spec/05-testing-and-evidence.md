@@ -2061,7 +2061,8 @@ open settles the tool call unknown exactly once despite a re-cut, under both
 loss policies. Runner fixtures
 cover a newer transfer, a cut after promotion before recording, lease lapse
 without a successor, and a same-instance link blip whose foreground call
-completes. Removing the transfer stop, removing its report, stopping on link
+completes. An admitted start queued past its instance lease is refused with
+no effect, even before the next idle tick. Removing the transfer stop, removing its report, stopping on link
 loss, or removing the lapse stop must each fail the corresponding probe.
 The sweep observes the runner's promotion state before recovery: only
 promoted jobs may survive the successor's transfer.

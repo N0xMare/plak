@@ -156,14 +156,14 @@ pub(in super::super) fn after_kill(
             !alive(pid.unwrap()),
             "recovery did not finish the recorded stop"
         );
-    } else if let Some(pid) = pid {
-        if shape != "runner_restart_unknown_host" {
-            assert_eq!(
-                alive(pid),
-                was_promoted,
-                "transfer must stop only foreground processes"
-            );
-        }
+    } else if let Some(pid) = pid
+        && shape != "runner_restart_unknown_host"
+    {
+        assert_eq!(
+            alive(pid),
+            was_promoted,
+            "transfer must stop only foreground processes"
+        );
     }
     if shape == "runner_restart_unknown_host" {
         for job in before.jobs.iter().filter(|job| job["terminal"] == false) {

@@ -208,17 +208,7 @@ async fn a_new_owner_stops_and_reports_foreground_but_preserves_promoted_jobs() 
         let stopped = after.client.transfer_owner(&owner(2)).await.unwrap();
         assert_eq!(stopped.len(), usize::from(!promoted));
         assert_eq!(alive(fixture.pid()), promoted);
-        if !promoted {
-            assert_eq!(stopped[0].pid, fixture.pid().cast_unsigned());
-            assert_eq!(
-                stopped[0].call_key,
-                "00000000-0000-0000-0000-000000000001:00000000-0000-0000-0000-000000000002"
-            );
-            let third = Link::new(&fixture.service, "third").await;
-            let repeated = third.client.transfer_owner(&owner(3)).await.unwrap();
-            assert_eq!(repeated.len(), 1);
-            assert_eq!(repeated[0], stopped[0]);
-        } else {
+        if promoted {
             let env = runner_environment(
                 environment(fixture.root.path()).descriptor().scope(),
                 fixture.root.path(),
@@ -234,6 +224,16 @@ async fn a_new_owner_stops_and_reports_foreground_but_preserves_promoted_jobs() 
                 )
                 .await
                 .unwrap();
+        } else {
+            assert_eq!(stopped[0].pid, fixture.pid().cast_unsigned());
+            assert_eq!(
+                stopped[0].call_key,
+                "00000000-0000-0000-0000-000000000001:00000000-0000-0000-0000-000000000002"
+            );
+            let third = Link::new(&fixture.service, "third").await;
+            let repeated = third.client.transfer_owner(&owner(3)).await.unwrap();
+            assert_eq!(repeated.len(), 1);
+            assert_eq!(repeated[0], stopped[0]);
         }
     }
 }
