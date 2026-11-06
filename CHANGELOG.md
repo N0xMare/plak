@@ -145,7 +145,9 @@ an export.
   and stops it within 60 s, and the next host's start scan opens each
   session whose continuation runs by itself (a handoff, a pending decision,
   a held loss under `resume_after_loss = "continue"`), so it continues with
-  no client attached. Spec 02 §4.6 carries the systemd unit.
+  no client attached. `release_session` detaches every attachment of a
+  session and releases it now unless something else keeps it resident, so a
+  desk TUI can take it. Spec 02 §4.6 carries the systemd unit.
 - `plak host --web`: the host's sessions' wire v2 over
   a WebSocket at `/wire`, and a web UI's static build, on a private unix
   socket that `tailscale serve --bg unix:<path>` publishes on the tailnet,

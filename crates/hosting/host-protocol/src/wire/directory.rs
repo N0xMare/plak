@@ -112,13 +112,11 @@ pub struct HostedElsewhere {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ResidentReason {
-    /// A turn, a queued or deferred command, recovery debt or a pending
-    /// continuation.
+    /// A turn, a queued or deferred command, recovery debt, a pending
+    /// continuation or a resident child in its tree.
     Work,
     /// A background process.
     Processes,
-    /// A resident child in its tree.
-    Children,
     /// An attachment made since the request.
     Attachment,
 }

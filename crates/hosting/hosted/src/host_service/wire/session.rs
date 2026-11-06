@@ -27,6 +27,10 @@ pub struct WireSession<P: ProtocolExtension> {
     served: Shared<P>,
     changes: watch::Receiver<u64>,
     ended: Arc<AtomicBool>,
+    /// Bumped by each `release_session`: every connection attached before
+    /// it detaches.
+    releases: std::sync::atomic::AtomicU64,
+    attachments: AttachmentCount,
 }
 
 impl<P: ProtocolExtension> WireSession<P> {
@@ -119,6 +123,8 @@ impl<P: ProtocolExtension> WireSession<P> {
             served,
             changes,
             ended,
+            releases: std::sync::atomic::AtomicU64::new(0),
+            attachments: attachments.clone(),
         }
     }
 
@@ -180,6 +186,30 @@ impl<P: ProtocolExtension> WireSession<P> {
     #[must_use]
     pub fn ended(&self) -> bool {
         self.ended.load(Ordering::Acquire)
+    }
+
+    /// How many times a host asked for this session's release.
+    #[must_use]
+    pub fn releases(&self) -> u64 {
+        self.releases.load(Ordering::Acquire)
+    }
+
+    /// Asks every connection attached now to detach, and the session to
+    /// release as soon as nothing else keeps it resident.
+    pub fn request_release(&self) {
+        self.releases.fetch_add(1, Ordering::AcqRel);
+        self.attachments.request_release_now();
+    }
+
+    /// Withdraws [`Self::request_release`]'s release (not its detaches).
+    pub fn cancel_release(&self) {
+        self.attachments.cancel_release_now();
+    }
+
+    /// The attachments and holds counted now.
+    #[must_use]
+    pub fn attached(&self) -> usize {
+        self.attachments.get()
     }
 
     /// Asks the session to quit; it ends once it has.

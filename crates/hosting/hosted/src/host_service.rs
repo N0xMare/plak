@@ -317,6 +317,9 @@ pub struct AttachmentCount(Arc<CountWord>);
 #[derive(Debug, Default)]
 struct CountWord {
     bits: AtomicU64,
+    /// A host asked the session to release as soon as nothing keeps it,
+    /// without waiting out the idle release (`release_session`).
+    release_now: std::sync::atomic::AtomicBool,
     #[cfg(test)]
     seam: Mutex<MarkSeam>,
 }
@@ -387,6 +390,23 @@ impl AttachmentCount {
             after(marked);
         }
         marked
+    }
+
+    /// Asks the session to release as soon as nothing keeps it resident,
+    /// without waiting out the idle release; an attach or a hold still
+    /// keeps it.
+    pub fn request_release_now(&self) {
+        self.0.release_now.store(true, Ordering::Release);
+    }
+
+    /// Withdraws [`Self::request_release_now`].
+    pub fn cancel_release_now(&self) {
+        self.0.release_now.store(false, Ordering::Release);
+    }
+
+    /// Whether a host asked the session to release now.
+    pub(crate) fn release_now(&self) -> bool {
+        self.0.release_now.load(Ordering::Acquire)
     }
 
     /// Holds the session resident until the hold is dropped; `None` once it

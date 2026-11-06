@@ -84,6 +84,75 @@ fn an_idle_session_releases_once_its_last_attachment_detaches() {
     worker.join().unwrap().unwrap();
 }
 
+/// A host's `release_session` asks a settled session to release without
+/// waiting out its idle release: an hour's idle release still ends at once
+/// once asked, and not before; an attachment still keeps it.
+#[test]
+fn a_release_now_ends_a_settled_session_before_its_idle_release() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut config, _) = scripted_host_with(root.path(), answered_once());
+    let attachments = AttachmentCount::default();
+    config.idle_release = Some(IdleRelease {
+        after: Duration::from_secs(3600),
+        attachments: attachments.clone(),
+    });
+    let (actions, events, worker) = spawn_host_worker(config).unwrap();
+    let node = NodeAddress {
+        tree_id: "idle".into(),
+        agent_id: "idle".into(),
+    };
+    let service =
+        HostService::new(actions.clone(), node.clone(), 64).with_attachment_count(&attachments);
+    let attachment = service
+        .attach(&node, crate::host_service::wire::Face::Local)
+        .unwrap();
+    let mut seen = Vec::new();
+    send_attached_action(&actions, UserAction::Prompt("hello".into()));
+    wait_for(&events, &mut seen, "the turn settled", |event| {
+        matches!(event, HostEvent::SetBusy(false))
+    });
+    attachments.request_release_now();
+    assert!(
+        !ended(&worker, Duration::from_secs(1)),
+        "an attached session was released"
+    );
+    service.detach(attachment).unwrap();
+    drop(service);
+    assert!(
+        ended(&worker, Duration::from_secs(30)),
+        "the session asked to release now waited out its idle release"
+    );
+    drop(actions);
+    worker.join().unwrap().unwrap();
+}
+
+/// Without the request, the same settled session with nothing attached
+/// stays resident for its idle release.
+#[test]
+fn a_settled_session_waits_out_its_idle_release_unless_asked() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut config, _) = scripted_host_with(root.path(), answered_once());
+    let attachments = AttachmentCount::default();
+    config.idle_release = Some(IdleRelease {
+        after: Duration::from_secs(3600),
+        attachments: attachments.clone(),
+    });
+    let (actions, events, worker) = spawn_host_worker(config).unwrap();
+    let mut seen = Vec::new();
+    send_attached_action(&actions, UserAction::Prompt("hello".into()));
+    wait_for(&events, &mut seen, "the turn settled", |event| {
+        matches!(event, HostEvent::SetBusy(false))
+    });
+    attachments.request_release_now();
+    attachments.cancel_release_now();
+    assert!(
+        !ended(&worker, Duration::from_secs(2)),
+        "a withdrawn release still released"
+    );
+    send_attached_action(&actions, UserAction::Quit);
+    worker.join().unwrap().unwrap();
+}
+
 /// An embedded session (no idle release) is never released for being idle.
 #[test]
 fn an_embedded_session_is_never_released_for_being_idle() {

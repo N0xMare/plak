@@ -3912,7 +3912,7 @@ verdicts) are addressed, the session profile and workspace chrome states.
   `unwatch_sessions {attachment}` (`detached`), `new_session {workspace,
   template?, request_id}` (`created {session, node, environment}`) and
   `release_session {session}` (`released`, or `resident {reason}` with
-  `work`, `processes`, `children` or `attachment`). The host attachment
+  `work`, `processes` or `attachment`). The host attachment
   takes `directory {attachment, seq, snapshot, rows}` frames, its sequence
   from 1 as an attachment's events: first a snapshot of every row, which
   replaces what the client holds, then the rows that changed. A row names
@@ -4019,7 +4019,10 @@ verdicts) are addressed, the session profile and workspace chrome states.
   hold also advances a generation in the same word, and the actor marks
   only from the exact word it read before the receive whose timeout led to
   the decision, so a client that attached, sent an intent and left again
-  in between still keeps the session: its intent was accepted and runs. An
+  in between still keeps the session: its intent was accepted and runs. A
+  host's `release_session` asks the actor to decide now rather than after
+  the idle release (`AttachmentCount::request_release_now`); every other
+  condition stands. An
   attach racing the timer therefore either comes first and keeps the
   session, or finds it released. An embedded face's session (the TUI, `plak agent`,
   `plak run`) is never released for being idle. A host serves each session
@@ -4520,6 +4523,20 @@ directory (§4.4).
   session is dormant until attached; its `environment` is
   `host-login-shell`, and a session a TUI or `plak agent` created reads
   `cli`. Any existing directory is accepted (chapter 04 §2.10).
+- **Release.** `release_session {session}` hands a session to a desk TUI
+  without waiting out the idle release: every attachment of the session
+  ends, the asker's own included, each with the host frame `detached`, and
+  the session releases as soon as nothing else keeps it resident (its
+  actor's idle release, asked to release now, decides it as it decides an
+  idle release, so a turn, pending work, a process or a resident child still
+  keeps it, and so does an attach made since). The answer is `released` once
+  the release committed, so another face may open the session at once, or,
+  when none began within 10 s, `resident {reason}` (`attachment` when one
+  was made since, `processes` while one runs, `work` otherwise), and then the
+  request is withdrawn, so the session does not release by itself later. A
+  dormant session is `released`; one the host does not know is
+  `unknown_session`. The release writes nothing of its own: it is the idle
+  release's joined quit.
 - **Start scan.** Before it serves, it reads which of the directory's
   sessions the last host left a continuation that runs by itself: a root
   whose latest loss is a planned handoff, a root continuation decided and

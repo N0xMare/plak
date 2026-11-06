@@ -68,6 +68,8 @@ struct Script {
     creates: Mutex<Vec<String>>,
     /// The tree each session's root is in, when it is not its own.
     trees: Mutex<BTreeMap<String, String>>,
+    /// The sessions keep themselves resident: nothing releases.
+    stay: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Clone, Default)]
@@ -110,15 +112,30 @@ impl HostSessions<Core> for Fake {
             .unwrap()
             .insert(session.to_owned(), observations.clone());
         let busy = observations.clone();
+        let attachments = crate::host_service::AttachmentCount::default();
+        let count = attachments.clone();
+        let script = Arc::clone(&self.0);
         let worker = HostWorkerHandle::spawn(move || {
             drop(observations);
-            while let Ok(delivery) = intents.recv() {
-                match &*delivery {
-                    SessionIntent::Quit => break,
-                    SessionIntent::Prompt(_) => {
-                        let _ = busy.send(SessionObservation::SetBusy(true));
+            loop {
+                match intents.recv_timeout(Duration::from_millis(10)) {
+                    Ok(delivery) => match &*delivery {
+                        SessionIntent::Quit => break,
+                        SessionIntent::Prompt(_) => {
+                            let _ = busy.send(SessionObservation::SetBusy(true));
+                        }
+                        _ => {}
+                    },
+                    // The actor's idle release, asked to release now.
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        if !script.stay.load(Ordering::SeqCst)
+                            && count.release_now()
+                            && count.begin_release(count.seen())
+                        {
+                            break;
+                        }
                     }
-                    _ => {}
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                 }
             }
             Ok(())
@@ -137,7 +154,7 @@ impl HostSessions<Core> for Fake {
             actions,
             events,
             worker,
-            attachments: crate::host_service::AttachmentCount::default(),
+            attachments,
             roots: Box::new(|id| Some(node(id))),
         })
     }
@@ -561,10 +578,112 @@ fn new_session_answers_created_and_a_replay_answers_the_same() {
     assert_eq!(*fake.0.creates.lock().unwrap(), ["new-r1"]);
 }
 
+/// `release_session` detaches every attachment of a resident session, the
+/// asker's own and another connection's (each ended with `detached`), and
+/// answers `released` once it began to release; the next attach opens it
+/// again. A dormant session is released already, and an unknown one is
+/// refused.
+#[test]
+fn release_session_detaches_every_attachment_and_releases() {
+    let (host, fake) = host(&["s1", "s2"]);
+    let (one, two) = (Out::default(), Out::default());
+    let mut asker = host.connect(one.clone(), Face::Remote, || false);
+    let mut other = host.connect(two.clone(), Face::Remote, || false);
+    request(&mut asker, 1, Op::Attach { node: node("s1") });
+    let mine = attached(&one.take(), 1);
+    request(&mut other, 1, Op::Attach { node: node("s1") });
+    let theirs = attached(&two.take(), 1);
+    let releasing = std::thread::spawn(move || {
+        request(
+            &mut asker,
+            2,
+            Op::ReleaseSession {
+                session: "s1".into(),
+            },
+        );
+        asker
+    });
+    // The other connection detaches when the host's change reaches it.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while other.node.is_some() {
+        assert!(
+            Instant::now() < deadline,
+            "the other connection kept its attachment"
+        );
+        other.flush().unwrap();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(
+        two.take()
+            .contains(&HostFrame::Detached { attachment: theirs })
+    );
+    let asker = releasing.join().unwrap();
+    let frames = one.take();
+    assert!(
+        frames.contains(&HostFrame::Detached { attachment: mine }),
+        "{frames:?}"
+    );
+    assert_eq!(outcome(&frames, 2), Outcome::Ok(Answer::Released));
+    assert!(asker.node.is_none());
+    let mut asker = asker;
+    request(&mut asker, 3, Op::Attach { node: node("s1") });
+    attached(&one.take(), 3);
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 2);
+    for (session, answer) in [
+        ("s2", Outcome::Ok(Answer::Released)),
+        ("nowhere", Outcome::Refused(RequestRefusal::UnknownSession)),
+    ] {
+        request(
+            &mut asker,
+            4,
+            Op::ReleaseSession {
+                session: session.into(),
+            },
+        );
+        assert_eq!(outcome(&one.take(), 4), answer);
+    }
+    asker.leave();
+    other.leave();
+    handed_off(&host);
+}
+
+/// A session that something else keeps resident is answered `resident`
+/// with its reason once the wait is over, and the request is withdrawn: it
+/// does not release later by itself.
+#[test]
+fn release_session_answers_resident_and_withdraws_when_nothing_releases() {
+    let fake = Fake::default();
+    *fake.0.rows.lock().unwrap() = vec![row("s1", 0)];
+    fake.0.stay.store(true, Ordering::SeqCst);
+    let host = SessionHost::with_release_wait(fake.clone(), Duration::from_millis(200));
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    attached(&out.take(), 1);
+    request(
+        &mut connection,
+        2,
+        Op::ReleaseSession {
+            session: "s1".into(),
+        },
+    );
+    assert_eq!(
+        outcome(&out.take(), 2),
+        Outcome::Ok(Answer::Resident {
+            reason: ResidentReason::Work
+        })
+    );
+    // The session would release now, but the request was withdrawn.
+    fake.0.stay.store(false, Ordering::SeqCst);
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(matches!(host.slot("s1").peek(), SlotView::Resident(_)));
+    handed_off(&host);
+}
+
 /// The requests this host does not do yet are refused unsupported, naming
 /// the op.
 #[test]
-fn release_and_stop_are_refused_unsupported_for_now() {
+fn stop_is_refused_unsupported_for_now() {
     let (host, _) = host(&["s1"]);
     let out = Out::default();
     let mut connection = host.connect(out.clone(), Face::Remote, || false);

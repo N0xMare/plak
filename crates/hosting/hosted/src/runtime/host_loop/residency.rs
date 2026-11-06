@@ -34,8 +34,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
 
     /// Whether the host releases the session now: it releases idle
     /// sessions, nothing has kept this one resident for the whole idle
-    /// release, and nothing was counted since `seen` was read. Anything that
-    /// keeps it resident restarts the wait.
+    /// release (or the host asked it to release now), and nothing was
+    /// counted since `seen` was read. Anything that keeps it resident
+    /// restarts the wait.
     pub(super) async fn idle_release_due(&mut self, seen: Option<CountSeen>) -> bool {
         let (Some(release), Some(seen)) = (self.role.config.idle_release.clone(), seen) else {
             return false;
@@ -45,7 +46,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             return false;
         }
         let since = *self.role.idle_since.get_or_insert_with(Instant::now);
-        if since.elapsed() < release.after {
+        if since.elapsed() < release.after && !release.attachments.release_now() {
             return false;
         }
         // An attach or a hold since the word was read wins, even one that

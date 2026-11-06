@@ -25,8 +25,8 @@ use std::time::{Duration, Instant};
 use plakous_host_protocol::ProtocolExtension;
 use plakous_host_protocol::wire::{
     Answer, AttachmentId, ClientFrame, HostFrame, NodeAddress, Op, Outcome, RequestRefusal,
-    SessionActivity, SessionEnvironment, SessionResidency, SessionRow, Welcome, WireError,
-    decode_line,
+    ResidentReason, SessionActivity, SessionEnvironment, SessionResidency, SessionRow, Welcome,
+    WireError, decode_line,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -41,6 +41,13 @@ use crate::error::{CliFailure, CliResult};
 /// nothing on the host changed: a session's title and its durable facts
 /// change in its own stores.
 pub const DIRECTORY_POLL: Duration = Duration::from_secs(1);
+
+/// How long `release_session` waits for its session to begin releasing.
+pub const RELEASE_WAIT: Duration = Duration::from_secs(10);
+
+/// How long `release_session` waits for a release that began to commit, as
+/// a slot waits for a release's join.
+const RELEASE_JOIN: Duration = Duration::from_secs(60);
 
 /// A session `new_session` created.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -106,6 +113,7 @@ pub struct SessionHost<P: ProtocolExtension> {
     next_host_attachment: AtomicU64,
     binary_id: String,
     generation: u64,
+    release_wait: Duration,
 }
 
 impl<P: ProtocolExtension> SessionHost<P>
@@ -132,7 +140,21 @@ where
             next_host_attachment: AtomicU64::new(1),
             binary_id: binary_id.into(),
             generation,
+            release_wait: RELEASE_WAIT,
         })
+    }
+
+    /// [`Self::new`] whose `release_session` waits `release_wait`.
+    #[cfg(test)]
+    pub(crate) fn with_release_wait(
+        sessions: impl HostSessions<P> + 'static,
+        release_wait: Duration,
+    ) -> Arc<Self> {
+        let mut host = Self::new(sessions, "b1", 7);
+        if let Some(host) = Arc::get_mut(&mut host) {
+            host.release_wait = release_wait;
+        }
+        host
     }
 
     /// The welcome every connection gets: it names no session.
@@ -302,6 +324,9 @@ struct NodeLink<P: ProtocolExtension, W: Write> {
     session: Arc<WireSession<P>>,
     connection: WireConnection<P, W>,
     changes: watch::Receiver<u64>,
+    /// The session's release requests when the link was made; a later one
+    /// detaches it.
+    releases: u64,
     _hold: ResidencyHold,
 }
 
@@ -435,11 +460,10 @@ where
                 }
                 Err(refusal) => refused(refusal),
             },
-            op @ (Op::ReleaseSession { .. } | Op::StopSession { .. }) => {
-                refused(RequestRefusal::Unsupported {
-                    detail: format!("{} is not available on this host yet", op.name()),
-                })
-            }
+            Op::ReleaseSession { session } => answered(self.release(&session)?),
+            op @ Op::StopSession { .. } => refused(RequestRefusal::Unsupported {
+                detail: format!("{} is not available on this host yet", op.name()),
+            }),
             Op::Attach { node } => self.attach(&node, text),
             Op::Detach { .. }
             | Op::Intent { .. }
@@ -488,11 +512,99 @@ where
         }
         self.node = Some(NodeLink {
             changes: session.changes(),
+            releases: session.releases(),
             session,
             connection,
             _hold: hold,
         });
         self.forward(text.to_owned()).map(Forwarded::Reading)
+    }
+
+    /// `release_session`: every attachment of `session` detaches (this
+    /// connection's own first, ended with `detached` like the others), then
+    /// the session releases as soon as nothing else keeps it resident.
+    /// Answered `released` once the release committed (its worker ended), or
+    /// `resident` with what keeps it when none began within
+    /// [`RELEASE_WAIT`], and the request is withdrawn; a dormant session is
+    /// `released`.
+    ///
+    /// # Errors
+    ///
+    /// A lost output.
+    fn release(&mut self, session: &str) -> CliResult<Outcome> {
+        let resident = self.host.lock().iter().find_map(|slot| match slot.peek() {
+            SlotView::Resident(served) if served.session_id() == session => {
+                Some((Arc::clone(slot), served))
+            }
+            _ => None,
+        });
+        let Some((slot, served)) = resident else {
+            let known = self.host.lock().iter().any(|slot| slot.known() == session)
+                || self
+                    .host
+                    .sessions
+                    .rows(None)
+                    .is_ok_and(|rows| rows.iter().any(|row| row.session == session));
+            return Ok(if known {
+                Outcome::Ok(Answer::Released)
+            } else {
+                Outcome::Refused(RequestRefusal::UnknownSession)
+            });
+        };
+        if self
+            .node
+            .as_ref()
+            .is_some_and(|link| Arc::ptr_eq(&link.session, &served))
+        {
+            self.detach_link()?;
+        }
+        // The other connections see the request when the host's change
+        // wakes them, and detach.
+        served.request_release();
+        self.host.changed();
+        let deadline = Instant::now() + self.host.release_wait;
+        // A release that began cannot be withdrawn: it is answered once it
+        // committed (its worker ended), bounded as a slot bounds a join.
+        let joined = Instant::now() + RELEASE_JOIN;
+        loop {
+            match slot.peek() {
+                SlotView::Dormant(_) => {
+                    self.host.changed();
+                    return Ok(Outcome::Ok(Answer::Released));
+                }
+                SlotView::Releasing(_) | SlotView::Opening(_) if Instant::now() < joined => {}
+                SlotView::Releasing(_) | SlotView::Opening(_) => {
+                    return Ok(Outcome::Ok(Answer::Released));
+                }
+                SlotView::Resident(_) if Instant::now() >= deadline => break,
+                SlotView::Resident(_) => {}
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        served.cancel_release();
+        let kept = served.kept_activity();
+        let reason = if served.attached() > 0 {
+            ResidentReason::Attachment
+        } else if kept.processes > 0 {
+            ResidentReason::Processes
+        } else {
+            ResidentReason::Work
+        };
+        Ok(Outcome::Ok(Answer::Resident { reason }))
+    }
+
+    /// Ends the node attachment with the host frame `detached`, and lets its
+    /// session go.
+    fn detach_link(&mut self) -> CliResult<()> {
+        let attachment = self
+            .node
+            .as_ref()
+            .and_then(|link| link.connection.attachment());
+        self.unlink();
+        if let Some(attachment) = attachment {
+            write_frame(&mut self.out, &HostFrame::<P>::Detached { attachment })?;
+        }
+        Ok(())
     }
 
     /// Hands `text` to the node attachment's connection; `false` once the
@@ -522,12 +634,10 @@ where
     /// cannot be read.
     pub fn flush(&mut self) -> CliResult<()> {
         if let Some(link) = &mut self.node {
-            if link.session.ended() {
-                let attachment = link.connection.attachment();
-                self.unlink();
-                if let Some(attachment) = attachment {
-                    write_frame(&mut self.out, &HostFrame::<P>::Detached { attachment })?;
-                }
+            // A session that ended, or one a `release_session` since the
+            // link asked for, is no longer this connection's.
+            if link.session.ended() || link.session.releases() > link.releases {
+                self.detach_link()?;
                 self.host.changed();
             } else {
                 link.connection.flush()?;

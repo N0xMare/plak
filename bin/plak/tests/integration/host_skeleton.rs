@@ -502,6 +502,68 @@ fn a_sigterm_hands_a_running_turn_to_the_next_host_which_continues_it_once() {
     assert_eq!(root_record(&fixture, &session).1, 1);
 }
 
+/// `release_session` hands a session to an embedded face at once: its
+/// attachment ends with `detached`, the session reads dormant without
+/// waiting out the 300 s idle release, and `plak agent` opens it.
+#[test]
+fn a_released_session_is_free_for_an_embedded_face_at_once() {
+    let Some(fixture) = fixture() else { return };
+    fixture.write_script(&json!({
+        "version": 1,
+        "steps": [{"output": {"text": ANSWER}}]
+    }));
+    let host = start(&fixture);
+    let mut client = Client::connect(&host);
+    let Outcome::Ok(Answer::Created { session, node, .. }) =
+        client.request(1, new_session(&fixture.workspace()))
+    else {
+        panic!("not created");
+    };
+    let attachment = client.attach(2, &node);
+    client.prompt(3, attachment, "before the release", ANSWER);
+    client.send(&ClientFrame::Request {
+        id: 4,
+        op: Op::ReleaseSession {
+            session: session.clone(),
+        },
+    });
+    let mut detached = false;
+    loop {
+        match client.next() {
+            HostFrame::Detached { attachment: ended } if ended == attachment => detached = true,
+            HostFrame::Response { id: 4, outcome } => {
+                assert_eq!(outcome, Outcome::Ok(Answer::Released));
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert!(detached, "the attachment did not end with detached");
+    assert_eq!(client.rows(5)[0].residency, SessionResidency::Dormant);
+    let mut agent = fixture
+        .command()
+        .args(["agent", "--session", &session])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let stdout = agent.stdout.take().unwrap();
+    let (said, hello) = mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if line.contains("\"kind\":\"hello\"") {
+                let _ = said.send(());
+            }
+        }
+    });
+    hello
+        .recv_timeout(WAIT)
+        .expect("plak agent opened the released session");
+    agent.kill().unwrap();
+    agent.wait().unwrap();
+}
+
 /// A request id that is not a uuid, or a workspace that is not a
 /// directory, creates nothing.
 #[test]
