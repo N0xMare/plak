@@ -718,7 +718,7 @@ impl App {
                 if !self.local_queue.is_empty() {
                     add_key("focus-queue", When::Transcript, "Tab");
                 }
-                if self.busy && !self.cancel_pending {
+                if self.root_stoppable() && !self.cancel_pending {
                     add("cancel", "Cancel the running root turn.");
                 }
                 if self.open_approval.is_some() {

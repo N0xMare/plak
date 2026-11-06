@@ -4866,7 +4866,7 @@ The sheet groups by the context in which a binding applies: **global**,
 print their window in milliseconds on the sheet rather than leaving it to be
 learned.
 
-**Global.** `Esc` closes the focused owner and opens the turn stop pop-up (§5.3) for a running turn.
+**Global.** `Esc` closes the focused owner and opens the turn stop pop-up (§5.3) for a running turn, including a prompt or follow-up sent before its busy edge.
 `Esc Esc` within 800 ms clears an idle draft, recoverably. `Ctrl+C` is the
 ladder of §5.3 with its 1000 ms confirm window. `Ctrl+Q` quits (§5.3). `Ctrl+X` cuts
 the composer selection, and **with no selection opens Menu on its last-used
@@ -5063,7 +5063,9 @@ through the host action channel; the pop-up then says
 `N background processes keep running unless you stop them too`. A prompt or
 follow-up the operator sent counts as mid-turn, for Esc and `Ctrl+C` alike,
 from the moment it is sent until the host's busy edge for it:
-unacknowledged, acknowledged, or with its row already echoed. Esc then opens
+unacknowledged, acknowledged, or with its row already echoed. Quit asks in
+that same window, and cancel is offered for it, rather than only once the
+host reports busy. Esc then opens
 the same pop-up and never sends the idle interrupt, which would stop the
 prompt unconfirmed. A host refusal that ends
 the prompt before any busy edge closes the pop-up and settles a stop already
@@ -5164,10 +5166,11 @@ screen is left.
 
 Quit is `/quit` (or `/exit`), `Ctrl+Q`, or the `Ctrl+C` ladder; each opens the
 quit pop-up (§5.7) while a root turn runs with no stop of it in flight, while
-child agents are live, or while background processes run, and its lines name
-what stops (the root turn, the running agents, which stay resumable, the
-processes). Idle with nothing running it quits at once, and so does the
-ladder's second press over a stuck cancel. A bare
+a prompt or follow-up the operator sent has not reached its busy edge and no
+stop of it is in flight, while child agents are live, or while background
+processes run, and its lines name what stops (the root turn, the running
+agents, which stay resumable, the processes). Idle with nothing running it
+quits at once, and so does the ladder's second press over a stuck cancel. A bare
 `quit`, `exit` or `:q` without the slash is an ordinary prompt, idle or
 mid-turn. The TUI embeds its session, so its quit stops the session's work;
 a wire client of a host detaches instead and stops a session's work by

@@ -1081,3 +1081,75 @@ fn a_refused_prompt_ends_its_pending_stop_without_a_busy_edge() {
         Some(UserAction::Interrupt)
     );
 }
+
+fn offers_cancel(app: &App) -> bool {
+    app.legal_pilot_actions()
+        .iter()
+        .any(|action| action.id == "cancel")
+}
+
+/// `/quit`, `Ctrl+Q` and the `Ctrl+C` ladder's confirming quit ask while a
+/// sent prompt has not reached its busy edge, and the Keybinds sheet offers
+/// cancel for that same window (spec 02 §5.3). Once the prompt settles idle,
+/// quit leaves at once and cancel is gone. A stop already in flight still
+/// leaves on the ladder's second press.
+#[test]
+fn a_sent_prompt_before_its_busy_edge_confirms_quit_and_offers_cancel() {
+    for stage in 0..3 {
+        let (mut app, action, _receiver) = sent_prompt("stop me");
+        answer_prompt_from(&mut app, &action, 0, stage);
+        assert!(!app.busy, "stage {stage}");
+        assert!(app.turn_in_flight(), "stage {stage}");
+        assert!(offers_cancel(&app), "stage {stage}");
+
+        assert_eq!(
+            app.handle_key(key_ctrl(KeyCode::Char('q'))),
+            None,
+            "stage {stage}"
+        );
+        assert!(!app.should_quit, "stage {stage}");
+        let screen = render_to_string(&mut app, 120, 30);
+        assert!(
+            screen.contains("Quit plak?") && screen.contains("root turn is cancelled"),
+            "stage {stage}: {screen}"
+        );
+        assert_eq!(app.handle_key(key(KeyCode::Esc)), None, "stage {stage}");
+
+        app.set_input("/quit".into());
+        assert_eq!(app.handle_key(key(KeyCode::Enter)), None, "stage {stage}");
+        assert!(!app.should_quit, "stage {stage}");
+        let screen = render_to_string(&mut app, 120, 30);
+        assert!(
+            screen.contains("root turn is cancelled"),
+            "stage {stage}: {screen}"
+        );
+        assert_eq!(app.handle_key(key(KeyCode::Esc)), None, "stage {stage}");
+
+        // The ladder's confirming press is this quit, not a second stop.
+        assert_eq!(app.request_quit(), None, "stage {stage}");
+        assert!(!app.should_quit, "stage {stage}");
+        let screen = render_to_string(&mut app, 120, 30);
+        assert!(
+            screen.contains("root turn is cancelled"),
+            "stage {stage}: {screen}"
+        );
+        assert_eq!(app.handle_key(key(KeyCode::Esc)), None, "stage {stage}");
+
+        app.cancel_pending = true;
+        assert!(!app.turn_in_flight(), "stage {stage}");
+        assert!(!offers_cancel(&app), "stage {stage}");
+        assert_eq!(app.request_quit(), Some(UserAction::Quit), "stage {stage}");
+    }
+
+    let (mut app, action, _receiver) = sent_prompt("settled");
+    answer_prompt_from(&mut app, &action, 0, 2);
+    app.apply_host_event(HostEvent::SetBusy(true));
+    app.apply_host_event(HostEvent::SetBusy(false));
+    assert!(!app.busy);
+    assert!(!app.turn_in_flight());
+    assert!(!offers_cancel(&app));
+    assert_eq!(
+        app.handle_key(key_ctrl(KeyCode::Char('q'))),
+        Some(UserAction::Quit)
+    );
+}

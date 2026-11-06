@@ -211,9 +211,11 @@ impl App {
         }
     }
 
-    /// A root turn runs and no stop of it is in flight.
-    pub(super) const fn turn_in_flight(&self) -> bool {
-        self.busy && !self.cancel_pending
+    /// A root turn runs, or a prompt or follow-up the operator sent has not
+    /// reached its busy edge, and no stop of it is in flight (spec 02 §5.3).
+    /// The same window [`Self::root_stoppable`] uses for Esc and `Ctrl+C`.
+    pub(super) fn turn_in_flight(&self) -> bool {
+        self.root_stoppable() && !self.cancel_pending
     }
 
     /// Keys on the Processes tab. `s` and `S` open the destructive
