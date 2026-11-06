@@ -14,7 +14,7 @@ use super::test_support::{blocks_contain, launch_basic};
 use crate::tui::{HostEventReceiver, SurfaceIntent, UserAction, UserActionSendError};
 
 /// Drains `unsent` through the frame's host drain, as the loop does.
-fn drain(app: &mut App, unsent: Vec<crate::surface_protocol::Unsent>) {
+fn drain(app: &mut App, unsent: Vec<crate::surface_protocol::tui_channel::Unsent>) {
     let events = HostEventReceiver::Refusing(Mutex::new(VecDeque::from(unsent)));
     let mut connected = true;
     drain_host_events(app, &events, &mut connected, 64);

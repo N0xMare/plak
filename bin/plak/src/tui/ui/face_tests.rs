@@ -40,7 +40,7 @@ impl Pilot {
         let storage_interrupted = intents.storage_interrupt_probe();
         Self {
             app: App::new(launch_basic(), true),
-            actions: crate::surface_protocol::TuiActionSender::InProcess(actions),
+            actions: crate::surface_protocol::tui_channel::TuiActionSender::InProcess(actions),
             events: HostEventReceiver::InProcess(events),
             intents,
             observations,

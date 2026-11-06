@@ -6,11 +6,14 @@ pub(crate) use crate::capabilities::usage_verticals;
 pub(crate) use crate::product_config::{DEFAULT_SCROLL_LINES, MAX_SCROLL_LINES, MIN_SCROLL_LINES};
 pub(crate) use crate::tui_preferences::TuiPreferences;
 mod usage_decoration;
+pub(crate) use crate::surface_protocol::tui_channel::{
+    TuiActionSender as FaceActionSender, TuiEventReceiver as HostEventReceiver,
+};
 pub(crate) use crate::surface_protocol::{
     AgentAcknowledgement, HostEvent, McpOverview, McpSessionBinding, ProfileApply,
     ProfileDifference, ProfileOutcome, ProfileRole, ProfileRow, ProfilesView, SettingsTheme,
-    SettingsView, SurfaceIntent, SurfaceObservation, TuiActionSender as FaceActionSender,
-    TuiEventReceiver as HostEventReceiver, UserAction, UserActionSendError, WorkspaceChrome,
+    SettingsView, SurfaceIntent, SurfaceObservation, UserAction, UserActionSendError,
+    WorkspaceChrome,
 };
 
 /// A test's TUI mailbox: the receiver, and a face sender no service serves,

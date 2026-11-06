@@ -23,7 +23,8 @@ use plakous_hosted::host_service::FacePublisher;
 use plakous_hosted::host_service::wire::{Face, WireConnection, handshake, session_welcome};
 use plakous_hosted::runtime::{HostWorker, HostWorkerHandle};
 
-use crate::surface_protocol::{PlakExtension, TuiActionSender, TuiEventReceiver, UserActionSender};
+use crate::surface_protocol::tui_channel::{TuiActionSender, TuiEventReceiver};
+use crate::surface_protocol::{PlakExtension, UserActionSender};
 use crate::{CliFailure, CliResult, agent_wire, build_identity};
 
 /// How long a release waits for the session's verdict on what the TUI sent
