@@ -163,8 +163,14 @@ pub(super) fn write_private(path: &Path, body: &str) {
 impl Drop for Fixture {
     fn drop(&mut self) {
         if self.home().join("host/runner").exists() {
-            for entry in std::fs::read_dir(&self.root).into_iter().flatten().flatten() {
-                if entry.path().extension().is_some_and(|ext| ext == "marker") { kill_marked_jobs(&entry.path()); }
+            for entry in std::fs::read_dir(&self.root)
+                .into_iter()
+                .flatten()
+                .flatten()
+            {
+                if entry.path().extension().is_some_and(|ext| ext == "marker") {
+                    kill_marked_jobs(&entry.path());
+                }
             }
         }
         kill_home_local_runner(&self.home());
@@ -194,10 +200,21 @@ impl Drop for Fixture {
 }
 
 pub(super) fn kill_local_daemon_only(home: &Path) {
-    for version in std::fs::read_dir(home.join("host/runner")).into_iter().flatten().flatten() {
-        for lock in std::fs::read_dir(version.path().join("run")).into_iter().flatten().flatten() {
+    for version in std::fs::read_dir(home.join("host/runner"))
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        for lock in std::fs::read_dir(version.path().join("run"))
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
             if lock.path().extension().is_some_and(|ext| ext == "lock") {
-                for pid in opened_by(&lock.path()).into_iter().filter_map(rustix::process::Pid::from_raw) {
+                for pid in opened_by(&lock.path())
+                    .into_iter()
+                    .filter_map(rustix::process::Pid::from_raw)
+                {
                     let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
                 }
                 let deadline = Instant::now() + WAIT;
@@ -677,6 +694,23 @@ fn kill_marked_jobs(marker: &Path) {
                 nix::unistd::Pid::from_raw(pid),
                 nix::sys::signal::Signal::SIGKILL,
             );
+            let deadline = Instant::now() + WAIT;
+            loop {
+                let still_this_job = Command::new("ps")
+                    .args(["-o", "command=", "-p", &pid.to_string()])
+                    .output()
+                    .is_ok_and(|output| {
+                        String::from_utf8_lossy(&output.stdout).contains(&marker_name)
+                    });
+                if !still_this_job {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "a marked job outlived fixture cleanup"
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
         }
     }
 }

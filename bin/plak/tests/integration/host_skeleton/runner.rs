@@ -121,6 +121,21 @@ fn stopped(pid: i32) {
     }
 }
 
+fn cut_exit(child: &mut Child) -> std::process::ExitStatus {
+    let deadline = std::time::Instant::now() + WAIT;
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            return status;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("the host did not reach its crash boundary");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
 fn start_job(fixture: &Fixture, busy: bool) -> (Host, String, NodeAddress) {
     fixture.write_script(&job_script(fixture, busy));
     let host = start(fixture);
@@ -183,33 +198,7 @@ fn a_foreground_host_cut_stops_at_transfer_and_records_unknown_once() {
             format!("{text}\n[host]\nresume_after_loss = \"{policy}\"\n"),
         )
         .unwrap();
-        let mut script = job_script(&fixture, false);
-        script["steps"][0]["output"]["tool"]["arguments"]["yield_time_ms"] = json!(30000);
-        fixture.write_script(&script);
-        let mut host = start(&fixture);
-        let mut client = Client::connect(&host);
-        let Outcome::Ok(Answer::Created { session, node, .. }) =
-            client.request(1, new_session(&fixture.workspace()))
-        else {
-            panic!("not created")
-        };
-        let attachment = client.attach(2, &node);
-        assert_eq!(
-            client.request(
-                3,
-                Op::Intent {
-                    attachment,
-                    intent: SessionIntent::Prompt(Draft::from("start foreground")),
-                    blobs: Vec::new()
-                }
-            ),
-            Outcome::Ok(Answer::Accepted)
-        );
-        let deadline = std::time::Instant::now() + WAIT;
-        while !fixture.root.join("local-job.marker").exists() {
-            assert!(std::time::Instant::now() < deadline);
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
+        let (mut host, session, node) = start_foreground(&fixture);
         let (pid, _) = job(&fixture);
         kill(&mut host);
         assert!(alive(pid));
@@ -220,7 +209,7 @@ fn a_foreground_host_cut_stops_at_transfer_and_records_unknown_once() {
                 &[],
                 &[("PLAK_TEST_HOST_READOPT_CUT", "transfer".into())],
             );
-            assert_eq!(child.wait().unwrap().signal(), Some(9));
+            assert_eq!(cut_exit(&mut child).signal(), Some(9));
             stopped(pid);
         }
         let mut host = start(&fixture);
@@ -248,6 +237,61 @@ fn a_foreground_host_cut_stops_at_transfer_and_records_unknown_once() {
         job(&fixture);
         stop(&mut host);
     }
+}
+
+fn start_foreground(fixture: &Fixture) -> (Host, String, NodeAddress) {
+    let mut script = job_script(fixture, false);
+    script["steps"][0]["output"]["tool"]["arguments"]["yield_time_ms"] = json!(30000);
+    fixture.write_script(&script);
+    let host = start(fixture);
+    let mut client = Client::connect(&host);
+    let Outcome::Ok(Answer::Created { session, node, .. }) =
+        client.request(1, new_session(&fixture.workspace()))
+    else {
+        panic!("not created")
+    };
+    let attachment = client.attach(2, &node);
+    assert_eq!(
+        client.request(
+            3,
+            Op::Intent {
+                attachment,
+                intent: SessionIntent::Prompt(Draft::from("start foreground")),
+                blobs: Vec::new()
+            }
+        ),
+        Outcome::Ok(Answer::Accepted)
+    );
+    let deadline = std::time::Instant::now() + WAIT;
+    while !fixture.root.join("local-job.marker").exists() {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    (host, session, node)
+}
+
+#[test]
+fn a_runner_restart_leaves_an_unpromoted_call_unknown_without_restarting_it() {
+    let Some(fixture) = fixture() else { return };
+    let (mut host, session, node) = start_foreground(&fixture);
+    let (pid, _) = job(&fixture);
+    kill(&mut host);
+    kill_local_daemon_only(&fixture.home());
+    let mut host = start(&fixture);
+    let mut client = Client::connect(&host);
+    client.attach(1, &node);
+    assert_eq!(unknown_effects(&fixture, &session), 1);
+    job(&fixture);
+    kill(&mut host);
+    let mut host = start(&fixture);
+    let mut client = Client::connect(&host);
+    client.attach(1, &node);
+    assert_eq!(unknown_effects(&fixture, &session), 1);
+    stop(&mut host);
+    // A dead runner has no safe identifier authority over its old child.
+    // Fixture-owned marker identity, never session state, reaps it instead.
+    drop(fixture);
+    stopped(pid);
 }
 
 fn unknown_effects(fixture: &Fixture, session: &str) -> usize {
@@ -492,7 +536,7 @@ fn host_crash_mid_readopt_converges_after_every_transfer_boundary() {
                 &[],
                 &[("PLAK_TEST_HOST_READOPT_CUT", phase.into())],
             );
-            let status = child.wait().unwrap();
+            let status = cut_exit(&mut child);
             assert_eq!(status.signal(), Some(9), "{phase}: {status}");
             assert!(alive(pid), "{phase}: the cut stopped the job");
         }
@@ -543,7 +587,7 @@ fn host_crash_mid_stop_finishes_the_recorded_stop_once_after_retransfer() {
                 &[],
                 &[("PLAK_TEST_HOST_READOPT_CUT", phase.into())],
             );
-            assert_eq!(child.wait().unwrap().signal(), Some(9));
+            assert_eq!(cut_exit(&mut child).signal(), Some(9));
             if phase == "before-stop" {
                 assert!(alive(pid));
             } else {

@@ -46,7 +46,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         {
             failures.push(error);
         }
-        if let Err(error) = self.role.config.state_roots.finish_child_process_stops(&tree_id).await {
+        if let Err(error) = self
+            .role
+            .config
+            .state_roots
+            .finish_child_process_stops(&tree_id)
+            .await
+        {
             failures.push(error.message().to_owned());
         }
         // What would start by itself, before the root record: a crash here

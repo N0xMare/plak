@@ -176,7 +176,9 @@ fn lifecycle(
 ) -> AgentOutcome {
     let _orphans = Orphans(fixture);
     (shapes::get(shape).configure)(fixture);
-    if let Some(outcome) = alternate_lifecycle(fixture, session, shape, cut) { return outcome; }
+    if let Some(outcome) = alternate_lifecycle(fixture, session, shape, cut) {
+        return outcome;
+    }
     let mut round_gates = super::round_gates::RoundGates::new(fixture, shape);
     let mut command = fixture.command();
     command
@@ -270,17 +272,41 @@ fn lifecycle(
     agent.finish()
 }
 
-fn alternate_lifecycle(fixture: &Fixture, session: &str, shape: &str, cut: Option<&trace::Commit>) -> Option<AgentOutcome> {
+fn alternate_lifecycle(
+    fixture: &Fixture,
+    session: &str,
+    shape: &str,
+    cut: Option<&trace::Commit>,
+) -> Option<AgentOutcome> {
     if shapes::host_runner::is_host(shape) {
-        let mut env = vec![(TRACE_ENV, fixture.root.join("commit-trace.jsonl").display().to_string())];
-        if let Some(cut) = cut { env.push((KILL_ENV, format!("{}:{}", cut.store, cut.store_ordinal))); }
-        return Some(crate::host_skeleton::sweep::run(fixture, session, shape, shapes::ANSWER, &env));
+        let mut env = vec![(
+            TRACE_ENV,
+            fixture
+                .root
+                .join("commit-trace.jsonl")
+                .display()
+                .to_string(),
+        )];
+        if let Some(cut) = cut {
+            env.push((KILL_ENV, format!("{}:{}", cut.store, cut.store_ordinal)));
+        }
+        return Some(crate::host_skeleton::sweep::run(
+            fixture,
+            session,
+            shape,
+            shapes::ANSWER,
+            &env,
+        ));
     }
     if shape == shapes::dormant::NAME {
         let mut command = fixture.command();
         command.env(TRACE_ENV, fixture.root.join("commit-trace.jsonl"));
-        if let Some(k) = cut { command.env(KILL_ENV, format!("{}:{}", k.store, k.store_ordinal)); }
-        return Some(super::web_face::dormant_lifecycle(fixture, command, session));
+        if let Some(k) = cut {
+            command.env(KILL_ENV, format!("{}:{}", k.store, k.store_ordinal));
+        }
+        return Some(super::web_face::dormant_lifecycle(
+            fixture, command, session,
+        ));
     }
     None
 }

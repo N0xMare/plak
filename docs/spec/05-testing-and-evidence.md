@@ -2049,7 +2049,11 @@ with distinct login-shell PATHs and HOMEs. An EOF before Hello, contention
 with an exiting daemon's socket lock, and an unreachable user manager have
 deterministic fixtures. Fixtures kill their local daemon and its process
 groups, including on a cut or assertion failure; a daemon restart's surviving
-marked jobs are reaped separately with process-identity checks.
+marked jobs are reaped separately with process-identity checks. Cleanup waits
+for each marked live identity to disappear before releasing its evidence.
+`a_runner_restart_leaves_an_unpromoted_call_unknown_without_restarting_it`
+pins the missing foreground call's once-only recovery after daemon loss;
+the fixture reaps the old orphan without giving the new runner PID authority.
 
 Foreground authority is pinned separately: a host cut before promotion
 stops the process at transfer, writes no job-terminal row, and the next full

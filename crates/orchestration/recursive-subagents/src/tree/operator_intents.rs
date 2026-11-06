@@ -91,12 +91,20 @@ impl ProductAgentTree {
     /// Child lines whose current attempts have a recorded stop, with the intent key.
     #[must_use]
     pub fn recorded_process_stops(&self) -> Vec<(String, String)> {
-        self.nodes.values().filter_map(|node| {
-            if node.parent_agent_id.is_none() || node.status != NodeStatus::Interrupted { return None; }
-            let (intent, cause) = self.latest_interrupt(&node.agent_id, node.attempt_id.as_ref()?)?;
-            if cause != Some(InterruptCause::Stopped) { return None; }
-            Some((node.session_locator.clone()?, intent.to_owned()))
-        }).collect()
+        self.nodes
+            .values()
+            .filter_map(|node| {
+                if node.parent_agent_id.is_none() || node.status != NodeStatus::Interrupted {
+                    return None;
+                }
+                let (intent, cause) =
+                    self.latest_interrupt(&node.agent_id, node.attempt_id.as_ref()?)?;
+                if cause != Some(InterruptCause::Stopped) {
+                    return None;
+                }
+                Some((node.session_locator.clone()?, intent.to_owned()))
+            })
+            .collect()
     }
 
     /// Why an interrupted node stopped: the cause its current attempt's

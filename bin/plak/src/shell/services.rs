@@ -23,7 +23,10 @@ pub(crate) type TelemetrySinkFactory = fn() -> Option<Arc<dyn ExtraTelemetrySink
 
 /// Handles every product command shares for the life of the process.
 pub(crate) struct Services {
-    local_daemon: Option<(plakous::tools::runner::LocalDaemonBackend, plakous::runner::RunnerClient)>,
+    local_daemon: Option<(
+        plakous::tools::runner::LocalDaemonBackend,
+        plakous::runner::RunnerClient,
+    )>,
     clock: Arc<dyn plakous::model::Clock>,
     home: Home,
     session_records: OnceLock<Arc<crate::store::session_records::SqliteSessionStore>>,

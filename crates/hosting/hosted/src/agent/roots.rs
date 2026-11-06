@@ -375,14 +375,26 @@ impl ProductStateRoots {
     }
 
     pub(crate) async fn finish_child_process_stops(&self, tree_id: &str) -> CliResult<()> {
-        let Some(client) = &self.daemon_client else { return Ok(()) };
-        let stops = self.tree_store()?.load(tree_id).map_err(|error| CliFailure::new(error.detail))?
+        let Some(client) = &self.daemon_client else {
+            return Ok(());
+        };
+        let stops = self
+            .tree_store()?
+            .load(tree_id)
+            .map_err(|error| CliFailure::new(error.detail))?
             .map_or_else(Vec::new, |tree| tree.rows().recorded_process_stops());
         let sessions = self.runtime_sessions()?;
         for (locator, intent) in stops {
-            let locator = locator.parse::<plakous::sessions::SessionLocator>().map_err(|error| CliFailure::new(error.to_string()))?;
-            let head = sessions.line_head_of(locator).await.map_err(|error| CliFailure::new(error.to_string()))?;
-            crate::runner_adoption::finish_recorded_stop(client, &sessions, head.line(), &intent).await.map_err(CliFailure::new)?;
+            let locator = locator
+                .parse::<plakous::sessions::SessionLocator>()
+                .map_err(|error| CliFailure::new(error.to_string()))?;
+            let head = sessions
+                .line_head_of(locator)
+                .await
+                .map_err(|error| CliFailure::new(error.to_string()))?;
+            crate::runner_adoption::finish_recorded_stop(client, &sessions, head.line(), &intent)
+                .await
+                .map_err(CliFailure::new)?;
         }
         Ok(())
     }
