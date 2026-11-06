@@ -27,36 +27,7 @@ async fn queued_start_loses_authority(expire: bool) {
     let root = tempfile::tempdir().unwrap();
     let scope =
         ExecutionEnvironmentScope::Run("00000000-0000-0000-0000-000000000001".parse().unwrap());
-    let environment = ExecutionEnvironment::host(
-        scope,
-        root.path(),
-        ".",
-        ExecutionEnvironmentConfig::default(),
-    )
-    .unwrap();
-    let version = VersionTriple::current("queued-authority", "test");
-    let service = RunnerService::new(
-        environment,
-        RunnerIdentity {
-            runner_id: RunnerId::new("queued").unwrap(),
-            version: version.clone(),
-            boot_id: "boot".into(),
-            binary_id: None,
-        },
-    )
-    .unwrap();
-    let link = Loopback::join(
-        service.clone(),
-        Bind {
-            host_id: "home".into(),
-            host_instance: "before".into(),
-            version,
-            inspect: false,
-        },
-        ClientWindows::default(),
-    )
-    .await
-    .unwrap();
+    let (service, link) = queued_link(root.path(), scope).await;
     let backend = link.backend();
     let environment = runner_environment(
         scope,
@@ -114,7 +85,7 @@ async fn queued_start_loses_authority(expire: bool) {
         let mut leases = lock(&service.inner.leases);
         let lease = leases.get_mut(&key).unwrap();
         lease.connections = 0;
-        lease.released = Some(Instant::now() - service.inner.owner_lease - Duration::from_secs(1));
+        lease.released = Some(Instant::now());
     } else {
         let mut tables = lock(&service.inner.tables);
         let previous = tables.owner("home", &owner.line().to_string()).unwrap().0;
@@ -143,4 +114,41 @@ async fn queued_start_loses_authority(expire: bool) {
     );
     assert!(refused.proven_no_effect());
     assert!(!marker.exists());
+}
+
+async fn queued_link(
+    root: &std::path::Path,
+    scope: ExecutionEnvironmentScope,
+) -> (RunnerService, Loopback) {
+    let environment =
+        ExecutionEnvironment::host(scope, root, ".", ExecutionEnvironmentConfig::default())
+            .unwrap();
+    let version = VersionTriple::current("queued-authority", "test");
+    let service = RunnerService::with_limits(
+        environment,
+        RunnerIdentity {
+            runner_id: RunnerId::new("queued").unwrap(),
+            version: version.clone(),
+            boot_id: "boot".into(),
+            binary_id: None,
+        },
+        crate::RunnerLimits {
+            owner_lease: Duration::ZERO,
+            ..crate::RunnerLimits::default()
+        },
+    )
+    .unwrap();
+    let link = Loopback::join(
+        service.clone(),
+        Bind {
+            host_id: "home".into(),
+            host_instance: "before".into(),
+            version,
+            inspect: false,
+        },
+        ClientWindows::default(),
+    )
+    .await
+    .unwrap();
+    (service, link)
 }
