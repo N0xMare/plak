@@ -99,13 +99,14 @@ pub fn recording_surface<P: plakous_host_protocol::ProtocolExtension>() -> Surfa
 /// Independent extension used by hosted fixtures; deliberately neither Copy nor Default.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TestExtension(pub String);
-/// Read-only request from the independent test driver.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Read-only request from the independent test driver; it crosses the wire
+/// for the tests that drive a host's sessions over wire v2.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ProbeIntent {
     InspectUsage,
 }
 /// Observation owned by the independent test driver.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ProbeObservation {
     UsageObserved,
 }
@@ -1293,6 +1294,18 @@ pub trait BlockHere: Future + Sized {
 }
 
 impl<F: Future> BlockHere for F {}
+
+/// A stop ticket, for a test that builds a [`StopSession`] intent itself.
+///
+/// [`StopSession`]: plakous_host_protocol::SessionIntent::StopSession
+#[must_use]
+pub fn stop_ticket() -> plakous_host_protocol::StopTicket {
+    let (sender, _receiver) =
+        plakous_host_protocol::intent_channel::<plakous_host_protocol::Core>();
+    sender
+        .request_stop()
+        .unwrap_or_else(|_| unreachable!("the receiver is alive"))
+}
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "deterministic factory-boundary fixture")]

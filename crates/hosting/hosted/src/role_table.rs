@@ -76,7 +76,7 @@ pub(crate) enum Row {
     Queue,
     /// `ResolveApproval`.
     Approval,
-    /// `Quit`.
+    /// `Quit`, and a host's `StopSession`, which no attachment sends.
     Quit,
     /// `NewSession`, `Compact`, `ForkSession`, `ResumeSession`,
     /// `ResumeSessionHandoff`. Switch and rebind arrive as product
@@ -236,7 +236,7 @@ pub(crate) fn row_of(action: &UserAction) -> Row {
         | UserAction::MoveQueued { .. }
         | UserAction::ResumeQueueDrain => Row::Queue,
         UserAction::ResolveApproval { .. } => Row::Approval,
-        UserAction::Quit => Row::Quit,
+        UserAction::Quit | UserAction::StopSession { .. } => Row::Quit,
         UserAction::NewSession
         | UserAction::Compact
         | UserAction::ForkSession { .. }
@@ -289,7 +289,7 @@ pub(crate) fn child_address(action: &UserAction) -> Option<&str> {
 }
 
 /// The number of intent variants [`row_of`] places.
-const INTENT_VARIANTS: usize = 41;
+const INTENT_VARIANTS: usize = 42;
 
 /// One intent of every variant, child-addressed wherever the intent can be.
 pub(crate) fn every_intent() -> Vec<UserAction> {
@@ -329,6 +329,9 @@ pub(crate) fn every_intent() -> Vec<UserAction> {
             choice: plakous_host_protocol::ApprovalChoice::Allow,
         },
         UserAction::Quit,
+        UserAction::StopSession {
+            ticket: crate::runtime::test_kit::stop_ticket(),
+        },
         UserAction::NewSession,
         UserAction::Compact,
         UserAction::ResumeSession { id: None },
@@ -444,13 +447,15 @@ fn todays_root_column_is_the_dispatch_table() {
         for action in &intents {
             let class = IntentClass::of(action);
             let letter = match class {
-                IntentClass::Urgent | IntentClass::Quit => U,
+                IntentClass::Urgent | IntentClass::Quit | IntentClass::Stop => U,
                 IntentClass::IdleOnly { .. } => I,
                 IntentClass::Ordinary => B,
             };
             derived.push(letter);
             match class.disposition(DispatchPhase::Workflow) {
-                Disposition::Defer if class != IntentClass::Quit => derived.push(W),
+                Disposition::Defer if !matches!(class, IntentClass::Quit | IntentClass::Stop) => {
+                    derived.push(W);
+                }
                 Disposition::Defer | Disposition::ObserveInterrupt => {}
                 other => panic!("{action:?}: a workflow does not {other:?}"),
             }

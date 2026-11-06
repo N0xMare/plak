@@ -277,6 +277,13 @@ pub(crate) struct ConnectionSlot {
     login: String,
 }
 
+impl ConnectionSlot {
+    /// The tailnet login (or dev login) the connection was admitted as.
+    pub(crate) fn login(&self) -> &str {
+        &self.login
+    }
+}
+
 impl Drop for ConnectionSlot {
     fn drop(&mut self) {
         let mut limits = self.served.gate.lock();

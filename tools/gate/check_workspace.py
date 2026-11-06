@@ -785,6 +785,11 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-hosted", "src/runtime/events.rs"): {"warn"},
     # A wake the session store refused logs its cause class, never content.
     ("plakous-hosted", "src/runtime/host_loop/wake.rs"): {"warn"},
+    # A host's stop logs the session id and whether it was recorded; the
+    # wire request that asked for it also logs the connection's face and
+    # login (spec 04 section 2.10). Never content.
+    ("plakous-hosted", "src/host_service/wire.rs"): {"info"},
+    ("plakous-hosted", "src/runtime/host_loop/stop.rs"): {"info"},
     # Context-meter diagnostics are bounded; allowance reads join independent deadlines.
     ("plakous-hosted", "src/runtime/usage.rs"): {"join", "warn"},
     # Pending HUD diagnostics carry only source, counts and delivery status.

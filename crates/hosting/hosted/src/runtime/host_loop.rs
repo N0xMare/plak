@@ -213,6 +213,7 @@ mod residency;
 mod restored;
 mod run_until_idle;
 mod session_executor;
+mod stop;
 pub(in crate::runtime) mod transient;
 pub(in crate::runtime) mod wake;
 

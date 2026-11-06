@@ -18,6 +18,36 @@ use crate::binding::TargetSelection;
 use crate::sessions::SessionRecord;
 use plakous::agent::ReasoningEffort;
 use plakous::subscriptions::NativeProvider;
+use std::thread;
+use std::time::{Duration, Instant};
+
+/// A detached shell has nothing to stop. It still settles the ticket, or
+/// the asker waits until the session ends.
+#[test]
+fn a_detached_shell_settles_a_stop() {
+    let root = tempfile::tempdir().unwrap();
+    let fixture = test_kit::shell_host_on_doubles::<TestExtension>(
+        root.path(),
+        SessionRecord::new(root.path().to_path_buf()),
+        None,
+    );
+    let (actions, _events, handle) = test_kit::spawn_shell_host_on_doubles(fixture.config);
+    let ticket = actions.request_stop().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Some(outcome) = actions.stop_settled(ticket) {
+            assert_eq!(outcome, Ok(()));
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the shell never settled the stop"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+    drop(actions);
+    handle.join().unwrap();
+}
 
 #[test]
 fn detached_clear_publishes_binding_before_clear_view_and_target_transcript() {

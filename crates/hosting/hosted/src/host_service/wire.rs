@@ -28,7 +28,8 @@ use plakous_host_protocol::wire::{
     encode_line, page_snapshot, take_observation_images,
 };
 use plakous_host_protocol::{
-    IntentSender, ObservationReceiver, ProtocolExtension, SessionIntent, SessionObservation,
+    IntentSendError, IntentSender, ObservationReceiver, ProtocolExtension, SessionIntent,
+    SessionObservation, StopTicket,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -285,6 +286,11 @@ pub struct WireConnection<P: ProtocolExtension, W: Write> {
     /// The session request in flight: its frame's id, its client's id and
     /// the attachment that asked.
     session_request: Option<(RequestId, String, AttachmentId)>,
+    /// The `stop_session` in flight: its frame's id, its ticket, and when
+    /// it is answered without the stop.
+    stop: Option<(RequestId, StopTicket, Instant)>,
+    /// Who the transport admitted, when it names a login.
+    login: Option<String>,
     lost_transcripts: LostTranscripts,
     /// The next root attach need not ask the session for a root baseline.
     baseline_follows: bool,
@@ -295,6 +301,10 @@ pub struct WireConnection<P: ProtocolExtension, W: Write> {
 
 /// The hook that wakes a serving connection, installed when it serves.
 type Waker = std::sync::Arc<std::sync::Mutex<Option<Box<dyn Fn() + Send + Sync>>>>;
+
+/// How long a stop may take before its request is answered without it: the
+/// root's cancel bound and the tree's release bound, with room.
+const STOP_DEADLINE: Duration = Duration::from_secs(90);
 
 /// How many roots a connection remembers telling its client: an attach of
 /// an older one is unknown, as a root never told is.
@@ -460,10 +470,20 @@ where
             settled: Vec::new(),
             next_mail: 0,
             session_request: None,
+            stop: None,
+            login: None,
             lost_transcripts: LostTranscripts::default(),
             baseline_follows: false,
             wake: Waker::default(),
         }
+    }
+
+    /// This connection, its transport having admitted `login`: the log of
+    /// a request that acts without an attachment names it.
+    #[must_use]
+    pub fn identified(mut self, login: impl Into<String>) -> Self {
+        self.login = Some(login.into());
+        self
     }
 
     /// This connection, its transport marked `face`; a connection is a
@@ -608,6 +628,9 @@ where
     /// A lost output.
     pub fn serve(mut self, lines: &Lines, events: &ObservationReceiver<P>) -> CliResult<()> {
         events.set_notify(lines.waker());
+        // A stop's settle is not an observation. Wake the blocked read so
+        // the answer does not wait for a later frame.
+        self.actions.on_stop_settled(lines.waker());
         *self
             .wake
             .lock()
@@ -758,11 +781,7 @@ where
             op @ (Op::RetryAttach { .. } | Op::ResumeSession { .. } | Op::Rebind { .. }) => {
                 self.session_request(id, op)
             }
-            // Stopping a session writes its stop records, which this host
-            // does not yet do.
-            Op::StopSession { session: _ } => refused(RequestRefusal::Unsupported {
-                detail: "stop_session is not available on this host yet".to_owned(),
-            }),
+            Op::StopSession { session } => self.stop_request(id, &session),
             Op::Attach { node } => {
                 // An attach and the replay it takes are one step against
                 // the session's observations.
@@ -961,6 +980,67 @@ where
         }
     }
 
+    /// A `stop_session` for `session`: asked of the session it names when
+    /// this connection serves it, answered once the stop is durable
+    /// ([`Self::settle_stop`]). It acts without an attachment, so it is
+    /// logged with the connection's face and login.
+    fn stop_request(&mut self, id: RequestId, session: &str) -> Option<Outcome> {
+        let serves = self.served_session().as_deref() == Some(session);
+        tracing::info!(
+            target: "plak::host",
+            face = ?self.face,
+            login = self.login.as_deref().unwrap_or("-"),
+            session,
+            served = serves,
+            "stop_session"
+        );
+        let refused = |refusal| Some(Outcome::Refused(refusal));
+        if !serves {
+            return refused(RequestRefusal::UnknownSession);
+        }
+        if self.stop.is_some() {
+            return refused(RequestRefusal::OneInFlight);
+        }
+        match self.actions.request_stop() {
+            Ok(ticket) => {
+                self.stop = Some((id, ticket, Instant::now() + STOP_DEADLINE));
+                None
+            }
+            Err(IntentSendError::Saturated(_)) => refused(RequestRefusal::Backpressure),
+            Err(_) => refused(RequestRefusal::Disconnected),
+        }
+    }
+
+    /// The session this connection serves now: the shared served session's
+    /// after a switch, else the one its transport named.
+    fn served_session(&self) -> Option<String> {
+        match &self.served {
+            Some(served) => Some(served::lock(served).session().to_owned()),
+            None => self.session.clone(),
+        }
+    }
+
+    /// Answers the stop in flight once the session settled it, or once its
+    /// bound passed: `stopped` when it is durable, else
+    /// `session_unavailable` with why.
+    fn settle_stop(&mut self) {
+        let Some((id, ticket, deadline)) = self.stop else {
+            return;
+        };
+        let outcome = match self.actions.stop_settled(ticket) {
+            Some(Ok(())) => Outcome::Ok(Answer::Stopped),
+            Some(Err(detail)) => Outcome::Refused(RequestRefusal::SessionUnavailable { detail }),
+            None if Instant::now() >= deadline => {
+                Outcome::Refused(RequestRefusal::SessionUnavailable {
+                    detail: "the stop did not finish in time; it may still take effect".to_owned(),
+                })
+            }
+            None => return,
+        };
+        self.stop = None;
+        self.settled.push((id, outcome));
+    }
+
     /// The response a child's mail request gets from `observation`, the
     /// answer in its window: accepted once written, or the tree's refusal.
     fn mail_answer(&mut self, observation: &SessionObservation<P>) {
@@ -1020,12 +1100,14 @@ where
     /// Writes what the service queued for the attachment: a snapshot as
     /// pages, anything else as an event after its image blobs, and a
     /// resync-required that ends the attachment. A child's mail request is
-    /// answered before the event that settles it.
+    /// answered before the event that settles it, and a stop once the
+    /// session settled it.
     ///
     /// # Errors
     ///
     /// A lost output, or a snapshot that cannot be paged.
     pub fn flush(&mut self) -> CliResult<()> {
+        self.settle_stop();
         for (id, outcome) in std::mem::take(&mut self.settled) {
             write_frame(&mut self.stdout, &HostFrame::<P>::Response { id, outcome })?;
         }

@@ -181,30 +181,46 @@ pub fn epoch_rebind_refusal(
     }
 }
 
+/// How a tree stop treats the children it interrupted.
+enum ChildStop {
+    /// The root's Ctrl-C: cascade, and settle the release in the background.
+    Cascade,
+    /// A running turn's stop: record `stopped` and signal, without joining.
+    /// The idle sweep joins.
+    Signal,
+    /// The idle sweep, or a run leaving its executor: record `stopped` and
+    /// join within the shutdown allowance.
+    Join,
+}
+
 /// Root Ctrl-C: cancels this turn and interrupts every running descendant,
 /// without closing any. Returns how many children were interrupted.
 ///
 /// Records the interrupt and signals children; release owners settle in the
 /// background and retain their own failure evidence.
 pub(crate) async fn mark_root_interrupted(tree_id: &str) -> Result<usize, String> {
-    interrupt_root(tree_id, false).await
+    interrupt_root(tree_id, ChildStop::Cascade).await
 }
 
-/// A headless run is leaving its executor: join within the shutdown allowance
-/// so healthy child terminal/job publications finish before process teardown.
+/// A running turn's stop: record `stopped` and signal the children, and do
+/// not join them. The root's cancel stays immediate; the idle sweep joins.
+pub(crate) async fn signal_root_stopped(tree_id: &str) -> Result<usize, String> {
+    interrupt_root(tree_id, ChildStop::Signal).await
+}
+
+/// The idle sweep, or a headless run leaving its executor: join within the
+/// shutdown allowance so child terminal and job publications finish.
 pub(crate) async fn mark_root_interrupted_for_run(tree_id: &str) -> Result<usize, String> {
-    interrupt_root(tree_id, true).await
+    interrupt_root(tree_id, ChildStop::Join).await
 }
 
-async fn interrupt_root(tree_id: &str, exiting: bool) -> Result<usize, String> {
+async fn interrupt_root(tree_id: &str, stop: ChildStop) -> Result<usize, String> {
     let Some(runtime) = lookup(tree_id) else {
         return Ok(0);
     };
-    // A run's exit is a stop of its tree; the root's Ctrl-C cascades.
-    let cause = if exiting {
-        crate::agent_tree::InterruptCause::Stopped
-    } else {
-        crate::agent_tree::InterruptCause::Cascade
+    let cause = match stop {
+        ChildStop::Cascade => crate::agent_tree::InterruptCause::Cascade,
+        ChildStop::Signal | ChildStop::Join => crate::agent_tree::InterruptCause::Stopped,
     };
     let mut interrupted = runtime
         .mutate_then_emit(false, move |tree| {
@@ -216,10 +232,11 @@ async fn interrupt_root(tree_id: &str, exiting: bool) -> Result<usize, String> {
         })
         .await?;
     let count = interrupted.len();
-    if exiting {
+    let join = matches!(stop, ChildStop::Join);
+    if join {
         interrupted = runtime.live.lock().await.keys().cloned().collect();
     }
-    cancel_interrupted_children(&runtime, &interrupted, exiting).await?;
+    cancel_interrupted_children(&runtime, &interrupted, join, tree_id).await?;
     Ok(count)
 }
 
@@ -227,12 +244,28 @@ async fn cancel_interrupted_children(
     runtime: &crate::topology_runtime::ProductTopologyRuntime,
     interrupted: &[String],
     exiting: bool,
+    #[cfg_attr(
+        not(test),
+        allow(
+            unused_variables,
+            reason = "the tree id is read only by the test retirement seam"
+        )
+    )]
+    tree_id: &str,
 ) -> Result<(), String> {
     if interrupted.is_empty() && !exiting {
         return Ok(());
     }
     if exiting {
-        let report = tokio::time::timeout(
+        #[cfg(test)]
+        if crate::runtime::test_seams::retirement_timeout_forced(tree_id) {
+            tracing::error!(
+                target: "plak.topology",
+                "child retirement exceeded the run-exit bound after the stop was recorded"
+            );
+            return Ok(());
+        }
+        let retired = tokio::time::timeout(
             crate::topology_runtime::HOST_SHUTDOWN_RELEASE_TIMEOUT,
             async {
                 let join = runtime.begin_cancel_live_many(interrupted).await;
@@ -241,8 +274,20 @@ async fn cancel_interrupted_children(
                 Ok::<_, String>(report)
             },
         )
-        .await
-        .map_err(|_| "child retirement exceeded the run-exit bound; owner retained".to_owned())??;
+        .await;
+        let report = match retired {
+            Ok(Ok(report)) => report,
+            Ok(Err(error)) => return Err(error),
+            // The tree's stop records are already durable. A child that is
+            // slow to retire must not turn that into a failed stop.
+            Err(_) => {
+                tracing::error!(
+                    target: "plak.topology",
+                    "child retirement exceeded the run-exit bound after the stop was recorded"
+                );
+                return Ok(());
+            }
+        };
         return report.first_failure.map_or(Ok(()), Err);
     }
     let join = runtime.begin_cancel_live_many(interrupted).await;

@@ -387,6 +387,56 @@ pub(crate) fn record_root_stop(
         .map(|write| write == RootInterruptWrite::Written)
 }
 
+/// Whether the views' cursor has already applied a terminal of `turn_id`.
+/// A stop does not anchor `stopped` on a turn that finished.
+///
+/// # Errors
+/// A feed read refused.
+pub(crate) async fn root_turn_terminal_applied(
+    sessions: &AgentSessions,
+    session: plakous::model::SessionId,
+    turn_id: &str,
+    through: u64,
+) -> Result<bool, String> {
+    let mut cursor = FeedSeq::new(0);
+    let mut restarted = false;
+    loop {
+        let page = sessions
+            .feed_page(FeedPageRequest::after(FeedCursor::new(session, cursor)))
+            .await
+            .map_err(|error| error.to_string())?;
+        let records = match page {
+            FeedPage::Records { records, .. } => records,
+            FeedPage::BehindRetention { retained_from, .. } if !restarted => {
+                restarted = true;
+                cursor = FeedSeq::new(retained_from.get().saturating_sub(1));
+                continue;
+            }
+            _ => return Ok(false),
+        };
+        if records.is_empty() {
+            return Ok(false);
+        }
+        for record in records {
+            let seq = record.header().seq;
+            cursor = seq;
+            if seq.get() > through {
+                return Ok(false);
+            }
+            let applied = record.facts().iter().any(|fact| {
+                matches!(
+                    fact,
+                    FeedFact::TurnTerminal { turn_id: terminal, .. }
+                        if terminal.to_string() == turn_id
+                )
+            });
+            if applied {
+                return Ok(true);
+            }
+        }
+    }
+}
+
 /// What one root interrupt write did.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum RootInterruptWrite {

@@ -77,6 +77,11 @@ pub fn run_shell_host_loop<P: plakous_host_protocol::ProtocolExtension>(
             let _ = events.send(started);
         }
         let (action, _acknowledgement) = delivery.into_parts();
+        // A detached shell runs no work: a host's stop has nothing to stop.
+        if let UserAction::StopSession { ticket } = action {
+            actions.settle_stop(ticket, Ok(()));
+            continue;
+        }
         if state.recovery_blocked && recovery_blocked_action(&action) {
             refuse_detached_recovery_action(&events, &action);
             continue;
@@ -155,7 +160,7 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
             );
         }
         UserAction::Quit => return ShellStep::Quit,
-        UserAction::Background => {}
+        UserAction::Background | UserAction::StopSession { .. } => {}
         action @ (UserAction::Prompt(_) | UserAction::FollowUp(_) | UserAction::Steer(_)) => {
             refuse_not_ready(events, config, log);
             reject_draft(events, action);

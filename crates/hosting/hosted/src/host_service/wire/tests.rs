@@ -1387,23 +1387,102 @@ fn a_quit_on_the_root_detaches_in_a_host_and_quits_on_stdio() {
     assert!(quit, "stdio's session was not asked to quit");
 }
 
-/// `stop_session` is refused, unsupported, until the host writes stop
-/// records; nothing reaches the session.
+/// `stop_session` names a session: one the connection does not serve is
+/// refused `unknown_session` and nothing reaches the session it serves.
 #[test]
-fn stop_session_is_refused_unsupported_for_now() {
+fn a_stop_of_a_session_not_served_is_refused_unknown() {
     let (actions, intents) = plakous_host_protocol::intent_channel::<plakous_host_protocol::Core>();
     let mut stdout = Vec::new();
-    let mut connection = WireConnection::new(root(), &mut stdout, actions);
-    assert!(matches!(
+    let mut connection = WireConnection::new(root(), &mut stdout, actions).serving("s1", |_| None);
+    assert_eq!(
+        connection.request(
+            1,
+            Op::StopSession {
+                session: "s2".to_owned()
+            }
+        ),
+        Some(Outcome::Refused(RequestRefusal::UnknownSession))
+    );
+    assert!(intents.try_recv().is_err());
+}
+
+/// A stop of the served session needs no attachment: it enters the
+/// session's mailbox as its stop, a second one while it is in flight is
+/// refused `one_in_flight`, and the request is answered `stopped` only once
+/// the session settled the stop, and then again for a repeated stop.
+#[test]
+fn a_stop_is_answered_once_the_session_settled_it() {
+    let (actions, intents) = plakous_host_protocol::intent_channel::<plakous_host_protocol::Core>();
+    let mut stdout = Vec::new();
+    let mut connection = WireConnection::new(root(), &mut stdout, actions).serving("s1", |_| None);
+    let stop = |id| ClientFrame::<plakous_host_protocol::Core>::Request {
+        id,
+        op: Op::StopSession {
+            session: "s1".to_owned(),
+        },
+    };
+    let line = |frame| Ok(encode_line(&frame).unwrap().trim_end().to_owned());
+    assert!(connection.frame(line(stop(1))).unwrap());
+    assert_eq!(
+        connection.request(
+            2,
+            Op::StopSession {
+                session: "s1".to_owned()
+            }
+        ),
+        Some(Outcome::Refused(RequestRefusal::OneInFlight))
+    );
+    let SessionIntent::StopSession { ticket } = &*intents.try_recv().unwrap() else {
+        panic!("the stop did not reach the session");
+    };
+    let ticket = *ticket;
+    connection.flush().unwrap();
+    intents.settle_stop(ticket, Ok(()));
+    connection.flush().unwrap();
+    assert!(connection.frame(line(stop(3))).unwrap());
+    let SessionIntent::StopSession { ticket } = &*intents.try_recv().unwrap() else {
+        panic!("the repeated stop did not reach the session");
+    };
+    intents.settle_stop(*ticket, Ok(()));
+    connection.flush().unwrap();
+    drop(connection);
+    let responses: Vec<serde_json::Value> = String::from_utf8(stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .filter(|frame: &serde_json::Value| frame["frame"] == "response")
+        .collect();
+    assert_eq!(
+        responses,
+        [
+            serde_json::json!({"frame": "response", "id": 1, "outcome": {"ok": {"answer": "stopped"}}}),
+            serde_json::json!({"frame": "response", "id": 3, "outcome": {"ok": {"answer": "stopped"}}}),
+        ]
+    );
+}
+
+/// A stop the session ends before settling is answered with why, never
+/// `stopped`.
+#[test]
+fn a_stop_whose_session_ended_first_is_not_answered_stopped() {
+    let (actions, intents) = plakous_host_protocol::intent_channel::<plakous_host_protocol::Core>();
+    let mut stdout = Vec::new();
+    let mut connection = WireConnection::new(root(), &mut stdout, actions).serving("s1", |_| None);
+    assert_eq!(
         connection.request(
             1,
             Op::StopSession {
                 session: "s1".to_owned()
             }
         ),
-        Some(Outcome::Refused(RequestRefusal::Unsupported { .. }))
-    ));
-    assert!(intents.try_recv().is_err());
+        None
+    );
+    drop(intents);
+    connection.flush().unwrap();
+    drop(connection);
+    let text = String::from_utf8(stdout).unwrap();
+    assert!(text.contains("session_unavailable"), "{text}");
+    assert!(!text.contains("stopped\""), "{text}");
 }
 
 /// A child attachment's quit is its detach on any connection, and answers

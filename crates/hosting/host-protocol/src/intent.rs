@@ -270,6 +270,16 @@ pub enum SessionIntent<P: ProtocolExtension = Core> {
     },
     /// Host stop-all: postorder-close every non-root non-terminal node.
     StopAllTopology,
+    /// A host's stop of the session's work (wire `stop_session`), sent by
+    /// [`IntentSender::request_stop`](crate::IntentSender::request_stop)
+    /// and settled under its `ticket`. Host-only: it never crosses the
+    /// wire, where a client asks for it with the `stop_session` request.
+    #[serde(skip)]
+    #[schemars(skip)]
+    StopSession {
+        /// The stop's ticket.
+        ticket: crate::StopTicket,
+    },
     /// Settle one child's recorded session recovery: the operator's retry,
     /// not the root `Recover` intent. The host refuses a stale revision or a
     /// different attempt.
@@ -373,6 +383,7 @@ impl<P: ProtocolExtension> fmt::Debug for SessionIntent<P> {
             Self::StopTopologyNodeProcesses { .. } => "StopTopologyNodeProcesses(..)",
             Self::ReadTopologyNodeUsage { .. } => "ReadTopologyNodeUsage(..)",
             Self::StopAllTopology => "StopAllTopology",
+            Self::StopSession { .. } => "StopSession(..)",
             Self::RecoverTopologyNode { .. } => "RecoverTopologyNode(..)",
             Self::ResumeLossContinuation { .. } => "ResumeLossContinuation(..)",
             Self::RefreshTemplates => "RefreshTemplates",

@@ -101,10 +101,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     /// A stop of everything while the root holds a continuation after a
     /// loss, or has one pending, ends it: stops stay stopped (spec 03
     /// §14.1). An idle interrupt does not.
+    ///
+    /// # Errors
+    /// The stop could not be recorded; the error notice is already shown.
     pub(super) fn stop_root_continuation(
         &mut self,
         cause: crate::sessions::projector::RootInterruptCause,
-    ) {
+    ) -> Result<(), String> {
         self.role.root_loss_resume_due = false;
         match crate::runtime::root_loss::stop_root_continuation(
             self.role.config.store.as_ref(),
@@ -126,8 +129,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     NoticeScope::Recovery,
                     format!("the stop could not be recorded: {error}"),
                 ));
+                return Err(error);
             }
         }
+        Ok(())
     }
 
     /// Lets a restored, paused queue drain again. Returns whether it is

@@ -46,6 +46,10 @@ use plakous::agent::{ControlError, ControlErrorKind};
 pub(crate) struct InterruptWatchState<P: plakous_host_protocol::ProtocolExtension> {
     interrupted: bool,
     deferred: VecDeque<UserActionDelivery<P>>,
+    /// Host stops a running turn took: its root stop recorded, or why it
+    /// was not, and its cancel requested. The idle dispatcher finishes and
+    /// settles each once the turn ended.
+    stops: Vec<(plakous_host_protocol::StopTicket, Option<String>)>,
 }
 
 impl<P: plakous_host_protocol::ProtocolExtension> Default for InterruptWatchState<P> {
@@ -53,6 +57,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> Default for InterruptWatchStat
         Self {
             interrupted: false,
             deferred: VecDeque::new(),
+            stops: Vec::new(),
         }
     }
 }
@@ -68,6 +73,23 @@ impl<P: plakous_host_protocol::ProtocolExtension> InterruptWatchState<P> {
         self.deferred.push_front(delivery);
     }
 
+    /// Keeps a stop the running turn took for the idle dispatcher, with the
+    /// reason its root stop was not recorded, if it was not.
+    pub(crate) fn stop_after_turn(
+        &mut self,
+        ticket: plakous_host_protocol::StopTicket,
+        unrecorded: Option<String>,
+    ) {
+        self.stops.push((ticket, unrecorded));
+    }
+
+    /// Takes the stops a running turn took.
+    pub(crate) fn take_stops(
+        &mut self,
+    ) -> Vec<(plakous_host_protocol::StopTicket, Option<String>)> {
+        std::mem::take(&mut self.stops)
+    }
+
     /// Whether any deferred action is still waiting to be handled.
     ///
     /// The drive loop asks before it starts a queued turn: an action the
@@ -75,6 +97,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> InterruptWatchState<P> {
     /// the queue opens a turn that would only have to be cancelled again.
     pub(crate) fn has_deferred(&self) -> bool {
         !self.deferred.is_empty()
+    }
+
+    /// Whether a stop a running turn took is still to be finished.
+    pub(crate) fn has_stops(&self) -> bool {
+        !self.stops.is_empty()
     }
 
     /// Whether a deferred `Quit` is waiting to be handled.
@@ -151,7 +178,14 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> InterruptWatch<'a, P> {
             match self.actions.try_recv() {
                 Ok(delivery) => {
                     let mut state = self.state.borrow_mut();
-                    match IntentClass::of(&*delivery).disposition(DispatchPhase::Workflow) {
+                    let class = IntentClass::of(&*delivery);
+                    match class.disposition(DispatchPhase::Workflow) {
+                        // A stop is observed, like the operator's interrupt,
+                        // and kept: the rest of it runs when the workflow ends.
+                        Disposition::ObserveInterrupt if class == IntentClass::Stop => {
+                            state.interrupted = true;
+                            state.deferred.push_back(delivery);
+                        }
                         Disposition::ObserveInterrupt if self.defer_urgent => {
                             defer_urgent(&mut state.deferred, delivery, |queued| {
                                 IntentClass::of(&**queued) == IntentClass::Urgent
@@ -181,15 +215,18 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> InterruptWatch<'a, P> {
     }
 
     /// Preparation has no admitted operation to finish after its current
-    /// receipt. Leave Quit in FIFO order, but never start a turn ahead of it.
+    /// receipt. Leave Quit, and a host's stop, in FIFO order, but never
+    /// start a turn ahead of either.
     pub(crate) fn preparation_stopped(self) -> bool {
         self.poll();
         let state = self.state.borrow();
         state.interrupted
-            || state
-                .deferred
-                .iter()
-                .any(|delivery| IntentClass::of(&**delivery) == IntentClass::Quit)
+            || state.deferred.iter().any(|delivery| {
+                matches!(
+                    IntentClass::of(&**delivery),
+                    IntentClass::Quit | IntentClass::Stop
+                )
+            })
             || self.actions.abandon_and_release_requested()
     }
 

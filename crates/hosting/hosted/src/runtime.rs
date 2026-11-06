@@ -171,7 +171,11 @@ mod root_loss_open_tests;
 pub mod shell;
 mod source_release;
 mod startup;
+#[cfg(test)]
+mod stop_tests;
 mod storage;
+#[cfg(test)]
+pub(crate) mod test_seams;
 pub use factory::{ProductionRuntimeFactory, RuntimeFactory, RuntimeFuture, TurnObserver};
 #[cfg(any(test, feature = "test-support"))]
 pub use test_kit::ScriptedRuntimeFactory;

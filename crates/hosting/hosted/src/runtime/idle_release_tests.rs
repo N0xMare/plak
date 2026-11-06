@@ -511,7 +511,12 @@ fn a_release_that_does_not_join_in_time_leaves_no_second_session() {
     let mut seen = Vec::new();
     send_attached_action(&actions, UserAction::Prompt("store me".into()));
     wait_for(&events, &mut seen, "the stored turn", turn_completed);
-    let reopen = reopener(workspace.clone(), store, state_roots);
+    let reopen = reopener(
+        workspace.clone(),
+        store,
+        state_roots,
+        Duration::from_secs(3600),
+    );
     let slot = Arc::new(
         SessionSlot::new(
             OpenedSession {
@@ -571,11 +576,12 @@ fn a_release_that_does_not_join_in_time_leaves_no_second_session() {
 }
 
 /// Opens the session of an id again from `store` and `state_roots`, as a
-/// host's slot does after a release.
-fn reopener(
+/// host's slot does after a release, released once idle for `after`.
+pub(super) fn reopener(
     workspace: std::path::PathBuf,
     store: Arc<dyn crate::session_store::SessionRecordStore>,
     state_roots: crate::agent::ProductStateRoots,
+    after: Duration,
 ) -> impl Fn(&str) -> crate::CliResult<crate::host_service::wire::OpenedSession<TestExtension>>
 + Send
 + Sync
@@ -587,7 +593,7 @@ fn reopener(
         config.session = store.load(id).map_err(crate::error::CliFailure::new)?;
         let attachments = AttachmentCount::default();
         config.idle_release = Some(IdleRelease {
-            after: Duration::from_secs(3600),
+            after,
             attachments: attachments.clone(),
         });
         let root = NodeAddress {

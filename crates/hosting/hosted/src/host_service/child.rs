@@ -86,7 +86,7 @@ const fn row<P: ProtocolExtension>(intent: &SessionIntent<P>) -> &'static str {
         | SessionIntent::MoveQueued { .. }
         | SessionIntent::ResumeQueueDrain => "queue",
         SessionIntent::ResolveApproval { .. } => "approval",
-        SessionIntent::Quit => "quit",
+        SessionIntent::Quit | SessionIntent::StopSession { .. } => "quit",
         SessionIntent::NewSession
         | SessionIntent::Compact
         | SessionIntent::ForkSession { .. }

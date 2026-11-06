@@ -78,6 +78,10 @@ impl<P: ProtocolExtension> WireSession<P> {
             .with_attachment_count(attachments);
         let served = ServedSession::shared(session_id, Box::new(roots), service);
         let (notify, changes) = watch::channel(0_u64);
+        let wake = notify.clone();
+        actions.on_stop_settled(move || {
+            wake.send_modify(|revision| *revision = revision.wrapping_add(1));
+        });
         let ended = Arc::new(AtomicBool::new(false));
         let pumped = Arc::clone(&served);
         let pump_ended = Arc::clone(&ended);

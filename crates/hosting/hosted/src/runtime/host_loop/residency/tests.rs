@@ -326,3 +326,224 @@ impl crate::topology_runtime::LiveChildHandle for QuietChild {
         Box::pin(async { crate::topology_runtime::LiveRelease::default() })
     }
 }
+
+/// A stop drops a transient resume, a host continuation and a pending
+/// start. Any one of them left in place would run after the stop.
+#[test]
+fn a_stop_drops_a_resume_a_continuation_and_a_pending_start() {
+    with_actor(
+        |_| {},
+        |host, _| {
+            host.role.config.continuation = Some("carry on".into());
+            host.role.pending_start = Some(crate::sessions::QueueItem::new("next up"));
+            host.block(async |host| {
+                let plan = crate::driver::transient::plan(
+                    crate::driver::transient::ResumeGate::Delay(Duration::from_secs(3600)),
+                    crate::driver::transient::ResumeOwner::Root {
+                        failed_turn: plakous::model::TurnId::try_from(uuid::Uuid::from_u128(1))
+                            .unwrap(),
+                    },
+                    "offline",
+                    0,
+                    1,
+                )
+                .unwrap();
+                let id = host.role.config.session.id.clone();
+                host.role.pending_resume = Some(super::super::transient::PendingResume::spawn(
+                    host.role.executor.tasks(),
+                    id,
+                    plan,
+                    None,
+                ));
+            });
+            let (sender, _receiver) =
+                crate::surface_protocol::user_action_channel::<TestExtension>();
+            let ticket = sender.request_stop().unwrap();
+            host.block(async |host| host.stop_session(ticket, None).await);
+            assert!(host.role.pending_resume.is_none(), "the resume would retry");
+            assert!(host.role.config.continuation.is_none());
+            assert!(host.role.pending_start.is_none());
+        },
+    );
+}
+
+/// A queued item's live drain stops with the session. A later open pauses
+/// any queue still outstanding; this pins the pause the stop itself writes,
+/// which a load of a non-empty queue would report either way.
+#[test]
+fn a_stop_pauses_a_queued_item() {
+    with_actor(
+        |config| {
+            config
+                .session
+                .pending_queue
+                .push(crate::sessions::QueueItem::new("must not run"));
+            config.session.queue_drain_state = crate::sessions::QueueDrainState::LiveAutoDrain;
+        },
+        |host, _| {
+            let (sender, _receiver) =
+                crate::surface_protocol::user_action_channel::<TestExtension>();
+            let ticket = sender.request_stop().unwrap();
+            host.block(async |host| host.stop_session(ticket, None).await);
+            assert_eq!(
+                host.role.config.session.queue_drain_state,
+                crate::sessions::QueueDrainState::RestoredPaused,
+                "the queued item would still drain"
+            );
+            assert_eq!(host.role.config.session.pending_queue.len(), 1);
+            assert!(host.role.pending_start.is_none());
+        },
+    );
+}
+
+/// A stop a running turn took, not yet finished, keeps the session. An
+/// idle release of zero would otherwise drop it before the settle.
+#[test]
+fn a_stop_taken_by_a_running_turn_keeps_the_session() {
+    with_actor(
+        |_| {},
+        |host, attachments| {
+            let (sender, _receiver) =
+                crate::surface_protocol::user_action_channel::<TestExtension>();
+            let ticket = sender.request_stop().unwrap();
+            host.role
+                .interrupt_state
+                .borrow_mut()
+                .stop_after_turn(ticket, None);
+            assert!(!due(host), "released while the stop was unfinished");
+            assert!(!attachments.releasing());
+            let _ = host.role.interrupt_state.borrow_mut().take_stops();
+            assert!(due(host), "not released once the stop was taken");
+            assert!(attachments.releasing());
+        },
+    );
+}
+
+/// The tree's retirement bound is past, and the stop is already durable.
+/// The answer is still stopped.
+#[test]
+fn a_slow_child_retirement_does_not_fail_a_recorded_stop() {
+    let _guard = crate::runtime::test_seams::Guard;
+    let root = tempfile::tempdir().unwrap();
+    let (mut config, _) = scripted_host_with(
+        root.path(),
+        script(serde_json::json!([{"output": {"text": "resident"}}])),
+    );
+    let attachments = AttachmentCount::default();
+    config.idle_release = Some(IdleRelease {
+        after: Duration::ZERO,
+        attachments: attachments.clone(),
+    });
+    let (sender, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let (sent, _observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let mut host = RootActor::open_blocking(config, &actions, Sender::over(sent), None).unwrap();
+    let id = host.role.config.session.id.clone();
+    let _runtime = install_idle_topology_hub(&id, &host.role.config.cwd);
+    crate::runtime::test_seams::force_retirement_timeout(&id);
+    let ticket = sender.request_stop().unwrap();
+    host.block(async |host| host.stop_session(ticket, None).await);
+    assert_eq!(sender.stop_settled(ticket), Some(Ok(())));
+}
+
+/// A running child and a child held after a loss both read `stopped`, and
+/// the held one has no continuation left.
+#[test]
+fn a_stop_interrupts_a_running_child_and_a_held_child() {
+    use crate::agent_tree::{AgentCommand, AgentCommandKind, InterruptCause, interrupt_cause};
+    use crate::agent_tree_protocol::{NodeStatus, SpawnAgentRequest};
+    with_actor(
+        |_| {},
+        |host, _| {
+            let id = host.role.config.session.id.clone();
+            let runtime = install_idle_topology_hub(&id, &host.role.config.cwd);
+            let (running, held) = host.block(async |_host| {
+                runtime
+                    .mutate_then_emit(false, |tree| {
+                        let spawn = |tree: &mut crate::agent_tree::ProductAgentTree| {
+                            tree.spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+                                .unwrap()
+                                .agent_id
+                        };
+                        let running = spawn(tree);
+                        let held = spawn(tree);
+                        for (child, turn) in [
+                            (running.as_str(), "00000000-0000-0000-0000-0000000000a1"),
+                            (held.as_str(), "00000000-0000-0000-0000-0000000000a2"),
+                        ] {
+                            tree.bind_session_locator(child, "locator".to_owned())
+                                .unwrap();
+                            tree.set_active_turn(child, true).unwrap();
+                            tree.bind_attempt_turn(child, turn).unwrap();
+                            let command = format!("start:{child}");
+                            let attempt = tree.node(child).unwrap().attempt_id.clone();
+                            tree.record_command(AgentCommand::intent(
+                                command,
+                                child,
+                                attempt,
+                                AgentCommandKind::Start,
+                                "assignment",
+                                Vec::new(),
+                            ))
+                            .unwrap();
+                        }
+                        tree.release_attempt_turn(&held).unwrap();
+                        tree.park_child(&held, Vec::new()).unwrap();
+                        tree.mark_owner_lost(&held);
+                        Ok((running, held))
+                    })
+                    .await
+                    .unwrap()
+            });
+            let (sender, _receiver) =
+                crate::surface_protocol::user_action_channel::<TestExtension>();
+            let ticket = sender.request_stop().unwrap();
+            host.block(async |host| host.stop_session(ticket, None).await);
+            runtime
+                .read(|tree| {
+                    assert_eq!(tree.node(&running).unwrap().status, NodeStatus::Interrupted);
+                    assert_eq!(tree.loss_continuation(&held), None);
+                    let causes: Vec<_> = tree
+                        .operations()
+                        .values()
+                        .filter_map(|operation| interrupt_cause(operation).unwrap())
+                        .collect();
+                    assert!(
+                        causes.contains(&Some(InterruptCause::Stopped)),
+                        "{causes:?}"
+                    );
+                })
+                .unwrap();
+        },
+    );
+}
+
+/// A stopped session keeps nothing resident: the stop ends what would
+/// continue, so the next decision releases it.
+#[test]
+fn a_stopped_session_is_released_when_idle() {
+    with_actor(
+        |_| {},
+        |host, attachments| {
+            let (sender, receiver) =
+                crate::surface_protocol::user_action_channel::<TestExtension>();
+            let ticket = sender.request_stop().unwrap();
+            drop(receiver);
+            host.block(async |host| host.stop_session(ticket, None).await);
+            let role = &host.role;
+            let state = format!(
+                "start={} resume={} loss={} continuation={} blocked={} deferred={} stops={} queue={} jobs={}",
+                role.pending_start.is_some(),
+                role.pending_resume.is_some(),
+                role.root_loss_resume_due,
+                role.config.continuation.is_some(),
+                role.recovery.blocked(),
+                role.interrupt_state.borrow().has_deferred(),
+                role.interrupt_state.borrow().has_stops(),
+                role.config.session.pending_queue.len(),
+                role.config.state_roots.job_registry().running_count(),
+            );
+            assert!(due(host), "a stopped session stayed resident: {state}");
+            assert!(attachments.releasing());
+        },
+    );
+}

@@ -149,7 +149,28 @@ struct IntentQueue<P: ProtocolExtension> {
     /// Run once when shutdown is first requested or the last sender drops;
     /// `None` once they ran.
     shutdown_hooks: Mutex<Option<Vec<ShutdownHook>>>,
+    stops: Mutex<StopBook>,
+    /// Wakes connections waiting on a stop's answer. The settle itself is
+    /// not an observation, so nothing else would.
+    stop_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
+
+/// One stop a sender asked the host for ([`IntentSender::request_stop`]),
+/// which the host settles once the stop is durable.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct StopTicket(u64);
+
+/// The stops asked for and the outcomes the host settled, until each asker
+/// takes its own.
+#[derive(Default)]
+struct StopBook {
+    issued: u64,
+    settled: VecDeque<(StopTicket, Result<(), String>)>,
+}
+
+/// How many settled stops wait for their askers; an asker gone for good
+/// leaves its outcome to be dropped behind the newer ones.
+const SETTLED_STOPS: usize = 64;
 
 type ShutdownHook = Box<dyn FnOnce() + Send>;
 
@@ -421,6 +442,64 @@ impl<P: ProtocolExtension> IntentSender<P> {
         self.0.planned_handoff.store(true, Ordering::Release);
         self.request_release();
     }
+    /// Asks the host to stop the session's work: a host's `stop_session`.
+    /// The stop enters the mailbox in arrival order as
+    /// [`SessionIntent::StopSession`] under a fresh ticket, and the host
+    /// settles the ticket once the stop is durable ([`Self::stop_settled`]).
+    ///
+    /// # Errors
+    /// Returns a typed refusal when the stop cannot enter the queue.
+    #[allow(
+        clippy::result_large_err,
+        reason = "the refusal hands the rejected action back, as send's does"
+    )]
+    pub fn request_stop(&self) -> Result<StopTicket, IntentSendError<P>> {
+        let ticket = {
+            let mut book = self
+                .0
+                .stops
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            book.issued += 1;
+            StopTicket(book.issued)
+        };
+        self.send(SessionIntent::StopSession { ticket })?;
+        Ok(ticket)
+    }
+
+    /// Runs `hook` when the host settles a stop on this queue. A wire
+    /// session uses it to wake connections waiting on the answer; the
+    /// settle is not itself an observation.
+    pub fn on_stop_settled(&self, hook: impl Fn() + Send + Sync + 'static) {
+        *self
+            .0
+            .stop_hook
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::new(hook));
+    }
+
+    /// Takes what the host settled the stop `ticket` to: `Ok` once it is
+    /// durable, the host's reason when it could not record it, or a reason
+    /// of its own when the host ended before it settled the stop. `None`
+    /// while the stop is still under way.
+    #[must_use]
+    pub fn stop_settled(&self, ticket: StopTicket) -> Option<Result<(), String>> {
+        let mut book = self
+            .0
+            .stops
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(at) = book
+            .settled
+            .iter()
+            .position(|(settled, _)| *settled == ticket)
+        {
+            return book.settled.remove(at).map(|(_, outcome)| outcome);
+        }
+        (!self.0.receiver_alive.load(Ordering::Acquire))
+            .then(|| Err("the session ended before the stop was answered".to_owned()))
+    }
+
     fn request_release(&self) {
         self.0.shutdown_requested.store(true, Ordering::Release);
         self.0.abandon_and_release.store(true, Ordering::Release);
@@ -633,6 +712,34 @@ impl<P: ProtocolExtension> IntentReceiver<P> {
         self.0.planned_handoff.load(Ordering::Acquire)
     }
 
+    /// Settles the stop `ticket` to `outcome`: `Ok` once the stop is
+    /// durable. Its asker takes it ([`IntentSender::stop_settled`]). Wakes
+    /// the mailbox and whatever [`IntentSender::on_stop_settled`] registered,
+    /// so the answer does not wait for a later frame.
+    pub fn settle_stop(&self, ticket: StopTicket, outcome: Result<(), String>) {
+        let hook = {
+            let mut book = self
+                .0
+                .stops
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if book.settled.len() >= SETTLED_STOPS {
+                book.settled.pop_front();
+            }
+            book.settled.push_back((ticket, outcome));
+            self.0
+                .stop_hook
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone()
+        };
+        self.0.ready.notify_all();
+        self.0.wake_waiter();
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
+
     /// Whether the product has painted its first interactive frame.
     #[must_use]
     pub fn is_promptable(&self) -> bool {
@@ -830,6 +937,8 @@ pub fn intent_channel<P: ProtocolExtension>() -> (IntentSender<P>, IntentReceive
         ready: Condvar::new(),
         waiter: Mutex::new(None),
         shutdown_hooks: Mutex::new(Some(Vec::new())),
+        stops: Mutex::new(StopBook::default()),
+        stop_hook: Mutex::new(None),
     });
     (
         IntentSender(Arc::clone(&shared), None),

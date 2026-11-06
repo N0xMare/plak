@@ -3891,7 +3891,35 @@ continuation, so a stray interrupt never discards it: only the Resume, a new
 prompt or a stop of the whole tree ends it. A stop of the whole tree while the
 root holds a continuation after a loss, or has one pending, records `stopped`
 anchored on the loss's turn, which ends the continuation and withdraws a
-pending continuation's prepared submission with its queue item.
+pending continuation's prepared submission with its queue item. A host's
+`stop_session` (chapter 02 §4.4) is a stop of the whole session. Child-wake
+suppression is written first. That suppression is what refuses a child
+wake, until a later root turn is admitted: a prompt admits one and clears
+it, so a child result after the prompt wakes the root, and until then a
+child result does not. Then every running or held child is interrupted
+with cause `stopped`, as an embedded run's exit does. On a running root
+turn the children are signalled and not joined; the idle boundary joins
+the retirement. A child that has not retired within the host's release
+bound after the tree's stop records are durable does not fail the stop.
+The root's `interrupt{stopped}` is recorded next, and skipped when that
+turn's terminal is already applied, so a finished turn is not anchored
+`stopped`. Background processes are stopped with the record, and the
+cancel is requested only after it. Once the turn has ended, the idle
+boundary repeats the suppression and the tree stop, pauses a queued
+drain, stops background processes, and writes the root record last:
+`stopped` on a held or pending root continuation, which ends it. That
+root record is the commit point either way. A stop during a workflow is
+observed as the operator's interrupt is, and the rest of the stop waits
+until the workflow ends. *Durable before and after:* a crash before the
+root record is an ordinary loss, held or continued under the loss policy.
+After it, with no root turn admitted since, the whole tree reads stopped
+and nothing continues it under either policy. A planned handoff or a
+later cascade does not replace `stopped` on a child while no turn of
+that attempt was admitted or bound after the stop; a child resumed onto
+a later turn is interrupted again. A child wake does not prompt that
+root while the suppression holds. The request is answered only once the
+stop is durable; the settle wakes the connection that asked, before the
+notice.
 
 A child whose own turn a live owner fenced is recovered at once, without
 waiting for the parent: its turn waiter releases and reopens the session as

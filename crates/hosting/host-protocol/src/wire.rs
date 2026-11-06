@@ -222,9 +222,17 @@ pub enum Op<P: ProtocolExtension> {
         /// Why exact reopen cannot continue, or the operator's own reason.
         cause: String,
     },
-    /// Stop the session `session`: its turn and the work under it end, as
-    /// `/stop` ends them. A host-level request, naming the session rather
-    /// than an attachment, so a session nobody attaches can be stopped.
+    /// Stop the session `session`: its running turn is cancelled with the
+    /// root's `interrupt{stopped}` recorded first, its background processes
+    /// are stopped, its running and held sub-agents are interrupted with
+    /// cause `stopped`, and a held or pending continuation is ended, so
+    /// nothing continues by itself. A host-level request, naming the
+    /// session rather than an attachment, so a session nobody attaches can
+    /// be stopped; a connection has one in flight. Answered `stopped` once
+    /// the stop is durable, `unknown_session` for a session the host does
+    /// not serve, or `session_unavailable` when the stop could not be
+    /// recorded or did not finish within the host's bound. Repeating it is
+    /// harmless: a stopped session's stop records nothing more.
     StopSession {
         /// The durable session id.
         session: String,
@@ -246,7 +254,7 @@ pub enum Answer {
     Accepted,
     /// Liveness.
     Pong,
-    /// The session stopped.
+    /// The session's work stopped, durably (`stop_session`).
     Stopped,
     /// The session request switched the session to the one rooted at
     /// `node`; the requester's `moved` follows.
@@ -273,6 +281,9 @@ pub enum RequestRefusal {
     },
     /// No such node.
     UnknownNode,
+    /// No such session on this host: `stop_session` named one it does not
+    /// serve. A session another host serves is stopped by that host.
+    UnknownSession,
     /// The node was the root of the session the connection's welcome named,
     /// which has since switched to the one rooted at `node`: attach that.
     Moved {

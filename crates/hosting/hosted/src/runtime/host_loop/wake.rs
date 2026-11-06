@@ -7,7 +7,8 @@ use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 use std::time::Duration;
 
 #[cfg(test)]
-const QUIET_WINDOW: Duration = crate::driver::wake::WakePolicy::Root.window();
+pub(in crate::runtime) const QUIET_WINDOW: Duration =
+    crate::driver::wake::WakePolicy::Root.window();
 /// Consecutive transient store refusals a wake retries on a doubling delay,
 /// starting at [`TRANSIENT_FIRST_DELAY`], before it reports itself paused.
 const TRANSIENT_RETRIES: u32 = 5;
@@ -91,6 +92,22 @@ impl RootWake {
     }
 }
 
+/// Whether child wakes are already suppressed in the session's intents.
+pub(in crate::runtime) fn wake_suppression_durable(
+    store: &dyn crate::session_store::SessionRecordStore,
+    session_id: &str,
+) -> bool {
+    let Ok(intents) = store.load_intents(session_id) else {
+        return false;
+    };
+    let Ok(views) = store.load_views(session_id) else {
+        return false;
+    };
+    views
+        .unwrap_or_else(crate::sessions::projector::SessionViews::empty)
+        .wake_suppressed(&intents)
+}
+
 pub(in crate::runtime) fn is_wake_delivery(
     session: &crate::sessions::SessionRecord,
     item: &SessionQueueItem,
@@ -105,6 +122,19 @@ pub(in crate::runtime) fn is_wake_delivery(
 
 impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     pub(super) fn suppress_child_wake(&mut self, reason: Option<String>) -> CliResult<()> {
+        // A repeated stop records nothing new: the suppression row is
+        // already the durable fact.
+        if reason.is_none()
+            && !self.role.child_wake.suppression_pending
+            && self.role.config.session.store_revision != 0
+            && wake_suppression_durable(
+                self.role.config.store.as_ref(),
+                &self.role.config.session.id,
+            )
+        {
+            self.role.config.session.child_wake_suppressed = true;
+            return Ok(());
+        }
         self.role.config.session.child_wake_suppressed = true;
         self.role.child_wake.suppression_pending = true;
         self.role.child_wake.pause_pending = reason.clone();
@@ -180,7 +210,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         Ok(())
     }
 
-    pub(super) async fn child_wake_prompt(&mut self, now: Instant) -> CliResult<HostStep> {
+    pub(in crate::runtime) async fn child_wake_prompt(
+        &mut self,
+        now: Instant,
+    ) -> CliResult<HostStep> {
         if self.role.config.interactive
             && let Some(surface) = self.role.config.surface.as_deref()
             && let Some(enabled) = surface.child_wake_enabled()
@@ -362,6 +395,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             .store
             .load_intents(&self.role.config.session.id)
             .map_err(CliFailure::new)?;
+        // Suppression is the refusal. A later root turn's admission clears
+        // it, so a child result after that prompt wakes the root again.
         self.role.config.session.child_wake_suppressed = views.wake_suppressed(&intents);
         if views.pause_cause(&intents).is_some() {
             self.role.child_wake.park();
@@ -576,6 +611,37 @@ pub(super) enum WakeFit {
     Fits,
     DoesNotFit,
     Stopped(super::prompt::preparation::Stopped),
+}
+
+/// Whether a child result wakes `config`'s root across one quiet window,
+/// with no new prompt. The actor is released afterwards.
+#[cfg(test)]
+pub(in crate::runtime) fn probe_child_wake(
+    config: super::super::HostConfig<crate::runtime::test_kit::TestExtension>,
+) -> bool {
+    let (_actions, receiver) =
+        crate::surface_protocol::user_action_channel::<crate::runtime::test_kit::TestExtension>();
+    let (events, _observed) =
+        crate::surface_protocol::host_event_channel::<crate::runtime::test_kit::TestExtension>();
+    let mut host = RootActor::open_blocking(
+        config,
+        &receiver,
+        crate::runtime::Sender::over(events),
+        None,
+    )
+    .expect("probe host");
+    let now = Instant::now();
+    let _ = host
+        .block(async |host| host.child_wake_prompt(now).await)
+        .expect("first wake");
+    let woke = matches!(
+        host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
+            .expect("second wake"),
+        HostStep::Prompt { .. }
+    );
+    host.block(async |host| host.release().await)
+        .expect("probe release");
+    woke
 }
 
 #[cfg(test)]

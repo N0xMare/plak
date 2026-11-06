@@ -109,6 +109,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         self.role
             .readiness
             .apply_settled(&mut self.role.config, &self.role.events);
+        // A stop a running turn took ends that turn's work at its idle
+        // boundary, before anything else can start.
+        let stops = self.role.interrupt_state.borrow_mut().take_stops();
+        for (ticket, unrecorded) in stops {
+            self.stop_session(ticket, unrecorded).await;
+        }
         // An action the operator already sent outranks the queue. Starting
         // a queued turn first would open a turn the very next iteration has to
         // cancel, so a deferred delivery is drained before `pending_start`.
@@ -211,6 +217,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 other => other,
             };
             match received {
+                Ok(UserAction::StopSession { ticket }) => {
+                    self.stop_session(ticket, None).await;
+                    None
+                }
                 Ok(UserAction::StopProcesses { id, interrupt: _ }) => {
                     if let Err(error) = self
                         .role
@@ -1019,7 +1029,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     | UserAction::ResumeLossContinuation { .. }),
                 ) => {
                     if matches!(action, UserAction::StopAllTopology) {
-                        self.stop_root_continuation(
+                        let _ = self.stop_root_continuation(
                             sessions::projector::RootInterruptCause::Stopped,
                         );
                     }
@@ -1086,6 +1096,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     if one_shot.is_none() && observed_tree {
                         return self.child_wake_prompt(Instant::now()).await;
                     }
+                    // The word read before the receive. A test pauses here,
+                    // between that read and the decision, which is the gap a
+                    // re-read of the residency word would close.
+                    #[cfg(test)]
+                    crate::runtime::test_seams::before_idle_release(&self.role.config.session.id);
                     if one_shot.is_none() && self.idle_release_due(residency_seen).await {
                         return Ok(self.release_idle());
                     }

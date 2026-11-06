@@ -42,6 +42,96 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
         !self.quit_after_terminal
     }
 
+    /// Suppresses child wakes before the tree stop and the root record. A
+    /// write that fails is retried by the idle sweep. The suppression is
+    /// what refuses a wake, until a later root turn's admission clears it.
+    fn suppress_child_wakes(&mut self) {
+        self.cut_stop("wake");
+        if self.host.session.store_revision == 0 {
+            self.host.session.child_wake_suppressed = true;
+            return;
+        }
+        if super::super::host_loop::wake::wake_suppression_durable(
+            self.host.store,
+            &self.host.session.id,
+        ) {
+            self.host.session.child_wake_suppressed = true;
+            return;
+        }
+        match self
+            .host
+            .store
+            .write_host_controls(&self.host.session.id, true, None)
+        {
+            Ok(()) => self.host.session.child_wake_suppressed = true,
+            Err(error) => {
+                let _ = self.host.events.notice(TranscriptRow::error(
+                    NoticeScope::Host,
+                    format!("child wakes were not suppressed: {error}"),
+                ));
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn cut_stop(&self, at: &str) {
+        assert!(
+            !crate::runtime::test_seams::stop_cut(&self.host.session.id, at),
+            "injected stop cut at {at}"
+        );
+    }
+
+    #[cfg(not(test))]
+    fn cut_stop(&self, _at: &str) {}
+
+    /// Records a host's stop of the running root turn (`interrupt{stopped}`
+    /// on the turn) before its cancel is requested, trying a refused write
+    /// once more; why it is not recorded, when it is not. A turn whose
+    /// terminal is already applied is left as it completed: nothing anchors
+    /// `stopped` on it.
+    async fn record_host_stop(&self) -> Option<String> {
+        if self.host.session.store_revision == 0 {
+            return None;
+        }
+        let turn_id = self.control.turn_id().to_string();
+        if self.turn_terminal_applied(&turn_id).await {
+            return None;
+        }
+        let record = || {
+            crate::runtime::root_loss::record_root_stop(
+                self.host.store,
+                self.host.session,
+                &turn_id,
+                crate::sessions::projector::RootInterruptCause::Stopped,
+            )
+        };
+        let error = record().or_else(|_| record()).err()?;
+        let _ = self.host.events.notice(TranscriptRow::error(
+            NoticeScope::Host,
+            format!("the stop was not recorded: {error}"),
+        ));
+        Some(error)
+    }
+
+    /// Whether the views have already applied a terminal of `turn_id`.
+    async fn turn_terminal_applied(&self, turn_id: &str) -> bool {
+        let Ok(Some(views)) = self.host.store.load_views(&self.host.session.id) else {
+            return false;
+        };
+        let through = views.cursor.get();
+        if through == 0 {
+            return false;
+        }
+        crate::runtime::root_loss::root_turn_terminal_applied(
+            &self.host.live_target.sessions,
+            self.host.live_target.followed.session_id(),
+            turn_id,
+            through,
+        )
+        .await
+        .unwrap_or(false)
+    }
+
     #[allow(
         clippy::too_many_lines,
         reason = "The running-turn owner serializes queue edits, steering, cancellation, navigation, usage, and shutdown intents against one admission."
@@ -96,6 +186,53 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                         Err(TryRecvError::Empty)
                     }
                 }
+                // A host's stop ends the turn as an interrupt does. Child
+                // wakes are suppressed and the tree is signalled stopped
+                // before the root record, which is the commit point. The
+                // children are not joined here, so the cancel that follows
+                // is not held behind their retirement; the idle sweep joins
+                // them. The operator's interrupt below then finds the turn
+                // already anchored and records nothing.
+                Ok(UserAction::StopSession { ticket }) => {
+                    self.suppress_child_wakes();
+                    let tree_id = super::super::topology_state::durable_tree_id(
+                        self.host.rows,
+                        self.host.session,
+                    );
+                    self.cut_stop("tree");
+                    let tree_error = super::super::topology_state::signal_root_stopped(&tree_id)
+                        .await
+                        .err();
+                    if let Some(error) = &tree_error {
+                        let _ = self.host.events.notice(TranscriptRow::error(
+                            NoticeScope::Host,
+                            format!("the tree was not stopped: {error}"),
+                        ));
+                    }
+                    // No root record until the tree stop is durable: a crash
+                    // before it is an ordinary loss. A turn that already
+                    // finished is not anchored stopped.
+                    self.cut_stop("root");
+                    let unrecorded = match tree_error {
+                        Some(error) => Some(error),
+                        None => self.record_host_stop().await,
+                    };
+                    self.cut_stop("process");
+                    if let Err(error) = self.host.roots.job_registry().stop_user(None) {
+                        let _ = self
+                            .host
+                            .events
+                            .notice(TranscriptRow::error(NoticeScope::Session, error));
+                    }
+                    self.host
+                        .events
+                        .publish_processes(self.host.roots.job_registry().snapshot());
+                    self.host
+                        .deferred
+                        .borrow_mut()
+                        .stop_after_turn(ticket, unrecorded);
+                    Ok(UserAction::Interrupt)
+                }
                 Ok(action) => match IntentClass::of(&action).disposition(DispatchPhase::Busy) {
                     Disposition::RefuseWhileBusy { noun } => {
                         note_idle_only(self.host.events, noun);
@@ -106,8 +243,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                 other => other,
             };
             match received {
-                Ok(UserAction::StopProcesses { .. }) => {
-                    unreachable!("process intents handled above")
+                Ok(UserAction::StopProcesses { .. } | UserAction::StopSession { .. }) => {
+                    unreachable!("process intents and stops handled above")
                 }
                 // The table refused these above; were one reclassified, a
                 // running turn still has no handler for it and refuses it.

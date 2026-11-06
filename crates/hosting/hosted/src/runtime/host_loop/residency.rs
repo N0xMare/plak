@@ -66,6 +66,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             || role.config.continuation.is_some()
             || role.recovery.blocked()
             || role.interrupt_state.borrow().has_deferred()
+            || role.interrupt_state.borrow().has_stops()
             || !role.config.session.pending_queue.is_empty();
         if pending || role.config.state_roots.job_registry().running_count() > 0 {
             return false;

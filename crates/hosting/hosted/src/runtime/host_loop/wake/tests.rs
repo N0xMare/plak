@@ -3911,3 +3911,77 @@ fn queued_user_prompt_and_shutdown_outrank_a_ready_wake() {
         assert_eq!(host.role.config.session.root_turn_count, 0);
     });
 }
+
+fn run_user_prompt(
+    host: &mut RootActor<'_, TestExtension>,
+    actions: &UserActionSender<TestExtension>,
+    text: &str,
+) {
+    actions.send(UserAction::Prompt(text.into())).unwrap();
+    let (text, item, echoed) = take_prompt(
+        host.block(async |host| host.next_prompt(None).await)
+            .unwrap(),
+    );
+    host.block(async |host| host.run_prompt(text, item, echoed, None).await)
+        .unwrap();
+}
+
+/// A stop, then a prompt: the prompt's admission clears wake suppression, so
+/// a child result wakes the root. The recorded stop does not keep refusing.
+#[test]
+fn a_prompt_after_a_stop_lets_a_child_result_wake_the_root() {
+    with_host(0, |host, runtime, actions, _| {
+        run_user_prompt(host, actions, "store it");
+        let ticket = actions.request_stop().unwrap();
+        // The idle owner takes the stop. Calling it beside the mailbox would
+        // leave the action for the next prompt to consume.
+        assert!(matches!(
+            host.block(async |host| host.next_prompt(None).await)
+                .unwrap(),
+            HostStep::Continue
+        ));
+        assert_eq!(actions.stop_settled(ticket), Some(Ok(())));
+        run_user_prompt(host, actions, "again");
+        assert!(!host.role.config.session.child_wake_suppressed);
+        post_child_result(runtime);
+        let now = Instant::now();
+        assert!(matches!(
+            host.block(async |host| host.child_wake_prompt(now).await)
+                .unwrap(),
+            HostStep::Continue
+        ));
+        assert!(
+            matches!(
+                host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
+                    .unwrap(),
+                HostStep::Prompt { .. }
+            ),
+            "a child result after the prompt did not wake the root"
+        );
+    });
+}
+
+/// After the stop is recorded, and with no later prompt, a child result
+/// does not wake the root. Suppression is the refusal.
+#[test]
+fn a_child_result_does_not_wake_a_stopped_root() {
+    with_host(0, |host, runtime, actions, _| {
+        run_user_prompt(host, actions, "store it");
+        let ticket = actions.request_stop().unwrap();
+        host.block(async |host| host.stop_session(ticket, None).await);
+        assert_eq!(actions.stop_settled(ticket), Some(Ok(())));
+        assert!(host.role.config.session.child_wake_suppressed);
+        post_child_result(runtime);
+        let now = Instant::now();
+        for at in [now, now + QUIET_WINDOW, now + QUIET_WINDOW * 2] {
+            assert!(
+                matches!(
+                    host.block(async |host| host.child_wake_prompt(at).await)
+                        .unwrap(),
+                    HostStep::Continue
+                ),
+                "a child result woke a stopped root"
+            );
+        }
+    });
+}

@@ -729,7 +729,14 @@ Everything a client admitted there can do, an operator at the TUI can do,
 except the local-face intents of §4.6: it holds the serving user's shell.
 That includes the wire's session requests (`retry_attach`,
 `resume_session`, `rebind`), which act on the serving user's own sessions
-as the TUI's `/attach`, `/resume` and rebind do. What it is shown is what
+as the TUI's `/attach`, `/resume` and rebind do, and `stop_session`, which
+stops the served session's work as the TUI's interrupt, process stop and
+stop-all together do (every face can already send those) and leaves it
+resumable. It names a session rather than an attachment, so it is bounded:
+a host stops only a session it serves (any other is `unknown_session`,
+and a session another live host holds is that host's to stop), one at a
+time per connection, and it logs each with the connection's face and
+login, since it acts without an attachment. What it is shown is what
 the TUI shows, redacted as the TUI's rows are: the session's process rows
 (chapter 02 §4.4) carry each command redacted as the raw command it shows
 (§5) and each output tail through the same display redactor as a tool

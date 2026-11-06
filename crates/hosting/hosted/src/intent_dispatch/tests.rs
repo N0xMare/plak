@@ -13,6 +13,7 @@ fn expected_class(action: &UserAction) -> IntentClass {
     match action {
         UserAction::Interrupt => IntentClass::Urgent,
         UserAction::Quit => IntentClass::Quit,
+        UserAction::StopSession { .. } => IntentClass::Stop,
         UserAction::NewSession => IntentClass::IdleOnly {
             noun: "new session",
         },
@@ -98,6 +99,9 @@ fn every_intent() -> Vec<UserAction> {
             choice: plakous_host_protocol::ApprovalChoice::Allow,
         },
         UserAction::Quit,
+        UserAction::StopSession {
+            ticket: crate::runtime::test_kit::stop_ticket(),
+        },
         UserAction::NewSession,
         UserAction::Compact,
         UserAction::ResumeSession { id: None },
@@ -155,7 +159,7 @@ fn every_intent() -> Vec<UserAction> {
 }
 
 /// The number of `SessionIntent` variants `expected_class` matches.
-const INTENT_VARIANTS: usize = 41;
+const INTENT_VARIANTS: usize = 42;
 
 #[test]
 fn every_intent_has_its_class_and_disposition() {
@@ -172,6 +176,7 @@ fn every_intent_has_its_class_and_disposition() {
         assert_eq!(class, expected_class(action), "{action:?}");
         let (busy, workflow) = match class {
             IntentClass::Urgent => (Disposition::Handle, Disposition::ObserveInterrupt),
+            IntentClass::Stop => (Disposition::Handle, Disposition::ObserveInterrupt),
             IntentClass::Quit | IntentClass::Ordinary => (Disposition::Handle, Disposition::Defer),
             IntentClass::IdleOnly { noun } => {
                 (Disposition::RefuseWhileBusy { noun }, Disposition::Defer)
@@ -255,4 +260,56 @@ fn interrupt_is_observed_at_the_next_checkpoint() {
         take_next(&state, || receiver.try_recv()).is_err(),
         "the interrupt is never deferred"
     );
+}
+
+/// A stop during a workflow is observed, as the operator's interrupt is,
+/// and kept for the idle boundary that finishes it.
+#[test]
+fn a_stop_during_a_workflow_interrupts_it_and_stays_deferred() {
+    let (sender, receiver) = user_action_channel::<TestExtension>();
+    let state = RefCell::new(InterruptWatchState::default());
+    let watch = InterruptWatch::new(&receiver, &state);
+    watch.begin();
+    sender
+        .send(UserAction::FollowUp("in progress".into()))
+        .unwrap();
+    sender
+        .send(UserAction::StopSession {
+            ticket: crate::runtime::test_kit::stop_ticket(),
+        })
+        .unwrap();
+    assert!(watch.observe_now(), "the workflow is interrupted");
+    let first = take_next(&state, || receiver.try_recv()).unwrap();
+    assert_eq!(
+        first.into_parts().0,
+        UserAction::FollowUp("in progress".into())
+    );
+    let second = take_next(&state, || receiver.try_recv()).unwrap();
+    assert!(matches!(
+        second.into_parts().0,
+        UserAction::StopSession { .. }
+    ));
+}
+
+/// A stop already sitting in the deferred queue blocks preparation even
+/// when it was not observed as an interrupt. Removing the stop from
+/// [`InterruptWatch::preparation_stopped`] lets it start a turn.
+#[test]
+fn a_deferred_stop_blocks_preparation() {
+    let (sender, receiver) = user_action_channel::<TestExtension>();
+    let state = RefCell::new(InterruptWatchState::default());
+    let watch = InterruptWatch::new(&receiver, &state);
+    watch.begin();
+    sender
+        .send(UserAction::StopSession {
+            ticket: crate::runtime::test_kit::stop_ticket(),
+        })
+        .unwrap();
+    watch.defer_input();
+    assert!(
+        !watch.interrupted(),
+        "deferring the delivery is not an observation"
+    );
+    assert!(watch.preparation_stopped());
+    assert!(!watch.interrupted());
 }

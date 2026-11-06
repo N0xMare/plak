@@ -471,10 +471,22 @@ an export.
   `detached`, and the session runs on; on `plak agent --wire v2` it still
   quits the session. A child attachment's quit-as-detach now answers
   `detached` too, not `accepted`. The new `stop_session {session}` op
-  (`Op::StopSession`, answered `stopped`, `Answer::Stopped`) is refused
-  `unsupported` (`RequestRefusal::Unsupported`) until stop records are
-  written. The wire version stays 2. Embedder break: the new `Op`,
-  `Answer` and `RequestRefusal` variants.
+  (`Op::StopSession`, answered `stopped`, `Answer::Stopped`) stops the
+  served session's work from any face: child wakes are suppressed until
+  the next prompt's admission, running and held sub-agents are interrupted
+  `stopped` (signalled, not joined, while a root turn is running), background
+  processes stop, and the running root turn is then cancelled with
+  `interrupt{stopped}` recorded before the cancel unless that turn already
+  finished. A held or pending root continuation is recorded stopped last,
+  so nothing continues by itself. A later handoff skips a stopped child
+  only while that attempt has no later turn. It is answered only once that is durable; a session the host does
+  not serve is refused `unknown_session` (`RequestRefusal::UnknownSession`),
+  and each stop is logged with the connection's face and login. A dormant
+  session is woken for it. In process the stop is
+  `IntentSender::request_stop`, a host-only `SessionIntent::StopSession`
+  that never crosses the wire, settled through `IntentReceiver::settle_stop`.
+  The wire version is unchanged. Embedder break: the new `Op`, `Answer`,
+  `RequestRefusal` and `SessionIntent` variants.
 - Wire v2 session requests: `retry_attach`, `resume_session` and `rebind`
   ops (`Op::RetryAttach`, `Op::ResumeSession`, `Op::Rebind`), each naming
   its requester attachment and a client `request_id`, answered `moved`

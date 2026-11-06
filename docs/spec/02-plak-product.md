@@ -3888,7 +3888,9 @@ verdicts) are addressed, the session profile and workspace chrome states.
   attachment), `accepted` (the intent entered the node's mailbox; what it
   does arrives as observations), `pong`, `stopped` or `moved` (a session
   request's switch, with the new root), or a refusal: `backpressure`, `one_in_flight`, `disconnected`,
-  `refused_for_role` (with its role-table row), `unknown_node`, `moved`
+  `refused_for_role` (with its role-table row), `unknown_node`,
+  `unknown_session` (a `stop_session` naming a session the host does not
+  serve), `moved`
   (with the served session's root: the attach named a root the connection
   told its client of, in its welcome or a `moved`, of a session that has
   since switched, so the client attaches that node instead), `node_closed`, `node_retiring`,
@@ -3903,9 +3905,55 @@ verdicts) are addressed, the session profile and workspace chrome states.
   --wire v2`, whose one connection is the session's only client, does it
   quit the session. Either detach answers `detached`. Stopping a session's
   work is its own request, `stop_session {session}`, which names the
-  session rather than an attachment and answers `stopped`; until stop
-  records are written (the root's `interrupt{stopped}`), every host refuses
-  it `unsupported`.
+  session rather than an attachment, so a session nobody attaches can be
+  stopped; any face may send it, remote ones included (chapter 04 §2.10).
+  A host serves it only for a session it serves (any other is refused
+  `unknown_session`), one in flight per connection (`one_in_flight`), and
+  logs each with the connection's face and login. The stop enters the
+  session's mailbox in arrival order. A running root turn takes it at
+  once, and a workflow observes it as it observes the operator's
+  interrupt, leaving the rest of the stop until the workflow ends. Either
+  way child-wake suppression is written first. That suppression is what
+  refuses a child wake, and it holds until a later root turn is admitted:
+  a prompt is that admission, so a child result after the prompt wakes
+  the root, and until then a child result does not. Then every running
+  or held child is interrupted with cause `stopped`. On a running root
+  turn those children are signalled and not joined, so the turn's cancel
+  is not held behind their retirement; the idle boundary joins it. A
+  child that has not retired within the host's release bound after the
+  tree's stop records are durable does not fail the stop. The root's
+  `interrupt{stopped}` is recorded next, and only when that turn's
+  terminal is not already applied, so a turn that finished is not
+  anchored `stopped`; background processes are stopped with it, and only
+  then is the turn's cancel requested. At the idle boundary the same
+  suppression and tree stop run again for anything still in flight,
+  then the queue's drain is paused and background processes are stopped,
+  and last the session ends what would continue by itself: a held or
+  pending root continuation after a loss (recorded `stopped` on the
+  loss's turn, its prepared submission withdrawn), a transient resume and
+  a host continuation. The root record is the commit point. Before it,
+  a lost host is an ordinary loss. After it, with no root turn admitted
+  since, the whole tree reads stopped and nothing continues by itself
+  under either loss policy. A planned handoff or a later cascade does
+  not replace `stopped` on a child while no turn of that attempt was
+  admitted or bound after the stop; a child resumed onto a later turn
+  is interrupted again, and the handoff continues that turn once. A
+  prompt, mail or a Resume resumes the work as after any interrupt. The request is answered `stopped` only
+  once all of that is durable. The settle wakes the connection, before
+  the stop's notice, so the answer does not wait for a later frame. It is
+  refused `session_unavailable` with why when a record could not be
+  written, when the session ended between taking the stop and settling
+  it, or when the stop did not finish within 90 s; `backpressure` when
+  the mailbox could not take it; and `disconnected` when the session's
+  actor is gone. A repeated stop writes nothing new and answers `stopped`.
+  The connection that asks holds the session resident
+  (residency in a host, below), so its stop never races the session's
+  idle release: a session dormant when its client connects is opened again
+  for that connection, and its stop reaches the reopened session. A
+  dormant session holds no running or pending work, since any of it keeps
+  a session resident; what it can hold is a root continuation or children
+  held after a loss under `resume_after_loss = "hold"`, which the reopen
+  leaves held and the stop then records `stopped`.
 - **Residency in a host.** A host that releases idle sessions keeps a
   session resident while anything needs it: a turn, a queued or deferred
   command, recovery debt, a pending continuation (a transient resume, a
@@ -5122,8 +5170,8 @@ processes). Idle with nothing running it quits at once, and so does the
 ladder's second press over a stuck cancel. A bare
 `quit`, `exit` or `:q` without the slash is an ordinary prompt, idle or
 mid-turn. The TUI embeds its session, so its quit stops the session's work;
-a wire client of a host detaches instead and stops a session only by
-`stop_session` (§4.4).
+a wire client of a host detaches instead and stops a session's work by
+`stop_session` (§4.4), after which the session stays served.
 
 `SIGTERM` and `SIGHUP` are quit requests. A watcher thread armed before the
 terminal is taken records the signal and wakes the event loop (§5.8), which

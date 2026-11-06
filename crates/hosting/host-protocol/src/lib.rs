@@ -97,8 +97,8 @@ pub mod wire;
 
 pub use channel::{
     IntentAcknowledgement, IntentDelivery, IntentReceiver, IntentSendError, IntentSender,
-    ObservationReceiver, ObservationSender, ObservationSink, WeakIntentSender, intent_channel,
-    observation_channel,
+    ObservationReceiver, ObservationSender, ObservationSink, StopTicket, WeakIntentSender,
+    intent_channel, observation_channel,
 };
 pub use intent::{
     ApprovalChoice, Core, Draft, DraftImage, Never, ObservationExtension, ProtocolExtension,

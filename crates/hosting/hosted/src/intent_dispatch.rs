@@ -27,6 +27,9 @@ pub(crate) enum IntentClass {
     Urgent,
     /// `Quit`: taken in arrival order after work already accepted.
     Quit,
+    /// A host's `StopSession`: taken in arrival order, by a running turn
+    /// too; a workflow defers it and starts no turn ahead of it.
+    Stop,
     /// Refused while a turn runs; `noun` names it in the refusal note.
     IdleOnly { noun: &'static str },
     /// Handled whenever a loop takes it, idle or with a turn running.
@@ -61,6 +64,7 @@ impl IntentClass {
         match action {
             UserAction::Interrupt => Self::Urgent,
             UserAction::Quit => Self::Quit,
+            UserAction::StopSession { .. } => Self::Stop,
             UserAction::NewSession => Self::IdleOnly {
                 noun: "new session",
             },
@@ -112,14 +116,17 @@ impl IntentClass {
     pub(crate) const fn idle_only_noun(self) -> Option<&'static str> {
         match self {
             Self::IdleOnly { noun } => Some(noun),
-            Self::Urgent | Self::Quit | Self::Ordinary => None,
+            Self::Urgent | Self::Quit | Self::Stop | Self::Ordinary => None,
         }
     }
 
     /// What `phase` does with an intent of this class.
     pub(crate) const fn disposition(self, phase: DispatchPhase) -> Disposition {
         match (phase, self) {
-            (DispatchPhase::Workflow, Self::Urgent) => Disposition::ObserveInterrupt,
+            // A stop interrupts a workflow the way the operator's interrupt
+            // does. The delivery itself stays deferred: the idle boundary
+            // finishes the stop when the workflow ends.
+            (DispatchPhase::Workflow, Self::Urgent | Self::Stop) => Disposition::ObserveInterrupt,
             (DispatchPhase::Workflow, _) => Disposition::Defer,
             (DispatchPhase::Busy, Self::IdleOnly { noun }) => Disposition::RefuseWhileBusy { noun },
             (DispatchPhase::Busy, _) => Disposition::Handle,

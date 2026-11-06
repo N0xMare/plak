@@ -281,6 +281,41 @@ impl ProductAgentTree {
             })
     }
 
+    /// Whether a turn of the attempt began after the interrupt `interrupt`:
+    /// a command accepted past that intent's fold, or a bound turn that was
+    /// not itself accepted at or before the fold.
+    pub(super) fn turn_began_after_interrupt(
+        &self,
+        agent_id: &str,
+        attempt_id: &AttemptId,
+        interrupt: &str,
+    ) -> bool {
+        if self.turn_admitted_after(agent_id, attempt_id, interrupt) {
+            return true;
+        }
+        let Some(bound) = self
+            .attempt(agent_id)
+            .and_then(|attempt| attempt.turn_id.clone())
+        else {
+            return false;
+        };
+        let Some(through) = self
+            .operations
+            .get(interrupt)
+            .and_then(|operation| operation.fold)
+            .map(|fold| fold.seq)
+        else {
+            return true;
+        };
+        !self.commands.values().any(|command| {
+            command.recipient == agent_id
+                && command.attempt_id.as_ref() == Some(attempt_id)
+                && command.fact == Some(CommandFact::Accepted)
+                && command.turn_id.as_deref() == Some(bound.as_str())
+                && command.accepted_seq.is_some_and(|seq| seq <= through)
+        })
+    }
+
     /// Whether a command of the attempt was accepted after the interrupt
     /// intent `interrupt` was recorded, by feed position.
     fn turn_admitted_after(&self, agent_id: &str, attempt_id: &AttemptId, interrupt: &str) -> bool {

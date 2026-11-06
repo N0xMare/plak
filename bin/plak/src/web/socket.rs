@@ -166,7 +166,7 @@ pub(crate) async fn serve(upgraded: Upgraded, served: Arc<Served>, slot: Connect
         .max_frame_size(Some(MAX_LINE_BYTES));
     let mut socket =
         WebSocketStream::from_raw_socket(TokioIo::new(upgraded), Role::Server, Some(config)).await;
-    let reason = drive(&mut socket, &served).await;
+    let reason = drive(&mut socket, &served, slot.login()).await;
     let code = match reason {
         Ended::Left | Ended::SessionClosed => CloseCode::Normal,
         Ended::Policy(_) => CloseCode::Policy,
@@ -238,7 +238,7 @@ async fn send_pending(socket: &mut Socket, outbox: &Outbox) -> Result<(), Ended>
     Ok(())
 }
 
-async fn drive(socket: &mut Socket, served: &Arc<Served>) -> Ended {
+async fn drive(socket: &mut Socket, served: &Arc<Served>, login: &str) -> Ended {
     let mut pong = None;
     let outbox = Outbox::default();
     let hello = match tokio::time::timeout(HELLO_DEADLINE, next_text(socket, &mut pong)).await {
@@ -278,7 +278,8 @@ async fn drive(socket: &mut Socket, served: &Arc<Served>) -> Ended {
     let mut connection = session
         // The web endpoint is never a local face, however its client
         // authenticated: it may not exec or hand off the host's build.
-        .connect(outbox.clone(), Face::Remote, move || stop.stopped());
+        .connect(outbox.clone(), Face::Remote, move || stop.stopped())
+        .identified(login);
     let admitted = handshake::<PlakExtension>(
         &first,
         served.welcome(&connection, &session),

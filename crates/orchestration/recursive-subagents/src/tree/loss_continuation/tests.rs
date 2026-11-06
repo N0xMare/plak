@@ -375,6 +375,136 @@ fn a_handoff_interrupts_running_and_parked_children_and_keeps_a_hold() {
     assert_eq!(reopened.record_handoff().unwrap(), Vec::<String>::new());
 }
 
+/// A stop is final: a later handoff does not replace it, so the next host
+/// does not continue the stopped children.
+#[test]
+fn a_handoff_does_not_continue_a_stopped_child() {
+    let (_root, mut tree, [running, parked, held]) = working_children();
+    tree.interrupt_running_descendants_for(InterruptCause::Stopped)
+        .unwrap();
+    assert_eq!(tree.record_handoff().unwrap(), Vec::<String>::new());
+    for child in [&running, &parked] {
+        assert_eq!(
+            view(&tree, child).interrupt_cause,
+            Some(InterruptCauseView::Stopped)
+        );
+        assert_eq!(tree.loss_continuation(child), None);
+    }
+    assert_eq!(tree.loss_continuation(&held), None);
+    let reopened = ProductAgentTree::reopen(tree.to_persisted());
+    for child in [&running, &parked, &held] {
+        assert_eq!(reopened.loss_continuation(child), None);
+    }
+}
+
+/// One running child, and nothing else a handoff could select.
+fn one_running() -> (tempfile::TempDir, ProductAgentTree, String) {
+    let (root, mut tree) = tree();
+    let child = tree
+        .spawn_agent("root", &spawn_req(), None)
+        .unwrap()
+        .agent_id;
+    tree.bind_session_locator(&child, "locator".to_owned())
+        .unwrap();
+    tree.set_active_turn(&child, true).unwrap();
+    tree.bind_attempt_turn(&child, "00000000-0000-0000-0000-000000000001")
+        .unwrap();
+    accept_start(&mut tree, &child, "00000000-0000-0000-0000-000000000001");
+    (root, tree, child)
+}
+
+/// A stopped child that is running again, still on the turn the stop
+/// interrupted, is not cascaded or handed off: the stop stays the cause.
+#[test]
+fn a_stopped_child_is_not_interrupted_again_without_a_later_turn() {
+    let (_root, mut tree, running) = one_running();
+    tree.interrupt_running_descendants_for(InterruptCause::Stopped)
+        .unwrap();
+    tree.set_active_turn(&running, true).unwrap();
+    assert_eq!(tree.node(&running).unwrap().status, NodeStatus::Running);
+    assert_eq!(tree.record_handoff().unwrap(), Vec::<String>::new());
+    assert_eq!(
+        tree.interrupt_running_descendants_for(InterruptCause::Cascade)
+            .unwrap(),
+        Vec::<String>::new()
+    );
+    // Running again, the node does not project the cause. The record is
+    // still the stop: nothing replaced it.
+    assert!(tree.operations().values().any(|operation| {
+        interrupt_cause(operation).ok().flatten().flatten() == Some(InterruptCause::Stopped)
+    }));
+    assert!(!tree.operations().values().any(|operation| {
+        matches!(
+            interrupt_cause(operation).ok().flatten().flatten(),
+            Some(InterruptCause::Handoff | InterruptCause::Cascade)
+        )
+    }));
+}
+
+/// A child mail resumed onto a new turn of the same attempt after a stop
+/// is interrupted again: a cascade and a handoff both reach it.
+#[test]
+fn a_child_resumed_after_a_stop_is_interrupted_again() {
+    let resume = |tree: &mut ProductAgentTree, child: &str| {
+        tree.interrupt_running_descendants_for(InterruptCause::Stopped)
+            .unwrap();
+        tree.release_attempt_turn(child).unwrap();
+        tree.set_active_turn(child, true).unwrap();
+        tree.bind_attempt_turn(child, "00000000-0000-0000-0000-000000000099")
+            .unwrap();
+    };
+    let (_root, mut handed, running) = one_running();
+    resume(&mut handed, &running);
+    assert_eq!(handed.record_handoff().unwrap(), vec![running.clone()]);
+    assert_eq!(
+        view(&handed, &running).interrupt_cause,
+        Some(InterruptCauseView::Handoff)
+    );
+    let (_root, mut cascaded, running) = one_running();
+    resume(&mut cascaded, &running);
+    assert_eq!(
+        cascaded
+            .interrupt_running_descendants_for(InterruptCause::Cascade)
+            .unwrap(),
+        vec![running.clone()]
+    );
+    assert_eq!(
+        view(&cascaded, &running).interrupt_cause,
+        Some(InterruptCauseView::Cascade)
+    );
+}
+
+/// A command accepted after the stop, on the turn the stop interrupted,
+/// is a later turn: a cascade reaches the child.
+#[test]
+fn a_later_admission_lifts_a_stopped_child() {
+    let (_root, mut tree, running) = one_running();
+    tree.interrupt_running_descendants_for(InterruptCause::Stopped)
+        .unwrap();
+    tree.set_active_turn(&running, true).unwrap();
+    let attempt = tree.node(&running).unwrap().attempt_id.clone();
+    let turn = tree.attempt(&running).unwrap().turn_id.clone().unwrap();
+    let command = format!("again:{running}");
+    tree.record_command(AgentCommand::intent(
+        command.clone(),
+        &running,
+        attempt,
+        AgentCommandKind::Start,
+        "assignment",
+        Vec::new(),
+    ))
+    .unwrap();
+    let accepted = tree.commands.get_mut(&command).unwrap();
+    accepted.fact = Some(CommandFact::Accepted);
+    accepted.accepted_seq = Some(1);
+    accepted.turn_id = Some(turn);
+    assert_eq!(
+        tree.interrupt_running_descendants_for(InterruptCause::Cascade)
+            .unwrap(),
+        vec![running.clone()]
+    );
+}
+
 /// A turn admitted after the handoff and lost again is an owner loss: the
 /// child is held for consent, so a handoff continues by itself once.
 #[test]

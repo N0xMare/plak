@@ -56,6 +56,9 @@ pub(super) enum Release {
     Handoff,
     /// The operator's stop, then lease alone before the cancel settled.
     StopThenLost,
+    /// A host's `stop_session`, then lease alone before the cancel
+    /// settled.
+    HostStopThenLost,
 }
 
 /// How the turn's provider answers the release's cancel.
@@ -106,8 +109,12 @@ pub(super) fn release_a_running_root_turn(
     match release {
         Release::Lost => actions.request_abandon_and_release(),
         Release::Handoff => actions.request_handoff_and_release(),
-        Release::StopThenLost => {
-            send_attached_action(&actions, UserAction::Interrupt);
+        Release::StopThenLost | Release::HostStopThenLost => {
+            if release == Release::StopThenLost {
+                send_attached_action(&actions, UserAction::Interrupt);
+            } else {
+                let _ = actions.request_stop().unwrap();
+            }
             wait_for(&events, &mut seen, "the stop", |event| {
                 matches!(event, HostEvent::Status { phase, .. }
                     if matches!(phase, plakous_host_protocol::status::HostPhase::Interrupting))

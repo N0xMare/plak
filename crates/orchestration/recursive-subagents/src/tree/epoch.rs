@@ -330,6 +330,17 @@ impl ProductAgentTree {
         let mut interrupted = Vec::new();
         let ids: Vec<String> = self.nodes.keys().cloned().collect();
         for id in ids {
+            // A stop is final for the turn it interrupted. A later cascade
+            // or a planned handoff skips that child only while no turn of
+            // the attempt began after the stop; a resumed turn is
+            // interrupted again.
+            if matches!(
+                cause,
+                super::InterruptCause::Cascade | super::InterruptCause::Handoff
+            ) && self.interrupt_already_stopped(&id)
+            {
+                continue;
+            }
             let parked = self.is_parked(&id) && !self.is_park_ending(&id);
             let owned = self.has_turn_owner(&id)
                 && (cause != super::InterruptCause::Handoff || self.assignment_started(&id));
@@ -385,10 +396,28 @@ impl ProductAgentTree {
         })
     }
 
+    /// Whether `agent_id`'s latest interrupt is a stop, and no turn of that
+    /// attempt was admitted or bound after it.
+    fn interrupt_already_stopped(&self, agent_id: &str) -> bool {
+        let Some(attempt) = self
+            .nodes
+            .get(agent_id)
+            .and_then(|node| node.attempt_id.clone())
+        else {
+            return false;
+        };
+        let Some((interrupt, cause)) = self.latest_interrupt(agent_id, &attempt) else {
+            return false;
+        };
+        cause == Some(super::InterruptCause::Stopped)
+            && !self.turn_began_after_interrupt(agent_id, &attempt, interrupt)
+    }
+
     /// Records that the root's turn was interrupted while work was still
-    /// live, so the tree reads as interrupted rather than idle.
+    /// live, so the tree reads as interrupted rather than idle. A tree
+    /// already interrupted is left as it is: a repeated stop writes nothing.
     pub fn mark_root_interrupted(&mut self) {
-        if !self.epoch_allows_rebind() {
+        if !self.epoch_allows_rebind() && self.state != TreeAdmissionState::Interrupted {
             self.state = TreeAdmissionState::Interrupted;
             self.bump();
         }
