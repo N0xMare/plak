@@ -9,7 +9,7 @@ mod session;
 pub use framing::{FrameAssembler, MAX_PLAINTEXT_BYTES, split_frame};
 pub use offer::Offer;
 pub use pairing::{Confirmation, Fingerprint, PairKey, PairProof};
-pub use session::{Handshake, StaticKey, Transport};
+pub use session::{Handshake, Initiator, PendingTransport, Responder, StaticKey, Transport};
 
 /// A local failure category. Never send these diagnostics before authentication.
 #[derive(Debug, thiserror::Error)]

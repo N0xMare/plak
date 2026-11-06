@@ -704,7 +704,7 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES.update(
 )
 # Exact reviewed dependency and feature surfaces; path changes require review too.
 EXPECTED_SECURITY_SURFACE_DIGESTS = {
-    "plakous-runner-dial": "3233bb2644c9493cef8c81e4dd7f63ca9ec68e315da1a4d98b52baa5e7f774f8",
+    "plakous-runner-dial": "adefe7b2eb4e12474b8bdadd4b62de1b4f74ba5ba6fd971854beea4a892ee48e",
     "plakous-py-worker": "12692a8c10a6033ffd8c99be9fd192fb9d76cbd41de571b36aabdc8720bebce5",
     "plakous-js-runtime": "fd22d2bf42bb470f5ed7ec3a852aa0472c1fdafa2ced4641a4a4f42c0a4bdd2a",
     "plakous": "82da620e466e97098aa79a04fa4c2296cbb5c2954bd7f1656abf1e76e9551060",

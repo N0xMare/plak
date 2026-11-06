@@ -23,7 +23,7 @@ test-hooks = []
 
 [dependencies]
 base64.workspace = true
-blake2.workspace = true
+blake2 = { workspace = true, features = ["zeroize"] }
 chacha20poly1305.workspace = true
 curve25519-dalek.workspace = true
 getrandom.workspace = true
@@ -36,6 +36,7 @@ snow.workspace = true
 subtle.workspace = true
 thiserror.workspace = true
 url.workspace = true
+uuid.workspace = true
 x25519-dalek.workspace = true
 zeroize.workspace = true
 

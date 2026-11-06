@@ -1,31 +1,48 @@
 use crate::{Error, PairKey};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use secrecy::{ExposeSecret, SecretBox};
+use secrecy::{ExposeSecret, ExposeSecretMut, SecretBox};
 use std::fmt;
 use zeroize::Zeroizing;
+
+const MAX_OFFER_TEXT_BYTES: usize = 4096;
+const MAX_RUNNER_NAME_BYTES: usize = 128;
+
+fn validate_identity(host_id: &str, runner_name: &str) -> Result<(), Error> {
+    let host = uuid::Uuid::parse_str(host_id).map_err(|_| Error::Invalid)?;
+    if host.hyphenated().to_string() != host_id
+        || runner_name.is_empty()
+        || runner_name.len() > MAX_RUNNER_NAME_BYTES
+        || !runner_name
+            .bytes()
+            .all(|byte| (b' '..=b'~').contains(&byte))
+    {
+        return Err(Error::Invalid);
+    }
+    Ok(())
+}
+
+fn encoded_size(lengths: [usize; 7]) -> usize {
+    "plak-dial:1:".len()
+        + 6
+        + lengths
+            .into_iter()
+            .map(|length| (length * 4).div_ceil(3))
+            .sum::<usize>()
+}
 
 pub(crate) fn validate_url(value: &str) -> Result<(), Error> {
     let url = url::Url::parse(value).map_err(|_| Error::Invalid)?;
     let secure = url.scheme() == "wss";
     #[cfg(feature = "test-hooks")]
     let secure = secure || url.scheme() == "ws";
-    // Inspect the raw authority too: URL normalization drops an empty userinfo.
-    let authority = value
-        .split_once("://")
-        .ok_or(Error::Invalid)?
-        .1
-        .split(['/', '?', '#'])
-        .next()
-        .ok_or(Error::Invalid)?;
     if !secure
         || url.host_str().is_none()
-        || authority.contains('@')
         || !url.username().is_empty()
         || url.password().is_some()
         || url.query().is_some()
         || url.fragment().is_some()
-        || value.chars().any(|c| c.is_control() || c.is_whitespace())
-        || value.contains('\\')
+        || !value.is_ascii()
+        || url.as_str() != value
     {
         return Err(Error::Invalid);
     }
@@ -50,7 +67,7 @@ impl fmt::Debug for Offer {
 impl Offer {
     /// Creates a fresh offer id and secret. Expiry is displayed, never enforced here.
     /// # Errors
-    /// Refuses an invalid URL, empty identity/name or unavailable CSPRNG.
+    /// Refuses invalid URL/identity/name, an offer over 4 KiB or unavailable CSPRNG.
     pub fn generate(
         url: String,
         host_id: String,
@@ -58,20 +75,33 @@ impl Offer {
         runner_name: String,
         expiry: u64,
     ) -> Result<Self, Error> {
+        if url.len() > MAX_OFFER_TEXT_BYTES {
+            return Err(Error::Invalid);
+        }
         validate_url(&url)?;
-        if host_id.is_empty() || runner_name.is_empty() {
+        validate_identity(&host_id, &runner_name)?;
+        if encoded_size([
+            url.len(),
+            host_id.len(),
+            32,
+            16,
+            16,
+            runner_name.len(),
+            expiry.to_string().len(),
+        ]) > MAX_OFFER_TEXT_BYTES
+        {
             return Err(Error::Invalid);
         }
         let mut offer_id = [0; 16];
-        let mut secret = Zeroizing::new([0; 16]);
+        let mut secret = SecretBox::<[u8; 16]>::default();
         getrandom::fill(&mut offer_id).map_err(Error::Entropy)?;
-        getrandom::fill(&mut *secret).map_err(Error::Entropy)?;
+        getrandom::fill(secret.expose_secret_mut()).map_err(Error::Entropy)?;
         Ok(Self {
             url,
             host_id,
             host_key,
             id: offer_id,
-            secret: SecretBox::new(Box::new(*secret)),
+            secret,
             runner_name,
             expiry,
         })
@@ -80,6 +110,9 @@ impl Offer {
     /// # Errors
     /// Refuses malformed encoding, field sizes, URL, identity/name or expiry.
     pub fn parse(text: &str) -> Result<Self, Error> {
+        if text.len() > MAX_OFFER_TEXT_BYTES {
+            return Err(Error::Invalid);
+        }
         let encoded = text.strip_prefix("plak-dial:1:").ok_or(Error::Invalid)?;
         let fields: Vec<_> = encoded.split('.').collect();
         if fields.len() != 7 {
@@ -108,14 +141,18 @@ impl Offer {
             .as_slice()
             .try_into()
             .map_err(|_| Error::Invalid)?;
-        let secret = decode(4)?;
-        let secret: [u8; 16] = secret.as_slice().try_into().map_err(|_| Error::Invalid)?;
-        let secret = SecretBox::new(Box::new(secret));
+        let mut secret = SecretBox::<[u8; 16]>::default();
+        let length = URL_SAFE_NO_PAD
+            .decode_slice(fields[4], secret.expose_secret_mut())
+            .map_err(|_| Error::Invalid)?;
+        if length != 16 {
+            return Err(Error::Invalid);
+        }
         let runner_name = string(5)?;
+        validate_identity(&host_id, &runner_name)?;
         let expiry = string(6)?;
-        if host_id.is_empty()
-            || runner_name.is_empty()
-            || expiry.is_empty()
+        if expiry.is_empty()
+            || (expiry.len() > 1 && expiry.starts_with('0'))
             || !expiry.bytes().all(|b| b.is_ascii_digit())
         {
             return Err(Error::Invalid);
@@ -144,13 +181,13 @@ impl Offer {
             self.runner_name.as_bytes(),
             expiry.as_bytes(),
         ];
-        let mut out = String::from("plak-dial:1:");
+        let mut out = String::with_capacity(encoded_size(fields.map(<[u8]>::len)));
+        out.push_str("plak-dial:1:");
         for (index, field) in fields.iter().enumerate() {
             if index > 0 {
                 out.push('.');
             }
-            let encoded = Zeroizing::new(URL_SAFE_NO_PAD.encode(field));
-            out.push_str(&encoded);
+            URL_SAFE_NO_PAD.encode_string(field, &mut out);
         }
         secrecy::SecretString::from(out)
     }

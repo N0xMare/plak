@@ -1835,8 +1835,8 @@ the external `monty-proto` / `monty-types` / `monty-alloc` at
 ### 7.5 Portable crates
 
 `PORTABLE_CRATES` in `tools/gate/check_workspace.py` is the only portable-crate
-list: `plakous-model` and `plakous-runner-protocol`, whose closure is `serde`
-and `serde_json`, `plakous-runner-dial`, then `plakous-tools` and `plakous-agent`. All five have
+list: `plakous-model` and `plakous-runner-protocol` (closure `serde` and
+`serde_json`), then `plakous-runner-dial`, `plakous-tools` and `plakous-agent`. All five have
 portable defaults. A crate joins that tuple only in the change that makes its normal dependency
 closure pass the fence below and its library
 check clean for `wasm32-unknown-unknown`. Joining is not a supported-platform
@@ -1953,15 +1953,14 @@ it does not change the cryptographic suite. Both native and wasm use exactly
 `snow =0.10.0` with default features disabled and a local resolver over
 `x25519-dalek =2.0.1`, `curve25519-dalek =4.1.3`,
 `chacha20poly1305 =0.10.1`, `poly1305 =0.8.0` and the existing
-`blake2 =0.11.0`. Direct exact constraints on the two transitive primitives
+`blake2 =0.11.0` with its `zeroize` feature enabled for hash and MAC state.
+Direct exact constraints on the two transitive primitives
 keep their reviewed versions fixed. No snow built-in resolver or second blake2
 is linked. The curve pin includes RUSTSEC-2024-0344's fix; the snow pin includes
 RUSTSEC-2024-0011's stateful nonce fix. The additions are checked by cargo-deny.
-The 0.9.6 comparison with the same resolver builds natively but its unconditional
-rand_core/getrandom 0.2 edge fails wasm without a second backend declaration;
-0.10.0 removes that edge and propagates entropy failure. Review of the IK,
-symmetric-state and stateful-transport changes found no regression for this
-suite; the official vector and negative tests pin those paths.
+The resolver uses only getrandom 0.4 for entropy; snow adds no RNG dependency
+or backend. Its fallible RNG interface propagates failures. The official IK
+vector and negative tests pin the chosen suite's behavior.
 
 `plakous-agent` calls `getrandom` 0.4 directly for spawn salts, bootstrap
 nonces and checkpoint entropy. That version has no default backend on

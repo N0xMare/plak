@@ -34,10 +34,17 @@ impl Random for Entropy {
     }
 }
 
-#[derive(Default)]
 struct DiffieHellman {
-    private: Zeroizing<[u8; 32]>,
+    private: x25519_dalek::StaticSecret,
     public: [u8; 32],
+}
+impl Default for DiffieHellman {
+    fn default() -> Self {
+        Self {
+            private: x25519_dalek::StaticSecret::from([0; 32]),
+            public: [0; 32],
+        }
+    }
 }
 impl Dh for DiffieHellman {
     fn name(&self) -> &'static str {
@@ -50,22 +57,23 @@ impl Dh for DiffieHellman {
         32
     }
     fn set(&mut self, private: &[u8]) {
-        self.private.copy_from_slice(private);
-        self.public =
-            x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from(*self.private))
-                .to_bytes();
+        let mut bytes = Zeroizing::new([0; 32]);
+        bytes.copy_from_slice(private);
+        self.private = x25519_dalek::StaticSecret::from(*bytes);
+        self.public = x25519_dalek::PublicKey::from(&self.private).to_bytes();
     }
     fn generate(&mut self, rng: &mut dyn Random) -> Result<(), snow::Error> {
         let mut private = Zeroizing::new([0; 32]);
         rng.try_fill_bytes(&mut *private)?;
-        self.set(&*private);
+        self.private = x25519_dalek::StaticSecret::from(*private);
+        self.public = x25519_dalek::PublicKey::from(&self.private).to_bytes();
         Ok(())
     }
     fn pubkey(&self) -> &[u8] {
         &self.public
     }
     fn privkey(&self) -> &[u8] {
-        &*self.private
+        self.private.as_bytes()
     }
     fn dh(&self, public: &[u8], out: &mut [u8]) -> Result<(), snow::Error> {
         // snow supplies its MAXDHLEN backing array, not a pub_len-sized slice.
@@ -74,7 +82,8 @@ impl Dh for DiffieHellman {
             .ok_or(snow::Error::Dh)?
             .try_into()
             .map_err(|_| snow::Error::Dh)?;
-        let shared = x25519_dalek::StaticSecret::from(*self.private)
+        let shared = self
+            .private
             .diffie_hellman(&x25519_dalek::PublicKey::from(public));
         if !shared.was_contributory() {
             return Err(snow::Error::Dh);

@@ -5771,50 +5771,6 @@ daemon, which serves one runner on a private socket, and the stdio bridge a
 host reaches it through (`plak runner`, chapter 02 §3.1). Nothing selects a
 runner for a session yet.
 
-**Portable dial core (not connected to the product).** The published-internal
-`plakous-runner-dial` common crate provides `Noise_IK_25519_ChaChaPoly_BLAKE2s`
-with the runner as initiator and the host as responder. The initiator pins the
-host's X25519 public key. Both payloads are empty; message 1 is exactly 96 bytes
-and message 2 exactly 48. A handshake failure consumes its state. No action or
-authorization follows from message 1 or from completing IK alone: the responder
-must first decrypt a runner transport message, then check its application proof.
-There is no WebSocket client, listener, daemon integration or pairing store yet.
-
-The prologue is ASCII `plak-dial/1`, the protocol version as big-endian u32,
-then source revision, build flavor, exact URL spelling and host id as UTF-8,
-each preceded by its big-endian u32 byte length. This unambiguous encoding
-binds the runner protocol's version triple, endpoint and host identity.
-Stateful transport is in-order; any size, authentication or nonce failure
-poisons the link permanently. The resolver supports only the named suite,
-refuses non-contributory (all-zero) X25519 outputs, and uses the platform
-CSPRNG through getrandom without a fallback (chapter 06 §7.5).
-
-An offer is `plak-dial:1:<url>.<host_id>.<host key>.<offer id>.<secret>.<runner name>.<expiry>`.
-Every field is strict unpadded base64url. The decoded host key is 32 bytes,
-offer id 16 bytes and secret 16 bytes; id and name are nonempty UTF-8 and
-expiry is unsigned decimal Unix seconds. The parser checks structure, not
-expiry or the product's identity/allowlist policy. URLs require `wss`, a host,
-no userinfo (even empty), query or fragment; whitespace, controls and backslash
-normalization are refused. Only the compile-time `test-hooks` feature admits
-`ws`. Expiry enforcement, single-use consumption and attempt limits belong to
-the future host pairing store, not this crate.
-
-`K_pair = BLAKE2s(key = secret, "plak-dial/1 pair")` is a stored MAC key,
-not a password hash. `PairProof { offer_id, mac }` contains
-`mac = BLAKE2s(key = K_pair, handshake_hash)`, checked in constant time after
-selecting the offer by id. It travels only as encrypted transport data, never
-as a handshake payload. A proof from another session fails. The caller owns
-offer lookup, expiry and consumption. Fingerprints are the first 16 bytes of
-BLAKE2s(public key), displayed as eight space-separated groups of four lowercase
-hex digits. Confirmation uniformly chooses four distinct positions using the
-CSPRNG and requires exactly those four typed groups (ASCII hex case ignored).
-
-Length-plus-JSON frames split into at most 65,519 plaintext bytes per Noise
-message (65,535 with tag). Reassembly accepts split prefixes and coalesced
-frames, checks the existing 16 MiB body cap before retaining any body bytes,
-and refuses truncation at EOF. It returns frame bodies for the existing JSON
-decoder. None of these primitives grants runner authority.
-
 - **Frames.** A big-endian `u32` length, then one JSON value. Neither end
   reads or writes a frame over 16 MiB; an answer that would exceed it is
   replaced by a `ResourceLimit` backend error that is not proven to have had
@@ -6091,6 +6047,59 @@ The at-most-once law across restarts:
   number its session may take (past the host's durable job counter and every
   number the handle has seen on the line), and the runner numbers the line
   from the larger of it and its own counter.
+
+**Portable dial core (not connected to the product).** The published-internal
+`plakous-runner-dial` common crate provides `Noise_IK_25519_ChaChaPoly_BLAKE2s`
+with the runner as initiator and the host as responder. The initiator pins the
+host's X25519 public key. Both payloads are empty; message 1 is exactly 96 bytes
+and message 2 exactly 48. A handshake failure consumes its state. No action or
+authorization follows from message 1 or from completing IK alone: the responder
+finishes into a `PendingTransport`, which exposes neither peer identity nor a
+writer. Its only operation, consuming `confirm(first_ciphertext)`, decrypts the
+first runner message before yielding a `Transport` and that plaintext. A replayed
+message 1 cannot yield a confirmed transport. The caller must still check the
+application proof (PairProof or Hello) before granting authority.
+There is no WebSocket client, listener, daemon integration or pairing store yet.
+
+The prologue is ASCII `plak-dial/1`, the protocol version as big-endian u32,
+then the canonical URL and nonempty host id as UTF-8, each preceded by its
+big-endian u32 byte length. This unambiguous encoding binds the protocol,
+endpoint and host identity. Source revision and build flavor are compared in
+the authenticated Hello/Bind, as on the ssh path, not in the prologue. Protocol
+version mismatches still fail the handshake without negotiation or downgrade.
+Stateful transport is in-order; any size, authentication or nonce failure
+poisons the link permanently. The resolver supports only the named suite,
+refuses non-contributory (all-zero) X25519 outputs, and uses the platform
+CSPRNG through getrandom without a fallback (chapter 06 §7.5).
+
+An offer is `plak-dial:1:<url>.<host_id>.<host key>.<offer id>.<secret>.<runner name>.<expiry>`.
+The complete offer text is at most 4 KiB, checked before splitting. Every field
+is strict unpadded base64url. The decoded host key is 32 bytes, offer id 16 bytes
+and secret 16 bytes. The host id is a canonical lowercase hyphenated UUID, as in
+`hosts`; the runner name is 1–128 bytes of printable ASCII (0x20–0x7e). Expiry
+is unsigned decimal Unix seconds with no leading zeros except `0` itself.
+Generation enforces the same URL, identity, name and encoded-size bounds. The
+parser checks structure, not expiry or the product's identity/allowlist policy. URLs require `wss`, a host,
+no userinfo (even empty), query or fragment. Only ASCII input identical to the
+URL parser's canonical spelling is accepted; normalization is not a fallback.
+Only the compile-time `test-hooks` feature admits `ws`. Expiry enforcement, single-use consumption and attempt limits belong to
+the future host pairing store, not this crate.
+
+`K_pair = BLAKE2s(key = secret, "plak-dial/1 pair")` is a stored MAC key,
+not a password hash. `PairProof { offer_id, mac }` contains
+`mac = BLAKE2s(key = K_pair, handshake_hash)`, checked in constant time after
+selecting the offer by id. It travels only as encrypted transport data, never
+as a handshake payload. A proof from another session fails. The caller owns
+offer lookup, expiry and consumption. Fingerprints are the first 16 bytes of
+BLAKE2s(public key), displayed as eight space-separated groups of four lowercase
+hex digits. Confirmation uniformly chooses four distinct positions using the
+CSPRNG and requires exactly those four typed groups (ASCII hex case ignored).
+
+Length-plus-JSON frames split into at most 65,519 plaintext bytes per Noise
+message (65,535 with tag). Reassembly accepts split prefixes and coalesced
+frames, checks the existing 16 MiB body cap before retaining any body bytes,
+and refuses truncation at EOF. It returns frame bodies for the existing JSON
+decoder. None of these primitives grants runner authority.
 
 Every potentially effectful invocation follows one small protocol: validate →
 authorize or approve → record identity → dispatch → observe outcome → commit or

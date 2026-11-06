@@ -5,7 +5,8 @@ use proptest::prelude::*;
 use secrecy::ExposeSecret;
 
 const URL: &str = "wss://example.test/runner";
-fn start() -> (Handshake, Handshake) {
+const HOST_ID: &str = "01234567-89ab-cdef-0123-456789abcdef";
+fn start() -> (Handshake<Initiator>, Handshake<Responder>) {
     let runner = StaticKey::from_bytes([1; 32]);
     let host = StaticKey::from_bytes([2; 32]);
     let version = VersionTriple::current("source", "release");
@@ -21,8 +22,11 @@ fn connected() -> (Transport, Transport) {
     let host = host.read(&m1).unwrap();
     let (host, m2) = host.write().unwrap();
     assert_eq!(m2.len(), 48);
-    let runner = runner.read(&m2).unwrap();
-    (runner.finish().unwrap(), host.finish().unwrap())
+    let mut runner = runner.read(&m2).unwrap().finish().unwrap();
+    let first = runner.encrypt(b"key confirmation").unwrap();
+    let (host, plaintext) = host.finish().unwrap().confirm(&first).unwrap();
+    assert_eq!(plaintext, b"key confirmation");
+    (runner, host)
 }
 
 #[test]
@@ -122,11 +126,9 @@ fn prologue_binds_every_component_and_field_boundary() {
             URL,
             "host",
         ),
-        (VersionTriple::current("different", "release"), URL, "host"),
-        (VersionTriple::current("source", "debug"), URL, "host"),
         (version.clone(), "wss://other.test/runner", "host"),
         (version.clone(), URL, "other"),
-        (VersionTriple::current("sourc", "erelease"), URL, "host"),
+        (version.clone(), "wss://example.test/runne", "rhost"),
     ] {
         let runner =
             Handshake::initiator(&runner_key, &host_key.public_key(), &version, url, host_id)
@@ -138,24 +140,82 @@ fn prologue_binds_every_component_and_field_boundary() {
 }
 
 #[test]
+fn build_metadata_is_left_for_authenticated_hello_bind() {
+    let runner_key = StaticKey::from_bytes([1; 32]);
+    let host_key = StaticKey::from_bytes([2; 32]);
+    let runner = Handshake::initiator(
+        &runner_key,
+        &host_key.public_key(),
+        &VersionTriple::current("older", "debug"),
+        URL,
+        "host",
+    )
+    .unwrap();
+    let host = Handshake::responder(
+        &host_key,
+        &VersionTriple::current("newer", "release"),
+        URL,
+        "host",
+    )
+    .unwrap();
+    let (runner, m1) = runner.write().unwrap();
+    let (host, m2) = host.read(&m1).unwrap().write().unwrap();
+    let mut runner = runner.read(&m2).unwrap().finish().unwrap();
+    let first = runner.encrypt(b"authenticated Hello").unwrap();
+    let (_, plaintext) = host.finish().unwrap().confirm(&first).unwrap();
+    assert_eq!(plaintext, b"authenticated Hello");
+}
+
+#[test]
+fn handshake_validates_urls_and_nonempty_host_id() {
+    let key = StaticKey::from_bytes([1; 32]);
+    let version = VersionTriple::current("source", "release");
+    for (url, host_id) in [("wss://example.test/?query", "host"), (URL, "")] {
+        assert!(Handshake::initiator(&key, &key.public_key(), &version, url, host_id).is_err());
+        assert!(Handshake::responder(&key, &version, url, host_id).is_err());
+    }
+    assert_eq!(
+        Handshake::initiator(
+            &key,
+            &key.public_key(),
+            &version,
+            "ws://localhost/runner",
+            "host"
+        )
+        .is_ok(),
+        cfg!(feature = "test-hooks")
+    );
+    assert_eq!(
+        Handshake::responder(&key, &version, "ws://localhost/runner", "host").is_ok(),
+        cfg!(feature = "test-hooks")
+    );
+}
+
+#[test]
 fn replayed_message_one_cannot_confirm_runner() {
     let (runner, host) = start();
     let (runner, m1) = runner.write().unwrap();
     let (host, m2) = host.read(&m1).unwrap().write().unwrap();
     let mut runner = runner.read(&m2).unwrap().finish().unwrap();
-    let mut host = host.finish().unwrap();
+    let pending = host.finish().unwrap();
     let key = PairKey::derive(&[7; 16]);
     let proof = key.prove([8; 16], runner.handshake_hash());
     let packet = runner
         .encrypt(&serde_json::to_vec(&proof).unwrap())
         .unwrap();
-    assert!(host.decrypt(&packet).is_ok());
+    let (host, plaintext) = pending.confirm(&packet).unwrap();
+    let received: PairProof = serde_json::from_slice(&plaintext).unwrap();
+    assert!(key.verify(&received, host.handshake_hash()));
     let (_, replay_host) = start();
     let (replay_host, _) = replay_host.read(&m1).unwrap().write().unwrap();
-    let mut replay_host = replay_host.finish().unwrap();
-    assert_ne!(host.handshake_hash(), replay_host.handshake_hash());
-    assert!(replay_host.decrypt(&packet).is_err());
-    assert!(!key.verify(&proof, replay_host.handshake_hash()));
+    let replay_host = replay_host.finish().unwrap();
+    assert!(replay_host.confirm(&packet).is_err());
+    let (_, another_host) = connected();
+    assert!(!key.verify(&proof, another_host.handshake_hash()));
+    let (_, replay_host) = start();
+    let (replay_host, _) = replay_host.read(&m1).unwrap().write().unwrap();
+    // Message 1 by itself can never release a confirmed transport or identity.
+    assert!(replay_host.finish().unwrap().confirm(&m1).is_err());
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -186,7 +246,14 @@ fn pair_proof_known_answer_and_session_binding() {
 }
 
 fn offer() -> Offer {
-    Offer::generate(URL.into(), "host".into(), [2; 32], "runner".into(), 123_456).unwrap()
+    Offer::generate(
+        URL.into(),
+        HOST_ID.into(),
+        [2; 32],
+        "runner".into(),
+        123_456,
+    )
+    .unwrap()
 }
 fn replace_field(text: &str, index: usize, value: &[u8]) -> String {
     let mut fields: Vec<String> = text
@@ -206,18 +273,20 @@ fn offer_round_trip_and_rejections() {
     let parsed = Offer::parse(text).unwrap();
     assert_eq!(parsed.expose_encoded().expose_secret(), text);
     assert_eq!(parsed.url(), URL);
-    assert_eq!(parsed.host_id(), "host");
+    assert_eq!(parsed.host_id(), HOST_ID);
     assert_eq!(parsed.host_key(), &[2; 32]);
     assert_eq!(parsed.runner_name(), "runner");
     assert_eq!(parsed.expiry(), 123_456);
     let proof = parsed.pair_key().prove(parsed.offer_id(), &[3; 32]);
     assert!(original.pair_key().verify(&proof, &[3; 32]));
     for url in [
-        "https://example.test",
+        "https://example.test/",
         "ftp://example.test",
         "wss://user@example.test",
+        "wss://user@example.test/",
         "wss://@example.test",
         "wss://u:p@example.test",
+        "wss://u:p@example.test/",
         "wss://example.test/?q",
         "wss://example.test/?",
         "wss://example.test/#f",
@@ -226,6 +295,10 @@ fn offer_round_trip_and_rejections() {
         "wss://example.test/\n",
         "wss:\\example.test",
         "wss://example.test/a\\b",
+        "WSS://EXAMPLE.TEST/runner",
+        "wss://é.test/",
+        "wss://%65xample.test/runner",
+        "wss://example.test",
     ] {
         assert!(
             Offer::parse(&replace_field(text, 0, url.as_bytes())).is_err(),
@@ -240,6 +313,7 @@ fn offer_round_trip_and_rejections() {
         (5, &b""[..]),
         (6, &b"-1"[..]),
         (6, &b"+1"[..]),
+        (6, &b"000123"[..]),
         (6, &b"18446744073709551616"[..]),
         (5, &b"\xff"[..]),
     ] {
@@ -255,6 +329,52 @@ fn offer_round_trip_and_rejections() {
     ] {
         assert!(Offer::parse(&bad).is_err());
     }
+    for host in [
+        "not-a-uuid",
+        "0123456789abcdef0123456789abcdef",
+        "01234567-89AB-CDEF-0123-456789ABCDEF",
+        "\x1b\x07\r",
+    ] {
+        assert!(Offer::parse(&replace_field(text, 1, host.as_bytes())).is_err());
+    }
+    for name in ["\x1b", "\x07", "\r", "\x7f", "é", &"a".repeat(129)] {
+        assert!(Offer::parse(&replace_field(text, 5, name.as_bytes())).is_err());
+    }
+    let too_long = replace_field(text, 0, format!("{URL}/{}", "a".repeat(3500)).as_bytes());
+    assert!(too_long.len() > 4096);
+    assert!(Offer::parse(&too_long).is_err());
+    assert!(Offer::parse(&replace_field(text, 6, b"0")).is_ok());
+    assert!(Offer::parse(&replace_field(text, 5, &[b'a'; 128])).is_ok());
+}
+
+#[test]
+fn offer_generation_refuses_invalid_inputs() {
+    for url in [
+        "https://example.test/",
+        "wss://example.test/?q",
+        "WSS://EXAMPLE.TEST/",
+    ] {
+        assert!(Offer::generate(url.into(), HOST_ID.into(), [2; 32], "runner".into(), 1).is_err());
+    }
+    for host in ["", "not-a-uuid", "\x1b"] {
+        assert!(Offer::generate(URL.into(), host.into(), [2; 32], "runner".into(), 1).is_err());
+    }
+    for name in ["", "\x07", &"a".repeat(129)] {
+        assert!(Offer::generate(URL.into(), HOST_ID.into(), [2; 32], name.into(), 1).is_err());
+    }
+    for length in [3500, 4097] {
+        assert!(
+            Offer::generate(
+                format!("{URL}/{}", "a".repeat(length)),
+                HOST_ID.into(),
+                [2; 32],
+                "runner".into(),
+                1
+            )
+            .is_err()
+        );
+    }
+    assert!(StaticKey::generate().is_ok());
 }
 
 #[test]
@@ -279,8 +399,14 @@ fn fingerprints_and_confirmation() {
         .split_whitespace()
         .map(str::to_owned)
         .collect();
+    let mut draws = std::collections::BTreeSet::new();
+    let mut seen = [false; 8];
     for _ in 0..64 {
         let challenge = Confirmation::choose().unwrap();
+        draws.insert(*challenge.positions());
+        for &index in challenge.positions() {
+            seen[index] = true;
+        }
         assert!(
             challenge
                 .positions()
@@ -300,18 +426,25 @@ fn fingerprints_and_confirmation() {
             assert!(!challenge.check(fingerprint, bad));
         }
     }
+    assert!(draws.len() > 1);
+    assert!(seen.into_iter().all(|present| present));
 }
 
 #[test]
 fn debug_never_exposes_material() {
     let (handshake, _) = start();
     let (transport, _) = connected();
+    let (runner, host) = start();
+    let (_, m1) = runner.write().unwrap();
+    let (host, _) = host.read(&m1).unwrap().write().unwrap();
+    let pending = host.finish().unwrap();
     let key = PairKey::derive(&[42; 16]);
     let proof = key.prove([43; 16], &[44; 32]);
     for debug in [
         format!("{:?}", StaticKey::from_bytes([41; 32])),
         format!("{handshake:?}"),
         format!("{transport:?}"),
+        format!("{pending:?}"),
         format!("{key:?}"),
         format!("{proof:?}"),
         format!("{:?}", offer()),
@@ -374,7 +507,8 @@ fn framing_boundaries_cap_and_truncation() {
 
 proptest! {
     #[test]
-    fn generated_offers_round_trip(host in "[a-z0-9]{1,64}", runner in "[a-z0-9]{1,64}", path in "[a-z0-9/]{0,64}", expiry in any::<u64>(), key in any::<[u8;32]>()) {
+    fn generated_offers_round_trip(host in any::<[u8;16]>(), runner in "[a-z0-9]{1,64}", path in "[a-z0-9/]{0,64}", expiry in any::<u64>(), key in any::<[u8;32]>()) {
+        let host = uuid::Uuid::from_bytes(host).hyphenated().to_string();
         let url = format!("wss://example.test/{path}");
         let offer = Offer::generate(url.clone(), host.clone(), key, runner.clone(), expiry).unwrap();
         let encoded = offer.expose_encoded();
