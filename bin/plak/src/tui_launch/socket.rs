@@ -24,7 +24,7 @@ pub struct SocketFace {
     workspace: String,
     paths: product_paths::PlakPaths,
     host_binary: Option<String>,
-    state: Mutex<State>,
+    state: Arc<Mutex<State>>,
 }
 
 #[derive(Default)]
@@ -83,7 +83,7 @@ impl SocketFace {
             paths: paths.clone(),
             host_binary: (!welcome.binary_id.is_empty() && welcome.binary_id != "unknown")
                 .then_some(welcome.binary_id),
-            state: Mutex::default(),
+            state: Arc::default(),
         })))
     }
 
@@ -190,6 +190,10 @@ impl SocketFace {
         let op = match &action {
             UserAction::NewSession => Some(self.new_session()),
             UserAction::ResumeSession { .. } => Some(self.list()),
+            UserAction::Extension(crate::surface_protocol::SurfaceIntent::ProbeReload) => {
+                self.probe_reload();
+                return Ok(());
+            }
             // Build probes are client-local, never remote-face intents.
             UserAction::Extension(crate::surface_protocol::SurfaceIntent::CheckBuild) => {
                 self.refuse_requested_reload();
@@ -214,6 +218,35 @@ impl SocketFace {
             client::SendError::Refused(refused) => refused,
             other => UserActionSendError::Disconnected(other.into_intent()),
         })
+    }
+
+    fn probe_reload(&self) {
+        let paths = self.paths.clone();
+        let workspace = self.workspace.clone();
+        let state = Arc::clone(&self.state);
+        std::thread::spawn(move || {
+            let target =
+                crate::carry::probe_reload(&paths, std::path::Path::new(&workspace), None, None).0;
+            let key = crate::home::state::state_key();
+            let refusal = target.as_ref().and_then(|target| {
+                if target.state_key.as_deref() != Some(key.as_str()) {
+                    Some("reload refused: the installed client reads another state key; stop the host or run its build".to_owned())
+                } else {
+                    target.refusal(&key)
+                }
+            });
+            state
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .events
+                .push_back(HostEvent::Extension(
+                    crate::surface_protocol::SurfaceObservation::ReloadProbed {
+                        target: target.map(Box::new),
+                        refusal,
+                    },
+                ));
+            crate::tui::wake::wake();
+        });
     }
 
     fn responses(&self) {

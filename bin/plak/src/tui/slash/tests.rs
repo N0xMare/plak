@@ -229,11 +229,7 @@ fn the_catalog_is_closed_and_carries_no_deferred_capability_rows() {
         );
         assert!(fuzzy_list(dead).is_empty(), "/{dead} must not complete");
     }
-    assert_eq!(
-        COMMANDS.len(),
-        25,
-        "spec 02 §5.1 ships twenty-five commands"
-    );
+    assert_eq!(COMMANDS.len(), 26, "spec 02 §5.1 ships twenty-six commands");
     for (name, hint) in [
         ("resume", "<id>"),
         ("agents", "<profile>"),

@@ -548,6 +548,18 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
     ("plak", "src/tui_launch/supervisor.rs"): [
         ("std::process::Command", (("identifier", "executable"),)),
     ],
+    # The socket TUI replaces only its client, with the locally probed build.
+    ("plak", "src/tui_launch/hosted.rs"): [
+        (
+            "std::process::Command",
+            (
+                ("punct", "&"),
+                ("identifier", "target"),
+                ("punct", "."),
+                ("identifier", "executable"),
+            ),
+        ),
+    ],
     ("plak", "src/commands/support.rs"): [
         ("std::process::Command", (("identifier", "program"),)),
     ],
