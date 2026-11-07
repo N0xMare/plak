@@ -460,6 +460,7 @@ fn a_session_an_embedded_face_holds_is_refused_until_its_holder_is_gone() {
     client.prompt(11, attachment, "the first turn", ANSWER);
     client.request(12, Op::Detach { attachment });
     let id = dormant(&mut client, 13);
+    kill_local_daemon_only(&fixture.home());
     let agent = embedded(&fixture, &session).expect("plak agent opened the session");
     let pid = agent.child.id();
     let row = client.rows(id).remove(0);
@@ -583,6 +584,7 @@ fn a_tree_in_custody_is_named_by_its_holder_until_the_holder_is_gone() {
     assert_eq!(client.rows(id + 2)[0].hosted_elsewhere, None);
 
     // An embedded face takes it, and is killed holding it.
+    kill_local_daemon_only(&fixture.home());
     let agent = embedded(&fixture, &session).expect("plak agent opened the session");
     let agent_pid = agent.child.id();
     assert_eq!(custody_pid(&fixture, &node.tree_id), Some(agent_pid));
@@ -773,11 +775,10 @@ fn host_crash_cuts_of_create_materialize_and_release_recover() {
     );
 }
 
-/// An embedded face asking for a session the host serves is refused,
-/// typed `tree_hosted_elsewhere`, naming plak host's pid and the way to hand
-/// the session over; after `release_session` it opens it.
+/// A daemon-held line refuses embedded opens even after the host releases
+/// the session. Without that daemon's ownership, the released session opens.
 #[test]
-fn an_embedded_face_is_refused_a_session_the_host_serves_until_released() {
+fn an_embedded_face_is_refused_a_daemon_line_until_the_daemon_is_gone() {
     let Some(fixture) = fixture() else { return };
     fixture.write_script(&json!({
         "version": 1,
@@ -795,11 +796,10 @@ fn an_embedded_face_is_refused_a_session_the_host_serves_until_released() {
     let refused = embedded(&fixture, &session)
         .err()
         .expect("a second live session opened");
-    assert_eq!(refused["code"], "tree_hosted_elsewhere", "{refused}");
+    assert_eq!(refused["code"], "local_runner_processes", "{refused}");
     let message = refused["message"].as_str().unwrap();
-    let pid = host.child.as_ref().unwrap().id();
-    assert!(message.contains(&format!("pid {pid}")), "{message}");
-    assert!(message.contains("it is plak host"), "{message}");
+    assert!(message.contains("start `plak host`"), "{message}");
+    assert!(message.contains("plak runner ps"), "{message}");
     assert_eq!(
         client.request(
             4,
@@ -809,6 +809,11 @@ fn an_embedded_face_is_refused_a_session_the_host_serves_until_released() {
         ),
         Outcome::Ok(Answer::Released)
     );
+    let refused = embedded(&fixture, &session)
+        .err()
+        .expect("release discarded daemon ownership");
+    assert_eq!(refused["code"], "local_runner_processes", "{refused}");
+    kill_local_daemon_only(&fixture.home());
     embedded(&fixture, &session).expect("plak agent opened the released session");
 }
 
@@ -918,11 +923,10 @@ fn a_sigterm_hands_a_running_turn_to_the_next_host_which_continues_it_once() {
     assert_eq!(root_record(&fixture, &session).1, 1);
 }
 
-/// `release_session` hands a session to an embedded face at once: its
-/// attachment ends with `detached`, the session reads dormant without
-/// waiting out the 300 s idle release, and `plak agent` opens it.
+/// `release_session` detaches and becomes dormant at once, but embedded
+/// opens remain refused until the daemon no longer holds the line.
 #[test]
-fn a_released_session_is_free_for_an_embedded_face_at_once() {
+fn a_released_session_is_dormant_but_keeps_its_daemon_line() {
     let Some(fixture) = fixture() else { return };
     fixture.write_script(&json!({
         "version": 1,
@@ -956,28 +960,12 @@ fn a_released_session_is_free_for_an_embedded_face_at_once() {
     }
     assert!(detached, "the attachment did not end with detached");
     assert_eq!(client.rows(5)[0].residency, SessionResidency::Dormant);
-    let mut agent = fixture
-        .command()
-        .args(["agent", "--session", &session])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-    let stdout = agent.stdout.take().unwrap();
-    let (said, hello) = mpsc::channel();
-    std::thread::spawn(move || {
-        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            if line.contains("\"kind\":\"hello\"") {
-                let _ = said.send(());
-            }
-        }
-    });
-    hello
-        .recv_timeout(WAIT)
-        .expect("plak agent opened the released session");
-    agent.kill().unwrap();
-    agent.wait().unwrap();
+    let refused = embedded(&fixture, &session)
+        .err()
+        .expect("release discarded daemon ownership");
+    assert_eq!(refused["code"], "local_runner_processes", "{refused}");
+    kill_local_daemon_only(&fixture.home());
+    embedded(&fixture, &session).expect("plak agent opened the released session");
 }
 
 /// `host_sigkill_mid_handoff` (spec 05): a host stopping with a root turn

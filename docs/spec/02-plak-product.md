@@ -4613,15 +4613,17 @@ when the host starts keeps its custody, and the per-tree
   A replay whose workspace, or whose template's binding, is not the
   session's is refused `malformed`. Any existing directory is accepted
   (chapter 04 §2.10).
-- **Release.** `release_session {session}` hands a session to a desk TUI
+- **Release.** `release_session {session}` releases the host's attachment
   without waiting out the idle release: every attachment of the session
   ends, the asker's own included, each with the host frame `detached`, and
   the session releases as soon as nothing else keeps it resident (its
   actor's idle release, asked to release now, decides it as it decides an
   idle release, so a turn, pending work, a process or a resident child still
   keeps it, and so does an attach made since). The answer is `released` once
-  the release committed, so another face may open the session at once, or,
-  when none began within 10 s, `resident {reason}` (`attachment` when one
+  the release committed, so another host attachment may open the session at
+  once. An embedded face may open only when the home-local daemon no longer
+  holds the line; release does not discard that ownership. When no release
+  began within 10 s, the answer is `resident {reason}` (`attachment` when one
   was made since or another connection still holds the session, a stop
   still draining included, `processes` while one runs, `work` otherwise),
   and then the request is withdrawn, so the session does not release by
