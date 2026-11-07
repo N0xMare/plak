@@ -12,6 +12,52 @@ const PROVIDERS: [NativeProvider; 3] = [
     NativeProvider::Xai,
 ];
 
+#[tokio::test]
+async fn named_inventory_is_local_and_keeps_verticals_separate() -> Result<(), Box<dyn Error>> {
+    let root = tempfile::tempdir()?;
+    let paths = SubscriptionPaths::from_xdg_state_home(root.path().join("state"))?;
+    let native = subscriptions(paths);
+    assert_eq!(
+        native.named_accounts(NativeProvider::Claude).await?,
+        [] as [String; 0]
+    );
+    assert!(!root.path().join("state").exists());
+    let claude = native
+        .for_named_account(NativeProvider::Claude, "work")?
+        .create_account_for_login(NativeProvider::Claude)
+        .await?;
+    let grok = native
+        .for_named_account(NativeProvider::Xai, "personal")?
+        .create_account_for_login(NativeProvider::Xai)
+        .await?;
+    assert_eq!(
+        native.named_accounts(NativeProvider::Claude).await?,
+        ["work"]
+    );
+    assert_eq!(
+        native.named_accounts(NativeProvider::Xai).await?,
+        ["personal"]
+    );
+    assert_eq!(
+        native.named_accounts(NativeProvider::Codex).await?,
+        [] as [String; 0]
+    );
+    assert!(claude.account_exists(NativeProvider::Claude).await?);
+    assert!(claude.named_accounts(NativeProvider::Xai).await.is_err());
+    assert_eq!(
+        claude
+            .upstream_account_fingerprint(NativeProvider::Claude)
+            .await?,
+        None
+    );
+    drop((claude, grok));
+    assert_eq!(
+        native.named_accounts(NativeProvider::Claude).await?,
+        [] as [String; 0]
+    );
+    Ok(())
+}
+
 fn subscriptions(paths: SubscriptionPaths) -> NativeSubscriptions {
     NativeSubscriptions::new(paths).with_clock(Arc::new(plakous_model::FixedClock::new(
         Timestamp::new(test_now(), 0).unwrap(),
@@ -192,7 +238,10 @@ async fn named_removal_refuses_defaults_live_credentials_and_busy_writers()
             native.state.slot_id()?,
         )?;
         store.initialize_selected(&record(profile, 1)?)?;
-        assert!(native.remove_signed_out_account(provider).await.is_err());
+        assert_eq!(
+            native.remove_signed_out_account(provider).await,
+            Err(NativeSubscriptionError::AccountSignedIn)
+        );
         assert!(native.state.provider_record(provider).is_file());
         drop(store);
     }
@@ -210,6 +259,66 @@ fn record(
         CredentialStatus::Ready,
         SecretBytes::new(b"opaque-test-credential".to_vec()),
     )
+}
+
+#[tokio::test]
+async fn sibling_refresh_claims_and_quarantine_never_cross_account_boundaries()
+-> Result<(), Box<dyn Error>> {
+    let root = tempfile::tempdir()?;
+    let paths = SubscriptionPaths::from_xdg_state_home(root.path().join("state"))?;
+    for provider in PROVIDERS {
+        let native = subscriptions(paths.clone());
+        let work = native
+            .for_named_account(provider, "work")?
+            .create_account_for_login(provider)
+            .await?;
+        let other = native
+            .for_named_account(provider, "other")?
+            .create_account_for_login(provider)
+            .await?;
+        let profile = SubscriptionIntegrationProfileId::new(
+            NativeSubscriptions::notice(provider)?.profile_id(),
+        )?;
+        let open = |selected: &NativeSubscriptions| {
+            PrivateCredentialStore::open_slot(
+                selected.state.provider_record(provider),
+                profile.clone(),
+                selected.state.slot_id().unwrap(),
+            )
+        };
+        let work_store = open(&work)?;
+        let other_store = open(&other)?;
+        work_store.initialize_selected(&record(profile.clone(), 1)?)?;
+        other_store.initialize_selected(&record(profile.clone(), 1)?)?;
+        let work_fence = work_store.load()?.unwrap();
+        let other_fence = other_store.load()?.unwrap();
+        let work_lock = work.acquire_compatibility_lock(provider).await?;
+        let other_lock = other
+            .try_acquire_compatibility_lock(provider)
+            .await?
+            .ok_or("sibling writer lock was shared")?;
+        let work_claim = work_store.begin_refresh(&work_fence)?.start();
+        assert_eq!(
+            other_store.load()?.unwrap().status(),
+            CredentialStatus::Ready
+        );
+        assert!(other_store.try_acquire_ready(&other_fence)?.is_some());
+        let other_claim = other_store.begin_refresh(&other_fence)?.start();
+        drop(work_claim);
+        other_store.complete_refresh(other_claim, record(profile.clone(), 3)?)?;
+        assert_eq!(
+            work_store.load()?.unwrap().status(),
+            CredentialStatus::RefreshOutcomeUnknown
+        );
+        assert_eq!(
+            other_store.load()?.unwrap().status(),
+            CredentialStatus::Ready
+        );
+        assert_eq!(other_store.load()?.unwrap().generation().get(), 3);
+        work_lock.verify()?;
+        other_lock.verify()?;
+    }
+    Ok(())
 }
 
 #[tokio::test]

@@ -20,6 +20,47 @@ pub struct CodexSubscriptionLocalAdmin {
 }
 
 impl CodexSubscriptionLocalAdmin {
+    /// Reads an authenticated upstream-account digest without exposing identity or credentials.
+    /// Missing, non-Ready or busy evidence is unknown, not another account.
+    ///
+    /// # Errors
+    /// Refuses malformed, foreign or unsafe selected-slot records.
+    pub async fn upstream_account_fingerprint(
+        &self,
+    ) -> Result<Option<super::Digest>, NativeCodexAuthError> {
+        let store = Arc::clone(&self.store);
+        run_blocking(move || {
+            let Some(fence) = store.load().map_err(|_| NativeCodexAuthError::Store)? else {
+                return Ok(None);
+            };
+            if fence.status() != super::CredentialStatus::Ready {
+                return Ok(None);
+            }
+            let Some(lease) = store
+                .try_acquire_ready(&fence)
+                .map_err(|_| NativeCodexAuthError::Store)?
+            else {
+                return Ok(None);
+            };
+            let stored = super::parse_stored(lease.payload())?;
+            if stored.account_id != fence.account_binding().as_str() {
+                return Err(NativeCodexAuthError::Validation);
+            }
+            super::Digest::sha256(
+                super::DigestDomain::ModelBinding,
+                1,
+                &[
+                    b"plak.native-upstream-account.v1",
+                    b"codex",
+                    stored.account_id.as_bytes(),
+                ],
+            )
+            .map(Some)
+            .map_err(|_| NativeCodexAuthError::Validation)
+        })
+        .await
+    }
+
     /// Opens the exact application-selected slot for the pinned
     /// native Codex profile without consulting ambient state or the network.
     ///

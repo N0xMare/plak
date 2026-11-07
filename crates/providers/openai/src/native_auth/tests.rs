@@ -1041,6 +1041,37 @@ async fn explicit_codex_slot_ids_refuse_foreign_records_online_and_offline() -> 
     let admin =
         CodexSubscriptionLocalAdmin::open(&path, CredentialSlotId::new("named-work")?).await?;
     assert_eq!(admin.status().await?, OfflineCredentialLifecycle::Ready);
+    let digest = admin
+        .upstream_account_fingerprint()
+        .await?
+        .ok_or("missing upstream evidence")?;
+    let (_sibling_directory, sibling_path) = private_slot()?;
+    seed_ready_credential_for_slot(
+        &sibling_path,
+        CredentialSlotId::new("named-other")?,
+        "account",
+        "subject",
+        now_unix_secs() + 3_600,
+    )?;
+    let sibling =
+        CodexSubscriptionLocalAdmin::open(&sibling_path, CredentialSlotId::new("named-other")?)
+            .await?;
+    assert_eq!(sibling.upstream_account_fingerprint().await?, Some(digest));
+    let (_different_directory, different_path) = private_slot()?;
+    seed_ready_credential_for_slot(
+        &different_path,
+        CredentialSlotId::new("named-other")?,
+        "another-account",
+        "another-subject",
+        now_unix_secs() + 3_600,
+    )?;
+    let different =
+        CodexSubscriptionLocalAdmin::open(&different_path, CredentialSlotId::new("named-other")?)
+            .await?;
+    assert_ne!(
+        different.upstream_account_fingerprint().await?,
+        Some(digest)
+    );
     for foreign in ["primary", "named-other"] {
         assert!(open(foreign).is_err());
         assert!(

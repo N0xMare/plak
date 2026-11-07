@@ -546,6 +546,23 @@ impl NativeVertical for Vertical {
             }
         }
     }
+    fn upstream_account_fingerprint<'a>(
+        &self,
+        subscriptions: &'a NativeSubscriptions,
+    ) -> NativeFuture<'a, Result<Option<plakous_model::Digest>, NativeSubscriptionError>> {
+        Box::pin(async move {
+            plakous_openai::CodexSubscriptionLocalAdmin::open(
+                subscriptions.state.provider_record(NativeProvider::Codex),
+                subscriptions.state.slot_id()?,
+            )
+            .await
+            .map_err(map_codex_error)?
+            .upstream_account_fingerprint()
+            .await
+            .map_err(map_codex_error)
+        })
+    }
+
     fn offline_status<'a>(
         &self,
         subscriptions: &'a NativeSubscriptions,

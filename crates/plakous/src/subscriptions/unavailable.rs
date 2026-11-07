@@ -17,6 +17,36 @@ pub struct NativeSubscriptions {
     reason = "disabled routes retain the compiled async API contract"
 )]
 impl NativeSubscriptions {
+    /// Refuses account comparison for an omitted native route before I/O.
+    ///
+    /// # Errors
+    /// Returns the exact omitted route.
+    pub async fn upstream_account_fingerprint(
+        &self,
+        provider: NativeProvider,
+    ) -> Result<Option<plakous_model::Digest>, NativeSubscriptionError> {
+        Err(NativeSubscriptionError::NotCompiled(provider))
+    }
+    /// Refuses enumeration of an omitted native route before I/O.
+    ///
+    /// # Errors
+    /// Returns the exact omitted route.
+    pub async fn named_accounts(
+        &self,
+        provider: NativeProvider,
+    ) -> Result<Vec<String>, NativeSubscriptionError> {
+        Err(NativeSubscriptionError::NotCompiled(provider))
+    }
+    /// Refuses an existence read for an omitted native route before I/O.
+    ///
+    /// # Errors
+    /// Returns the exact omitted route.
+    pub async fn account_exists(
+        &self,
+        provider: NativeProvider,
+    ) -> Result<bool, NativeSubscriptionError> {
+        Err(NativeSubscriptionError::NotCompiled(provider))
+    }
     /// Refuses selection of an omitted native route before I/O.
     ///
     /// # Errors

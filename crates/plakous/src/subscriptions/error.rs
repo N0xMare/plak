@@ -41,6 +41,8 @@ pub enum NativeSubscriptionError {
     CredentialUnavailable,
     /// A named account writer or pending credential operation is busy.
     AccountBusy,
+    /// A named slot still has a live credential and must be signed out first.
+    AccountSignedIn,
     /// Bare default accounts can be signed out but cannot be removed.
     DefaultAccountNotRemovable,
     /// The provider rejected or invalidated the native authentication operation.
@@ -174,6 +176,7 @@ impl NativeSubscriptionError {
             Self::InvalidReceipt => "native compatibility receipt is invalid",
             Self::CredentialUnavailable => "native subscription credential is unavailable",
             Self::AccountBusy => "account_busy: the named subscription account is busy",
+            Self::AccountSignedIn => "account_signed_in: log out first",
             Self::DefaultAccountNotRemovable => {
                 "default_account_not_removable: sign out the default account instead"
             }

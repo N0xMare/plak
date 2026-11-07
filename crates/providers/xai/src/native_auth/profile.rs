@@ -166,6 +166,41 @@ pub struct XaiOfflineSelectedSlot {
 }
 
 impl XaiOfflineSelectedSlot {
+    /// Reads an authenticated upstream-account digest without exposing identity or credentials.
+    /// Missing, non-Ready or busy evidence is unknown, not another account.
+    ///
+    /// # Errors
+    /// Refuses malformed, foreign or unsafe selected-slot records.
+    pub fn upstream_account_fingerprint(
+        &self,
+    ) -> Result<Option<plakous_model::Digest>, XaiNativeAuthError> {
+        let Some(fence) = self.store.load()? else {
+            return Ok(None);
+        };
+        refuse_retired_payload(&self.store, &fence)?;
+        if fence.status() != CredentialStatus::Ready {
+            return Ok(None);
+        }
+        let Some(lease) = self.store.try_acquire_ready(&fence)? else {
+            return Ok(None);
+        };
+        let stored: super::StoredTokens =
+            serde_json::from_slice(lease.payload().expose_secret())
+                .map_err(|_| XaiNativeAuthError::InvalidStoredCredential)?;
+        stored.validate(fence.account_binding())?;
+        plakous_model::Digest::sha256(
+            plakous_model::DigestDomain::ModelBinding,
+            1,
+            &[
+                b"plak.native-upstream-account.v1",
+                b"grok",
+                stored.subject.as_bytes(),
+            ],
+        )
+        .map(Some)
+        .map_err(|_| XaiNativeAuthError::InvalidStoredCredential)
+    }
+
     /// Opens exactly the application-supplied private slot without network or
     /// current-profile admission.
     ///

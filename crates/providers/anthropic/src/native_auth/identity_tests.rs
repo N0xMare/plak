@@ -4,6 +4,32 @@ use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 const ACCOUNT: &str = "12345678-1234-4234-8234-123456789abc";
 const OTHER_ACCOUNT: &str = "87654321-4321-4321-8321-cba987654321";
 
+#[test]
+fn local_claude_upstream_comparison_uses_authenticated_uuid_not_slot_or_tokens() {
+    let fingerprint = |account: &str, access: &str| {
+        let root = tempfile::tempdir().unwrap();
+        let path = tests::private_store(&root);
+        let manager = tests::manager(path.clone());
+        manager
+            .persist_test_grant_for_account(
+                access,
+                "fixture-refresh",
+                3600,
+                "user:inference",
+                account,
+            )
+            .unwrap();
+        ClaudeOfflineSelectedSlot::open_explicit(path, CredentialSlotId::new("primary").unwrap())
+            .unwrap()
+            .upstream_account_fingerprint()
+            .unwrap()
+            .unwrap()
+    };
+    let first = fingerprint(ACCOUNT, "fixture-one");
+    assert_eq!(first, fingerprint(ACCOUNT, "fixture-two"));
+    assert_ne!(first, fingerprint(OTHER_ACCOUNT, "fixture-one"));
+}
+
 #[tokio::test]
 async fn named_claude_sources_change_only_credential_authority() {
     let temporary = tempfile::tempdir().unwrap();

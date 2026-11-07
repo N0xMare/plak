@@ -28,6 +28,10 @@ pub(super) trait NativeVertical: Sync {
         &self,
         subscriptions: &'a NativeSubscriptions,
     ) -> NativeFuture<'a, Result<NativeAuthStatus, NativeSubscriptionError>>;
+    fn upstream_account_fingerprint<'a>(
+        &self,
+        subscriptions: &'a NativeSubscriptions,
+    ) -> NativeFuture<'a, Result<Option<plakous_model::Digest>, NativeSubscriptionError>>;
     fn access_expires_at<'a>(
         &self,
         subscriptions: &'a NativeSubscriptions,

@@ -145,6 +145,47 @@ pub struct ClaudeOfflineSelectedSlot {
 }
 
 impl ClaudeOfflineSelectedSlot {
+    /// Reads the verified upstream UUID as a digest, without exposing it or credentials.
+    /// Missing, non-Ready, busy or not-yet-verified UUID evidence is unknown.
+    ///
+    /// # Errors
+    /// Refuses malformed, foreign or unsafe selected-slot records.
+    pub fn upstream_account_fingerprint(
+        &self,
+    ) -> Result<Option<plakous_model::Digest>, ClaudeNativeAuthError> {
+        validate_current_ready_record(&self.store)?;
+        let Some(fence) = self.store.load()? else {
+            return Ok(None);
+        };
+        if fence.status() != CredentialStatus::Ready {
+            return Ok(None);
+        }
+        let Some(lease) = self.store.try_acquire_ready(&fence)? else {
+            return Ok(None);
+        };
+        let stored: super::StoredTokens =
+            serde_json::from_slice(lease.payload().expose_secret())
+                .map_err(|_| ClaudeNativeAuthError::InvalidStoredCredential)?;
+        stored.validate()?;
+        if stored.grant_binding != fence.account_binding().as_str() {
+            return Err(ClaudeNativeAuthError::InvalidStoredCredential);
+        }
+        let Some(account) = stored.account_uuid.as_ref() else {
+            return Ok(None);
+        };
+        plakous_model::Digest::sha256(
+            plakous_model::DigestDomain::ModelBinding,
+            1,
+            &[
+                b"plak.native-upstream-account.v1",
+                b"claude",
+                account.as_str().as_bytes(),
+            ],
+        )
+        .map(Some)
+        .map_err(|_| ClaudeNativeAuthError::InvalidStoredCredential)
+    }
+
     /// Opens exactly the application-supplied private slot without network.
     ///
     /// # Errors

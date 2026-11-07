@@ -131,6 +131,60 @@ fn detach_and_remove(
 }
 
 impl SubscriptionState {
+    pub(in crate::subscriptions) fn require_signed_out_for_removal(
+        &self,
+        provider: NativeProvider,
+        profile: &str,
+    ) -> Result<(), NativeSubscriptionError> {
+        use plakous_auth::{
+            CredentialStatus, PrivateCredentialStore, SubscriptionIntegrationProfileId,
+        };
+        let profile = SubscriptionIntegrationProfileId::new(profile)
+            .map_err(|_| NativeSubscriptionError::Internal)?;
+        let store = PrivateCredentialStore::open_slot(
+            self.provider_record(provider),
+            profile,
+            self.slot_id()?,
+        )
+        .map_err(|_| NativeSubscriptionError::UnsafeStorage)?;
+        let fence = store
+            .load()
+            .map_err(|_| NativeSubscriptionError::UnsafeStorage)?;
+        if fence.is_some_and(|fence| fence.status() != CredentialStatus::Revoked) {
+            return Err(NativeSubscriptionError::AccountSignedIn);
+        }
+        Ok(())
+    }
+
+    pub(in crate::subscriptions) fn named_accounts(
+        &self,
+        provider: NativeProvider,
+    ) -> Result<Vec<String>, NativeSubscriptionError> {
+        let selected = self.paths.for_named_account(provider, "account")?;
+        let slot = selected
+            .named
+            .as_ref()
+            .ok_or(NativeSubscriptionError::Internal)?;
+        let Some(directory) = super::filesystem::named_parent(&selected.state_root, slot.vertical)?
+        else {
+            return Ok(Vec::new());
+        };
+        let entries = rustix::fs::Dir::read_from(&directory)
+            .map_err(|_| NativeSubscriptionError::UnsafeStorage)?;
+        let mut names = Vec::new();
+        for entry in entries {
+            let entry = entry.map_err(|_| NativeSubscriptionError::UnsafeStorage)?;
+            let Ok(name) = entry.file_name().to_str() else {
+                continue;
+            };
+            if selected.for_named_account(provider, name).is_ok() {
+                names.push(name.to_owned());
+            }
+        }
+        names.sort();
+        Ok(names)
+    }
+
     pub(in crate::subscriptions) fn for_named_account(
         &self,
         provider: NativeProvider,

@@ -3291,6 +3291,12 @@ its encoding and validates the recorded account before constructing the target.
 The platform runtime never reconstructs a default account from a provider.
 Named product slots scope source authority without changing upstream identity,
 prompt/profile behavior, or the default source's bytes.
+Native slot inventory reads only validated local directory names, never bearer
+payloads or ambient credentials. Upstream-account comparison reads an authenticated
+digest from the exact selected Ready slot; missing, busy or unreadable evidence
+is unknown. This operation does not refresh or contact a provider. It is separate
+from source authority, so sibling slots may share an upstream account without
+sharing a dispatch authority or writer lock.
 There are no default source methods, cross-route fallback or branded secret
 wrappers. Key construction rejects empty, over-64-KiB or control-byte text;
 xAI product key loading applies its 16-KiB ASCII-graphic bound before granting

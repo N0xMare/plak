@@ -355,6 +355,25 @@ impl NativeVertical for Vertical {
             }
         }
     }
+    fn upstream_account_fingerprint<'a>(
+        &self,
+        subscriptions: &'a NativeSubscriptions,
+    ) -> NativeFuture<'a, Result<Option<plakous_model::Digest>, NativeSubscriptionError>> {
+        let state = subscriptions.state.clone();
+        Box::pin(async move {
+            run_blocking(move || {
+                plakous_anthropic::ClaudeOfflineSelectedSlot::open_explicit(
+                    state.provider_record(NativeProvider::Claude),
+                    state.slot_id()?,
+                )
+                .map_err(map_claude_error)?
+                .upstream_account_fingerprint()
+                .map_err(map_claude_error)
+            })
+            .await?
+        })
+    }
+
     fn offline_status<'a>(
         &self,
         subscriptions: &'a NativeSubscriptions,

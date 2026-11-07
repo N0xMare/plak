@@ -483,6 +483,10 @@ impl SubscriptionState {
             .map(|slot| format!("{}/{}", slot.vertical, slot.name))
     }
 
+    pub(super) fn is_named(&self) -> bool {
+        self.paths.named.is_some()
+    }
+
     pub(super) fn require_provider(
         &self,
         provider: NativeProvider,

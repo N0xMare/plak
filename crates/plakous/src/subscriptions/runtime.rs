@@ -24,6 +24,60 @@ pub struct NativeSubscriptions {
 }
 
 impl NativeSubscriptions {
+    /// Reads only an authenticated upstream-account digest for local comparison.
+    /// This never refreshes, contacts a provider or exposes account/token text.
+    /// Missing, busy or unreadable evidence cannot establish account equality.
+    ///
+    /// # Errors
+    /// Refuses an omitted/different vertical and unsafe or foreign state.
+    pub async fn upstream_account_fingerprint(
+        &self,
+        provider: super::NativeProvider,
+    ) -> Result<Option<plakous_model::Digest>, NativeSubscriptionError> {
+        let vertical = super::vertical::require_vertical(provider)?;
+        self.state.require_provider(provider)?;
+        let state = self.state.clone();
+        if !run_blocking(move || state.layout_exists()).await?? {
+            return Ok(None);
+        }
+        let Some(lock) = self.try_acquire_compatibility_lock(provider).await? else {
+            return Ok(None);
+        };
+        let fingerprint = vertical.upstream_account_fingerprint(self).await?;
+        lock.verify()?;
+        Ok(fingerprint)
+    }
+    /// Lists local names from the exact vertical's private account directory.
+    /// Hidden trash and invalid names are not accounts. No credentials are read.
+    ///
+    /// # Errors
+    /// Refuses an omitted vertical and unsafe directory ancestors.
+    pub async fn named_accounts(
+        &self,
+        provider: super::NativeProvider,
+    ) -> Result<Vec<String>, NativeSubscriptionError> {
+        super::vertical::require_vertical(provider)?;
+        self.state.require_provider(provider)?;
+        let state = self.state.clone();
+        run_blocking(move || state.named_accounts(provider)).await?
+    }
+    /// Reports whether this selected named account exists, without creating it.
+    /// Bare defaults always exist as selections, even when signed out.
+    ///
+    /// # Errors
+    /// Refuses an omitted/different vertical and unsafe storage.
+    pub async fn account_exists(
+        &self,
+        provider: super::NativeProvider,
+    ) -> Result<bool, NativeSubscriptionError> {
+        super::vertical::require_vertical(provider)?;
+        self.state.require_provider(provider)?;
+        if !self.state.is_named() {
+            return Ok(true);
+        }
+        let state = self.state.clone();
+        run_blocking(move || state.layout_exists()).await?
+    }
     /// Selects one named account without creating its directory or reading credentials.
     ///
     /// # Errors
@@ -70,13 +124,9 @@ impl NativeSubscriptions {
             .try_acquire_compatibility_lock(provider)
             .await?
             .ok_or(NativeSubscriptionError::AccountBusy)?;
-        let status = self.status_unlocked(provider).await?;
-        if !matches!(
-            status.credential(),
-            super::NativeAuthStatus::SignedOut | super::NativeAuthStatus::Revoked
-        ) {
-            return Err(NativeSubscriptionError::CredentialUnavailable);
-        }
+        let state = self.state.clone();
+        let profile = Self::notice(provider)?.profile_id();
+        run_blocking(move || state.require_signed_out_for_removal(provider, profile)).await??;
         let state = self.state.clone();
         run_blocking(move || state.remove_named_directory(&lock)).await?
     }

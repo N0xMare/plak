@@ -73,6 +73,42 @@ fn named_grok_sources_keep_default_authority_bytes_and_scope_only_named_sources(
     Ok(())
 }
 
+#[tokio::test]
+async fn local_grok_upstream_comparison_uses_authenticated_subject_not_slot_or_tokens() -> TestResult
+{
+    let peer = mock_peer().await?;
+    let mut digests = Vec::new();
+    for (subject, access) in [
+        ("same-subject", "first-access"),
+        ("same-subject", "second-access"),
+        ("other-subject", "first-access"),
+    ] {
+        let root = tempdir()?;
+        let manager = manager(&root, &peer)?;
+        install_stored(
+            &manager,
+            subject,
+            access,
+            "fixture-refresh",
+            system_unix_seconds()? + 3_600,
+        )?;
+        let admin = XaiOfflineSelectedSlot::open_explicit(
+            manager.core.store.path(),
+            CredentialSlotId::new("test-selected")?,
+        )?;
+        digests.push(
+            admin
+                .upstream_account_fingerprint()?
+                .ok_or("missing account evidence")?,
+        );
+    }
+    assert_eq!(digests[0], digests[1]);
+    assert_ne!(digests[0], digests[2]);
+    assert!(peer.requests.lock().await.is_empty());
+    peer.abort_join().await?;
+    Ok(())
+}
+
 #[test]
 fn supergrok_dispatch_generation_binds_rotation_and_login_selection() {
     let baseline = supergrok_generation_fingerprint(7, "selection-a");
