@@ -4146,10 +4146,13 @@ verdicts) are addressed, the session profile and workspace chrome states.
   operation or version is added. The slot serializes release and reopen,
   and a stale request cannot operate on a replacement actor.
   The actor acknowledgement is bounded by the release-join budget (60 s).
-  Expiry returns `session_unavailable`, clears the reopening state and
-  leaves the slot releasing. A queued fence may still quit later; the next
-  attach joins that actor before reopening, never reuses it or performs
-  the timed-out carry.
+  Expiry cancels the uncommitted fence, clears the reopening state and
+  returns `session_unavailable`, keeping the same session served and its
+  worker owned by the resident slot. The actor checks cancellation atomically
+  when settling the fence, so a cancelled fence cannot quit later, whether
+  it resumes idle, busy or with processes. If settlement wins that race,
+  the launcher takes its outcome and joins a successful release normally.
+  No timed-out carry is performed.
   Every viewer receives `moved` and reattaches fresh. A failed carry reopens the source;
   a committed carry is never undone if its target's open fails: the target
   remains the slot's dormant session, viewers are told its root, and the

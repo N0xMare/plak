@@ -1444,7 +1444,10 @@ to the serial lane, excluded from offline parallel execution. Their waits
 are for explicit observations, log acknowledgements or process settlement.
 Reload-signal probes cover both blocked runner startup and a control-only
 host. Launcher timeout evidence gates mailbox reads, checks the bounded
-refusal, then permits the late quit and verifies a fresh actor is opened.
+refusal, then resumes idle, busy and process-held actors and verifies fresh
+attachments still reach the same actor with its runtime lease intact.
+Ticket tests cover both cancellation before a late idle quit and a committed
+release winning the expiry race.
 
 Three mechanisms keep wall-clock and resource assumptions honest, and none of
 them relaxes an assertion to buy parallelism.

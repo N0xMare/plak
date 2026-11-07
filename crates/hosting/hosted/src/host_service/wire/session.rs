@@ -239,12 +239,11 @@ impl<P: ProtocolExtension> WireSession<P> {
         self.actions.stop_settled(ticket)
     }
 
-    pub(super) fn expire_reopen(&self) {
-        self.request_release();
-        // A residency hold can delay the actor's release flag. End service
-        // immediately so a late quit can never race reuse by a new attach.
-        self.ended.store(true, Ordering::Release);
-        self.end_reopen(None);
+    pub(super) fn cancel_reopen(
+        &self,
+        ticket: plakous_host_protocol::StopTicket,
+    ) -> Option<Result<(), String>> {
+        self.actions.cancel_release_for_reopen(ticket)
     }
 
     pub(super) fn end_reopen(&self, moved: Option<(&NodeAddress, u64, &str)>) {

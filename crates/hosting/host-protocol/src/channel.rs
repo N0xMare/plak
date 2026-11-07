@@ -16,7 +16,7 @@
 //! (a terminal's `poll`) installs a notifier, which the queue calls on each
 //! empty to non-empty edge and when the last producer leaves.
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::fmt;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
@@ -167,6 +167,7 @@ pub struct StopTicket(u64);
 #[derive(Default)]
 struct StopBook {
     issued: u64,
+    reopens: HashSet<StopTicket>,
     settled: VecDeque<(StopTicket, Result<(), String>)>,
 }
 
@@ -709,27 +710,7 @@ impl<P: ProtocolExtension> IntentReceiver<P> {
     /// the mailbox and whatever [`IntentSender::on_stop_settled`] registered,
     /// so the answer does not wait for a later frame.
     pub fn settle_stop(&self, ticket: StopTicket, outcome: Result<(), String>) {
-        let hook = {
-            let mut book = self
-                .0
-                .stops
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if book.settled.len() >= SETTLED_STOPS {
-                book.settled.pop_front();
-            }
-            book.settled.push_back((ticket, outcome));
-            self.0
-                .stop_hook
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .clone()
-        };
-        self.0.ready.notify_all();
-        self.0.wake_waiter();
-        if let Some(hook) = hook {
-            hook();
-        }
+        self.settle_ticket(ticket, outcome, false);
     }
 
     /// Whether the product has painted its first interactive frame.

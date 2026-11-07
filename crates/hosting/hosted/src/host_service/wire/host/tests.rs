@@ -109,6 +109,8 @@ fn row(session: &str, updated_at: u64) -> SessionRow {
 /// The stores as a test scripts them, and what the host asked of them.
 #[derive(Default)]
 struct Script {
+    lease: Mutex<Option<plakous::sessions::LeaseOnlyHead>>,
+    processes: std::sync::atomic::AtomicBool,
     hold_mailbox: std::sync::atomic::AtomicBool,
     queued: AtomicUsize,
     rows: Mutex<Vec<SessionRow>>,
@@ -138,6 +140,31 @@ struct Script {
 
 #[derive(Clone, Default)]
 struct Fake(Arc<Script>);
+
+impl Script {
+    fn release_reopen(
+        &self,
+        intents: &plakous_host_protocol::IntentReceiver<Core>,
+        ticket: plakous_host_protocol::StopTicket,
+        session: &str,
+        identity: &str,
+        active: bool,
+    ) -> bool {
+        let outcome = if session != identity {
+            Err("the session moved".into())
+        } else if active || self.processes.load(Ordering::SeqCst) {
+            Err("work is running".into())
+        } else {
+            Ok(())
+        };
+        let quit = outcome.is_ok();
+        if intents.settle_release_for_reopen(ticket, outcome) && quit {
+            std::thread::sleep(Duration::from_millis(self.linger.load(Ordering::SeqCst)));
+            return true;
+        }
+        false
+    }
+}
 
 impl HostSessions<Core> for Fake {
     fn rows(&self, workspace: Option<&str>) -> Result<Vec<SessionRow>, String> {
@@ -188,6 +215,7 @@ impl HostSessions<Core> for Fake {
             .unwrap()
             .insert(session.to_owned(), count.clone());
         let script = Arc::clone(&self.0);
+        let lease = script.lease.lock().unwrap().take();
         let identity = session.to_owned();
         let worker = HostWorkerHandle::spawn(move || {
             drop(observations);
@@ -208,12 +236,8 @@ impl HostSessions<Core> for Fake {
                         SessionIntent::Quit => break,
                         SessionIntent::StopSession { ticket } => stops.push(*ticket),
                         SessionIntent::ReleaseForReopen { ticket, session } => {
-                            if *session != identity {
-                                intents.settle_stop(*ticket, Err("the session moved".into()));
-                            } else if active {
-                                intents.settle_stop(*ticket, Err("a turn is running".into()));
-                            } else {
-                                intents.settle_stop(*ticket, Ok(()));
+                            if script.release_reopen(&intents, *ticket, session, &identity, active)
+                            {
                                 break;
                             }
                         }
@@ -239,6 +263,9 @@ impl HostSessions<Core> for Fake {
                     }
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                 }
+            }
+            if let Some(lease) = lease {
+                crate::runtime::test_kit::BlockOn::block(lease.release()).unwrap();
             }
             Ok(())
         });
@@ -401,14 +428,119 @@ fn a_busy_actor_refuses_reopen_without_stopping_or_redispatching() {
 }
 
 #[test]
-fn a_reopen_ack_timeout_releases_the_slot_and_joins_a_late_quit() {
+fn a_reopen_ack_timeout_cancels_the_fence_and_keeps_the_actor() {
+    for mode in 0..3 {
+        cancelled_reopen(mode);
+    }
+}
+
+#[test]
+fn a_committed_reopen_joins_a_late_idle_quit_before_opening() {
+    let root = tempfile::tempdir().unwrap();
+    let (challenger, lease) = held_lease(root.path());
+    let line = lease.line();
     let fake = Fake::default();
+    *fake.0.lease.lock().unwrap() = Some(lease);
+    fake.0.stay.store(true, Ordering::SeqCst);
+    fake.0.linger.store(50, Ordering::SeqCst);
+    let opener = fake.clone();
+    let slot = SessionSlot::new(fake.open("s1").unwrap(), move |id| opener.open(id));
+    let (session, _hold) = slot.resident().unwrap();
+    slot.reopen(&session, "s1", 1, "repair", |_| {
+        // The actor acknowledged before its delayed teardown released the
+        // lease. Carry must run only after that exact worker was joined.
+        assert_lease_available(&challenger, line, "lease:carry");
+        Ok(("s1".into(), node("s1")))
+    })
+    .unwrap();
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 2);
+    slot.hand_off(Duration::from_secs(2)).unwrap();
+}
+
+fn actor_request(connection: &mut WireConnection<Core, Out>, id: RequestId, op: Op<Core>) {
+    connection
+        .frame(Ok(
+            encode_line(&ClientFrame::<Core>::Request { id, op }).unwrap()
+        ))
+        .unwrap();
+}
+
+fn held_lease(
+    root: &std::path::Path,
+) -> (
+    plakous::sessions::AgentSessions,
+    plakous::sessions::LeaseOnlyHead,
+) {
+    use crate::runtime::test_kit::BlockOn as _;
+    use plakous::sessions::{
+        AgentSessions, CreateSessionOutcome, CreateSessionRequest, SessionBackend,
+        SessionOperationId,
+    };
+    async {
+        let database = root.join("runtime.sqlite3");
+        let sessions = AgentSessions::new(SessionBackend::sqlite(&database).unwrap()).unwrap();
+        let script =
+            Arc::new(serde_json::from_value(serde_json::json!({"version":1,"steps":[]})).unwrap());
+        let controller =
+            plakous_offline_crash_harness::BoundaryController::quiet_from_evidence_path(
+                plakous_offline_crash_harness::protocol::CrashBoundary::None,
+                root.join("evidence.jsonl"),
+            )
+            .unwrap();
+        let binding =
+            plakous_offline_crash_harness::scripted_runtime_binding(root, controller, script)
+                .unwrap();
+        let CreateSessionOutcome::Created { session, .. } = sessions
+            .create(CreateSessionRequest::new(
+                SessionOperationId::new("lease:create").unwrap(),
+                binding,
+            ))
+            .await
+            .unwrap()
+        else {
+            panic!("not created")
+        };
+        let locator = session.release().await.unwrap();
+        let line = sessions.line_head_of(locator).await.unwrap().line();
+        let head = sessions
+            .open_lease_only(&SessionOperationId::new("lease:hold").unwrap(), line)
+            .await
+            .unwrap();
+        let challenger = AgentSessions::new(SessionBackend::sqlite(&database).unwrap()).unwrap();
+        (challenger, head)
+    }
+    .block()
+}
+
+fn cancelled_reopen(mode: u8) {
+    use crate::runtime::test_kit::BlockOn as _;
+    let root = tempfile::tempdir().unwrap();
+    let (challenger, lease) = held_lease(root.path());
+    let line = lease.line();
+    let fake = Fake::default();
+    *fake.0.lease.lock().unwrap() = Some(lease);
+    fake.0.processes.store(mode == 2, Ordering::SeqCst);
     fake.0.stay.store(true, Ordering::SeqCst);
     fake.0.hold_mailbox.store(true, Ordering::SeqCst);
     let opener = fake.clone();
     let slot = SessionSlot::new(fake.open("s1").unwrap(), move |id| opener.open(id))
         .with_release_join(Duration::from_millis(50));
     let (session, _hold) = slot.resident().unwrap();
+    let out = Out::default();
+    let mut viewer = session.connect(out.clone(), Face::Remote, || false);
+    actor_request(&mut viewer, 1, Op::Attach { node: node("s1") });
+    let attachment = attached(&out.take(), 1);
+    if mode == 1 {
+        actor_request(
+            &mut viewer,
+            2,
+            Op::Intent {
+                attachment,
+                intent: SessionIntent::Prompt("busy".into()),
+                blobs: Vec::new(),
+            },
+        );
+    }
     let changed = AtomicUsize::new(0);
     let (send, receive) = std::sync::mpsc::channel();
     let result = std::thread::scope(|scope| {
@@ -420,25 +552,78 @@ fn a_reopen_ack_timeout_releases_the_slot_and_joins_a_late_quit() {
             send.send(result).unwrap();
         });
         let result = receive.recv_timeout(Duration::from_secs(2));
-        let releasing = matches!(slot.peek(), SlotView::Releasing(_));
+        let served = matches!(slot.peek(), SlotView::Resident(_));
         fake.0.hold_mailbox.store(false, Ordering::SeqCst);
-        (result, releasing)
+        (result, served)
     });
     let timed_out = result
         .0
         .expect("an unread mailbox held the slot indefinitely");
     assert!(timed_out.unwrap_err().message().contains("acknowledge"));
-    assert!(result.1, "a late quit's actor could still be reused");
+    assert!(result.1, "expiry stranded a live actor");
     assert!(!session.reopening());
+    assert!(!session.ended());
     assert_eq!(
         changed.load(Ordering::SeqCst),
         0,
         "a timeout performed a carry"
     );
     let (next, _hold) = slot.resident().unwrap();
-    assert!(!Arc::ptr_eq(&session, &next));
-    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 2);
+    assert!(Arc::ptr_eq(&session, &next));
+    let mut attached_again = next.connect(out.clone(), Face::Remote, || false);
+    actor_request(&mut attached_again, 3, Op::Attach { node: node("s1") });
+    let attachment = attached(&out.take(), 3);
+    actor_request(
+        &mut attached_again,
+        4,
+        Op::Intent {
+            attachment,
+            intent: SessionIntent::FollowUp("still served".into()),
+            blobs: Vec::new(),
+        },
+    );
+    let until = Instant::now() + Duration::from_secs(2);
+    while fake.0.queued.load(Ordering::SeqCst) == 0 {
+        assert!(
+            Instant::now() < until,
+            "the actor quit on a cancelled idle fence"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
+    let held = challenger
+        .open_lease_only(
+            &plakous::sessions::SessionOperationId::new("lease:contend").unwrap(),
+            line,
+        )
+        .block()
+        .unwrap_err();
+    assert_eq!(
+        held.kind(),
+        plakous::sessions::AgentSessionsErrorKind::Ownership
+    );
+    viewer.leave();
+    attached_again.leave();
     slot.hand_off(Duration::from_secs(2)).unwrap();
+    assert_lease_available(&challenger, line, "lease:after");
+}
+
+fn assert_lease_available(
+    sessions: &plakous::sessions::AgentSessions,
+    line: plakous::model::LineId,
+    operation: &str,
+) {
+    use crate::runtime::test_kit::BlockOn as _;
+    sessions
+        .open_lease_only(
+            &plakous::sessions::SessionOperationId::new(operation).unwrap(),
+            line,
+        )
+        .block()
+        .unwrap()
+        .release()
+        .block()
+        .unwrap();
 }
 
 #[test]

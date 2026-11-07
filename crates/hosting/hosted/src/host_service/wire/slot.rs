@@ -359,12 +359,19 @@ where
                 break;
             }
             if Instant::now() >= until {
-                // The queued fence may still select a late quit. Leave the
-                // slot releasing so no attach reuses that actor: it must
-                // join before reopening, just like any other release.
-                old.expire_reopen();
+                // Cancellation and actor settlement share one ticket lock.
+                // If settlement won, join it normally; otherwise the stale
+                // fence cannot quit and the same actor remains served.
+                if let Some(result) = old.cancel_reopen(ticket) {
+                    if let Err(detail) = result {
+                        old.end_reopen(None);
+                        return Err(CliFailure::new(detail));
+                    }
+                    break;
+                }
+                old.end_reopen(None);
                 return Err(CliFailure::new(
-                    "the session did not acknowledge its release in time; retry attaching after it releases",
+                    "the session did not acknowledge its release in time; the fence was cancelled",
                 ));
             }
             std::thread::sleep(Duration::from_millis(5));

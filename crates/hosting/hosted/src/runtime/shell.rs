@@ -84,14 +84,16 @@ pub fn run_shell_host_loop<P: plakous_host_protocol::ProtocolExtension>(
         }
         if let UserAction::ReleaseForReopen { ticket, session } = &action {
             if *session != config.session.id {
-                actions.settle_stop(
+                let _ = actions.settle_release_for_reopen(
                     *ticket,
                     Err("the requesting attachment's session moved".to_owned()),
                 );
                 continue;
             }
-            actions.settle_stop(*ticket, Ok(()));
-            break;
+            if actions.settle_release_for_reopen(*ticket, Ok(())) {
+                break;
+            }
+            continue;
         }
         if state.recovery_blocked && recovery_blocked_action(&action) {
             refuse_detached_recovery_action(&events, &action);

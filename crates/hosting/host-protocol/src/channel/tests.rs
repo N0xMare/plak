@@ -15,8 +15,32 @@ fn launcher_release_fence_is_not_a_protocol_four_wire_operation() {
     );
     let schema = serde_json::to_string(&schemars::schema_for!(SessionIntent<Core>)).unwrap();
     assert!(!schema.contains("release_for_reopen"));
-    receiver.settle_stop(ticket, Ok(()));
+    assert!(receiver.settle_release_for_reopen(ticket, Ok(())));
     assert_eq!(sender.stop_settled(ticket), Some(Ok(())));
+}
+
+#[test]
+fn cancelled_reopen_fences_cannot_commit_a_late_idle_quit() {
+    let (sender, receiver) = intent_channel::<Core>();
+    let ticket = sender.request_release_for_reopen("session").unwrap();
+    assert_eq!(sender.cancel_release_for_reopen(ticket), None);
+    let action = receiver.try_recv().unwrap();
+    assert!(
+        matches!(&*action, SessionIntent::ReleaseForReopen { ticket: seen, .. } if *seen == ticket)
+    );
+    assert!(!receiver.settle_release_for_reopen(ticket, Ok(())));
+    assert!(!receiver.settle_release_for_reopen(ticket, Err("busy".into())));
+    assert_eq!(sender.stop_settled(ticket), None);
+}
+
+#[test]
+fn committed_reopen_fences_win_the_expiry_race_and_still_require_join() {
+    let (sender, receiver) = intent_channel::<Core>();
+    let ticket = sender.request_release_for_reopen("session").unwrap();
+    let _action = receiver.try_recv().unwrap();
+    assert!(receiver.settle_release_for_reopen(ticket, Ok(())));
+    assert_eq!(sender.cancel_release_for_reopen(ticket), Some(Ok(())));
+    assert!(!receiver.settle_release_for_reopen(ticket, Ok(())));
 }
 
 #[test]

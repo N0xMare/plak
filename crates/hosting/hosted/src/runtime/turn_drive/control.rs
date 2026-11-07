@@ -171,7 +171,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                 });
             let received = match received {
                 Ok(UserAction::ReleaseForReopen { ticket, .. }) => {
-                    self.host.actions.settle_stop(
+                    let _ = self.host.actions.settle_release_for_reopen(
                         ticket,
                         Err("a turn is running; stop it or wait before reopening".to_owned()),
                     );
