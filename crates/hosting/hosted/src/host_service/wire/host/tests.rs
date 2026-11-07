@@ -109,6 +109,7 @@ fn row(session: &str, updated_at: u64) -> SessionRow {
 /// The stores as a test scripts them, and what the host asked of them.
 #[derive(Default)]
 struct Script {
+    hold_mailbox: std::sync::atomic::AtomicBool,
     queued: AtomicUsize,
     rows: Mutex<Vec<SessionRow>>,
     opens: AtomicUsize,
@@ -193,6 +194,10 @@ impl HostSessions<Core> for Fake {
             let mut stops = Vec::new();
             let mut active = false;
             loop {
+                if script.hold_mailbox.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(5));
+                    continue;
+                }
                 if !script.hold_stops.load(Ordering::SeqCst) {
                     for ticket in stops.drain(..) {
                         intents.settle_stop(ticket, Ok(()));
@@ -393,6 +398,47 @@ fn a_busy_actor_refuses_reopen_without_stopping_or_redispatching() {
     assert_eq!(fake.0.images.lock().unwrap().len(), 1);
     connection.leave();
     handed_off(&host);
+}
+
+#[test]
+fn a_reopen_ack_timeout_releases_the_slot_and_joins_a_late_quit() {
+    let fake = Fake::default();
+    fake.0.stay.store(true, Ordering::SeqCst);
+    fake.0.hold_mailbox.store(true, Ordering::SeqCst);
+    let opener = fake.clone();
+    let slot = SessionSlot::new(fake.open("s1").unwrap(), move |id| opener.open(id))
+        .with_release_join(Duration::from_millis(50));
+    let (session, _hold) = slot.resident().unwrap();
+    let changed = AtomicUsize::new(0);
+    let (send, receive) = std::sync::mpsc::channel();
+    let result = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            let result = slot.reopen(&session, "s1", 1, "repair", |_| {
+                changed.fetch_add(1, Ordering::SeqCst);
+                Ok(("s1".into(), node("s1")))
+            });
+            send.send(result).unwrap();
+        });
+        let result = receive.recv_timeout(Duration::from_secs(2));
+        let releasing = matches!(slot.peek(), SlotView::Releasing(_));
+        fake.0.hold_mailbox.store(false, Ordering::SeqCst);
+        (result, releasing)
+    });
+    let timed_out = result
+        .0
+        .expect("an unread mailbox held the slot indefinitely");
+    assert!(timed_out.unwrap_err().message().contains("acknowledge"));
+    assert!(result.1, "a late quit's actor could still be reused");
+    assert!(!session.reopening());
+    assert_eq!(
+        changed.load(Ordering::SeqCst),
+        0,
+        "a timeout performed a carry"
+    );
+    let (next, _hold) = slot.resident().unwrap();
+    assert!(!Arc::ptr_eq(&session, &next));
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 2);
+    slot.hand_off(Duration::from_secs(2)).unwrap();
 }
 
 #[test]

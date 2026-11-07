@@ -349,6 +349,7 @@ where
         let ticket = old.begin_reopen(expected_session)?;
         // Only the actor decides whether releasing is admissible. Once it
         // acknowledges, join that same worker before any target is built.
+        let until = Instant::now() + self.release_join;
         loop {
             if let Some(result) = old.reopen_settled(ticket) {
                 if let Err(detail) = result {
@@ -356,6 +357,16 @@ where
                     return Err(CliFailure::new(detail));
                 }
                 break;
+            }
+            if Instant::now() >= until {
+                // The queued fence may still select a late quit. Leave the
+                // slot releasing so no attach reuses that actor: it must
+                // join before reopening, just like any other release.
+                old.request_release();
+                old.end_reopen(None);
+                return Err(CliFailure::new(
+                    "the session did not acknowledge its release in time; retry attaching after it releases",
+                ));
             }
             std::thread::sleep(Duration::from_millis(5));
         }

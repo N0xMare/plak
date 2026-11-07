@@ -4144,8 +4144,13 @@ verdicts) are addressed, the session profile and workspace chrome states.
   them. Once admitted, the host joins that exact worker before re-resolution
   (`retry_attach`) or the existing durable history carry (`rebind`). No wire
   operation or version is added. The slot serializes release and reopen,
-  and a stale request cannot operate on a replacement actor. Every viewer
-  receives `moved` and reattaches fresh. A failed carry reopens the source;
+  and a stale request cannot operate on a replacement actor.
+  The actor acknowledgement is bounded by the release-join budget (60 s).
+  Expiry returns `session_unavailable`, clears the reopening state and
+  leaves the slot releasing. A queued fence may still quit later; the next
+  attach joins that actor before reopening, never reuses it or performs
+  the timed-out carry.
+  Every viewer receives `moved` and reattaches fresh. A failed carry reopens the source;
   a committed carry is never undone if its target's open fails: the target
   remains the slot's dormant session, viewers are told its root, and the
   request returns `session_unavailable` with the open's failure.
