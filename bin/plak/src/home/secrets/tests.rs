@@ -241,7 +241,7 @@ fn all_secret_shelves_accept_owner_read_only_and_refuse_shared_or_unreadable_mod
         SecretShelf::Named,
         SecretShelf::Runner,
         SecretShelf::Web,
-        SecretShelf::Api(plakous_hosted::account::Vertical::OpenAi),
+        SecretShelf::Api(Vertical::OpenAi),
     ] {
         set_shelf_secret(&paths, shelf, "work", "synthetic-secret").unwrap();
         let path = paths.secret_shelf_dir(shelf).join("work.secret");

@@ -221,7 +221,7 @@ fn named_siblings_suppress_unattributed_default_refresh_failures()
             .join("plak/subscriptions/accounts")
             .join(account)
             .join("work");
-        std::fs::create_dir_all(&named)?;
+        fs::create_dir_all(&named)?;
         assert_eq!(
             last_failed_refresh(&paths, account, &jiff::tz::TimeZone::UTC),
             None
