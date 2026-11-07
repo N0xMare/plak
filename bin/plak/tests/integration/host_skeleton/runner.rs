@@ -34,7 +34,7 @@ fn an_upgraded_host_inspects_the_old_protocol_and_starts_a_separate_daemon() {
     use plakous::runner::protocol::{HostFrame as RunnerHostFrame, RunnerFrame, frame};
     use std::io::Read as _;
     let Some(fixture) = fixture() else { return };
-    let (mut initial_host, session, _) = start_job(&fixture, false);
+    let (mut initial_host, session, node) = start_job(&fixture, false);
     let (pid, _) = job(&fixture);
     let old_lines = local_daemon_lines(&fixture);
     assert_eq!(old_lines.len(), 1);
@@ -97,8 +97,9 @@ fn an_upgraded_host_inspects_the_old_protocol_and_starts_a_separate_daemon() {
             .exists()
     );
     let mut client = Client::connect(&host);
+    client.attach(1, &node);
     assert_eq!(
-        client.request(1, Op::StopSession { session }),
+        client.request(2, Op::StopSession { session }),
         Outcome::Ok(Answer::Stopped)
     );
     stopped(pid);
