@@ -31,9 +31,7 @@ fn an_eof_before_the_local_runner_hello_is_retried() {
 
 #[test]
 fn an_upgraded_host_inspects_the_old_protocol_and_starts_a_separate_daemon() {
-    use plakous::runner::protocol::{
-        HostFrame as RunnerHostFrame, RunnerFrame, VersionTriple, frame,
-    };
+    use plakous::runner::protocol::{HostFrame as RunnerHostFrame, RunnerFrame, frame};
     use std::io::Read as _;
     let Some(fixture) = fixture() else { return };
     let (mut initial_host, session, _) = start_job(&fixture, false);
@@ -115,16 +113,28 @@ fn an_upgraded_host_inspects_the_old_protocol_and_starts_a_separate_daemon() {
 
 fn obsolete_hello(fixture: &Fixture) -> plakous::runner::protocol::Hello {
     use plakous::runner::protocol::VersionTriple;
-    use plakous::tools::{ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope, RunnerId};
+    use plakous::tools::{
+        ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope, RunnerId,
+    };
     let environment = ExecutionEnvironment::host(
         ExecutionEnvironmentScope::Run("00000000-0000-0000-0000-000000000001".parse().unwrap()),
-        fixture.workspace(), ".", ExecutionEnvironmentConfig::default(),
-    ).unwrap();
+        fixture.workspace(),
+        ".",
+        ExecutionEnvironmentConfig::default(),
+    )
+    .unwrap();
     let mut version = VersionTriple::current("old-revision", "old-flavor");
     version.protocol = 1;
-    let old = plakous::runner::RunnerService::new(environment, plakous::runner::RunnerIdentity {
-        runner_id: RunnerId::new("old-home").unwrap(), version, boot_id: "old-boot".into(), binary_id: None,
-    }).unwrap();
+    let old = plakous::runner::RunnerService::new(
+        environment,
+        plakous::runner::RunnerIdentity {
+            runner_id: RunnerId::new("old-home").unwrap(),
+            version,
+            boot_id: "old-boot".into(),
+            binary_id: None,
+        },
+    )
+    .unwrap();
     old.hello().clone()
 }
 
@@ -670,6 +680,59 @@ fn a_childs_daemon_job_survives_host_loss_and_handoff() {
 
 fn start_child_job(fixture: &Fixture) -> (Host, String, NodeAddress) {
     start_child_job_variant(fixture, false, &[])
+}
+
+#[test]
+fn an_embedded_open_refuses_an_idle_root_with_a_daemon_child_job() {
+    assert_child_job_refuses_embedded_open(false);
+}
+
+#[test]
+fn an_embedded_open_refuses_a_busy_root_with_a_daemon_child_job() {
+    assert_child_job_refuses_embedded_open(true);
+}
+
+fn assert_child_job_refuses_embedded_open(busy: bool) {
+    let Some(fixture) = fixture() else { return };
+    let (mut host, session, node) = start_child_job_variant(&fixture, busy, &[]);
+    let (pid, _) = job(&fixture);
+    hold_child_script(&fixture);
+    kill(&mut host);
+    let held = local_daemon_lines(&fixture);
+    assert!(held.iter().any(|line| {
+        line.jobs["jobs"]
+            .as_array()
+            .is_some_and(|jobs| jobs.iter().any(|job| job["status"]["status"] == "running"))
+    }));
+    let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
+    let connection = rusqlite::Connection::open(paths.runtime_database()).unwrap();
+    let terminals = || {
+        connection
+            .query_row("SELECT count(*) FROM line_job_terminals", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap()
+    };
+    assert_eq!(terminals(), 0);
+    let refused = embedded(&fixture, &session)
+        .err()
+        .expect("an embedded face took a tree with a live daemon child job");
+    assert_eq!(refused["code"], "local_runner_processes", "{refused}");
+    assert!(alive(pid));
+    assert_eq!(terminals(), 0, "refusal recorded a job terminal");
+    assert_eq!(unknown_effects(&fixture, &session), 0);
+    let mut host = start(&fixture);
+    let mut client = Client::connect(&host);
+    client.attach(1, &node);
+    assert!(alive(pid));
+    job(&fixture);
+    assert_eq!(
+        client.request(2, Op::StopSession { session }),
+        Outcome::Ok(Answer::Stopped)
+    );
+    stopped(pid);
+    assert_eq!(terminals(), 1, "the child job must settle once");
+    stop(&mut host);
 }
 
 fn write_resume_policy(fixture: &Fixture, policy: &str) {

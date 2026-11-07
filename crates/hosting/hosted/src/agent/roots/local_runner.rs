@@ -1,4 +1,6 @@
-//! An embedded attachment never opens a process line still held by the daemon.
+//! An embedded attachment refuses live daemon work anywhere in its tree.
+
+use std::collections::BTreeSet;
 
 use super::ProductStateRoots;
 use crate::error::{CliFailure, CliResult};
@@ -6,9 +8,10 @@ use plakous::runner::protocol::{Bind, PROTOCOL_VERSION, VersionTriple};
 use plakous::runner::{ClientWindows, ConnectError, RunnerClient};
 
 impl ProductStateRoots {
-    pub(crate) async fn refuse_daemon_line(
+    pub(crate) async fn refuse_daemon_tree(
         &self,
         locator: plakous::sessions::SessionLocator,
+        tree_id: &str,
     ) -> CliResult<()> {
         if self.daemon_processes() {
             return Ok(());
@@ -55,14 +58,34 @@ impl ProductStateRoots {
             let lines = lines.map_err(|error| {
                 CliFailure::new(format!("the local runner inspection failed: {error:?}"))
             })?;
-            let head = self
-                .runtime_sessions()?
-                .line_head_of(locator)
-                .await
-                .map_err(|error| CliFailure::new(error.to_string()))?;
+            let sessions = self.runtime_sessions()?;
+            let mut locators = vec![locator];
+            if let Some(tree) = self
+                .tree_store()?
+                .load(tree_id)
+                .map_err(|error| CliFailure::new(error.to_string()))?
+            {
+                for node in tree.nodes().values() {
+                    if let Some(recorded) = &node.session_locator {
+                        locators.push(
+                            recorded
+                                .parse::<plakous::sessions::SessionLocator>()
+                                .map_err(|error| CliFailure::new(error.to_string()))?,
+                        );
+                    }
+                }
+            }
+            let mut tree_lines = BTreeSet::new();
+            for locator in locators {
+                let head = sessions
+                    .line_head_of(locator)
+                    .await
+                    .map_err(|error| CliFailure::new(error.to_string()))?;
+                tree_lines.insert(head.line().to_string());
+            }
             if lines
                 .iter()
-                .any(|line| line.line == head.line().to_string() && has_processes(line))
+                .any(|line| tree_lines.contains(&line.line) && has_processes(line))
             {
                 return Err(CliFailure::local_runner_processes());
             }

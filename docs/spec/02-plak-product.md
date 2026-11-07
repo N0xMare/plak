@@ -4623,7 +4623,7 @@ when the host starts keeps its custody, and the per-tree
   keeps it, and so does an attach made since). The answer is `released` once
   the release committed, so another host attachment may open the session at
   once. An embedded face may open when the home-local daemon has no running
-  job or live foreground process on the line; a retained process-free line
+  job or live foreground process on any line of its tree; retained process-free lines
   does not prevent release to an embedded face. When no release
   began within 10 s, the answer is `resident {reason}` (`attachment` when one
   was made since or another connection still holds the session, a stop
@@ -4687,8 +4687,10 @@ when the host starts keeps its custody, and the per-tree
   remain direct and stop their jobs on exit.
   An embedded open checks the live holder first, preserving
   `tree_hosted_elsewhere`, then inspects the current-protocol home-local daemon
-  before opening the canonical session. A listed line with a running job or
-  live foreground process refuses with typed
+  before opening the canonical session. It resolves the root and every node's
+  recorded session locator to its current head line, without opening any of
+  them. Live work on any of those lines, including a held child's line after
+  host loss, refuses with typed
   `local_runner_processes`: "this session's processes run in the local runner;
   start `plak host`, or see them with `plak runner ps`". It changes no job
   outcome and stops nothing. A live runtime holder's name takes precedence

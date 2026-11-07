@@ -72,7 +72,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
             let holder = config.lease_holder.as_ref().and_then(|name| name(locator));
             config
                 .state_roots
-                .refuse_daemon_line(locator)
+                .refuse_daemon_tree(locator, &tree_id)
                 .await
                 .map_err(|failure| {
                     // A process-free open still applies canonical lease expiry.
