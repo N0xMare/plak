@@ -110,6 +110,11 @@ fn reload_target(workspace: &Path) -> Option<ReloadTarget> {
 }
 
 fn probe_reload_target(executable: PathBuf, workspace: &Path) -> ReloadTarget {
+    // Model executable-launch latency (for example, an OS first-run scan),
+    // outside the running child's response budget.
+    if let Some(delay) = crate::build_identity::RELOAD_PROBE_LAUNCH_DELAY.get() {
+        std::thread::sleep(*delay);
+    }
     probe_reload_target_with_timeout(executable, workspace, STATE_KEY_TIMEOUT)
 }
 

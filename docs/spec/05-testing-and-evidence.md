@@ -1844,7 +1844,11 @@ beside the root's evidence. Those dials are refused unless `tree` is set,
 `product_child_script` requires `durable_tree` and none of the scripted child
 dials. They are fixture controls,
 not product configuration. A scripted stall observes cancellation unless the
-script sets `stall_ignores_cancellation`. On an attached offline face,
+script sets `stall_ignores_cancellation`. Root-turn reload PTY tests instead
+use the script step's cancellable `gate: {"file": <sentinel>}` rendezvous:
+the test releases it only after observing the reload continuation, with a
+120-second safety release. Installed-build probe latency cannot finish the
+original answer ahead of the handoff. On an attached offline face,
 `PLAK_TEST_PROVIDER_RELEASE` selects a file gate at the first physical provider
 dispatch: the operation waits, observing cancellation, until that file exists.
 This repository-only hook uses the harness boundary controller, not a scripted
@@ -3068,6 +3072,13 @@ this ignored test explicitly
 with `PLAKOUS_PERF_HOST_ID` set; ordinary gates never enforce its timings.
 
 ### 2.8 Transport fault injection
+
+With `test-hooks`, `PLAK_TEST_RELOAD_PROBE_LAUNCH_DELAY_MS` (an unsigned integer
+in milliseconds) delays the installed-build reload probe before launching the
+executable, outside the child's response budget. It models OS executable-launch
+latency without changing production timeouts or probe answers. The reload PTY
+fixtures forward it explicitly for delayed-probe regression runs; ordinary
+builds do not read it.
 
 `plakous-http`'s `fault-injection` feature makes chosen exchanges fail the way
 the network or a provider would, at the one place every provider's traffic

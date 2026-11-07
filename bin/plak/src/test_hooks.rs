@@ -77,6 +77,13 @@ fn install_identity_hash_delay() {
 /// §8.5). Nothing else selects a runner.
 pub(crate) fn install() -> Result<(), String> {
     install_identity_hash_delay();
+    if let Some(millis) = hook_environment("PLAK_TEST_RELOAD_PROBE_LAUNCH_DELAY_MS")
+        .and_then(|value| value.into_string().ok())
+        .and_then(|value| value.parse().ok())
+    {
+        let _ = crate::build_identity::RELOAD_PROBE_LAUNCH_DELAY
+            .set(std::time::Duration::from_millis(millis));
+    }
     if let Some(Ok(selection)) = selected() {
         if selection.plan.loopback_runner {
             plakous_offline_crash_harness::loopback::select(
@@ -1247,7 +1254,11 @@ pub(crate) fn selected() -> Option<Result<OfflineSelection, String>> {
 }
 
 fn selector() -> Option<std::ffi::OsString> {
-    std::env::var_os("PLAK_TEST_MODEL")
+    hook_environment("PLAK_TEST_MODEL")
+}
+
+fn hook_environment(name: &str) -> Option<std::ffi::OsString> {
+    std::env::var_os(name)
 }
 
 /// The terminal application's hooks.

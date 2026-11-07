@@ -264,6 +264,48 @@ impl Drop for Fixture {
     }
 }
 
+/// A file rendezvous with a safety release, not a provider timing window.
+struct ProviderGate {
+    path: PathBuf,
+    stop: std::sync::mpsc::Sender<()>,
+    safety: Option<std::thread::JoinHandle<()>>,
+}
+
+impl ProviderGate {
+    fn new(fixture: &Fixture) -> Self {
+        let path = fixture.root.join("provider-release");
+        let safety_path = path.clone();
+        let (stop, receiver) = std::sync::mpsc::channel();
+        let safety = std::thread::spawn(move || {
+            if receiver.recv_timeout(Duration::from_secs(120))
+                == Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+            {
+                std::fs::write(safety_path, b"release").expect("provider safety release");
+            }
+        });
+        Self {
+            path,
+            stop,
+            safety: Some(safety),
+        }
+    }
+
+    fn release(&self) {
+        std::fs::write(&self.path, b"release").expect("release provider");
+    }
+}
+
+impl Drop for ProviderGate {
+    fn drop(&mut self) {
+        let _ = self.stop.send(());
+        self.safety
+            .take()
+            .expect("safety thread")
+            .join()
+            .expect("join safety thread");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Scripts
 // ---------------------------------------------------------------------------
@@ -481,7 +523,11 @@ impl Terminal {
         command.env("PLAK_TEST_MODEL", "offline-loopback-v1");
         command.env("PLAK_TEST_SCRIPT", fixture.script());
         command.env("PLAK_TEST_EVIDENCE", fixture.evidence());
-        for name in ["LLVM_PROFILE_FILE", "CARGO_LLVM_COV_TARGET_DIR"] {
+        for name in [
+            "LLVM_PROFILE_FILE",
+            "CARGO_LLVM_COV_TARGET_DIR",
+            "PLAK_TEST_RELOAD_PROBE_LAUNCH_DELAY_MS",
+        ] {
             if let Some(value) = std::env::var_os(name) {
                 command.env(name, value);
             }
@@ -2813,7 +2859,11 @@ fn a_slow_identity_hash_still_carries_a_changed_binding() {
 /// handed-off turn continues once in this build.
 #[test]
 fn a_reload_whose_binding_changed_keeps_a_running_turn_here_and_continues_it_once() {
-    let fixture = Fixture::new(&stalled_then_answers(30_000));
+    let fixture = Fixture::new(&stalled_then_answers(0));
+    let gate = ProviderGate::new(&fixture);
+    let mut script = stalled_then_answers(0);
+    script["steps"][0]["gate"] = json!({"file": gate.path});
+    fixture.write_script(&script);
     let fake_bin = fixture.root.join("fake-bin-changed");
     std::fs::create_dir_all(&fake_bin).expect("fake bin");
     let mut terminal = Terminal::spawn(&fixture, Launch::OnPath(&fake_bin));
@@ -2824,7 +2874,6 @@ fn a_reload_whose_binding_changed_keeps_a_running_turn_here_and_continues_it_onc
     // Installed after the launch, so only the reload's questions reach it:
     // that build reads a script whose adapter differs.
     let changed = fixture.root.join("changed-script.json");
-    let mut script = stalled_then_answers(30_000);
     script["adapter_profile"] = json!("offline-loopback-adapter-v2");
     write_json(&changed, &script);
     write_script_file(
@@ -2843,6 +2892,7 @@ fn a_reload_whose_binding_changed_keeps_a_running_turn_here_and_continues_it_onc
     terminal.send(b"/reload\r");
     terminal.wait_screen("this build reopens it");
     terminal.wait_screen("continued in this build");
+    gate.release();
     terminal.wait_absent("Esc stop");
     assert!(terminal.is_alive());
     assert_eq!(fixture.session_ids().len(), 1);
@@ -3219,7 +3269,11 @@ fn install_this_build(fixture: &Fixture, fake_bin: &Path) {
 /// request is not replayed.
 #[test]
 fn a_reload_during_a_running_turn_hands_it_to_the_new_build_once() {
-    let fixture = Fixture::new(&stalled_then_answers(30_000));
+    let fixture = Fixture::new(&stalled_then_answers(0));
+    let gate = ProviderGate::new(&fixture);
+    let mut script = stalled_then_answers(0);
+    script["steps"][0]["gate"] = json!({"file": gate.path});
+    fixture.write_script(&script);
     let fake_bin = fixture.root.join("fake-bin-handoff");
     std::fs::create_dir_all(&fake_bin).expect("fake bin");
     install_this_build(&fixture, &fake_bin);
@@ -3235,6 +3289,7 @@ fn a_reload_during_a_running_turn_hands_it_to_the_new_build_once() {
     }));
     terminal.send(b"/reload\r");
     terminal.wait_screen("continued after the reload");
+    gate.release();
     terminal.wait_absent("Esc stop");
     assert_eq!(fixture.session_ids().len(), 1, "the same session resumed");
     assert_eq!(

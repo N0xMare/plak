@@ -425,7 +425,7 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
         ("var_os", (("string", "PLAK_TEST_STORAGE_CAPACITY"),)),
         ("var", (("string", "PLAK_TEST_MODEL"),)),
         ("var_os", (("string", "PLAK_TEST_ASSISTANT_DONE_RELEASE"),)),
-        ("var_os", (("string", "PLAK_TEST_MODEL"),)),
+        ("var_os", (("identifier", "name"),)),
         ("var_os", (("string", "PLAK_TEST_TUI_PILOT"),)),
         ("var_os", (("string", "PLAK_TEST_SCRIPT"),)),
         ("var_os", (("string", "PLAK_TEST_EVIDENCE"),)),
