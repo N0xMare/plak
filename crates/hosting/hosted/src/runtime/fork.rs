@@ -484,7 +484,7 @@ pub(super) async fn production_fork_runtime<P: plakous_host_protocol::ProtocolEx
     stderr_buf: &mut Vec<u8>,
 ) -> CliResult<plakous::sessions::SessionRuntimeBinding> {
     let mut attached = None;
-    if config.session.target_selection.api_target().is_none() {
+    if !config.session.target_selection.is_api() {
         let mut spec = super::startup::native_spec(config)?;
         spec.topology_tree_id = Some(tree_id.to_owned());
         return crate::agent::coding_session_runtime_binding_with_attach(

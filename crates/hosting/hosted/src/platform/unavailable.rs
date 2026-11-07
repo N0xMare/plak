@@ -17,6 +17,7 @@ pub(super) fn construct(
 }
 pub(super) fn listing(
     provider: PlatformProvider,
+    _: &crate::account::AccountRef,
     _: &dyn PlatformCredentials,
     _: Option<&std::path::Path>,
     _: ApiModelLists,

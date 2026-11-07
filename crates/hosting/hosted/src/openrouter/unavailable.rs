@@ -12,8 +12,8 @@ impl OpenRouterChatModelEvidence {
 #[derive(Clone, Debug)]
 pub enum OpenRouterKeyUsage {}
 pub trait OpenRouterCredentials: Send + Sync + 'static {
-    fn preflight(&self) -> CliResult<()>;
-    fn key_label(&self) -> CliResult<String>;
+    fn preflight(&self, _account: &crate::account::AccountRef) -> CliResult<()>;
+    fn key_label(&self, _account: &crate::account::AccountRef) -> CliResult<String>;
 }
 fn unavailable() -> CliFailure {
     crate::capabilities::CapabilityUnavailable {
@@ -39,7 +39,10 @@ pub fn construct_openrouter_compaction_runtime(
 ) -> std::future::Ready<CliResult<SessionRuntimeBinding>> {
     std::future::ready(Err(unavailable()))
 }
-pub fn probe_openrouter_key_usage(_: &dyn OpenRouterCredentials) -> OpenRouterKeyUsageProbe {
+pub fn probe_openrouter_key_usage(
+    _: &dyn OpenRouterCredentials,
+    _: &crate::account::AccountRef,
+) -> OpenRouterKeyUsageProbe {
     OpenRouterKeyUsageProbe::Failed(unavailable().to_string())
 }
 pub(crate) fn carry_input_window<P: plakous_host_protocol::ProtocolExtension>(

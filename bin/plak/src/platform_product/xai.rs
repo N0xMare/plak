@@ -2,27 +2,30 @@ use super::{Arc, ProductPlatformCredentials};
 use plakous_hosted::CliResult;
 struct XaiSource {
     product: ProductPlatformCredentials,
+    account: plakous_hosted::account::AccountRef,
     authority: plakous::xai::XaiPlatformApiKeyAuthority,
 }
 
 impl XaiSource {
     fn new(
         product: ProductPlatformCredentials,
+        account: plakous_hosted::account::AccountRef,
     ) -> Result<Self, plakous::xai::XaiPlatformBuildError> {
         Ok(Self {
             product,
             authority: plakous::xai::XaiPlatformApiKeyAuthority::new(
                 "plak/xai-api",
-                "plak/xai/environment-or-file",
+                &account.source_authority("plak/xai/environment-or-file"),
                 1,
             )
             .map_err(|_| plakous::xai::XaiPlatformBuildError::Authentication)?,
+            account,
         })
     }
     fn key(&self) -> Result<plakous::api_key::ApiKey, plakous::api_key::ApiKeyError> {
         let key = self
             .product
-            .key("xai-api")
+            .key(&self.account)
             .map_err(|_| plakous::api_key::ApiKeyError::Unavailable)?;
         validate_key(key)
     }
@@ -48,8 +51,14 @@ impl
     }
     fn generation_grant(
         &self,
-        _: &dyn plakous::api_key::ApiKeyRequest,
+        request: &dyn plakous::api_key::ApiKeyRequest,
     ) -> Result<plakous::xai::XaiPlatformKeyGeneration, plakous::api_key::ApiKeyError> {
+        if request.provider() != plakous::api_key::CredentialProviderTag::XaiPlatform
+            || request.origin() != "https://api.x.ai"
+            || request.credential_reference().is_some()
+        {
+            return Err(plakous::api_key::ApiKeyError::BindingMismatch);
+        }
         Ok(self.key()?.generation_grant(
             plakous::api_key::CredentialProviderTag::XaiPlatform,
             self.authority.clone(),
@@ -76,11 +85,15 @@ impl
 }
 
 impl plakous_hosted::platform::XaiCredentials for ProductPlatformCredentials {
-    fn xai(&self) -> CliResult<Arc<plakous::xai::XaiPlatformKeySource>> {
-        crate::home::secrets::require_api_key(&self.paths, "xai-api")?;
-        Ok(Arc::new(XaiSource::new(self.clone()).map_err(|error| {
-            plakous_hosted::CliFailure::new(error.to_string())
-        })?))
+    fn xai(
+        &self,
+        account: &plakous_hosted::account::AccountRef,
+    ) -> CliResult<Arc<plakous::xai::XaiPlatformKeySource>> {
+        self.require_account(account, plakous_hosted::account::Vertical::XaiApi)?;
+        Ok(Arc::new(
+            XaiSource::new(self.clone(), account.clone())
+                .map_err(|error| plakous_hosted::CliFailure::new(error.to_string()))?,
+        ))
     }
 }
 
@@ -105,7 +118,9 @@ mod tests {
             .unwrap();
         }
         let product = ProductPlatformCredentials::shared(&paths);
-        let source = plakous_hosted::platform::XaiCredentials::xai(&*product).unwrap();
+        let source =
+            plakous_hosted::platform::XaiCredentials::xai(&*product, &"xai-api".parse().unwrap())
+                .unwrap();
         plakous::xai::xai_api_key_generation(source.as_ref()).unwrap();
     }
 

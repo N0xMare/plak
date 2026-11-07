@@ -1217,7 +1217,11 @@ Account-admission regressions require typed `unknown_account` on run/agent
 selection and resumed records, while preserving known aliases and unbound
 empty shells. A v12 named-API import with a synthetic default key present in
 an isolated home must refuse before product-store publication, not construct
-a default credential source. Mutants accepting unknown routes or bypassing
+a default credential source. Account/target mismatches refuse both import and
+resume before credential lookup. Product source tests use identical synthetic
+keys in sibling slots to distinguish source authority from key identity, then
+remove one slot and require it to become unavailable without affecting its sibling.
+Mutants accepting unknown routes or bypassing
 session account admission must fail committed assertions. Read-only account
 labels remain distinct from admission and known-feature omission.
 Explicit rebind tests separately preserve its configured-root remedy for an

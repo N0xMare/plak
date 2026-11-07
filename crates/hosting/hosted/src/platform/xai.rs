@@ -10,7 +10,10 @@ pub(super) use plakous::xai::XaiListedModel as ListedModel;
 
 /// Product-owned credentials for this compiled API route.
 pub trait Credentials: Send + Sync + 'static {
-    fn xai(&self) -> CliResult<Arc<plakous::xai::XaiPlatformKeySource>>;
+    fn xai(
+        &self,
+        _account: &crate::account::AccountRef,
+    ) -> CliResult<Arc<plakous::xai::XaiPlatformKeySource>>;
 }
 #[cfg(any(test, feature = "test-support"))]
 #[path = "test_support/xai.rs"]
@@ -31,7 +34,7 @@ pub(super) async fn construct(
         observer,
     } = input;
 
-    let source = credentials.xai()?;
+    let source = credentials.xai(&spec.account)?;
     let provisional = plakous::xai::xai_platform_selection_for(spec.literal_model, behavior)
         .map_err(api_error)?;
     let selected = plakous::xai::xai_platform_selection_for(
@@ -124,13 +127,14 @@ pub(super) fn rows_valid(models: &[ListedModel]) -> bool {
 
 pub(super) async fn listing(
     provider: PlatformProvider,
+    account: &crate::account::AccountRef,
     credentials: &dyn PlatformCredentials,
     product_home: Option<&std::path::Path>,
     lists: ApiModelLists,
     now: u64,
     observer: crate::exchange_observation::Observer,
 ) -> ApiModelCatalog {
-    let source = match credentials.xai() {
+    let source = match credentials.xai(account) {
         Ok(source) => source,
         Err(error) => return bundled_catalog(provider, error.message()),
     };
@@ -138,7 +142,7 @@ pub(super) async fn listing(
         Ok(fingerprint) => fingerprint,
         Err(error) => return bundled_catalog(provider, &error.to_string()),
     };
-    let lookup = Lookup::new(provider, product_home, &fingerprint, lists, now);
+    let lookup = Lookup::new(provider, account, product_home, &fingerprint, lists, now);
     lookup
         .run(
             async {

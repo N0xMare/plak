@@ -276,8 +276,16 @@ fn frozen_tools_rebind_refusal<P: plakous_host_protocol::ProtocolExtension>(
     if tools.selection.is_empty() {
         return None;
     }
-    let route = match target_selection.api_target() {
-        Some(target) => Some(crate::tool_plan::ToolRoute::api(target)),
+    let account_ref = match account.parse() {
+        Ok(account) => account,
+        Err(error) => return Some(format!("{error}")),
+    };
+    let api_target = match target_selection.api_target(&account_ref) {
+        Ok(target) => target,
+        Err(error) => return Some(error.to_string()),
+    };
+    let route = match api_target {
+        Some(target) => Some(crate::tool_plan::ToolRoute::api(&target)),
         None => oauth_provider_for_account(account).and_then(crate::tool_plan::ToolRoute::native),
     };
     let Some(route) = route else {
@@ -634,7 +642,7 @@ fn profile_rebind_selection<P: plakous_host_protocol::ProtocolExtension>(
 )> {
     let target_selection =
         profile_target_selection(account, extra, protocol).map_err(CliFailure::new)?;
-    let api_root = target_selection.api_target().is_some();
+    let api_root = target_selection.is_api();
     let (effort_label, composition) = if api_root {
         // An API root carries no catalog row to follow; it binds as a new
         // session from the same template would.

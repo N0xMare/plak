@@ -291,7 +291,8 @@ fn cache_ttl_fallback_and_keying() {
     assert!(reason.contains("outage"), "{reason}");
 
     let home = tempfile::tempdir().unwrap();
-    let path = cache_path(home.path(), provider, "fp1");
+    let account = provider.account().parse().unwrap();
+    let path = cache_path(home.path(), &account, "fp1");
     assert!(path.ends_with("cache/api-models/anthropic-fp1.json"));
     write_cache(&path, &fresh).unwrap();
     let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
@@ -306,9 +307,17 @@ fn cache_ttl_fallback_and_keying() {
                 .is_some_and(|ext| ext == "tmp")),
         "the unique stage file is renamed, not left behind"
     );
-    assert_eq!(read_cache(&path, provider, "fp1"), Some(fresh));
-    assert_eq!(read_cache(&path, provider, "fp2"), None);
-    assert_eq!(read_cache(&path, PlatformProvider::OpenAi, "fp1"), None);
+    assert_eq!(read_cache(&path, provider, &account, "fp1"), Some(fresh));
+    assert_eq!(read_cache(&path, provider, &account, "fp2"), None);
+    assert_eq!(
+        read_cache(
+            &path,
+            PlatformProvider::OpenAi,
+            &"openai".parse().unwrap(),
+            "fp1"
+        ),
+        None
+    );
 }
 
 #[test]

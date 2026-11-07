@@ -10,7 +10,10 @@ pub(super) use plakous::anthropic::AnthropicListedModel as ListedModel;
 
 /// Product-owned credentials for this compiled API route.
 pub trait Credentials: Send + Sync + 'static {
-    fn anthropic(&self) -> CliResult<Arc<plakous::anthropic::AnthropicKeySource>>;
+    fn anthropic(
+        &self,
+        _account: &crate::account::AccountRef,
+    ) -> CliResult<Arc<plakous::anthropic::AnthropicKeySource>>;
 }
 #[cfg(any(test, feature = "test-support"))]
 #[path = "test_support/anthropic.rs"]
@@ -39,8 +42,8 @@ fn construct_now(input: Construction<'_, '_>) -> CliResult<ConfiguredLanguageMod
         .ok_or_else(|| CliFailure::new("Anthropic API model facts are unavailable"))?;
     let (configured, retrieval) =
         plakous::anthropic::AnthropicLanguageModel::configured_with_retrieval(
-            credentials.anthropic()?,
-            "plak/anthropic",
+            credentials.anthropic(&spec.account)?,
+            &spec.account.source_authority("plak/anthropic"),
             model,
             &row.binding_evidence_for(provider, window),
             behavior,
@@ -108,13 +111,14 @@ pub(super) fn rows_valid(models: &[ListedModel]) -> bool {
 
 pub(super) async fn listing(
     provider: PlatformProvider,
+    account: &crate::account::AccountRef,
     credentials: &dyn PlatformCredentials,
     product_home: Option<&std::path::Path>,
     lists: ApiModelLists,
     now: u64,
     observer: crate::exchange_observation::Observer,
 ) -> ApiModelCatalog {
-    let source = match credentials.anthropic() {
+    let source = match credentials.anthropic(account) {
         Ok(source) => source,
         Err(error) => return bundled_catalog(provider, error.message()),
     };
@@ -122,7 +126,7 @@ pub(super) async fn listing(
         Ok(fingerprint) => fingerprint,
         Err(error) => return bundled_catalog(provider, &error.to_string()),
     };
-    let lookup = Lookup::new(provider, product_home, &fingerprint, lists, now);
+    let lookup = Lookup::new(provider, account, product_home, &fingerprint, lists, now);
     lookup
         .run(
             async {

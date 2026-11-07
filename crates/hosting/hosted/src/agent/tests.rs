@@ -51,9 +51,14 @@ async fn sdk_spawned_api_binding_refuses_before_discovery_or_creation() {
     for target in [
         crate::binding::ApiTarget::OpenRouter {
             wire: ResolvedProtocol::Chat,
+            account: "openrouter".parse().unwrap(),
         },
         crate::binding::ApiTarget::Platform {
             provider: crate::binding::PlatformProvider::Anthropic,
+            account: (crate::binding::PlatformProvider::Anthropic)
+                .account()
+                .parse()
+                .unwrap(),
         },
     ] {
         let mut parent = openrouter_test_parent();
@@ -283,6 +288,7 @@ pub(super) fn openrouter_test_parent() -> ApiTopologyParent {
         effort: None,
         target: crate::binding::ApiTarget::OpenRouter {
             wire: ResolvedProtocol::Chat,
+            account: "openrouter".parse().unwrap(),
         },
         scheduled_compaction: true,
         max_model_rounds: NATIVE_RUN_MAX_MODEL_ROUNDS,
@@ -4536,6 +4542,7 @@ async fn a_selected_tool_the_route_cannot_serve_refuses_api_session_creation()
         (
             crate::binding::ApiTarget::OpenRouter {
                 wire: ResolvedProtocol::Chat,
+                account: "openrouter".parse().unwrap(),
             },
             "x_search",
             "x_search is not available on openrouter; \
@@ -4544,6 +4551,10 @@ async fn a_selected_tool_the_route_cannot_serve_refuses_api_session_creation()
         (
             crate::binding::ApiTarget::Platform {
                 provider: crate::binding::PlatformProvider::Anthropic,
+                account: (crate::binding::PlatformProvider::Anthropic)
+                    .account()
+                    .parse()
+                    .unwrap(),
             },
             "mcp:github",
             "mcp server github is not configured; remedy: add [mcp_servers.github] \
@@ -4578,6 +4589,10 @@ fn child_spawn_parent_inputs_are_profile_independent_apart_from_composition() {
         effort: Some(ReasoningEffort::High),
         target: crate::binding::ApiTarget::Platform {
             provider: crate::binding::PlatformProvider::Anthropic,
+            account: (crate::binding::PlatformProvider::Anthropic)
+                .account()
+                .parse()
+                .unwrap(),
         },
         composition: CompositionSelection::JsPtc,
         tool_selection: crate::tool_plan::NodeToolSelection {

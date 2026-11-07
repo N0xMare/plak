@@ -1593,10 +1593,10 @@ async fn the_deepseek_route_shape_still_admits_with_a_workable_budget() {
 // AgentSessions, offline. The loopback route replaces live discovery.
 struct PiHubOpenRouterCredentials;
 impl OpenRouterCredentials for PiHubOpenRouterCredentials {
-    fn preflight(&self) -> CliResult<()> {
+    fn preflight(&self, _account: &crate::account::AccountRef) -> CliResult<()> {
         Ok(())
     }
-    fn source(&self) -> CliResult<Arc<OpenRouterKeySource>> {
+    fn source(&self, _account: &crate::account::AccountRef) -> CliResult<Arc<OpenRouterKeySource>> {
         use plakous::openrouter::ApiKey;
         Ok(Arc::new(
             plakous::openrouter::static_openrouter_api_key_source(
@@ -1607,7 +1607,7 @@ impl OpenRouterCredentials for PiHubOpenRouterCredentials {
             .expect("source"),
         ))
     }
-    fn key_label(&self) -> CliResult<String> {
+    fn key_label(&self, _account: &crate::account::AccountRef) -> CliResult<String> {
         Ok("PROBE".to_owned())
     }
 }
@@ -1944,6 +1944,7 @@ async fn pi_hub_local(
     let worker = directory.path().join("uninvoked-worker");
     std::fs::write(&worker, b"offline artifact identity fixture").expect("worker");
     let spec = |opening: bool, vocabulary| ProductOpenRouterSpec {
+        account: "openrouter".parse().unwrap(),
         job_config: plakous::tools::JobConfig::default(),
         created_output_bound: None,
         exchange_observer: None,

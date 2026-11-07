@@ -123,7 +123,11 @@ fn api_targets_reconstruct_without_crossing_account_or_oauth_authority() {
         }
         assert!(TargetSelection::Native.route(provider.account()).is_err());
         assert_eq!(
-            restored.api_target().unwrap().protocol(),
+            restored
+                .api_target(&provider.account().parse().unwrap())
+                .unwrap()
+                .unwrap()
+                .protocol(),
             provider.protocol()
         );
     }

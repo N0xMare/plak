@@ -1108,6 +1108,7 @@ pub async fn scripted_root_topology(
         effort: None,
         target: crate::binding::ApiTarget::OpenRouter {
             wire: crate::binding::ResolvedProtocol::Chat,
+            account: crate::account::AccountRef::default_for(crate::account::Vertical::OpenRouter),
         },
         scheduled_compaction: false,
         max_model_rounds: crate::agent::NATIVE_RUN_MAX_MODEL_ROUNDS,
@@ -1160,6 +1161,7 @@ pub fn scripted_caller_topology_tools(
         effort: None,
         target: crate::binding::ApiTarget::OpenRouter {
             wire: crate::binding::ResolvedProtocol::Chat,
+            account: crate::account::AccountRef::default_for(crate::account::Vertical::OpenRouter),
         },
         scheduled_compaction: false,
         max_model_rounds: crate::agent::NATIVE_RUN_MAX_MODEL_ROUNDS,

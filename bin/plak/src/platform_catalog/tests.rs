@@ -337,6 +337,7 @@ fn run_and_agent_save_the_same_api_record_for_the_same_arguments() {
             ] {
                 let run = crate::commands::run::api_run_record(
                     "/offline/workspace".into(),
+                    &provider.account().parse().unwrap(),
                     model,
                     Some(ReasoningEffort::Low),
                     composition.unwrap_or(ProductCompositionSelection::FollowCatalog),

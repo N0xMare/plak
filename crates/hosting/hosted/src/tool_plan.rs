@@ -745,10 +745,10 @@ impl ToolRoute {
         }
     }
 
-    pub(crate) const fn api(target: ApiTarget) -> Self {
+    pub(crate) const fn api(target: &ApiTarget) -> Self {
         match target {
             ApiTarget::OpenRouter { .. } => Self::OpenRouter,
-            ApiTarget::Platform { provider } => match provider {
+            ApiTarget::Platform { provider, .. } => match provider {
                 PlatformProvider::OpenAi => Self::OpenAi,
                 PlatformProvider::Anthropic => Self::Anthropic,
                 PlatformProvider::Xai => Self::XaiApi,

@@ -46,21 +46,26 @@ pub(crate) struct CachedList {
     rows: CachedRows,
 }
 
-pub(crate) fn cache_path(home: &Path, provider: PlatformProvider, fingerprint: &str) -> PathBuf {
+pub(crate) fn cache_path(
+    home: &Path,
+    account: &crate::account::AccountRef,
+    fingerprint: &str,
+) -> PathBuf {
     home.join("cache")
         .join("api-models")
-        .join(format!("{}-{fingerprint}.json", provider.account()))
+        .join(format!("{account}-{fingerprint}.json"))
 }
 
 pub(crate) fn read_cache(
     path: &Path,
     provider: PlatformProvider,
+    account: &crate::account::AccountRef,
     fingerprint: &str,
 ) -> Option<CachedList> {
     let bytes = read_owned_file(path)?;
     let cached: CachedList = serde_json::from_slice(&bytes).ok()?;
     (cached.version == CACHE_VERSION
-        && cached.account == provider.account()
+        && cached.account == account.as_str()
         && cached.key_fingerprint == fingerprint
         && rows_valid(provider, &cached.rows))
     .then_some(cached)
@@ -209,19 +214,31 @@ pub(crate) fn after_fetch<T>(
 /// The route's catalog: live list, cache or bundled table, classified.
 pub async fn api_model_catalog(
     provider: PlatformProvider,
+    account: &crate::account::AccountRef,
     credentials: &dyn PlatformCredentials,
     product_home: Option<&Path>,
     lists: ApiModelLists,
     now: u64,
 ) -> crate::CliResult<ApiModelCatalog> {
-    crate::capabilities::require(provider.account())?;
-    Ok(api_model_catalog_observed(provider, credentials, product_home, lists, now, None).await)
+    crate::capabilities::require(account.as_str())?;
+    crate::binding::TargetSelection::Platform { provider }.validate_account(account)?;
+    Ok(api_model_catalog_observed(
+        provider,
+        account,
+        credentials,
+        product_home,
+        lists,
+        now,
+        None,
+    )
+    .await)
 }
 
 /// [`api_model_catalog`] with the session's exchange observer, which sees the
 /// listing requests when a fetch happens.
 pub(crate) async fn api_model_catalog_observed(
     provider: PlatformProvider,
+    account: &crate::account::AccountRef,
     credentials: &dyn PlatformCredentials,
     product_home: Option<&Path>,
     lists: ApiModelLists,
@@ -230,14 +247,40 @@ pub(crate) async fn api_model_catalog_observed(
 ) -> ApiModelCatalog {
     match provider {
         PlatformProvider::Anthropic => {
-            super::anthropic::listing(provider, credentials, product_home, lists, now, observer)
-                .await
+            super::anthropic::listing(
+                provider,
+                account,
+                credentials,
+                product_home,
+                lists,
+                now,
+                observer,
+            )
+            .await
         }
         PlatformProvider::OpenAi => {
-            super::openai::listing(provider, credentials, product_home, lists, now, observer).await
+            super::openai::listing(
+                provider,
+                account,
+                credentials,
+                product_home,
+                lists,
+                now,
+                observer,
+            )
+            .await
         }
         PlatformProvider::Xai => {
-            super::xai::listing(provider, credentials, product_home, lists, now, observer).await
+            super::xai::listing(
+                provider,
+                account,
+                credentials,
+                product_home,
+                lists,
+                now,
+                observer,
+            )
+            .await
         }
     }
 }
@@ -245,6 +288,7 @@ pub(crate) async fn api_model_catalog_observed(
 /// One route's cache decision for one key.
 pub(super) struct Lookup {
     provider: PlatformProvider,
+    account: crate::account::AccountRef,
     fingerprint: String,
     path: Option<PathBuf>,
     cached: Option<CachedList>,
@@ -255,17 +299,19 @@ pub(super) struct Lookup {
 impl Lookup {
     pub(super) fn new(
         provider: PlatformProvider,
+        account: &crate::account::AccountRef,
         product_home: Option<&Path>,
         fingerprint: &str,
         lists: ApiModelLists,
         now: u64,
     ) -> Self {
-        let path = product_home.map(|home| cache_path(home, provider, fingerprint));
+        let path = product_home.map(|home| cache_path(home, account, fingerprint));
         let cached = path
             .as_deref()
-            .and_then(|path| read_cache(path, provider, fingerprint));
+            .and_then(|path| read_cache(path, provider, account, fingerprint));
         Self {
             provider,
+            account: account.clone(),
             fingerprint: fingerprint.to_owned(),
             path,
             cached,
@@ -322,7 +368,7 @@ impl Lookup {
                     path,
                     &CachedList {
                         version: CACHE_VERSION,
-                        account: self.provider.account().to_owned(),
+                        account: self.account.to_string(),
                         key_fingerprint: self.fingerprint.clone(),
                         fetched_at: self.now,
                         rows: wrap(models.clone()),

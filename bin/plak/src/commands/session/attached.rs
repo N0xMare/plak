@@ -197,7 +197,7 @@ fn build_attached_host_config(
         .model
         .clone()
         .ok_or_else(|| CliFailure::new("session has no exact model binding"))?;
-    let presentation = tui_presentation_bundle(paths)?;
+    let presentation = attached_presentation(paths, &account)?;
     let ready_catalog = &presentation.sections;
     let (effort, explicit) = product_host::effort_from_config(record.effort.as_deref());
     validate_catalog_for_attach(
@@ -226,6 +226,22 @@ fn build_attached_host_config(
     .map_err(AttachedConfigError::Other)
 }
 
+fn attached_presentation(
+    paths: &crate::home::paths::PlakPaths,
+    account: &str,
+) -> CliResult<crate::presentation::TuiPresentationBundle> {
+    let selection: plakous_hosted::account::AccountRef = account.parse()?;
+    if selection.is_named() && selection.vertical().is_api() {
+        crate::home::secrets::require_api_key(paths, selection.as_str())?;
+        return Ok(crate::presentation::TuiPresentationBundle {
+            providers: Vec::new(),
+            sections: plakous_host_protocol::views::ReadyCatalog::default(),
+            native_models: Vec::new(),
+        });
+    }
+    tui_presentation_bundle(paths)
+}
+
 fn validate_catalog_for_attach(
     target: &product_config::ProductTargetSelection,
     catalog: &plakous_host_protocol::views::ReadyCatalog,
@@ -235,7 +251,10 @@ fn validate_catalog_for_attach(
     effort_explicit: bool,
     classify_rebind_fallback: bool,
 ) -> Result<(), AttachedConfigError> {
-    if classify_rebind_fallback {
+    let selection: plakous_hosted::account::AccountRef =
+        account.parse().map_err(CliFailure::from)?;
+    let named_api = selection.is_named() && selection.vertical().is_api();
+    if classify_rebind_fallback && !named_api {
         require_catalog_binding(target, catalog, native_models, account, model)?;
     }
     if tui_attach_eligibility(target, catalog, Some(account), Some(model), effort_explicit)

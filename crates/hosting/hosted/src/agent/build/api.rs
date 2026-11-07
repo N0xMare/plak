@@ -31,10 +31,10 @@ use crate::error::{CliFailure, CliResult};
 use crate::tools::product_surface_with_fence;
 use plakous::prompts::plan::target_instructions;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct ApiRuntimeSpec<'a> {
     pub job_config: plakous::tools::JobConfig,
-    pub account: &'a str,
+    pub account: crate::account::AccountRef,
     pub sidecars: &'a dyn plakous::tools::SidecarLocator,
     pub product_home: Option<&'a Path>,
     pub literal_model: &'a str,
@@ -68,7 +68,7 @@ pub(crate) fn runtime_binding(
     spec.composition.admit_role(spec.spawned_child)?;
     let _binding_span = tracing::info_span!(
         "api_runtime_binding",
-        provider = spec.account,
+        provider = %spec.account,
         model = spec.literal_model,
         composition = spec.composition.as_str(),
         session_id = spec.plan_state_authority,
@@ -99,7 +99,7 @@ pub(crate) fn runtime_binding(
         .tool_policy(session_tool_policy(spec.tool_fence))
         .host_process_options(crate::process_environment::options(&physical_root)?)
         .job_config(spec.job_config)
-        .request_slots(crate::request_slots::for_account(spec.account));
+        .request_slots(crate::request_slots::for_account(spec.account.as_str()));
     if let Some(telemetry) = spec.telemetry {
         builder = builder.telemetry(Arc::clone(telemetry));
     }
@@ -275,7 +275,7 @@ pub(crate) fn runtime_binding(
         .with_scheduled_compaction_enabled(spec.scheduled_compaction);
     if !spec.opening_durable_session {
         let profile = api_product_profile(
-            spec.account,
+            &spec.account,
             spec.composition,
             spec.effort,
             spec.wire,
@@ -337,7 +337,7 @@ pub(crate) fn runtime_binding(
     reason = "API profile compilation keeps route capability, selected configuration, frozen tools, workspace, and composition inputs distinct."
 )]
 pub(crate) fn api_product_profile(
-    account: &str,
+    account: &crate::account::AccountRef,
     composition: CompositionSelection,
     effort: Option<ReasoningEffort>,
     wire: ResolvedProtocol,
@@ -347,8 +347,8 @@ pub(crate) fn api_product_profile(
     cwd: &Path,
     surface: &CompiledSurface,
 ) -> CliResult<plakous::agent::HarnessProfileSpec> {
-    let account: crate::account::AccountRef = account.parse()?;
-    let account = account.vertical().as_str();
+    let vertical = account.vertical();
+    let account = vertical.as_str();
     let wire_name = match wire {
         ResolvedProtocol::Chat => "chat",
         ResolvedProtocol::Responses => "responses",
@@ -367,7 +367,7 @@ pub(crate) fn api_product_profile(
     )?;
     let selected_effort = effort.map(plakous::prompts::identity::product_effort_label);
     let instructions = target_instructions(
-        &api_base_instructions(account, composition, surface)?,
+        &api_base_instructions(vertical, composition, surface)?,
         crate::prompt_inputs::prompt_composition(composition),
         surface,
         workspace_root,
@@ -398,13 +398,12 @@ pub(crate) fn api_product_profile(
 /// route wears (Codex, its Code Mode variant, Grok or Claude), or the pi base
 /// over the surface's pi tools.
 fn api_base_instructions(
-    account: &str,
+    vertical: crate::account::Vertical,
     composition: CompositionSelection,
     surface: &CompiledSurface,
 ) -> CliResult<String> {
     let variant = super::profile::product_prompt_variant();
-    let account: crate::account::AccountRef = account.parse()?;
-    let presentation = match account.vertical() {
+    let presentation = match vertical {
         crate::account::Vertical::OpenAi => Some(CodingPresentation::Codex),
         crate::account::Vertical::XaiApi => Some(CodingPresentation::Grok),
         crate::account::Vertical::Anthropic => Some(CodingPresentation::Claude),
@@ -570,7 +569,7 @@ mod tests {
                     .unwrap()
                 } else {
                     api_product_profile(
-                        &account.to_string(),
+                        account,
                         CompositionSelection::Direct,
                         None,
                         route.protocol.unwrap_or(ResolvedProtocol::Chat),
@@ -654,11 +653,27 @@ mod tests {
         ] {
             let surface = crate::tools::test_support::surface(presentation, &[]);
             assert!(
-                api_base_instructions(account, CompositionSelection::NativePtc, &surface).is_err(),
+                api_base_instructions(
+                    account
+                        .parse::<crate::account::AccountRef>()
+                        .unwrap()
+                        .vertical(),
+                    CompositionSelection::NativePtc,
+                    &surface
+                )
+                .is_err(),
                 "{account}"
             );
             assert!(
-                api_base_instructions(account, CompositionSelection::Direct, &surface).is_ok(),
+                api_base_instructions(
+                    account
+                        .parse::<crate::account::AccountRef>()
+                        .unwrap()
+                        .vertical(),
+                    CompositionSelection::Direct,
+                    &surface
+                )
+                .is_ok(),
                 "{account}"
             );
         }

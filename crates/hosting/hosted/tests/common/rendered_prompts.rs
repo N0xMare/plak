@@ -1265,7 +1265,7 @@ pub(crate) mod suite {
         cwd: &Path,
     ) -> (HarnessProfileSpec, Vec<ResolvedContextSourceFact>) {
         let profile = crate::agent::build::api::api_product_profile(
-            provider.account(),
+            &provider.account().parse().unwrap(),
             spec.composition,
             Some(API_EFFORT),
             provider.protocol(),

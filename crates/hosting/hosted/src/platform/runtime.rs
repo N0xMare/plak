@@ -104,7 +104,7 @@ pub(crate) async fn build_runtime(
         parent.state_roots.platform_credentials(),
         &ApiRuntimeSpec {
             job_config: parent.state_roots.job_config(),
-            account: provider.account(),
+            account: parent.target.selection().clone(),
             sidecars: parent.state_roots.sidecars().as_ref(),
             product_home: parent.product_home.as_deref(),
             literal_model: &parent.model,
@@ -138,8 +138,9 @@ pub(crate) async fn construct_platform_runtime_with(
     admission: &PlatformAdmission,
     clock: Arc<dyn plakous::model::Clock>,
 ) -> CliResult<plakous::sessions::SessionRuntimeBinding> {
-    crate::capabilities::require(provider.account())?;
-    if provider.account() != spec.account || provider.protocol() != spec.wire {
+    crate::capabilities::require(spec.account.as_str())?;
+    crate::binding::TargetSelection::Platform { provider }.validate_account(&spec.account)?;
+    if provider.protocol() != spec.wire {
         return Err(CliFailure::new(
             "API target/account/protocol binding is inconsistent",
         ));
@@ -148,7 +149,7 @@ pub(crate) async fn construct_platform_runtime_with(
         api_composition(provider, spec.literal_model, spec.composition).map_err(CliFailure::new)?;
     let spec = &ApiRuntimeSpec {
         composition,
-        ..*spec
+        ..spec.clone()
     };
     let native_ptc = composition == CompositionSelection::NativePtc;
     let registry = crate::agent::build::coding_tool_registry_with_extensions(
@@ -167,6 +168,7 @@ pub(crate) async fn construct_platform_runtime_with(
         .collect();
     let catalog = listing::api_model_catalog_observed(
         provider,
+        &spec.account,
         credentials,
         spec.product_home,
         admission.lists,
@@ -299,6 +301,12 @@ pub(crate) fn carry_input_window<P: plakous_host_protocol::ProtocolExtension>(
     let catalog = executor
         .block_on(listing::api_model_catalog_observed(
             provider,
+            &config
+                .session
+                .account
+                .as_deref()
+                .ok_or_else(|| CliFailure::new("API session account is missing"))?
+                .parse()?,
             config.state_roots.platform_credentials(),
             Some(&config.product_home),
             admission.lists,

@@ -19,7 +19,7 @@ fn spec<'a>(
 ) -> ApiRuntimeSpec<'a> {
     ApiRuntimeSpec {
         job_config: plakous::tools::JobConfig::default(),
-        account: PlatformProvider::Anthropic.account(),
+        account: PlatformProvider::Anthropic.account().parse().unwrap(),
         sidecars: workers,
         product_home: Some(directory),
         literal_model: "claude-haiku-5-5",
@@ -132,20 +132,38 @@ mod listing_cache {
     }
 
     impl AnthropicCredentials for ListingCredentials {
-        fn anthropic(&self) -> CliResult<Arc<plakous::anthropic::AnthropicKeySource>> {
-            Ok(self.wrap(PlatformProvider::Anthropic, Credentials(KEY).anthropic())?)
+        fn anthropic(
+            &self,
+            _account: &crate::account::AccountRef,
+        ) -> CliResult<Arc<plakous::anthropic::AnthropicKeySource>> {
+            Ok(self.wrap(
+                PlatformProvider::Anthropic,
+                Credentials(KEY).anthropic(&"anthropic".parse().unwrap()),
+            )?)
         }
     }
 
     impl OpenAiCredentials for ListingCredentials {
-        fn openai(&self) -> CliResult<Arc<plakous::openai::OpenAiKeySource>> {
-            Ok(self.wrap(PlatformProvider::OpenAi, Credentials(KEY).openai())?)
+        fn openai(
+            &self,
+            _account: &crate::account::AccountRef,
+        ) -> CliResult<Arc<plakous::openai::OpenAiKeySource>> {
+            Ok(self.wrap(
+                PlatformProvider::OpenAi,
+                Credentials(KEY).openai(&"openai".parse().unwrap()),
+            )?)
         }
     }
 
     impl XaiCredentials for ListingCredentials {
-        fn xai(&self) -> CliResult<Arc<plakous::xai::XaiPlatformKeySource>> {
-            Ok(self.wrap(PlatformProvider::Xai, Credentials(KEY).xai())?)
+        fn xai(
+            &self,
+            _account: &crate::account::AccountRef,
+        ) -> CliResult<Arc<plakous::xai::XaiPlatformKeySource>> {
+            Ok(self.wrap(
+                PlatformProvider::Xai,
+                Credentials(KEY).xai(&"xai-api".parse().unwrap()),
+            )?)
         }
     }
 
@@ -153,7 +171,10 @@ mod listing_cache {
         let (fingerprint, rows) = match provider {
             PlatformProvider::Anthropic => (
                 plakous::anthropic::anthropic_api_key_fingerprint(
-                    Credentials(KEY).anthropic().unwrap().as_ref(),
+                    Credentials(KEY)
+                        .anthropic(&"anthropic".parse().unwrap())
+                        .unwrap()
+                        .as_ref(),
                 )
                 .unwrap(),
                 CachedRows::Anthropic(
@@ -162,8 +183,11 @@ mod listing_cache {
             ),
             PlatformProvider::OpenAi => (
                 plakous::openai::openai_api_key_fingerprint(
-                    &openai::openai_credential_reference().unwrap(),
-                    Credentials(KEY).openai().unwrap().as_ref(),
+                    &openai::openai_credential_reference(&"openai".parse().unwrap()).unwrap(),
+                    Credentials(KEY)
+                        .openai(&"openai".parse().unwrap())
+                        .unwrap()
+                        .as_ref(),
                 )
                 .unwrap(),
                 CachedRows::OpenAi(
@@ -171,8 +195,13 @@ mod listing_cache {
                 ),
             ),
             PlatformProvider::Xai => (
-                plakous::xai::xai_api_key_fingerprint(Credentials(KEY).xai().unwrap().as_ref())
-                    .unwrap(),
+                plakous::xai::xai_api_key_fingerprint(
+                    Credentials(KEY)
+                        .xai(&"xai-api".parse().unwrap())
+                        .unwrap()
+                        .as_ref(),
+                )
+                .unwrap(),
                 CachedRows::Xai(plakous::xai::xai_api_bundled_listing().unwrap()[..1].to_vec()),
             ),
         };
@@ -199,13 +228,18 @@ mod listing_cache {
                 let credentials = ListingCredentials::new(Failure::None);
                 let (fingerprint, mut document) = cache_fixture(provider);
                 document["fetched_at"] = (NOW - age).into();
-                let path = cache_path(directory.path(), provider, &fingerprint);
+                let path = cache_path(
+                    directory.path(),
+                    &provider.account().parse().unwrap(),
+                    &fingerprint,
+                );
                 write_fixture(&path, &document);
                 if age > 60 {
                     std::fs::write(path.with_extension("failed"), (NOW - 60).to_string()).unwrap();
                 }
                 let catalog = api_model_catalog_observed(
                     provider,
+                    &provider.account().parse().unwrap(),
                     &credentials,
                     Some(directory.path()),
                     ApiModelLists::Live,
@@ -231,10 +265,15 @@ mod listing_cache {
             let credentials = ListingCredentials::new(Failure::None);
             let (fingerprint, mut document) = cache_fixture(provider);
             document["fetched_at"] = 1.into();
-            let path = cache_path(directory.path(), provider, &fingerprint);
+            let path = cache_path(
+                directory.path(),
+                &provider.account().parse().unwrap(),
+                &fingerprint,
+            );
             write_fixture(&path, &document);
             let catalog = api_model_catalog_observed(
                 provider,
+                &provider.account().parse().unwrap(),
                 &credentials,
                 Some(directory.path()),
                 ApiModelLists::Live,
@@ -265,6 +304,7 @@ mod listing_cache {
                 let credentials = ListingCredentials::new(failure);
                 let catalog = api_model_catalog_observed(
                     provider,
+                    &provider.account().parse().unwrap(),
                     &credentials,
                     None,
                     ApiModelLists::Offline,
@@ -312,11 +352,16 @@ mod listing_cache {
             ] {
                 let directory = tempfile::tempdir().unwrap();
                 let credentials = ListingCredentials::new(Failure::None);
-                let path = cache_path(directory.path(), provider, &fingerprint);
+                let path = cache_path(
+                    directory.path(),
+                    &provider.account().parse().unwrap(),
+                    &fingerprint,
+                );
                 std::fs::create_dir_all(path.parent().unwrap()).unwrap();
                 std::fs::write(path, bytes).unwrap();
                 let catalog = api_model_catalog_observed(
                     provider,
+                    &provider.account().parse().unwrap(),
                     &credentials,
                     Some(directory.path()),
                     ApiModelLists::Offline,
@@ -419,7 +464,10 @@ async fn exact_reopen_from_stored_evidence_keeps_window_and_refuses_moved_facts(
 
     // The provider now publishes a smaller output limit for Haiku.
     let fingerprint = plakous::anthropic::anthropic_api_key_fingerprint(
-        Credentials("fixture-key-one").anthropic().unwrap().as_ref(),
+        Credentials("fixture-key-one")
+            .anthropic(&"anthropic".parse().unwrap())
+            .unwrap()
+            .as_ref(),
     )
     .unwrap();
     let mut listed = plakous::anthropic::anthropic_api_bundled_listing().unwrap();
@@ -432,7 +480,11 @@ async fn exact_reopen_from_stored_evidence_keeps_window_and_refuses_moved_facts(
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    let path = cache_path(directory.path(), PlatformProvider::Anthropic, &fingerprint);
+    let path = cache_path(
+        directory.path(),
+        &"anthropic".parse().unwrap(),
+        &fingerprint,
+    );
     write_cache(
         &path,
         &cached_for_test(PlatformProvider::Anthropic, &fingerprint, now, listed),
@@ -469,10 +521,10 @@ fn cache_rows_are_validated_like_a_fetched_page() {
     evil.id = "claude-haiku-5-5\u{1b}[2J\tusable".to_owned();
     listed.push(evil);
     listed.push(listed[0].clone());
-    let path = cache_path(directory.path(), provider, "fp");
+    let path = cache_path(directory.path(), &provider.account().parse().unwrap(), "fp");
     write_cache(&path, &cached_for_test(provider, "fp", 1, listed)).unwrap();
     assert_eq!(
-        read_cache(&path, provider, "fp"),
+        read_cache(&path, provider, &provider.account().parse().unwrap(), "fp"),
         None,
         "a cache with an unsafe id and a repeated id was accepted"
     );
@@ -484,7 +536,7 @@ fn cache_file_is_owner_only() {
     use std::os::unix::fs::PermissionsExt as _;
     let directory = tempfile::tempdir().unwrap();
     let provider = PlatformProvider::Anthropic;
-    let path = cache_path(directory.path(), provider, "fp");
+    let path = cache_path(directory.path(), &provider.account().parse().unwrap(), "fp");
     let listed = plakous::anthropic::anthropic_api_bundled_listing().unwrap();
     write_cache(&path, &cached_for_test(provider, "fp", 1, listed)).unwrap();
     let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
@@ -506,11 +558,22 @@ fn cache_read_does_not_follow_a_symlink() {
     let target = directory.path().join("elsewhere.json");
     let listed = plakous::anthropic::anthropic_api_bundled_listing().unwrap();
     write_cache(&target, &cached_for_test(provider, "fp", 1, listed)).unwrap();
-    assert!(read_cache(&target, provider, "fp").is_some());
-    let path = cache_path(directory.path(), provider, "fp");
+    assert!(
+        read_cache(
+            &target,
+            provider,
+            &provider.account().parse().unwrap(),
+            "fp"
+        )
+        .is_some()
+    );
+    let path = cache_path(directory.path(), &provider.account().parse().unwrap(), "fp");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::os::unix::fs::symlink(&target, &path).unwrap();
-    assert_eq!(read_cache(&path, provider, "fp"), None);
+    assert_eq!(
+        read_cache(&path, provider, &provider.account().parse().unwrap(), "fp"),
+        None
+    );
 }
 
 /// Counts key reads: the fingerprint is one read, a fetch would be another.
@@ -545,18 +608,27 @@ impl plakous::api_key::ApiKeySource<plakous::anthropic::AnthropicApiKeyRequest>
     }
 }
 impl OpenAiCredentials for CountingCredentials {
-    fn openai(&self) -> CliResult<Arc<plakous::openai::OpenAiKeySource>> {
-        Credentials("fixture-key-one").openai()
+    fn openai(
+        &self,
+        _account: &crate::account::AccountRef,
+    ) -> CliResult<Arc<plakous::openai::OpenAiKeySource>> {
+        Credentials("fixture-key-one").openai(&"openai".parse().unwrap())
     }
 }
 impl AnthropicCredentials for CountingCredentials {
-    fn anthropic(&self) -> CliResult<Arc<plakous::anthropic::AnthropicKeySource>> {
+    fn anthropic(
+        &self,
+        _account: &crate::account::AccountRef,
+    ) -> CliResult<Arc<plakous::anthropic::AnthropicKeySource>> {
         Ok(Arc::new(CountingCredentials(Arc::clone(&self.0))))
     }
 }
 impl XaiCredentials for CountingCredentials {
-    fn xai(&self) -> CliResult<Arc<plakous::xai::XaiPlatformKeySource>> {
-        Credentials("fixture-key-one").xai()
+    fn xai(
+        &self,
+        _account: &crate::account::AccountRef,
+    ) -> CliResult<Arc<plakous::xai::XaiPlatformKeySource>> {
+        Credentials("fixture-key-one").xai(&"xai-api".parse().unwrap())
     }
 }
 
@@ -569,16 +641,24 @@ async fn a_recent_listing_failure_is_not_retried_for_five_minutes() {
     let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let credentials = CountingCredentials(Arc::clone(&reads));
     let fingerprint = plakous::anthropic::anthropic_api_key_fingerprint(
-        Credentials("fixture-key-one").anthropic().unwrap().as_ref(),
+        Credentials("fixture-key-one")
+            .anthropic(&"anthropic".parse().unwrap())
+            .unwrap()
+            .as_ref(),
     )
     .unwrap();
-    let path = cache_path(directory.path(), provider, &fingerprint);
+    let path = cache_path(
+        directory.path(),
+        &provider.account().parse().unwrap(),
+        &fingerprint,
+    );
     let listed = plakous::anthropic::anthropic_api_bundled_listing().unwrap();
     let now = 2_000_000_000;
     write_cache(&path, &cached_for_test(provider, &fingerprint, 1, listed)).unwrap();
     std::fs::write(path.with_extension("failed"), (now - 60).to_string()).unwrap();
     let catalog = api_model_catalog_observed(
         provider,
+        &provider.account().parse().unwrap(),
         &credentials,
         Some(directory.path()),
         ApiModelLists::Live,
@@ -620,7 +700,7 @@ async fn every_admitted_model_effort_constructs_on_its_route() {
         for row in platform_models(provider) {
             for effort in row.efforts.clone() {
                 let mut spec = spec(directory.path(), &workers, &extensions, false);
-                spec.account = provider.account();
+                spec.account = provider.account().parse().unwrap();
                 spec.wire = provider.protocol();
                 spec.literal_model = &row.model;
                 spec.effort = Some(effort);
@@ -669,7 +749,7 @@ fn unified_api_keys_keep_existing_owner_only_listing_cache_paths() {
         None,
         (),
     );
-    let reference = openai::openai_credential_reference().unwrap();
+    let reference = openai::openai_credential_reference(&"openai".parse().unwrap()).unwrap();
     let openai = plakous::openai::static_openai_api_key_source(
         ApiKey::new(text).unwrap(),
         reference.clone(),
@@ -700,7 +780,11 @@ fn unified_api_keys_keep_existing_owner_only_listing_cache_paths() {
         ),
     ] {
         assert_eq!(
-            cache_path(Path::new("owner"), provider, &fingerprint),
+            cache_path(
+                Path::new("owner"),
+                &provider.account().parse().unwrap(),
+                &fingerprint
+            ),
             Path::new("owner/cache/api-models").join(expected)
         );
     }

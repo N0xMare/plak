@@ -16,9 +16,10 @@ fn named_api_v12_import_refuses_even_with_a_default_key_present() {
         "unused-default-key",
     )
     .unwrap();
-    let services = crate::shell::services::Services::for_home(paths);
     for account in ["openai/work", "unknown"] {
+        let services = crate::shell::services::Services::for_home(paths.clone());
         let mut document = sample_document();
+        document.workspace_root = root.path().to_owned();
         document.binding.account = Some(account.into());
         document.binding.target_selection =
             crate::product_config::ProductTargetSelection::Platform {
@@ -28,13 +29,59 @@ fn named_api_v12_import_refuses_even_with_a_default_key_present() {
         fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
         let failure =
             crate::commands::session::import_export::import_session(&services, &path).unwrap_err();
-        assert_eq!(failure.exit_code(), 2);
-        assert!(matches!(
-            std::error::Error::source(&failure).unwrap()
-                .downcast_ref::<plakous_hosted::capabilities::AccountAdmissionError>(),
-            Some(plakous_hosted::capabilities::AccountAdmissionError::UnknownAccount { account: refused })
-                if refused == account
-        ));
+        if account == "unknown" {
+            assert_eq!(services.product_store_opens(), 0);
+            assert_eq!(failure.exit_code(), 2);
+            assert!(matches!(
+                std::error::Error::source(&failure).unwrap()
+                    .downcast_ref::<plakous_hosted::capabilities::AccountAdmissionError>(),
+                Some(plakous_hosted::capabilities::AccountAdmissionError::UnknownAccount { account: refused })
+                    if refused == account
+            ));
+        } else {
+            assert_eq!(failure.exit_code(), 3, "{failure}");
+            assert!(failure.message().contains("openai/work"), "{failure}");
+            assert!(!failure.message().contains("unused-default-key"));
+            assert_eq!(
+                services
+                    .session_records()
+                    .unwrap()
+                    .list_for_workspace(root.path())
+                    .unwrap(),
+                [] as [SessionRecord; 0]
+            );
+        }
+    }
+}
+
+#[test]
+fn import_and_resume_refuse_account_target_mismatches_before_credentials() {
+    use plakous_hosted::binding::{PlatformProvider, TargetSelection};
+    use plakous_hosted::capabilities::AccountAdmissionError;
+    let root = tempfile::tempdir().unwrap();
+    let paths = PlakPaths::explicit(root.path().join("home")).for_workspace(root.path());
+    paths.ensure_layout().unwrap();
+    let services = crate::shell::services::Services::for_home(paths);
+    for account in ["openai", "openai/work", "claude", "openrouter/work"] {
+        let mut document = sample_document();
+        document.binding.account = Some(account.into());
+        document.binding.target_selection = TargetSelection::Platform {
+            provider: PlatformProvider::Anthropic,
+        };
+        let path = root.path().join("export.json");
+        fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
+        let imported =
+            crate::commands::session::import_export::import_session(&services, &path).unwrap_err();
+        let mut record = SessionRecord::new(root.path().to_owned());
+        record.account = Some(account.into());
+        record.target_selection = document.binding.target_selection;
+        let resumed = crate::build_features::admit_session(&record).unwrap_err();
+        for failure in [imported, resumed] {
+            assert!(matches!(
+                std::error::Error::source(&failure).unwrap().downcast_ref::<AccountAdmissionError>(),
+                Some(AccountAdmissionError::AccountTargetMismatch { account: refused }) if refused == account
+            ));
+        }
         assert_eq!(services.product_store_opens(), 0);
     }
 }

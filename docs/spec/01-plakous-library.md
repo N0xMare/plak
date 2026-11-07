@@ -3284,6 +3284,13 @@ grant. Metadata-only selection cannot substitute for a physical request proof.
 OpenRouter Chat, Messages and Responses each retain the model's admitted
 generation through dispatch; a later metadata lookup cannot replace it before
 bearer resolution.
+Hosted API credential ports receive a validated product `AccountRef` for
+every source construction and catalog lookup. Runtime-only `ApiTarget` owns
+that reference alongside the provider/wire; persisted `TargetSelection` keeps
+its encoding and validates the recorded account before constructing the target.
+The platform runtime never reconstructs a default account from a provider.
+Named product slots scope source authority without changing upstream identity,
+prompt/profile behavior, or the default source's bytes.
 There are no default source methods, cross-route fallback or branded secret
 wrappers. Key construction rejects empty, over-64-KiB or control-byte text;
 xAI product key loading applies its 16-KiB ASCII-graphic bound before granting

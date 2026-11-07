@@ -77,13 +77,15 @@ impl AccountName {
 pub struct AccountRef {
     vertical: Vertical,
     name: Option<AccountName>,
+    reference: String,
 }
 
 impl AccountRef {
-    pub const fn default_for(vertical: Vertical) -> Self {
+    pub fn default_for(vertical: Vertical) -> Self {
         Self {
             vertical,
             name: None,
+            reference: vertical.as_str().to_owned(),
         }
     }
     pub const fn vertical(&self) -> Vertical {
@@ -94,6 +96,22 @@ impl AccountRef {
     }
     pub fn is_named(&self) -> bool {
         self.name.is_some()
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.reference
+    }
+
+    pub fn source_authority(&self, default: &str) -> String {
+        if self.is_named() {
+            format!("{default}/plak.account-scope.v1/{self}")
+        } else {
+            default.to_owned()
+        }
+    }
+
+    pub fn credential_reference(&self) -> String {
+        format!("plak/{self}")
     }
 }
 
@@ -120,23 +138,54 @@ impl FromStr for AccountRef {
         let name = name
             .map(|name| AccountName::parse(name).ok_or_else(unknown))
             .transpose()?;
-        Ok(Self { vertical, name })
+        let reference = name.as_ref().map_or_else(
+            || vertical.as_str().to_owned(),
+            |name| format!("{}/{}", vertical.as_str(), name.as_str()),
+        );
+        Ok(Self {
+            vertical,
+            name,
+            reference,
+        })
     }
 }
 
 impl fmt::Display for AccountRef {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.vertical.as_str())?;
-        if let Some(name) = &self.name {
-            write!(formatter, "/{}", name.as_str())?;
-        }
-        Ok(())
+        formatter.write_str(&self.reference)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_scopes_preserve_default_bytes_and_distinguish_named_accounts() {
+        for vertical in Vertical::ALL {
+            let default = AccountRef::default_for(vertical);
+            let named: AccountRef = format!("{}/work", vertical.as_str()).parse().unwrap();
+            assert_eq!(
+                default.source_authority("existing-authority"),
+                "existing-authority"
+            );
+            assert_eq!(
+                default.credential_reference(),
+                format!("plak/{}", vertical.as_str())
+            );
+            assert_eq!(
+                named.source_authority("existing-authority"),
+                format!("existing-authority/plak.account-scope.v1/{named}")
+            );
+            assert_ne!(
+                named.source_authority("existing-authority"),
+                format!("{}/other", vertical.as_str())
+                    .parse::<AccountRef>()
+                    .unwrap()
+                    .source_authority("existing-authority")
+            );
+        }
+    }
 
     #[test]
     fn names_preserve_verticals_and_canonicalize_only_explicit_aliases() {

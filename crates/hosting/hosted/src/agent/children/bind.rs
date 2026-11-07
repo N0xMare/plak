@@ -815,19 +815,27 @@ pub(in crate::agent) async fn openrouter_child_runtime_binding(
         .filter(|value| !value.is_empty())
         .ok_or_else(|| "API child model is missing".to_owned())?;
     let (composition, protocol) = frozen_openrouter_child_pin(tree_id, agent_id)?;
-    let target = if account == "openrouter" {
+    let selected: crate::account::AccountRef = account.parse()?;
+    let target = if selected.vertical() == crate::account::Vertical::OpenRouter {
         crate::binding::ApiTarget::OpenRouter {
             wire: crate::binding::WireBinding::resolve(protocol).resolved,
+            account: selected,
         }
     } else {
-        let provider = crate::binding::PlatformProvider::for_account(account)
+        let provider = selected
+            .vertical()
+            .capability()
+            .platform_provider()
             .ok_or_else(|| "API child account is unsupported".to_owned())?;
         if protocol != crate::binding::ProtocolSelection::Auto
             && crate::binding::WireBinding::resolve(protocol).resolved != provider.protocol()
         {
             return Err("API child protocol does not match its exact account".into());
         }
-        crate::binding::ApiTarget::Platform { provider }
+        crate::binding::ApiTarget::Platform {
+            provider,
+            account: selected,
+        }
     };
     let inputs = parent.child_inputs();
     let child_path = PathBuf::from(path);

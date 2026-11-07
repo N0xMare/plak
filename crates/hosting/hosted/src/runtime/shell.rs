@@ -1049,7 +1049,7 @@ pub(super) fn handle_shell_set_model<P: plakous_host_protocol::ProtocolExtension
             return ShellBindingOutcome::Refused;
         }
     };
-    let effort = if candidate.target_selection.api_target().is_some() {
+    let effort = if candidate.target_selection.is_api() {
         match api_root_binding(
             &candidate.target_selection,
             &model,

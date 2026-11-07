@@ -314,6 +314,20 @@ impl StoreBaseline {
 }
 
 impl SessionRecord {
+    /// The exact selected account; a target never supplies an absent account.
+    pub fn account_ref(
+        &self,
+    ) -> Result<crate::account::AccountRef, crate::capabilities::AccountAdmissionError> {
+        self.account
+            .as_deref()
+            .ok_or_else(
+                || crate::capabilities::AccountAdmissionError::AccountTargetMismatch {
+                    account: "<unbound>".into(),
+                },
+            )?
+            .parse()
+    }
+
     #[must_use]
     pub fn new(workspace_root: PathBuf) -> Self {
         let now = now_unix_secs();
@@ -505,9 +519,15 @@ impl SessionRecord {
         if self.carry_intent.is_some() && self.plakous_locator.is_some() {
             return Err("a carry intent is cleared when its locator is bound".to_owned());
         }
+        let selected_account = self
+            .account
+            .as_deref()
+            .and_then(|account| account.parse::<crate::account::AccountRef>().ok());
         match (&self.target_selection, self.account.as_deref()) {
-            (ProductTargetSelection::OpenRouter { .. }, Some("openrouter"))
-                if self.model.as_deref().is_some_and(|model| !model.is_empty())
+            (ProductTargetSelection::OpenRouter { .. }, Some(_))
+                if selected_account.as_ref().is_some_and(|account| {
+                    account.vertical() == crate::account::Vertical::OpenRouter
+                }) && self.model.as_deref().is_some_and(|model| !model.is_empty())
                     && self.composition != ProductCompositionSelection::FollowCatalog
                     && self
                         .effort
@@ -519,31 +539,35 @@ impl SessionRecord {
                         .to_owned(),
                 );
             }
-            (
-                ProductTargetSelection::Native | ProductTargetSelection::NativePriority,
-                Some("openrouter"),
-            ) => {
+            (ProductTargetSelection::Native | ProductTargetSelection::NativePriority, Some(_))
+                if selected_account.as_ref().is_some_and(|account| {
+                    account.vertical() == crate::account::Vertical::OpenRouter
+                }) =>
+            {
                 return Err("OpenRouter account requires an exact OpenRouter target".to_owned());
             }
-            (ProductTargetSelection::NativePriority, Some("codex")) => {}
+            (ProductTargetSelection::NativePriority, Some(_))
+                if selected_account.as_ref().is_some_and(|account| {
+                    account.vertical() == crate::account::Vertical::Codex
+                }) => {}
             (ProductTargetSelection::NativePriority, _) => {
                 return Err(
                     "priority native target requires the Codex subscription account".to_owned(),
                 );
             }
-            (ProductTargetSelection::Platform { provider }, account)
-                if account == Some(provider.account())
-                    && self.model.as_deref().is_some_and(|model| {
-                        !model.is_empty()
-                            && self.composition != ProductCompositionSelection::FollowCatalog
-                            && (self.composition != ProductCompositionSelection::NativePtc
-                                || *provider == crate::binding::PlatformProvider::OpenAi)
-                    })
-                    && self
-                        .effort
-                        .as_deref()
-                        .and_then(crate::effort::parse)
-                        .is_some() => {}
+            (ProductTargetSelection::Platform { provider }, _)
+                if selected_account.as_ref().is_some_and(|account| {
+                    account.vertical().capability().platform_provider() == Some(*provider)
+                }) && self.model.as_deref().is_some_and(|model| {
+                    !model.is_empty()
+                        && self.composition != ProductCompositionSelection::FollowCatalog
+                        && (self.composition != ProductCompositionSelection::NativePtc
+                            || *provider == crate::binding::PlatformProvider::OpenAi)
+                }) && self
+                    .effort
+                    .as_deref()
+                    .and_then(crate::effort::parse)
+                    .is_some() => {}
             (ProductTargetSelection::Platform { .. }, _) => {
                 return Err(
                     "API target requires its exact account, model, effort, and local composition"
@@ -551,7 +575,9 @@ impl SessionRecord {
                 );
             }
             (ProductTargetSelection::Native, Some(account))
-                if crate::binding::PlatformProvider::for_account(account).is_some() =>
+                if account
+                    .parse::<crate::account::AccountRef>()
+                    .is_ok_and(|account| account.vertical().is_api()) =>
             {
                 return Err("API account requires its exact API target".to_owned());
             }

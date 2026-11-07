@@ -256,6 +256,7 @@ impl PlakousApplication {
     pub(crate) fn run_api(
         &mut self,
         config: &product_config::ProductConfig,
+        account: plakous_hosted::account::AccountRef,
         model: &str,
         effort: Option<ReasoningEffort>,
         composition: product_config::ProductCompositionSelection,
@@ -270,10 +271,10 @@ impl PlakousApplication {
             return run_timeout(stderr);
         }
         let api = selection
-            .api_target()
+            .api_target(&account)?
             .ok_or_else(|| CliFailure::new("API run requires an API target"))?;
         let cwd = self.workspace()?;
-        let session = api_run_record(cwd, model, effort, composition, selection)?;
+        let session = api_run_record(cwd, &account, model, effort, composition, selection)?;
         self.product_paths()?
             .ensure_layout()
             .map_err(CliFailure::new)?;
@@ -284,7 +285,7 @@ impl PlakousApplication {
                     evidence: None,
                 }
             }
-            plakous_hosted::binding::ApiTarget::Platform { provider } => {
+            plakous_hosted::binding::ApiTarget::Platform { provider, .. } => {
                 product_host::HostTargetAuthority::Platform {
                     provider,
                     subscriptions: self.subscriptions.clone(),
@@ -346,7 +347,10 @@ impl PlakousApplication {
                 "session has no exact canonical Plakous locator",
             ));
         }
-        if let Some(api) = session.target_selection.api_target() {
+        if let Some(api) = session
+            .target_selection
+            .api_target(&session.account_ref()?)?
+        {
             let account = session
                 .account
                 .as_deref()
@@ -362,7 +366,7 @@ impl PlakousApplication {
                         evidence: None,
                     }
                 }
-                plakous_hosted::binding::ApiTarget::Platform { provider } => {
+                plakous_hosted::binding::ApiTarget::Platform { provider, .. } => {
                     product_host::HostTargetAuthority::Platform {
                         provider,
                         subscriptions: self.subscriptions.clone(),
@@ -785,6 +789,7 @@ fn assistant_stdout(assistant: String, stdout_mode: TerminalMode) -> String {
 /// account (`plakous-default` binds `direct` on OpenRouter).
 pub(crate) fn api_run_record(
     cwd: std::path::PathBuf,
+    account: &plakous_hosted::account::AccountRef,
     model: &str,
     effort: Option<ReasoningEffort>,
     composition: product_config::ProductCompositionSelection,
@@ -794,9 +799,9 @@ pub(crate) fn api_run_record(
         .validate()
         .map_err(|message| CliFailure::classified(CliFailureKind::Usage, message))?;
     let api = selection
-        .api_target()
+        .api_target(account)?
         .ok_or_else(|| CliFailure::new("API run requires an API target"))?;
-    if let plakous_hosted::binding::ApiTarget::Platform { provider } = api {
+    if let plakous_hosted::binding::ApiTarget::Platform { provider, .. } = api {
         crate::platform_catalog::validate(provider, model, effort, composition)
             .map_err(|message| CliFailure::classified(CliFailureKind::Usage, message))?;
     }
@@ -805,7 +810,7 @@ pub(crate) fn api_run_record(
     session.model = Some(model.to_owned());
     session.effort = effort.map(product_host::effort_label);
     session.composition = match (api, composition) {
-        (plakous_hosted::binding::ApiTarget::Platform { provider }, _) => {
+        (plakous_hosted::binding::ApiTarget::Platform { provider, .. }, _) => {
             plakous_hosted::platform::api_composition(provider, model, composition)
                 .map_err(|message| CliFailure::classified(CliFailureKind::Usage, message))?
         }

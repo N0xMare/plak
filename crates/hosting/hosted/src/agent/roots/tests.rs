@@ -358,6 +358,7 @@ fn unreadable_roster_refuses_fresh_genesis_without_publishing_a_tree() {
         effort: None,
         target: crate::binding::ApiTarget::OpenRouter {
             wire: crate::binding::ResolvedProtocol::Chat,
+            account: "openrouter".parse().unwrap(),
         },
         scheduled_compaction: true,
         max_model_rounds: 8,
@@ -423,6 +424,7 @@ fn inspecting_a_persisted_tree_compiles_its_tools_without_attaching_or_saving() 
         effort: None,
         target: crate::binding::ApiTarget::OpenRouter {
             wire: crate::binding::ResolvedProtocol::Chat,
+            account: "openrouter".parse().unwrap(),
         },
         scheduled_compaction: true,
         max_model_rounds: 8,
@@ -573,6 +575,7 @@ async fn a_root_attach_keeps_the_trees_tasks_apart_from_the_session() {
         effort: None,
         target: crate::binding::ApiTarget::OpenRouter {
             wire: crate::binding::ResolvedProtocol::Chat,
+            account: "openrouter".parse().unwrap(),
         },
         scheduled_compaction: true,
         max_model_rounds: 8,

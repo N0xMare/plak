@@ -355,7 +355,7 @@ pub(super) async fn api_session_runtime_binding_with_owner(
         .admit_composition(parent.composition)?;
     let tool_plan = bind_node_tool_plan(
         &parent.tool_selection,
-        Some(crate::tool_plan::ToolRoute::api(parent.target)),
+        Some(crate::tool_plan::ToolRoute::api(&parent.target)),
         parent.target.account(),
         &parent.workspace_root,
         &parent.state_roots,
@@ -378,13 +378,14 @@ pub(super) async fn api_session_runtime_binding_with_owner(
     .with_skills(&node_skills(
         &parent.state_roots,
         &parent.workspace_root,
-        api_skills_presentation(parent.target, parent.composition),
+        api_skills_presentation(&parent.target, parent.composition),
     )?)?;
     install_occupancy_fence(&parent.cwd)?;
-    match parent.target {
-        crate::binding::ApiTarget::OpenRouter { wire } => {
+    match &parent.target {
+        crate::binding::ApiTarget::OpenRouter { wire, .. } => {
             let prepared = Box::pin(crate::openrouter::construct_openrouter_runtime_with_fence(
                 crate::openrouter::ProductOpenRouterSpec {
+                    account: parent.target.selection().clone(),
                     job_config: parent.state_roots.job_config(),
                     exchange_observer: parent.state_roots.exchange_observer(),
                     credentials: parent.state_roots.openrouter_credentials(),
@@ -393,7 +394,7 @@ pub(super) async fn api_session_runtime_binding_with_owner(
                     literal_model: parent.model.clone(),
                     effort: parent.effort,
                     composition: parent.composition,
-                    wire,
+                    wire: *wire,
                     workspace_root: parent.workspace_root.clone(),
                     cwd: parent.cwd.clone(),
                     plan_state_authority: parent.plan_state_authority.clone(),
@@ -430,9 +431,9 @@ pub(super) async fn api_session_runtime_binding_with_owner(
                 evidence: Some(prepared.evidence),
             })
         }
-        crate::binding::ApiTarget::Platform { provider } => {
+        crate::binding::ApiTarget::Platform { provider, .. } => {
             let runtime = crate::platform::build_runtime(
-                provider,
+                *provider,
                 parent,
                 opening_durable_session,
                 tool_fence,
@@ -1152,7 +1153,7 @@ fn node_skills(
 
 /// The skills listing family of one API target: the pack its route wears.
 fn api_skills_presentation(
-    target: crate::binding::ApiTarget,
+    target: &crate::binding::ApiTarget,
     composition: CompositionSelection,
 ) -> plakous::prompts::skills::SkillsPresentation {
     use crate::binding::{ApiTarget, PlatformProvider};
@@ -1162,12 +1163,15 @@ fn api_skills_presentation(
         ApiTarget::OpenRouter { .. } => SkillsPresentation::Pi,
         ApiTarget::Platform {
             provider: PlatformProvider::OpenAi,
+            ..
         } => SkillsPresentation::Codex,
         ApiTarget::Platform {
             provider: PlatformProvider::Anthropic,
+            ..
         } => SkillsPresentation::Claude,
         ApiTarget::Platform {
             provider: PlatformProvider::Xai,
+            ..
         } => SkillsPresentation::Grok,
     }
 }

@@ -1159,7 +1159,14 @@ Account admission is closed to the product's supported vertical vocabulary
 resume and import before credential-source construction. In particular, a
 named API account in a v12 export cannot select a default API key merely
 because its target names that provider. Inspecting historical account metadata
-confers no admission or credential authority.
+confers no admission or credential authority. API targets carry the validated
+full account reference through runtime and catalog construction. Every product
+generation and bearer lookup resolves that account, never its vertical's default.
+The recorded target and account vertical must agree before credential lookup.
+Named API source authority includes the full local reference, while default
+source authority and credential-reference bytes remain unchanged. This scopes
+reopen authority without changing the provider-defined upstream account or replay
+identity; copying the same key between named slots does not merge their authority.
 
 API-key sources share the `plakous-auth::api_key` secret and grant types, not
 admission authority. Metadata lookup takes `ApiKeyRequest` data; bearer

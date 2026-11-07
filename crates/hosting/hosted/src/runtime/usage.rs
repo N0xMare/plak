@@ -1157,7 +1157,10 @@ pub(super) fn project_usage_limits(
     }
     observations.push((
         openrouter_vertical(),
-        match crate::openrouter::probe_openrouter_key_usage(credentials) {
+        match crate::openrouter::probe_openrouter_key_usage(
+            credentials,
+            &crate::account::AccountRef::default_for(crate::account::Vertical::OpenRouter),
+        ) {
             crate::openrouter::OpenRouterKeyUsageProbe::NotConfigured => {
                 VerticalObservation::NotConnected
             }

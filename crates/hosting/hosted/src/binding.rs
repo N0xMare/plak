@@ -184,26 +184,35 @@ impl PlatformProvider {
 }
 
 /// Resolved API route used by a hosted root or child.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ApiTarget {
-    OpenRouter { wire: ResolvedProtocol },
-    Platform { provider: PlatformProvider },
+    OpenRouter {
+        wire: ResolvedProtocol,
+        account: crate::account::AccountRef,
+    },
+    Platform {
+        provider: PlatformProvider,
+        account: crate::account::AccountRef,
+    },
 }
 
 impl ApiTarget {
     #[must_use]
-    pub const fn account(self) -> &'static str {
+    pub fn account(&self) -> &str {
+        self.selection().as_str()
+    }
+
+    pub fn selection(&self) -> &crate::account::AccountRef {
         match self {
-            Self::OpenRouter { .. } => "openrouter",
-            Self::Platform { provider } => provider.account(),
+            Self::OpenRouter { account, .. } | Self::Platform { account, .. } => account,
         }
     }
 
     #[must_use]
-    pub const fn protocol(self) -> ResolvedProtocol {
+    pub const fn protocol(&self) -> ResolvedProtocol {
         match self {
-            Self::OpenRouter { wire } => wire,
-            Self::Platform { provider } => provider.protocol(),
+            Self::OpenRouter { wire, .. } => *wire,
+            Self::Platform { provider, .. } => provider.protocol(),
         }
     }
 }
@@ -226,16 +235,49 @@ pub enum TargetSelection {
 }
 
 impl TargetSelection {
-    #[must_use]
-    pub const fn api_target(&self) -> Option<ApiTarget> {
-        match self {
+    pub const fn is_api(&self) -> bool {
+        matches!(self, Self::Platform { .. } | Self::OpenRouter { .. })
+    }
+
+    pub fn api_target(
+        &self,
+        account: &crate::account::AccountRef,
+    ) -> Result<Option<ApiTarget>, crate::capabilities::AccountAdmissionError> {
+        self.validate_account(account)?;
+        Ok(match self {
             Self::OpenRouter { wire, .. } => Some(ApiTarget::OpenRouter {
                 wire: wire.resolved,
+                account: account.clone(),
             }),
             Self::Platform { provider } => Some(ApiTarget::Platform {
                 provider: *provider,
+                account: account.clone(),
             }),
             Self::Native | Self::NativePriority => None,
+        })
+    }
+
+    pub fn validate_account(
+        &self,
+        account: &crate::account::AccountRef,
+    ) -> Result<(), crate::capabilities::AccountAdmissionError> {
+        use crate::account::Vertical;
+        let matches = match self {
+            Self::Platform { provider } => {
+                account.vertical().capability().platform_provider() == Some(*provider)
+            }
+            Self::OpenRouter { .. } => account.vertical() == Vertical::OpenRouter,
+            Self::Native => !account.vertical().is_api(),
+            Self::NativePriority => account.vertical() == Vertical::Codex,
+        };
+        if matches {
+            Ok(())
+        } else {
+            Err(
+                crate::capabilities::AccountAdmissionError::AccountTargetMismatch {
+                    account: account.to_string(),
+                },
+            )
         }
     }
 
@@ -390,9 +432,23 @@ impl TargetSelection {
     /// disagree about the gateway; [`RouteRefusal::NotOauth`] when a native
     /// target names an account with no OAuth subscription.
     pub fn route<'a>(&'a self, account: &str) -> Result<AttachRoute<'a>, RouteRefusal> {
+        let selected: crate::account::AccountRef = account.parse().map_err(|_| {
+            if self.is_api() {
+                RouteRefusal::AccountMismatch
+            } else {
+                RouteRefusal::NotOauth
+            }
+        })?;
+        self.validate_account(&selected).map_err(|_| {
+            if self.is_api() {
+                RouteRefusal::AccountMismatch
+            } else {
+                RouteRefusal::NotOauth
+            }
+        })?;
         match self {
             Self::Platform { provider } => {
-                if account == provider.account() {
+                if selected.vertical().capability().platform_provider() == Some(*provider) {
                     Ok(AttachRoute::Platform {
                         provider: *provider,
                     })
@@ -401,7 +457,7 @@ impl TargetSelection {
                 }
             }
             Self::OpenRouter { wire, routing } => {
-                if account == "openrouter" {
+                if selected.vertical() == crate::account::Vertical::OpenRouter {
                     Ok(AttachRoute::OpenRouter { wire, routing })
                 } else {
                     Err(RouteRefusal::AccountMismatch)
@@ -410,15 +466,16 @@ impl TargetSelection {
             // A native target on any account without an OAuth subscription —
             // `openrouter` included — is `NotOauth`, the refusal the attach
             // paths have always reported for it.
-            Self::Native | Self::NativePriority => oauth_provider_for_account(account).map_or(
-                Err(RouteRefusal::NotOauth),
-                |provider| {
+            Self::Native | Self::NativePriority => selected
+                .vertical()
+                .capability()
+                .native_provider()
+                .map_or(Err(RouteRefusal::NotOauth), |provider| {
                     Ok(AttachRoute::NativeOauth {
                         provider,
                         priority: matches!(self, Self::NativePriority),
                     })
-                },
-            ),
+                }),
         }
     }
 

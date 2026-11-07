@@ -23,6 +23,7 @@ pub(super) fn bundled(provider: PlatformProvider, source: ApiCatalogSource) -> A
 }
 pub fn api_model_catalog(
     provider: PlatformProvider,
+    _: &crate::account::AccountRef,
     _: &dyn PlatformCredentials,
     _: Option<&std::path::Path>,
     _: ApiModelLists,

@@ -918,6 +918,7 @@ fn execute_application_command(
             print_session_id,
         } => backend.run_api(
             &admit(stderr)?,
+            "openrouter".parse()?,
             &model,
             effort,
             composition,
@@ -941,6 +942,7 @@ fn execute_application_command(
             print_session_id,
         } => backend.run_api(
             &admit(stderr)?,
+            provider.account().parse()?,
             &model,
             Some(effort),
             composition,

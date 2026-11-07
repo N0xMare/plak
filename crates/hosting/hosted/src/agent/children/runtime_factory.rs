@@ -47,6 +47,7 @@ mod tests {
             None,
             crate::binding::ApiTarget::OpenRouter {
                 wire: crate::binding::ResolvedProtocol::Chat,
+                account: "openrouter".parse().unwrap(),
             },
             "scoped-factory".into(),
             false,

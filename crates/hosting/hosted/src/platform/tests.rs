@@ -17,17 +17,24 @@ use plakous::agent::ReasoningEffort;
 
 struct Credentials(&'static str);
 impl OpenAiCredentials for Credentials {
-    fn openai(&self) -> CliResult<Arc<plakous::openai::OpenAiKeySource>> {
+    fn openai(
+        &self,
+        account: &crate::account::AccountRef,
+    ) -> CliResult<Arc<plakous::openai::OpenAiKeySource>> {
         use plakous::openai::{ApiKey, CredentialAuthorityId, CredentialReference};
         Ok(Arc::new(plakous::openai::static_openai_api_key_source(
             ApiKey::new(self.0).map_err(api_error)?,
-            CredentialReference::application("plak/openai").map_err(api_error)?,
-            CredentialAuthorityId::new("fixture/openai").map_err(api_error)?,
+            CredentialReference::application(account.credential_reference()).map_err(api_error)?,
+            CredentialAuthorityId::new(account.source_authority("fixture/openai"))
+                .map_err(api_error)?,
         )))
     }
 }
 impl AnthropicCredentials for Credentials {
-    fn anthropic(&self) -> CliResult<Arc<plakous::anthropic::AnthropicKeySource>> {
+    fn anthropic(
+        &self,
+        _account: &crate::account::AccountRef,
+    ) -> CliResult<Arc<plakous::anthropic::AnthropicKeySource>> {
         Ok(Arc::new(plakous::api_key::StaticApiKeySource::for_key(
             plakous::api_key::ApiKey::new(self.0).map_err(api_error)?,
             plakous::api_key::CredentialProviderTag::AnthropicPlatform,
@@ -38,14 +45,21 @@ impl AnthropicCredentials for Credentials {
     }
 }
 impl XaiCredentials for Credentials {
-    fn xai(&self) -> CliResult<Arc<plakous::xai::XaiPlatformKeySource>> {
+    fn xai(
+        &self,
+        account: &crate::account::AccountRef,
+    ) -> CliResult<Arc<plakous::xai::XaiPlatformKeySource>> {
         Ok(Arc::new(plakous::api_key::StaticApiKeySource::for_key(
             plakous::api_key::ApiKey::new(self.0).map_err(api_error)?,
             plakous::api_key::CredentialProviderTag::XaiPlatform,
             "https://api.x.ai",
             None,
-            plakous::xai::XaiPlatformApiKeyAuthority::new("fixture/xai", "fixture/key", 1)
-                .map_err(api_error)?,
+            plakous::xai::XaiPlatformApiKeyAuthority::new(
+                "fixture/xai",
+                &account.source_authority("fixture/key"),
+                1,
+            )
+            .map_err(api_error)?,
         )))
     }
 }
@@ -72,9 +86,9 @@ async fn product_api_bindings_compile_exact_tools_and_reconstruct_same_credentia
         (PlatformProvider::Xai, "grok-4.6"),
     ] {
         for effort in [ReasoningEffort::Low, ReasoningEffort::Medium] {
-            let spec = ApiRuntimeSpec {
+            let mut spec = ApiRuntimeSpec {
                 job_config: plakous::tools::JobConfig::default(),
-                account: provider.account(),
+                account: provider.account().parse().unwrap(),
                 sidecars: &NoWorkers,
                 product_home: None,
                 literal_model: model,
@@ -111,6 +125,22 @@ async fn product_api_bindings_compile_exact_tools_and_reconstruct_same_credentia
                 "key replacement must not inherit encrypted history"
             );
             assert_eq!(first.target_binding().model().as_str(), model);
+            spec.account = format!("{}/work", provider.account()).parse().unwrap();
+            let named =
+                construct_platform_runtime(provider, &Credentials("fixture-key-one"), &spec, None)
+                    .await
+                    .unwrap();
+            assert_ne!(
+                first.target_binding(),
+                named.target_binding(),
+                "same key in a named slot must not authorize exact reopen through the default"
+            );
+            spec.account = format!("{}/other", provider.account()).parse().unwrap();
+            let sibling =
+                construct_platform_runtime(provider, &Credentials("fixture-key-one"), &spec, None)
+                    .await
+                    .unwrap();
+            assert_ne!(named.target_binding(), sibling.target_binding());
         }
     }
 }
@@ -160,6 +190,7 @@ async fn resumed_js_session_keeps_construction_jobs_after_policy_change() {
         effort: Some(ReasoningEffort::Low),
         target: crate::binding::ApiTarget::Platform {
             provider: PlatformProvider::OpenAi,
+            account: (PlatformProvider::OpenAi).account().parse().unwrap(),
         },
         scheduled_compaction: false,
         max_model_rounds: crate::agent::NATIVE_RUN_MAX_MODEL_ROUNDS,
@@ -240,7 +271,7 @@ async fn api_compositions_create_and_reopen_required_durable_sessions_without_di
             let extensions = crate::tools::ProductToolExtensions::default();
             let mut spec = ApiRuntimeSpec {
                 job_config: plakous::tools::JobConfig::default(),
-                account: provider.account(),
+                account: provider.account().parse().unwrap(),
                 sidecars: &workers,
                 product_home: None,
                 literal_model: model,
@@ -427,7 +458,7 @@ async fn openai_api_native_ptc_without_the_javascript_host_names_the_sidecar() {
     let provider = PlatformProvider::OpenAi;
     let spec = ApiRuntimeSpec {
         job_config: plakous::tools::JobConfig::default(),
-        account: provider.account(),
+        account: provider.account().parse().unwrap(),
         sidecars: &NoWorkers,
         product_home: None,
         literal_model: "gpt-5.6-sol",
@@ -500,7 +531,7 @@ async fn openai_api_native_ptc_creates_and_reopens_from_the_enrolled_table() {
         let extensions = crate::tools::ProductToolExtensions::default();
         let mut spec = ApiRuntimeSpec {
             job_config: plakous::tools::JobConfig::default(),
-            account: provider.account(),
+            account: provider.account().parse().unwrap(),
             sidecars: &workers,
             product_home: None,
             literal_model: model,
@@ -603,7 +634,7 @@ async fn pre_pack_openai_api_direct_session_reopen_fails_closed() {
     let extensions = crate::tools::ProductToolExtensions::default();
     let mut spec = ApiRuntimeSpec {
         job_config: plakous::tools::JobConfig::default(),
-        account: provider.account(),
+        account: provider.account().parse().unwrap(),
         sidecars: &NoWorkers,
         product_home: None,
         literal_model: model,
@@ -655,7 +686,9 @@ async fn pre_pack_openai_api_direct_session_reopen_fails_closed() {
         };
         let authority = OpenAiPlatformModelBuilder::new(
             CredentialReference::application("plak/openai").unwrap(),
-            Credentials("fixture-key-one").openai().unwrap(),
+            Credentials("fixture-key-one")
+                .openai(&"openai".parse().unwrap())
+                .unwrap(),
             OpenAiPlatformModelFacts::from_model_id(model).unwrap(),
             PlatformStoragePolicy::Stateless,
             PlatformProjectPolicy::DefaultProject,
@@ -886,7 +919,7 @@ async fn pre_w3_b_grok_session_reopen_fails_closed() {
     .unwrap();
     let mut spec = ApiRuntimeSpec {
         job_config: plakous::tools::JobConfig::default(),
-        account: provider.account(),
+        account: provider.account().parse().unwrap(),
         sidecars: &NoWorkers,
         product_home: None,
         literal_model: model,
@@ -933,7 +966,9 @@ async fn pre_w3_b_grok_session_reopen_fails_closed() {
     let maximum = NonZeroU64::new(row.window(ApiWindow::Working)).unwrap();
     let configured: ConfiguredLanguageModel = {
         use plakous::xai::{XaiPlatformModel, xai_platform_selection};
-        let source = Credentials("fixture-key-one").xai().unwrap();
+        let source = Credentials("fixture-key-one")
+            .xai(&"xai-api".parse().unwrap())
+            .unwrap();
         let provisional = xai_platform_selection(behavior).unwrap();
         let selected = xai_platform_selection(exact_route_retention(&provisional)).unwrap();
         let authority = plakous::xai::xai_api_key_generation(source.as_ref())
@@ -1212,7 +1247,7 @@ async fn grok_api_hub_creates_and_reopens(
     .unwrap();
     let mut spec = ApiRuntimeSpec {
         job_config: plakous::tools::JobConfig::default(),
-        account: provider.account(),
+        account: provider.account().parse().unwrap(),
         sidecars: &workers,
         product_home: None,
         literal_model: "grok-4.6",
@@ -1407,7 +1442,7 @@ async fn pre_w3_b_grok_ptc_session_reopen_fails_closed() {
         let task = extensions_for(crate::agent_tree_tools::TopologyVocabulary::TaskTools);
         let mut spec = ApiRuntimeSpec {
             job_config: plakous::tools::JobConfig::default(),
-            account: provider.account(),
+            account: provider.account().parse().unwrap(),
             sidecars: &workers,
             product_home: None,
             literal_model: "grok-4.6",

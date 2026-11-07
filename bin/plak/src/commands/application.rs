@@ -585,7 +585,12 @@ impl AccountOps for PlakousApplication {
         let credentials =
             crate::openrouter_product::ProductOpenRouterCredentials::shared(self.product_paths()?);
         Ok(
-            match product_openrouter::probe_openrouter_key_usage(credentials.as_ref()) {
+            match product_openrouter::probe_openrouter_key_usage(
+                credentials.as_ref(),
+                &plakous_hosted::account::AccountRef::default_for(
+                    plakous_hosted::account::Vertical::OpenRouter,
+                ),
+            ) {
                 product_openrouter::OpenRouterKeyUsageProbe::NotConfigured => {
                     product_usage::VerticalObservation::NotConnected
                 }
@@ -760,6 +765,7 @@ impl AccountOps for PlakousApplication {
             .block_on(async move {
                 plakous_hosted::platform::api_model_catalog(
                     provider,
+                    &provider.account().parse()?,
                     credentials.as_ref(),
                     Some(paths.home()),
                     plakous_hosted::platform::ApiModelLists::Live,

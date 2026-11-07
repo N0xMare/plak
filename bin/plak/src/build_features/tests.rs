@@ -4,7 +4,7 @@ use super::*;
 fn unknown_accounts_refuse_selection_and_resume_before_credentials() {
     use plakous_hosted::capabilities::AccountAdmissionError;
     let config = crate::product_config::ProductConfig::default_product();
-    for account in ["openai/work", "missing", "", "xai", "OPENAI"] {
+    for account in ["openai/work/extra", "missing", "", "xai", "OPENAI"] {
         let failure = admit_selected(
             &config,
             Some(account),

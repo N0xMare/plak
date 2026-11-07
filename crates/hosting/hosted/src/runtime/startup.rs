@@ -824,7 +824,7 @@ pub(super) fn api_parent_from_config<P: plakous_host_protocol::ProtocolExtension
 ) -> CliResult<crate::agent::ApiTopologyParent> {
     let target = session
         .target_selection
-        .api_target()
+        .api_target(&session.account_ref()?)?
         .ok_or_else(|| CliFailure::new("API runtime target is missing"))?;
     let effort = effort_from_record(session.effort.as_deref())?;
     let mut parent = api_topology_parent(
@@ -980,7 +980,7 @@ pub(super) async fn api_compaction_runtime_binding<P: plakous_host_protocol::Pro
     let target = config
         .session
         .target_selection
-        .api_target()
+        .api_target(&config.session.account_ref()?)?
         .ok_or_else(|| CliFailure::new("API runtime target is missing"))?;
     let literal_model = config.model_id.clone();
     let effort = effort_from_record(config.session.effort.as_deref())?;
@@ -1022,7 +1022,7 @@ pub(super) async fn cached_api_runtime_for_record<P: plakous_host_protocol::Prot
 ) -> CliResult<SessionRuntimeBinding> {
     let target = record
         .target_selection
-        .api_target()
+        .api_target(&record.account_ref()?)?
         .ok_or_else(|| CliFailure::new("API runtime target is missing"))?;
     let literal_model = record
         .model
@@ -1063,7 +1063,7 @@ pub(super) async fn cached_api_runtime_for_record<P: plakous_host_protocol::Prot
     if let HostTargetAuthority::OpenRouter { evidence, .. } = &mut config.target {
         *evidence = Some(Box::new(OpenRouterHostEvidence {
             literal_model,
-            wire: target.protocol(),
+            wire: parent.target.protocol(),
             evidence: prepared
                 .evidence
                 .ok_or_else(|| CliFailure::new("OpenRouter runtime omitted discovery evidence"))?,
@@ -1144,7 +1144,7 @@ pub(super) async fn production_open_session_for_host<
     role: RuntimeRole,
 ) -> Result<AttachedCodingSession, crate::agent::CodingSessionOpenFailure> {
     let _ = role;
-    if session.target_selection.api_target().is_some() {
+    if session.target_selection.is_api() {
         let parent = api_parent_from_config(config, session)
             .map_err(crate::agent::CodingSessionOpenFailure::from)?;
         return Box::pin(open_api_coding_session_with_fence(

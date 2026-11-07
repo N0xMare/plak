@@ -53,7 +53,7 @@ async fn runtime_with_source(
     let configured = match provider {
         PlatformProvider::Anthropic => {
             plakous::anthropic::AnthropicLanguageModel::configured_with_local_transport(
-                source.unwrap_or_else(|| keys.anthropic().unwrap()),
+                source.unwrap_or_else(|| keys.anthropic(&"anthropic".parse().unwrap()).unwrap()),
                 "plak/anthropic",
                 row.anthropic.as_ref().unwrap(),
                 &row.binding_evidence(provider, window),
@@ -68,7 +68,7 @@ async fn runtime_with_source(
             use plakous::openai::*;
             let authority = OpenAiPlatformModelBuilder::new(
                 CredentialReference::application("plak/openai").unwrap(),
-                keys.openai().unwrap(),
+                keys.openai(&"openai".parse().unwrap()).unwrap(),
                 OpenAiPlatformModelFacts::from_model_id(spec.literal_model).unwrap(),
                 PlatformStoragePolicy::Stateless,
                 PlatformProjectPolicy::DefaultProject,
@@ -91,7 +91,7 @@ async fn runtime_with_source(
         }
         PlatformProvider::Xai => {
             use plakous::xai::*;
-            let source = keys.xai().unwrap();
+            let source = keys.xai(&"xai-api".parse().unwrap()).unwrap();
             let authority = xai_api_key_generation(source.as_ref())
                 .unwrap()
                 .authority()
@@ -147,7 +147,7 @@ pub(crate) async fn platform_binding(
     let extensions = crate::tools::ProductToolExtensions::default();
     let spec = ApiRuntimeSpec {
         job_config: plakous::tools::JobConfig::default(),
-        account: provider.account(),
+        account: provider.account().parse().unwrap(),
         sidecars: &NoWorkers,
         product_home: None,
         literal_model: model,
@@ -345,7 +345,7 @@ async fn openai_product_tools_preserve_optional_schemas_on_production_wire() {
     let provider = PlatformProvider::OpenAi;
     let spec = ApiRuntimeSpec {
         job_config: plakous::tools::JobConfig::default(),
-        account: provider.account(),
+        account: provider.account().parse().unwrap(),
         sidecars: &NoWorkers,
         product_home: None,
         literal_model: "gpt-5.6-luna",
@@ -448,7 +448,7 @@ async fn openai_api_native_ptc_wire_is_code_mode_without_the_codex_costume() {
     assert_eq!(composition, CompositionSelection::NativePtc);
     let spec = ApiRuntimeSpec {
         job_config: plakous::tools::JobConfig::default(),
-        account: provider.account(),
+        account: provider.account().parse().unwrap(),
         sidecars: &workers,
         product_home: None,
         literal_model: "gpt-5.6-luna",
@@ -564,7 +564,7 @@ async fn production_api_sessions_compact_once_and_reopen_with_original_configura
         let extensions = crate::tools::ProductToolExtensions::default();
         let mut spec = ApiRuntimeSpec {
             job_config: plakous::tools::JobConfig::default(),
-            account: provider.account(),
+            account: provider.account().parse().unwrap(),
             sidecars: &NoWorkers,
             product_home: None,
             literal_model: model,
@@ -735,7 +735,7 @@ async fn completed_compaction_recovers_after_reconstructing_fresh_model_without_
     let extensions = crate::tools::ProductToolExtensions::default();
     let mut spec = ApiRuntimeSpec {
         job_config: plakous::tools::JobConfig::default(),
-        account: provider.account(),
+        account: provider.account().parse().unwrap(),
         sidecars: &NoWorkers,
         product_home: None,
         literal_model: "claude-sonnet-5",
@@ -925,7 +925,7 @@ async fn api_working_window_is_measured_in_provider_tokens() {
             let extensions = crate::tools::ProductToolExtensions::default();
             let spec = ApiRuntimeSpec {
                 job_config: plakous::tools::JobConfig::default(),
-                account: provider.account(),
+                account: provider.account().parse().unwrap(),
                 sidecars: &NoWorkers,
                 product_home: None,
                 literal_model: model,
@@ -1050,7 +1050,7 @@ async fn explicit_none_effort_is_reconstructed_and_sent_on_the_api_wire() {
         let extensions = crate::tools::ProductToolExtensions::default();
         let spec = ApiRuntimeSpec {
             job_config: plakous::tools::JobConfig::default(),
-            account: provider.account(),
+            account: provider.account().parse().unwrap(),
             sidecars: &NoWorkers,
             product_home: None,
             literal_model: model,

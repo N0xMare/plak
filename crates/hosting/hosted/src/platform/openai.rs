@@ -36,7 +36,10 @@ pub(super) fn profile(model: &str) -> Option<&'static str> {
 
 /// Product-owned credentials for this compiled API route.
 pub trait Credentials: Send + Sync + 'static {
-    fn openai(&self) -> CliResult<Arc<plakous::openai::OpenAiKeySource>>;
+    fn openai(
+        &self,
+        _account: &crate::account::AccountRef,
+    ) -> CliResult<Arc<plakous::openai::OpenAiKeySource>>;
 }
 #[cfg(any(test, feature = "test-support"))]
 #[path = "test_support/openai.rs"]
@@ -60,8 +63,8 @@ pub(super) async fn construct(
     let facts = OpenAiPlatformModelFacts::from_model_id(spec.literal_model)
         .ok_or_else(|| CliFailure::new("OpenAI API model is not enrolled"))?;
     let authority = OpenAiPlatformModelBuilder::new(
-        openai_credential_reference()?,
-        credentials.openai()?,
+        openai_credential_reference(&spec.account)?,
+        credentials.openai(&spec.account)?,
         facts,
         PlatformStoragePolicy::Stateless,
         PlatformProjectPolicy::DefaultProject,
@@ -93,8 +96,11 @@ pub(super) async fn construct(
 }
 /// The credential reference the OpenAI API route resolves its key under, for
 /// both session construction and the model listing.
-pub(super) fn openai_credential_reference() -> CliResult<plakous::openai::CredentialReference> {
-    plakous::openai::CredentialReference::application("plak/openai").map_err(api_error)
+pub(super) fn openai_credential_reference(
+    account: &crate::account::AccountRef,
+) -> CliResult<plakous::openai::CredentialReference> {
+    plakous::openai::CredentialReference::application(account.credential_reference())
+        .map_err(api_error)
 }
 
 /// The OpenAI catalog over one id list, classified by the provider crate's
@@ -153,17 +159,18 @@ pub(super) fn rows_valid(models: &[ListedModel]) -> bool {
 
 pub(super) async fn listing(
     provider: PlatformProvider,
+    account: &crate::account::AccountRef,
     credentials: &dyn PlatformCredentials,
     product_home: Option<&std::path::Path>,
     lists: ApiModelLists,
     now: u64,
     observer: crate::exchange_observation::Observer,
 ) -> ApiModelCatalog {
-    let source = match credentials.openai() {
+    let source = match credentials.openai(account) {
         Ok(source) => source,
         Err(error) => return bundled_catalog(provider, error.message()),
     };
-    let reference = match openai_credential_reference() {
+    let reference = match openai_credential_reference(account) {
         Ok(reference) => reference,
         Err(error) => return bundled_catalog(provider, error.message()),
     };
@@ -172,7 +179,7 @@ pub(super) async fn listing(
         Ok(fingerprint) => fingerprint,
         Err(error) => return bundled_catalog(provider, &error.to_string()),
     };
-    let lookup = Lookup::new(provider, product_home, &fingerprint, lists, now);
+    let lookup = Lookup::new(provider, account, product_home, &fingerprint, lists, now);
     lookup
         .run(
             async {

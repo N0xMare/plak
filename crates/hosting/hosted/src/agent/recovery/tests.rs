@@ -1290,6 +1290,7 @@ impl Fixture {
             effort: None,
             target: crate::binding::ApiTarget::OpenRouter {
                 wire: ResolvedProtocol::Chat,
+                account: "openrouter".parse().unwrap(),
             },
             scheduled_compaction: true,
             max_model_rounds: NATIVE_RUN_MAX_MODEL_ROUNDS,

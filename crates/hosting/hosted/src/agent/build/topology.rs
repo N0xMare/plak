@@ -547,7 +547,7 @@ async fn topology_extensions_from_hub_with_owner(
 /// The product owns its account names — `grok` for xAI, `claude` for
 /// Anthropic — so the spelling comes from the roster source that owns the rest
 /// of the roster vocabulary, not from a table in the constructor.
-pub(in crate::agent) fn spawn_parent_root_account(parent: &SpawnParent) -> &'static str {
+pub(in crate::agent) fn spawn_parent_root_account(parent: &SpawnParent) -> &str {
     match parent {
         SpawnParent::Native(spec) => spec.state_roots.roster_source().account_name(spec.provider),
         SpawnParent::Api(parent) => parent.target.account(),
@@ -787,9 +787,9 @@ fn parent_coding_presentation(parent: &SpawnParent) -> CliResult<CodingPresentat
             crate::coding_routes::product_presentation_routes()?,
         )
         .map_err(|_| CliFailure::new("native route has no enrolled coding vocabulary")),
-        SpawnParent::Api(parent) => match parent.target {
-            crate::binding::ApiTarget::Platform { provider } => {
-                crate::coding_routes::platform_route_presentation(provider, &parent.model)
+        SpawnParent::Api(parent) => match &parent.target {
+            crate::binding::ApiTarget::Platform { provider, .. } => {
+                crate::coding_routes::platform_route_presentation(*provider, &parent.model)
             }
             crate::binding::ApiTarget::OpenRouter { .. } => Ok(CodingPresentation::Pi),
         },

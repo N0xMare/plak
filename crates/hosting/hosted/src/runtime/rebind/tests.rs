@@ -201,7 +201,10 @@ impl
     }
 }
 impl crate::platform::OpenAiCredentials for TopologyApiCredentials {
-    fn openai(&self) -> CliResult<Arc<plakous::openai::OpenAiKeySource>> {
+    fn openai(
+        &self,
+        _account: &crate::account::AccountRef,
+    ) -> CliResult<Arc<plakous::openai::OpenAiKeySource>> {
         use plakous::openai::*;
         Ok(Arc::new(NoInferenceSource(static_openai_api_key_source(
             ApiKey::new("synthetic-topology-lifecycle-key").unwrap(),
@@ -211,7 +214,10 @@ impl crate::platform::OpenAiCredentials for TopologyApiCredentials {
     }
 }
 impl crate::platform::AnthropicCredentials for TopologyApiCredentials {
-    fn anthropic(&self) -> CliResult<Arc<plakous::anthropic::AnthropicKeySource>> {
+    fn anthropic(
+        &self,
+        _account: &crate::account::AccountRef,
+    ) -> CliResult<Arc<plakous::anthropic::AnthropicKeySource>> {
         Ok(Arc::new(plakous::api_key::StaticApiKeySource::for_key(
             plakous::api_key::ApiKey::new("synthetic-topology-lifecycle-key").unwrap(),
             plakous::api_key::CredentialProviderTag::AnthropicPlatform,
@@ -222,7 +228,10 @@ impl crate::platform::AnthropicCredentials for TopologyApiCredentials {
     }
 }
 impl crate::platform::XaiCredentials for TopologyApiCredentials {
-    fn xai(&self) -> CliResult<Arc<plakous::xai::XaiPlatformKeySource>> {
+    fn xai(
+        &self,
+        _account: &crate::account::AccountRef,
+    ) -> CliResult<Arc<plakous::xai::XaiPlatformKeySource>> {
         Err(CliFailure::new("unselected provider"))
     }
 }
@@ -314,7 +323,10 @@ fn api_topology_root_parent(
         config.state_roots.clone(),
         config.model_id.clone(),
         config.effort,
-        crate::binding::ApiTarget::Platform { provider },
+        crate::binding::ApiTarget::Platform {
+            provider,
+            account: (provider).account().parse().unwrap(),
+        },
         info::plan_state_authority(&*config.store, &config.session).unwrap(),
         false,
         crate::agent::NATIVE_RUN_MAX_MODEL_ROUNDS,

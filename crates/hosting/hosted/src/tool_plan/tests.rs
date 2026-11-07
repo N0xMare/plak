@@ -1029,8 +1029,9 @@ fn routes_map_from_every_native_provider_and_api_target() {
         Some(ToolRoute::Claude)
     );
     assert_eq!(
-        ToolRoute::api(ApiTarget::OpenRouter {
-            wire: ResolvedProtocol::Chat
+        ToolRoute::api(&ApiTarget::OpenRouter {
+            wire: ResolvedProtocol::Chat,
+            account: "openrouter".parse().unwrap(),
         }),
         ToolRoute::OpenRouter
     );
@@ -1039,6 +1040,12 @@ fn routes_map_from_every_native_provider_and_api_target() {
         (PlatformProvider::Anthropic, ToolRoute::Anthropic),
         (PlatformProvider::Xai, ToolRoute::XaiApi),
     ] {
-        assert_eq!(ToolRoute::api(ApiTarget::Platform { provider }), route);
+        assert_eq!(
+            ToolRoute::api(&ApiTarget::Platform {
+                provider,
+                account: (provider).account().parse().unwrap(),
+            }),
+            route
+        );
     }
 }

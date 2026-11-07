@@ -12,10 +12,10 @@ impl ProductOpenRouterCredentials {
     }
 }
 impl OpenRouterCredentials for ProductOpenRouterCredentials {
-    fn preflight(&self) -> CliResult<()> {
+    fn preflight(&self, _account: &plakous_hosted::account::AccountRef) -> CliResult<()> {
         Err(unavailable())
     }
-    fn key_label(&self) -> CliResult<String> {
+    fn key_label(&self, _account: &plakous_hosted::account::AccountRef) -> CliResult<String> {
         Err(unavailable())
     }
 }

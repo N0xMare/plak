@@ -70,11 +70,12 @@ show/log/export and carry export do not require the bound evaluator.
 
 Account admission is closed to `claude`, `codex`, `grok`, `anthropic`,
 `openai`, `xai-api`, and `openrouter`, including their existing unambiguous
-aliases. Any supplied account outside that set returns typed
+aliases and validated names on API verticals. Any supplied account outside that vocabulary returns typed
 `AccountAdmissionError::UnknownAccount` (`unknown_account`, exit **2**)
 before credential-source construction. This applies to run/agent selection,
-resume, and imported documents, including v12 documents with named account
-strings. An unbound empty shell remains valid. An unknown account never
+resume, and imported documents. An account disagreeing with the recorded target
+returns typed `AccountTargetMismatch` (`account_target_mismatch`) before credentials.
+An unbound empty shell remains valid. An unknown account never
 inherits the target provider's default credentials. Export stays v12 with its
 v11 importer; no binding inputs or document encodings change.
 Read-only session labels retain unknown account metadata; unknown does not
@@ -1139,10 +1140,11 @@ product-neutral; the hosted product renderer supplies the recovery commands.
 #### 2.5.1 Carry-forward
 
 Import and exact resume admit the recorded account through the same closed
-vocabulary as fresh selection (§8.2). An unknown account, including a named
-API account string in a v12 document, returns typed `unknown_account` before
+vocabulary as fresh selection (§8.2). An unknown account returns typed `unknown_account` before
 credential-source construction or successor publication. It never inherits
-the target provider's default key. Valid unbound empty shells remain valid.
+the target provider's default key. A named API account binds only its own shelf
+key or refuses; its target must agree with its vertical on both import and resume.
+Valid unbound empty shells remain valid.
 Export remains v12, importing v12 and v11; this refusal changes no encoding.
 
 Before leaving a resumable session, `/reload` asks the destination build for
@@ -9295,15 +9297,16 @@ the reserved `default`; aliases normalize before a name, while `xai` remains
 ambiguous. A name does not change model behavior, harness/profile identity,
 prompt bytes or compiled route capability. The full reference is selection
 identity, never a provider-reported email. Parsing a reference alone confers
-no credential or runtime admission; named references remain refused until
-the selected credential source is admitted.
+no credential or runtime admission. API credential construction receives the
+full reference, never a provider-derived default; named native admission is
+separate from parsing.
 
 The account vocabulary is closed to the seven verticals `claude`, `codex`,
 `grok`, `anthropic`, `openai`, `xai-api`, and `openrouter`, with their existing
-unambiguous aliases. A supplied string outside that set, including a named
-reference, is typed `AccountAdmissionError::UnknownAccount`, rendered as
+unambiguous aliases and validated names on API verticals. A supplied string outside that vocabulary
+is typed `AccountAdmissionError::UnknownAccount`, rendered as
 `unknown_account` with exit 2. Run/agent selection, resume and import refuse
-it before selecting credentials; this build does not support named accounts.
+it before selecting credentials. Named native references are not yet admitted.
 
 **Auth selects one exact URL and API profile, and API-key and OAuth routes
 never cross or fall back.** A vertical is either a subscription (OAuth) or a

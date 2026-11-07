@@ -8,21 +8,28 @@ use plakous_hosted::error::{CliFailure, CliResult};
 #[derive(Clone)]
 struct OpenAiSource {
     product: ProductPlatformCredentials,
+    account: plakous_hosted::account::AccountRef,
     openai_reference: CredentialReference,
     openai_authority: CredentialAuthorityId,
 }
 impl OpenAiSource {
-    fn new(product: ProductPlatformCredentials) -> CliResult<Self> {
+    fn new(
+        product: ProductPlatformCredentials,
+        account: plakous_hosted::account::AccountRef,
+    ) -> CliResult<Self> {
         Ok(Self {
             product,
-            openai_reference: CredentialReference::application("plak/openai")
+            openai_reference: CredentialReference::application(account.credential_reference())
                 .map_err(|_| CliFailure::new("OpenAI credential reference is invalid"))?,
-            openai_authority: CredentialAuthorityId::new("plak/openai/environment-or-file")
-                .map_err(|_| CliFailure::new("OpenAI credential authority is invalid"))?,
+            openai_authority: CredentialAuthorityId::new(
+                account.source_authority("plak/openai/environment-or-file"),
+            )
+            .map_err(|_| CliFailure::new("OpenAI credential authority is invalid"))?,
+            account,
         })
     }
-    fn key(&self, account: &str) -> Result<String, String> {
-        self.product.key(account)
+    fn key(&self) -> Result<String, String> {
+        self.product.key(&self.account)
     }
     fn openai_source(
         &self,
@@ -32,7 +39,7 @@ impl OpenAiSource {
         if reference != &self.openai_reference || origin.as_str() != "https://api.openai.com/" {
             return Err(ApiKeyError::BindingMismatch);
         }
-        let key = self.key("openai").map_err(|_| ApiKeyError::Unavailable)?;
+        let key = self.key().map_err(|_| ApiKeyError::Unavailable)?;
         let key = ApiKey::new(key).map_err(|_| ApiKeyError::Unavailable)?;
         Ok(plakous::openai::static_openai_api_key_source(
             key,
@@ -57,7 +64,7 @@ impl plakous::api_key::ApiKeySource<plakous::openai::OpenAiApiKeyRequest<'_>, Cr
         {
             return Err(ApiKeyError::BindingMismatch);
         }
-        let value = self.key("openai").map_err(|_| ApiKeyError::Unavailable)?;
+        let value = self.key().map_err(|_| ApiKeyError::Unavailable)?;
         Ok(ApiKey::new(value)?.generation_grant(
             plakous::api_key::CredentialProviderTag::OpenAiPlatform,
             self.openai_authority.clone(),
@@ -74,9 +81,12 @@ impl plakous::api_key::ApiKeySource<plakous::openai::OpenAiApiKeyRequest<'_>, Cr
 }
 
 impl plakous_hosted::platform::OpenAiCredentials for ProductPlatformCredentials {
-    fn openai(&self) -> CliResult<Arc<OpenAiKeySource>> {
-        crate::home::secrets::require_api_key(&self.paths, "openai")?;
-        Ok(Arc::new(OpenAiSource::new(self.clone())?))
+    fn openai(
+        &self,
+        account: &plakous_hosted::account::AccountRef,
+    ) -> CliResult<Arc<OpenAiKeySource>> {
+        self.require_account(account, plakous_hosted::account::Vertical::OpenAi)?;
+        Ok(Arc::new(OpenAiSource::new(self.clone(), account.clone())?))
     }
 }
 
@@ -112,9 +122,14 @@ mod tests {
     use plakous::openai::{CredentialReference, EndpointOrigin};
 
     fn source(paths: &PlakPaths) -> CliResult<Arc<OpenAiSource>> {
-        Ok(Arc::new(OpenAiSource::new(ProductPlatformCredentials {
-            paths: paths.clone(),
-        })?))
+        Ok(Arc::new(OpenAiSource::new(
+            ProductPlatformCredentials {
+                paths: paths.clone(),
+            },
+            plakous_hosted::account::AccountRef::default_for(
+                plakous_hosted::account::Vertical::OpenAi,
+            ),
+        )?))
     }
 
     #[test]
@@ -153,5 +168,49 @@ mod tests {
             source.generation_grant(&Selection::new(&reference, &origin)),
             Err(ApiKeyError::BindingMismatch)
         ));
+    }
+
+    #[test]
+    fn named_openai_sources_never_select_defaults_or_another_slot() {
+        use plakous_hosted::platform::OpenAiCredentials as _;
+        let directory = tempfile::tempdir().unwrap();
+        let paths = PlakPaths::explicit(directory.path().join("home"));
+        for name in ["openai/work", "openai/other"] {
+            crate::home::secrets::set_api_key(&paths, name, "identical-test-key").unwrap();
+        }
+        let product = ProductPlatformCredentials {
+            paths: paths.clone(),
+        };
+        let work = OpenAiSource::new(product.clone(), "openai/work".parse().unwrap()).unwrap();
+        let other = OpenAiSource::new(product.clone(), "openai/other".parse().unwrap()).unwrap();
+        let origin = EndpointOrigin::parse("https://api.openai.com/").unwrap();
+        let request = Selection::new(&work.openai_reference, &origin);
+        let original = work.generation_grant(&request).unwrap();
+        assert_ne!(work.openai_authority, other.openai_authority);
+        assert_ne!(
+            original,
+            other
+                .generation_grant(&Selection::new(&other.openai_reference, &origin))
+                .unwrap()
+        );
+        assert_eq!(
+            other.generation_grant(&request).err(),
+            Some(ApiKeyError::BindingMismatch)
+        );
+        crate::home::secrets::clear_api_key(&paths, "openai/work").unwrap();
+        assert_eq!(
+            work.generation_grant(&request).err(),
+            Some(ApiKeyError::Unavailable)
+        );
+        assert!(
+            other
+                .generation_grant(&Selection::new(&other.openai_reference, &origin))
+                .is_ok()
+        );
+        let failure = product
+            .openai(&"anthropic/work".parse().unwrap())
+            .err()
+            .unwrap();
+        assert!(failure.message().starts_with("account_target_mismatch:"));
     }
 }

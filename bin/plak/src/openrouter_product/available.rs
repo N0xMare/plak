@@ -38,21 +38,40 @@ impl ProductOpenRouterCredentials {
 }
 
 impl OpenRouterCredentials for ProductOpenRouterCredentials {
-    fn key_label(&self) -> CliResult<String> {
-        let status = crate::home::secrets::key_status(&self.paths, "openrouter")
+    fn key_label(&self, account: &plakous_hosted::account::AccountRef) -> CliResult<String> {
+        require_openrouter(account)?;
+        let status = crate::home::secrets::key_status(&self.paths, account.as_str())
             .map_err(|_| CliFailure::new("OpenRouter key store is unreadable"))?;
         key_usage_label(&status)
     }
 
-    fn preflight(&self) -> CliResult<()> {
-        crate::home::secrets::require_api_key(&self.paths, "openrouter")
+    fn preflight(&self, account: &plakous_hosted::account::AccountRef) -> CliResult<()> {
+        require_openrouter(account)?;
+        crate::home::secrets::require_api_key(&self.paths, account.as_str())
     }
 
-    fn source(&self) -> CliResult<Arc<OpenRouterKeySource>> {
+    fn source(
+        &self,
+        account: &plakous_hosted::account::AccountRef,
+    ) -> CliResult<Arc<OpenRouterKeySource>> {
+        require_openrouter(account)?;
         Ok(Arc::new(ProductOpenRouterApiKeySource::new(
             self.paths.clone(),
+            account.clone(),
         )?))
     }
+}
+
+fn require_openrouter(account: &plakous_hosted::account::AccountRef) -> CliResult<()> {
+    if account.vertical() != plakous_hosted::account::Vertical::OpenRouter {
+        return Err(
+            plakous_hosted::capabilities::AccountAdmissionError::AccountTargetMismatch {
+                account: account.to_string(),
+            }
+            .into(),
+        );
+    }
+    Ok(())
 }
 
 fn key_usage_label(status: &crate::home::secrets::KeyStatus) -> CliResult<String> {
@@ -69,28 +88,33 @@ fn key_usage_label(status: &crate::home::secrets::KeyStatus) -> CliResult<String
 /// every authority check and physical dispatch re-resolves the current key.
 struct ProductOpenRouterApiKeySource {
     paths: PlakPaths,
+    account: plakous_hosted::account::AccountRef,
     binding: OpenRouterCredentialBinding,
 }
 
 impl ProductOpenRouterApiKeySource {
-    fn new(paths: PlakPaths) -> CliResult<Self> {
+    fn new(paths: PlakPaths, account: plakous_hosted::account::AccountRef) -> CliResult<Self> {
         let binding = OpenRouterCredentialBinding::platform(
             "plak.openrouter",
-            "plak.product-secrets.openrouter.v1",
+            account.source_authority("plak.product-secrets.openrouter.v1"),
         )
         .map_err(|_| CliFailure::new("OpenRouter credential binding is invalid"))?;
-        Ok(Self { paths, binding })
+        Ok(Self {
+            paths,
+            account,
+            binding,
+        })
     }
 
     fn current(&self) -> Result<ApiKey, plakous::api_key::ApiKeyError> {
-        let value = crate::home::secrets::resolve_api_key(&self.paths, "openrouter")
+        let value = crate::home::secrets::resolve_api_key(&self.paths, self.account.as_str())
             .map_err(|_| plakous::api_key::ApiKeyError::Unavailable)?
             .ok_or(plakous::api_key::ApiKeyError::Unavailable)?;
         ApiKey::new(value).map_err(|_| plakous::api_key::ApiKeyError::Unavailable)
     }
 
     fn generation(&self) -> Result<OpenRouterKeyGeneration, plakous::api_key::ApiKeyError> {
-        let value = crate::home::secrets::resolve_api_key(&self.paths, "openrouter")
+        let value = crate::home::secrets::resolve_api_key(&self.paths, self.account.as_str())
             .map_err(|_| plakous::api_key::ApiKeyError::Unavailable)?
             .ok_or(plakous::api_key::ApiKeyError::Unavailable)?;
         OpenRouterKeyGeneration::from_generation_binding(
@@ -144,9 +168,12 @@ impl plakous::api_key::ApiKeySource<OpenRouterCredentialRequest<'_>, OpenRouterC
 /// Reads model identifiers through the existing authenticated facade catalog route.
 pub async fn list_models(paths: &PlakPaths) -> CliResult<Vec<String>> {
     let credentials = ProductOpenRouterCredentials::new(paths.clone());
-    credentials.preflight()?;
+    let account = plakous_hosted::account::AccountRef::default_for(
+        plakous_hosted::account::Vertical::OpenRouter,
+    );
+    credentials.preflight(&account)?;
     let client = OpenRouterChatClient::connect_with_retention(
-        credentials.source()?,
+        credentials.source(&account)?,
         OpenRouterRetentionPolicy::gateway_default(),
     )
     .and_then(OpenRouterChatClient::with_plak_attribution)
@@ -164,7 +191,16 @@ pub fn probe_openrouter_catalog_allowlist(
     account: Option<&str>,
     model: Option<&str>,
 ) -> OpenRouterCatalogProbe {
-    let key_present = crate::home::secrets::resolve_api_key(paths, "openrouter")
+    let selected = match account
+        .unwrap_or("openrouter")
+        .parse::<plakous_hosted::account::AccountRef>()
+    {
+        Ok(selected) if selected.vertical() == plakous_hosted::account::Vertical::OpenRouter => {
+            selected
+        }
+        _ => return OpenRouterCatalogProbe::KeyPresentNoModel,
+    };
+    let key_present = crate::home::secrets::resolve_api_key(paths, selected.as_str())
         .ok()
         .flatten()
         .is_some();
@@ -174,7 +210,7 @@ pub fn probe_openrouter_catalog_allowlist(
     let Some(model) = model.map(str::trim).filter(|value| !value.is_empty()) else {
         return OpenRouterCatalogProbe::KeyPresentNoModel;
     };
-    if account != Some("openrouter") {
+    if account.is_none() {
         return OpenRouterCatalogProbe::KeyPresentNoModel;
     }
     let runtime = match tokio::runtime::Builder::new_current_thread()
@@ -187,7 +223,7 @@ pub fn probe_openrouter_catalog_allowlist(
     let paths = paths.clone();
     let model = model.to_owned();
     runtime.block_on(async move {
-        let source = match ProductOpenRouterApiKeySource::new(paths) {
+        let source = match ProductOpenRouterApiKeySource::new(paths, selected) {
             Ok(source) => source,
             Err(error) => return OpenRouterCatalogProbe::Failed(error.message().to_owned()),
         };
@@ -237,6 +273,28 @@ mod tests {
     }
 
     #[test]
+    fn named_gateway_sources_bind_only_their_own_key_and_authority() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = PlakPaths::explicit(directory.path().join("home"));
+        for account in ["openrouter/work", "openrouter/other"] {
+            crate::home::secrets::set_api_key(&paths, account, "identical-test-key").unwrap();
+        }
+        let work =
+            ProductOpenRouterApiKeySource::new(paths.clone(), "openrouter/work".parse().unwrap())
+                .unwrap();
+        let other =
+            ProductOpenRouterApiKeySource::new(paths.clone(), "openrouter/other".parse().unwrap())
+                .unwrap();
+        assert_ne!(work.binding, other.binding);
+        assert_ne!(work.generation().unwrap(), other.generation().unwrap());
+        crate::home::secrets::clear_api_key(&paths, "openrouter/work").unwrap();
+        assert!(work.generation().is_err());
+        assert!(other.generation().is_ok());
+        let credentials = ProductOpenRouterCredentials::new(paths);
+        assert!(credentials.source(&"openai/work".parse().unwrap()).is_err());
+    }
+
+    #[test]
     fn product_key_source_observes_rotation_and_revocation() {
         if std::env::var_os("OPENROUTER_API_KEY").is_some() {
             // Env wins over the file store; file rotation is unobservable here.
@@ -250,12 +308,14 @@ mod tests {
         .unwrap();
         crate::home::secrets::set_api_key(&paths, "openrouter", "key-alpha").unwrap();
         let label = ProductOpenRouterCredentials::new(paths.clone())
-            .key_label()
+            .key_label(&"openrouter".parse().unwrap())
             .unwrap();
         assert!(label.starts_with("sha256:"));
         assert_eq!(label.len(), 15);
         assert!(!label.contains("key-alpha"));
-        let source = ProductOpenRouterApiKeySource::new(paths.clone()).unwrap();
+        let source =
+            ProductOpenRouterApiKeySource::new(paths.clone(), "openrouter".parse().unwrap())
+                .unwrap();
         let alpha = source.generation().unwrap();
 
         crate::home::secrets::set_api_key(&paths, "openrouter", "key-beta").unwrap();

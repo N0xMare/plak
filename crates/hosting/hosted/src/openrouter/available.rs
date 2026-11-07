@@ -67,14 +67,14 @@ pub trait OpenRouterCredentials: Send + Sync + 'static {
     /// # Errors
     ///
     /// Returns a redaction-safe failure when no credential is available.
-    fn preflight(&self) -> CliResult<()>;
+    fn preflight(&self, _account: &crate::account::AccountRef) -> CliResult<()>;
 
     /// The source the client re-resolves through at every attempt fence.
     ///
     /// # Errors
     ///
     /// Returns a redaction-safe failure when the credential binding is invalid.
-    fn source(&self) -> CliResult<Arc<OpenRouterKeySource>>;
+    fn source(&self, _account: &crate::account::AccountRef) -> CliResult<Arc<OpenRouterKeySource>>;
 
     /// The selected key's safe account label: its environment variable name
     /// or `sha256:` plus eight hex digits, never a key prefix or suffix.
@@ -82,7 +82,7 @@ pub trait OpenRouterCredentials: Send + Sync + 'static {
     /// # Errors
     ///
     /// Returns a redaction-safe failure when the selected key cannot be read.
-    fn key_label(&self) -> CliResult<String>;
+    fn key_label(&self, _account: &crate::account::AccountRef) -> CliResult<String>;
 }
 
 /// Authenticates, discovers one literal model, and constructs its exact Chat runtime.
@@ -131,6 +131,14 @@ pub async fn construct_openrouter_compaction_runtime(
     reason = "OpenRouter preparation keeps catalog admission, credentials, and the exact route policy in one failure boundary."
 )]
 async fn prepare_openrouter(spec: &ProductOpenRouterSpec) -> CliResult<PreparedOpenRouter> {
+    if spec.account.vertical() != crate::account::Vertical::OpenRouter {
+        return Err(
+            crate::capabilities::AccountAdmissionError::AccountTargetMismatch {
+                account: spec.account.to_string(),
+            }
+            .into(),
+        );
+    }
     if spec.composition == CompositionSelection::NativePtc {
         return Err(CliFailure::new(
             crate::binding::OPENROUTER_NATIVE_PTC_REFUSAL,
@@ -138,9 +146,9 @@ async fn prepare_openrouter(spec: &ProductOpenRouterSpec) -> CliResult<PreparedO
     }
     // Resolve once for an immediate, safe construction diagnostic. The source
     // itself never retains this secret and re-resolves at every attempt fence.
-    spec.credentials.preflight()?;
+    spec.credentials.preflight(&spec.account)?;
     let client = OpenRouterChatClient::connect_with_retention(
-        spec.credentials.source()?,
+        spec.credentials.source(&spec.account)?,
         OpenRouterRetentionPolicy::gateway_default(),
     )
     .and_then(OpenRouterChatClient::with_plak_attribution)
@@ -159,7 +167,7 @@ async fn prepare_openrouter(spec: &ProductOpenRouterSpec) -> CliResult<PreparedO
                 "model `{}` is not in the OpenRouter catalog of account `openrouter`; inspect its available models",
                 spec.literal_model
             ),
-        ).with_advice(plakous_host_protocol::refusal::RefusalAdvice::UnknownModel { model: spec.literal_model.clone(), account: "openrouter".into(), catalog: "OpenRouter".into() }),
+        ).with_advice(plakous_host_protocol::refusal::RefusalAdvice::UnknownModel { model: spec.literal_model.clone(), account: spec.account.to_string(), catalog: "OpenRouter".into() }),
         error => CliFailure::new(format!("OpenRouter exact discovery failed: {error}")),
     })?;
     let reasoning_disable_wire =
@@ -615,7 +623,7 @@ fn openrouter_runtime_binding(
     crate::agent::build::api::runtime_binding(
         &crate::agent::build::api::ApiRuntimeSpec {
             job_config: spec.job_config,
-            account: "openrouter",
+            account: spec.account.clone(),
             sidecars: spec.sidecars.as_ref(),
             product_home: spec.product_home.as_deref(),
             literal_model: &spec.literal_model,
@@ -655,7 +663,7 @@ pub(crate) fn openrouter_product_profile(
     surface: &CompiledSurface,
 ) -> CliResult<plakous::agent::HarnessProfileSpec> {
     crate::agent::build::api::api_product_profile(
-        "openrouter",
+        &"openrouter".parse()?,
         composition,
         effort,
         wire,
@@ -676,17 +684,18 @@ pub(crate) fn openrouter_product_profile(
 #[must_use]
 pub fn probe_openrouter_key_usage(
     credentials: &dyn OpenRouterCredentials,
+    account: &crate::account::AccountRef,
 ) -> OpenRouterKeyUsageProbe {
     // "Is a key configured at all" is the credential's own preflight; an
     // unconfigured product is `NotConfigured`, not a failure.
-    if credentials.preflight().is_err() {
+    if credentials.preflight(account).is_err() {
         return OpenRouterKeyUsageProbe::NotConfigured;
     }
-    let source = match credentials.source() {
+    let source = match credentials.source(account) {
         Ok(source) => source,
         Err(error) => return OpenRouterKeyUsageProbe::Failed(error.message().to_owned()),
     };
-    let label = match credentials.key_label() {
+    let label = match credentials.key_label(account) {
         Ok(label) => label,
         Err(error) => return OpenRouterKeyUsageProbe::Failed(error.message().to_owned()),
     };
@@ -755,9 +764,10 @@ pub(crate) fn carry_input_window<P: plakous_host_protocol::ProtocolExtension>(
     config: &crate::runtime::HostConfig<P>,
 ) -> CliResult<plakous::sessions::SessionInputWindow> {
     let credentials = config.state_roots.openrouter_credentials();
-    credentials.preflight()?;
+    let account = config.session.account_ref()?;
+    credentials.preflight(&account)?;
     let client = OpenRouterChatClient::connect_with_retention(
-        credentials.source()?,
+        credentials.source(&account)?,
         OpenRouterRetentionPolicy::gateway_default(),
     )
     .and_then(OpenRouterChatClient::with_plak_attribution)
@@ -771,7 +781,7 @@ pub(crate) fn carry_input_window<P: plakous_host_protocol::ProtocolExtension>(
     let wire = config
         .session
         .target_selection
-        .api_target()
+        .api_target(&config.session.account_ref()?)?
         .ok_or_else(|| CliFailure::new("missing API target"))?
         .protocol();
     let reasoning = config.effort.is_some();

@@ -208,6 +208,7 @@ pub fn require_tools(
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AccountAdmissionError {
     UnknownAccount { account: String },
+    AccountTargetMismatch { account: String },
     CapabilityUnavailable(CapabilityUnavailable),
 }
 
@@ -215,6 +216,10 @@ impl std::fmt::Display for AccountAdmissionError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::UnknownAccount { account } => write!(formatter, "unknown_account: `{account}`"),
+            Self::AccountTargetMismatch { account } => write!(
+                formatter,
+                "account_target_mismatch: `{account}` disagrees with the selected target"
+            ),
             Self::CapabilityUnavailable(error) => error.fmt(formatter),
         }
     }
@@ -223,7 +228,7 @@ impl std::fmt::Display for AccountAdmissionError {
 impl std::error::Error for AccountAdmissionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::UnknownAccount { .. } => None,
+            Self::UnknownAccount { .. } | Self::AccountTargetMismatch { .. } => None,
             Self::CapabilityUnavailable(error) => Some(error),
         }
     }
@@ -231,9 +236,13 @@ impl std::error::Error for AccountAdmissionError {
 
 /// Refuses unknown or omitted accounts without choosing another route.
 pub fn require(account: &str) -> Result<(), AccountAdmissionError> {
-    let route = for_account(account).ok_or_else(|| AccountAdmissionError::UnknownAccount {
-        account: account.to_owned(),
-    })?;
+    let selection: crate::account::AccountRef = account.parse()?;
+    if selection.is_named() && !selection.vertical().is_api() {
+        return Err(AccountAdmissionError::UnknownAccount {
+            account: account.to_owned(),
+        });
+    }
+    let route = selection.vertical().capability();
     require_route(route).map_err(AccountAdmissionError::CapabilityUnavailable)
 }
 
@@ -265,7 +274,14 @@ mod tests {
 
     #[test]
     fn unknown_accounts_never_acquire_a_route() {
-        for account in ["openai/work", "unknown", "", "xai", "codex/", "OPENAI"] {
+        for account in [
+            "openai/work/extra",
+            "unknown",
+            "",
+            "xai",
+            "codex/",
+            "OPENAI",
+        ] {
             assert_eq!(
                 require(account),
                 Err(AccountAdmissionError::UnknownAccount {
