@@ -4608,8 +4608,11 @@ background hash is pending; welcome never waits for that hash.
   stop, `held_after_loss` while a lost host's turn waits for Resume,
   `continuing` while a continuation that runs by itself waits for the next
   open (a planned handoff, or a decided continuation a crash left pending),
-  `idle` otherwise; its live work is none. `children` and `held_children`
-  are not yet counted (0). A session is held elsewhere by its tree's
+  `idle` otherwise; its live work is none. A resident row counts non-root
+  pending, running (including parked), paused and sealing nodes as
+  `children`, and children held for consent after host loss as
+  `held_children`, never in both counts. Any live child also makes the
+  row busy unless operator attention takes precedence. A session is held elsewhere by its tree's
   custody holder or, for every session, by the holder of its runtime
   lease, whose holder record names the process (spec 01's runtime store
   holder proof; `plakous::sessions::holder::sqlite_branch_holder`); either is

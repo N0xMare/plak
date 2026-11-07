@@ -81,12 +81,11 @@ pub enum SessionActivity {
 )]
 #[serde(deny_unknown_fields)]
 pub struct LiveWork {
-    /// Its running sub-agents (not yet counted: always 0).
+    /// Its live sub-agents, including pending, parked and sealing work.
     pub children: u32,
     /// Its running background processes.
     pub processes: u32,
-    /// Its tree's sub-agents held for the operator (not yet counted: always
-    /// 0).
+    /// Its tree's sub-agents awaiting consent to continue after host loss.
     pub held_children: u32,
 }
 

@@ -4,6 +4,35 @@ use crate::agent_tree_protocol::NodeStatus;
 
 use super::{ChildNodes, NodeState};
 
+pub(super) fn child_counts(tree_id: &str) -> (usize, usize) {
+    crate::topology_runtime::lookup(tree_id)
+        .and_then(|runtime| runtime.read(count_children).ok())
+        .unwrap_or_default()
+}
+
+fn count_children(tree: &crate::agent_tree::ProductAgentTree) -> (usize, usize) {
+    use crate::agent_tree::LossContinuationState;
+    let mut running = 0;
+    let mut held = 0;
+    for (id, node) in tree.nodes() {
+        if *id == tree.root_agent_id {
+            continue;
+        }
+        if tree
+            .loss_continuation(id)
+            .is_some_and(|continuation| continuation.state == LossContinuationState::Held)
+        {
+            held += 1;
+        } else if matches!(
+            node.status,
+            NodeStatus::Pending | NodeStatus::Running | NodeStatus::Paused | NodeStatus::Sealing
+        ) {
+            running += 1;
+        }
+    }
+    (running, held)
+}
+
 /// The children of the tree `tree_id`, as its hub holds them: a node of a
 /// hub that is shutting down is retiring, a closed node is closed, a node
 /// the tree's root may not write to is out of the operator's reach, and a

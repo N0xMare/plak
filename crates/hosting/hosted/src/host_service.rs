@@ -502,6 +502,10 @@ pub struct KeptActivity {
     pub awaiting_operator: bool,
     /// Background processes running or stopping.
     pub processes: usize,
+    /// Children whose work is live, including parked and sealing children.
+    pub children: usize,
+    /// Children awaiting consent to continue after host loss.
+    pub held_children: usize,
 }
 
 /// A connection's hold on its session's residency
@@ -998,6 +1002,8 @@ impl<P: ProtocolExtension> HostService<P> {
         }
         drop(state);
         kept.awaiting_operator |= crate::runtime::tree_needs_operator(&self.root().tree_id);
+        (kept.children, kept.held_children) = tree_nodes::child_counts(&self.root().tree_id);
+        kept.busy |= kept.children > 0;
         kept
     }
 
