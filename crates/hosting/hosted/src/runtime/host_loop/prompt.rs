@@ -47,6 +47,20 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         user_echoed: bool,
         one_shot: Option<&mut super::super::oneshot::OneShotState>,
     ) -> CliResult<HostStep> {
+        if self
+            .role
+            .config
+            .store
+            .load(&self.role.config.session.id)
+            .map_err(CliFailure::new)?
+            .archived
+        {
+            let _ = self.role.events.notice(TranscriptRow::info(
+                NoticeScope::Session,
+                "session_archived: unarchive this session before admitting work",
+            ));
+            return Ok(HostStep::Continue);
+        }
         let wake = queued_delivery
             .as_ref()
             .and_then(|item| self.role.config.session.queue_commands.pending_for(item))

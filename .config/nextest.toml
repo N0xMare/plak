@@ -245,6 +245,7 @@ not (
   | test(durability::)
   | test(host_binding_request_crash_cuts_keep_one_owner_and_never_redispatch)
   | test(lifecycle_commit_crash_cuts_reopen_exactly_before_or_after)
+  | test(lifecycle_keepalive_scan_survives_expiry_and_refuses_renewal_loss)
   | test(lifecycle_deletion_crash_cuts_finish_without_recovery_or_cascade)
   | test(tui_host_restart)
   | test(review_tui_host_restart_switch)
@@ -352,7 +353,8 @@ default-filter = '''
   test(a_dormant_directory_stop_never_opens_or_dispatches_its_continuation)
   | test(ui_reload_preserves_a_live_session_socket_and_rejects_an_invalid_replacement)
   |
-  test(=foreground_owner_lease_expiry_stops_without_a_successor)
+  test(lifecycle_keepalive_scan_survives_expiry_and_refuses_renewal_loss)
+  | test(=foreground_owner_lease_expiry_stops_without_a_successor)
   | test(ledger_retirement_5000_real_leaf_calls_in_closed_cells_memory)
   | test(ledger_retirement_5000_real_leaf_calls_in_closed_cells_sqlite)
   | test(ledger_retirement_5000_direct_batch_calls)

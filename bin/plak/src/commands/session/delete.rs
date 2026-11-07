@@ -97,6 +97,20 @@ pub(super) fn delete_confirmed(
     }
     if let Some(locator) = record.plakous_locator {
         let runtime = RuntimeDeletion::new(services)?;
+        let plan = deletion_plan(paths, &mut product, &record, locator, abandon_children)?;
+        let fences = super::lifecycle::fence_for_delete(services, locator, &plan.children)?;
+        let settled = plan
+            .children
+            .iter()
+            .filter(|(id, _)| !plan.abandon.contains(id))
+            .cloned()
+            .collect::<Vec<_>>();
+        runtime.refuse_unsettled_children(id, &settled)?;
+        fences.verify()?;
+        // Runtime archival takes over with its own irreversible admission
+        // fence. It rechecks after release and refuses a racing owner before
+        // any deletion; later cleanup is protected by archived revisions.
+        drop(fences);
         delete_confirmed_session(
             paths,
             &mut product,

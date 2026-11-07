@@ -217,6 +217,21 @@ impl DurableSessionRuntime {
 }
 
 impl DurableBranchHold {
+    /// Renews the held branch lease without opening a driver.
+    ///
+    /// # Errors
+    /// Returns the typed refusal; a refused renewal ends the hold.
+    pub async fn renew(&mut self) -> Result<(), AgentError> {
+        self.lease = store_call(
+            StorePhase::Renew,
+            self.timeouts.operation,
+            self.store.renew(self.lease.clone()),
+        )
+        .await
+        .map_err(StoreCallError::into_agent)?;
+        Ok(())
+    }
+
     /// Releases the held lease.
     ///
     /// # Errors

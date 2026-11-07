@@ -1,8 +1,8 @@
-//! Archive a dormant session while holding the runtime branches against admission.
+//! Collect lifecycle activity while holding the runtime branches against admission.
 
 use plakous::application::ApplicationExecutor;
 use plakous::sessions::{
-    AgentSessions, AgentSessionsErrorKind, BranchHold, SessionLocator, SessionOperationId,
+    AgentSessions, AgentSessionsErrorKind, SessionLocator, SessionOperationId,
 };
 use plakous_hosted::error::CliFailure;
 use plakous_recursive_subagents_store::TreeInspection;
@@ -10,13 +10,26 @@ use plakous_recursive_subagents_store::TreeInspection;
 use super::{LifecycleError, LifecycleRefusal, SessionActivity};
 use crate::shell::services::Services;
 
-struct Fences {
+pub(in crate::commands::session) struct Fences {
     executor: ApplicationExecutor,
     sessions: std::sync::Arc<AgentSessions>,
-    held: Vec<BranchHold>,
+    keepalive: super::keepalive::Keepalive,
 }
 
 impl Fences {
+    fn new(services: &Services) -> Result<Self, LifecycleError> {
+        let sessions = services.state_roots()?.runtime_sessions()?;
+        Ok(Self {
+            executor: ApplicationExecutor::new()
+                .map_err(|_| CliFailure::new("application executor unavailable"))?,
+            keepalive: super::keepalive::Keepalive::new(sessions.lease_period_seconds())?,
+            sessions,
+        })
+    }
+
+    pub(in crate::commands::session) fn verify(&self) -> Result<(), LifecycleError> {
+        self.keepalive.verify(&self.executor)
+    }
     fn acquire(&mut self, recorded: SessionLocator) -> Result<SessionLocator, LifecycleError> {
         let operation = SessionOperationId::new(format!("plak:archive:{}", uuid::Uuid::new_v4()))
             .map_err(|error| CliFailure::new(error.to_string()))?;
@@ -28,7 +41,7 @@ impl Fences {
                 .map_err(|_| CliFailure::new("application execution failed"))?
             {
                 Ok(hold) => {
-                    self.held.push(hold);
+                    self.keepalive.add(hold)?;
                     return Ok(head);
                 }
                 Err(error) if error.kind() == AgentSessionsErrorKind::Ownership => {
@@ -81,29 +94,33 @@ impl Fences {
     }
 }
 
-impl Drop for Fences {
-    fn drop(&mut self) {
-        for held in self.held.drain(..).rev() {
-            let _ = self.executor.block_on(held.release());
-        }
+pub(in crate::commands::session) fn for_delete(
+    services: &Services,
+    root: SessionLocator,
+    children: &[(String, SessionLocator)],
+) -> Result<Fences, LifecycleError> {
+    let mut fences = Fences::new(services)?;
+    fences.acquire(root)?;
+    for (_, locator) in children {
+        fences.acquire(*locator)?;
     }
+    fences.verify()?;
+    Ok(fences)
 }
 
-pub(super) fn archive(services: &Services, id: &str) -> Result<(), LifecycleError> {
+pub(super) fn archive(
+    services: &Services,
+    id: &str,
+    allow_reservation: bool,
+) -> Result<(), LifecycleError> {
     let paths = services.paths()?;
-    let product = crate::store::ProductStore::open(paths)
+    let mut product = crate::store::ProductStore::open(paths)
         .map_err(|error| CliFailure::new(error.to_string()))?;
     if product.lifecycle_metadata(id)?.1 {
         return Ok(());
     }
     let records = services.session_records()?;
     let record = records.load(id).map_err(CliFailure::new)?;
-    let mut fences = Fences {
-        executor: ApplicationExecutor::new()
-            .map_err(|_| CliFailure::new("application executor unavailable"))?,
-        sessions: services.state_roots()?.runtime_sessions()?,
-        held: Vec::new(),
-    };
     let mut activity = SessionActivity {
         turn: false,
         children: Vec::new(),
@@ -113,9 +130,13 @@ pub(super) fn archive(services: &Services, id: &str) -> Result<(), LifecycleErro
     let Some(locator) = record.plakous_locator else {
         // No existing branch can fence a concurrent first runtime creation.
         // The host can serialize that reservation; offline cannot prove idle.
+        if allow_reservation {
+            return product.set_archived(id, true);
+        }
         activity.state_unknown = true;
-        return super::set_archived(services, id, true, &activity);
+        return activity.refuse_running();
     };
+    let mut fences = Fences::new(services)?;
     let head = fences.acquire(locator)?;
     fences.inspect(head, paths, &mut activity)?;
     let (_, inspected) = crate::topology_product::inspect_session_tree(paths, &record)?;
@@ -149,5 +170,14 @@ pub(super) fn archive(services: &Services, id: &str) -> Result<(), LifecycleErro
             }
         }
     }
-    super::set_archived(services, id, true, &activity)
+    activity.refuse_running()?;
+    #[cfg(test)]
+    if let Ok(milliseconds) = std::env::var("PLAK_LIFECYCLE_SCAN_PAUSE_MS") {
+        let milliseconds = milliseconds
+            .parse::<u64>()
+            .map_err(|_| CliFailure::new("invalid scan pause fixture"))?;
+        std::thread::sleep(std::time::Duration::from_millis(milliseconds));
+    }
+    fences.verify()?;
+    product.set_archived_checked(id, true, &|| fences.verify())
 }

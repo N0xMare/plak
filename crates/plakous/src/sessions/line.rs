@@ -141,6 +141,17 @@ pub struct BranchHold {
 }
 
 impl BranchHold {
+    /// Renews the held branch lease without opening a driver.
+    ///
+    /// # Errors
+    /// Returns the typed refusal; a refused renewal ends the hold.
+    pub async fn renew(&mut self) -> Result<(), AgentSessionsError> {
+        self.inner
+            .renew()
+            .await
+            .map_err(|error| runtime_error(&error))
+    }
+
     /// Releases the held lease.
     ///
     /// # Errors

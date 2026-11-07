@@ -4,10 +4,12 @@ use plakous_hosted::error::CliFailure;
 
 use crate::shell::services::Services;
 
-mod offline;
+mod fences;
+mod keepalive;
+pub(super) use fences::for_delete as fence_for_delete;
 
 pub(crate) fn archive_offline(services: &Services, id: &str) -> Result<(), LifecycleError> {
-    offline::archive(services, id)
+    fences::archive(services, id, false)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -215,23 +217,23 @@ pub(crate) fn rename_session(
     Ok(title.map(str::to_owned))
 }
 
-/// The caller holds admission through this commit and updates existing viewers.
+/// The host holds a nonresident session's slot through this call. Existing
+/// branches are fenced here; the slot also serializes a first-create reservation.
 /// Unarchiving starts no work; repeated state is an acknowledged no-op.
 pub(crate) fn set_archived(
     services: &Services,
     id: &str,
     archived: bool,
-    activity: &SessionActivity,
 ) -> Result<(), LifecycleError> {
+    if archived {
+        return fences::archive(services, id, true);
+    }
     let paths = services.paths()?;
     let mut store = crate::store::ProductStore::open(paths)
         .map_err(|error| CliFailure::new(error.to_string()))?;
     let previous = store.lifecycle_metadata(id)?;
     if previous.1 == archived {
         return Ok(());
-    }
-    if archived {
-        activity.refuse_running()?;
     }
     store.set_archived(id, archived)
 }
@@ -334,22 +336,18 @@ mod tests {
         let mut record = crate::store::sessions::SessionRecord::new(paths.home().to_owned());
         record.title = Some("generated".into());
         store.commit(&mut record).unwrap();
-        let idle = SessionActivity {
-            turn: false,
-            children: vec![],
-            processes: vec![],
-            state_unknown: false,
-        };
+        assert!(matches!(
+            archive_offline(&services, &record.id),
+            Err(LifecycleError::Refused(LifecycleRefusal::Busy {
+                state_unknown: true,
+                ..
+            }))
+        ));
+        assert!(!paths.runtime_database().exists());
         rename_session(&services, &record.id, Some("  label  ")).unwrap();
-        set_archived(&services, &record.id, true, &idle).unwrap();
+        set_archived(&services, &record.id, true).unwrap();
         rename_session(&services, &record.id, Some("archived label")).unwrap();
-        let unknown = SessionActivity {
-            turn: true,
-            children: vec![],
-            processes: vec![],
-            state_unknown: true,
-        };
-        set_archived(&services, &record.id, true, &unknown).unwrap();
+        set_archived(&services, &record.id, true).unwrap();
         let loaded = store.load(&record.id).unwrap();
         assert_eq!(loaded.title.as_deref(), Some("generated"));
         assert_eq!(loaded.title_override.as_deref(), Some("archived label"));
@@ -362,7 +360,7 @@ mod tests {
             Some("archived label")
         );
         rename_session(&services, &record.id, None).unwrap();
-        set_archived(&services, &record.id, false, &unknown).unwrap();
+        set_archived(&services, &record.id, false).unwrap();
         assert_eq!(
             store.directory(None).unwrap()[0].title.as_deref(),
             Some("generated")

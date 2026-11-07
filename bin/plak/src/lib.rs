@@ -1130,13 +1130,7 @@ fn execute_command(
             Ok(ProcessOutcome::Success)
         }
         Command::SessionUnarchive { id } => {
-            let activity = commands::session::lifecycle::SessionActivity {
-                turn: false,
-                children: Vec::new(),
-                processes: Vec::new(),
-                state_unknown: true,
-            };
-            commands::session::lifecycle::set_archived(services, &id, false, &activity)?;
+            commands::session::lifecycle::set_archived(services, &id, false)?;
             writeln!(stdout, "unarchived session {id}")
                 .map_err(|_| CliFailure::new("stdout failed"))?;
             Ok(ProcessOutcome::Success)

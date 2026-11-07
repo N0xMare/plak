@@ -50,11 +50,20 @@ impl ProductStore {
         id: &str,
         title: Option<&str>,
     ) -> Result<(), LifecycleError> {
-        self.write_lifecycle(id, title, None)
+        self.write_lifecycle(id, title, None, &|| Ok(()))
     }
 
     pub(crate) fn set_archived(&mut self, id: &str, archived: bool) -> Result<(), LifecycleError> {
-        self.write_lifecycle(id, None, Some(archived))
+        self.write_lifecycle(id, None, Some(archived), &|| Ok(()))
+    }
+
+    pub(crate) fn set_archived_checked(
+        &mut self,
+        id: &str,
+        archived: bool,
+        verify: &dyn Fn() -> Result<(), LifecycleError>,
+    ) -> Result<(), LifecycleError> {
+        self.write_lifecycle(id, None, Some(archived), verify)
     }
 
     fn write_lifecycle(
@@ -62,6 +71,7 @@ impl ProductStore {
         id: &str,
         title: Option<&str>,
         archived: Option<bool>,
+        verify: &dyn Fn() -> Result<(), LifecycleError>,
     ) -> Result<(), LifecycleError> {
         self.durability(true).map_err(CliFailure::new)?;
         let transaction = self
@@ -94,6 +104,14 @@ impl ProductStore {
         }
         #[cfg(test)]
         crash_cut("metadata_before_commit");
+        #[cfg(test)]
+        if let Ok(milliseconds) = std::env::var("PLAK_LIFECYCLE_COMMIT_PAUSE_MS") {
+            let milliseconds = milliseconds
+                .parse::<u64>()
+                .map_err(|_| CliFailure::new("invalid commit pause fixture"))?;
+            std::thread::sleep(std::time::Duration::from_millis(milliseconds));
+        }
+        verify()?;
         transaction
             .commit()
             .map_err(|error| CliFailure::new(error.to_string()))?;
@@ -109,6 +127,31 @@ mod tests {
     use super::*;
     use crate::home::paths::PlakPaths;
     use crate::store::sessions::SessionRecord;
+
+    #[test]
+    fn archived_read_only_inspection_never_reads_runtime_or_drains_work() {
+        let (_home, paths) = PlakPaths::isolated_test_home();
+        let mut store = ProductStore::open(&paths).unwrap();
+        let mut record = SessionRecord::new(paths.home().to_owned());
+        record.archived = true;
+        record.title = Some("generated".into());
+        record.title_override = Some("operator".into());
+        record
+            .pending_queue
+            .push(crate::store::sessions::QueueItem::new("do not run".into()));
+        store.commit(&mut record).unwrap();
+        let revision = record.store_revision;
+        std::fs::write(paths.runtime_database(), b"deliberately unreadable runtime").unwrap();
+        let inspected = ProductStore::inspect_session_read_only(&paths, &record.id).unwrap();
+        assert!(inspected.archived);
+        assert_eq!(inspected.title_override.as_deref(), Some("operator"));
+        assert_eq!(inspected.pending_queue, record.pending_queue);
+        assert_eq!(inspected.store_revision, revision);
+        assert_eq!(
+            std::fs::read(paths.runtime_database()).unwrap(),
+            b"deliberately unreadable runtime"
+        );
+    }
 
     #[test]
     fn concurrent_renames_and_resident_save_share_the_revision_fence() {

@@ -15,6 +15,80 @@ use plakous_offline_crash_harness::{BoundaryController, runtime_binding};
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
+#[cfg(feature = "test-hooks")]
+#[test]
+fn lifecycle_keepalive_worker() {
+    let Ok(home) = std::env::var("PLAK_LIFECYCLE_CRASH_HOME") else {
+        return;
+    };
+    let paths = crate::home::paths::PlakPaths::explicit(home.into());
+    let id = std::env::var("PLAK_LIFECYCLE_CRASH_SESSION").unwrap();
+    let services = crate::shell::services::Services::for_home(paths.clone());
+    assert_eq!(
+        services
+            .state_roots()
+            .unwrap()
+            .runtime_sessions()
+            .unwrap()
+            .lease_period_seconds(),
+        1
+    );
+    let result = super::lifecycle::archive_offline(&services, &id);
+    let failure = std::env::var("PLAK_LIFECYCLE_FAIL_RENEWAL").as_deref() == Ok("1");
+    if failure {
+        assert!(matches!(result, Err(LifecycleError::Failure(_))));
+    } else {
+        result.unwrap();
+    }
+    assert_eq!(
+        crate::store::ProductStore::inspect_session_read_only(&paths, &id)
+            .unwrap()
+            .archived,
+        !failure
+    );
+}
+
+#[cfg(feature = "test-hooks")]
+#[test]
+fn lifecycle_keepalive_scan_survives_expiry_and_refuses_renewal_loss() -> TestResult {
+    for failure in [false, true] {
+        let mut f = fixture(false).checked()?;
+        f.tree.abandon_recovery_for_delete(&f.child_id).checked()?;
+        crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
+        let output = std::process::Command::new(std::env::current_exe().checked()?)
+            .args([
+                "--exact",
+                "commands::session::delete::deletion_tests::lifecycle_keepalive_worker",
+                "--nocapture",
+            ])
+            .env("PLAK_LIFECYCLE_CRASH_HOME", f.paths.home())
+            .env("PLAK_LIFECYCLE_CRASH_SESSION", &f.record.id)
+            .env("PLAK_TEST_SESSION_LEASE_SECONDS", "1")
+            .env(
+                "PLAK_LIFECYCLE_SCAN_PAUSE_MS",
+                if failure { "400" } else { "2200" },
+            )
+            .env(
+                "PLAK_LIFECYCLE_COMMIT_PAUSE_MS",
+                if failure { "0" } else { "1200" },
+            )
+            .env(
+                "PLAK_LIFECYCLE_FAIL_RENEWAL",
+                if failure { "1" } else { "0" },
+            )
+            .output()
+            .checked()?;
+        assert!(
+            output.status.success(),
+            "{} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(f.product.load(&f.record.id).checked()?.archived, !failure);
+    }
+    Ok(())
+}
+
 #[test]
 fn offline_archive_fences_owners_and_live_children_without_archiving_runtime() -> TestResult {
     let mut f = fixture(false).checked()?;

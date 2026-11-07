@@ -1397,6 +1397,12 @@ recording and folding leaves them recorded; the fold is exactly once because it
 is one commit, the head's or the head move's. `AgentSessions::line_head(line)` reads a line's head without a
 lease and `OpenedSession::line` names an attached session's line.
 
+`AgentSessions::hold_branch` takes the same non-executing lease on any branch,
+including a non-head branch. `BranchHold::renew` renews that fence without
+opening a driver; renewal failure ends the caller's authority to proceed.
+Consumers doing multi-store work keep all held branches renewed during their
+scan and commit and verify every hold immediately before the product commit.
+
 `SessionBackend::memory()` is fallible: it returns a structured session-storage
 error if the host lease clock cannot be established, just as SQLite backend
 construction reports its storage prerequisites. It never falls back to a wall

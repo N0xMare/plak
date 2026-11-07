@@ -1539,8 +1539,12 @@ session is read-only until explicitly unarchived; inspection must not open its
 runtime, recover, drain its queue or execute a continuation. Rename, unarchive
 and guarded delete remain available. Repeating the archive state is a no-op.
 Archive refuses a busy turn, any live child, a running process, or incomplete
-running-state evidence. The host holds the whole-tree admission barrier from
-that check through the durable metadata commit. Unarchive starts nothing.
+running-state evidence. The host holds the session's slot lock, refuses busy
+residents and releases idle residents first. The product service then holds
+the root and every finished child's runtime branch lease through its activity
+check and durable metadata commit. It renews all holds during the scan and
+commit, verifies them immediately before commit, and refuses a lost hold.
+Unarchive starts nothing.
 For deletion through the host, a busy resident owner is refused, while an idle
 resident owner is released before the same confirmed deletion service below.
 
