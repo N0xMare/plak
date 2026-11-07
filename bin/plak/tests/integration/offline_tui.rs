@@ -587,7 +587,7 @@ impl Terminal {
         Self::spawn_sized(fixture, launch, TUI_ROWS, TUI_COLS)
     }
 
-    fn spawn_sized(fixture: &Fixture, launch: Launch<'_>, rows: u16, cols: u16) -> Self {
+    fn ensure_host(fixture: &Fixture, launch: Launch<'_>) {
         match launch {
             Launch::WithEnv(env) | Launch::OnPathWithEnv(_, env) => {
                 fixture.ensure_host_with_env(env);
@@ -597,6 +597,10 @@ impl Terminal {
             }
             _ => fixture.ensure_host(),
         }
+    }
+
+    fn spawn_sized(fixture: &Fixture, launch: Launch<'_>, rows: u16, cols: u16) -> Self {
+        Self::ensure_host(fixture, launch);
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows,
