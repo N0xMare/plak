@@ -40,6 +40,8 @@ use crate::views::PresentationSnapshot;
 use crate::views::transcript::{TranscriptItem, TranscriptScope};
 
 mod directory;
+mod runner_label;
+pub use runner_label::RunnerLabel;
 pub use directory::{
     HostedElsewhere, LiveWork, ResidentReason, SessionActivity, SessionEnvironment,
     SessionResidency, SessionRow,

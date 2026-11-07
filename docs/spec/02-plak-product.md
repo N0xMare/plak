@@ -3849,6 +3849,11 @@ node, or a pending context-capacity decision, even while a turn runs.
 Clients must treat it as potentially running and submit `follow_up` (Queue),
 not infer idle and submit `prompt`. The row shape and protocol stay unchanged.
 
+Every protocol-5 NodeView carries its own required runner `{name,runner_id}`.
+Local is explicitly `{name:"local",runner_id:"local"}`. The saved node id is
+authority; the host decorates the canonical configured alias, or uses the saved
+id when no alias remains. This does not expand JSONL v1 tree frames.
+
 Wire v2 is the framed protocol every frontend will speak to a host; it
 replaces the JSONL host of §4.3, which stays byte-identical until it is
 removed. Its types live in `plakous-host-protocol` (`wire`, the observation

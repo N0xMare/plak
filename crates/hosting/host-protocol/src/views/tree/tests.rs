@@ -8,6 +8,30 @@ use crate::topology::{
 };
 use crate::views::navigator::{AttemptUsage, BlockedObservation};
 
+#[test]
+fn every_node_carries_its_own_required_runner_identity() {
+    let mut tree = view();
+    tree.nodes[1].runner = crate::wire::RunnerLabel {
+        name: "machine".into(),
+        runner_id: "pinned-id".into(),
+    };
+    let mut value = serde_json::to_value(&tree).unwrap();
+    assert_eq!(
+        value["nodes"][0]["runner"],
+        serde_json::json!({"name":"local","runner_id":"local"})
+    );
+    assert_eq!(
+        value["nodes"][1]["runner"],
+        serde_json::json!({"name":"machine","runner_id":"pinned-id"})
+    );
+    assert_eq!(
+        serde_json::from_value::<TreeView>(value.clone()).unwrap(),
+        tree
+    );
+    value["nodes"][1].as_object_mut().unwrap().remove("runner");
+    assert!(serde_json::from_value::<TreeView>(value).is_err());
+}
+
 /// Every field the JSONL `tree` frame reads, set to a value that would show
 /// a wrong spelling: a non-default status, a non-default tier, a workspace
 /// row mid-adopt, and a quota refusal with a reset stamp.
@@ -19,6 +43,7 @@ fn view() -> TreeView {
         solicited: true,
         nodes: vec![
             NodeView {
+                runner: crate::wire::RunnerLabel::local(),
                 agent_id: "root".to_owned(),
                 parent_agent_id: None,
                 depth: 0,
@@ -55,6 +80,7 @@ fn view() -> TreeView {
                 continuation: None,
             },
             NodeView {
+                runner: crate::wire::RunnerLabel::local(),
                 agent_id: "c1".to_owned(),
                 parent_agent_id: Some("root".to_owned()),
                 depth: 1,

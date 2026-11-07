@@ -19,6 +19,8 @@ use crate::topology::{
 )]
 #[serde(deny_unknown_fields)]
 pub struct NodeView {
+    /// Saved node placement; the host decorates its configured canonical alias.
+    pub runner: crate::wire::RunnerLabel,
     /// Exact durable agent id.
     pub agent_id: String,
     /// Parent agent id; `None` for the tree root.
