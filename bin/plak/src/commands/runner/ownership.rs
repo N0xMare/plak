@@ -103,6 +103,71 @@ fn lock_file(paths: &PlakPaths) -> CliResult<File> {
 mod tests {
     use super::*;
 
+    const CHILD_HOME: &str = "PLAK_TEST_RUNNER_CUSTODY_HOME";
+    const CHILD_KIND: &str = "PLAK_TEST_RUNNER_CUSTODY_KIND";
+
+    #[test]
+    fn custody_holder_process() {
+        let Some(home) = std::env::var_os(CHILD_HOME) else {
+            return;
+        };
+        let paths = PlakPaths::explicit(home.into());
+        let _owner = if std::env::var(CHILD_KIND).unwrap() == "host" {
+            RunnerOwnership::host(&paths).unwrap()
+        } else {
+            RunnerOwnership::standalone(&paths).unwrap()
+        };
+        std::fs::write(paths.home().join("held"), b"held").unwrap();
+        let _ = std::io::Read::read_to_end(&mut std::io::stdin(), &mut Vec::new());
+    }
+
+    struct Holder(std::process::Child);
+
+    impl Drop for Holder {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    #[test]
+    fn a_killed_holder_releases_custody_without_stale_pid_or_socket_repair() {
+        for kind in ["host", "standalone"] {
+            let home = tempfile::tempdir().unwrap();
+            let paths = PlakPaths::explicit(home.path().to_path_buf());
+            let mut child = Holder(
+                std::process::Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        "--exact",
+                        "commands::runner::ownership::tests::custody_holder_process",
+                        "--nocapture",
+                    ])
+                    .env(CHILD_HOME, home.path())
+                    .env(CHILD_KIND, kind)
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::inherit())
+                    .spawn()
+                    .unwrap(),
+            );
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !home.path().join("held").exists() {
+                assert!(child.0.try_wait().unwrap().is_none());
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            match RunnerOwnership::standalone(&paths) {
+                Err(StandaloneRunnerError::ImportThroughRunningHost) if kind == "host" => {}
+                Err(StandaloneRunnerError::HomeBusy) if kind == "standalone" => {}
+                other => panic!("incorrect custody: {other:?}"),
+            }
+            child.0.kill().unwrap();
+            child.0.wait().unwrap();
+            assert!(RunnerOwnership::standalone(&paths).is_ok());
+            assert!(RunnerOwnership::host(&paths).is_ok());
+        }
+    }
+
     #[test]
     fn standalone_custody_excludes_hosts_and_other_standalone_binds() {
         let home = tempfile::tempdir().unwrap();

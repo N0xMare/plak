@@ -6,10 +6,18 @@ mod journal;
 mod restored;
 
 #[test]
-fn a_host_exits_nonzero_when_its_lost_daemon_cannot_restart() {
+fn a_broken_daemon_blocks_local_placement_without_terminating_the_host() {
     let Some(fixture) = fixture() else { return };
     let mut host = start(&fixture);
     let version = plakous::runner::protocol::PROTOCOL_VERSION;
+    let floors = fixture
+        .home()
+        .join(format!("host/runner/v{version}/owners.json"));
+    let deadline = std::time::Instant::now() + WAIT;
+    while !floors.exists() {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     std::fs::write(
         fixture
             .home()
@@ -38,33 +46,18 @@ fn a_host_exits_nonzero_when_its_lost_daemon_cannot_restart() {
             Err(error) => panic!("lock probe: {error}"),
         }
     }
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    loop {
-        if let Some(status) = host.child.as_mut().unwrap().try_wait().unwrap() {
-            assert_eq!(status.code(), Some(8));
-            host.child.take();
-            break;
-        }
-        if std::time::Instant::now() >= deadline {
-            kill(&mut host);
-            panic!("the host did not fail after bounded redial");
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    let stderr = host.lines.iter().collect::<Vec<_>>().join("\n");
-    assert!(
-        stderr.contains("owners.json") && stderr.contains("owner floors"),
-        "{stderr}"
-    );
+    wait_for_recovery_failure(&fixture, &mut host, "owners.json");
+    assert_eq!(Client::connect(&host).rows(1), []);
+    stop(&mut host);
     for detached in ["0", "1"] {
-        let (mut child, lines) = spawn_env(
+        let mut host = start_env(
             &fixture,
             &[],
             &[("PLAK_TEST_RUNNER_DETACHED", detached.into())],
         );
-        assert_eq!(cut_exit(&mut child).code(), Some(8));
-        let stderr = lines.iter().collect::<Vec<_>>().join("\n");
-        assert!(stderr.contains("owners.json"), "{stderr}");
+        wait_for_recovery_failure(&fixture, &mut host, "owners.json");
+        assert_eq!(Client::connect(&host).rows(1), []);
+        stop(&mut host);
     }
 }
 
@@ -85,16 +78,34 @@ fn a_transient_daemon_failure_keeps_the_redial_bound() {
         // A listener that never sends Hello is transient, not a start refusal.
         let _listener = std::os::unix::net::UnixListener::bind(socket).unwrap();
         kill_local_daemon_only(&fixture.home());
-        let began = std::time::Instant::now();
-        let status = cut_exit(host.child.as_mut().unwrap());
-        host.child.take();
-        assert_eq!(status.code(), Some(1));
+        wait_for_recovery_failure(&fixture, &mut host, "did not reconnect within 10 s");
+        assert_eq!(Client::connect(&host).rows(1), []);
+        stop(&mut host);
+    }
+}
+
+fn wait_for_recovery_failure(fixture: &Fixture, host: &mut Host, detail: &str) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(25);
+    let mut diagnostics = String::new();
+    loop {
         assert!(
-            began.elapsed() >= std::time::Duration::from_secs(9),
-            "transient redial did not retry"
+            host.child.as_mut().unwrap().try_wait().unwrap().is_none(),
+            "{diagnostics}"
         );
-        let stderr = host.lines.iter().collect::<Vec<_>>().join("\n");
-        assert!(stderr.contains("did not reconnect within 10 s"), "{stderr}");
+        for line in host.lines.try_iter() {
+            diagnostics.push_str(&line);
+        }
+        let log = std::fs::read_to_string(fixture.home().join("logs/plak.log")).unwrap_or_default();
+        if (diagnostics.contains("runner_recovery_failed") && diagnostics.contains(detail))
+            || (log.contains("runner_recovery_failed") && log.contains(detail))
+        {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "missing bounded runner failure: {diagnostics}\n{log}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }
 

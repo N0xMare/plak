@@ -37,8 +37,9 @@ pub(crate) fn bind_mcp_tools(
     _workspace_root: &Path,
     _secrets: Arc<dyn NamedSecrets>,
     _frozen: Option<&[McpToolRecord]>,
-    _node: super::McpNodeServices,
+    node: super::McpNodeServices,
 ) -> Result<BoundMcpTools, crate::CliFailure> {
+    let _ = (node.runner, node.product_home);
     crate::capabilities::require_tools(selection).map_err(|error| error.to_string())?;
     Ok(BoundMcpTools {
         names: Vec::new(),

@@ -305,7 +305,7 @@ async fn obsolete_inspection_preserves_jobs(
     assert_eq!(jobs[0].status, JobStatus::Running);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_held_line_does_not_prevent_the_next_lines_sweep() {
     let directory = tempfile::tempdir().unwrap();
     let workspace = directory.path();

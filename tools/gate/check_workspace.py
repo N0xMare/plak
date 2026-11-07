@@ -659,7 +659,8 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-hosted", "src/agent/roots.rs"): {"warn"},
     ("plak", "src/commands/runner/local.rs"): {"warn"},
     ("plak", "src/host.rs"): {"select"},
-    ("plak", "src/host/runner.rs"): {"info", "warn"},
+    ("plak", "src/commands/runner/services.rs"): {"info", "select", "warn"},
+    ("plak", "src/commands/runner/services/host.rs"): {"warn"},
     # Typed, output-free runner diagnostics and the recorded stop's fixed payload.
     ("plakous-hosted", "src/runner_adoption.rs"): {"info", "json", "warn"},
     # The tree stage a VCS effect runs as, read by a runner-backed port.
@@ -1537,18 +1538,12 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
             # Hidden, unsupported seam: the mark a job tail cut inside its
             # only line starts with, so a face shows no fragment.
             "JOB_TAIL_FRAGMENT",
-            # Hidden, unsupported runner seam: the selected runner's probe
-            # (spec 01 §8.5).
-            "runner::workspace_probe",
         },
     },
     "plakous-workspace": _SHARED_PLAKOUS_SYMBOLS,
     "plakous-recursive-subagents": {
         **_SHARED_PLAKOUS_SYMBOLS,
-        # Hidden, unsupported runner seam: the selected runner's probe and
-        # the runner the tree's VCS port runs on (spec 01 §8.5).
-        "tools": _SHARED_PLAKOUS_SYMBOLS["tools"]
-        | {"runner::process_runner", "runner::workspace_probe"},
+        "tools": _SHARED_PLAKOUS_SYMBOLS["tools"],
     },
     "plakous-recursive-subagents-store": _SHARED_PLAKOUS_SYMBOLS,
 }
@@ -1588,24 +1583,26 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     # The hidden runner seam's instruction reads (spec 01 §8.5): the reader
     # contract's answer types, and the seam's call, link and extension.
     ("plakous-hosted", "src/runner_reader.rs"): {
-        "prompts": {
-            "DirectoryAnswer",
-            "DirectoryRefusal",
-            "InstructionChainEntry",
-            "SourceEntryKind",
-            "SourceFile",
-            "SourceReadError",
-            "SourceResolution",
+        'prompts': {
+            'DirectoryAnswer',
+            'DirectoryRefusal',
+            'InstructionChainEntry',
+            'SourceEntryKind',
+            'SourceFile',
+            'SourceReadError',
+            'SourceResolution',
         },
-        "tools": {
-            "runner::RunnerCall",
-            "runner::RunnerExtension",
-            "runner::RunnerLink",
-            "runner::RunnerVerb",
-            "runner::ServeFailure",
-            "runner::ServeFuture",
-            "runner::call_blocking",
-            "runner::process_runner",
+        'runner': {'RunnerServices'},
+        'tools': {
+            'runner::RunnerCall',
+            'runner::RunnerExtension',
+            'runner::RunnerLink',
+            'runner::RunnerVerb',
+            'runner::ServeFailure',
+            'runner::ServeFuture',
+            'runner::call_blocking',
+            'runner::environment_failure',
+            'runner::workspace_refusal',
         },
     },
     # The export document names its runner by the library's runner identity.
@@ -1613,41 +1610,50 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     # `plak runner`: the daemon over the hidden runner ends, its environment
     # and identity, and the host's inspecting link (spec 02 §3.1).
     ("plak", "src/commands/runner.rs"): {
-        "model": {"RunId"},
-        "runner": {
-            "ClientWindows",
-            "FileOwnerFloors",
-            "RunnerClient",
-            "RunnerIdentity",
-            "RunnerLimits",
-            "RunnerOptions",
-            "RunnerService",
-            "daemon",
-            "protocol",
-            "Bind",
-            "LineStatus",
-            "Refusal",
+        'model': {'RunId'},
+        'runner': {
+            'Bind',
+            'ClientWindows',
+            'FileOwnerFloors',
+            'LineStatus',
+            'PlacementFailure',
+            'Refusal',
+            'RunnerClient',
+            'RunnerIdentity',
+            'RunnerLimits',
+            'RunnerOptions',
+            'RunnerPin',
+            'RunnerService',
+            'WorkspaceCatalog',
+            'daemon',
+            'machine_id',
+            'protocol',
         },
-        "tools": {
-            "ExecutionEnvironment",
-            "ExecutionEnvironmentConfig",
-            "ExecutionEnvironmentScope",
-            "RunnerId",
-            "runner",
+        'tools': {
+            'ExecutionEnvironment',
+            'ExecutionEnvironmentConfig',
+            'ExecutionEnvironmentScope',
+            'RunnerId',
+            'runner',
+            'runner::RunnerExtension',
+            'runner::workspace_refusal',
         },
     },
     # The host's strict ssh dial and journaled bind to a runner.
     ("plak", "src/commands/runner/dial.rs"): {
-        "runner": {
-            "CallJournal",
-            "ClientWindows",
-            "FileCallJournal",
-            "RunnerClient",
-            "protocol",
-            "Bind",
-            "Hello",
-            "VersionTriple",
-        },
+        'runner': {
+            'Bind',
+            'CallJournal',
+            'ClientWindows',
+            'ConnectError',
+            'FileCallJournal',
+            'Hello',
+            'PlacementFailure',
+            'ProbePhase',
+            'RunnerClient',
+            'VersionTriple',
+            'protocol',
+        }
     },
     # The host starts and journal-binds its home-local daemon before opening sessions.
     ("plak", "src/commands/runner/local.rs"): {
@@ -1661,19 +1667,20 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "daemon",
         },
     },
-    ("plak", "src/host/environment.rs"): {
-        "runner": {"RunnerClient"},
-        "tools": {"runner"},
-    },
-    ("plak", "src/host/runner.rs"): {"runner": {"RunnerClient"}},
     ("plak", "src/shell/services.rs"): {
-        "runner": {"RunnerClient"},
-        "tools": {"runner"},
+        'runner': {
+            'MachineOverlapGuard',
+            'PlacementFailure',
+            'ProbePhase',
+            'RunnerClient',
+            'RunnerRegistry',
+        },
+        'tools': {'runner', 'runner::LocalDaemonBackend'},
     },
     ("plakous-hosted", "src/agent/roots.rs"): {
         "sessions": {"LeaseOnlyHead"},
-        "runner": {"RunnerClient"},
-        "tools": {"runner::LocalDaemonBackend"},
+        'runner': {'RunnerClient', 'RunnerRegistry', 'RunnerServices', 'RunnerStatus'},
+        'tools': {'runner::LocalDaemonBackend'},
     },
     ("plakous-hosted", "src/agent/roots/local_runner.rs"): {
         "runner": {
@@ -1689,15 +1696,16 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     # `test-hooks` only: the offline script's child runner, bound and journaled
     # as a host's dial is, then selected for the process (spec 01 §8.5).
     ("plak", "src/test_hooks.rs"): {
-        "runner": {
-            "CallJournal",
-            "ClientWindows",
-            "FileCallJournal",
-            "RunnerClient",
-            "protocol",
-            "Bind",
+        'runner': {
+            'Bind',
+            'CallJournal',
+            'ClientWindows',
+            'FileCallJournal',
+            'RunnerClient',
+            'RunnerServices',
+            'protocol',
         },
-        "tools": {"runner::RunnerBackend", "runner::select_process_runner"},
+        'tools': {'runner::RunnerBackend'},
     },
     # Re-adoption of a runner's lines through a lease-only head (spec 01 §8.4).
     ("plakous-hosted", "src/runner_adoption.rs"): {
@@ -1786,46 +1794,48 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     },
     # A Direct extension's registry owner names its MCP server.
     ("plakous-hosted", "src/agent/build/tools.rs"): {"tools": {"ToolOwnerClass"}},
-    ("plakous-hosted", "src/agent/build/api.rs"): {"tools": {"RegisteredToolIdentity"}},
+    ("plakous-hosted", "src/agent/build/api.rs"): {
+        'runner': {'RunnerServices'},
+        'tools': {'RegisteredToolIdentity'},
+    },
     # MCP binding: the facade's MCP client, a host environment for the pool's
     # service processes or the selected runner's for a server placed there,
     # and the named-secret value type.
     ("plakous-hosted", "src/mcp_binding/available.rs"): {
-        "mcp": {
-            "HeaderName",
-            "HeaderValue",
-            "McpError",
-            "McpErrorKind",
-            "McpHttpEndpoint",
-            "McpHttpSecret",
-            "McpHttpSecretResolver",
-            "McpLease",
-            "McpOAuthSecretResolver",
-            "McpOAuthSettings",
-            "McpOAuthStatus",
-            "McpPool",
-            "McpPrompt",
-            "McpPromptExpansion",
-            "McpSecretResolver",
-            "McpNamedSecretMissing",
-            "McpServerSpec",
-            "McpToolPack",
-            "McpToolRecord",
-            "McpToolSelection",
-            "SensitiveBytes",
-            "ServiceSecretValue",
-            "exposed_tool_name",
+        'mcp': {
+            'HeaderName',
+            'HeaderValue',
+            'McpError',
+            'McpErrorKind',
+            'McpHttpEndpoint',
+            'McpHttpSecret',
+            'McpHttpSecretResolver',
+            'McpLease',
+            'McpNamedSecretMissing',
+            'McpOAuthSecretResolver',
+            'McpOAuthSettings',
+            'McpOAuthStatus',
+            'McpPool',
+            'McpPrompt',
+            'McpPromptExpansion',
+            'McpSecretResolver',
+            'McpServerSpec',
+            'McpToolPack',
+            'McpToolRecord',
+            'McpToolSelection',
+            'SensitiveBytes',
+            'ServiceSecretValue',
+            'exposed_tool_name',
         },
-        "model": {"RunId"},
-        "tools": {
-            "EnvironmentVariableName",
-            "ExecutionEnvironment",
-            "ExecutionEnvironmentConfig",
-            "ExecutionEnvironmentScope",
-            "runner::ProcessRunner",
-            "runner::RunnerBackend",
-            "runner::process_runner",
-            "runner::runner_environment",
+        'model': {'RunId'},
+        'runner': {'RunnerServices'},
+        'tools': {
+            'EnvironmentVariableName',
+            'ExecutionEnvironment',
+            'ExecutionEnvironmentConfig',
+            'ExecutionEnvironmentScope',
+            'runner::RunnerBackend',
+            'runner::runner_environment',
         },
     },
     # `plak mcp list|show` report an OAuth server's stored login.
@@ -1945,6 +1955,49 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     ("plakous-hosted", "src/capabilities/route_unavailable.rs"): {
         "model": {"HostedRetrievalTable"},
     },
+    ('plak', 'src/host.rs'): {'runner': {'RunnerStatus'}},
+    ('plak', 'src/lib.rs'): {'runner': {'RunnerServices'}},
+    ('plak', 'src/commands/runner/registry.rs'): {
+        'runner': {
+            'AdmissionSnapshot',
+            'ConfiguredRunner',
+            'MachineOverlapGuard',
+            'PlacementFailure',
+            'ProbePhase',
+            'RunnerPin',
+            'WorkspaceCatalog',
+            'WorkspaceOptions',
+            'machine_id',
+            'protocol',
+        }
+    },
+    ('plak', 'src/commands/runner/home.rs'): {'runner': {'daemon', 'protocol'}},
+    ('plak', 'src/commands/runner/services.rs'): {
+        'runner': {
+            'PlacementFailure',
+            'ProbePhase',
+            'RunnerClient',
+            'RunnerRegistry',
+            'RunnerServices',
+            'RunnerStatus',
+            'WorkspaceCatalog',
+            'protocol',
+        },
+        'tools': {'runner::RunnerBackend'},
+    },
+    ('plak', 'src/commands/runner/environment.rs'): {
+        'runner': {'RunnerClient'},
+        'tools': {'runner::LocalDaemonBackend'},
+    },
+    ('plak', 'src/commands/runner/services/host.rs'): {
+        'runner': {'PlacementFailure', 'ProbePhase', 'WorkspaceCatalog'}
+    },
+    ('plakous-hosted', 'src/openrouter.rs'): {'runner': {'RunnerServices'}},
+    ('plakous-hosted', 'src/skills.rs'): {'runner': {'RunnerServices'}},
+    ('plakous-hosted', 'src/mcp_binding.rs'): {'runner': {'RunnerServices'}},
+    ('plakous-hosted', 'src/agent/build/policy.rs'): {'runner': {'RunnerServices'}},
+    ('plakous-hosted', 'src/agent/build/profile.rs'): {'runner': {'RunnerServices'}},
+    ('plakous-hosted', 'src/agent/build/topology.rs'): {'runner': {'RunnerServices'}},
 }
 
 PROVIDER_NAMES = {"anthropic", "gemini", "openai", "openrouter", "xai"}

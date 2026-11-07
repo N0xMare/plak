@@ -10,10 +10,6 @@ pub(crate) fn probe_unavailable(error: ProbeError) -> CliFailure {
     CliFailure::new(format!("workspace could not be inspected: {error}"))
 }
 
-pub(crate) fn options(workspace: &Path) -> CliResult<HostProcessOptions> {
-    options_on(workspace, &plakous::tools::LocalWorkspaceProbe)
-}
-
 pub(crate) fn options_on(
     workspace: &Path,
     probe: &dyn plakous::tools::WorkspaceProbe,
@@ -44,7 +40,11 @@ pub(crate) fn options_on(
 
 #[cfg(test)]
 mod tests {
-    use super::options;
+    fn options(
+        workspace: &std::path::Path,
+    ) -> crate::CliResult<plakous::tools::HostProcessOptions> {
+        super::options_on(workspace, &plakous::tools::LocalWorkspaceProbe)
+    }
 
     #[test]
     fn inherited_workspace_does_not_require_minted_copy_shim() {

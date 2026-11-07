@@ -12,33 +12,23 @@ use crate::shell::services::Services;
 
 pub(crate) use super::ownership::StandaloneRunnerError;
 
-#[derive(Clone)]
-enum LocalTransport {
-    Direct,
-    #[cfg(feature = "web")]
-    Daemon(super::environment::HostEnvironment),
-}
-
 #[cfg(feature = "web")]
-pub(crate) fn prepare(
-    services: &Services,
-    environment: &super::environment::HostEnvironment,
-    runtime: &tokio::runtime::Runtime,
-) -> CliResult<Services> {
-    let ownership =
-        std::sync::Arc::new(super::ownership::RunnerOwnership::host(services.paths()?)?);
-    let services = services.with_runner_ownership(ownership);
-    let prepared = crate::commands::runner::registry::prepare(&services)?;
-    let services = prepared.services;
-    services.runners().require_connection("local", true);
-    start_probes(
-        &services,
-        prepared.local,
-        LocalTransport::Daemon(environment.clone()),
-        runtime.handle(),
-    );
-    Ok(services)
-}
+mod host;
+#[cfg(feature = "web")]
+pub(crate) use host::prepare;
+
+type LocalDial = dyn Fn(
+        Services,
+        std::sync::Arc<plakous::runner::WorkspaceCatalog>,
+        tokio::runtime::Handle,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<RunnerClient, plakous::runner::PlacementFailure>,
+                > + Send,
+        >,
+    > + Send
+    + Sync;
 
 pub(crate) fn standalone(
     services: &Services,
@@ -56,19 +46,14 @@ pub(crate) fn standalone(
     )?;
     let services = services.with_runner_ownership(std::sync::Arc::new(ownership));
     let prepared = super::registry::prepare(&services).map_err(StandaloneRunnerError::Setup)?;
-    start_probes(
-        &prepared.services,
-        prepared.local,
-        LocalTransport::Direct,
-        executor,
-    );
+    start_probes(&prepared.services, prepared.local, None, executor);
     Ok(prepared.services)
 }
 
 fn start_probes(
     services: &Services,
     local: std::sync::Arc<plakous::runner::WorkspaceCatalog>,
-    environment: LocalTransport,
+    environment: Option<std::sync::Arc<LocalDial>>,
     runtime: &tokio::runtime::Handle,
 ) {
     services.runners().run_probes_on(runtime.clone());
@@ -76,7 +61,7 @@ fn start_probes(
         String,
         crate::commands::runner::dial::Dialed,
     >::new()));
-    let retries = std::sync::Arc::new(std::sync::Mutex::new(BTreeMap::new()));
+    let retries: Retries = std::sync::Arc::default();
     let context = services.runner_probe_context();
     let handle = runtime.clone();
     services
@@ -91,11 +76,10 @@ fn start_probes(
             Box::pin(async move {
                 if id == "local" {
                     match environment {
-                        LocalTransport::Direct => {
+                        None => {
                             return ready_local(registry, local, services.now_unix_seconds()).await;
                         }
-                        #[cfg(feature = "web")]
-                        LocalTransport::Daemon(environment) => {
+                        Some(dial) => {
                             if services
                                 .local_runner_client()
                                 .is_some_and(|client| client.is_connected())
@@ -107,7 +91,7 @@ fn start_probes(
                                 return ready_local(registry, local, services.now_unix_seconds())
                                     .await;
                             }
-                            let result = bind_local(&services, local, &environment, &handle).await;
+                            let result = dial(services.clone(), local, handle).await;
                             match &result {
                                 Ok(client) => watch_remote(registry, id, client.clone(), retries),
                                 Err(_) => retry_remote(registry, id, retries),
@@ -290,80 +274,6 @@ fn install_reporter(client: &RunnerClient) {
     client.report_foreground_with(|line, process| {
         tracing::info!(target: "plak.runner", line, call_key = %process.call_key, pid = process.pid, ended = %process.ended, "stopped_foreground");
     });
-}
-
-#[cfg(feature = "web")]
-async fn bind_local(
-    services: &Services,
-    catalog: std::sync::Arc<plakous::runner::WorkspaceCatalog>,
-    environment: &super::environment::HostEnvironment,
-    runtime: &tokio::runtime::Handle,
-) -> Result<RunnerClient, plakous::runner::PlacementFailure> {
-    use plakous::runner::{PlacementFailure, ProbePhase};
-    let unavailable = |phase| PlacementFailure::RunnerUnreachable {
-        phase,
-        timed_out: false,
-    };
-    let paths = services
-        .paths()
-        .map_err(|_| unavailable(ProbePhase::Daemon))?;
-    services
-        .runners()
-        .begin_reconcile("local", services.now_unix_seconds());
-    services.runners().progress("local", ProbePhase::Daemon);
-    let client = if let Some(client) = services.local_runner_client() {
-        if !client.is_connected() {
-            crate::commands::runner::local::reconnect(paths, &client)
-                .await
-                .map_err(|error| {
-                    tracing::warn!(target: "plak.runner", runner_id = "local", phase = "daemon", error = %error, "runner_recovery_failed");
-                    unavailable(ProbePhase::Daemon)
-                })?;
-        }
-        client
-    } else {
-        crate::commands::runner::local::dial(paths)
-            .await
-            .map_err(|error| {
-                tracing::warn!(target: "plak.runner", runner_id = "local", phase = "daemon", error = %error, "runner_recovery_failed");
-                unavailable(ProbePhase::Daemon)
-            })?
-    };
-    install_reporter(&client);
-    let _ = services.with_local_daemon(
-        environment.backend(client.clone(), runtime.clone()),
-        client.clone(),
-    );
-    services.runners().progress("local", ProbePhase::Reconcile);
-    let sessions = services
-        .state_roots()
-        .and_then(|roots| roots.runtime_sessions())
-        .map_err(|_| unavailable(ProbePhase::Reconcile))?;
-    let obsolete = crate::commands::runner::local::older(paths)
-        .await
-        .map_err(|_| unavailable(ProbePhase::Reconcile))?;
-    plakous_hosted::runner_adoption::report_obsolete_lines(&sessions, obsolete).await;
-    let (readopted, failures) =
-        plakous_hosted::runner_adoption::readopt_lines(&client, &sessions, "plak:host:readopt")
-            .await
-            .map_err(|_| unavailable(ProbePhase::Reconcile))?;
-    if failures.iter().any(|failure| !failure.held_elsewhere) {
-        return Err(unavailable(ProbePhase::Reconcile));
-    }
-    let _ = client.recover().await;
-    finish_stops(services, &client, &sessions, &readopted)
-        .await
-        .map_err(|_| unavailable(ProbePhase::Reconcile))?;
-    client
-        .reconcile_settled_foreground()
-        .await
-        .map_err(|_| unavailable(ProbePhase::Reconcile))?;
-    let registry = services.runners().clone();
-    let now = services.now_unix_seconds();
-    tokio::task::spawn_blocking(move || registry.ready_local(catalog, now))
-        .await
-        .map_err(|_| unavailable(ProbePhase::Discovery))??;
-    Ok(client)
 }
 
 async fn bind_remote(
