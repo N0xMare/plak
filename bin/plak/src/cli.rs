@@ -12,7 +12,7 @@ use std::ffi::OsString;
 
 use clap::{ArgAction, Parser, Subcommand};
 use plakous::subscriptions::NativeLoginMode;
-#[cfg(test)]
+#[cfg(all(test, feature = "maintainer"))]
 use plakous::subscriptions::NativeProvider;
 
 use crate::command::{Command, NATIVE_RUN_MAX_PROMPT_BYTES, RunEffort};
