@@ -116,12 +116,62 @@ fn assert_yielded_cell_later_round_abandonment(
             fold.effect_operations
                 .contains(&OperationId(cell.operation_id()))
         );
+        assert_later_provider_refuses_without_yielded_parent(checkpoint, cell, provider)?;
         cuts += 1;
     }
     assert!(
         cuts >= 2,
         "both prepared and dispatched later-round cuts must be covered"
     );
+    Ok(())
+}
+
+fn assert_later_provider_refuses_without_yielded_parent(
+    checkpoint: &RuntimeCheckpoint,
+    cell: &DurableOperationRecord,
+    provider: &DurableOperationRecord,
+) -> TestResult {
+    for locator_provider in [false, true] {
+        if locator_provider && !matches!(provider.state(), DurableOperationState::Dispatched) {
+            continue;
+        }
+        let records = checkpoint
+            .manifest()
+            .ledger()
+            .operations()
+            .into_iter()
+            .map(|record| {
+                if !locator_provider && record.operation_id() == cell.operation_id() {
+                    return DurableOperationRecord::new(
+                        record.operation_id(),
+                        record.kind().clone(),
+                        record.request().clone(),
+                        record.transitions()[..record.transitions().len() - 1].to_vec(),
+                    );
+                }
+                if locator_provider && record.operation_id() == provider.operation_id() {
+                    return record.append_transition(DurableOperationTransition::new(
+                        CheckpointId::try_from(uuid::Uuid::from_u128(0xc0de_ff99))
+                            .map_err(|_| crate::RuntimeManifestError::InvalidLedger)?,
+                        DurableOperationState::LocatorBound(
+                            cell.latest_locator()
+                                .cloned()
+                                .ok_or(crate::RuntimeManifestError::InvalidLedger)?,
+                        ),
+                    ));
+                }
+                Ok(record.clone())
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("negative provider state {locator_provider}: {error}"))?;
+        let turn = operation_turn_id(cell).ok_or("cell root")?;
+        let cut = checkpoint_with_code_cell_records(checkpoint, turn, records)
+            .map_err(|error| format!("negative provider checkpoint {locator_provider}: {error}"))?;
+        let error = code_cell_abandonment_fold(&cut)
+            .err()
+            .ok_or("unsupported provider/cell combination was accepted")?;
+        assert_eq!(error.kind(), AgentErrorKind::OutcomeUnknown);
+    }
     Ok(())
 }
 

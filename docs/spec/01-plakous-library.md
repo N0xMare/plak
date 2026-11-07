@@ -378,7 +378,10 @@ references of retained evidence, frames and runtime owners. A live composition
 group stays whole, including delivered children below P; only fully closed,
 unreferenced groups retire. If a yielded cell spans a later unobserved model
 round, the turn abandonment fold closes both the exact cell group and that
-provider attempt without restarting either. Preserve the latest response/provenance, newest
+provider attempt without restarting either. This cell abandonment accepts only
+a same-turn Prepared, Dispatched or OutcomeUnknown provider strictly after a
+LocatorBound evaluation. A LocatorBound provider, or a provider without such
+an earlier evaluation, remains outside that cell-abandonment scope (§5.5). Preserve the latest response/provenance, newest
 finalized-provider fence, failed paid-fold pairs, latest successful fold pair,
 and latest harness-fold pair. Post-P fold evidence cannot disappear and change
 an open/committed/unsent Fold or Retry closure row. Settled controls remain while
@@ -1198,7 +1201,11 @@ recency margin, plus a round's commits. A test-hooks build reads
 `PLAK_TEST_WORKING_PRUNE_MINIMUM` for that minimum, and
 `PLAK_TEST_WORKING_PRUNE_MARGIN` for the recency floor, so a gate sweep prunes
 between every pair of rounds. Both knobs are for the crash sweep only
-(spec 05); parity tests run at the default margin. Before dispatching the prune, the owner
+(spec 05); parity tests run at the default margin. The test-only
+`PLAK_TEST_LEDGER_RETIREMENT_HIGH_WATER` and
+`PLAK_TEST_LEDGER_HEADROOM_LIMIT` knobs separately lower operation-retirement
+and admission thresholds (§3.1); they do not enlarge any persisted bound. Before
+dispatching the prune, the owner
 unconditionally reduces its object cache to the current root's reachable
 closure. Cache membership must not imply that a superseded object survives
 store reclamation; reconstructing its address later must supply it again.
@@ -2653,6 +2660,10 @@ evidence, never written onto an effect or process-session record; a cell's
 nested effect or process is closed by the effect and process rules, named
 among the possible effects, and never turned into a cell result. A process
 session's orphan is not signalled.
+A pending provider obligation is eligible for Code Cell abandonment only for a
+Turn-root provider attempt ordered after its LocatorBound evaluation. A provider
+without that earlier evaluation, or a LocatorBound provider attempt, still
+refuses Code Cell abandonment.
 
 **Usage.** Every terminal recovery publishes reports the exact sum over T's
 provider outcome records: each attempt counts once, completed and failed

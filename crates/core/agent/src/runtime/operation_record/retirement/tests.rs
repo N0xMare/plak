@@ -12,6 +12,9 @@ use plakous_model::{
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
+#[path = "precas_tests.rs"]
+mod precas;
+
 fn checkpoint(value: u64) -> TestResult<CheckpointId> {
     Ok(CheckpointId::try_from(uuid::Uuid::from_u128(
         u128::from(value) + 0x10000,

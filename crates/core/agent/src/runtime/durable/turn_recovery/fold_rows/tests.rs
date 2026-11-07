@@ -666,6 +666,7 @@ async fn retirement_respects_closed_baton_references_reaches_target_and_matches_
     let retained = retire_test_ledger(&full, turn, 16)?;
     assert!(retained.operation_count() <= 12);
     assert!(retained.operation(baton).is_some());
+    assert_dependency_publication_refusal(&full, turn, effect)?;
     assert_eq!(retained.operation(effect), full.operation(effect));
     assert_eq!(
         terminal_turn_usage(&retained, turn)?,
@@ -726,6 +727,51 @@ fn finalized_batch_records(source: &RuntimeCheckpoint) -> TestResult<Vec<Durable
             )?)
         })
         .collect()
+}
+
+fn assert_dependency_publication_refusal(
+    full: &RuntimeOperationLedger,
+    turn: TurnId,
+    effect: u64,
+) -> TestResult {
+    use crate::runtime::checkpoint::candidate::{SuccessorFacts, successor_candidate};
+    let parent = retirement_checkpoint(full.clone(), turn, CanonicalHistory::default())?;
+    let forged = RuntimeOperationLedger::new(
+        full.commands().into_iter().cloned().collect(),
+        full.operations()
+            .into_iter()
+            .filter(|record| record.operation_id() != effect)
+            .cloned()
+            .collect(),
+    )?
+    .with_retired_attempts(Some((turn, 1)))?
+    .with_retirement_source(full, &std::collections::BTreeSet::new());
+    let manifest = parent.manifest();
+    let result = successor_candidate(
+        &parent,
+        &RuntimeCheckpointCodec::bundle(&parent, None)?,
+        SuccessorFacts {
+            checkpoint_id: CheckpointId::try_from(uuid::Uuid::from_u128(0x9910))?,
+            lifecycle: manifest.lifecycle().clone(),
+            history: manifest.canonical().history().clone(),
+            ledger: forged,
+            jobs: manifest.jobs().clone(),
+            named_state: manifest.named_state().clone(),
+            context: manifest.canonical().context().retained_for_exact_resume(),
+            family: manifest.family_artifact().cloned(),
+        },
+        1,
+        None,
+    );
+    let error = result
+        .err()
+        .ok_or("frame dependency was lost before publication")?;
+    assert_eq!(error.kind(), AgentErrorKind::Internal);
+    assert_eq!(
+        error.message(),
+        "operation ledger retirement violates its frontier or accounting"
+    );
+    Ok(())
 }
 
 fn completed_batch_frame(

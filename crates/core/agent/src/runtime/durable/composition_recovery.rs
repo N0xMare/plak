@@ -310,6 +310,10 @@ pub(in crate::runtime) fn code_cell_abandonment_fold(
     let mut continuations = Vec::new();
     let mut turn_abandonment = root_finalized;
     let mut root_recovery_required = root_finalized;
+    let yielded_evaluation = ledger.operations().into_iter().find(|record| {
+        matches!(record.kind(), DurableOperationKind::CompositionEvaluation { turn_id: bound, .. } if bound == turn_id)
+            && matches!(record.state(), DurableOperationState::LocatorBound(_))
+    }).map(DurableOperationRecord::operation_id);
     for obligation in obligations {
         let record = ledger
             .operation(obligation.operation_id())
@@ -333,13 +337,13 @@ pub(in crate::runtime) fn code_cell_abandonment_fold(
             // A yielded cell can span later model rounds. Their unobserved
             // provider outcomes remain the ordinary turn fold's responsibility.
             (
-                DurableOperationKind::Provider { .. },
+                DurableOperationKind::Provider { root: plakous_model::ModelOperationRoot::Turn(bound), .. },
                 DurableOperationState::Prepared
                 | DurableOperationState::Dispatched
                 | DurableOperationState::OutcomeUnknown(_),
                 RecoveryObligationKind::ProviderAttempt,
                 RecoveryAction::ProviderEvidenceRequired,
-            ) => turn_abandonment = true,
+            ) if bound == turn_id && yielded_evaluation.is_some_and(|id| id < record.operation_id()) => turn_abandonment = true,
             (
                 DurableOperationKind::Command {
                     turn_id: Some(root_turn),
