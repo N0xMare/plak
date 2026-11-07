@@ -150,9 +150,10 @@ fn launch(
 ) -> CliResult<tui::TuiLaunch> {
     let workspace = paths.workspace().map_err(CliFailure::new)?.to_path_buf();
     let settings = crate::shell::settings::settings_view(cfg);
+    face.probe_host_notice();
     Ok(tui::TuiLaunch {
         host_mode: true,
-        host_notice: face.outdated_host_notice(),
+        host_notice: None,
         version: plakous::VERSION,
         session_id: face.session(),
         workspace: workspace.clone(),
@@ -222,8 +223,9 @@ fn reload(
         crate::build_identity::invocation_argv0(),
     );
     command.env_remove(super::RELOAD_EPOCH_ENV);
+    command.arg(crate::cli::HOST_RESUME_FLAG);
     if let Some(session) = session {
-        command.arg("--resume").arg(session);
+        command.arg(session);
     }
     let error = std::os::unix::process::CommandExt::exec(&mut command);
     Err(CliFailure::new(format!(

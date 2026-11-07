@@ -6,6 +6,7 @@ use plakous_host_protocol::wire::{ClientFrame, Hello, Op, WIRE_VERSION, encode_l
 use std::io::{BufRead as _, BufReader};
 use std::os::unix::net::UnixStream;
 
+mod build_notice;
 mod lifecycle;
 
 struct Directory {
@@ -398,6 +399,9 @@ fn a_host_tui_shows_a_persistent_notice_only_when_the_installed_build_differs() 
         terminal.wait_ready();
         assert_eq!(Directory::connect(&fixture).binary, host);
         terminal.send(b"work with this host\r");
+        if mismatch {
+            terminal.wait_screen("differs from installed build");
+        }
         let screen = terminal.wait_screen("notice does not block work");
         assert_eq!(
             screen.contains("differs from installed build"),

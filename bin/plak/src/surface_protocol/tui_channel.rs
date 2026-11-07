@@ -83,6 +83,14 @@ pub enum TuiEventReceiver {
 }
 
 impl TuiEventReceiver {
+    /// Client-local build notice for this socket face, outside the wire.
+    pub(crate) fn host_notice(&self) -> Option<String> {
+        match self {
+            Self::Socket(face) => face.host_notice(),
+            _ => None,
+        }
+    }
+
     /// The next observation, as [`HostEventReceiver::try_recv`].
     ///
     /// # Errors

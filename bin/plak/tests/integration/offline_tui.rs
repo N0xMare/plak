@@ -257,6 +257,12 @@ impl Fixture {
     }
 
     fn ensure_host_with_env(&self, env: &[(&str, &str)]) {
+        let mut command = self.command();
+        command.envs(env.iter().copied());
+        self.ensure_host_with_command(command);
+    }
+
+    fn ensure_host_with_command(&self, mut command: Command) {
         use std::io::{BufRead as _, BufReader};
         use std::process::Stdio;
         if self.mode != Mode::Host {
@@ -266,9 +272,7 @@ impl Fixture {
         if slot.is_some() {
             return;
         }
-        let mut child = self
-            .command()
-            .envs(env.iter().copied())
+        let mut child = command
             .arg("host")
             .stdin(Stdio::null())
             .stdout(Stdio::null())

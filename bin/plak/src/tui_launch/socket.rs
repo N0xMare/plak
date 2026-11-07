@@ -30,6 +30,8 @@ pub struct SocketFace {
 
 #[derive(Default)]
 struct State {
+    host_notice_probe_started: bool,
+    host_notice: Option<String>,
     session: Option<String>,
     pending: BTreeMap<RequestId, (Option<UserAction>, Instant)>,
     attachments: BTreeMap<RequestId, (String, Instant)>,
@@ -205,18 +207,32 @@ impl SocketFace {
         self.receiver.ended()
     }
 
-    pub(super) fn outdated_host_notice(&self) -> Option<String> {
-        let installed = crate::carry::probe_reload(
-            &self.paths,
-            std::path::Path::new(&self.workspace),
-            None,
-            None,
-        )
-        .0?;
-        outdated_host_notice(
-            self.host_binary.as_deref(),
-            installed.probe.as_ref()?.binary_id.as_deref(),
-        )
+    pub(super) fn probe_host_notice(&self) {
+        if std::mem::replace(&mut self.state().host_notice_probe_started, true) {
+            return;
+        }
+        let paths = self.paths.clone();
+        let workspace = self.workspace.clone();
+        let host = self.host_binary.clone();
+        let state = Arc::clone(&self.state);
+        std::thread::spawn(move || {
+            let installed =
+                crate::carry::probe_reload(&paths, std::path::Path::new(&workspace), None, None).0;
+            let installed = installed
+                .as_ref()
+                .and_then(|target| target.probe.as_ref())
+                .and_then(|probe| probe.binary_id.as_deref());
+            // The result belongs to this connection, never a later face.
+            state
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .host_notice = outdated_host_notice(host.as_deref(), installed);
+            crate::tui::wake::wake();
+        });
+    }
+
+    pub(crate) fn host_notice(&self) -> Option<String> {
+        self.state().host_notice.clone()
     }
 
     fn note(&self, text: String) {

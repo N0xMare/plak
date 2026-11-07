@@ -4556,7 +4556,10 @@ A terminal connected to a host whose welcome binary id differs from the
 locally installed binary id shows a persistent, non-blocking notice naming
 both builds. Its remedy is to restart the host unit, or run `plak host stop`
 and start it again. The ids are read-only build facts; the terminal never
-restarts the host. Matching builds show no notice. An unavailable identity
+restarts the host. Its installed-build probe runs off the UI thread, without
+delaying the first frame. A result belongs only to its connection; reconnecting
+never inherits an old connection's notice or pending result. Matching builds
+show no notice. An unavailable identity
 does not establish a mismatch.
 
 - **One per home and state key.** Before anything else it takes an exclusive
@@ -4960,6 +4963,9 @@ with a stop-host/run-its-build remedy, rather than accidentally opening
 an embedded session on another key. Running processes do not refuse a hand
 reload in host mode: they belong to the host or its daemon and survive the
 client replacement. Embedded reload keeps its background-process refusal.
+The exec carries a private host-only resume marker: if no host answers the
+replacement client, it refuses with `the host stopped; start it, then plak
+resume <id>`, never embedding or taking session custody.
 
 Socket discovery applies the same-user run-directory, socket-owner and
 peer-uid checks (§4.6, chapter 04 §4.7). An unbindably long socket path

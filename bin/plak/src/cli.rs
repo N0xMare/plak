@@ -20,6 +20,7 @@ use plakous_hosted::account::{AccountRef, Vertical};
 
 /// The hidden argument a reload passes to name its handoff sidecar.
 pub(crate) const RELOAD_HANDOFF_FLAG: &str = "--reload-handoff";
+pub(crate) const HOST_RESUME_FLAG: &str = "--host-resume";
 
 /// Parse argv tokens (without binary name) into a product [`Command`].
 pub(crate) fn parse(arguments: impl IntoIterator<Item = OsString>) -> crate::CliResult<Command> {
@@ -42,6 +43,13 @@ fn split_reload_handoff(values: &[String]) -> (&[String], Option<std::path::Path
 fn resume_command(values: &[String]) -> Option<Result<Command, String>> {
     let (values, handoff) = split_reload_handoff(values);
     Some(match values.first().map(String::as_str)? {
+        HOST_RESUME_FLAG if handoff.is_none() => match values {
+            [_] => Ok(Command::HostResume { session_id: None }),
+            [_, session_id] if !session_id.starts_with('-') => Ok(Command::HostResume {
+                session_id: Some(session_id.clone()),
+            }),
+            _ => Err("plak --host-resume accepts at most one session UUID".to_owned()),
+        },
         "--import-resume" => match values {
             [_, path] if !path.starts_with('-') => Ok(Command::ImportResume {
                 path: path.into(),

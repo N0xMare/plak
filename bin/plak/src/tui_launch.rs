@@ -81,6 +81,22 @@ pub(crate) fn launch_tui(
     )
 }
 
+pub(crate) fn launch_host_tui(
+    services: &Services,
+    session_id: Option<String>,
+) -> CliResult<ProcessOutcome> {
+    refuse_without_terminal(services, session_id.as_deref(), false)?;
+    let face = socket::SocketFace::discover(services.paths()?)?.ok_or_else(|| {
+        CliFailure::new(format!(
+            "the host stopped; start it, then plak resume{}",
+            session_id
+                .as_ref()
+                .map_or_else(String::new, |id| format!(" {id}")),
+        ))
+    })?;
+    hosted::run(services, face, session_id, false, None)
+}
+
 fn begin_tui_session_launch(
     _paths: &product_paths::PlakPaths,
     _record: &mut product_sessions::SessionRecord,

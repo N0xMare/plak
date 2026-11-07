@@ -405,7 +405,10 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
     // Only a command that uses product state records a fresh binary id in the
     // home; inspection commands read the identity cache and never write it.
     if command_needs_product_state(&command)
-        || matches!(command, Command::Tui { .. } | Command::Resume { .. })
+        || matches!(
+            command,
+            Command::Tui { .. } | Command::Resume { .. } | Command::HostResume { .. }
+        )
     {
         build_identity::allow_identity_cache_writes();
     }
@@ -491,6 +494,9 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             session_id,
             resume_picker,
         } => return launch_tui(&services, session_id, resume_picker, None),
+        Command::HostResume { session_id } => {
+            return tui_launch::launch_host_tui(&services, session_id);
+        }
         Command::Resume {
             session_id: None, ..
         } => return launch_tui(&services, None, true, None),
@@ -1226,6 +1232,7 @@ fn execute_command(
         | Command::ContinueSession { .. }
         | Command::Tui { .. }
         | Command::Resume { .. }
+        | Command::HostResume { .. }
         | Command::Agent { .. }
         | Command::Host(_)
         | Command::WireSchema

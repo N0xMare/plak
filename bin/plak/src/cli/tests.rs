@@ -1368,6 +1368,19 @@ fn resume_aliases_accept_at_most_one_session_id() {
 }
 
 #[test]
+fn the_private_host_resume_marker_is_distinct_from_embedded_resume() {
+    for argv in [&["--host-resume"][..], &["--host-resume", "aaaaaaaa"][..]] {
+        assert!(matches!(parse(args(argv)), Ok(Command::HostResume { .. })));
+    }
+    for argv in [
+        &["--host-resume", "--other"][..],
+        &["--host-resume", "id", "extra"][..],
+    ] {
+        assert!(parse(args(argv)).is_err());
+    }
+}
+
+#[test]
 fn top_level_init_and_setup_are_absent_but_config_init_remains() {
     for retired in ["init", "setup"] {
         assert_eq!(

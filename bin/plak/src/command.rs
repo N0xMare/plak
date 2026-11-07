@@ -112,6 +112,9 @@ pub(crate) enum Command {
         /// The reload handoff sidecar the old build named (hidden).
         handoff: Option<PathBuf>,
     },
+    HostResume {
+        session_id: Option<String>,
+    },
     Fork {
         session_id: String,
         confirmed: bool,
@@ -421,7 +424,7 @@ impl Command {
             | Self::ReopenProbe { .. }
             | Self::ExportVersion => "version",
             Self::Tui { .. } => "tui",
-            Self::Resume { .. } | Self::ImportResume { .. } => "resume",
+            Self::Resume { .. } | Self::HostResume { .. } | Self::ImportResume { .. } => "resume",
             Self::Fork { .. } => "fork",
             Self::Compact { .. } => "compact",
             Self::Doctor => "doctor",
