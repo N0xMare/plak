@@ -1200,6 +1200,9 @@ an isolated home must refuse before product-store publication, not construct
 a default credential source. Mutants accepting unknown routes or bypassing
 session account admission must fail committed assertions. Read-only account
 labels remain distinct from admission and known-feature omission.
+Explicit rebind tests separately preserve its configured-root remedy for an
+unresolvable source: valid policy yields the fallback notice and strips replay,
+while invalid policy refuses without choosing a root or changing replay.
 
 Repository tooling tests live in `tests/tooling/`; opt-in live scenarios and
 their status page live in `tests/live/`. Build helpers

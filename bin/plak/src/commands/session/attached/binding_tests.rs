@@ -1,6 +1,39 @@
 use super::*;
 
 #[test]
+fn only_explicit_rebind_classifies_an_unknown_account_as_unresolvable() {
+    let root = tempfile::tempdir().unwrap();
+    let paths = crate::home::paths::PlakPaths::explicit(root.path().join("home"))
+        .for_workspace(root.path());
+    paths.ensure_layout().unwrap();
+    let services = crate::shell::services::Services::for_home(paths);
+    let mut record = product_sessions::SessionRecord::new(root.path().to_path_buf());
+    record.account = Some("openai/work".into());
+    record.model = Some("m".into());
+    for purpose in [
+        AttachedPurpose::Action,
+        AttachedPurpose::Verify,
+        AttachedPurpose::Rebind,
+    ] {
+        let Err(refusal) = build_attached_host_config(&services, record.clone(), purpose) else {
+            panic!("unknown account was admitted");
+        };
+        assert_eq!(
+            matches!(refusal, AttachedConfigError::Unresolvable(_)),
+            purpose == AttachedPurpose::Rebind
+        );
+        let failure = CliFailure::from(refusal);
+        assert!(matches!(
+            std::error::Error::source(&failure)
+                .unwrap()
+                .downcast_ref::<plakous_hosted::capabilities::AccountAdmissionError>(),
+            Some(plakous_hosted::capabilities::AccountAdmissionError::UnknownAccount { .. })
+        ));
+        assert_eq!(services.product_store_opens(), 0);
+    }
+}
+
+#[test]
 fn absent_model_is_unresolvable_only_in_a_ready_catalog() {
     for ready in [false, true] {
         let catalog = plakous_host_protocol::views::ReadyCatalog::new(vec![

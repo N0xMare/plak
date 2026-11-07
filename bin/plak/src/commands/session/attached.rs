@@ -135,7 +135,21 @@ fn build_attached_host_config(
     purpose: AttachedPurpose,
 ) -> Result<product_host::HostConfig<crate::surface_protocol::PlakExtension>, AttachedConfigError> {
     let classify_rebind_fallback = purpose == AttachedPurpose::Rebind;
-    crate::build_features::admit_session(&record)?;
+    if let Err(error) = crate::build_features::admit_session(&record) {
+        let unknown_account = std::error::Error::source(&error).is_some_and(|source| {
+            matches!(
+                source.downcast_ref::<plakous_hosted::capabilities::AccountAdmissionError>(),
+                Some(plakous_hosted::capabilities::AccountAdmissionError::UnknownAccount { .. })
+            )
+        });
+        if classify_rebind_fallback && unknown_account {
+            // Choosing the configured root requires a valid local policy first.
+            let paths = services.paths()?.for_workspace(&record.workspace_root);
+            product_config::SessionPolicy::load(&paths).map_err(CliFailure::new)?;
+            return Err(AttachedConfigError::Unresolvable(error));
+        }
+        return Err(error.into());
+    }
     let paths = &services.paths()?.for_workspace(&record.workspace_root);
     product_config::SessionPolicy::load(paths).map_err(CliFailure::new)?;
     let cwd = services
@@ -183,11 +197,6 @@ fn build_attached_host_config(
         .model
         .clone()
         .ok_or_else(|| CliFailure::new("session has no exact model binding"))?;
-    if plakous_hosted::capabilities::for_account(&account).is_none() {
-        return Err(AttachedConfigError::Unresolvable(CliFailure::new(format!(
-            "account `{account}` is no longer available"
-        ))));
-    }
     let presentation = tui_presentation_bundle(paths)?;
     let ready_catalog = &presentation.sections;
     let (effort, explicit) = product_host::effort_from_config(record.effort.as_deref());

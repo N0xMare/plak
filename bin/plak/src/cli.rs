@@ -952,14 +952,15 @@ struct RunPrompt {
 }
 
 fn parse_oauth_account(value: &str) -> Result<NativeProvider, String> {
-    match value {
-        "codex" => Ok(NativeProvider::Codex),
-        "grok" | "supergrok" => Ok(NativeProvider::Xai),
-        "claude" => Ok(NativeProvider::Claude),
-        _ => Err(format!(
-            "unknown OAuth account `{value}`; expected codex|grok|claude (API keys: plak key set …)"
-        )),
-    }
+    let route = plakous_hosted::capabilities::for_account(value).ok_or_else(|| {
+        plakous_hosted::capabilities::AccountAdmissionError::UnknownAccount {
+            account: value.to_owned(),
+        }
+        .to_string()
+    })?;
+    route.native_provider().ok_or_else(|| {
+        format!("account `{value}` is not an OAuth account; use plak key set for API keys")
+    })
 }
 
 #[cfg(test)]
