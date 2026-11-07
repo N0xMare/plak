@@ -4286,6 +4286,40 @@ fn session_event_files(fixture: &Fixture) -> Vec<PathBuf> {
     files
 }
 
+/// Waits for the resumed turn's terminal authority, not just streamed text.
+fn wait_for_last_turn_completed(fixture: &Fixture) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let records = session_event_files(fixture)
+            .into_iter()
+            .flat_map(|path| {
+                std::fs::read_to_string(path)
+                    .unwrap_or_default()
+                    .lines()
+                    .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        if let Some(admitted) = records
+            .iter()
+            .rev()
+            .find(|record| record["kind"] == "turn.lifecycle" && record["phase"] == "admitted")
+            && records.iter().any(|record| {
+                record["kind"] == "turn.lifecycle"
+                    && record["phase"] == "completed"
+                    && record["turn_id"] == admitted["turn_id"]
+            })
+        {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the resumed turn never completed: {records:?}"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 /// §6 quit over a live OS child on the real TUI: the terminal is restored,
 /// the worker join holds until the child's group TERM lands, and the printed
 /// resume id attaches the same session for a second turn — not a fresh one.
@@ -4445,12 +4479,10 @@ fn real_process_quit_fixture(promoted: bool) {
     resumed.wait_screen("/ commands");
     resumed.send(b"carry on\r");
     resumed.wait_screen("resumed owned process session");
+    wait_for_last_turn_completed(&fixture);
     resumed.send(b"\x11");
     let status = resumed.finish();
-    assert!(
-        status.signal().is_none() && matches!(status.exit_code(), 0 | 130),
-        "{status:?}"
-    );
+    assert!(status.success(), "{status:?}");
 
     assert_eq!(
         session_event_files(&fixture),
@@ -5534,12 +5566,10 @@ fn real_composition_quit_releases_nested_process() {
     resumed.wait_screen("/ commands");
     resumed.send(b"run nested\r");
     resumed.wait_screen("the composed answer");
+    wait_for_last_turn_completed(&fixture);
     resumed.send(b"\x11");
     let status = resumed.finish();
-    assert!(
-        status.signal().is_none() && matches!(status.exit_code(), 0 | 130),
-        "{status:?}"
-    );
+    assert!(status.success(), "{status:?}");
 
     assert_eq!(
         session_event_files(&fixture),

@@ -1426,8 +1426,8 @@ A hosted quit regression expires the terminal-join deadline after cancellation
 settles, before the host polls the already-published result. It requires a clean
 quit and the canonical cancelled lifecycle, not lease-only abandonment. The
 injected deadline models host descheduling without a wall-clock wait, so this
-regression runs in the parallel lane; the real-binary quit latency checks keep
-their unchanged serial budgets.
+regression lives in `runtime::quit_tests` and runs in the parallel lane; the
+real-binary quit latency checks keep their unchanged serial budgets.
 
 The real-binary `real_*quit_releases*` checks accept exactly the two specified
 quit statuses: joined release (0) and lease-only abandonment (130), never a
@@ -1438,12 +1438,14 @@ after reopening exactly the same session. Host load can legitimately spend
 the bounded cancel/join windows; requiring only exit 0 would assert an
 unpromised scheduling deadline rather than release and recovery.
 
-A cell finalization cut leaves its provider round, evaluation and child
-finalized, its nested effect Completed, and its root Dispatched. Recovery must
+A real accepted cancellation cut leaves its provider round, evaluation and
+single child finalized, its nested effect Completed, and its root Dispatched.
+`execute_restored_admitted` returns on cancellation before pushing the effect
+into the cell's child-operation list, so only the root terminal commit's
+`finalize_turn` would finalize it. Its outcome was not consumed. Recovery must
 close that root and finalize the effect with its own evidence, without replay.
-This models quit abandoning after root-boundary cleanup consumed the nested
-reply but before its effect-finalization commit; exact reopen must not refuse
-that otherwise settled head.
+The regression reopens the unedited accepted checkpoint in a fresh runtime;
+a same-attempt effect whose call identity has no child must not close.
 
 The product-revision CAS probes run serially with `PLAK_TEST_CAS_SAMPLES`
 independent homes each (positive integer, default 6, two process launches per

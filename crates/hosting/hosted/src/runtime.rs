@@ -180,6 +180,8 @@ pub use factory::{ProductionRuntimeFactory, RuntimeFactory, RuntimeFuture, TurnO
 pub use root_loss::{RootStanding, root_standing};
 #[cfg(any(test, feature = "test-support"))]
 pub use test_kit::ScriptedRuntimeFactory;
+#[cfg(test)]
+mod quit_tests;
 mod surface;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_kit;
