@@ -325,6 +325,33 @@ fn encoded() -> String {
 }
 
 #[test]
+fn older_pinned_line_frames_decode_for_inspection() {
+    for (version, pinned) in PINNED
+        .iter()
+        .filter(|(version, _)| *version < PROTOCOL_VERSION)
+    {
+        let value = pinned
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .find(|value| value["kind"] == "lines" && value["lines"].is_array())
+            .unwrap();
+        let RunnerFrame::Lines { lines, .. } =
+            crate::frame::decode::<RunnerFrame>(&serde_json::to_vec(&value).unwrap()).unwrap()
+        else {
+            panic!("protocol {version} did not decode a lines frame");
+        };
+        assert!(
+            !lines.is_empty(),
+            "protocol {version} must exercise a line entry"
+        );
+        assert!(
+            lines.iter().all(|line| !line.foreground),
+            "protocol {version} has no foreground evidence"
+        );
+    }
+}
+
+#[test]
 fn a_frame_changes_only_with_a_protocol_version_bump() {
     let encoded = encoded();
     let Some((_, pinned)) = PINNED

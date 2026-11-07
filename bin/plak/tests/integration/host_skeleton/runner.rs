@@ -34,36 +34,20 @@ fn an_upgraded_host_inspects_the_old_protocol_and_starts_a_separate_daemon() {
     use plakous::runner::protocol::{
         HostFrame as RunnerHostFrame, RunnerFrame, VersionTriple, frame,
     };
-    use plakous::tools::{
-        ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope, RunnerId,
-    };
     use std::io::Read as _;
     let Some(fixture) = fixture() else { return };
+    let (mut initial_host, session, _) = start_job(&fixture, false);
+    let (pid, _) = job(&fixture);
+    let old_lines = local_daemon_lines(&fixture);
+    assert_eq!(old_lines.len(), 1);
+    assert!(!old_lines[0].jobs["jobs"].as_array().unwrap().is_empty());
+    stop(&mut initial_host);
     let directory = fixture.home().join("host/runner/v1/run");
     std::fs::create_dir_all(&directory).unwrap();
     let socket = directory.join("runner.sock");
     let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
     listener.set_nonblocking(true).unwrap();
-    let environment = ExecutionEnvironment::host(
-        ExecutionEnvironmentScope::Run("00000000-0000-0000-0000-000000000001".parse().unwrap()),
-        fixture.workspace(),
-        ".",
-        ExecutionEnvironmentConfig::default(),
-    )
-    .unwrap();
-    let mut version = VersionTriple::current("old-revision", "old-flavor");
-    version.protocol = 1;
-    let old = plakous::runner::RunnerService::new(
-        environment,
-        plakous::runner::RunnerIdentity {
-            runner_id: RunnerId::new("old-home").unwrap(),
-            version,
-            boot_id: "old-boot".into(),
-            binary_id: None,
-        },
-    )
-    .unwrap();
-    let hello = old.hello().clone();
+    let hello = obsolete_hello(&fixture);
     let inspect = std::thread::spawn(move || {
         let deadline = std::time::Instant::now() + WAIT;
         let mut stream = loop {
@@ -92,20 +76,24 @@ fn an_upgraded_host_inspects_the_old_protocol_and_starts_a_separate_daemon() {
         let RunnerHostFrame::Lines { request_id } = runner_frame(&mut stream) else {
             panic!("not inspecting lines")
         };
+        let mut response = json!({"kind": "lines", "request_id": request_id, "lines": old_lines});
+        for entry in response["lines"].as_array_mut().unwrap() {
+            entry.as_object_mut().unwrap().remove("foreground");
+        }
         stream
-            .write_all(
-                &frame::encode(&RunnerFrame::Lines {
-                    request_id,
-                    lines: Vec::new(),
-                })
-                .unwrap(),
-            )
+            .write_all(&frame::encode(&response).unwrap())
             .unwrap();
         let mut byte = [0];
         assert_eq!(stream.read(&mut byte).unwrap(), 0, "an inspector sent work");
     });
-    let mut host = start(&fixture);
+    let mut host = start_env(&fixture, &[], &[("PLAK_LOG", "info".into())]);
     inspect.join().unwrap();
+    let log = std::fs::read_to_string(fixture.home().join("logs/plak.log")).unwrap();
+    assert!(
+        log.contains("obsolete_protocol") && log.contains("outcome_unknown"),
+        "{log}"
+    );
+    assert!(!log.contains("runner_recovery_failed"), "{log}");
     assert!(socket.exists());
     assert!(
         fixture
@@ -116,7 +104,62 @@ fn an_upgraded_host_inspects_the_old_protocol_and_starts_a_separate_daemon() {
             ))
             .exists()
     );
+    let mut client = Client::connect(&host);
+    assert_eq!(
+        client.request(1, Op::StopSession { session }),
+        Outcome::Ok(Answer::Stopped)
+    );
+    stopped(pid);
     stop(&mut host);
+}
+
+fn obsolete_hello(fixture: &Fixture) -> plakous::runner::protocol::Hello {
+    use plakous::runner::protocol::VersionTriple;
+    use plakous::tools::{ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope, RunnerId};
+    let environment = ExecutionEnvironment::host(
+        ExecutionEnvironmentScope::Run("00000000-0000-0000-0000-000000000001".parse().unwrap()),
+        fixture.workspace(), ".", ExecutionEnvironmentConfig::default(),
+    ).unwrap();
+    let mut version = VersionTriple::current("old-revision", "old-flavor");
+    version.protocol = 1;
+    let old = plakous::runner::RunnerService::new(environment, plakous::runner::RunnerIdentity {
+        runner_id: RunnerId::new("old-home").unwrap(), version, boot_id: "old-boot".into(), binary_id: None,
+    }).unwrap();
+    old.hello().clone()
+}
+
+fn local_daemon_lines(fixture: &Fixture) -> Vec<plakous::runner::protocol::LineStatus> {
+    use plakous::runner::protocol::{Bind, PROTOCOL_VERSION, VersionTriple};
+    use plakous::runner::{ClientWindows, RunnerClient};
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let stream = tokio::net::UnixStream::connect(
+                fixture
+                    .home()
+                    .join(format!("host/runner/v{PROTOCOL_VERSION}/run/runner.sock")),
+            )
+            .await
+            .unwrap();
+            let bind = Bind {
+                host_id: std::fs::read_to_string(fixture.home().join("host-id"))
+                    .unwrap()
+                    .trim()
+                    .to_owned(),
+                host_instance: "line-inspection".into(),
+                version: VersionTriple::current("inspection", "test"),
+                inspect: true,
+            };
+            let (client, _) =
+                RunnerClient::connect_home_local(stream, bind, ClientWindows::default(), None)
+                    .await
+                    .unwrap();
+            let lines = client.lines().await.unwrap();
+            client.disconnect();
+            lines
+        })
 }
 
 fn runner_frame(stream: &mut UnixStream) -> plakous::runner::protocol::HostFrame {

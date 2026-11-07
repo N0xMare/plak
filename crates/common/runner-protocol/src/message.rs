@@ -226,6 +226,7 @@ pub struct LineStatus {
     /// environment's schema.
     pub jobs: Value,
     /// Whether an unpromoted foreground process is still live on this line.
+    #[serde(default)]
     pub foreground: bool,
 }
 

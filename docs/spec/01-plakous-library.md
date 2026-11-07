@@ -5981,6 +5981,8 @@ runner for a session yet.
   the runner may have run it and forgotten it: its outcome is unknown.
 - **Line table.** Protocol 3 adds `foreground` to each `Lines` entry: true
   while an unpromoted process is live, independent of retained job snapshots.
+  Missing `foreground` in an obsolete protocol 1 or 2 line decodes as false
+  for inspection; those peers do not report foreground liveness.
   Older protocol directories remain inspection-only.
   `Lines` lists the lines the runner holds processes for: on
   a host's connection its own lines; on an inspecting one bound under the
