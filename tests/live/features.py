@@ -631,7 +631,10 @@ class Features:
             for image in images
         ):
             raise ScenarioFailure(HARNESS, f"session {session}: tool image is not inline")
-        if re.sub(r"\s+", "", answer_text(out, records)).strip(".\"'`") != "AENQVR":
+        # The last turn's printed answer only: answer_text also appends the logged
+        # assistant text, which repeats it.
+        printed = "\n".join(line for line in out.splitlines() if not line.startswith("session_id="))
+        if re.sub(r"\s+", "", printed).strip(".\"'`") != "AENQVR":
             raise ScenarioFailure(
                 MODEL, f"session {session}: answer does not match the pinned image's letters"
             )
