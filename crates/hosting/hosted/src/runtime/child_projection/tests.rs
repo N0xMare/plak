@@ -10,6 +10,58 @@ use plakous::model::{ModelEvent, OutputLocation, TextDelta, Usage, UsageUpdate};
 use std::collections::HashSet;
 use std::time::Duration;
 
+struct ObservedChild(Arc<ChildObservation>);
+
+impl crate::topology_runtime::LiveChildHandle for ObservedChild {
+    fn host_observation(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        Some(self.0.clone())
+    }
+    fn agent(&self) -> Option<Agent> {
+        None
+    }
+    fn turn_id(&self) -> TurnId {
+        self.0.turn()
+    }
+    fn turn_control(&self) -> TurnControl {
+        panic!("observation-only fixture")
+    }
+    fn follow_up(
+        &self,
+        _: plakous::agent::CommandId,
+        _: String,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
+        Box::pin(async { Err("observation-only fixture".into()) })
+    }
+    fn follow_up_barrier(&self) -> Option<Arc<tokio::sync::RwLock<()>>> {
+        None
+    }
+    fn restart(
+        &mut self,
+        _: crate::agent_tree_tools::TreeDriver,
+        _: plakous::agent::CommandId,
+        _: String,
+        _: Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<TurnResultHandle, String>> + Send + '_>> {
+        Box::pin(async { Err("observation-only fixture".into()) })
+    }
+    fn release(
+        self: Box<Self>,
+        _: crate::agent_tree_tools::TreeDriver,
+    ) -> std::pin::Pin<Box<dyn Future<Output = crate::topology_runtime::LiveRelease> + Send>> {
+        Box::pin(async { crate::topology_runtime::LiveRelease::default() })
+    }
+    fn cancel_and_release(
+        self: Box<Self>,
+        driver: crate::agent_tree_tools::TreeDriver,
+        dispatched: Option<tokio::sync::oneshot::Sender<()>>,
+    ) -> std::pin::Pin<Box<dyn Future<Output = crate::topology_runtime::LiveRelease> + Send>> {
+        if let Some(dispatched) = dispatched {
+            let _ = dispatched.send(());
+        }
+        self.release(driver)
+    }
+}
+
 #[cfg(test)]
 mod attach_fences;
 
@@ -56,6 +108,38 @@ async fn credential_wait_labels_snapshot_without_rewriting_retained_updates() {
     )
     .drive_in(&crate::TaskSet::new());
     let observation = &owner.observation;
+    let directory = tempfile::tempdir().unwrap();
+    let tree = uuid::Uuid::new_v4().to_string();
+    let runtime = crate::runtime::test_kit::install_idle_topology_hub(&tree, directory.path());
+    let child = runtime
+        .mutate_then_emit(false, |tree| {
+            Ok(tree
+                .spawn_agent(
+                    "root",
+                    &crate::agent_tree_protocol::SpawnAgentRequest::test_review(),
+                    None,
+                )
+                .unwrap()
+                .agent_id)
+        })
+        .await
+        .unwrap();
+    assert!(
+        runtime
+            .try_occupy_live(child, Box::new(ObservedChild(Arc::clone(observation))))
+            .await
+            .is_ok()
+    );
+    let (actions, _intents) = plakous_host_protocol::intent_channel();
+    let service = crate::host_service::HostService::<Core>::new(
+        actions,
+        plakous_host_protocol::wire::NodeAddress {
+            tree_id: tree.clone(),
+            agent_id: "root".into(),
+        },
+        32,
+    );
+    service.observe(HostEvent::SetBusy(true));
     publish(
         &sender,
         observation,
@@ -80,6 +164,10 @@ async fn credential_wait_labels_snapshot_without_rewriting_retained_updates() {
     );
     assert_eq!(snapshot.progress.credential_wait.as_deref(), Some("claude"));
     assert!(observation.needs_operator());
+    assert!(
+        service.kept_activity().awaiting_operator,
+        "a child's wait did not reach the root row"
+    );
     assert!(!snapshot.terminal);
     {
         let state = observation.lock();
@@ -98,7 +186,9 @@ async fn credential_wait_labels_snapshot_without_rewriting_retained_updates() {
     .await;
     assert!(observation.snapshot().progress.activity.is_none());
     assert!(!observation.needs_operator());
+    assert!(!service.kept_activity().awaiting_operator);
     assert!(!observation.snapshot().terminal);
+    crate::topology_runtime::force_release(&tree).await;
 }
 
 #[tokio::test]

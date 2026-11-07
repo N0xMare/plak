@@ -1553,8 +1553,6 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
     "plakous-recursive-subagents-store": _SHARED_PLAKOUS_SYMBOLS,
 }
 ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
-    ("plakous-hosted", "src/agent/roots.rs"): {"sessions": {"LeaseOnlyHead"}},
-    ("plakous-hosted", "src/runner_adoption.rs"): {"sessions": {"LeaseOnlyHead"}},
     ("plakous-hosted", "src/jobs.rs"): {"tools": {"LineOwner"}},
     ("plak", "src/platform_product/anthropic.rs"): {
         "anthropic": {"ANTHROPIC_PLATFORM_ORIGIN"},
@@ -1673,6 +1671,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         "tools": {"runner"},
     },
     ("plakous-hosted", "src/agent/roots.rs"): {
+        "sessions": {"LeaseOnlyHead"},
         "runner": {"RunnerClient"},
         "tools": {"runner::LocalDaemonBackend"},
     },
@@ -1702,6 +1701,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     },
     # Re-adoption of a runner's lines through a lease-only head (spec 01 §8.4).
     ("plakous-hosted", "src/runner_adoption.rs"): {
+        "sessions": {"LeaseOnlyHead"},
         "runner": {"RunnerClient", "protocol"},
         "tools": {
             "LineOwner",

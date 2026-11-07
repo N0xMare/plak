@@ -37,7 +37,7 @@ pub(crate) use {
     interactive::{
         ReloadPlan, carry_foreign_session, carry_out, reload_plan, reverify_released, switch_to,
     },
-    rebind::rebind_session,
+    rebind::session::rebind_session,
 };
 
 /// A running turn refuses a reload or rebind whose successor is another

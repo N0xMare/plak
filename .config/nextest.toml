@@ -99,7 +99,6 @@ not (
   test(an_unattached_stop_stops_a_busy_root_and_live_children)
   |
   test(host_binding_requests_preserve_history_without_another_paid_turn)
-  | test(host_binding_request_crash_cuts_keep_one_owner_and_never_redispatch)
   |
   test(a_dormant_directory_stop_never_opens_or_dispatches_its_continuation)
   | test(ui_reload_preserves_a_live_session_socket_and_rejects_an_invalid_replacement)
@@ -238,6 +237,7 @@ not (
   | test(jj_cli_doctor_bounds_output_wait_after_leader_exit)
   | test(pending_wakes_return_the_wait_and_are_consumed)
   | test(durability::)
+  | test(host_binding_request_crash_cuts_keep_one_owner_and_never_redispatch)
   | test(tui_host_restart)
   | test(review_tui_host_restart_switch)
   | test(image_residency_crash_cuts_recover_without_redispatch)

@@ -240,7 +240,8 @@ impl HostSessions<PlakExtension> for ProductSessions {
             .session_records()?
             .load(session)
             .map_err(CliFailure::new)?;
-        let (target, _) = crate::carry::rebind::rebind_session(&self.services, &record, cause)?;
+        let (target, _) =
+            crate::carry::rebind::session::rebind_session(&self.services, &record, cause)?;
         Ok(Created {
             node: NodeAddress {
                 tree_id: target.node.tree_id,

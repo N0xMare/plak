@@ -109,6 +109,7 @@ fn row(session: &str, updated_at: u64) -> SessionRow {
 /// The stores as a test scripts them, and what the host asked of them.
 #[derive(Default)]
 struct Script {
+    queued: AtomicUsize,
     rows: Mutex<Vec<SessionRow>>,
     opens: AtomicUsize,
     /// Sessions whose open fails, with the failure.
@@ -214,6 +215,9 @@ impl HostSessions<Core> for Fake {
                         SessionIntent::Prompt(draft) => {
                             active = true;
                             prompted(&script, &busy, draft);
+                        }
+                        SessionIntent::FollowUp(_) => {
+                            script.queued.fetch_add(1, Ordering::SeqCst);
                         }
                         _ => {}
                     },
@@ -389,6 +393,57 @@ fn a_busy_actor_refuses_reopen_without_stopping_or_redispatching() {
     assert_eq!(fake.0.images.lock().unwrap().len(), 1);
     connection.leave();
     handed_off(&host);
+}
+
+#[test]
+fn directory_rows_count_live_and_held_children_without_counting_the_root() {
+    use crate::agent_tree::{AgentCommand, AgentCommandKind};
+    use crate::agent_tree_protocol::SpawnAgentRequest;
+    use crate::runtime::test_kit::BlockOn as _;
+    let dir = tempfile::tempdir().unwrap();
+    let id = uuid::Uuid::new_v4().to_string();
+    let runtime = crate::runtime::test_kit::install_idle_topology_hub(&id, dir.path());
+    runtime
+        .mutate_then_emit(false, |tree| {
+            tree.spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+                .unwrap();
+            let held = tree
+                .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+                .unwrap()
+                .agent_id;
+            tree.bind_session_locator(&held, "locator").unwrap();
+            tree.set_active_turn(&held, true).unwrap();
+            tree.bind_attempt_turn(&held, "00000000-0000-0000-0000-000000000001")
+                .unwrap();
+            let attempt = tree.node(&held).unwrap().attempt_id.clone();
+            tree.record_command(AgentCommand::intent(
+                "start",
+                &held,
+                attempt,
+                AgentCommandKind::Start,
+                "assignment",
+                Vec::new(),
+            ))
+            .unwrap();
+            tree.release_attempt_turn(&held).unwrap();
+            tree.park_child(&held, Vec::new()).unwrap();
+            tree.mark_owner_lost(&held);
+            Ok(())
+        })
+        .block()
+        .unwrap();
+    let (host, _) = host(&[&id]);
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    request(&mut connection, 1, Op::Attach { node: node(&id) });
+    attached(&out.take(), 1);
+    let row = row_of(&host, &id);
+    assert_eq!(row.live_work.children, 1);
+    assert_eq!(row.live_work.held_children, 1);
+    assert_eq!(row.activity, SessionActivity::Busy);
+    connection.leave();
+    handed_off(&host);
+    crate::topology_runtime::force_release(&id).block();
 }
 
 /// Hands every resident session off, each in time.
@@ -1160,7 +1215,7 @@ fn an_attachment_its_service_ended_lets_the_session_go() {
 /// A resident session awaiting an approval reads awaiting_operator.
 #[test]
 fn a_session_awaiting_an_approval_reads_awaiting_operator() {
-    let (host, _) = host(&["s1"]);
+    let (host, fake) = host(&["s1"]);
     let out = Out::default();
     let mut connection = host.connect(out.clone(), Face::Remote, || false);
     request(&mut connection, 1, Op::Attach { node: node("s1") });
@@ -1171,6 +1226,35 @@ fn a_session_awaiting_an_approval_reads_awaiting_operator() {
         assert!(Instant::now() < deadline, "the approval never showed");
         std::thread::sleep(Duration::from_millis(20));
     }
+    // A protocol-4 client cannot infer idle from attention. Both running
+    // row states use Queue, not Prompt.
+    let intent = match row_of(&host, "s1").activity {
+        SessionActivity::Busy | SessionActivity::AwaitingOperator => {
+            SessionIntent::FollowUp("queued".into())
+        }
+        _ => SessionIntent::Prompt("unexpected idle".into()),
+    };
+    request(
+        &mut connection,
+        3,
+        Op::Intent {
+            attachment,
+            intent,
+            blobs: Vec::new(),
+        },
+    );
+    while fake.0.queued.load(Ordering::SeqCst) == 0 {
+        assert!(
+            Instant::now() < deadline,
+            "attention submitted a new prompt instead of queueing"
+        );
+        std::thread::yield_now();
+    }
+    assert_eq!(
+        fake.0.images.lock().unwrap().len(),
+        1,
+        "a second prompt was dispatched"
+    );
     connection.leave();
     handed_off(&host);
 }
