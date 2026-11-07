@@ -13,7 +13,25 @@ use {
     std::path::Path,
 };
 
+#[cfg(feature = "sessions-sqlite")]
 impl AgentSessions {
+    /// Read the current durable checkpoint revision of a SQLite branch.
+    ///
+    /// Only the locator's session and branch identify the read; its checkpoint
+    /// may have advanced. This acquires no runtime lease and never performs
+    /// recovery or a write. Lease release and pruning do not advance this value.
+    ///
+    /// # Errors
+    /// Returns typed schema, lookup, integrity or backend read failure.
+    pub fn inspect_branch_revision_sqlite(
+        path: impl AsRef<Path>,
+        locator: SessionLocator,
+    ) -> Result<u64, AgentSessionsError> {
+        let (head, _) = SqliteSessionStore::inspect_branch_metadata(path, locator.session_ref())
+            .map_err(store_error)?;
+        Ok(head.revision().get())
+    }
+
     /// Pages committed canonical history at one exact SQLite branch head,
     /// including Working heads. This reads no uncommitted stream items, opens
     /// no mutable runtime, takes no lease, and performs no recovery or writes.
@@ -25,7 +43,6 @@ impl AgentSessions {
     ///
     /// Returns typed lookup, stale-locator, integrity, schema, invalid-input,
     /// or storage failure. Cursor/revision mismatch requests a resnapshot.
-    #[cfg(feature = "sessions-sqlite")]
     pub fn inspect_history_page_sqlite(
         path: impl AsRef<Path>,
         request: &SessionHistoryPageRequest,
@@ -42,7 +59,9 @@ impl AgentSessions {
             committed_compaction_facts(&exact.checkpoint),
         ))
     }
+}
 
+impl AgentSessions {
     /// Reads the committed conversation and named state of one exact quiescent SQLite branch
     /// head so it can seed a new session elsewhere, without opening a mutable
     /// runtime, acquiring a lease, or calling a provider or tool.

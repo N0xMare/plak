@@ -1426,6 +1426,14 @@ once on the snapshot it reads. It does not recount retained rows: those counters
 guard only the writer's admission accounting, which writer open still validates.
 A feed content read loads its named checkpoint directly, as the live read does.
 
+`AgentSessions::inspect_branch_revision_sqlite(path, locator)` reads the current
+durable head revision of the locator's session and branch as a `u64`. Its
+checkpoint need not still be the head: this is a branch-head read, not an exact
+checkpoint selector. It reads addressed checkpoint metadata without loading
+conversation history, taking a runtime lease, recovering or writing. The value
+is the existing durable checkpoint revision, never a product-record revision
+or a feed cursor; lease release alone does not advance it.
+
 `SessionStoreError::Corrupt` carries only a content-free reason:
 `missing_base`, `missing_root`, `missing_child`, or `inconsistent` for other
 integrity checks. Its display is `session store integrity check failed: <reason>`,

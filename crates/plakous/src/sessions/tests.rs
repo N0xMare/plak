@@ -3992,7 +3992,14 @@ async fn sqlite_history_inspection_pages_committed_content_without_mutation() ->
     );
     assert!(!missing.exists());
     assert_eq!(store.stats().await?, before);
+    let revision = AgentSessions::inspect_branch_revision_sqlite(&database, source)?;
     let current = install_family_artifact(&store, source).await?;
+    let advanced = AgentSessions::inspect_branch_revision_sqlite(&database, source)?;
+    assert!(advanced > revision);
+    assert_eq!(
+        advanced,
+        AgentSessions::inspect_branch_revision_sqlite(&database, current)?
+    );
     let before = store.stats().await?;
     let stale = AgentSessions::inspect_history_page_sqlite(
         &database,
