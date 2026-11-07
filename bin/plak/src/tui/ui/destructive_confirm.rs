@@ -736,12 +736,7 @@ impl App {
         let menu = self.settings_menu.as_mut()?;
         menu.reset_to_default(row);
         menu.pane = super::SettingsPane::Browse;
-        let update = menu.draft.clone();
-        self.theme = super::theme_for(update.tui.theme);
-        self.mark_dirty();
-        Some(UserAction::Extension(
-            crate::tui::SurfaceIntent::SaveSettings(update),
-        ))
+        self.persist_settings()
     }
 
     /// The pilot's `confirm`: presses the first action, as a click on it does.

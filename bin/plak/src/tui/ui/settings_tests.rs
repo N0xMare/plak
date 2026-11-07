@@ -1,6 +1,50 @@
 //! Settings tab and theme tests.
 
 #[test]
+fn resetting_terminal_integer_and_theme_preferences_persists_locally() {
+    let (_root, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+    let mut config = crate::product_config::ProductConfig::default_product();
+    config.scroll_lines = 9;
+    config.theme = crate::product_config::ProductTheme::CatppuccinMocha;
+    config.save(&paths).unwrap();
+    let settings = crate::shell::settings::settings_view(&config);
+    let mut launch = launch_basic();
+    launch.theme = settings.tui.theme;
+    launch.settings = Some(settings);
+    launch.reload_home = Some(paths.clone());
+    let mut app = App::new(launch, true);
+    app.pending_open_settings = true;
+    app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
+        SettingsView::default(),
+    )));
+    for key_name in [
+        crate::tui::settings_registry::SCROLL_LINES,
+        crate::tui::settings_registry::THEME,
+    ] {
+        app.settings_menu.as_mut().unwrap().selected = settings_row(key_name);
+        app.handle_key(key(KeyCode::Char('d')));
+        app.handle_key(key(KeyCode::Enter));
+        let saved = crate::product_config::ProductConfig::load(&paths).unwrap();
+        assert_eq!(saved.scroll_lines, 3, "the integer reset reached the file");
+        if key_name == crate::tui::settings_registry::THEME {
+            assert_eq!(
+                saved.theme,
+                crate::product_config::ProductTheme::DefaultDark
+            );
+            assert_eq!(app.persisted_theme, crate::tui::SettingsTheme::DefaultDark);
+            assert_eq!(app.theme, crate::tui::Theme::dark());
+        }
+        app.apply_host_event(HostEvent::Extension(
+            SurfaceObservation::SettingsViewApplied(SettingsView::default()),
+        ));
+        assert_eq!(
+            app.settings_menu.as_ref().unwrap().draft.tui.scroll_lines,
+            3
+        );
+    }
+}
+
+#[test]
 fn wire_settings_views_never_replace_local_preferences_and_edits_persist_locally() {
     use super::theme_for;
     use crate::tui::SettingsTheme;
