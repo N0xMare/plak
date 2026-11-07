@@ -135,6 +135,12 @@ impl Schema {
                 )
             }
             Some("string") => {
+                if schema["pattern"]
+                    .as_str()
+                    .is_some_and(|pattern| pattern.contains("4[0-9a-f]"))
+                {
+                    return json!("00000000-0000-4000-8000-000000000001");
+                }
                 let least = schema["minLength"].as_u64().unwrap_or(1).max(1);
                 Value::String("x".repeat(usize::try_from(least).unwrap()))
             }
@@ -212,8 +218,13 @@ fn built(kind: &str) -> Option<Observation> {
 /// `value` as an observation: generated, or built when the type refuses
 /// the generated one.
 fn observation(kind: &str, value: &Value) -> Result<Observation, String> {
-    serde_json::from_value::<Observation>(value.clone())
-        .or_else(|error| built(kind).ok_or_else(|| format!("{error}: {value}")))
+    serde_json::from_value::<Host>(json!({"frame":"event", "attachment":1, "seq":1,
+        "class":"state", "observation":value, "blobs":[]}))
+    .map(|frame| match frame {
+        HostFrame::Event { observation, .. } => observation,
+        _ => unreachable!("constructed event"),
+    })
+    .or_else(|error| built(kind).ok_or_else(|| format!("{error}: {value}")))
 }
 
 fn host_round_trips(frame: &Host) -> Result<(), String> {
@@ -234,6 +245,7 @@ fn client_round_trips(frame: &Client) -> Result<(), String> {
 
 fn event(observation: Observation) -> Host {
     HostFrame::Event {
+        client_id: None,
         attachment: 1,
         seq: 1,
         class: observation.class(),
@@ -246,6 +258,7 @@ fn intent_request(intent: Intent) -> Client {
     ClientFrame::Request {
         id: 1,
         op: Op::Intent {
+            client_id: None,
             attachment: 1,
             intent,
             blobs: Vec::new(),
@@ -270,7 +283,7 @@ fn every_observation_decodes_from_its_event_line() {
     let schema = Schema::new();
     let mut failures = Vec::new();
     let mut values: Vec<(String, Value)> = schema
-        .variants("SessionObservation")
+        .variants("WireSessionObservation")
         .iter()
         .map(|branch| (kind_of(branch), schema.instance(branch, 0)))
         .collect();

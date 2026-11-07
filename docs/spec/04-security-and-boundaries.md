@@ -767,6 +767,25 @@ widens it.
 
 ### 2.10 The web endpoint
 
+Protocol-5 placement/options metadata is authenticated operator information,
+not a trust grant or permission to execute a probe's workspace. Picker reads
+do not create sessions, trust projects, bind new effect owners or dispatch
+tools. The host validates canonical placement again before the product
+create commit. Remote path bytes are never inspected as host-local project
+paths. Binding refusals are independent of runner readiness, and committed
+create replay reads only stored facts before any fresh runner/config lookup.
+
+Draft identity is bounded in-memory admission metadata, not a credential or
+persisted exactly-once ledger. Reserve client ids atomically host-wide before
+mailbox admission, remember durable acceptance independently of socket
+delivery, and free refused/dropped submissions. Keep admitted ids until host
+exit without TTL/LRU; the 100,000-entry bound refuses new ids rather than
+evicting old verdicts. A changed host_generation requires outcome-unknown
+reconciliation, never automatic resubmission. Correlation ids and tool-operation
+projections stay outside stored/exported history. Named-account remedy targets
+must preserve the validated exact vertical/name; they never fall back to a
+different account's credentials.
+
 `plak host --web` (chapter 02 §4.5) serves the host's sessions to browsers
 on the tailnet. Everything a client admitted there can do, an operator at
 the TUI can do, except the local-face intents of §4.6: it holds the serving

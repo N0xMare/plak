@@ -856,12 +856,21 @@ impl<P: ProtocolExtension> Inner<P> {
         let id = state.next_request;
         state.next_request += 1;
         let mut intent = sent.intent.clone();
+        let client_id = matches!(
+            &intent,
+            SessionIntent::Prompt(_)
+                | SessionIntent::FollowUp(_)
+                | SessionIntent::Steer(_)
+                | SessionIntent::MailTopologyNode { .. }
+        )
+        .then(crate::wire::ClientDraftId::new);
         let taken = take_images(&mut intent, &format!("r{id}"));
         let mut frames: Vec<ClientFrame<P>> =
             taken.chunks.into_iter().map(ClientFrame::Blob).collect();
         frames.push(ClientFrame::Request {
             id,
             op: Op::Intent {
+                client_id,
                 attachment,
                 intent,
                 blobs: taken.ids,
@@ -959,6 +968,7 @@ impl<P: ProtocolExtension> Inner<P> {
                     self.write(&ClientFrame::Request {
                         id,
                         op: Op::Intent {
+                            client_id: None,
                             attachment,
                             intent: SessionIntent::OpenAgentTranscript { agent_id },
                             blobs: Vec::new(),
@@ -1191,6 +1201,7 @@ impl<P: ProtocolExtension> Inner<P> {
                 Err(std::io::Error::other("the host released the session"))
             }
             // This client never opens a host attachment.
+            HostFrame::OptionsProgress { .. } => Ok(false),
             HostFrame::Directory { .. } => Err(std::io::Error::other(
                 "the host sent a session directory this client did not watch",
             )),

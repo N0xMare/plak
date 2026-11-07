@@ -3895,6 +3895,11 @@ Local is explicitly `{name:"local",runner_id:"local"}`. The saved node id is
 authority; the host decorates the canonical configured alias, or uses the saved
 id when no alias remains. This does not expand JSONL v1 tree frames.
 
+The client protocol number is **5**. It must match exactly; the runner
+transport has its own independent version. Protocol 5 adds explicit placement,
+bounded creation options, directory lifecycle and process-local draft identity.
+It does not change JSONL v1, canonical history or exported transcript rows.
+
 Wire v2 is the framed protocol every frontend will speak to a host; it
 replaces the JSONL host of §4.3, which stays byte-identical until it is
 removed. Its types live in `plakous-host-protocol` (`wire`, the observation
@@ -4010,11 +4015,11 @@ verdicts) are addressed, the session profile and workspace chrome states.
   by id on one connection, which holds at most one node attachment and at
   most one host attachment; the welcome names no session, and the node an
   attach names comes from the directory's row, never guessed. Its requests
-  are `list_sessions {workspace?}` (a one-shot read, answered `sessions
-  {rows}`, newest first), `watch_sessions` (opens the host attachment,
+  are `list_sessions {workspace?, runner?, include_archived?:false}` (a one-shot read, answered `sessions
+  {rows}`, newest first), `watch_sessions {include_archived?:false}` (opens the host attachment,
   answered `watching {attachment}`; a second is `one_in_flight`),
-  `unwatch_sessions {attachment}` (`detached`), `new_session {workspace,
-  template?, request_id}` (`created {session, node, environment}`) and
+  `unwatch_sessions {attachment}` (`detached`), `new_session {runner, workspace,
+  profile?, template?, model?, request_id}` (`created {session, node, environment}`) and
   `release_session {session}` (`released`, or `resident {reason}` with
   `work`, `processes` or `attachment`). The host attachment
   takes `directory {attachment, seq, snapshot, rows}` frames, its sequence
@@ -4023,7 +4028,7 @@ verdicts) are addressed, the session profile and workspace chrome states.
   the session, its root `node`, its `title`, `workspace`, `profile` and
   `updated_at` (unix seconds), its `residency` (`dormant`, `opening`,
   `resident` or `releasing`), its `activity` (`idle`, `busy`,
-  `awaiting_operator`, `held_after_loss`, `continuing` or `stopped`), its
+  `held_after_loss`, `continuing` or `stopped`), its
   `live_work {children, processes, held_children}`, its tools'
   `environment` (`host`, the host process's own, or `cli`, another
   process's that holds the session) and `hosted_elsewhere {host_name,
@@ -4053,6 +4058,60 @@ verdicts) are addressed, the session profile and workspace chrome states.
   that read is shared by every host attachment; an idle release is seen by
   the next read. A read that fails is a skipped tick, not a lost
   connection. A row gone from the stores is said by a fresh snapshot.
+- **Placement and attention.** Every directory row carries `runner
+  {name,runner_id}`, `runner_status`, `needs_operator`, `activity_seq` and
+  `archived`. Local is explicitly `{name:"local",runner_id:"local"}` and
+  means the host, not the client. Workspace identity is `(runner_id,path)`;
+  runner filtering precedes directory limits. A status is tagged `status`:
+  `unknown`, `ready` or `blocked {reason}`; reads project cached readiness,
+  never wait for SSH. `needs_operator` is independent of busy activity and
+  aggregates unresolved approvals, credential waits and context-capacity
+  decisions across all resident nodes; dormant rows have false. Node-to-node
+  questions are not operator decisions. `activity_seq` is the session head's
+  durable checkpoint revision (zero before runtime creation), never a feed
+  cursor, lease release, directory sequence or metadata timestamp. Every
+  NodeView carries its own saved runner identity, decorated by the host with
+  the lexically first configured alias, `local`, or the saved id if removed.
+- **Stop effects.** `stopped {runner_pending}` certifies durable host-side
+  cancellation. The flag is sampled after that commit from the session's
+  runner services: true means an unavailable link or reconciliation barrier
+  leaves runner stop effects unresolved, never proof of process death. A
+  reconnect/restart reconciles recorded stops without inventing another owner.
+- **Creation options.** `session_options {workspace?:{runner,path}}` is one
+  bounded authenticated read, not a subscription. It returns `options
+  {options:{runners,models,profiles,templates,workspace}}`. Profiles reuse the
+  shared ProfileRow/ProfilesView DTO and are ungated creation summaries.
+  Workspace is null, `{canonical_path,profiles,templates,models}`, or
+  `{refusal}`. Runner rows carry canonical runner/aliases, cached status,
+  checked_at and blocked_since, roots (null for local), default_workspace,
+  newest 20 committed distinct workspaces and at most 200 discovered checkouts.
+  Discovery entries are `{path,repo:null|{name,head,commit}}`, without remote
+  URLs; HEAD is tagged `kind`: branch{name}, detached, unborn{name} or
+  unavailable. Unborn/unavailable have null commit. Request-scoped
+  `options_progress {request_id,runner,phase,row}` frames report phase changes
+  and one completion per runner before exactly one final answer. Null phase
+  means queued for a probe slot; phases are ssh, daemon, bind, options,
+  discovery, reconcile and link_lost. Cache/probe deadlines do not cancel
+  admitted reconciliation effects; create/open always validates afresh.
+- **Draft identity.** Wire `intent` accepts optional sibling `client_id`, a
+  canonical lowercase hyphenated UUID4. The multi-session host requires it
+  for prompt, follow_up, steer and mail_topology_node; the single-session
+  local acceptor ignores it. Shared Draft and SessionIntent bodies are
+  unchanged. Reserve the id alone atomically host-wide, digesting session,
+  target, intent kind and exact body/images. Changed input is malformed.
+  Mailbox entry answers `accepted {duplicate:false}`, not durable admission.
+  Identical pending input refuses `draft_pending {client_id}`. Before
+  delivering DraftAccepted, retain the durable verdict independent of the
+  originating connection; only that state answers `accepted {duplicate:true}`
+  without enqueueing. Rejection, pre-admission refusal and mailbox drop free
+  the reservation. Keep admitted ids for the host process lifetime without
+  TTL/LRU; pending plus admitted entries are bounded at 100,000, with
+  `draft_registry_full {limit:100000}` for new ids and duplicates still usable.
+  Accepted/rejected/restored events may echo origin in optional event-envelope
+  client_id, never stored/shared bodies. Refusal, edit, restore or pull-back
+  ends a submission identity. Do not automatically resend an unknown outcome;
+  a changed host_generation loses the registry and requires reconciliation
+  against queue/row evidence, not a cross-restart exactly-once claim.
 - **Quit and stop.** A `quit` intent never ends a session that outlives its
   clients. On a child attachment it is that attachment's detach, on any
   connection. On a root attachment of a host whose connections detach when
@@ -4703,10 +4762,18 @@ background hash is pending; welcome never waits for that hash.
   read a holder free. This process's probes of a lock are serialized, and
   a lock found held is asked again twice, 5 ms apart, so a probe never reads
   a dead holder alive because another probe held its lock that moment.
-- **New session.** `new_session {workspace, template?, request_id}` creates
-  a session in `workspace`, an existing directory, canonicalized, on the
-  binding of `template` from that workspace's context, or of its `[root]
-  agent` when absent, as `plak agent` seeds one. The request id must be a
+- **New session.** `new_session {runner, workspace, profile?, template?, model?, request_id}` creates
+  a dormant session on the selected pinned runner. Workspace is an absolute,
+  canonical directory on that runner: creation refuses changed canonical
+  spelling before saving, never rewrites the requested bytes. Profile selects
+  root template plus working-set names and is exclusive with advanced
+  template/model overrides; model is `{account,model}` and affects only the
+  root binding, not grants or child cards. Omission uses the home default.
+  Freeze root_profile names and root account/model/effort at creation;
+  card/tool bodies still freeze at first open/genesis. Every session-aware
+  roster/root-tool resolution uses the saved selection through selection_config;
+  a removed saved template refuses rather than substituting a default.
+  Embedded NewSession stays payload-free. The request id must be a
   uuid; the session's id is the version 5 uuid of it in the namespace of
   the home's `host-id`, so a retry of a request whose answer was lost finds
   the session it made and answers the same `created`, and never makes a
@@ -4714,9 +4781,11 @@ background hash is pending; welcome never waits for that hash.
   created when it is first opened, under the open's own law (§2.6). The
   session is dormant until attached, and any face may open it first: the
   first open of a session no face has opened creates its runtime session.
-  A replay whose workspace, or whose template's binding, is not the
-  session's is refused `malformed`. Any existing directory is accepted
-  (chapter 04 §2.10).
+  Check committed replay before runner probes or profile/default resolution.
+  Compare only stored runner id, workspace bytes and explicitly supplied
+  template/model facts; changed alias labels or profile files do not invalidate
+  it. A conflict is malformed. Remote contexts never load host-side project
+  overlays for remote path spellings (chapter 04 §2.10).
 - **Release.** `release_session {session}` releases the host's attachment
   without waiting out the idle release: every attachment of the session
   ends, the asker's own included, each with the host frame `detached`, and
@@ -4934,6 +5003,15 @@ selected account in a detached shell does not suppress refresh. Refreshed rows
 are published to the TUI; `/attach` retries attachment against that catalog.
 
 ### 5.1 The slash catalog
+
+The protocol-5 host TUI launches with optional `--runner <name>` and
+`--workspace <path>`. Resolve aliases through host options and validate the
+selected runner's path before creation; do not canonicalize remote paths on
+the client. These are not run/agent flags. A missing/refusing host is an
+explicit failure, never embedded/local fallback. Host `/new` uses the home
+default profile on its selected placement; embedded NewSession stays
+payload-free. A chosen profile is frozen by host new_session, not by changing
+the process-wide roster source.
 
 Changing branches or sessions while the source has running promoted processes
 is refused before durable product work: `N background processes are running;
@@ -5776,7 +5854,11 @@ host-populated activity kind. `ToolItem::operation()` uses that classifier;
 the operation is not a field in the persisted or exported row. A process-local
 `wire_operation` overlay may retain the host-supplied operation after decoding;
 it is excluded from serde, JSON Schema and row equality. Without that overlay,
-`operation()` uses the classifier. Plak maps the
+`operation()` uses the classifier. Protocol 5
+projects an explicit WireToolItem carrying required `operation` in snapshots,
+patches, streaming updates and row events. Clients consume that host field,
+including every existing ToolOperation variant; they do not reclassify names.
+Stored/exported ToolItem bytes remain unchanged. Plak maps the
 semantic operation to terminal labels and keeps no separate canonical-name
 classification table. Plan detail carries neutral status labels; terminal
 plan bullets and Activity status glyphs belong to the TUI, not a host library.

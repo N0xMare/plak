@@ -108,6 +108,7 @@ fn stub_host(stream: UnixStream) {
                     outcome: Outcome::Refused(RequestRefusal::UnknownNode),
                 }),
                 Op::Intent {
+                    client_id: _,
                     attachment,
                     intent,
                     blobs: ids,
@@ -129,9 +130,13 @@ fn stub_host(stream: UnixStream) {
                 }),
                 Op::StopSession { .. }
                 | Op::ListSessions { .. }
-                | Op::WatchSessions
+                | Op::WatchSessions { .. }
                 | Op::UnwatchSessions { .. }
                 | Op::NewSession { .. }
+                | Op::SessionOptions { .. }
+                | Op::RenameSession { .. }
+                | Op::ArchiveSession { .. }
+                | Op::DeleteSession { .. }
                 | Op::ReleaseSession { .. } => end.send(&Host::Response {
                     id,
                     outcome: Outcome::Refused(RequestRefusal::Unsupported {
@@ -169,7 +174,7 @@ fn answer_intent(
     blobs.restore_images(&mut intent, ids).unwrap();
     end.send(&Host::Response {
         id,
-        outcome: Outcome::Ok(Answer::Accepted),
+        outcome: Outcome::Ok(Answer::Accepted { duplicate: false }),
     });
     let mut observation = SessionObservation::DraftAccepted(intent);
     let taken = plakous_host_protocol::wire::take_observation_images(
@@ -187,6 +192,7 @@ fn answer_intent(
             Vec::new()
         };
         end.send(&Host::Event {
+            client_id: None,
             attachment,
             seq: *seq,
             class: observation.class(),
@@ -295,6 +301,7 @@ fn a_client_attaches_and_prompts_a_stub_host_over_wire_v2() {
     end.send(&Client::Request {
         id: 3,
         op: Op::Intent {
+            client_id: None,
             attachment: 1,
             intent: sent,
             blobs: taken.ids,
@@ -304,7 +311,7 @@ fn a_client_attaches_and_prompts_a_stub_host_over_wire_v2() {
         end.next::<Host>(),
         Some(Host::Response {
             id: 3,
-            outcome: Outcome::Ok(Answer::Accepted)
+            outcome: Outcome::Ok(Answer::Accepted { duplicate: false })
         })
     );
     let events = events(&mut end, 2);

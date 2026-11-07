@@ -19,10 +19,22 @@ pub struct SessionRow {
     pub title: Option<String>,
     /// Its workspace.
     pub workspace: String,
+    /// Root placement, explicitly local or pinned to a configured runner.
+    pub runner: super::RunnerLabel,
+    /// Latest host-generation readiness verdict; directory reads never probe.
+    pub runner_status: super::RunnerStatus,
+    /// Any unresolved operator decision in this resident tree, independently of busy.
+    pub needs_operator: bool,
+    /// Durable head checkpoint revision; zero before runtime creation.
+    pub activity_seq: u64,
+    /// Product visibility/read-only state, not runtime-history archival.
+    pub archived: bool,
     /// Its root template, or the binding's account and model when it has
     /// none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<String>,
+    /// Bounded differences from the nearest current-config profile.
+    pub differences: Vec<crate::views::ProfileDifference>,
     /// Unix seconds of its last change.
     pub updated_at: u64,
     /// Whether this host holds it now.
@@ -62,9 +74,6 @@ pub enum SessionActivity {
     Idle,
     /// A turn runs.
     Busy,
-    /// Any node needs an approval or credentials, or a context-capacity
-    /// decision is pending. A turn may still run: submissions must queue.
-    AwaitingOperator,
     /// Its host was lost and it holds for the operator's Resume.
     HeldAfterLoss,
     /// A continuation that runs by itself waits for the next open (a

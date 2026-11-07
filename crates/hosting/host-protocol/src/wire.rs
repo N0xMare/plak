@@ -41,16 +41,30 @@ use crate::views::transcript::{TranscriptItem, TranscriptScope};
 
 mod directory;
 mod runner_label;
+pub use runner_label::RunnerLabel;
+mod draft;
+pub use draft::{ClientDraftId, InvalidClientDraftId};
+mod lifecycle;
+pub use lifecycle::{InvalidTitleKind, LifecycleReason, MAX_LIFECYCLE_IDS, validate_title};
+mod placement;
+mod tool;
+mod tool_rows;
 pub use directory::{
     HostedElsewhere, LiveWork, ResidentReason, SessionActivity, SessionEnvironment,
     SessionResidency, SessionRow,
 };
-pub use runner_label::RunnerLabel;
+pub use placement::{
+    BindingRefusalKind, CreationModel, DiscoveredWorkspace, PlacementReason, RecentWorkspace,
+    RepositoryHead, RepositoryMetadata, RunnerOptions, RunnerPhase, RunnerStatus, RunnerVersion,
+    SessionOptions, WorkspaceOptions, WorkspaceProbe, WorkspaceRefusalKind,
+};
+pub use tool::WireToolItem;
 
 /// The wire protocol version; a peer with another is refused. 3 dropped
 /// `hello`'s locality; 4 lets a welcome name no session and adds the
-/// session directory's requests and frames.
-pub const WIRE_VERSION: u32 = 4;
+/// session directory's requests and frames; 5 adds explicit placement,
+/// directory lifecycle and process-lifetime draft admission identity.
+pub const WIRE_VERSION: u32 = 5;
 
 /// The most bytes one line holds, newline included.
 pub const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
@@ -210,6 +224,10 @@ pub enum Op<P: ProtocolExtension> {
         attachment: AttachmentId,
         /// The intent, its images' bytes taken out into `blobs`.
         intent: SessionIntent<P>,
+        /// Wire-only submission identity; required by the multi-session host
+        /// for prompt, follow-up, steer and topology mail, ignored by local acceptors.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        client_id: Option<ClientDraftId>,
         /// The blobs holding its images' bytes, in image order.
         blobs: Vec<String>,
     },
@@ -263,10 +281,20 @@ pub enum Op<P: ProtocolExtension> {
         /// Only the sessions of this workspace, when given.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         workspace: Option<String>,
+        /// Pinned runner id, required for nonlocal workspace filters.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        runner: Option<String>,
+        /// Include archived and active sessions; defaults to active only.
+        #[serde(default)]
+        include_archived: bool,
     },
     /// Opens the connection's one host attachment: the session directory,
     /// as a snapshot of its rows and then each row that changes.
-    WatchSessions,
+    WatchSessions {
+        /// Include archived and active rows.
+        #[serde(default)]
+        include_archived: bool,
+    },
     /// Closes the host attachment.
     UnwatchSessions {
         /// The host attachment.
@@ -274,15 +302,54 @@ pub enum Op<P: ProtocolExtension> {
     },
     /// Creates a session in `workspace`, dormant until attached.
     NewSession {
+        /// Explicit pinned runner selection; no implicit host/client default.
+        runner: RunnerLabel,
         /// An existing directory, the session's workspace.
         workspace: String,
+        /// User-facing profile; cannot be combined with template or model.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        profile: Option<String>,
         /// The root template; the workspace's `[root] agent` when absent.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         template: Option<String>,
+        /// Advanced root-only model override.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<CreationModel>,
         /// A uuid the client draws for each new-session action. It decides
         /// the new session's id, so a retry of the same action answers the
         /// session it created and never makes a second one.
         request_id: String,
+    },
+    /// One bounded creation-picker read with request-scoped progress.
+    SessionOptions {
+        /// Optional runner-owned path validation.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workspace: Option<WorkspaceProbe>,
+    },
+    /// Set or clear only the product title override, without opening a runtime.
+    RenameSession {
+        /// Full product session id.
+        session: String,
+        /// Null reveals the generated title again.
+        #[serde(deserialize_with = "required_nullable_title")]
+        #[schemars(required)]
+        #[schemars(length(min = 1, max = 128))]
+        title: Option<String>,
+    },
+    /// Reversible product visibility/read-only state, not runtime-history archival.
+    ArchiveSession {
+        /// Full product session id.
+        session: String,
+        /// Desired state; repeating it is an acknowledged no-op.
+        archived: bool,
+    },
+    /// Confirmed guarded deletion through the product deletion service.
+    DeleteSession {
+        /// Full product session id.
+        session: String,
+        /// Explicitly abandon only this session's recovery-required children.
+        #[serde(default)]
+        abandon_children: bool,
     },
     /// Detaches every attachment of `session` and releases it now, unless
     /// something other than an attachment keeps it resident.
@@ -290,6 +357,12 @@ pub enum Op<P: ProtocolExtension> {
         /// The durable session id.
         session: String,
     },
+}
+
+fn required_nullable_title<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    Option::<String>::deserialize(deserializer)
 }
 
 impl<P: ProtocolExtension> Op<P> {
@@ -306,9 +379,13 @@ impl<P: ProtocolExtension> Op<P> {
             Self::Rebind { .. } => "rebind",
             Self::StopSession { .. } => "stop_session",
             Self::ListSessions { .. } => "list_sessions",
-            Self::WatchSessions => "watch_sessions",
+            Self::WatchSessions { .. } => "watch_sessions",
             Self::UnwatchSessions { .. } => "unwatch_sessions",
             Self::NewSession { .. } => "new_session",
+            Self::SessionOptions { .. } => "session_options",
+            Self::RenameSession { .. } => "rename_session",
+            Self::ArchiveSession { .. } => "archive_session",
+            Self::DeleteSession { .. } => "delete_session",
             Self::ReleaseSession { .. } => "release_session",
         }
     }
@@ -326,11 +403,42 @@ pub enum Answer {
     /// Detached.
     Detached,
     /// The intent entered the node's mailbox.
-    Accepted,
+    Accepted {
+        /// True certifies an identical submission was durably admitted;
+        /// false means only mailbox entry.
+        duplicate: bool,
+    },
     /// Liveness.
     Pong,
     /// The session's work stopped, durably (`stop_session`).
-    Stopped,
+    Stopped {
+        /// Cancellation is durable, but runner stop effects remain unresolved.
+        runner_pending: bool,
+    },
+    /// Aggregate bounded picker result after all progress for this request.
+    Options {
+        /// Runners, choices and optional workspace validation.
+        options: Box<SessionOptions>,
+    },
+    /// The title override committed.
+    Renamed {
+        /// Product session id.
+        session: String,
+        /// Effective title after applying or clearing the override.
+        title: Option<String>,
+    },
+    /// Product archive flag committed.
+    ArchiveUpdated {
+        /// Product session id.
+        session: String,
+        /// Authoritative archive state.
+        archived: bool,
+    },
+    /// Guarded cleanup completed, including final product record removal.
+    Deleted {
+        /// Deleted product session id.
+        session: String,
+    },
     /// The session request switched the session to the one rooted at
     /// `node`; the requester's `moved` follows.
     Moved {
@@ -372,6 +480,40 @@ pub enum Answer {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "refusal", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RequestRefusal {
+    /// An identical submission still has no durable admission verdict.
+    DraftPending {
+        /// Submission identity, not an instruction to automatically resend.
+        client_id: ClientDraftId,
+    },
+    /// New ids cannot enter; admitted duplicates still work without eviction.
+    DraftRegistryFull {
+        /// Process-generation bound, 100,000.
+        limit: usize,
+    },
+    /// Runner/workspace admission failed before a product commit.
+    PlacementRefused {
+        /// Requested or saved runner identity.
+        runner: RunnerLabel,
+        /// Typed placement verdict.
+        reason: PlacementReason,
+    },
+    /// Product binding failed independently of runner readiness.
+    BindingRefused {
+        /// Closed binding verdict.
+        kind: BindingRefusalKind,
+    },
+    /// Directory lifecycle checks refused without execution or cleanup.
+    SessionLifecycleRefused {
+        /// Full product id.
+        session: String,
+        /// Closed lifecycle verdict.
+        reason: LifecycleReason,
+    },
+    /// Archived sessions admit reads, but no execution or queue mutations.
+    SessionArchived {
+        /// Full product id.
+        session: String,
+    },
     /// The node's mailbox is full; try again.
     Backpressure,
     /// The same one-in-flight operation is already running.
@@ -476,6 +618,11 @@ pub struct SnapshotPage {
     /// This page's position, from zero.
     pub page: u32,
     /// Its rows, in order.
+    #[serde(
+        serialize_with = "tool_rows::serialize_items",
+        deserialize_with = "tool_rows::deserialize_items"
+    )]
+    #[schemars(with = "tool_rows::ItemsSchema")]
     pub items: Vec<TranscriptItem>,
     /// Whether this is the last page.
     pub last: bool,
@@ -550,7 +697,16 @@ pub enum HostFrame<P: ProtocolExtension> {
         /// Who receives it.
         class: ObservationClass,
         /// The observation, its images' bytes taken out into `blobs`.
+        #[serde(
+            serialize_with = "tool_rows::serialize_observation",
+            deserialize_with = "tool_rows::deserialize_observation"
+        )]
+        #[schemars(with = "tool_rows::ObservationSchema<P>")]
         observation: SessionObservation<P>,
+        /// Process-local wire origin of accepted/rejected/restored drafts;
+        /// never inserted in their shared bodies or stored rows.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        client_id: Option<ClientDraftId>,
         /// The blobs holding its images' bytes, in image order.
         blobs: Vec<String>,
     },
@@ -588,6 +744,17 @@ pub enum HostFrame<P: ProtocolExtension> {
         snapshot: bool,
         /// The rows, newest first.
         rows: Vec<SessionRow>,
+    },
+    /// Bounded phase-change/completion progress, ending before the final response.
+    OptionsProgress {
+        /// The `session_options` request's connection-local frame id.
+        request_id: RequestId,
+        /// Canonical runner entry.
+        runner: RunnerLabel,
+        /// Probe phase; null denotes waiting for a probe-pool slot.
+        phase: Option<RunnerPhase>,
+        /// Completed runner row, emitted at most once per request/runner.
+        row: Option<RunnerOptions>,
     },
     /// The attachment ended because its session is no longer resident on
     /// this host (`release_session`, or the session ended); an attach
@@ -1045,3 +1212,7 @@ impl SnapshotAssembler {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]
 mod tests;
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "unit tests")]
+mod p5_tests;

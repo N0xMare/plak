@@ -91,6 +91,8 @@ fn a_directory_client_selects_a_root_without_a_default_session() {
     let (sender, receiver, _) = client.join().unwrap();
     let id = sender
         .request_operation(Op::ListSessions {
+            runner: None,
+            include_archived: false,
             workspace: Some("/workspace".into()),
         })
         .unwrap();
@@ -99,6 +101,8 @@ fn a_directory_client_selects_a_root_without_a_default_session() {
         (
             id,
             Op::ListSessions {
+                runner: None,
+                include_archived: false,
                 workspace: Some("/workspace".into())
             }
         )
@@ -124,6 +128,7 @@ fn a_directory_client_selects_a_root_without_a_default_session() {
         outcome: Outcome::Ok(Answer::Attached { attachment: 7 }),
     });
     host.send(&HostFrame::Event {
+        client_id: None,
         attachment: 7,
         seq: 1,
         class: crate::observation::ObservationClass::State,
@@ -154,7 +159,11 @@ fn directory_responses_keep_refusals_and_disconnect_is_terminal() {
         Err(RecvTimeoutError::Timeout)
     );
     let id = sender
-        .request_operation(Op::ListSessions { workspace: None })
+        .request_operation(Op::ListSessions {
+            runner: None,
+            include_archived: false,
+            workspace: None,
+        })
         .unwrap();
     assert_eq!(host.request().0, id);
     host.send(&HostFrame::Response {
@@ -258,7 +267,11 @@ fn the_welcome_deadline_interrupts_only_a_missing_welcome() {
             .unwrap();
         client.join().unwrap();
         let id = sender
-            .request_operation(Op::ListSessions { workspace: None })
+            .request_operation(Op::ListSessions {
+                runner: None,
+                include_archived: false,
+                workspace: None,
+            })
             .unwrap();
         assert_eq!(host.request().0, id);
         thread::sleep(Duration::from_millis(1100));
@@ -331,6 +344,7 @@ fn only_its_own_attachments_detached_ends_the_connection() {
     });
     host.send(&HostFrame::Detached { attachment: 3 });
     host.send(&HostFrame::Event {
+        client_id: None,
         attachment: 4,
         seq: 1,
         class: SessionObservation::<Core>::SetBusy(true).class(),
@@ -377,6 +391,7 @@ fn the_client_follows_the_host() {
     });
     for (attachment, busy) in [(1, false), (2, true)] {
         host.send(&HostFrame::Event {
+            client_id: None,
             attachment,
             seq: 1,
             class: SessionObservation::<Core>::SetBusy(busy).class(),
@@ -458,6 +473,7 @@ fn attached(attachment: AttachmentId) -> (Host, WireSender<Core>, WireReceiver<C
 fn event(attachment: AttachmentId, busy: bool) -> HostFrame<Core> {
     let observation = SessionObservation::SetBusy(busy);
     HostFrame::Event {
+        client_id: None,
         attachment,
         seq: 1,
         class: observation.class(),
@@ -504,7 +520,7 @@ fn a_large_send_does_not_hold_up_the_face() {
     assert!(matches!(op, Op::Intent { attachment: 1, .. }), "{op:?}");
     host.send(&HostFrame::Response {
         id,
-        outcome: Outcome::Ok(Answer::Accepted),
+        outcome: Outcome::Ok(Answer::Accepted { duplicate: false }),
     });
     assert!(sender.settle(Duration::from_secs(10)));
     assert!(receiver.try_unsent().is_none());
@@ -521,6 +537,7 @@ fn rows_a_slow_face_cannot_hold_leave_the_transcript_lost() {
     for index in 0..=crate::limits::OBSERVATION_QUEUE_CAPACITY {
         let observation = SessionObservation::Row(TranscriptRow::user(format!("row {index}")));
         host.send(&HostFrame::Event {
+            client_id: None,
             attachment: 1,
             seq: 1,
             class: observation.class(),
@@ -557,12 +574,13 @@ fn a_real_overflow_attaches_again_and_opens_the_agent_again() {
     let (id, _) = host.request();
     host.send(&HostFrame::Response {
         id,
-        outcome: Outcome::Ok(Answer::Accepted),
+        outcome: Outcome::Ok(Answer::Accepted { duplicate: false }),
     });
     assert!(sender.settle(Duration::from_secs(10)));
     for _ in 0..=crate::limits::OBSERVATION_QUEUE_CAPACITY {
         let observation = SessionObservation::DraftRejected(SessionIntent::Interrupt);
         host.send(&HostFrame::Event {
+            client_id: None,
             attachment: 1,
             seq: 1,
             class: observation.class(),
@@ -588,6 +606,7 @@ fn a_real_overflow_attaches_again_and_opens_the_agent_again() {
     assert_eq!(
         op,
         Op::Intent {
+            client_id: None,
             attachment: 2,
             intent: SessionIntent::OpenAgentTranscript {
                 agent_id: "a1".into()
@@ -611,7 +630,7 @@ fn a_resync_reads_every_held_transcript_as_lost() {
     let (id, _) = host.request();
     host.send(&HostFrame::Response {
         id,
-        outcome: Outcome::Ok(Answer::Accepted),
+        outcome: Outcome::Ok(Answer::Accepted { duplicate: false }),
     });
     assert!(sender.settle(Duration::from_secs(10)));
     host.send(&HostFrame::ResyncRequired { attachment: 1 });
@@ -741,6 +760,7 @@ fn a_stale_events_blobs_are_dropped() {
         }));
         let observation = SessionObservation::SetBusy(true);
         host.send(&HostFrame::Event {
+            client_id: None,
             attachment: 1,
             seq: 1,
             class: observation.class(),

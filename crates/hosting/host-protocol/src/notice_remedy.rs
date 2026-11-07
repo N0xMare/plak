@@ -2,6 +2,89 @@
 
 use serde::{Deserialize, Serialize};
 
+/// A bounded, canonical named account, not a display alias or a credential path.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NamedAccount {
+    bytes: [u8; 43],
+    len: u8,
+}
+
+impl NamedAccount {
+    /// Canonical `<vertical>/<name>` spelling.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.bytes[..usize::from(self.len)]).unwrap_or_default()
+    }
+}
+
+impl std::str::FromStr for NamedAccount {
+    type Err = &'static str;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let invalid = "named account must be canonical <vertical>/<name>";
+        let (vertical, name) = value.split_once('/').ok_or(invalid)?;
+        if !matches!(
+            vertical,
+            "claude" | "codex" | "grok" | "anthropic" | "openai" | "xai-api" | "openrouter"
+        ) || !(1..=32).contains(&name.len())
+            || name == "default"
+            || !name.as_bytes()[0].is_ascii_lowercase()
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        {
+            return Err(invalid);
+        }
+        let mut bytes = [0; 43];
+        bytes[..value.len()].copy_from_slice(value.as_bytes());
+        Ok(Self {
+            bytes,
+            len: u8::try_from(value.len()).map_err(|_| invalid)?,
+        })
+    }
+}
+
+impl Serialize for NamedAccount {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for NamedAccount {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer)?
+            .parse()
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+impl schemars::JsonSchema for NamedAccount {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "NamedAccount".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        use serde_json::{Map, Value};
+        let forbidden = [
+            "claude",
+            "codex",
+            "grok",
+            "anthropic",
+            "openai",
+            "xai-api",
+            "openrouter",
+        ]
+        .into_iter()
+        .map(|vertical| Value::String(format!("{vertical}/default")))
+        .collect();
+        Map::from_iter([
+            ("type".to_owned(), Value::String("string".to_owned())),
+            ("pattern".to_owned(), Value::String("^(claude|codex|grok|anthropic|openai|xai-api|openrouter)/[a-z][a-z0-9-]{0,31}$".to_owned())),
+            ("not".to_owned(), Value::Object(Map::from_iter([("enum".to_owned(), Value::Array(forbidden))]))),
+        ]).into()
+    }
+}
+
 /// Account whose native login needs attention; unspecified is an explicit placeholder.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -16,12 +99,18 @@ pub enum AccountTarget {
     OpenRouter,
     /// No account identity was available at the failure site.
     Unspecified,
+    /// Exact named slot; existing default-account strings keep their encodings.
+    #[serde(untagged)]
+    Named(NamedAccount),
 }
 
 impl AccountTarget {
     /// Preserve a known native account identity, otherwise an explicit unknown target.
     #[must_use]
     pub fn from_account(account: &str) -> Self {
+        if let Ok(named) = account.parse() {
+            return Self::Named(named);
+        }
         match account {
             "codex" | "chatgpt" => Self::Codex,
             // `xai` is NativeProvider::as_str for the SuperGrok subscription.
@@ -31,6 +120,65 @@ impl AccountTarget {
             "openrouter" => Self::OpenRouter,
             _ => Self::Unspecified,
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "unit tests")]
+mod named_tests {
+    use super::*;
+
+    #[test]
+    fn named_remedies_are_exact_and_default_strings_remain_identical() {
+        for vertical in [
+            "claude",
+            "codex",
+            "grok",
+            "anthropic",
+            "openai",
+            "xai-api",
+            "openrouter",
+        ] {
+            let account = format!("{vertical}/work");
+            let target = AccountTarget::from_account(&account);
+            assert!(matches!(target, AccountTarget::Named(named) if named.as_str() == account));
+            let encoded = serde_json::to_string(&target).unwrap();
+            assert_eq!(encoded, format!("\"{account}\""));
+            assert_eq!(
+                serde_json::from_str::<AccountTarget>(&encoded).unwrap(),
+                target
+            );
+        }
+        assert_eq!(
+            serde_json::to_string(&AccountTarget::Codex).unwrap(),
+            "\"codex\""
+        );
+        assert_eq!(
+            serde_json::to_string(&AccountTarget::OpenRouter).unwrap(),
+            "\"open_router\""
+        );
+        for invalid in [
+            "claude/default",
+            "claude/Work",
+            "claude/../work",
+            "claude/",
+            "claude/work/other",
+            "unknown/work",
+            "chatgpt/work",
+            "grok/work_1",
+        ] {
+            assert!(
+                serde_json::from_str::<AccountTarget>(&format!("\"{invalid}\"")).is_err(),
+                "{invalid}"
+            );
+        }
+        let longest = format!("openrouter/{}", "x".repeat(32));
+        assert!(longest.parse::<NamedAccount>().is_ok());
+        assert!(
+            format!("openrouter/{}", "x".repeat(33))
+                .parse::<NamedAccount>()
+                .is_err()
+        );
     }
 }
 

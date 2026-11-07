@@ -69,6 +69,7 @@ fn frames_round_trip_as_lines() {
         Client::Request {
             id: 2,
             op: Op::Intent {
+                client_id: None,
                 attachment: 3,
                 intent: SessionIntent::Steer(Draft::from("go")),
                 blobs: Vec::new(),
@@ -98,6 +99,7 @@ fn frames_round_trip_as_lines() {
             }),
         },
         Host::Event {
+            client_id: None,
             attachment: 3,
             seq: 1,
             class: ObservationClass::State,
@@ -173,7 +175,9 @@ fn session_requests_round_trip_as_lines() {
         },
         Host::Response {
             id: 7,
-            outcome: Outcome::Ok(Answer::Stopped),
+            outcome: Outcome::Ok(Answer::Stopped {
+                runner_pending: false,
+            }),
         },
         Host::Response {
             id: 7,
@@ -208,6 +212,12 @@ fn session_requests_round_trip_as_lines() {
 
 fn row() -> SessionRow {
     SessionRow {
+        runner: RunnerLabel::local(),
+        runner_status: RunnerStatus::Unknown,
+        needs_operator: false,
+        activity_seq: 0,
+        archived: false,
+        differences: Vec::new(),
         session: "s1".into(),
         node: NodeAddress {
             tree_id: "s1".into(),
@@ -234,16 +244,22 @@ fn the_directory_requests_round_trip_with_pinned_bytes() {
         (
             Client::Request {
                 id: 1,
-                op: Op::ListSessions { workspace: None },
+                op: Op::ListSessions {
+                    runner: None,
+                    include_archived: false,
+                    workspace: None,
+                },
             },
-            r#"{"frame":"request","id":1,"op":{"op":"list_sessions"}}"#,
+            r#"{"frame":"request","id":1,"op":{"op":"list_sessions","include_archived":false}}"#,
         ),
         (
             Client::Request {
                 id: 2,
-                op: Op::WatchSessions,
+                op: Op::WatchSessions {
+                    include_archived: false,
+                },
             },
-            r#"{"frame":"request","id":2,"op":{"op":"watch_sessions"}}"#,
+            r#"{"frame":"request","id":2,"op":{"op":"watch_sessions","include_archived":false}}"#,
         ),
         (
             Client::Request {
@@ -256,12 +272,15 @@ fn the_directory_requests_round_trip_with_pinned_bytes() {
             Client::Request {
                 id: 4,
                 op: Op::NewSession {
+                    runner: RunnerLabel::local(),
+                    profile: None,
+                    model: None,
                     workspace: "/w".into(),
                     template: Some("coder".into()),
                     request_id: "00000000-0000-4000-8000-000000000001".into(),
                 },
             },
-            r#"{"frame":"request","id":4,"op":{"op":"new_session","workspace":"/w","template":"coder","request_id":"00000000-0000-4000-8000-000000000001"}}"#,
+            r#"{"frame":"request","id":4,"op":{"op":"new_session","runner":{"name":"local","runner_id":"local"},"workspace":"/w","template":"coder","request_id":"00000000-0000-4000-8000-000000000001"}}"#,
         ),
         (
             Client::Request {
@@ -311,7 +330,7 @@ fn the_directory_answers_and_frames_round_trip_with_pinned_bytes() {
                 id: 1,
                 outcome: Outcome::Ok(Answer::Sessions { rows: vec![row()] }),
             },
-            r#"{"frame":"response","id":1,"outcome":{"ok":{"answer":"sessions","rows":[{"session":"s1","node":{"tree_id":"s1","agent_id":"s1"},"workspace":"/w","updated_at":9,"residency":"dormant","activity":"idle","live_work":{"children":0,"processes":0,"held_children":0},"environment":"host"}]}}}"#,
+            r#"{"frame":"response","id":1,"outcome":{"ok":{"answer":"sessions","rows":[{"session":"s1","node":{"tree_id":"s1","agent_id":"s1"},"workspace":"/w","runner":{"name":"local","runner_id":"local"},"runner_status":{"status":"unknown"},"needs_operator":false,"activity_seq":0,"archived":false,"differences":[],"updated_at":9,"residency":"dormant","activity":"idle","live_work":{"children":0,"processes":0,"held_children":0},"environment":"host"}]}}}"#,
         ),
         (
             Host::Response {
@@ -372,7 +391,7 @@ fn the_directory_answers_and_frames_round_trip_with_pinned_bytes() {
                 snapshot: false,
                 rows: vec![held_elsewhere()],
             },
-            r#"{"frame":"directory","attachment":4,"seq":2,"snapshot":false,"rows":[{"session":"s1","node":{"tree_id":"s1","agent_id":"s1"},"title":"fix the build","workspace":"/w","profile":"coder","updated_at":9,"residency":"resident","activity":"busy","live_work":{"children":1,"processes":2,"held_children":0},"environment":"cli","hosted_elsewhere":{"host_name":"desk","pid":42}}]}"#,
+            r#"{"frame":"directory","attachment":4,"seq":2,"snapshot":false,"rows":[{"session":"s1","node":{"tree_id":"s1","agent_id":"s1"},"title":"fix the build","workspace":"/w","runner":{"name":"local","runner_id":"local"},"runner_status":{"status":"unknown"},"needs_operator":false,"activity_seq":0,"archived":false,"profile":"coder","differences":[],"updated_at":9,"residency":"resident","activity":"busy","live_work":{"children":1,"processes":2,"held_children":0},"environment":"cli","hosted_elsewhere":{"host_name":"desk","pid":42}}]}"#,
         ),
         (
             Host::Detached { attachment: 3 },
@@ -383,7 +402,7 @@ fn the_directory_answers_and_frames_round_trip_with_pinned_bytes() {
                 session: None,
                 ..welcome()
             }),
-            r#"{"frame":"welcome","proto":4,"binary_id":"b1","host_generation":7,"caps":[]}"#,
+            r#"{"frame":"welcome","proto":5,"binary_id":"b1","host_generation":7,"caps":[]}"#,
         ),
     ];
     for (frame, pinned) in host {
@@ -414,6 +433,7 @@ fn a_usage_event_decodes() {
         status: "fits".into(),
     });
     let frame = Host::Event {
+        client_id: None,
         attachment: 1,
         seq: 1,
         class: observation.class(),
@@ -429,6 +449,7 @@ fn a_line_over_the_cap_is_refused_and_skipped() {
     let huge = Client::Request {
         id: 1,
         op: Op::Intent {
+            client_id: None,
             attachment: 1,
             intent: SessionIntent::Prompt(Draft::from("x".repeat(MAX_LINE_BYTES))),
             blobs: Vec::new(),
@@ -616,6 +637,7 @@ fn a_snapshot_over_its_page_bound_is_refused() {
 #[test]
 fn a_received_frame_is_checked() {
     let event = Host::Event {
+        client_id: None,
         attachment: 1,
         seq: 1,
         class: ObservationClass::Addressed,

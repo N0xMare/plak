@@ -295,6 +295,7 @@ pub struct ToolItem {
 
 impl PartialEq for ToolItem {
     fn eq(&self, other: &Self) -> bool {
+        // A transport overlay must not create a persisted transcript diff.
         self.call_id == other.call_id
             && self.name == other.name
             && self.exposed_name == other.exposed_name

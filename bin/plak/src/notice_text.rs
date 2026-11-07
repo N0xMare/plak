@@ -33,13 +33,14 @@ pub(crate) fn restored_pause(
     text
 }
 
-pub(crate) const fn account_label(account: AccountTarget) -> &'static str {
+pub(crate) fn account_label(account: AccountTarget) -> String {
     match account {
-        AccountTarget::Codex => "codex",
-        AccountTarget::Grok => "grok",
-        AccountTarget::Claude => "claude",
-        AccountTarget::OpenRouter => "openrouter",
-        AccountTarget::Unspecified => "<account>",
+        AccountTarget::Codex => "codex".to_owned(),
+        AccountTarget::Grok => "grok".to_owned(),
+        AccountTarget::Claude => "claude".to_owned(),
+        AccountTarget::OpenRouter => "openrouter".to_owned(),
+        AccountTarget::Unspecified => "<account>".to_owned(),
+        AccountTarget::Named(account) => account.as_str().to_owned(),
     }
 }
 
@@ -47,6 +48,14 @@ pub(crate) const fn account_label(account: AccountTarget) -> &'static str {
 fn credential_command(account: AccountTarget) -> String {
     match account {
         AccountTarget::OpenRouter => "plak key set openrouter".to_owned(),
+        AccountTarget::Named(account)
+            if account
+                .as_str()
+                .parse::<plakous_hosted::account::AccountRef>()
+                .is_ok_and(|account| account.vertical().is_api()) =>
+        {
+            format!("plak key set {}", account.as_str())
+        }
         other => format!("plak login {}", account_label(other)),
     }
 }

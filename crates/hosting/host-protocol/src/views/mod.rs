@@ -10,6 +10,7 @@ mod call_detail;
 mod catalog;
 mod navigator;
 mod processes;
+mod profiles;
 mod resume;
 mod templates;
 mod tool_operation;
@@ -29,6 +30,7 @@ pub use presentation::{
     UsageLimitsView,
 };
 pub use processes::{ProcessStatus, ProcessView};
+pub use profiles::{ProfileDifference, ProfileRole, ProfileRow, ProfilesView};
 pub use resume::ResumeSessionEntry;
 pub use templates::TemplateRow;
 pub use tool_operation::ToolOperation;

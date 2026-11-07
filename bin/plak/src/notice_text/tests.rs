@@ -289,6 +289,18 @@ fn accounts() -> [AccountTarget; 5] {
     ]
 }
 
+#[test]
+fn named_account_remedies_never_suggest_the_default_slot() {
+    for (account, command) in [
+        ("claude/work", "plak login claude/work"),
+        ("openai/work", "plak key set openai/work"),
+    ] {
+        let target = AccountTarget::from_account(account);
+        assert_eq!(super::credential_command(target), command);
+        assert_eq!(super::account_label(target), account);
+    }
+}
+
 fn credential_conditions() -> [CredentialCondition; 4] {
     [
         CredentialCondition::OlderProfile,

@@ -2015,11 +2015,13 @@ PRODUCT_ACCOUNT_NAME_WAIVERS: set[str] = set()
 PRODUCT_ACCOUNT_NAME_EXEMPTIONS: dict[SourceKey, set[str]] = {
     # Persisted notice remedies preserve the exact original account identity.
     ("plakous-host-protocol", "src/notice_remedy.rs"): {
+        "anthropic",
         "chatgpt",
         "claude",
         "codex",
         "grok",
         "openrouter",
+        "openai",
         "supergrok",
         "xai",
         "xai-oauth",
