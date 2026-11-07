@@ -1426,5 +1426,6 @@ fn a_stop_is_answered_after_its_attachment_detaches() {
 }
 
 mod crash;
+mod requests;
 mod runner;
 pub(crate) mod sweep;

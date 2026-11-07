@@ -1,4 +1,25 @@
 #[test]
+fn launcher_release_fence_is_not_a_protocol_four_wire_operation() {
+    let (sender, receiver) = intent_channel::<Core>();
+    let ticket = sender.request_release_for_reopen("session").unwrap();
+    let delivery = receiver.try_recv().unwrap();
+    assert!(
+        matches!(&*delivery, SessionIntent::ReleaseForReopen { ticket: seen, .. } if *seen == ticket)
+    );
+    assert!(serde_json::to_string(&*delivery).is_err());
+    assert!(
+        serde_json::from_str::<SessionIntent<Core>>(
+            r#"{"kind":"release_for_reopen","body":{"ticket":1}}"#
+        )
+        .is_err()
+    );
+    let schema = serde_json::to_string(&schemars::schema_for!(SessionIntent<Core>)).unwrap();
+    assert!(!schema.contains("release_for_reopen"));
+    receiver.settle_stop(ticket, Ok(()));
+    assert_eq!(sender.stop_settled(ticket), Some(Ok(())));
+}
+
+#[test]
 fn patch_overflow_and_replacements_are_isolated_by_scope() {
     use crate::views::transcript::{TranscriptPatch, TranscriptScope};
     let (sender, receiver) = observation_channel::<Core>();

@@ -55,6 +55,8 @@ pub type RootResolver = Box<dyn Fn(&str) -> Option<NodeAddress> + Send + Sync>;
 /// Opens the session of an id on a fresh host worker.
 type Opener<P> = Box<dyn Fn(&str) -> CliResult<OpenedSession<P>> + Send + Sync>;
 
+type HeldSession<P> = (Arc<WireSession<P>>, ResidencyHold, u64);
+
 enum Slot<P: ProtocolExtension> {
     Resident {
         session: Arc<WireSession<P>>,
@@ -213,9 +215,7 @@ where
     /// the slot handed the session over. That count is read under the slot
     /// lock, so a release that waited out this open is still ahead of it and
     /// the attachment it makes detaches.
-    pub(super) fn resident_at_handoff(
-        &self,
-    ) -> CliResult<(Arc<WireSession<P>>, ResidencyHold, u64)> {
+    pub(super) fn resident_at_handoff(&self) -> CliResult<HeldSession<P>> {
         let mut slot = self.lock();
         loop {
             if let Slot::Resident { session, .. } = &*slot {
@@ -228,17 +228,11 @@ where
             if let Slot::Dormant { session_id } = &*slot {
                 // On a thread of its own: an open builds the session's own
                 // executor, which a caller's async runtime would refuse.
-                let open = &self.open;
                 self.set_known(session_id);
                 self.busy.store(BUSY_OPENING, Ordering::Release);
-                let opened = std::thread::scope(|scope| {
-                    scope
-                        .spawn(|| open(session_id))
-                        .join()
-                        .map_err(|_| CliFailure::new("the session's open panicked"))
-                });
+                let opened = self.open_on_thread(session_id);
                 self.busy.store(BUSY_NONE, Ordering::Release);
-                *slot = resident(opened??);
+                *slot = resident(opened?);
             }
             if let Slot::Resident {
                 session,
@@ -290,6 +284,80 @@ where
         self.end(deadline, WireSession::hand_off)
     }
 
+    /// Serializes an actor-fenced release, product carry/re-resolution and
+    /// reopen with every other trigger for this slot.
+    pub(super) fn reopen(
+        &self,
+        expected: &Arc<WireSession<P>>,
+        expected_session: &str,
+        attachment: u64,
+        request: &str,
+        change: impl FnOnce(&str) -> CliResult<(String, NodeAddress)> + Send,
+    ) -> CliResult<NodeAddress> {
+        let mut slot = self.lock();
+        let Slot::Resident { session, .. } = &*slot else {
+            return Err(CliFailure::new("the session is no longer resident"));
+        };
+        if !Arc::ptr_eq(session, expected) || session.session_id() != expected_session {
+            return Err(CliFailure::new(
+                "the requesting attachment's session already moved",
+            ));
+        }
+        let old = Arc::clone(session);
+        let ticket = old.begin_reopen(expected_session)?;
+        // Only the actor decides whether releasing is admissible. Once it
+        // acknowledges, join that same worker before any target is built.
+        loop {
+            if let Some(result) = old.reopen_settled(ticket) {
+                if let Err(detail) = result {
+                    old.end_reopen(None);
+                    return Err(CliFailure::new(detail));
+                }
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        self.busy.store(BUSY_RELEASING, Ordering::Release);
+        crate::test_support_runner::reopen_cut("fenced");
+        let source = old.session_id();
+        let Slot::Resident { worker, .. } = std::mem::replace(
+            &mut *slot,
+            Slot::Dormant {
+                session_id: source.clone(),
+            },
+        ) else {
+            unreachable!("the slot lock retains the resident worker");
+        };
+        if let Err(failure) = join(worker, self.release_join) {
+            old.end_reopen(None);
+            self.busy.store(BUSY_NONE, Ordering::Release);
+            return Err(failure);
+        }
+        crate::test_support_runner::reopen_cut("released");
+        let changed = std::thread::scope(|scope| scope.spawn(|| change(&source)).join())
+            .unwrap_or_else(|_| Err(CliFailure::new("the binding repair panicked")));
+        crate::test_support_runner::reopen_cut("carried");
+        let (target, mut root) = changed
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|_| (source, old.root()));
+        self.set_known(&target);
+        *slot = Slot::Dormant {
+            session_id: target.clone(),
+        };
+        self.busy.store(BUSY_OPENING, Ordering::Release);
+        let opened = self.open_on_thread(&target);
+        let opening = opened.map(|opened| {
+            root = opened.root.clone();
+            self.set_known(&opened.session_id);
+            *slot = resident(opened);
+        });
+        crate::test_support_runner::reopen_cut("opened");
+        old.end_reopen(Some((&root, attachment, request)));
+        self.busy.store(BUSY_NONE, Ordering::Release);
+        changed.and(opening).map(|()| root)
+    }
+
     fn end(&self, deadline: Duration, ask: fn(&WireSession<P>)) -> CliResult<()> {
         let mut slot = self.lock();
         if let Slot::Resident { session, .. } = &*slot {
@@ -313,6 +381,11 @@ where
 
     fn lock(&self) -> MutexGuard<'_, Slot<P>> {
         self.slot.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn open_on_thread(&self, session: &str) -> CliResult<OpenedSession<P>> {
+        std::thread::scope(|scope| scope.spawn(|| (self.open)(session)).join())
+            .map_err(|_| CliFailure::new("the session's open panicked"))?
     }
 }
 

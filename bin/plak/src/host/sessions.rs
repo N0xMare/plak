@@ -234,6 +234,23 @@ impl HostSessions<PlakExtension> for ProductSessions {
         )
     }
 
+    fn rebind(&self, session: &str, cause: &str) -> CliResult<Created> {
+        let record = self
+            .services
+            .session_records()?
+            .load(session)
+            .map_err(CliFailure::new)?;
+        let (target, _) = crate::carry::rebind::rebind_session(&self.services, &record, cause)?;
+        Ok(Created {
+            node: NodeAddress {
+                tree_id: target.node.tree_id,
+                agent_id: target.node.agent_id,
+            },
+            session: target.id,
+            environment: SessionEnvironment::Host,
+        })
+    }
+
     fn refusal(&self, session: &str, failure: &CliFailure) -> RequestRefusal {
         let held = (failure.code() == Some("tree_hosted_elsewhere"))
             .then(|| {

@@ -57,6 +57,51 @@ fn stopped_note(event: &HostEvent) -> bool {
         if notice.text.starts_with("stopped: the session's work ended"))
 }
 
+#[test]
+fn a_launcher_release_fence_refuses_a_running_turn_without_cancelling_it() {
+    let root = tempfile::tempdir().unwrap();
+    let plan = Arc::new(
+        serde_json::from_value(serde_json::json!({
+            "version": plakous_offline_crash_harness::script::SCRIPT_VERSION,
+            "steps": [{"stream": [{"text": "still running"}, {"stall":30000}]}]
+        }))
+        .unwrap(),
+    );
+    let (config, _) = scripted_host_with(root.path(), plan);
+    let session = config.session.id.clone();
+    let (actions, events, host) = spawn_host_worker(config).unwrap();
+    let mut seen = Vec::new();
+    send_attached_action(&actions, UserAction::Prompt("work".into()));
+    wait_for(
+        &events,
+        &mut seen,
+        "running",
+        |event| matches!(event, HostEvent::AssistantDelta(text) if text.contains("still running")),
+    );
+    let ticket = actions.request_release_for_reopen(&session).unwrap();
+    assert!(settled(&actions, ticket).is_err());
+    assert!(!host.is_finished());
+    assert!(!seen.iter().any(|event| matches!(event, HostEvent::TurnLifecycle(lifecycle) if format!("{lifecycle:?}").contains("Cancelled"))));
+    send_attached_action(&actions, UserAction::Quit);
+    host.join().unwrap().unwrap();
+}
+
+#[test]
+fn a_stale_launcher_fence_never_releases_a_successor_session() {
+    let root = tempfile::tempdir().unwrap();
+    let (config, _) = scripted_host_with(root.path(), script(serde_json::json!([])));
+    let session = config.session.id.clone();
+    let (actions, _events, host) = spawn_host_worker(config).unwrap();
+    let stale = actions
+        .request_release_for_reopen("a-session-this-actor-does-not-serve")
+        .unwrap();
+    assert!(settled(&actions, stale).is_err());
+    assert!(!host.is_finished());
+    let own = actions.request_release_for_reopen(&session).unwrap();
+    assert_eq!(settled(&actions, own), Ok(()));
+    host.join().unwrap().unwrap();
+}
+
 /// A stop of a root that holds its continuation after a loss records
 /// `stopped` on the loss's turn before it is settled, and a repeated stop
 /// records nothing more. The next open, under `continue`, holds nothing and

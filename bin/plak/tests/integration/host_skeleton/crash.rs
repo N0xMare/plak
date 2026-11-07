@@ -16,7 +16,7 @@ use super::*;
 mod tui;
 
 /// The physical provider dispatches the fixture has seen.
-fn dispatches(fixture: &Fixture) -> usize {
+pub(super) fn dispatches(fixture: &Fixture) -> usize {
     read_evidence(fixture.root.join("evidence.jsonl"))
         .expect("dispatch evidence")
         .iter()

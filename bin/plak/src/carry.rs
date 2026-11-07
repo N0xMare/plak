@@ -35,9 +35,9 @@ pub(crate) use reload::{
 pub(crate) use {
     epoch::apply_on_reload,
     interactive::{
-        ReloadPlan, carry_foreign_session, carry_out, rebind_session, reload_plan,
-        reverify_released, switch_to,
+        ReloadPlan, carry_foreign_session, carry_out, reload_plan, reverify_released, switch_to,
     },
+    rebind::rebind_session,
 };
 
 /// A running turn refuses a reload or rebind whose successor is another

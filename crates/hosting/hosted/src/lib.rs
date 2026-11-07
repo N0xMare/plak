@@ -135,6 +135,7 @@ mod test_support_runner;
 #[cfg(not(feature = "test-support"))]
 mod test_support_runner {
     pub(crate) const fn cut(_: &str) {}
+    pub(crate) const fn reopen_cut(_: &str) {}
     pub(crate) const fn selected(_: &str) -> bool {
         false
     }

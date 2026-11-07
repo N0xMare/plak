@@ -82,6 +82,17 @@ pub fn run_shell_host_loop<P: plakous_host_protocol::ProtocolExtension>(
             actions.settle_stop(ticket, Ok(()));
             continue;
         }
+        if let UserAction::ReleaseForReopen { ticket, session } = &action {
+            if *session != config.session.id {
+                actions.settle_stop(
+                    *ticket,
+                    Err("the requesting attachment's session moved".to_owned()),
+                );
+                continue;
+            }
+            actions.settle_stop(*ticket, Ok(()));
+            break;
+        }
         if state.recovery_blocked && recovery_blocked_action(&action) {
             refuse_detached_recovery_action(&events, &action);
             continue;
@@ -160,7 +171,9 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
             );
         }
         UserAction::Quit => return ShellStep::Quit,
-        UserAction::Background | UserAction::StopSession { .. } => {}
+        UserAction::Background
+        | UserAction::StopSession { .. }
+        | UserAction::ReleaseForReopen { .. } => {}
         action @ (UserAction::Prompt(_) | UserAction::FollowUp(_) | UserAction::Steer(_)) => {
             refuse_not_ready(events, config, log);
             reject_draft(events, action);

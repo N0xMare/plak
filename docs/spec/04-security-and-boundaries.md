@@ -788,6 +788,13 @@ The redactor is best-effort display minimization, not a credential
 boundary. The endpoint's whole job is
 deciding who the client is, and its checks stop different attackers.
 
+Host `retry_attach` and `rebind` require the requesting connection's root
+attachment, not a child attachment. They do not exec or hand off the host
+build. An actor-side fence refuses busy work without interrupting it;
+the host joins the released owner before exact re-resolution or the
+existing durable carry. A stale request cannot release a replacement
+actor, and no target opens concurrently with its predecessor.
+
 - **The tailnet identity stops everyone who is not an allowed login.** The
   endpoint binds only a unix socket in a `0700` directory owned by the
   effective uid (refused when the directory is anything else, a symlink

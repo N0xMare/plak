@@ -651,7 +651,7 @@ fn a_host_tui_rereads_mouse_preferences_after_the_config_editor() {
 }
 
 #[test]
-fn a_host_tui_reports_rebind_refusal_without_changing_its_attachment() {
+fn a_host_tui_rebinds_without_restarting_its_host() {
     let fixture = Fixture::with_mode(&tool_then_answer("rebind stays hosted"), Mode::Host);
     let mut terminal = Terminal::spawn_ready(&fixture);
     terminal.send(b"the original host binding\r");
@@ -661,9 +661,22 @@ fn a_host_tui_reports_rebind_refusal_without_changing_its_attachment() {
     let before = directory.rows();
     let pid = fixture.host.lock().unwrap().as_ref().unwrap().child.id();
     terminal.send(b"/rebind\r");
-    terminal.wait_screen("rebind refused:");
-    terminal.wait_screen("keeps the session it serves");
-    assert_eq!(directory.rows(), before);
+    let until = Instant::now() + WAIT;
+    let after = loop {
+        let rows = directory.rows();
+        if rows
+            .iter()
+            .any(|row| row["session"] != before[0]["session"] && row["residency"] == "resident")
+        {
+            break rows;
+        }
+        assert!(
+            Instant::now() < until,
+            "the rebind did not create its successor"
+        );
+        std::thread::yield_now();
+    };
+    assert_eq!(after.len(), before.len() + 1);
     assert_eq!(
         fixture.host.lock().unwrap().as_ref().unwrap().child.id(),
         pid
@@ -692,8 +705,14 @@ fn rebind_preferences(theme: &str) {
         &path,
         &format!("{original}\n[tui]\ntheme = \"{theme}\"\nmouse = false\n"),
     );
+    let mut directory = Directory::connect(&fixture);
+    let before = directory.rows().len();
     terminal.send(b"/rebind\r");
-    terminal.wait_screen("rebind refused:");
+    let until = Instant::now() + WAIT;
+    while directory.rows().len() == before {
+        assert!(Instant::now() < until, "the rebind did not settle");
+        std::thread::yield_now();
+    }
     terminal.wait_screen("/ commands");
     terminal.send(b"/settings\r");
     terminal.wait_where("fresh local preferences on the hosted relaunch", |frame| {

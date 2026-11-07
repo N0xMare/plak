@@ -86,6 +86,16 @@ pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
     /// The session does not open.
     fn open(&self, session: &str) -> CliResult<OpenedSession<P>>;
 
+    /// Carries the released session under its current root selection.
+    ///
+    /// # Errors
+    /// The carry's validation or durable transition refused.
+    fn rebind(&self, _session: &str, _cause: &str) -> CliResult<Created> {
+        Err(CliFailure::new(
+            "this launcher does not support binding repair",
+        ))
+    }
+
     /// The refusal of an attach whose session did not open with `failure`:
     /// `tree_hosted_elsewhere` while another live host process holds its
     /// tree, `session_unavailable` with why otherwise.
@@ -588,16 +598,79 @@ where
                 })
             }
             Op::Attach { node } => self.attach(&node, text),
-            Op::Detach { .. }
-            | Op::Intent { .. }
-            | Op::RetryAttach { .. }
-            | Op::ResumeSession { .. }
-            | Op::Rebind { .. } => {
+            Op::RetryAttach {
+                attachment,
+                request_id,
+            } => answered(self.reopen(attachment, &request_id, None)),
+            Op::Rebind {
+                attachment,
+                request_id,
+                cause,
+            } => answered(self.reopen(attachment, &request_id, Some(&cause))),
+            Op::Detach { .. } | Op::Intent { .. } | Op::ResumeSession { .. } => {
                 if self.node.is_none() {
                     return refused(RequestRefusal::NotAttached);
                 }
+                if self
+                    .node
+                    .as_ref()
+                    .is_some_and(|link| link.session.reopening())
+                {
+                    return refused(RequestRefusal::SessionUnavailable {
+                        detail: "the session is reopening".to_owned(),
+                    });
+                }
                 self.forward(text.to_owned()).map(Forwarded::Reading)
             }
+        }
+    }
+
+    fn reopen(&mut self, attachment: AttachmentId, request: &str, cause: Option<&str>) -> Outcome {
+        let Some(link) = &self.node else {
+            return Outcome::Refused(RequestRefusal::NotAttached);
+        };
+        if link.connection.attachment() != Some(attachment)
+            || !link.connection.service.attached(attachment)
+        {
+            return Outcome::Refused(RequestRefusal::NotAttached);
+        }
+        if link.connection.service.is_child(attachment) {
+            return Outcome::Refused(RequestRefusal::RefusedForRole {
+                row: if cause.is_some() {
+                    "workflow"
+                } else {
+                    "readiness"
+                }
+                .to_owned(),
+            });
+        }
+        if link.connection.stopping() || self.draining.is_some() {
+            return Outcome::Refused(RequestRefusal::OneInFlight);
+        }
+        let session = link
+            .connection
+            .session
+            .clone()
+            .unwrap_or_else(|| link.session.session_id());
+        let source_root = link.session.root();
+        let slot = self.host.slot(&session);
+        let sessions = Arc::clone(&self.host.sessions);
+        let result = slot.reopen(
+            &link.session,
+            &session,
+            attachment,
+            request,
+            |source| match cause {
+                Some(cause) => sessions
+                    .rebind(source, cause)
+                    .map(|created| (created.session, created.node)),
+                None => Ok((source.to_owned(), source_root)),
+            },
+        );
+        self.host.changed();
+        match result {
+            Ok(node) => Outcome::Ok(Answer::Moved { node }),
+            Err(failure) => Outcome::Refused(self.host.sessions.refusal(&session, &failure)),
         }
     }
 
@@ -607,11 +680,9 @@ where
     /// as a new attach on one session's connection ends the one before it;
     /// a refused attach leaves it.
     fn attach(&mut self, node: &NodeAddress, text: &str) -> CliResult<Forwarded> {
-        if self
-            .node
-            .as_ref()
-            .is_some_and(|link| link.session.root().tree_id == node.tree_id)
-        {
+        if self.node.as_ref().is_some_and(|link| {
+            link.session.root().tree_id == node.tree_id && !link.session.ended()
+        }) {
             return self.forward(text.to_owned()).map(Forwarded::Reading);
         }
         let slot = match self.host.resolve(node) {
@@ -805,14 +876,14 @@ where
         if let Some(link) = &mut self.node {
             // A session that ended, or one a `release_session` since the
             // link asked for, is no longer this connection's.
-            if link.session.ended() || link.session.releases() > link.releases {
+            link.connection.flush()?;
+            if !link.connection.holding() {
+                self.unlink();
+            } else if !link.session.reopening()
+                && (link.session.ended() || link.session.releases() > link.releases)
+            {
                 self.detach_link()?;
                 self.host.changed();
-            } else {
-                link.connection.flush()?;
-                if !link.connection.holding() {
-                    self.unlink();
-                }
             }
         }
         self.flush_directory()

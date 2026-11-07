@@ -4122,15 +4122,25 @@ verdicts) are addressed, the session profile and workspace chrome states.
   response comes when the request is settled: `moved` with the new root,
   just before the requester's own `moved` frame, or `session_unavailable`
   when the session could not be opened and the served session is
-  unchanged. A request whose attachment ends first is answered
+  unchanged (except a carry already committed, described below). A request whose attachment ends first is answered
   `not_attached`; it may still take effect, and every `moved` it causes
   names its `request_id`, on every connection still attached. Client ids
   are unique only per connection, so the response answers the connection
   whose attachment asked, never another that used the same id. The session host serves `resume_session` as the
   session's own resume; `retry_attach` and `rebind` reopen the session,
   which only a launcher that owns the session's host can do, so a host
-  that does not own its sessions' launcher (`plak agent --wire v2`, `plak
-  host`) refuses them `session_unavailable` and keeps its session.
+  that does not own its sessions' launcher (`plak agent --wire v2`)
+  refuses them `session_unavailable` and keeps its session.
+  `plak host` owns its launchers: an actor-side, process-local release fence
+  refuses a running turn, child work or background processes without stopping
+  them. Once admitted, the host joins that exact worker before re-resolution
+  (`retry_attach`) or the existing durable history carry (`rebind`). No wire
+  operation or version is added. The slot serializes release and reopen,
+  and a stale request cannot operate on a replacement actor. Every viewer
+  receives `moved` and reattaches fresh. A failed carry reopens the source;
+  a committed carry is never undone if its target's open fails: the target
+  remains the slot's dormant session, viewers are told its root, and the
+  request returns `session_unavailable` with the open's failure.
 - **Observation classes.** Every observation is one class. A **state** is
   broadcast as the latest value of its kind and is part of the attach
   snapshot. An **event** is broadcast as it happens; a *required* event is

@@ -65,6 +65,7 @@ impl IntentClass {
             UserAction::Interrupt => Self::Urgent,
             UserAction::Quit => Self::Quit,
             UserAction::StopSession { .. } => Self::Stop,
+            UserAction::ReleaseForReopen { .. } => Self::IdleOnly { noun: "binding" },
             UserAction::NewSession => Self::IdleOnly {
                 noun: "new session",
             },

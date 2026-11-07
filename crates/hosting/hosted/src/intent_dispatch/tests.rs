@@ -14,6 +14,7 @@ fn expected_class(action: &UserAction) -> IntentClass {
         UserAction::Interrupt => IntentClass::Urgent,
         UserAction::Quit => IntentClass::Quit,
         UserAction::StopSession { .. } => IntentClass::Stop,
+        UserAction::ReleaseForReopen { .. } => IntentClass::IdleOnly { noun: "binding" },
         UserAction::NewSession => IntentClass::IdleOnly {
             noun: "new session",
         },

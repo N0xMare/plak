@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
+use crate::error::{CliFailure, CliResult};
 use plakous_host_protocol::wire::{ClientFrame, HostFrame, NodeAddress};
 use plakous_host_protocol::{IntentSender, ObservationReceiver, ProtocolExtension, SessionIntent};
 use serde::Serialize;
@@ -31,6 +32,7 @@ pub struct WireSession<P: ProtocolExtension> {
     /// it detaches.
     releases: std::sync::atomic::AtomicU64,
     attachments: AttachmentCount,
+    reopening: AtomicBool,
 }
 
 impl<P: ProtocolExtension> WireSession<P> {
@@ -125,6 +127,7 @@ impl<P: ProtocolExtension> WireSession<P> {
             ended,
             releases: std::sync::atomic::AtomicU64::new(0),
             attachments: attachments.clone(),
+            reopening: AtomicBool::new(false),
         }
     }
 
@@ -210,6 +213,40 @@ impl<P: ProtocolExtension> WireSession<P> {
     #[must_use]
     pub fn attached(&self) -> usize {
         self.attachments.get()
+    }
+
+    pub(super) fn reopening(&self) -> bool {
+        self.reopening.load(Ordering::Acquire)
+    }
+
+    pub(super) fn begin_reopen(
+        &self,
+        session: &str,
+    ) -> CliResult<plakous_host_protocol::StopTicket> {
+        self.reopening.store(true, Ordering::Release);
+        self.actions
+            .request_release_for_reopen(session)
+            .map_err(|error| {
+                self.reopening.store(false, Ordering::Release);
+                CliFailure::new(format!("the reopen could not enter the mailbox: {error:?}"))
+            })
+    }
+
+    pub(super) fn reopen_settled(
+        &self,
+        ticket: plakous_host_protocol::StopTicket,
+    ) -> Option<Result<(), String>> {
+        self.actions.stop_settled(ticket)
+    }
+
+    pub(super) fn end_reopen(&self, moved: Option<(&NodeAddress, u64, &str)>) {
+        if let Some((root, attachment, request)) = moved {
+            served::lock(&self.served)
+                .service()
+                .move_attachments(root, Some((attachment, request)));
+            self.ended.store(true, Ordering::Release);
+        }
+        self.reopening.store(false, Ordering::Release);
     }
 
     /// Asks the session to quit; it ends once it has.

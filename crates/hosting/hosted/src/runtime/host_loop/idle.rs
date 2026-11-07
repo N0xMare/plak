@@ -218,6 +218,35 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 other => other,
             };
             match received {
+                Ok(UserAction::ReleaseForReopen { ticket, session }) => {
+                    if session != self.role.config.session.id {
+                        self.role.actions.settle_stop(
+                            ticket,
+                            Err("the requesting attachment's session moved".to_owned()),
+                        );
+                        return Ok(HostStep::Continue);
+                    }
+                    let tree_id = crate::runtime::rebind::durable_tree_id(
+                        &self.role.config.topology_rows(),
+                        &self.role.config.session,
+                    );
+                    let children = match crate::topology_runtime::lookup(&tree_id) {
+                        Some(runtime) => {
+                            !runtime.children_quiet().await
+                                || runtime
+                                    .read(|tree| tree.quiescence_refusal().is_some())
+                                    .unwrap_or(true)
+                        }
+                        None => false,
+                    };
+                    if children || self.role.config.state_roots.job_registry().running_count() > 0 {
+                        self.role.actions.settle_stop(ticket, Err("child work or processes still run; stop them or wait before reopening".to_owned()));
+                        return Ok(HostStep::Continue);
+                    }
+                    self.quit_started_at.get_or_insert_with(Instant::now);
+                    self.role.actions.settle_stop(ticket, Ok(()));
+                    return Ok(HostStep::Quit);
+                }
                 Ok(UserAction::StopSession { ticket }) => {
                     self.stop_session(ticket, None).await;
                     None

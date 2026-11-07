@@ -726,29 +726,6 @@ pub(crate) fn switch_to(
     super::intent::resume(services, None, record, note)
 }
 
-/// The binding-repair `/rebind` carry of `record`.
-///
-/// # Errors
-/// Returns the carry's refusal.
-pub(crate) fn rebind_session(
-    services: &Services,
-    record: &SessionRecord,
-    cause: &str,
-) -> CliResult<(SessionRecord, String)> {
-    super::rebind::ensure_carry_quiescence(services.paths()?, record)?;
-    let document = export_session(services.paths()?, record)
-        .map_err(|error| CliFailure::new(format!("cannot carry this session: {error}")))?;
-    let paths = services.paths()?.for_workspace(&record.workspace_root);
-    commands::session::rebind::rebind_document(
-        services,
-        document,
-        cause,
-        super::rebind::ReboundMode::Rebind,
-        crate::profiles::session_selection(&paths, record),
-        None,
-    )
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests;

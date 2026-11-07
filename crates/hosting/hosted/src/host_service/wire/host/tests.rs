@@ -186,9 +186,11 @@ impl HostSessions<Core> for Fake {
             .unwrap()
             .insert(session.to_owned(), count.clone());
         let script = Arc::clone(&self.0);
+        let identity = session.to_owned();
         let worker = HostWorkerHandle::spawn(move || {
             drop(observations);
             let mut stops = Vec::new();
+            let mut active = false;
             loop {
                 if !script.hold_stops.load(Ordering::SeqCst) {
                     for ticket in stops.drain(..) {
@@ -199,7 +201,20 @@ impl HostSessions<Core> for Fake {
                     Ok(delivery) => match &*delivery {
                         SessionIntent::Quit => break,
                         SessionIntent::StopSession { ticket } => stops.push(*ticket),
-                        SessionIntent::Prompt(draft) => prompted(&script, &busy, draft),
+                        SessionIntent::ReleaseForReopen { ticket, session } => {
+                            if *session != identity {
+                                intents.settle_stop(*ticket, Err("the session moved".into()));
+                            } else if active {
+                                intents.settle_stop(*ticket, Err("a turn is running".into()));
+                            } else {
+                                intents.settle_stop(*ticket, Ok(()));
+                                break;
+                            }
+                        }
+                        SessionIntent::Prompt(draft) => {
+                            active = true;
+                            prompted(&script, &busy, draft);
+                        }
                         _ => {}
                     },
                     // The actor's idle release, asked to release now.
@@ -273,6 +288,90 @@ impl HostSessions<Core> for Fake {
             environment: SessionEnvironment::Host,
         })
     }
+
+    fn rebind(&self, session: &str, _cause: &str) -> CliResult<Created> {
+        let target = format!("{session}-rebound");
+        self.0
+            .trees
+            .lock()
+            .unwrap()
+            .insert(target.clone(), session.to_owned());
+        let mut target_row = row(&target, 100);
+        target_row.node = node(session);
+        self.0.rows.lock().unwrap().insert(0, target_row);
+        Ok(Created {
+            session: target,
+            node: node(session),
+            environment: SessionEnvironment::Host,
+        })
+    }
+}
+
+#[test]
+fn host_requests_reopen_only_after_actor_release_and_move_every_viewer() {
+    for rebind in [false, true] {
+        let (host, fake) = host(&["s1"]);
+        let out = Out::default();
+        let mut connection = host.connect(out.clone(), Face::Remote, || false);
+        request(&mut connection, 1, Op::Attach { node: node("s1") });
+        let attachment = attached(&out.take(), 1);
+        let other_out = Out::default();
+        let mut other = host.connect(other_out.clone(), Face::Remote, || false);
+        request(&mut other, 1, Op::Attach { node: node("s1") });
+        let other_attachment = attached(&other_out.take(), 1);
+        let op = if rebind {
+            Op::Rebind {
+                attachment,
+                request_id: "repair".into(),
+                cause: "binding repair".into(),
+            }
+        } else {
+            Op::RetryAttach {
+                attachment,
+                request_id: "repair".into(),
+            }
+        };
+        request(&mut connection, 2, op);
+        assert_eq!(
+            outcome(&out.take(), 2),
+            Outcome::Ok(Answer::Moved { node: node("s1") })
+        );
+        other.flush().unwrap();
+        assert!(other_out.take().iter().any(|frame| matches!(frame, HostFrame::Moved { attachment, request_id: Some(id), .. } if *attachment == other_attachment && id == "repair")));
+        request(&mut connection, 3, Op::Attach { node: node("s1") });
+        attached(&out.take(), 3);
+        assert_eq!(fake.0.opens.load(Ordering::SeqCst), 2);
+        assert_eq!(host.slots().len(), 1, "a reattach created a competing slot");
+        connection.leave();
+        other.leave();
+        handed_off(&host);
+    }
+}
+
+#[test]
+fn a_busy_actor_refuses_reopen_without_stopping_or_redispatching() {
+    let (host, fake) = host(&["s1"]);
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    let attachment = attached(&out.take(), 1);
+    prompt(&mut connection, 2, attachment, "running");
+    request(
+        &mut connection,
+        3,
+        Op::RetryAttach {
+            attachment,
+            request_id: "retry".into(),
+        },
+    );
+    assert!(matches!(
+        outcome(&out.take(), 3),
+        Outcome::Refused(RequestRefusal::SessionUnavailable { .. })
+    ));
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
+    assert_eq!(fake.0.images.lock().unwrap().len(), 1);
+    connection.leave();
+    handed_off(&host);
 }
 
 /// Hands every resident session off, each in time.

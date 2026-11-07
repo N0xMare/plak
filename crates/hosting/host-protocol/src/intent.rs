@@ -280,6 +280,16 @@ pub enum SessionIntent<P: ProtocolExtension = Core> {
         /// The stop's ticket.
         ticket: crate::StopTicket,
     },
+    /// Process-local launcher fence: refuse while busy, otherwise release
+    /// the runtime before the launcher re-resolves or carries it.
+    #[serde(skip)]
+    #[schemars(skip)]
+    ReleaseForReopen {
+        /// The launcher acknowledgement, settled through the stop ticket book.
+        ticket: crate::StopTicket,
+        /// The session the requesting attachment observed, never a successor.
+        session: String,
+    },
     /// Settle one child's recorded session recovery: the operator's retry,
     /// not the root `Recover` intent. The host refuses a stale revision or a
     /// different attempt.
@@ -384,6 +394,7 @@ impl<P: ProtocolExtension> fmt::Debug for SessionIntent<P> {
             Self::ReadTopologyNodeUsage { .. } => "ReadTopologyNodeUsage(..)",
             Self::StopAllTopology => "StopAllTopology",
             Self::StopSession { .. } => "StopSession(..)",
+            Self::ReleaseForReopen { .. } => "ReleaseForReopen(..)",
             Self::RecoverTopologyNode { .. } => "RecoverTopologyNode(..)",
             Self::ResumeLossContinuation { .. } => "ResumeLossContinuation(..)",
             Self::RefreshTemplates => "RefreshTemplates",

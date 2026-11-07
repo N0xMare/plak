@@ -236,7 +236,9 @@ pub(crate) fn row_of(action: &UserAction) -> Row {
         | UserAction::MoveQueued { .. }
         | UserAction::ResumeQueueDrain => Row::Queue,
         UserAction::ResolveApproval { .. } => Row::Approval,
-        UserAction::Quit | UserAction::StopSession { .. } => Row::Quit,
+        UserAction::Quit | UserAction::StopSession { .. } | UserAction::ReleaseForReopen { .. } => {
+            Row::Quit
+        }
         UserAction::NewSession
         | UserAction::Compact
         | UserAction::ForkSession { .. }

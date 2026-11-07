@@ -170,6 +170,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                     action
                 });
             let received = match received {
+                Ok(UserAction::ReleaseForReopen { ticket, .. }) => {
+                    self.host.actions.settle_stop(
+                        ticket,
+                        Err("a turn is running; stop it or wait before reopening".to_owned()),
+                    );
+                    return false;
+                }
                 Ok(UserAction::StopProcesses { id, interrupt }) => {
                     if let Err(error) = self.host.roots.job_registry().stop_user(id.as_deref()) {
                         let _ = self
@@ -243,7 +250,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                 other => other,
             };
             match received {
-                Ok(UserAction::StopProcesses { .. } | UserAction::StopSession { .. }) => {
+                Ok(
+                    UserAction::StopProcesses { .. }
+                    | UserAction::StopSession { .. }
+                    | UserAction::ReleaseForReopen { .. },
+                ) => {
                     unreachable!("process intents and stops handled above")
                 }
                 // The table refused these above; were one reclassified, a

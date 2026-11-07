@@ -1853,6 +1853,11 @@ checks the replacement policy and continued wire service, and rejects an
 invalid replacement while retaining the old build. SIGHUP remains a
 planned host handoff, never an asset reload.
 
+Host binding-request process cuts cover the actor fence, joined release,
+durable carry and opened target for both `rebind` and `retry_attach`.
+Restart must recover custody, retain one canonical terminal and the carried
+history, serve one actor, and append no provider dispatch evidence.
+
 A class of defect lives only in the process: how a signal ends it, what its
 writer does when the reader stops reading, whether a failed shutdown still
 terminates the stream, and whether a session an earlier process wrote reopens.

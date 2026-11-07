@@ -377,6 +377,7 @@ pub mod control {
             | UserAction::ResolveApproval { .. }
             | UserAction::Quit
             | UserAction::StopSession { .. }
+            | UserAction::ReleaseForReopen { .. }
             | UserAction::NewSession
             | UserAction::Compact
             | UserAction::ResumeSession { .. }
