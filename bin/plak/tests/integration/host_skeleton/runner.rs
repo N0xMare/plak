@@ -38,7 +38,7 @@ fn an_upgraded_host_inspects_the_old_protocol_and_starts_a_separate_daemon() {
     let (pid, _) = job(&fixture);
     let old_lines = local_daemon_lines(&fixture);
     assert_eq!(old_lines.len(), 1);
-    assert!(!old_lines[0].jobs["jobs"].as_array().unwrap().is_empty());
+    assert_eq!(old_lines[0].jobs["jobs"].as_array().unwrap().len(), 1);
     stop(&mut initial_host);
     let directory = fixture.home().join("host/runner/v1/run");
     std::fs::create_dir_all(&directory).unwrap();
