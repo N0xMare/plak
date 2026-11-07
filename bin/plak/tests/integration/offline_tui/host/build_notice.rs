@@ -212,7 +212,7 @@ fn a_host_reload_refuses_if_the_host_stops_before_client_exec() {
         .as_str()
         .unwrap()
         .to_owned();
-    let paid = provider_dispatches(&fixture);
+    let dispatches = provider_dispatches(&fixture);
     terminal.send(b"/reload\r");
     wait_for_file(&stopped);
     fixture
@@ -250,5 +250,5 @@ fn a_host_reload_refuses_if_the_host_stops_before_client_exec() {
         fences,
         "the replacement client took custody"
     );
-    assert_eq!(provider_dispatches(&fixture), paid);
+    assert_eq!(provider_dispatches(&fixture), dispatches);
 }
