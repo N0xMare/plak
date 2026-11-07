@@ -130,7 +130,7 @@ pub(in super::super) fn after_kill(
     assert!(starts(fixture) <= 1);
     let pid = job(fixture);
     let lines = runner_lines(fixture);
-    let held = !lines.is_empty();
+    let foreground = lines.iter().any(|line| line.foreground);
     let was_promoted = lines.into_iter().any(|line| {
         plakous::tools::runner::decode_jobs_snapshot(line.jobs)
             .unwrap()
@@ -138,6 +138,7 @@ pub(in super::super) fn after_kill(
             .iter()
             .any(|job| job.status == plakous::tools::JobStatus::Running)
     });
+    let held = foreground || was_promoted;
     if shape != "host_crash_mid_stop"
         && let Some(pid) = pid
     {

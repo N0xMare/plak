@@ -2060,13 +2060,14 @@ empty. A held first line cannot prevent the next line's sweep, and child-stop
 recovery collects every failure rather than returning after the first.
 The exact-name lane checker uses full binary-relative test paths, rejects bare
 module and suffix matches, and preserves exact lane/exclusion comparison.
-`embedded_open_after_host_crash` adds indexed refusal cuts: a daemon-held line
-refuses embedded open without a job terminal, and the next host still adopts it.
+`embedded_open_after_host_crash` adds indexed refusal cuts: a line with a running
+job or live foreground process refuses embedded open without a job terminal,
+and the next host still adopts it. A listed process-free line is not a refusal.
 Start-environment coverage uses two hosts sharing one daemon
 with distinct login-shell PATHs and HOMEs. An EOF before Hello, contention
 with an exiting daemon's socket lock, and an unreachable user manager have
 deterministic fixtures. A version-1 socket accepts only an inspecting bind
-from an upgraded host, which starts a separate version-2 daemon alongside it.
+from an upgraded host, which starts a separate version-3 daemon alongside it.
 Fixtures kill their local daemon and its process
 groups, including on a cut or assertion failure; a daemon restart's surviving
 marked jobs are reaped separately with process-identity checks. Cleanup waits
