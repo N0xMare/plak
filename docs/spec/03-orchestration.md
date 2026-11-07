@@ -3961,7 +3961,8 @@ before interrupting and retiring children, so recovery has released its
 canonical leases before the daemon stop takes a fresh head lease. This join
 uses the host release bound; a timed-out recovery remains tracked and the stop
 reports failure rather than claiming completion. The running-turn stop signal
-does not wait for recovery.
+does not wait for recovery. Failed joins retain only unjoined recovery handles;
+a completed or failed handle is consumed once, never polled again on retry.
 *Durable before and after:* a crash before the
 root record is an ordinary loss, held or continued under the loss policy.
 After it, with no root turn admitted since, the whole tree reads stopped

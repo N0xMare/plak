@@ -8,6 +8,7 @@
 //! now, so the questions come here and the product keeps only its own way of
 //! opening them.
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use crate::agent_tree::ProductAgentTree;
@@ -249,24 +250,24 @@ async fn join_stop_recoveries(
     let deadline =
         tokio::time::Instant::now() + crate::topology_runtime::HOST_SHUTDOWN_RELEASE_TIMEOUT;
     loop {
-        let mut tasks = runtime.take_recoveries();
+        let mut tasks = VecDeque::from(runtime.take_recoveries());
         if tasks.is_empty() {
             return Ok(());
         }
-        let joined = tokio::time::timeout_at(deadline, async {
-            for task in &mut tasks {
-                task.await
-                    .map_err(|_| "child recovery failed before the session stop".to_owned())?;
+        while let Some(task) = tasks.front_mut() {
+            let joined = tokio::time::timeout_at(deadline, task).await;
+            if joined.is_ok() {
+                tasks.pop_front();
             }
-            Ok(())
-        })
-        .await
-        .unwrap_or_else(|_| Err("child recovery exceeded the session stop bound".to_owned()));
-        if let Err(error) = joined {
+            let error = match joined {
+                Ok(Ok(())) => continue,
+                Ok(Err(_)) => "child recovery failed before the session stop",
+                Err(_) => "child recovery exceeded the session stop bound",
+            };
             for task in tasks {
                 runtime.track_recovery(task);
             }
-            return Err(error);
+            return Err(error.to_owned());
         }
     }
 }

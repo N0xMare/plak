@@ -2,6 +2,34 @@ use crate::agent_tree_protocol::{NodeStatus, SpawnAgentRequest};
 use crate::runtime::test_kit::BlockOn as _;
 
 #[test]
+fn a_failed_recovery_join_does_not_retrack_its_spent_handle() {
+    let root = tempfile::tempdir().unwrap();
+    let tree_id = uuid::Uuid::new_v4().to_string();
+    let runtime = crate::runtime::test_kit::install_idle_topology_hub(&tree_id, root.path());
+    let executor = plakous::application::ApplicationExecutor::new().unwrap();
+    executor
+        .block_on(async {
+            let recovery = runtime
+                .driver()
+                .tasks()
+                .spawn(async { panic!("failed recovery fixture") });
+            assert!(runtime.track_recovery(recovery));
+            assert!(
+                super::mark_root_interrupted_for_run(&tree_id)
+                    .await
+                    .is_err()
+            );
+            super::mark_root_interrupted_for_run(&tree_id)
+                .await
+                .unwrap();
+            crate::topology_runtime::force_release(&tree_id)
+                .await
+                .unwrap();
+        })
+        .unwrap();
+}
+
+#[test]
 fn idle_stop_joins_child_recovery_before_acquiring_process_stop_leases() {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
