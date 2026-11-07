@@ -48,6 +48,8 @@
     )
 )]
 
+/// Exact local account references and total vertical identity.
+pub mod account;
 /// How the host classifies and renders one tool call's activity.
 pub mod activity;
 /// Image files attached to a prompt: reading, sniffing, bounds and chips.

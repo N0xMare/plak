@@ -347,6 +347,8 @@ pub(crate) fn api_product_profile(
     cwd: &Path,
     surface: &CompiledSurface,
 ) -> CliResult<plakous::agent::HarnessProfileSpec> {
+    let account: crate::account::AccountRef = account.parse()?;
+    let account = account.vertical().as_str();
     let wire_name = match wire {
         ResolvedProtocol::Chat => "chat",
         ResolvedProtocol::Responses => "responses",
@@ -401,8 +403,18 @@ fn api_base_instructions(
     surface: &CompiledSurface,
 ) -> CliResult<String> {
     let variant = super::profile::product_prompt_variant();
-    let presentation = crate::binding::PlatformProvider::for_account(account)
-        .map(crate::coding_routes::platform_presentation);
+    let account: crate::account::AccountRef = account.parse()?;
+    let presentation = match account.vertical() {
+        crate::account::Vertical::OpenAi => Some(CodingPresentation::Codex),
+        crate::account::Vertical::XaiApi => Some(CodingPresentation::Grok),
+        crate::account::Vertical::Anthropic => Some(CodingPresentation::Claude),
+        crate::account::Vertical::OpenRouter => None,
+        crate::account::Vertical::Claude
+        | crate::account::Vertical::Codex
+        | crate::account::Vertical::Grok => {
+            return Err(CliFailure::new("API profile requires an API account"));
+        }
+    };
     let pack = match (presentation, composition) {
         (Some(CodingPresentation::Codex), CompositionSelection::NativePtc) => {
             let names = code_mode_nested_names(surface);
@@ -522,6 +534,67 @@ pub(crate) fn configured_tools(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn named_accounts_preserve_all_seven_vertical_profiles_and_prompt_bytes() {
+        use crate::account::{AccountRef, Vertical};
+        let root = tempfile::tempdir().unwrap();
+        let model = plakous::model::ModelId::new("parity-model").unwrap();
+        for vertical in Vertical::ALL {
+            let default = AccountRef::default_for(vertical);
+            let named: AccountRef = format!("{}/work", vertical.as_str()).parse().unwrap();
+            let presentation = match vertical {
+                Vertical::Codex | Vertical::OpenAi => CodingPresentation::Codex,
+                Vertical::Claude | Vertical::Anthropic => CodingPresentation::Claude,
+                Vertical::Grok | Vertical::XaiApi => CodingPresentation::Grok,
+                Vertical::OpenRouter => CodingPresentation::Pi,
+            };
+            let surface = crate::tools::test_support::surface(presentation, &[]);
+            let profile = |account: &AccountRef| {
+                let route = account.vertical().capability();
+                if let Some(provider) = route.native_provider() {
+                    super::super::profile::selected_harness_profile(
+                        provider,
+                        &model,
+                        None,
+                        false,
+                        false,
+                        &[],
+                        false,
+                        CompositionSelection::Direct,
+                        &surface,
+                        root.path(),
+                        root.path(),
+                    )
+                    .unwrap()
+                    .unwrap()
+                } else {
+                    api_product_profile(
+                        &account.to_string(),
+                        CompositionSelection::Direct,
+                        None,
+                        route.protocol.unwrap_or(ResolvedProtocol::Chat),
+                        model.as_str(),
+                        false,
+                        root.path(),
+                        root.path(),
+                        &surface,
+                    )
+                    .unwrap()
+                }
+            };
+            let bare = profile(&default);
+            let selected = profile(&named);
+            assert_eq!(bare.id(), selected.id(), "{}", vertical.as_str());
+            assert_eq!(
+                bare.base_instructions().as_bytes(),
+                selected.base_instructions().as_bytes(),
+                "{}",
+                vertical.as_str()
+            );
+            assert_eq!(default.vertical().require(), named.vertical().require());
+        }
+    }
 
     /// An MCP-owned extension reaches the provider configuration of a
     /// Messages (artifact-producing) route with its server, so the protocol

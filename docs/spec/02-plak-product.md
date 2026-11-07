@@ -9283,6 +9283,15 @@ variables, spelled the same way `plak doctor` spells them.
 
 ### 8.2 The two credential routes
 
+The host account vocabulary has a validated `AccountRef`: a total seven-way
+vertical and an optional local name. Names match `[a-z][a-z0-9-]{0,31}` except
+the reserved `default`; aliases normalize before a name, while `xai` remains
+ambiguous. A name does not change model behavior, harness/profile identity,
+prompt bytes or compiled route capability. The full reference is selection
+identity, never a provider-reported email. Parsing a reference alone confers
+no credential or runtime admission; named references remain refused until
+the selected credential source is admitted.
+
 The account vocabulary is closed to the seven verticals `claude`, `codex`,
 `grok`, `anthropic`, `openai`, `xai-api`, and `openrouter`, with their existing
 unambiguous aliases. A supplied string outside that set, including a named

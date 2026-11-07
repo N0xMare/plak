@@ -1201,6 +1201,11 @@ The gated ratchet on long-function and wide-signature allows and on files over
 
 ## 2. Offline test conventions
 
+Account-reference tests cover the closed seven-vertical classification,
+canonical alias spelling, reserved/unsafe names, and byte-identical native/API
+profile ids and prompt renders for a bare vertical and its named reference.
+Behavioral parity is not evidence of credential readiness or admission.
+
 Account-admission regressions require typed `unknown_account` on run/agent
 selection and resumed records, while preserving known aliases and unbound
 empty shells. A v12 named-API import with a synthetic default key present in
