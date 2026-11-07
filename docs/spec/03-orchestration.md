@@ -3296,7 +3296,8 @@ cannot publish divergent private baselines. Registry entries are weak;
 release, break-glass release and deletion discard that tree's image so a
 dormant tree is not retained by another resident tree's connection.
 Load always refreshes the baseline from current rows and the current grant
-in one `Immediate` transaction. A cold, refused, failed or truly stale image
+in one `Immediate` transaction. An image may therefore originate from a load
+as well as an acknowledged save. A cold, refused, failed or truly stale image
 is rebuilt from current rows inside the save's existing transaction; the
 save then writes deltas, never deleting and reinserting unchanged rows.
 Only an absent tree needs an initial insert. The header CAS, exact

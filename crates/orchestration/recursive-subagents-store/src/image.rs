@@ -1,5 +1,5 @@
-//! Row-level saves: the rows this connection last committed for a tree, and
-//! the diff that writes only what changed since.
+//! Row-level saves: the persisted tree at this revision and grant, and the
+//! diff that writes only what changed since.
 //!
 //! An image describes the persisted tree at this revision and grant, so a
 //! record equal to its image entry encodes to the row the file already holds. It is
@@ -18,7 +18,7 @@ use rusqlite::Transaction;
 
 use crate::rows::{Row, delete_row, write_row};
 
-/// One tree's persisted maps as this connection last committed them.
+/// One persisted tree's maps at this revision and grant.
 pub(crate) struct TreeImage {
     /// Diagnostic only; validity always comes from the revision and grant.
     data_version: i64,
