@@ -21,7 +21,7 @@ use crate::tui::blocks::RenderPrefs;
 use crate::tui::blocks::ScrollBlock;
 use crate::tui::presentation::{ActivityKind, ActivityState};
 use crate::tui::{HostEvent, QueueDrainState, SettingsView, UserAction};
-use crate::tui::{SurfaceIntent, SurfaceObservation};
+use crate::tui::SurfaceObservation;
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use plakous_host_protocol::status::{DiagnosticText, HostPhase, HostStatusDetail};
 use plakous_host_protocol::views::transcript::{NoticeScope, ToolItem, TranscriptRow};
@@ -1197,10 +1197,11 @@ fn toggling_group_tool_calls_replans_the_transcript_live() {
     app.settings_menu.as_mut().expect("settings").selected = row;
     app.pane.pending_transcript_change = TranscriptChange::Unchanged;
     // A switch applies on change, so the flip is also a save.
-    assert!(matches!(
-        app.handle_key(key(KeyCode::Char(' '))),
-        Some(UserAction::Extension(SurfaceIntent::SaveSettings(_)))
-    ));
+    assert_eq!(app.handle_key(key(KeyCode::Char(' '))), None);
+    assert!(
+        !app.preferences.group_tool_calls,
+        "the terminal switch applies locally"
+    );
 
     assert!(
         !app.render_prefs.group_tool_calls,

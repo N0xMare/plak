@@ -467,13 +467,11 @@ fn settings_reset_confirms_with_enter_at_once() {
 
     assert!(app.handle_key(key(KeyCode::Char('d'))).is_none());
     let sent = app.handle_key(key(KeyCode::Enter));
-    assert!(
-        matches!(
-            sent,
-            Some(UserAction::Extension(SurfaceIntent::SaveSettings(_)))
-        ),
-        "Enter confirms at once: {sent:?}"
+    assert_eq!(
+        sent, None,
+        "a terminal reset confirms locally, without a host intent"
     );
+    assert_eq!(app.preferences.scroll_lines, 3);
     assert!(app.destructive_confirm.is_none());
     assert!(
         matches!(

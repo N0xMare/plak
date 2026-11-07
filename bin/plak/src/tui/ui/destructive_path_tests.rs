@@ -7,7 +7,7 @@ use super::test_support::{
     FIXED_NOW, key, key_alt, key_ctrl, launch_basic, left_click, open_tree, pass_time, queue_item,
     render_to_string, settings_fixture, tree_node, tree_snapshot,
 };
-use crate::tui::{ApprovalChoice, HostEvent, QueueDrainState, SurfaceIntent, UserAction};
+use crate::tui::{ApprovalChoice, HostEvent, QueueDrainState, UserAction};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 type Step = (u64, KeyCode);
@@ -394,13 +394,8 @@ fn settings_d_then_enter_resets_a_row_at_once() {
         Some("settings-reset")
     );
     let sent = app.handle_key(key(KeyCode::Enter));
-    assert!(
-        matches!(
-            sent,
-            Some(UserAction::Extension(SurfaceIntent::SaveSettings(_)))
-        ),
-        "Enter confirmed: {sent:?}"
-    );
+    assert_eq!(sent, None, "Enter confirms the terminal reset locally");
+    assert_eq!(app.preferences.scroll_lines, 3);
     assert!(app.destructive_confirm.is_none());
 }
 
@@ -911,23 +906,13 @@ fn settings_reset_enter_confirms_and_esc_cancels() {
         .and_then(DestructiveConfirm::action_hit)
         .expect("Reset is painted");
     let clicked = app.handle_mouse(left_click(hit.x, hit.y));
-    assert!(
-        matches!(
-            clicked,
-            Some(UserAction::Extension(SurfaceIntent::SaveSettings(_)))
-        ),
-        "a click on Reset sent {clicked:?}"
-    );
+    assert_eq!(clicked, None, "a click on Reset stays local");
+    assert_eq!(app.preferences.scroll_lines, 3);
     assert!(app.destructive_confirm.is_none());
 
     let sent = run(&mut app, &[(0, KeyCode::Char('d')), (0, KeyCode::Enter)]);
-    assert!(
-        sent.iter().any(|action| matches!(
-            action,
-            UserAction::Extension(SurfaceIntent::SaveSettings(_))
-        )),
-        "d, Enter sent {sent:?}"
-    );
+    assert!(sent.is_empty(), "d, Enter stays local: {sent:?}");
+    assert_eq!(app.preferences.scroll_lines, 3);
 }
 
 /// An idle app that sent `text` as a prompt, still unanswered by the host.

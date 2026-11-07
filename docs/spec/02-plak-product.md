@@ -3851,8 +3851,10 @@ on the host preserves its current `[tui]` values and never copies terminal
 preferences from a wire update. The TUI applies preference edits locally and
 publishes its own home's `[tui]` section; received settings views and save
 acknowledgements update product settings only, never theme or render preferences.
-A terminal-only edit sends no host settings update. Config publication is
-serialized by the home's `config.lock`; writers re-read under that lock and
+A terminal-only edit sends no host settings update.
+The same is true for a confirmed terminal reset, including a no-op reset of
+a row already at its default.
+Config publication is serialized by the home's `config.lock`; writers re-read under that lock and
 apply only their own fields: `[tui]` for a terminal and the changed product
 fields for host settings. One face cannot revert another's independent edit.
 Confirmed resets use the same local publication path as other terminal
