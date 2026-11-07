@@ -2676,6 +2676,7 @@ not have or a command that would only print help.
 | 5 | agent or product failure, model refusal, a `plak run` answer committed truncated at its output limit (`turn_failed:output-limit`), or `RecoveryRequired` |
 | 6 | `plak run` reached its admitted-turn or wall-clock bound |
 | 7 | `tree_hosted_elsewhere`: the session's agent tree is in another live `plak` process's custody (chapter 03 §14), or its open was refused for a runtime lease another live `plak` process holds (§4.6); nothing was attached or written |
+| 8 | `plak host` cannot start or reconnect its home-local runner because its owner floors require operator repair (§4.6); the user service does not restart this status |
 | 130 | quit exhausted its terminal join and selected lease-only abandonment, including when `SIGTERM`/`SIGHUP` requested the stop; an idle quit or a quit whose terminal joined still exits 0 |
 | 1 | anything else, including an invalid `config.toml` |
 
