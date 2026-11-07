@@ -858,6 +858,12 @@ impl SessionLedger {
     }
 }
 
+pub(super) struct SubscriptionUsageRequest {
+    subscriptions: Option<NativeSubscriptions>,
+    account: Option<crate::account::AccountRef>,
+    _read: super::UsageRead,
+}
+
 impl<P: plakous_host_protocol::ProtocolExtension> SubscriptionUsageRefresh<P> {
     pub(super) fn new(
         events: &Sender<P>,
@@ -919,7 +925,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> SubscriptionUsageRefresh<P> {
             .spawn(move || {
                 // The read's guard settles it once its projection is published.
                 while let Ok(request) = receiver.recv() {
-                    let super::SubscriptionUsageRequest {
+                    let SubscriptionUsageRequest {
                         subscriptions,
                         account,
                         _read,
@@ -1048,7 +1054,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> SubscriptionUsageRefresh<P> {
             ));
         }
         // A refused send drops its guard; a queued read absorbs this request.
-        match requests.try_send(super::SubscriptionUsageRequest {
+        match requests.try_send(SubscriptionUsageRequest {
             subscriptions,
             account,
             _read: self.reads.begin(),

@@ -1173,14 +1173,8 @@ struct SessionLedgerTotals {
     turns: u64,
 }
 
-struct SubscriptionUsageRequest {
-    subscriptions: Option<NativeSubscriptions>,
-    account: Option<crate::account::AccountRef>,
-    _read: UsageRead,
-}
-
 struct SubscriptionUsageRefresh<P: plakous_host_protocol::ProtocolExtension> {
-    requests: Option<std::sync::mpsc::SyncSender<SubscriptionUsageRequest>>,
+    requests: Option<std::sync::mpsc::SyncSender<usage::SubscriptionUsageRequest>>,
     worker: Option<thread::JoinHandle<()>>,
     events: Sender<P>,
     in_flight: Arc<AtomicBool>,
