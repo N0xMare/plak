@@ -6,8 +6,7 @@ use super::{
     OperationId, Ordering, RuntimeComponentKind, RuntimeLifecycle, RuntimeWorkingRoot,
     StoreAdmission, TurnId, durable_command_effect, durable_control_error_kind, durable_rejection,
     effect_intent_bytes, effect_operation_intent_digest, ledger_needs_retention,
-    operation_kind_turn_id, retain_quiescent_ledger, runtime_component, runtime_manifest_error,
-    working_lifecycle,
+    operation_kind_turn_id, runtime_component, runtime_manifest_error, working_lifecycle,
 };
 
 impl Driver {
@@ -262,6 +261,22 @@ impl Driver {
                 .ledger()
                 .append_command(record)
                 .map_err(runtime_manifest_error)?;
+            let pending_operation = operation_id
+                .map(|operation_id| {
+                    DurableOperationRecord::new(
+                        operation_id.0,
+                        DurableOperationKind::Command {
+                            turn_id: operation_turn_id,
+                        },
+                        operation,
+                        vec![DurableOperationTransition::new(
+                            checkpoint_id,
+                            DurableOperationState::Prepared,
+                        )],
+                    )
+                    .map_err(runtime_manifest_error)
+                })
+                .transpose()?;
             // The new receipt makes the previous root eligible for retention.
             // Prune before appending its operation: a recovered, finalized
             // latest turn can occupy every operation slot (spec 01 §3).
@@ -275,24 +290,20 @@ impl Driver {
                     .chain(self.roots.iter())
                     .map(|root| root.turn_id)
                     .collect();
-                ledger = retain_quiescent_ledger(&ledger, &owned_turns)?;
-            }
-            if let Some(operation_id) = operation_id {
-                ledger = ledger
-                    .append_operation(
-                        DurableOperationRecord::new(
-                            operation_id.0,
-                            DurableOperationKind::Command {
-                                turn_id: operation_turn_id,
-                            },
-                            operation,
-                            vec![DurableOperationTransition::new(
-                                checkpoint_id,
-                                DurableOperationState::Prepared,
-                            )],
-                        )
-                        .map_err(runtime_manifest_error)?,
+                let anchor = pending_operation.ok_or_else(|| {
+                    AgentError::new(
+                        AgentErrorKind::Internal,
+                        "root admission retention requires its pending operation",
                     )
+                })?;
+                ledger = crate::runtime::operation_record::retain_quiescent_ledger_with_anchor(
+                    &ledger,
+                    &owned_turns,
+                    crate::manifest::RetentionAnchor::NewRecord(anchor),
+                )?;
+            } else if let Some(record) = pending_operation {
+                ledger = ledger
+                    .append_operation(record)
                     .map_err(runtime_manifest_error)?;
             }
             (

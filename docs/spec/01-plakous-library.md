@@ -362,7 +362,11 @@ receipt, quiescent admission prunes the previous root’s settled operations
 before appending the new root operation, in the same admission commit. A
 recovered latest turn occupying all 4096 operation slots therefore does not
 prevent re-tasking. Retained root terminal evidence and unresolved operations
-are unchanged. Nothing reserves headroom
+are unchanged. Retention preserves the actual highest operation, or installs
+the actual pending new-root operation with a strictly higher id before checking
+capacity. Every publication, including recovery and cold ledger rebuilds,
+refuses a successor whose highest operation id or command sequence is lower
+than its parent's. Nothing reserves headroom
 for one turn's rounds and fan-out: retention runs only at quiescence, so a very
 long turn (many rounds of parallel tools or Code Cell children) that starts
 near the high-water mark can reach the 4096-record limit and end

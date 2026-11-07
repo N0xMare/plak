@@ -220,17 +220,8 @@ fn new_root_retention_drops_the_previous_newest_composition_group_whole() -> Tes
         3
     );
     let ledger = ledger.append_command(root_command(2, next)?)?;
-    let retained = retain_quiescent_ledger(&ledger, &BTreeSet::new())?;
-    assert_eq!(
-        retained
-            .operations()
-            .iter()
-            .map(|record| record.operation_id())
-            .collect::<Vec<_>>(),
-        [1]
-    );
-    // Admission supplies the new sequence anchor in the same publication.
-    let admitted = retained.append_operation(DurableOperationRecord::new(
+    // Admission supplies the actual pending record before capacity validation.
+    let anchor = DurableOperationRecord::new(
         4,
         DurableOperationKind::Command {
             turn_id: Some(next),
@@ -240,11 +231,118 @@ fn new_root_retention_drops_the_previous_newest_composition_group_whole() -> Tes
             checkpoint(0x38)?,
             DurableOperationState::Prepared,
         )],
-    )?)?;
+    )?;
+    let admitted = retain_quiescent_ledger_with_anchor(
+        &ledger,
+        &BTreeSet::new(),
+        crate::manifest::RetentionAnchor::NewRecord(anchor),
+    )?;
+    assert_eq!(
+        admitted
+            .operations()
+            .iter()
+            .map(|record| record.operation_id())
+            .collect::<Vec<_>>(),
+        [1, 4]
+    );
     assert_eq!(
         admitted.operations().last().ok_or("root")?.operation_id(),
         4
     );
+    Ok(())
+}
+
+#[test]
+fn retention_requires_an_actual_strictly_newer_sequence_anchor() -> TestResult {
+    use crate::manifest::RetentionAnchor;
+    let turn = TurnId::try_from(uuid::Uuid::from_u128(0x39))?;
+    let ledger = RuntimeOperationLedger::new(
+        vec![root_command(1, turn)?, rejected_command(2)?],
+        vec![settled_root(1, turn)?, settled_root(2, turn)?],
+    )?;
+    let retained = ledger.retained(RetentionAnchor::ExistingHighest, |_| false, |_| false)?;
+    assert_eq!(retained.operations()[0].operation_id(), 2);
+    assert_eq!(retained.commands()[0].sequence(), 2);
+    for id in [1, 2] {
+        assert!(
+            ledger
+                .retained(
+                    RetentionAnchor::NewRecord(settled_root(id, turn)?),
+                    |_| false,
+                    |_| false,
+                )
+                .is_err()
+        );
+    }
+    let retained = ledger.retained(
+        RetentionAnchor::NewRecord(settled_root(3, turn)?),
+        |_| false,
+        |_| false,
+    )?;
+    assert_eq!(retained.operations()[0].operation_id(), 3);
+    assert!(retained.preserves_high_water_of(&ledger));
+    Ok(())
+}
+
+#[test]
+fn every_publication_refuses_cold_rebuilt_high_water_regression() -> TestResult {
+    use crate::runtime::checkpoint::candidate::{SuccessorFacts, successor_candidate};
+    let turn = TurnId::try_from(uuid::Uuid::from_u128(0x3a))?;
+    let ledger = RuntimeOperationLedger::new(
+        vec![root_command(1, turn)?, rejected_command(2)?],
+        vec![settled_root(1, turn)?, settled_root(2, turn)?],
+    )?;
+    let source = crate::checkpoint_bundle::tests::fixture_with_history_and_ledger(
+        plakous_model::CanonicalHistory::default(),
+        1,
+        false,
+        Some(ledger),
+        None,
+    )?;
+    let bundle = crate::RuntimeCheckpointCodec::bundle(&source, None)?;
+    let manifest = source.manifest();
+    for (commands, operations) in [(1, 2), (2, 1), (2, 2)] {
+        // Deliberately use the public cold constructor, not retention: the
+        // publication boundary must catch regressions from every producer.
+        let ledger = RuntimeOperationLedger::new(
+            manifest.ledger().commands()[..commands]
+                .iter()
+                .copied()
+                .cloned()
+                .collect(),
+            manifest.ledger().operations()[..operations]
+                .iter()
+                .copied()
+                .cloned()
+                .collect(),
+        )?;
+        let result = successor_candidate(
+            &source,
+            &bundle,
+            SuccessorFacts {
+                checkpoint_id: checkpoint(0x3b)?,
+                lifecycle: RuntimeLifecycle::Quiescent,
+                history: manifest.canonical().history().clone(),
+                ledger,
+                jobs: manifest.jobs().clone(),
+                named_state: manifest.named_state().clone(),
+                context: manifest.canonical().context().retained_for_exact_resume(),
+                family: manifest.family_artifact().cloned(),
+            },
+            1,
+            None,
+        );
+        if commands == 2 && operations == 2 {
+            assert!(result.is_ok(), "equal high-water marks remain publishable");
+        } else {
+            let error = result.err().ok_or("regressed successor was accepted")?;
+            assert_eq!(error.kind(), AgentErrorKind::Internal);
+            assert_eq!(
+                error.to_string(),
+                "checkpoint successor regressed a ledger high-water mark"
+            );
+        }
+    }
     Ok(())
 }
 

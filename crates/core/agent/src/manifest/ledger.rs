@@ -121,6 +121,12 @@ pub struct RuntimeOperationLedger {
     pub(super) operation_count: usize,
 }
 
+/// The actual operation that makes a retained ledger's sequence reconstructive.
+pub(crate) enum RetentionAnchor {
+    ExistingHighest,
+    NewRecord(DurableOperationRecord),
+}
+
 impl RuntimeOperationLedger {
     /// Creates a canonically ordered exact ledger for cold decode/import.
     pub fn new(
@@ -433,14 +439,26 @@ impl RuntimeOperationLedger {
     ///
     /// Commands declined by `keep_command` are dropped, and so is every
     /// operation `keep` declines, which must then be `Finalized`. The newest
-    /// command always stays. The caller keeps the newest operation too unless
-    /// it appends a newer one before publication, so a reopen's operation
-    /// sequence never goes back. The result is rebuilt from retained records.
+    /// command always stays. The anchor preserves the existing highest
+    /// operation or installs an actual newer record before capacity validation.
+    /// The result is rebuilt from retained records.
     pub(crate) fn retained(
         &self,
+        anchor: RetentionAnchor,
         mut keep_command: impl FnMut(&DurableCommandRecord) -> bool,
         mut keep: impl FnMut(&DurableOperationRecord) -> bool,
     ) -> Result<Self, RuntimeManifestError> {
+        let highest = operation_map_last(self.operation_root.as_deref())
+            .map(DurableOperationRecord::operation_id);
+        let (keep_highest, new_record) = match anchor {
+            RetentionAnchor::ExistingHighest => (highest, None),
+            RetentionAnchor::NewRecord(record) => {
+                if highest.is_some_and(|highest| record.operation_id() <= highest) {
+                    return Err(RuntimeManifestError::InvalidLedger);
+                }
+                (None, Some(record))
+            }
+        };
         let last_sequence = self.command_tail.as_ref().map(|tail| tail.record.sequence);
         let commands = self
             .commands()
@@ -450,13 +468,30 @@ impl RuntimeOperationLedger {
             .collect();
         let mut operations = Vec::new();
         for record in self.operations() {
-            if keep(record) {
+            if keep(record) || Some(record.operation_id()) == keep_highest {
                 operations.push(record.clone());
             } else if !matches!(record.state(), DurableOperationState::Finalized(_)) {
                 return Err(RuntimeManifestError::InvalidLedger);
             }
         }
+        operations.extend(new_record);
         Self::new(commands, operations)
+    }
+
+    /// Cold reconstruction must not allow either minted sequence to go back.
+    pub(crate) fn preserves_high_water_of(&self, prior: &Self) -> bool {
+        let operation_high_water = |ledger: &Self| {
+            operation_map_last(ledger.operation_root.as_deref())
+                .map(DurableOperationRecord::operation_id)
+        };
+        let command_high_water = |ledger: &Self| {
+            ledger
+                .command_tail
+                .as_ref()
+                .map(|tail| tail.record.sequence)
+        };
+        operation_high_water(self) >= operation_high_water(prior)
+            && command_high_water(self) >= command_high_water(prior)
     }
 
     /// Whether every record here is either one of `prior`'s, unchanged or

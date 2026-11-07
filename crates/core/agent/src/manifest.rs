@@ -48,13 +48,13 @@ pub(crate) use jobs::fixture_job_owner;
 pub use jobs::{JobLedger, JobRow, JobTerminal, JobTerminalStatus, LineJobTerminal};
 use operations::validate_composition_graph;
 
-pub(crate) use ledger::OperationLedgerMutationRef;
 pub use ledger::RuntimeOperationLedger;
 #[allow(
     clippy::wildcard_imports,
     reason = "the ledger split shares the manifest vocabulary"
 )]
 use ledger::*;
+pub(crate) use ledger::{OperationLedgerMutationRef, RetentionAnchor};
 #[allow(
     clippy::wildcard_imports,
     reason = "the lifecycle split shares the manifest vocabulary"

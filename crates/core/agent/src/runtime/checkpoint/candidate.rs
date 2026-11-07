@@ -46,6 +46,12 @@ pub(in crate::runtime) fn successor_candidate(
         family,
     } = facts;
     let prior = checkpoint.manifest();
+    if !ledger.preserves_high_water_of(prior.ledger()) {
+        return Err(AgentError::new(
+            AgentErrorKind::Internal,
+            "checkpoint successor regressed a ledger high-water mark",
+        ));
+    }
     let topology = prior.topology();
     let branch_revision = topology.branch_revision.checked_add(1).ok_or_else(|| {
         AgentError::new(

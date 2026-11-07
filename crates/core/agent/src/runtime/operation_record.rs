@@ -492,6 +492,18 @@ pub(super) fn retain_quiescent_ledger(
     ledger: &RuntimeOperationLedger,
     owned_turns: &BTreeSet<TurnId>,
 ) -> Result<RuntimeOperationLedger, AgentError> {
+    retain_quiescent_ledger_with_anchor(
+        ledger,
+        owned_turns,
+        crate::manifest::RetentionAnchor::ExistingHighest,
+    )
+}
+
+pub(super) fn retain_quiescent_ledger_with_anchor(
+    ledger: &RuntimeOperationLedger,
+    owned_turns: &BTreeSet<TurnId>,
+    anchor: crate::manifest::RetentionAnchor,
+) -> Result<RuntimeOperationLedger, AgentError> {
     let commands = ledger.commands();
     let window_start = commands.len().saturating_sub(COMMAND_RETENTION_WINDOW);
     let last_root = commands
@@ -503,7 +515,6 @@ pub(super) fn retain_quiescent_ledger(
         .iter()
         .find(|record| last_turn.is_some() && command_kind_turn_id(record) == last_turn)
         .map_or(u64::MAX, |record| record.operation_id());
-    let admitting_root = last_turn.is_some() && last_turn_start == u64::MAX;
     let mut unsettled_turns = operations
         .iter()
         .filter_map(|record| {
@@ -531,11 +542,9 @@ pub(super) fn retain_quiescent_ledger(
         .filter(|command| is_accepted_root(command))
         .filter_map(|command| command.turn_id())
         .collect::<BTreeSet<_>>();
-    // A just-appended root receipt has no operation yet. Admission appends a
-    // newer operation before publishing, so the old newest operation need not
-    // survive. Otherwise preserve it, including its whole composition group,
-    // to keep reopen's operation sequence monotonic.
-    let last_operation = (!admitting_root)
+    // Keep the whole group of an existing anchor. New-root admission supplies
+    // its pending operation instead, atomically replacing that sequence anchor.
+    let last_operation = matches!(&anchor, crate::manifest::RetentionAnchor::ExistingHighest)
         .then(|| operations.last().map(|record| record.operation_id()))
         .flatten();
     let latest_response = operations
@@ -569,6 +578,7 @@ pub(super) fn retain_quiescent_ledger(
         .collect::<BTreeSet<_>>();
     ledger
         .retained(
+            anchor,
             |command| {
                 command.sequence() >= first_sequence
                     || command
