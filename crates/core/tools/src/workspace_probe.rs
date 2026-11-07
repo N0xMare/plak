@@ -40,6 +40,16 @@ impl std::error::Error for ProbeError {}
 /// construction is async; until then a caller must not hold a lock across a
 /// call.
 pub trait WorkspaceProbe: Send + Sync {
+    /// Physical object identity from the workspace's own filesystem.
+    ///
+    /// # Errors
+    /// Unavailable probes fail closed, never substitute host metadata.
+    fn filesystem_identity(
+        &self,
+        _path: &Path,
+    ) -> Result<crate::HostFilesystemObjectIdentity, ProbeError> {
+        Err(ProbeError::Unavailable)
+    }
     /// The physical absolute path of `path`, as [`std::fs::canonicalize`]
     /// resolves it; `None` when it does not resolve (missing, or a component
     /// cannot be searched).
@@ -68,6 +78,12 @@ pub trait WorkspaceProbe: Send + Sync {
 pub struct LocalWorkspaceProbe;
 
 impl WorkspaceProbe for LocalWorkspaceProbe {
+    fn filesystem_identity(
+        &self,
+        path: &Path,
+    ) -> Result<crate::HostFilesystemObjectIdentity, ProbeError> {
+        crate::environment::filesystem_object_identity(path).map_err(|_| ProbeError::Unavailable)
+    }
     fn canonicalize(&self, path: &Path) -> Result<Option<PathBuf>, ProbeError> {
         Ok(std::fs::canonicalize(path).ok())
     }

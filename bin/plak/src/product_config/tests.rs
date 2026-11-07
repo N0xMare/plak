@@ -240,7 +240,7 @@ fn trusted_project_cannot_override_home_orchestration() {
     fs::create_dir_all(&home).unwrap();
     fs::write(
         home.join("config.toml"),
-        "[orchestration]\nsubagents = true\nmax_depth = 4\nmax_children = 8\nmax_nodes = 32\nmax_attempts = 64\ntransient_resumes = 2\nmax_concurrent_requests_per_account = 9\nrequire_review_evidence = false\n[turn]\nauto_continue = true\n[tui]\nmouse = false\nreload_requests = true\n[mcp]\nclient_id_metadata_url = \"https://project.example/client.json\"\n[host]\nresume_after_loss = \"continue\"\n[runners.buildbox]\nssh = \"buildbox\"\n[web]\nallow = [\"repo@example.com\"]\norigin = \"https://repo.example.ts.net\"\n",
+        "[orchestration]\nsubagents = true\nmax_depth = 4\nmax_children = 8\nmax_nodes = 32\nmax_attempts = 64\ntransient_resumes = 2\nmax_concurrent_requests_per_account = 9\nrequire_review_evidence = false\n[turn]\nauto_continue = true\n[tui]\nmouse = false\nreload_requests = true\n[mcp]\nclient_id_metadata_url = \"https://project.example/client.json\"\n[host]\nresume_after_loss = \"continue\"\n[runners.buildbox]\nssh = \"buildbox\"\ncommand = \"/opt/bin/plak\"\n[web]\nallow = [\"repo@example.com\"]\norigin = \"https://repo.example.ts.net\"\n",
     )
     .unwrap();
     project_trust::trust(&paths, project.path()).unwrap();

@@ -16,6 +16,7 @@ use super::*;
 /// and [`Self::try_read`] read the live tree throughout.
 #[derive(Clone)]
 pub struct TreeDriver {
+    workspace_probe: Arc<Mutex<Arc<dyn plakous::tools::WorkspaceProbe>>>,
     /// The tree under its one mutex.
     ///
     /// `pub(super)` and not `pub`: the tree's own tools interleave locked and
@@ -144,6 +145,13 @@ fn probe_checkout_sizes(
 }
 
 impl TreeDriver {
+    /// Installs the explicit reader used by periodic workspace-size probes.
+    pub fn set_workspace_probe(&self, probe: Arc<dyn plakous::tools::WorkspaceProbe>) {
+        *self
+            .workspace_probe
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = probe;
+    }
     #[cfg(test)]
     pub(super) fn capacity_retry_without_delay(&mut self) {
         self.capacity_retry_interval = std::time::Duration::ZERO;
@@ -193,6 +201,7 @@ impl TreeDriver {
             Arc::from(tree.root_agent_id.as_str())
         };
         Self {
+            workspace_probe: Arc::new(Mutex::new(Arc::new(plakous::tools::LocalWorkspaceProbe))),
             tree,
             store,
             vcs,
@@ -236,7 +245,11 @@ impl TreeDriver {
         self.sweep_transfers().await;
         let inventory = self.read(ProductAgentTree::checkout_size_probes)?;
         let cache = Arc::clone(&self.checkout_sizes);
-        let probe = plakous::tools::runner::workspace_probe();
+        let probe = self
+            .workspace_probe
+            .lock()
+            .map_err(|_| Self::lock_poisoned())?
+            .clone();
         let sizes = tokio::task::spawn_blocking(move || {
             let mut cache = cache.lock().map_err(|_| Self::lock_poisoned())?;
             let sizes =

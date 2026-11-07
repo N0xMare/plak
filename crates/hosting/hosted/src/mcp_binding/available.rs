@@ -13,7 +13,7 @@ use plakous::mcp::{
     McpToolRecord, McpToolSelection, exposed_tool_name,
 };
 use plakous::model::ToolName;
-use plakous::tools::runner::{RunnerBackend, process_runner, runner_environment};
+use plakous::tools::runner::{RunnerBackend, runner_environment};
 use plakous::tools::{
     EnvironmentVariableName, ExecutionEnvironment, ExecutionEnvironmentConfig,
     ExecutionEnvironmentScope, McpServerName, ToolPack, ToolRegistration, WorkspacePolicy,
@@ -78,6 +78,8 @@ pub(crate) struct BoundMcpTools {
 pub(crate) enum ServerSite {
     /// Beside the agent; secrets from the host's named secrets.
     Host,
+    /// Host process for a nonlocal node: fresh empty private cwd per spawn.
+    HostPrivate,
     /// `placement = "runner"` with no runner selected: this machine is the
     /// node's runner, so the server runs here with secrets from its runner
     /// shelf, never the host's named secrets.
@@ -94,21 +96,17 @@ impl ServerSite {
         match (placement, runner) {
             (Some(McpPlacement::Runner), Some(runner)) => Self::Runner(runner),
             (Some(McpPlacement::Runner), None) => Self::LocalRunner,
-            (Some(McpPlacement::Host) | None, _) => Self::Host,
+            (Some(McpPlacement::Host) | None, Some(_)) => Self::HostPrivate,
+            (Some(McpPlacement::Host) | None, None) => Self::Host,
         }
     }
 
     const fn placement(&self) -> McpPlacement {
         match self {
-            Self::Host => McpPlacement::Host,
+            Self::Host | Self::HostPrivate => McpPlacement::Host,
             Self::LocalRunner | Self::Runner(_) => McpPlacement::Runner,
         }
     }
-}
-
-/// The runner this process runs its sessions on, if any.
-fn selected_runner() -> Option<Arc<RunnerBackend>> {
-    process_runner().map(plakous::tools::runner::ProcessRunner::backend)
 }
 
 /// The process's MCP pool and the executor its servers run on. Sessions bind
@@ -146,6 +144,7 @@ pub(crate) fn bind_mcp_tools(
     workspace_root: &std::path::Path,
     secrets: Arc<dyn NamedSecrets>,
     frozen: Option<&[McpToolRecord]>,
+    node: super::McpNodeServices,
 ) -> Result<BoundMcpTools, crate::CliFailure> {
     if selection.mcp_servers().next().is_none() {
         return Ok(BoundMcpTools::empty());
@@ -166,6 +165,7 @@ pub(crate) fn bind_mcp_tools(
             &workspace_root,
             secrets,
             frozen.as_deref(),
+            node,
         )
         .await;
         let _ = sender.send(bound);
@@ -182,10 +182,14 @@ async fn bind_on_pool(
     workspace_root: &std::path::Path,
     secrets: Arc<dyn NamedSecrets>,
     frozen: Option<&[McpToolRecord]>,
+    node: super::McpNodeServices,
 ) -> Result<BoundMcpTools, crate::CliFailure> {
     let mut bound = BoundMcpTools::empty();
     let servers = selection.mcp_servers().cloned().collect::<Vec<_>>();
-    let runner = selected_runner();
+    let runner = node
+        .runner
+        .as_ref()
+        .map(plakous::runner::RunnerServices::backend);
     let (mut host, mut remote) = (None, None);
     for server in servers {
         let rendered = tool_sections
@@ -206,7 +210,11 @@ async fn bind_on_pool(
         };
         let environment = match slot {
             Some(environment) => Arc::clone(environment),
-            None => Arc::clone(slot.insert(Arc::new(service_environment(workspace_root, &site)?))),
+            None => Arc::clone(slot.insert(Arc::new(service_environment(
+                workspace_root,
+                &site,
+                node.product_home.as_deref(),
+            )?))),
         };
         let remedy =
             format!("remedy: fix the server or remove mcp:{server} from the template's tools");
@@ -325,6 +333,7 @@ pub(crate) fn recorded_mcp_tools(
     tool_sections: &BTreeMap<String, String>,
     secrets: &Arc<dyn NamedSecrets>,
     frozen: Option<&[McpToolRecord]>,
+    node: super::McpNodeServices,
 ) -> Result<BoundMcpTools, crate::CliFailure> {
     let mut bound = BoundMcpTools::empty();
     if selection.mcp_servers().next().is_none() {
@@ -344,7 +353,14 @@ pub(crate) fn recorded_mcp_tools(
                      to config.toml or remove mcp:{server} from the template's tools"
                 )
             })?;
-        let (spec, site) = placed_server_spec(server, rendered, secrets, selected_runner())?;
+        let (spec, site) = placed_server_spec(
+            server,
+            rendered,
+            secrets,
+            node.runner
+                .as_ref()
+                .map(plakous::runner::RunnerServices::backend),
+        )?;
         let records = frozen
             .iter()
             .filter(|record| record.server() == server)
@@ -398,7 +414,7 @@ pub fn probe_mcp_server(
 ) -> Result<McpProbe, crate::CliFailure> {
     let server = McpServerName::new(server.to_owned())
         .map_err(|_| format!("{server:?} is not a valid MCP server id"))?;
-    let (spec, site) = placed_server_spec(&server, rendered, &secrets, selected_runner())?;
+    let (spec, site) = placed_server_spec(&server, rendered, &secrets, None)?;
     let allowlist = crate::frozen_tables::parse::<RenderedTables>(rendered)
         .and_then(|mut tables| tables.mcp_servers.remove(server.as_str()))
         .and_then(|definition| definition.tools);
@@ -470,7 +486,7 @@ pub fn list_mcp_prompts(
 ) -> Result<Vec<McpPrompt>, crate::CliFailure> {
     let server = McpServerName::new(server.to_owned())
         .map_err(|_| format!("{server:?} is not a valid MCP server id"))?;
-    let (spec, site) = placed_server_spec(&server, rendered, &secrets, selected_runner())?;
+    let (spec, site) = placed_server_spec(&server, rendered, &secrets, None)?;
     on_probe_lease(spec, &site, workspace_root, async |lease| {
         lease.list_prompts().await.map_err(mcp_failure)
     })
@@ -493,7 +509,7 @@ pub fn get_mcp_prompt(
 ) -> Result<McpPromptExpansion, crate::CliFailure> {
     let server = McpServerName::new(server.to_owned())
         .map_err(|_| format!("{server:?} is not a valid MCP server id"))?;
-    let (spec, site) = placed_server_spec(&server, rendered, &secrets, selected_runner())?;
+    let (spec, site) = placed_server_spec(&server, rendered, &secrets, None)?;
     on_probe_lease(spec, &site, workspace_root, async |lease| {
         lease
             .get_prompt(prompt, arguments)
@@ -511,7 +527,7 @@ fn on_probe_lease<T>(
     work: impl AsyncFnOnce(&McpLease) -> Result<T, crate::CliFailure>,
 ) -> Result<T, crate::CliFailure> {
     crate::capabilities::require_feature("mcp").map_err(crate::CliFailure::from)?;
-    let environment = Arc::new(service_environment(workspace_root, site)?);
+    let environment = Arc::new(service_environment(workspace_root, site, None)?);
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .thread_name("plak-mcp-probe")
@@ -610,6 +626,7 @@ fn server_selection(selection: &TemplateToolSelection, server: &McpServerName) -
 fn service_environment(
     workspace_root: &std::path::Path,
     site: &ServerSite,
+    product_home: Option<&std::path::Path>,
 ) -> Result<ExecutionEnvironment, crate::CliFailure> {
     let unavailable = "mcp server environment could not be prepared for this workspace";
     if let ServerSite::Runner(runner) = site {
@@ -624,19 +641,37 @@ fn service_environment(
         )
         .map_err(|_| crate::CliFailure::new(unavailable));
     }
+    let private = matches!(site, ServerSite::HostPrivate);
+    let temporary = std::env::temp_dir();
+    let workspace_root = if private {
+        temporary.as_path()
+    } else {
+        workspace_root
+    };
     let workspace =
         WorkspacePolicy::host(workspace_root, ".").map_err(|_| unavailable.to_owned())?;
     let run = plakous::model::RunId::try_from(uuid::Uuid::new_v4())
         .map_err(|_| unavailable.to_owned())?;
     let options = crate::process_environment::options(workspace_root)
         .map_err(|error| error.message().to_owned())?;
-    ExecutionEnvironment::host_with_policy_and_process_options(
+    let environment = ExecutionEnvironment::host_with_policy_and_process_options(
         ExecutionEnvironmentScope::Run(run),
         workspace,
         ExecutionEnvironmentConfig::default(),
         options,
     )
-    .map_err(|_| crate::CliFailure::new(unavailable))
+    .map_err(|_| crate::CliFailure::new(unavailable))?;
+    if private {
+        Ok(environment.with_private_service_cwd(
+            product_home
+                .ok_or_else(|| {
+                    crate::CliFailure::new("nonlocal host MCP requires explicit product home")
+                })?
+                .to_path_buf(),
+        ))
+    } else {
+        Ok(environment)
+    }
 }
 
 /// One `[mcp_servers.<id>]` table as `ToolSections` renders it.
@@ -683,7 +718,7 @@ pub(crate) fn server_spec(
     rendered: &str,
     secrets: &Arc<dyn NamedSecrets>,
 ) -> Result<McpServerSpec, crate::CliFailure> {
-    placed_server_spec(server, rendered, secrets, selected_runner()).map(|(spec, _)| spec)
+    placed_server_spec(server, rendered, secrets, None).map(|(spec, _)| spec)
 }
 
 /// Rebuilds one server definition from its frozen canonical table, and
@@ -963,7 +998,7 @@ enum Shelf {
 impl Shelf {
     const fn of(site: &ServerSite) -> Self {
         match site {
-            ServerSite::Host => Self::Named,
+            ServerSite::Host | ServerSite::HostPrivate => Self::Named,
             ServerSite::LocalRunner | ServerSite::Runner(_) => Self::Runner,
         }
     }

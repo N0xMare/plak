@@ -625,6 +625,18 @@ requests; that exfiltration path is residual risk (section 9).
 
 ### 2.9 Runners
 
+Runner placement uses pin-backed stable machine identity and effective canonical
+roots even while a runner is offline. Same-machine pin/root admission and local
+workspace admission share a guard through the local product commit. All non-deleted
+local session roots and minted copies count, not only resident sessions; containment
+in either direction is overlap. Missing/unverifiable machine evidence refuses a
+remote bind with a re-pair remedy, never a local open. Remote canonical paths and
+physical root identity are read on that runner. Global instruction sources explicitly
+use host authority rather than a path-prefix exception. A nonlocal node’s host-placed
+MCP gets a fresh empty private 0700 cwd outside/not containing the product home,
+never `$HOME` or the remote workspace spelling.
+
+
 A runner runs a host's tools on another machine, as the runner machine's user
 (chapter 01 §8.4). Its authority is that user's, and nothing about the link
 widens it.
@@ -635,7 +647,7 @@ widens it.
   ForwardX11Trusted=no -o Tunnel=no -o ClearAllForwardings=yes -o SendEnv=-*
   -o PermitLocalCommand=no -o RemoteCommand=none -o RequestTTY=no -o
   ControlMaster=no -o ControlPath=none -o ServerAliveInterval=5 -o
-  ServerAliveCountMax=3 -o ConnectTimeout=10 -- <destination> plak runner
+  ServerAliveCountMax=3 -o ConnectTimeout=10 -- <destination> <absolute-command> runner
   connect --stdio`: a host key already known and never rewritten, no agent,
   credential, X11, port or tunnel forwarding, no environment sent, no local
   command, no shared master connection, no tty and no prompt. Options given on
@@ -645,7 +657,7 @@ widens it.
   checked to be a uuid first. A host never listens for a runner, and a runner
   never connects to a host.
 - **The socket is the runner user's.** The daemon listens on a socket of mode
-  0600 in `<home>/runner/run/`, a 0700 directory inside `<home>/runner/`, which
+  0600 in `<home>/runner/builds/<triple-key>/run/`, a 0700 directory inside `<home>/runner/`, which
   is forced to 0700 too; its log `serve.log` is 0600. A connection whose peer
   is another user is closed before the daemon's hello. `connect --stdio` is
   only a byte bridge to that socket, so ssh login as the runner user is the

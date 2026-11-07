@@ -5934,27 +5934,27 @@ agent named on its execution environment at construction
 (`ExecutionEnvironment::with_line_owner`, from the job owner of §8.5). The
 direct local backend carries the owner, class and budget without reading them;
 they are the fence and idempotency key a runner checks once execution leaves
-the process (runner protocol v3, below). The owner a runner checks comes from
+the process (runner protocol v4, below). The owner a runner checks comes from
 the session's current job owner (§8.5), not from an owner a joined process
 service stored when it started. `LineOwner` lives in `plakous-tools`; it never
 enters `plakous-model`.
 
-**Runner protocol v3.** `plakous-runner-protocol` defines what a host and a
+**Runner protocol v4.** `plakous-runner-protocol` defines what a host and a
 runner say to each other over one byte stream, and `plakous-runner` implements
 both ends over an `ExecutionEnvironment` and joins them in process as a
 loopback (both published internal, chapter 06 §3, and reached from the facade
 only through its hidden `plakous::runner` module). It also holds the runner
 daemon, which serves one runner on a private socket, and the stdio bridge a
-host reaches it through (`plak runner`, chapter 02 §3.1). Nothing selects a
-runner for a session yet.
+host reaches it through (`plak runner`, chapter 02 §3.1). Runner authority is supplied explicitly to each node and facade binding.
+No production process-global runner selector exists.
 
 - **Frames.** A big-endian `u32` length, then one JSON value. Neither end
   reads or writes a frame over 16 MiB; an answer that would exceed it is
   replaced by a `ResourceLimit` backend error that is not proven to have had
   no effect, since the operation ran.
 - **Handshake.** The runner speaks first: `Hello { version, binary_id,
-  runner_id, instance, boot_id, descriptor, capabilities, path, home,
-  job_bound }`. The version triple is the protocol version (3), the source
+  runner_id, instance, boot_id, machine_id, descriptor, capabilities, path, home,
+  job_bound }`. The version triple is the protocol version (4), the source
   revision and the build flavor, and binding requires an exact match, except
   to a home-local runner (below), which binds by protocol version alone; the
   binary id is evidence and is never compared. `instance` is fresh for every
@@ -6341,6 +6341,21 @@ must match the durable projection exactly. Rejection diagnostics distinguish
 provider-target drift from registry or exposure drift and projection-mode
 mismatch, without disclosing provider evidence or changing exact-reopen admission.
 
+Protocol 4 adds paired read-only `workspace.options`, `workspace.discover` and
+`workspace.validate`, stable `Hello.machine_id`, and same-owner
+`TransferAccepted.unpromoted [{call_key,pid}]`. Inspecting binds cannot read workspace
+options. Unknown machine evidence requires re-pair for remote placement, never a
+local-open refusal. Workspace metadata follows chapter 07 §3.7. The host reuses
+one connection per pinned identity, with aliases as labels. Explicit facade
+`SessionRuntimeBinding::with_runner_services` pins backend and executor per node.
+
+Foreground cleanup is based on terminal **driver operation** state after recovery,
+not a process.start answer/Ack. `process.foreground_stop` is a keyed owner control;
+it checks the starting call and PID together, cannot stop promoted jobs and does
+not insert a job terminal. Same-owner wake itself stops nothing. The runner’s
+lease clock excludes suspend. Floors, socket, lock and log are isolated by exact
+triple; no floors migration crosses a protocol/revision/flavor boundary.
+
 ### 8.5 Execution environment and process sessions
 
 File mutations report `changed_files=N`, then every committed changed
@@ -6685,12 +6700,12 @@ recorded root or cwd (`canonicalize`, which is also the existence check), whethe
 a copy-shim file is installed (`is_file`), and the bytes under a copy
 (`tree_bytes`, without following links). `LocalWorkspaceProbe` answers from the
 embedding process's filesystem. A host and the orchestration tree take their
-probe from `plakous::tools::runner::workspace_probe()` and their
-instruction-source reader from the selected runner too, so a probe answer and a
-backend answer always describe the same filesystem: on a selected runner, the
-runner answers both (`RunnerWorkspaceProbe`, and hosted's reader over the
-`instructions.read` verb, with reads under the product home kept on the
-host). A runner answers a probe only about an absolute path without `..`
+probe and instruction-source reader from the node’s explicit runner services.
+Canonical root/cwd and physical root-object identity come from that runner, never
+a same-spelled host path. Explicitly global instruction sources use a separate
+host reader; path prefixes never select authority. The local reader/policy path
+keeps its existing descriptor bytes. Hub stamp and mint-base lookups carry
+`(runner_id, path)`, and process sessions use the environment’s pinned executor. A runner answers a probe only about an absolute path without `..`
 under its roots and outside its home (chapter 04 §2.9); any other is a
 workspace refusal, which the host sees as `Unavailable`. The probe is a
 port, not authority: it grants nothing a tool could use, and the product-state
@@ -6850,16 +6865,14 @@ reached only through the seam; and `child_runner`, a real runner daemon
 (`plak runner serve` over the script's runner home) reached through
 `plak runner connect --stdio` run from the product's own executable, as a
 host's ssh reaches one, bound under the script's host identity with its
-keyed calls journaled. `SessionRuntimeBinding::new` then hands the builder the
-runner's backend (`plakous::agent::select_runner_backend`), so the run's
+keyed calls journaled. The test hook supplies explicit runner services to the facade builder, so the run's
 environment is a runner environment: its reads, queries, mutations, literal
 processes and services go to the runner, and its descriptor names the runner,
 so its sessions do not reopen on another runner or on the local one. Its
 process sessions are the runner's, through the runner arm above; a runner
-environment with no selected runner runtime or no line owner refuses every
-start, `Unsupported` with no effect. No production configuration can name
-a runner. The facade reaches the seam only through the hidden
-`plakous::tools::runner` and `plakous::agent::select_runner_backend`.
+environment with no pinned runner runtime or no line owner refuses every
+start, `Unsupported` with no effect. Production placement resolves configured paired identities, never an ambient runner. The facade reaches the seam only through the hidden
+`plakous::tools::runner` and `plakous::agent::select_runner_services`.
 
 An unpromoted runner process never outlives its owning instance's authority:
 transfer or lease lapse stops it and reports `OutcomeUnknown` (§8.4).
@@ -11152,7 +11165,7 @@ by hosted through the hidden `plakous::tools::preview_redaction` bridge.
 The runner seam is the unsupported `plakous_tools::internal::runner` and
 `plakous_agent::internal::select_runner_backend`, reached by hosted and the
 orchestration tree through the hidden `plakous::tools::runner` and
-`plakous::agent::select_runner_backend` bridges (§8.5). Each consumer is
+`plakous::agent::select_runner_services` bridges (§8.5). Each consumer is
 granted the bridge's items one by one: hosted its `workspace_probe` and, in
 its hidden `runner_reader`, the link and extension items the instruction
 reader uses; the orchestration tree `workspace_probe` and `process_runner`.

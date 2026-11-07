@@ -14,19 +14,18 @@ use plakous::prompts::instructions::{
 };
 use plakous::tools::runner::{
     RunnerCall, RunnerExtension, RunnerLink, RunnerVerb, ServeFailure, ServeFuture, call_blocking,
-    process_runner,
 };
 use serde_json::{Value, json};
 
-/// The reader of the workspaces sessions run in: the selected runner's, with
-/// reads under `host_local` (the product home) kept on this host, or this
-/// process's own filesystem.
-pub(crate) fn instruction_reader(host_local: Option<&Path>) -> Arc<dyn InstructionSourceReader> {
-    match process_runner() {
+/// Reader of this node's workspace authority. Global sources use a separate
+/// explicit host reader, never a path-prefix exception in this one.
+pub(crate) fn instruction_reader(
+    runner: Option<&plakous::runner::RunnerServices>,
+) -> Arc<dyn InstructionSourceReader> {
+    match runner {
         Some(runner) => Arc::new(RunnerInstructionSourceReader {
             link: runner.backend().link(),
             runtime: runner.runtime().clone(),
-            host_local: host_local.map(Path::to_path_buf),
         }),
         None => Arc::new(LocalInstructionSourceReader),
     }
@@ -38,16 +37,9 @@ pub(crate) fn instruction_reader(host_local: Option<&Path>) -> Arc<dyn Instructi
 struct RunnerInstructionSourceReader {
     link: Arc<dyn RunnerLink>,
     runtime: tokio::runtime::Handle,
-    host_local: Option<PathBuf>,
 }
 
 impl RunnerInstructionSourceReader {
-    fn local(&self, path: &Path) -> bool {
-        self.host_local
-            .as_ref()
-            .is_some_and(|root| path.starts_with(root))
-    }
-
     fn ask(&self, question: Value) -> Result<Value, SourceReadError> {
         call_blocking(
             self.link.as_ref(),
@@ -151,9 +143,6 @@ const INVALID: SourceReadError = SourceReadError::Unavailable;
 
 impl InstructionSourceReader for RunnerInstructionSourceReader {
     fn canonicalize(&self, path: &Path) -> Result<SourceResolution, SourceReadError> {
-        if self.local(path) {
-            return LocalInstructionSourceReader.canonicalize(path);
-        }
         let answer = self.ask(json!({ "op": "canonicalize", "path": bytes(path) }))?;
         Ok(match tag(&answer).ok_or(INVALID)? {
             "resolved" => SourceResolution::Resolved(path_of(answer.get("path")).ok_or(INVALID)?),
@@ -164,9 +153,6 @@ impl InstructionSourceReader for RunnerInstructionSourceReader {
     }
 
     fn anchored_directory(&self, directory: &Path) -> Result<DirectoryAnswer, SourceReadError> {
-        if self.local(directory) {
-            return LocalInstructionSourceReader.anchored_directory(directory);
-        }
         let answer = self.ask(json!({ "op": "anchored_directory", "path": bytes(directory) }))?;
         Ok(match tag(&answer).ok_or(INVALID)? {
             "directory" => DirectoryAnswer::Directory,
@@ -184,10 +170,6 @@ impl InstructionSourceReader for RunnerInstructionSourceReader {
         components: &[OsString],
         limit: usize,
     ) -> Result<Vec<InstructionChainEntry>, SourceReadError> {
-        if self.local(directory) {
-            return LocalInstructionSourceReader
-                .read_instruction_chain(directory, components, limit);
-        }
         let answer = self.ask(json!({
             "op": "read_instruction_chain",
             "path": bytes(directory),
@@ -214,9 +196,6 @@ impl InstructionSourceReader for RunnerInstructionSourceReader {
     }
 
     fn is_directory(&self, path: &Path) -> Result<bool, SourceReadError> {
-        if self.local(path) {
-            return LocalInstructionSourceReader.is_directory(path);
-        }
         self.ask(json!({ "op": "is_directory", "path": bytes(path) }))?
             .get("directory")
             .and_then(Value::as_bool)
@@ -224,9 +203,6 @@ impl InstructionSourceReader for RunnerInstructionSourceReader {
     }
 
     fn entry_kind(&self, path: &Path) -> Result<Option<SourceEntryKind>, SourceReadError> {
-        if self.local(path) {
-            return LocalInstructionSourceReader.entry_kind(path);
-        }
         let answer = self.ask(json!({ "op": "entry_kind", "path": bytes(path) }))?;
         match answer.get("kind") {
             Some(Value::Null) => Ok(None),
@@ -239,9 +215,6 @@ impl InstructionSourceReader for RunnerInstructionSourceReader {
         &self,
         directory: &Path,
     ) -> Result<Option<Vec<OsString>>, SourceReadError> {
-        if self.local(directory) {
-            return LocalInstructionSourceReader.directory_entries(directory);
-        }
         let answer = self.ask(json!({ "op": "directory_entries", "path": bytes(directory) }))?;
         match answer.get("entries") {
             Some(Value::Null) => Ok(None),
@@ -261,9 +234,6 @@ impl InstructionSourceReader for RunnerInstructionSourceReader {
         max_len: u64,
         limit: usize,
     ) -> Result<SourceFile, SourceReadError> {
-        if self.local(path) {
-            return LocalInstructionSourceReader.read_file(path, max_len, limit);
-        }
         let answer = self.ask(json!({
             "op": "read_file",
             "path": bytes(path),
@@ -280,23 +250,42 @@ impl InstructionSourceReader for RunnerInstructionSourceReader {
 #[doc(hidden)]
 #[must_use]
 pub fn test_runner_extension() -> Arc<dyn RunnerExtension> {
-    Arc::new(TestRunnerExtension {
-        vcs: plakous_recursive_subagents::remote_vcs::vcs_runner_extension(
-            Arc::new(|_| true),
-            None,
-        ),
-    })
+    runner_extension(
+        plakous_recursive_subagents::remote_vcs::vcs_runner_extension(Arc::new(|_| true), None),
+        Arc::new(|_| true),
+    )
 }
 
-struct TestRunnerExtension {
+/// Combines runner-owned instruction reads with the admitted VCS extension.
+/// The same consent predicate protects instruction reads before filesystem I/O.
+#[doc(hidden)]
+#[must_use]
+pub fn runner_extension(
     vcs: Arc<dyn RunnerExtension>,
+    admits: Arc<dyn Fn(&Path) -> bool + Send + Sync>,
+) -> Arc<dyn RunnerExtension> {
+    Arc::new(NodeRunnerExtension { vcs, admits })
 }
 
-impl RunnerExtension for TestRunnerExtension {
+struct NodeRunnerExtension {
+    vcs: Arc<dyn RunnerExtension>,
+    admits: Arc<dyn Fn(&Path) -> bool + Send + Sync>,
+}
+
+impl RunnerExtension for NodeRunnerExtension {
     fn serve(&self, verb: RunnerVerb, payload: Value) -> ServeFuture {
         match verb {
             RunnerVerb::VcsRead | RunnerVerb::VcsEffect => self.vcs.serve(verb, payload),
-            _ => InstructionReaderExtension.serve(verb, payload),
+            RunnerVerb::ReadInstructions
+                if path_of(payload.get("path")).is_some_and(|path| (self.admits)(&path)) =>
+            {
+                InstructionReaderExtension.serve(verb, payload)
+            }
+            _ => Box::pin(std::future::ready(Err(
+                plakous::tools::runner::environment_failure(
+                    &plakous::tools::runner::workspace_refusal(),
+                ),
+            ))),
         }
     }
 }

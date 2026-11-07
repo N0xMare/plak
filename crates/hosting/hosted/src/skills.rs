@@ -135,10 +135,11 @@ impl NodeSkills {
         mode: SkillsMode<'_>,
         workspace_root: &Path,
         presentation: SkillsPresentation,
+        runner: Option<&plakous::runner::RunnerServices>,
     ) -> CliResult<Self> {
         let roots = setting.roots(workspace_root);
         let reader: Arc<dyn InstructionSourceReader> =
-            crate::runner_reader::instruction_reader(None);
+            crate::runner_reader::instruction_reader(runner);
         let unreadable =
             |error| CliFailure::new(format!("skills could not be discovered: {error}"));
         let fresh = |on: bool| {

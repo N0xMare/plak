@@ -622,6 +622,7 @@ fn openrouter_runtime_binding(
 ) -> CliResult<SessionRuntimeBinding> {
     crate::agent::build::api::runtime_binding(
         &crate::agent::build::api::ApiRuntimeSpec {
+            runner_services: spec.runner_services.clone(),
             job_config: spec.job_config,
             account: spec.account.clone(),
             sidecars: spec.sidecars.as_ref(),

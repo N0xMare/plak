@@ -133,17 +133,13 @@ pub mod internal {
     ) -> AgentBuilder {
         builder.with_local_daemon(backend)
     }
-    /// Runs `builder`'s agent on the runner behind `backend` instead of the
-    /// local runner (spec 01 §8.5): its environment's operations and process
-    /// sessions go to that runner, and a checkpoint of another runner does
-    /// not reopen on it. Unsupported: only a test route
-    /// selects a runner until runner pairing exists.
+    /// Explicit per-node runner backend and link executor.
     #[must_use]
-    pub fn select_runner_backend(
-        builder: AgentBuilder,
-        backend: std::sync::Arc<plakous_tools::internal::runner::RunnerBackend>,
-    ) -> AgentBuilder {
-        builder.with_runner_backend(backend)
+    pub fn select_runner_services(
+        builder: crate::AgentBuilder,
+        services: plakous_tools::internal::runner::RunnerServices,
+    ) -> crate::AgentBuilder {
+        builder.with_runner_services(services)
     }
     pub use crate::binding_change::BindingChange;
     pub use crate::checkpoint_bundle::{

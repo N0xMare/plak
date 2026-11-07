@@ -33,7 +33,7 @@ rustix = { workspace = true, features = ["process"] }
 
 [dev-dependencies]
 tempfile.workspace = true
-tokio = { workspace = true, features = ["io-util", "macros", "rt-multi-thread", "sync", "time"] }
+tokio = { workspace = true, features = ["io-util", "macros", "rt-multi-thread", "sync", "time", "test-util"] }
 
 [lints]
 workspace = true

@@ -1,6 +1,6 @@
 //! `[runners.<name>]`: the machines a host may run a node's tools on, each
 //! reached as `ssh <alias>` (spec 07 §3.6). `plak runner pair` and `ps`
-//! dial them; no session runs on one yet.
+//! dial them; sessions retain the paired identity, not a mutable alias.
 
 use std::collections::BTreeMap;
 
@@ -17,12 +17,15 @@ pub struct RunnerConfig {
     /// The ssh destination the host dials: a `~/.ssh/config` alias or
     /// `[user@]host`.
     pub ssh: String,
+    /// Absolute remote stable-install-link executable, never shell source.
+    pub command: String,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(in crate::product_config) struct RunnerSection {
     ssh: Entry,
+    command: Entry,
 }
 
 /// Every `[runners.<name>]` table, validated and located like the tool
@@ -51,9 +54,25 @@ pub(in crate::product_config) fn parse(
                 "ssh must be an alias or [user@]host: 1 to 255 visible bytes, no whitespace, not starting with -",
             ));
         }
-        parsed.insert(name.clone(), RunnerConfig { ssh });
+        let Some(command) = reader.string("command", &section.command)? else {
+            return Err(reader.header("needs command = \"/absolute/stable/link/plak\"; set [runners.<name>] command to the remote stable install link"));
+        };
+        if !is_runner_command(&command) {
+            return Err(reader.at_entry(&section.command, "command must be an absolute executable path using only [A-Za-z0-9/._+-], not shell source"));
+        }
+        parsed.insert(name.clone(), RunnerConfig { ssh, command });
     }
     Ok(parsed)
+}
+
+pub(crate) fn is_runner_command(command: &str) -> bool {
+    command.starts_with('/')
+        && command.len() <= 4096
+        && command
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"/._+-".contains(&byte))
+        && !command.split('/').any(|part| matches!(part, "." | ".."))
+        && !command.ends_with('/')
 }
 
 /// Checks a runner name a command names, as a `[runners.<name>]` table

@@ -854,7 +854,11 @@ pub(in crate::agent) async fn openrouter_child_runtime_binding(
     };
     let inputs = parent.child_inputs();
     let child_path = PathBuf::from(path);
-    let workspace_root = child_session_workspace_root(inputs.workspace_root, &child_path)?;
+    let workspace_root = child_session_workspace_root(
+        inputs.workspace_root,
+        &child_path,
+        inputs.state_roots.workspace_probe().as_ref(),
+    )?;
     let selected_effort = crate::runtime::effort_from_record(effort)?;
     let child = ApiTopologyParent {
         created_output_bound,
@@ -1000,7 +1004,11 @@ pub async fn spawned_child_spec(
     let parent_composition =
         frozen_parent_composition(&tree_id, agent_id).unwrap_or(inputs.composition);
     let child_path = PathBuf::from(path);
-    let workspace_root = child_session_workspace_root(inputs.workspace_root, &child_path)?;
+    let workspace_root = child_session_workspace_root(
+        inputs.workspace_root,
+        &child_path,
+        inputs.state_roots.workspace_probe().as_ref(),
+    )?;
     let account = account.filter(|value| !value.is_empty());
     let tuple_id = tuple_id.filter(|value| !value.is_empty());
     let effort = effort.filter(|value| !value.is_empty());
@@ -1141,12 +1149,11 @@ fn child_tool_mode_label(mode: Option<plakous::subscriptions::NativeToolMode>) -
 pub(in crate::agent) fn child_session_workspace_root(
     parent_root: &Path,
     child_path: &Path,
+    probe: &dyn plakous::tools::WorkspaceProbe,
 ) -> crate::CliResult<PathBuf> {
     if parent_root == child_path {
         return Ok(parent_root.to_path_buf());
     }
-    let probe = plakous::tools::runner::workspace_probe();
-    let probe = probe.as_ref();
     let unavailable = crate::process_environment::probe_unavailable;
     Ok(
         match (

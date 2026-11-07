@@ -142,6 +142,9 @@ pub mod telemetry_store;
 mod test_hooks;
 #[cfg(not(feature = "test-hooks"))]
 mod test_hooks {
+    pub(crate) const fn runner_services() -> Option<plakous::runner::RunnerServices> {
+        None
+    }
     #[allow(dead_code, reason = "headless builds do not start hosts")]
     pub(crate) const fn runner_detached() -> bool {
         false

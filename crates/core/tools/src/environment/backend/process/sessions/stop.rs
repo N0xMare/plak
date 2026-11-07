@@ -5,8 +5,36 @@ use super::{
 };
 
 impl JoinedProcessSessions {
+    pub(crate) fn live_foreground(&self) -> Vec<(String, u32)> {
+        lock(&self.inner.state)
+            .active
+            .values()
+            .filter(|session| {
+                !lock(&session.shared).status.is_terminal()
+                    && session.promoted.load(Ordering::Acquire) != PROMOTED
+            })
+            .map(|session| {
+                let call_key = match session.foreground_control.class() {
+                    crate::OperationClass::EffectCall {
+                        call_id,
+                        attempt_id,
+                    } => format!("{call_id}:{attempt_id}"),
+                    _ => "unkeyed".to_owned(),
+                };
+                (call_key, session.pid)
+            })
+            .collect()
+    }
+
     pub(crate) fn stop_foreground_after_owner_loss(
         &self,
+    ) -> crate::internal::ForegroundProcessStops {
+        self.stop_foreground_matching(None)
+    }
+
+    pub(crate) fn stop_foreground_matching(
+        &self,
+        key: Option<(&str, u32)>,
     ) -> crate::internal::ForegroundProcessStops {
         let foreground = {
             let state = lock(&self.inner.state);
@@ -14,7 +42,18 @@ impl JoinedProcessSessions {
                 .active
                 .iter()
                 .filter(|(_, session)| {
-                    !lock(&session.shared).status.is_terminal()
+                    let identity_matches = key.is_none_or(|(key, pid)| {
+                        session.pid == pid
+                            && match session.foreground_control.class() {
+                                crate::OperationClass::EffectCall {
+                                    call_id,
+                                    attempt_id,
+                                } => key == format!("{call_id}:{attempt_id}"),
+                                _ => key == "unkeyed",
+                            }
+                    });
+                    identity_matches
+                        && !lock(&session.shared).status.is_terminal()
                         && session.promoted.compare_exchange(
                             super::FOREGROUND,
                             super::CANCELLING,

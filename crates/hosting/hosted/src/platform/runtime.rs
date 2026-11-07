@@ -103,6 +103,7 @@ pub(crate) async fn build_runtime(
         provider,
         parent.state_roots.platform_credentials(),
         &ApiRuntimeSpec {
+            runner_services: parent.state_roots.runner_services().cloned(),
             job_config: parent.state_roots.job_config(),
             account: parent.target.selection().clone(),
             sidecars: parent.state_roots.sidecars().as_ref(),

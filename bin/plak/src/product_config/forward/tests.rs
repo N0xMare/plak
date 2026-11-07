@@ -12,7 +12,7 @@ const SERVER: &str = "[mcp_servers.notes]\ntransport = \"stdio\"\ncommand = \"no
 fn the_forward_keys_parse_and_are_named_for_doctor() {
     let config = ProductConfig::parse(&format!(
         "[host]\nresume_after_loss = \"continue\"\n\n{SERVER}placement = \"runner\"\n\n\
-         [runners.buildbox]\nssh = \"me@buildbox\"\n"
+         [runners.buildbox]\nssh = \"me@buildbox\"\ncommand = \"/opt/bin/plak\"\n"
     ))
     .unwrap();
     assert_eq!(config.resume_after_loss, Some(ResumeAfterLoss::Continue));
@@ -23,7 +23,8 @@ fn the_forward_keys_parse_and_are_named_for_doctor() {
     assert_eq!(
         config.runners["buildbox"],
         RunnerConfig {
-            ssh: "me@buildbox".to_owned()
+            ssh: "me@buildbox".to_owned(),
+            command: "/opt/bin/plak".to_owned()
         }
     );
     assert_eq!(
@@ -71,15 +72,17 @@ fn malformed_forward_keys_are_named_load_errors() {
             "no whitespace",
         ),
         (
-            "[runners.buildbox]\nssh = \"buildbox\"\nroots = []\n",
+            "[runners.buildbox]\nssh = \"buildbox\"\ncommand = \"/opt/bin/plak\"\nroots = []\n",
             "unknown config key",
         ),
         (
-            "[runners.Buildbox]\nssh = \"buildbox\"\n",
+            "[runners.Buildbox]\nssh = \"buildbox\"\ncommand = \"/opt/bin/plak\"\n",
             "not a valid runner name",
         ),
         (
-            &format!("[runners.{LOCAL_RUNNER_NAME}]\nssh = \"buildbox\"\n"),
+            &format!(
+                "[runners.{LOCAL_RUNNER_NAME}]\nssh = \"buildbox\"\ncommand = \"/opt/bin/plak\"\n"
+            ),
             "host's own runner",
         ),
     ] {
@@ -173,7 +176,7 @@ fn a_server_table_spells_placement_only_when_set() {
 #[test]
 fn a_project_file_names_its_home_scoped_forward_keys() {
     let project = ProductConfig::parse(
-        "[host]\nresume_after_loss = \"continue\"\n\n[runners.buildbox]\nssh = \"buildbox\"\n",
+        "[host]\nresume_after_loss = \"continue\"\n\n[runners.buildbox]\nssh = \"buildbox\"\ncommand = \"/opt/bin/plak\"\n",
     )
     .unwrap();
     assert_eq!(
@@ -188,6 +191,9 @@ fn a_project_file_names_its_home_scoped_forward_keys() {
 fn an_empty_forward_only_table_is_still_named() {
     let config = ProductConfig::parse("[host]\n\n[runners]\n").unwrap();
     assert_eq!(config.forward_only_keys(), ["[host]", "[runners]"]);
-    let config = ProductConfig::parse("[runners.buildbox]\nssh = \"buildbox\"\n").unwrap();
+    let config = ProductConfig::parse(
+        "[runners.buildbox]\nssh = \"buildbox\"\ncommand = \"/opt/bin/plak\"\n",
+    )
+    .unwrap();
     assert_eq!(config.forward_only_keys(), ["[runners.buildbox]"]);
 }

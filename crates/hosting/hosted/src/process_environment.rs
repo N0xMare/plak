@@ -11,8 +11,13 @@ pub(crate) fn probe_unavailable(error: ProbeError) -> CliFailure {
 }
 
 pub(crate) fn options(workspace: &Path) -> CliResult<HostProcessOptions> {
-    let probe = plakous::tools::runner::workspace_probe();
-    let probe = probe.as_ref();
+    options_on(workspace, &plakous::tools::LocalWorkspaceProbe)
+}
+
+pub(crate) fn options_on(
+    workspace: &Path,
+    probe: &dyn plakous::tools::WorkspaceProbe,
+) -> CliResult<HostProcessOptions> {
     let relative = PathBuf::from(".plak/bin");
     let directory = workspace.join(&relative);
     let shim_present = probe

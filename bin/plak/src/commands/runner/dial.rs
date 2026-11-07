@@ -56,7 +56,6 @@ pub(crate) const STRICT_SSH_OPTIONS: [&str; 37] = [
 ];
 
 /// The command a host runs on its runner through ssh.
-pub(crate) const REMOTE_CONNECT: [&str; 4] = ["plak", "runner", "connect", "--stdio"];
 
 /// This build's version triple: the protocol, the source revision it was
 /// built from (`unknown` when the build did not say) and its flavor.
@@ -94,35 +93,104 @@ pub(crate) async fn dial(
     paths: &PlakPaths,
     name: &str,
     destination: &str,
+    command: &str,
     inspect: bool,
 ) -> CliResult<Dialed> {
-    let mut ssh = ssh_command(destination, &REMOTE_CONNECT);
-    ssh.stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit());
-    let mut child = ssh
-        .spawn()
-        .map_err(|error| CliFailure::new(format!("ssh could not be started: {error}")))?;
-    let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
-        return Err(CliFailure::new("ssh did not give a link"));
+    dial_placed(paths, name, destination, command, inspect)
+        .await
+        .map_err(|failure| CliFailure::new(format!("runner {name}: {failure:?}")))
+}
+
+pub(crate) async fn dial_placed(
+    paths: &PlakPaths,
+    name: &str,
+    destination: &str,
+    command: &str,
+    inspect: bool,
+) -> Result<Dialed, plakous::runner::PlacementFailure> {
+    use plakous::runner::{PlacementFailure, ProbePhase};
+    let unavailable = |phase| PlacementFailure::RunnerUnreachable {
+        phase,
+        timed_out: false,
     };
-    let stream = tokio::io::join(stdout, stdin);
-    let bind = super::bind(super::home::host_id(paths)?, inspect);
+    let (child, stream) = ssh_stream(destination, command)?;
+    let bind = super::bind(
+        super::home::host_id(paths).map_err(|_| PlacementFailure::RunnerNotPaired)?,
+        inspect,
+    );
     let journal: Option<std::sync::Arc<dyn CallJournal>> = if inspect {
         None
     } else {
         Some(std::sync::Arc::new(
-            FileCallJournal::open(paths.home().join("runners").join(name).join("calls")).map_err(
-                |error| CliFailure::new(format!("the runner call journal failed: {error}")),
-            )?,
+            FileCallJournal::open(paths.home().join("runners").join(name).join("calls"))
+                .map_err(|_| unavailable(ProbePhase::Reconcile))?,
         ))
     };
     let (client, hello) =
         RunnerClient::connect_journaled(stream, bind, ClientWindows::default(), journal)
             .await
-            .map_err(|error| CliFailure::new(format!("runner {name}: {error}")))?;
+            .map_err(|error| match error {
+                plakous::runner::ConnectError::VersionMismatch { runner } => {
+                    PlacementFailure::RunnerVersionMismatch {
+                        expected: version(),
+                        actual: runner,
+                    }
+                }
+                _ => unavailable(ProbePhase::Bind),
+            })?;
     Ok(Dialed {
         client,
+        hello,
+        _ssh: child,
+    })
+}
+
+type SshStream = tokio::io::Join<tokio::process::ChildStdout, tokio::process::ChildStdin>;
+
+fn ssh_stream(
+    destination: &str,
+    command: &str,
+) -> Result<(tokio::process::Child, SshStream), plakous::runner::PlacementFailure> {
+    let unavailable = || plakous::runner::PlacementFailure::RunnerUnreachable {
+        phase: plakous::runner::ProbePhase::Ssh,
+        timed_out: false,
+    };
+    let mut ssh = ssh_command(destination, &[command, "runner", "connect", "--stdio"]);
+    let mut child = ssh
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|_| unavailable())?;
+    let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
+        return Err(unavailable());
+    };
+    Ok((child, tokio::io::join(stdout, stdin)))
+}
+
+pub(crate) async fn reconnect_placed(
+    client: &RunnerClient,
+    destination: &str,
+    command: &str,
+) -> Result<Dialed, plakous::runner::PlacementFailure> {
+    let (child, stream) = ssh_stream(destination, command)?;
+    let hello = client
+        .reconnect(stream)
+        .await
+        .map_err(|error| match error {
+            plakous::runner::ConnectError::VersionMismatch { runner } => {
+                plakous::runner::PlacementFailure::RunnerVersionMismatch {
+                    expected: version(),
+                    actual: runner,
+                }
+            }
+            _ => plakous::runner::PlacementFailure::RunnerUnreachable {
+                phase: plakous::runner::ProbePhase::Bind,
+                timed_out: false,
+            },
+        })?;
+    Ok(Dialed {
+        client: client.clone(),
         hello,
         _ssh: child,
     })

@@ -1,4 +1,4 @@
-//! The two ends of runner protocol v3 over a Plakous execution environment
+//! The two ends of runner protocol v4 over a Plakous execution environment
 //! (spec 01 §8.4), and an in-process loopback that joins them.
 //!
 //! [`RunnerService`] is the runner end: it answers requests from a local
@@ -18,9 +18,28 @@ pub mod daemon;
 mod floors;
 mod journal;
 mod loopback;
+mod machine;
+mod overlap;
+mod registry;
+
+pub use overlap::{MachineOverlapGuard, RunnerPin};
+
+pub use plakous_tools::internal::runner::RunnerServices;
+pub use registry::{
+    BoundWorkspace, ConfiguredRunner, PlacementFailure, ProbePhase, RunnerProgress, RunnerRegistry,
+    RunnerRow, RunnerStatus,
+};
 mod service;
 mod state;
 mod streams;
+mod workspace;
+
+pub use machine::machine_id;
+
+pub use workspace::{
+    DiscoveredWorkspace, RepositoryHead, RepositoryMetadata, WorkspaceCatalog, WorkspaceDiscovery,
+    WorkspaceOptions, WorkspaceRefusal,
+};
 
 pub use client::{ClientWindows, ConnectError, RecoveredCall, RunnerClient};
 pub use floors::{FileOwnerFloors, Floor, OwnerFloors};

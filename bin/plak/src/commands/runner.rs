@@ -8,10 +8,11 @@
 //! host, `pair <name>` pairs this host with `[runners.<name>]` over ssh and
 //! `ps <name>` lists that runner's lines.
 
-mod dial;
+pub(crate) mod dial;
 mod home;
 #[cfg(feature = "web")]
 pub(crate) mod local;
+pub(crate) mod registry;
 
 pub(crate) use home::{host_id, private_directory};
 
@@ -110,6 +111,7 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
         )));
     };
     private_directory(home.root())?;
+    home.prepare_build()?;
     let excluded = paths.home().to_path_buf();
     refuse_unsafe_roots(&home, &config, &excluded)?;
     if !home::admitted_workspace(&config.roots, &excluded, first) {
@@ -139,6 +141,12 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
     let probe_paths = Arc::new(move |candidate: &Path| {
         home::admitted_probe_path(&roots, &probe_excluded, candidate)
     });
+    let workspace_catalog = plakous::runner::WorkspaceCatalog::machine(
+        config.roots.clone(),
+        &excluded,
+        config.copies.is_some(),
+    )
+    .map_err(|error| CliFailure::new(format!("runner workspace policy: {error:?}")))?;
     let extension = vcs_extension(&config, excluded);
     let allowlist_home = home.clone();
     let hosts = Arc::new(move |host_id: &str| {
@@ -160,6 +168,8 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
             binary_id: crate::build_identity::known_binary_id(),
         },
         RunnerOptions {
+            machine_id: plakous::runner::machine_id().ok(),
+            workspace_catalog: Some(Arc::new(workspace_catalog)),
             limits: RunnerLimits::default(),
             workspaces: Some(workspaces),
             extension: Some(extension),
@@ -234,6 +244,8 @@ async fn serve_local(paths: &PlakPaths) -> CliResult<()> {
             binary_id: crate::build_identity::known_binary_id(),
         },
         RunnerOptions {
+            machine_id: plakous::runner::machine_id().ok(),
+            workspace_catalog: None,
             workspaces: Some(workspaces),
             local_host: Some(host.clone()),
             floors: Some(Arc::new(floors)),
@@ -305,16 +317,19 @@ fn vcs_extension(
     excluded: std::path::PathBuf,
 ) -> Arc<dyn plakous::tools::runner::RunnerExtension> {
     let roots: Vec<_> = config.roots.iter().chain(&config.copies).cloned().collect();
-    plakous_recursive_subagents::remote_vcs::vcs_runner_extension(
-        Arc::new(move |candidate: &Path| home::admitted_probe_path(&roots, &excluded, candidate)),
+    let admits: Arc<dyn Fn(&Path) -> bool + Send + Sync> =
+        Arc::new(move |candidate: &Path| home::admitted_probe_path(&roots, &excluded, candidate));
+    let vcs = plakous_recursive_subagents::remote_vcs::vcs_runner_extension(
+        admits.clone(),
         config.copies.clone(),
-    )
+    );
+    plakous_hosted::runner_reader::runner_extension(vcs, admits)
 }
 
 /// This build's daemon socket in `home`, refused by name when the platform
 /// cannot bind or connect to it.
 fn checked_socket(home: &RunnerHome) -> CliResult<std::path::PathBuf> {
-    let socket = daemon::socket_path(&home.run_directory(), &version());
+    let socket = home.run_directory().join("s.sock");
     daemon::check_socket_path(&socket).map_err(|error| CliFailure::new(error.to_string()))?;
     Ok(socket)
 }
@@ -363,6 +378,8 @@ fn start_daemon(
             .unwrap_or_else(|| "/usr/bin:/bin".to_owned()),
     };
     private_directory(home.root())
+        .map_err(|error| std::io::Error::other(error.message().to_owned()))?;
+    home.prepare_build()
         .map_err(|error| std::io::Error::other(error.message().to_owned()))?;
     let log = {
         use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
@@ -500,8 +517,8 @@ async fn ps_remote(
     name: &str,
     stdout: &mut dyn std::io::Write,
 ) -> CliResult<()> {
-    let destination = configured(paths, name)?;
-    let dialed = dial::dial(paths, name, &destination, true).await?;
+    let configured = configured(paths, name)?;
+    let dialed = dial::dial(paths, name, &configured.ssh, &configured.command, true).await?;
     let lines = dialed
         .client
         .lines()
@@ -520,19 +537,22 @@ async fn pair(paths: &PlakPaths, name: &str, stdout: &mut dyn std::io::Write) ->
             "this build does not know its source revision, so it cannot pair with a remote runner; install a release or maintainer build",
         ));
     }
-    let destination = configured(paths, name)?;
+    let configured = configured(paths, name)?;
     let host_id = host_id(paths)?;
-    let status = ssh_command(&destination, &["plak", "runner", "allow", &host_id])
-        .stdin(std::process::Stdio::null())
-        .status()
-        .await
-        .map_err(|error| CliFailure::new(format!("ssh could not be started: {error}")))?;
+    let status = ssh_command(
+        &configured.ssh,
+        &[&configured.command, "runner", "allow", &host_id],
+    )
+    .stdin(std::process::Stdio::null())
+    .status()
+    .await
+    .map_err(|error| CliFailure::new(format!("ssh could not be started: {error}")))?;
     if !status.success() {
         return Err(CliFailure::new(format!(
             "runner {name}: `plak runner allow` did not succeed over ssh ({status})"
         )));
     }
-    let dialed = dial::dial(paths, name, &destination, false).await?;
+    let dialed = dial::dial(paths, name, &configured.ssh, &configured.command, false).await?;
     // The bind is proved by an answer the runner gives only a paired host.
     if let Err(error) = dialed.client.lines().await {
         let reason = match dialed.client.refusal() {
@@ -543,10 +563,12 @@ async fn pair(paths: &PlakPaths, name: &str, stdout: &mut dyn std::io::Write) ->
         return Err(CliFailure::new(format!("runner {name}: {reason}")));
     }
     let record = PairedRunner {
-        runner_id: &dialed.hello.runner_id,
-        source_revision: &dialed.hello.version.source_revision,
-        flavor: &dialed.hello.version.flavor,
-        binary_id: dialed.hello.binary_id.as_deref(),
+        runner_id: dialed.hello.runner_id.clone(),
+        source_revision: dialed.hello.version.source_revision.clone(),
+        flavor: dialed.hello.version.flavor.clone(),
+        binary_id: dialed.hello.binary_id.clone(),
+        machine_id: dialed.hello.machine_id.clone().filter(|id| !id.is_empty()).ok_or_else(|| CliFailure::new("runner machine identity is unavailable; re-pair on a runner that can verify its machine identity"))?,
+        roots: dialed.client.workspace_options().await.map_err(|error| CliFailure::new(format!("runner workspace options: {error:?}")))?.roots.ok_or_else(|| CliFailure::new("a machine runner must advertise effective roots"))?,
     };
     let directory = paths.home().join("runners").join(name);
     private_directory(&directory)?;
@@ -563,25 +585,27 @@ async fn pair(paths: &PlakPaths, name: &str, stdout: &mut dyn std::io::Write) ->
 }
 
 /// What a host records of a runner it paired with.
-#[derive(serde::Serialize)]
-struct PairedRunner<'a> {
-    runner_id: &'a str,
-    source_revision: &'a str,
-    flavor: &'a str,
-    binary_id: Option<&'a str>,
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PairedRunner {
+    pub(crate) runner_id: String,
+    source_revision: String,
+    flavor: String,
+    binary_id: Option<String>,
+    pub(crate) machine_id: String,
+    pub(crate) roots: Vec<String>,
 }
 
-fn configured(paths: &PlakPaths, name: &str) -> CliResult<String> {
+pub(crate) fn configured(
+    paths: &PlakPaths,
+    name: &str,
+) -> CliResult<crate::product_config::RunnerConfig> {
     let config = crate::product_config::ProductConfig::load(paths).map_err(CliFailure::new)?;
-    config
-        .runners
-        .get(name)
-        .map(|runner| runner.ssh.clone())
-        .ok_or_else(|| {
-            CliFailure::new(format!(
-                "no [runners.{name}] in config.toml; add it with an ssh destination"
-            ))
-        })
+    config.runners.get(name).cloned().ok_or_else(|| {
+        CliFailure::new(format!(
+            "no [runners.{name}] in config.toml; add it with an ssh destination"
+        ))
+    })
 }
 
 fn render_lines(lines: &[LineStatus], stdout: &mut dyn std::io::Write) -> CliResult<()> {

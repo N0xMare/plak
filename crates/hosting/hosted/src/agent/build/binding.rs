@@ -380,11 +380,12 @@ pub(super) async fn api_session_runtime_binding_with_owner(
         &parent.workspace_root,
         api_skills_presentation(&parent.target, parent.composition),
     )?)?;
-    install_occupancy_fence(&parent.cwd)?;
+    install_occupancy_fence(&parent.cwd, parent.state_roots.runner_services())?;
     match &parent.target {
         crate::binding::ApiTarget::OpenRouter { wire, .. } => {
             let prepared = Box::pin(crate::openrouter::construct_openrouter_runtime_with_fence(
                 crate::openrouter::ProductOpenRouterSpec {
+                    runner_services: parent.state_roots.runner_services().cloned(),
                     account: parent.target.selection().clone(),
                     job_config: parent.state_roots.job_config(),
                     exchange_observer: parent.state_roots.exchange_observer(),
@@ -685,7 +686,7 @@ pub(in crate::agent) async fn coding_session_runtime_binding_for(
         provider,
         product_sdk,
     )?)?;
-    install_occupancy_fence(&cwd)?;
+    install_occupancy_fence(&cwd, state_roots.runner_services())?;
     product_extensions.connect_retrieval(resolved.retrieval_port())?;
     product_extensions.connect_image_gen(resolved.image_gen_port())?;
     let frozen_tools = super::coding_tool_registry_with_extensions(
@@ -771,13 +772,15 @@ pub(in crate::agent) async fn coding_session_runtime_binding_for(
             "resolved provider tool configuration does not match the product registry",
         ));
     }
-    let probe = plakous::tools::runner::workspace_probe();
+    let probe = state_roots.workspace_probe();
     let probe = probe.as_ref();
     let physical_root = probe
         .canonicalize(&workspace_root)
         .map_err(probe_unavailable)?
         .ok_or_else(|| CliFailure::new("recorded workspace root could not be resolved"))?;
-    ensure_workspace_excludes_product_state(&physical_root, state_roots.paths())?;
+    if state_roots.runner_services().is_none() {
+        ensure_workspace_excludes_product_state(&physical_root, state_roots.paths())?;
+    }
     let physical_cwd = probe
         .canonicalize(&cwd)
         .map_err(probe_unavailable)?
@@ -785,7 +788,7 @@ pub(in crate::agent) async fn coding_session_runtime_binding_for(
     let relative_cwd = physical_cwd.strip_prefix(&physical_root).map_err(|_| {
         CliFailure::new("workspace current directory is outside the recorded workspace root")
     })?;
-    let workspace = Arc::new(stamped_workspace_policy(&physical_root, relative_cwd)?);
+    let workspace = Arc::new(stamped_workspace_policy(&physical_root, relative_cwd, state_roots.runner_services())?);
     let request_output_bound = resolved
         .configuration()
         .effective()
@@ -830,7 +833,7 @@ pub(in crate::agent) async fn coding_session_runtime_binding_for(
     // route catalog, so the product is what admits it at construction.
     .projection_admission(Arc::new(crate::coding_routes::ProductProjectionAdmission))
     .post_compaction_note(Arc::new(plan_restoration_note))
-    .host_process_options(crate::process_environment::options(&physical_root)?)
+    .host_process_options(crate::process_environment::options_on(&physical_root, probe)?)
     .job_config(state_roots.job_config())
     .job_host(
         state_roots.job_registry().for_agent(
@@ -1034,6 +1037,7 @@ pub(in crate::agent) async fn coding_session_runtime_binding_for(
             workspace.root(),
             workspace.cwd(),
             product_extensions.skills_listing(),
+            state_roots.runner_services(),
         )?;
         // Explicit harness plans own reasoning at agent construction and would
         // otherwise overwrite CLI `--effort` with the profile default (Codex
@@ -1155,6 +1159,7 @@ fn node_skills(
         state_roots.skills_mode(),
         workspace_root,
         presentation,
+        state_roots.runner_services(),
     )?;
     if let Some(notice) = skills.notice() {
         state_roots.push_skill_notice(notice);

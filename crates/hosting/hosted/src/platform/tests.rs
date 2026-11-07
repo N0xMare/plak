@@ -89,6 +89,7 @@ async fn product_api_bindings_compile_exact_tools_and_reconstruct_same_credentia
     ] {
         for effort in [ReasoningEffort::Low, ReasoningEffort::Medium] {
             let mut spec = ApiRuntimeSpec {
+                runner_services: None,
                 job_config: plakous::tools::JobConfig::default(),
                 account: provider.account().parse().unwrap(),
                 sidecars: &NoWorkers,
@@ -273,6 +274,7 @@ async fn api_compositions_create_and_reopen_required_durable_sessions_without_di
             let workers = FixtureWorkers(worker);
             let extensions = crate::tools::ProductToolExtensions::default();
             let mut spec = ApiRuntimeSpec {
+                runner_services: None,
                 job_config: plakous::tools::JobConfig::default(),
                 account: provider.account().parse().unwrap(),
                 sidecars: &workers,
@@ -460,6 +462,7 @@ async fn openai_api_native_ptc_without_the_javascript_host_names_the_sidecar() {
     let extensions = crate::tools::ProductToolExtensions::default();
     let provider = PlatformProvider::OpenAi;
     let spec = ApiRuntimeSpec {
+        runner_services: None,
         job_config: plakous::tools::JobConfig::default(),
         account: provider.account().parse().unwrap(),
         sidecars: &NoWorkers,
@@ -533,6 +536,7 @@ async fn openai_api_native_ptc_creates_and_reopens_from_the_enrolled_table() {
         let workers = FixtureWorkers(worker);
         let extensions = crate::tools::ProductToolExtensions::default();
         let mut spec = ApiRuntimeSpec {
+            runner_services: None,
             job_config: plakous::tools::JobConfig::default(),
             account: provider.account().parse().unwrap(),
             sidecars: &workers,
@@ -636,6 +640,7 @@ async fn pre_pack_openai_api_direct_session_reopen_fails_closed() {
     let directory = tempfile::tempdir().unwrap();
     let extensions = crate::tools::ProductToolExtensions::default();
     let mut spec = ApiRuntimeSpec {
+        runner_services: None,
         job_config: plakous::tools::JobConfig::default(),
         account: provider.account().parse().unwrap(),
         sidecars: &NoWorkers,
@@ -712,7 +717,7 @@ async fn pre_pack_openai_api_direct_session_reopen_fails_closed() {
     let configuration = configured.configuration().clone();
     let physical = std::fs::canonicalize(directory.path()).unwrap();
     let workspace = Arc::new(
-        crate::agent::stamped_workspace_policy(&physical, std::path::Path::new("")).unwrap(),
+        crate::agent::stamped_workspace_policy(&physical, std::path::Path::new(""), None).unwrap(),
     );
     let target = crate::agent::projection_target(&configuration, "pre-pack fixture").unwrap();
     let surface = crate::tools::product_surface_with_fence(
@@ -780,6 +785,7 @@ async fn pre_pack_openai_api_direct_session_reopen_fails_closed() {
         None,
         workspace.root(),
         workspace.cwd(),
+        None,
         None,
     )
     .unwrap();
@@ -921,6 +927,7 @@ async fn pre_w3_b_grok_session_reopen_fails_closed() {
     )
     .unwrap();
     let mut spec = ApiRuntimeSpec {
+        runner_services: None,
         job_config: plakous::tools::JobConfig::default(),
         account: provider.account().parse().unwrap(),
         sidecars: &NoWorkers,
@@ -996,7 +1003,7 @@ async fn pre_w3_b_grok_session_reopen_fails_closed() {
     let configuration = configured.configuration().clone();
     let physical = std::fs::canonicalize(directory.path()).unwrap();
     let workspace = Arc::new(
-        crate::agent::stamped_workspace_policy(&physical, std::path::Path::new("")).unwrap(),
+        crate::agent::stamped_workspace_policy(&physical, std::path::Path::new(""), None).unwrap(),
     );
     let target = crate::agent::projection_target(&configuration, "legacy Grok fixture").unwrap();
     let surface = crate::tools::product_surface_with_fence(
@@ -1081,6 +1088,7 @@ async fn pre_w3_b_grok_session_reopen_fails_closed() {
         None,
         workspace.root(),
         workspace.cwd(),
+        None,
         None,
     )
     .unwrap();
@@ -1249,6 +1257,7 @@ async fn grok_api_hub_creates_and_reopens(
     )
     .unwrap();
     let mut spec = ApiRuntimeSpec {
+        runner_services: None,
         job_config: plakous::tools::JobConfig::default(),
         account: provider.account().parse().unwrap(),
         sidecars: &workers,
@@ -1444,6 +1453,7 @@ async fn pre_w3_b_grok_ptc_session_reopen_fails_closed() {
         let plak = extensions_for(crate::agent_tree_tools::TopologyVocabulary::Plak);
         let task = extensions_for(crate::agent_tree_tools::TopologyVocabulary::TaskTools);
         let mut spec = ApiRuntimeSpec {
+            runner_services: None,
             job_config: plakous::tools::JobConfig::default(),
             account: provider.account().parse().unwrap(),
             sidecars: &workers,

@@ -174,6 +174,7 @@ impl Tables {
         RunnerFrame::TransferAccepted {
             control_id,
             stopped: Vec::new(),
+            unpromoted: Vec::new(),
         }
     }
 

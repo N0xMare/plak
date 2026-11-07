@@ -21,17 +21,16 @@ pub use plakous_model::redaction as preview;
 #[doc(hidden)]
 pub mod runner {
     pub use crate::environment::runner::{
-        LocalDaemonBackend, ProcessRunner, RunnerBackend, RunnerCall, RunnerCallFuture,
-        RunnerClass, RunnerExtension, RunnerFailure, RunnerLink, RunnerOpenFuture,
-        RunnerSecretResolver, RunnerSessions, RunnerStreams, RunnerVerb, RunnerVerbFamily,
+        LocalDaemonBackend, RunnerBackend, RunnerCall, RunnerCallFuture, RunnerClass,
+        RunnerExtension, RunnerFailure, RunnerLink, RunnerOpenFuture, RunnerSecretResolver,
+        RunnerServices, RunnerSessions, RunnerStreams, RunnerVerb, RunnerVerbFamily,
         RunnerWorkspaceProbe, ServeFailure, ServeFuture, ServeServiceFuture,
         adopt_runner_process_sessions, answer_too_large, call_blocking, decode_jobs_snapshot,
         decode_preempt, encode_preempt, environment_failure, job_capacity, line_sessions,
-        local_daemon_environment, lost_process_owner, process_runner, requested_workspace,
-        runner_descriptor, runner_environment, select_process_runner, serve, serve_failure,
-        serve_jobs_watch, serve_probe, serve_service_spawn, serve_service_terminate,
-        serve_sessions, service_spawned, terminated_service, with_runner_secrets, workspace_probe,
-        workspace_refusal,
+        local_daemon_environment, lost_process_owner, requested_workspace, runner_descriptor,
+        runner_environment, serve, serve_failure, serve_jobs_watch, serve_probe,
+        serve_service_spawn, serve_service_terminate, serve_sessions, service_spawned,
+        terminated_service, with_runner_secrets, workspace_refusal,
     };
 }
 
@@ -119,6 +118,21 @@ pub fn stop_foreground_after_owner_loss(
     sessions: &crate::JoinedProcessSessions,
 ) -> ForegroundProcessStops {
     sessions.stop_foreground_after_owner_loss()
+}
+
+/// Live foreground identity pairs. A process.start answer/Ack does not mean
+/// its driver operation has settled.
+pub fn live_foreground(sessions: &crate::JoinedProcessSessions) -> Vec<(String, u32)> {
+    sessions.live_foreground()
+}
+
+/// Stops only the unpromoted process whose starting call and PID both match.
+pub fn stop_matching_foreground(
+    sessions: &crate::JoinedProcessSessions,
+    call_key: &str,
+    pid: u32,
+) -> ForegroundProcessStops {
+    sessions.stop_foreground_matching(Some((call_key, pid)))
 }
 
 /// Completed foreground stops and any still-pending cleanup failure.

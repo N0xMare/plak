@@ -1134,13 +1134,16 @@ fn resolved_or_recorded(probe: &dyn WorkspaceProbe, path: &Path) -> Result<PathB
 /// # Errors
 /// Returns [`ProbeError::Unavailable`] when the workspace cannot be probed.
 pub fn generation_stamp_for_workspace_root(
+    runner_id: &str,
     root: &Path,
+    probe: &dyn WorkspaceProbe,
 ) -> Result<Option<Arc<AtomicU64>>, ProbeError> {
-    let probe = plakous::tools::runner::workspace_probe();
-    let probe = probe.as_ref();
     let root = resolved_or_recorded(probe, root)?;
     for runtime in process_hub().runtimes() {
-        let Ok(rows) = runtime.driver().read(ProductAgentTree::workspace_paths) else {
+        let Ok(rows) = runtime
+            .driver()
+            .read(|tree| tree.workspace_paths_on(runner_id))
+        else {
             continue;
         };
         let resolved = rows
@@ -1162,14 +1165,21 @@ pub fn generation_stamp_for_workspace_root(
 ///
 /// # Errors
 /// Returns [`ProbeError::Unavailable`] when the workspace cannot be probed.
-pub fn workspace_base_for_root(root: &Path) -> Result<Option<String>, ProbeError> {
-    let probe = plakous::tools::runner::workspace_probe();
-    let probe = probe.as_ref();
+pub fn workspace_base_for_root(
+    runner_id: &str,
+    root: &Path,
+    probe: &dyn WorkspaceProbe,
+) -> Result<Option<String>, ProbeError> {
     let root = resolved_or_recorded(probe, root)?;
     for runtime in process_hub().runtimes() {
         let Ok(rows) = runtime.driver().read(|tree| {
             tree.workspaces()
                 .values()
+                .filter(|row| {
+                    tree.node(&row.owner_agent_id).is_ok_and(|node| {
+                        node.placement.runner_id.as_deref().unwrap_or("local") == runner_id
+                    })
+                })
                 .map(|row| (row.path.clone(), row.base_commit.clone()))
                 .collect::<Vec<_>>()
         }) else {

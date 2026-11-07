@@ -1274,6 +1274,7 @@ fn accepted(control: &str, _instance: &str) -> RunnerFrame {
     RunnerFrame::TransferAccepted {
         control_id: control.into(),
         stopped: Vec::new(),
+        unpromoted: Vec::new(),
     }
 }
 

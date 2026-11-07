@@ -139,7 +139,7 @@ fn connect_never_reaches_the_home_local_runner() {
     let paths = PlakPaths::explicit(home.path().to_path_buf());
     let bridged = checked_socket(&RunnerHome::of(&paths)).unwrap();
     let local = LocalRunnerHome::of(&paths);
-    assert!(bridged.starts_with(home.path().join("runner").join("run")));
+    assert!(bridged.starts_with(home.path().join("runner").join("builds")));
     assert!(!bridged.starts_with(home.path().join("host")));
     assert_eq!(
         local.socket_path(),
@@ -147,5 +147,29 @@ fn connect_never_reaches_the_home_local_runner() {
             .join("host/runner")
             .join(format!("v{}", version().protocol))
             .join("run/runner.sock")
+    );
+}
+
+#[test]
+fn machine_build_identity_is_atomic_and_cannot_be_reinterpreted() {
+    let directory = tempfile::tempdir().unwrap();
+    let paths = PlakPaths::explicit(directory.path().to_path_buf());
+    let home = RunnerHome::of(&paths);
+    home.prepare_build().unwrap();
+    home.prepare_build().unwrap();
+    let mut other = version();
+    other.source_revision.push_str("-different");
+    std::fs::write(
+        home.build_directory().join("version.json"),
+        serde_json::to_vec(&other).unwrap(),
+    )
+    .unwrap();
+    assert!(home.prepare_build().is_err());
+    assert!(home.floors_path().starts_with(home.build_directory()));
+    assert!(home.log_path().starts_with(home.build_directory()));
+    assert!(
+        checked_socket(&home)
+            .unwrap()
+            .starts_with(home.build_directory())
     );
 }

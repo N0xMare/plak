@@ -205,7 +205,7 @@ async fn lease_on_runner(
     let (spec, site) =
         placed_server_spec(&server, &table(directory), &secrets, Some(backend)).unwrap();
     assert!(matches!(site, ServerSite::Runner(_)));
-    let environment = Arc::new(service_environment(&workspace(directory), &site).unwrap());
+    let environment = Arc::new(service_environment(&workspace(directory), &site, None).unwrap());
     assert_eq!(
         environment
             .backend()

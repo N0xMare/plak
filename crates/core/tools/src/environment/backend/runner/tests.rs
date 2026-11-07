@@ -20,12 +20,16 @@ struct DirectLink {
 
 impl RunnerLink for DirectLink {
     fn call(&self, call: RunnerCall) -> RunnerCallFuture {
-        let served = serve(
-            &self.runner,
-            call.verb().as_str(),
-            call.payload().clone(),
-            OperationContext::new(call.cancellation().clone()),
-        );
+        let served = if call.verb() == RunnerVerb::ProbeWorkspace {
+            serve_probe(call.payload().clone(), &|_| true)
+        } else {
+            serve(
+                &self.runner,
+                call.verb().as_str(),
+                call.payload().clone(),
+                OperationContext::new(call.cancellation().clone()),
+            )
+        };
         Box::pin(async move {
             served.await.map_err(|failure| match failure {
                 ServeFailure::Unsupported => RunnerFailure::Unsupported,
@@ -33,6 +37,59 @@ impl RunnerLink for DirectLink {
             })
         })
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn remote_workspace_identity_never_requires_a_host_path_and_local_bytes_stay_identical() {
+    struct RemoteProbe;
+    impl RunnerLink for RemoteProbe {
+        fn call(&self, call: RunnerCall) -> RunnerCallFuture {
+            let answer = match call.payload()["op"].as_str() {
+                Some("canonicalize") => {
+                    let path = Path::new(call.payload()["path"].as_str().unwrap())
+                        .components()
+                        .collect::<std::path::PathBuf>();
+                    Ok(json!({"path": path}))
+                }
+                Some("filesystem_identity") => Ok(json!({"device": 123, "inode": 456})),
+                _ => Err(RunnerFailure::Unsupported),
+            };
+            Box::pin(std::future::ready(answer))
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let direct = ExecutionEnvironment::host(scope(), root.path(), ".", config()).unwrap();
+    let old_policy = crate::WorkspacePolicy::host(root.path(), ".").unwrap();
+    let probed_policy =
+        crate::WorkspacePolicy::on_runner(root.path(), Path::new("."), &crate::LocalWorkspaceProbe)
+            .unwrap();
+    let old = ExecutionEnvironment::from_workspace_and_backend(
+        scope(),
+        old_policy,
+        config(),
+        direct.operation_backend.clone(),
+    )
+    .unwrap();
+    let probed = ExecutionEnvironment::from_workspace_and_backend(
+        scope(),
+        probed_policy,
+        config(),
+        direct.operation_backend.clone(),
+    )
+    .unwrap();
+    assert_eq!(
+        serde_json::to_vec(old.descriptor()).unwrap(),
+        serde_json::to_vec(probed.descriptor()).unwrap()
+    );
+    let descriptor = runner_descriptor(&direct, RunnerId::new("remote-probe").unwrap()).unwrap();
+    let backend = Arc::new(RunnerBackend::new(descriptor, Arc::new(RemoteProbe)).unwrap());
+    let absent = root.path().join("remote-only");
+    assert!(!absent.exists());
+    let remote = runner_environment(scope(), &absent, ".", config(), backend).unwrap();
+    assert_eq!(remote.descriptor().root_object().device(), 123);
+    assert_eq!(remote.descriptor().root_object().inode(), 456);
+    assert!(remote.matches_descriptor(remote.descriptor()));
+    assert!(!absent.exists());
 }
 
 fn scope() -> ExecutionEnvironmentScope {

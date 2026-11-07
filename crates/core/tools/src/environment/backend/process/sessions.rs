@@ -872,8 +872,8 @@ impl ExecutionEnvironment {
         } else if self.backend().kind() == ExecutionBackendKind::Runner
             && !self.backend().runner_id().is_some_and(RunnerId::is_local)
         {
-            match crate::environment::runner::process_runner() {
-                Some(runner) => self.runner_process_sessions(runner.runtime())?,
+            match &self.runner_runtime {
+                Some(runtime) => self.runner_process_sessions(runtime)?,
                 None => JoinedProcessSessions::refusing(self)?,
             }
         } else {

@@ -153,6 +153,7 @@ pub struct ProcessJobs(Arc<plakous::tools::JobHostCapacity>);
 
 #[derive(Clone)]
 pub struct ProductStateRoots {
+    runner_services: Option<plakous::runner::RunnerServices>,
     local_daemon: Option<plakous::tools::runner::LocalDaemonBackend>,
     daemon_client: Option<plakous::runner::RunnerClient>,
     child_runtime: Arc<dyn super::children::runtime_factory::ChildRuntimeFactory>,
@@ -303,6 +304,7 @@ impl ProductStateRoots {
             state_home,
             subscriptions: std::fs::canonicalize(&subscriptions).unwrap_or(subscriptions),
             local_daemon: None,
+            runner_services: None,
             daemon_client: None,
             runtime_sessions: Arc::new(Mutex::new(None)),
             store_fill: Arc::default(),
@@ -372,6 +374,7 @@ impl ProductStateRoots {
         client: plakous::runner::RunnerClient,
     ) -> Self {
         self.local_daemon = Some(backend);
+        self.runner_services = None;
         self.daemon_client = Some(client);
         self
     }
@@ -460,10 +463,62 @@ impl ProductStateRoots {
         &self,
         runtime: plakous::sessions::SessionRuntimeBinding,
     ) -> plakous::sessions::SessionRuntimeBinding {
+        if let Some(services) = &self.runner_services {
+            return runtime.with_runner_services(services.clone());
+        }
         match &self.local_daemon {
             Some(backend) => runtime.with_local_daemon(backend.clone()),
             None => runtime,
         }
+    }
+
+    /// Pins this node's runner services, rather than selecting a process-wide
+    /// backend. Local process transport is not applied to a nonlocal node.
+    #[must_use]
+    pub fn with_runner_services(mut self, services: plakous::runner::RunnerServices) -> Self {
+        self.runner_services = Some(services);
+        self.local_daemon = None;
+        self.daemon_client = None;
+        self
+    }
+
+    /// Explicit services for this node, absent for the local runner.
+    #[must_use]
+    pub const fn runner_services(&self) -> Option<&plakous::runner::RunnerServices> {
+        self.runner_services.as_ref()
+    }
+
+    /// Supplies the shared client's reconciliation/control port separately
+    /// from the facade's ordinary new-call services.
+    #[must_use]
+    pub fn with_runner_client(mut self, client: plakous::runner::RunnerClient) -> Self {
+        self.daemon_client = Some(client);
+        self
+    }
+
+    /// A durable stop must remain pending while its runner barrier/link is
+    /// unavailable; this is not evidence that any remote process has ended.
+    #[must_use]
+    pub fn runner_pending(&self) -> bool {
+        self.runner_services
+            .as_ref()
+            .is_some_and(|services| !services.is_available())
+            || self
+                .daemon_client
+                .as_ref()
+                .is_some_and(|client| !client.is_connected())
+    }
+
+    /// Workspace authority of this node; no process-global runner lookup.
+    #[must_use]
+    pub fn workspace_probe(&self) -> Arc<dyn plakous::tools::WorkspaceProbe> {
+        self.runner_services.as_ref().map_or_else(
+            || {
+                Arc::new(plakous::tools::LocalWorkspaceProbe)
+                    as Arc<dyn plakous::tools::WorkspaceProbe>
+            },
+            plakous::runner::RunnerServices::workspace_probe,
+        )
     }
 
     pub(crate) fn daemon_processes(&self) -> bool {
@@ -884,6 +939,7 @@ impl ProductStateRoots {
             product,
             state_home,
             local_daemon: None,
+            runner_services: None,
             daemon_client: None,
             runtime_sessions: Arc::new(Mutex::new(None)),
             store_fill: Arc::default(),

@@ -76,6 +76,7 @@ struct Inner {
     /// has none. An expired lease is removed.
     leases: Mutex<HashMap<(String, String), HostLease>>,
     foreground: foreground::Authority,
+    workspace_catalog: Option<Arc<crate::WorkspaceCatalog>>,
     next_connection: AtomicU64,
     /// Connections open now, bound or not.
     open: AtomicU64,
@@ -173,6 +174,10 @@ pub type WorkspaceFactory =
 /// What a runner serves beyond its default environment.
 #[derive(Clone, Default)]
 pub struct RunnerOptions {
+    /// Stable physical-machine identity; unknown identities cannot be paired for placement.
+    pub machine_id: Option<String>,
+    /// Runner-owned effective workspace consent and bounded discovery.
+    pub workspace_catalog: Option<Arc<crate::WorkspaceCatalog>>,
     /// Its bounds.
     pub limits: RunnerLimits,
     /// Environments for other workspaces; without it, a request naming
@@ -262,6 +267,7 @@ impl RunnerService {
             runner_id: identity.runner_id.as_str().to_owned(),
             instance: uuid::Uuid::new_v4().to_string(),
             boot_id: identity.boot_id,
+            machine_id: options.machine_id,
             descriptor,
             capabilities: vec![
                 capabilities::WORKSPACE_VERBS.to_owned(),
@@ -293,6 +299,7 @@ impl RunnerService {
                 hosts: Mutex::default(),
                 leases: Mutex::default(),
                 foreground: foreground::Authority::default(),
+                workspace_catalog: options.workspace_catalog,
                 next_connection: AtomicU64::new(0),
                 open: AtomicU64::new(0),
                 next_stream: AtomicU64::new(0),
@@ -750,6 +757,9 @@ impl RunnerService {
         let instance = instance.to_owned();
         let payload = request.operation.payload;
         let served = match verb.family() {
+            RunnerVerbFamily::Workspace => {
+                crate::workspace::serve(self.inner.workspace_catalog.clone(), verb, payload)
+            }
             RunnerVerbFamily::Environment => match self.environment_for(&payload) {
                 Ok(environment) => serve(&environment, verb.as_str(), payload, control),
                 Err(failure) => Box::pin(std::future::ready(Err(failure))),

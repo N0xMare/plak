@@ -517,8 +517,9 @@ fn new_plan_enrolls_global_then_root_to_cwd_sources() {
     )
     .expect("product profile");
 
-    let (profile, facts) = enroll_product_instructions(&profile, Some(&home), &root, &cwd, None)
-        .expect("instruction enrollment");
+    let (profile, facts) =
+        enroll_product_instructions(&profile, Some(&home), &root, &cwd, None, None)
+            .expect("instruction enrollment");
 
     assert_eq!(
         profile.instruction_strategy(),
@@ -586,7 +587,7 @@ fn javascript_and_python_overlays_enroll_agents_md() {
         .expect("new overlay session profile");
         let profile = base;
         let (enrolled, facts) =
-            enroll_product_instructions(&profile, Some(&home), &root, &cwd, None)
+            enroll_product_instructions(&profile, Some(&home), &root, &cwd, None, None)
                 .expect("overlay enrollment");
         assert_eq!(facts.len(), 3);
         assert_eq!(
@@ -631,6 +632,7 @@ fn absent_optional_instructions_preserve_base_only_profile() {
         Some(&temporary.path().join("missing-home")),
         temporary.path(),
         temporary.path(),
+        None,
         None,
     )
     .expect("missing optional instructions");
@@ -1654,8 +1656,12 @@ async fn fenced_direct_child_session_admits_its_projection_at_construction()
 
     let (_workspace_dir, workspace_root, _) = fixture_workspace();
     let workspace = Arc::new(
-        stamped_workspace_policy(&std::fs::canonicalize(&workspace_root)?, Path::new(""))
-            .expect("workspace policy"),
+        stamped_workspace_policy(
+            &std::fs::canonicalize(&workspace_root)?,
+            Path::new(""),
+            None,
+        )
+        .expect("workspace policy"),
     );
     let composition = CompositionSelection::FollowCatalog;
     let selected = selected_coding_provider_configuration(
@@ -2131,10 +2137,17 @@ fn minted_child_session_root_cannot_read_parent_seed() {
     std::fs::create_dir_all(&minted).expect("minted");
     std::fs::write(minted.join("CHILD.txt"), "child\n").expect("child");
     assert_eq!(
-        child_session_workspace_root(launch.path(), launch.path()).expect("inherit root"),
+        child_session_workspace_root(
+            launch.path(),
+            launch.path(),
+            &plakous::tools::LocalWorkspaceProbe
+        )
+        .expect("inherit root"),
         launch.path()
     );
-    let fenced = child_session_workspace_root(launch.path(), &minted).expect("fenced root");
+    let fenced =
+        child_session_workspace_root(launch.path(), &minted, &plakous::tools::LocalWorkspaceProbe)
+            .expect("fenced root");
     assert_eq!(fenced, minted);
     let policy = WorkspacePolicy::host(&fenced, Path::new(".")).expect("policy");
     assert!(policy.resolve_existing("CHILD.txt").is_ok());
@@ -4301,6 +4314,7 @@ async fn supergrok_hub_creates_and_reopens_on_every_fence() -> Result<(), Box<dy
                     stamped_workspace_policy(
                         &std::fs::canonicalize(&workspace_root).map_err(|e| e.to_string())?,
                         Path::new(""),
+                        None,
                     )
                     .map_err(|e| e.message().to_owned())?,
                 );

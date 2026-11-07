@@ -9,8 +9,8 @@
 
 mod local;
 mod probe;
-mod process;
 mod service;
+mod services;
 mod sessions;
 mod sessions_wire;
 mod wire;
@@ -24,13 +24,13 @@ pub(in crate::environment) use local::LocalDaemon;
 pub use local::{LocalDaemonBackend, local_daemon_environment};
 use plakous_model::{AttemptId, CallId, CancellationToken, Timestamp};
 pub use probe::{RunnerWorkspaceProbe, serve_probe};
-pub use process::{ProcessRunner, process_runner, select_process_runner, workspace_probe};
 use serde_json::Value;
 pub(super) use service::RunnerServiceOwner;
 pub use service::{
     RunnerSecretResolver, ServeServiceFuture, serve_service_spawn, serve_service_terminate,
     service_spawned, terminated_service,
 };
+pub use services::RunnerServices;
 
 /// `request` naming `secrets` (variable, secret name) for the runner that
 /// spawns it to resolve from its own store. A local backend refuses such a
@@ -80,6 +80,14 @@ pub fn workspace_refusal() -> ExecutionEnvironmentError {
 /// The operations a runner answers through this seam.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RunnerVerb {
+    /// Effective workspace roots and default.
+    WorkspaceOptions,
+    /// Bounded checkout discovery on the runner.
+    WorkspaceDiscover,
+    /// Fresh canonical workspace admission on the runner.
+    WorkspaceValidate,
+    /// Keyed cleanup of one settled driver call's unpromoted process.
+    ForegroundStop,
     /// [`ExecutionEnvironment::read_workspace`].
     ReadWorkspace,
     /// [`ExecutionEnvironment::query_repository`].
@@ -127,6 +135,8 @@ pub enum RunnerVerb {
 /// Which runner part answers a verb.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RunnerVerbFamily {
+    /// Authenticated workspace picker reads.
+    Workspace,
     /// The execution environment ([`serve`]).
     Environment,
     /// The owner line's process sessions ([`serve_sessions`]).
@@ -141,7 +151,11 @@ pub enum RunnerVerbFamily {
 
 impl RunnerVerb {
     /// Every verb.
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 23] = [
+        Self::ForegroundStop,
+        Self::WorkspaceOptions,
+        Self::WorkspaceDiscover,
+        Self::WorkspaceValidate,
         Self::ReadWorkspace,
         Self::QueryRepository,
         Self::MutateWorkspace,
@@ -167,6 +181,10 @@ impl RunnerVerb {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::WorkspaceOptions => "workspace.options",
+            Self::WorkspaceDiscover => "workspace.discover",
+            Self::WorkspaceValidate => "workspace.validate",
+            Self::ForegroundStop => "process.foreground_stop",
             Self::ReadWorkspace => "workspace.read",
             Self::QueryRepository => "repository.query",
             Self::MutateWorkspace => "workspace.mutate",
@@ -199,6 +217,9 @@ impl RunnerVerb {
     #[must_use]
     pub const fn family(self) -> RunnerVerbFamily {
         match self {
+            Self::WorkspaceOptions | Self::WorkspaceDiscover | Self::WorkspaceValidate => {
+                RunnerVerbFamily::Workspace
+            }
             Self::ReadWorkspace
             | Self::QueryRepository
             | Self::MutateWorkspace
@@ -207,6 +228,7 @@ impl RunnerVerb {
             Self::ProbeWorkspace => RunnerVerbFamily::Probe,
             Self::ReadInstructions | Self::VcsRead | Self::VcsEffect => RunnerVerbFamily::Extension,
             Self::ProcessStart
+            | Self::ForegroundStop
             | Self::ProcessWrite
             | Self::ProcessPoll
             | Self::ProcessStop
@@ -223,7 +245,10 @@ impl RunnerVerb {
     pub const fn is_read(self) -> bool {
         matches!(
             self,
-            Self::ReadWorkspace
+            Self::WorkspaceOptions
+                | Self::WorkspaceDiscover
+                | Self::WorkspaceValidate
+                | Self::ReadWorkspace
                 | Self::QueryRepository
                 | Self::ProcessPoll
                 | Self::JobsSnapshot
@@ -522,10 +547,12 @@ pub fn call_blocking(
 /// An execution backend whose operations run on a runner. Its identity is
 /// always a runner descriptor naming a runner other than `local`; it is never
 /// selected for a session by this crate.
+#[derive(Clone)]
 pub struct RunnerBackend {
     identity: ExecutionBackendIdentity,
     runner_id: RunnerId,
     link: Arc<dyn RunnerLink>,
+    runtime: Option<tokio::runtime::Handle>,
 }
 
 impl RunnerBackend {
@@ -560,7 +587,15 @@ impl RunnerBackend {
             identity: ExecutionBackendIdentity::runner(descriptor)?,
             runner_id,
             link,
+            runtime: tokio::runtime::Handle::try_current().ok(),
         })
+    }
+
+    /// Pins the executor used for synchronous construction reads on this link.
+    #[must_use]
+    pub fn running_on(mut self, runtime: tokio::runtime::Handle) -> Self {
+        self.runtime = Some(runtime);
+        self
     }
 
     /// The runner this backend's operations run on.
@@ -737,11 +772,37 @@ pub fn runner_environment(
     backend: Arc<RunnerBackend>,
 ) -> Result<ExecutionEnvironment, ExecutionEnvironmentError> {
     let link = backend.link();
+    let runtime = backend
+        .runtime
+        .clone()
+        .or_else(|| tokio::runtime::Handle::try_current().ok())
+        .ok_or_else(workspace_refusal)?;
+    let probe = RunnerWorkspaceProbe::new(Arc::clone(&link), runtime.clone());
+    let workspace = crate::WorkspacePolicy::on_runner(root.as_ref(), cwd.as_ref(), &probe)
+        .map_err(|_| workspace_refusal())?;
+    let root_object = crate::WorkspaceProbe::filesystem_identity(&probe, workspace.root())
+        .map_err(|_| workspace_refusal())?;
     let backend: Arc<dyn ExecutionBackend> = backend;
-    let mut environment =
-        ExecutionEnvironment::with_operation_backend(scope, root, cwd, config, backend)?;
+    let mut environment = ExecutionEnvironment::from_workspace_backend_and_identity(
+        scope,
+        workspace,
+        config,
+        backend,
+        Some(root_object),
+    )?;
     environment.runner_link = Some(link);
+    environment.runner_runtime = Some(runtime);
     Ok(environment)
+}
+
+impl ExecutionEnvironment {
+    /// Pins the executor of this node's runner link. This live service fact
+    /// is not part of its frozen execution descriptor.
+    #[must_use]
+    pub fn with_runner_runtime(mut self, runtime: tokio::runtime::Handle) -> Self {
+        self.runner_runtime = Some(runtime);
+        self
+    }
 }
 
 /// The descriptor a runner presents for `environment`'s backend under the

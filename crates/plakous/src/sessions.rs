@@ -223,6 +223,17 @@ pub struct SessionInputWindow {
 }
 
 impl SessionRuntimeBinding {
+    /// Installs this node's explicit runner backend and executor. No other
+    /// session's execution authority changes.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_runner_services(
+        mut self,
+        services: plakous_tools::internal::runner::RunnerServices,
+    ) -> Self {
+        self.builder = plakous_agent::internal::select_runner_services(self.builder, services);
+        self
+    }
     /// Selects the host's home-local process transport, not a binding fact.
     #[doc(hidden)]
     #[must_use]
@@ -260,16 +271,10 @@ impl SessionRuntimeBinding {
     /// copying facts from a manifest cannot prove fresh auth, workspace, tool,
     /// environment, or policy authority.
     ///
-    /// When the process selected a runner (unsupported; only a test route
-    /// does, spec 01 §8.5), the builder runs its agent on that runner.
+    /// Runner authority is supplied explicitly through node services; this
+    /// constructor never consults a process-global selector.
     #[must_use]
     pub fn new(builder: AgentBuilder) -> Self {
-        let builder = match plakous_tools::internal::runner::process_runner() {
-            Some(runner) => {
-                plakous_agent::internal::select_runner_backend(builder, runner.backend())
-            }
-            None => builder,
-        };
         Self { builder }
     }
 

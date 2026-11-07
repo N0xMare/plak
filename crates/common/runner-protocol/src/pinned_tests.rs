@@ -19,6 +19,7 @@ const PINNED: &[(u32, &str)] = &[
     (1, include_str!("pinned/v1.jsonl")),
     (2, include_str!("pinned/v2.jsonl")),
     (3, include_str!("pinned/v3.jsonl")),
+    (4, include_str!("pinned/v4.jsonl")),
 ];
 
 fn owner() -> LineOwner {
@@ -212,6 +213,7 @@ fn runner_frames() -> Vec<RunnerFrame> {
             runner_id: "runner".into(),
             instance: "instance".into(),
             boot_id: "boot".into(),
+            machine_id: Some("machine".into()),
             descriptor: json!({"descriptor": true}),
             capabilities: vec!["capability".into()],
             path: Some("/bin".into()),
@@ -248,6 +250,10 @@ fn runner_frames() -> Vec<RunnerFrame> {
         },
         RunnerFrame::TransferAccepted {
             control_id: "control".into(),
+            unpromoted: vec![crate::UnpromotedProcess {
+                call_key: "live:attempt".into(),
+                pid: 43,
+            }],
             stopped: vec![crate::StoppedForeground {
                 call_key: "call:attempt".into(),
                 pid: 42,
@@ -309,7 +315,8 @@ fn encoded() -> String {
             .map(|frame| serde_json::to_value(frame).unwrap()),
     );
     lines.push(json!({"verbs": [
-        verbs::READ_WORKSPACE, verbs::QUERY_REPOSITORY, verbs::MUTATE_WORKSPACE,
+        verbs::FOREGROUND_STOP,
+        verbs::WORKSPACE_OPTIONS, verbs::WORKSPACE_DISCOVER, verbs::WORKSPACE_VALIDATE, verbs::READ_WORKSPACE, verbs::QUERY_REPOSITORY, verbs::MUTATE_WORKSPACE,
         verbs::EXECUTE_LITERAL_PROCESS, verbs::PROCESS_START, verbs::PROCESS_WRITE,
         verbs::PROCESS_POLL, verbs::PROCESS_STOP, verbs::PROCESS_PROMOTE,
         verbs::JOBS_SNAPSHOT, verbs::JOBS_STOP, verbs::JOBS_DISOWN, verbs::JOBS_WATCH,

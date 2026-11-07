@@ -678,6 +678,8 @@ pub struct ExecutionEnvironment {
     /// The link to the runner this environment's operations run on, when it
     /// is not the local runner. Process-local, like the line owner.
     pub(super) runner_link: Option<Arc<dyn crate::environment::runner::RunnerLink>>,
+    pub(super) runner_runtime: Option<tokio::runtime::Handle>,
+    pub(super) private_service_home: Option<Arc<PathBuf>>,
     /// The home-local runner this local environment's process sessions run
     /// on, when one carries them. Process-local, like the line owner.
     pub(super) local_daemon: Option<crate::environment::runner::LocalDaemon>,
@@ -792,6 +794,16 @@ impl ExecutionEnvironment {
         config: ExecutionEnvironmentConfig,
         operation_backend: Arc<dyn ExecutionBackend>,
     ) -> Result<Self, ExecutionEnvironmentError> {
+        Self::from_workspace_backend_and_identity(scope, workspace, config, operation_backend, None)
+    }
+
+    pub(super) fn from_workspace_backend_and_identity(
+        scope: ExecutionEnvironmentScope,
+        workspace: WorkspacePolicy,
+        config: ExecutionEnvironmentConfig,
+        operation_backend: Arc<dyn ExecutionBackend>,
+        root_object: Option<super::HostFilesystemObjectIdentity>,
+    ) -> Result<Self, ExecutionEnvironmentError> {
         let relative_cwd = workspace
             .cwd()
             .strip_prefix(workspace.root())
@@ -806,7 +818,10 @@ impl ExecutionEnvironment {
         let backend = live_backend.descriptor().clone();
         let canonical_root = path_identity_bytes(workspace.root())?;
         let canonical_cwd = path_identity_bytes(workspace.cwd())?;
-        let root_object = filesystem_object_identity(workspace.root())?;
+        let root_object = match root_object {
+            Some(identity) => identity,
+            None => filesystem_object_identity(workspace.root())?,
+        };
         let digest = environment_digest(
             &backend,
             scope,
@@ -851,6 +866,8 @@ impl ExecutionEnvironment {
             tool_result_images: true,
             line_owner: None,
             runner_link: None,
+            runner_runtime: None,
+            private_service_home: None,
             local_daemon: None,
         })
     }
@@ -998,9 +1015,26 @@ impl ExecutionEnvironment {
             self.descriptor.scope,
             &path_identity_bytes(self.workspace.root())?,
             &path_identity_bytes(self.workspace.cwd())?,
-            filesystem_object_identity(self.workspace.root())?,
+            self.live_root_identity()?,
             &self.config,
         )
+    }
+
+    fn live_root_identity(
+        &self,
+    ) -> Result<super::HostFilesystemObjectIdentity, ExecutionEnvironmentError> {
+        if let (Some(link), Some(runtime)) = (&self.runner_link, &self.runner_runtime) {
+            use crate::WorkspaceProbe as _;
+            return super::runner::RunnerWorkspaceProbe::new(Arc::clone(link), runtime.clone())
+                .filesystem_identity(self.workspace.root())
+                .map_err(|_| {
+                    ExecutionEnvironmentError::new(
+                        ExecutionEnvironmentErrorKind::Workspace,
+                        "runner root identity unavailable",
+                    )
+                });
+        }
+        filesystem_object_identity(self.workspace.root())
     }
 }
 

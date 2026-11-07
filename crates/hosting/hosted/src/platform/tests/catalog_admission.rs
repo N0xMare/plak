@@ -18,6 +18,7 @@ fn spec<'a>(
     opening: bool,
 ) -> ApiRuntimeSpec<'a> {
     ApiRuntimeSpec {
+        runner_services: None,
         job_config: plakous::tools::JobConfig::default(),
         account: PlatformProvider::Anthropic.account().parse().unwrap(),
         sidecars: workers,

@@ -37,6 +37,7 @@ pub(crate) fn bind_mcp_tools(
     _workspace_root: &Path,
     _secrets: Arc<dyn NamedSecrets>,
     _frozen: Option<&[McpToolRecord]>,
+    _node: super::McpNodeServices,
 ) -> Result<BoundMcpTools, crate::CliFailure> {
     crate::capabilities::require_tools(selection).map_err(|error| error.to_string())?;
     Ok(BoundMcpTools {
@@ -53,6 +54,7 @@ pub(crate) fn recorded_mcp_tools(
     _tool_sections: &BTreeMap<String, String>,
     _secrets: &Arc<dyn NamedSecrets>,
     _frozen: Option<&[McpToolRecord]>,
+    node: super::McpNodeServices,
 ) -> Result<BoundMcpTools, crate::CliFailure> {
     bind_mcp_tools(
         selection,
@@ -60,5 +62,6 @@ pub(crate) fn recorded_mcp_tools(
         Path::new(""),
         Arc::new(super::NoNamedSecrets),
         None,
+        node,
     )
 }

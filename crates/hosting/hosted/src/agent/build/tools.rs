@@ -455,12 +455,20 @@ pub(in crate::agent) fn bind_node_tool_plan(
             workspace_root,
             state_roots.named_secrets(),
             tools.mcp_tools.as_deref(),
+            crate::mcp_binding::McpNodeServices {
+                runner: state_roots.runner_services().cloned(),
+                product_home: Some(state_roots.paths()[0].clone()),
+            },
         ),
         crate::mcp_binding::McpBinding::Recorded => crate::mcp_binding::recorded_mcp_tools(
             selection,
             &tools.tool_sections,
             &state_roots.named_secrets(),
             tools.mcp_tools.as_deref(),
+            crate::mcp_binding::McpNodeServices {
+                runner: state_roots.runner_services().cloned(),
+                product_home: Some(state_roots.paths()[0].clone()),
+            },
         ),
     }?;
     Ok(plan.with_mcp(selection, mcp))

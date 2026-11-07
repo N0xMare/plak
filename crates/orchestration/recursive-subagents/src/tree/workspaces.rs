@@ -1365,6 +1365,21 @@ impl ProductAgentTree {
             .collect()
     }
 
+    /// Workspace keys qualified by persisted runner identity. Equal paths on
+    /// another machine never share a generation counter or mint base.
+    #[must_use]
+    pub fn workspace_paths_on(&self, runner_id: &str) -> Vec<(String, PathBuf)> {
+        self.workspaces
+            .values()
+            .filter(|row| {
+                self.node(&row.owner_agent_id).is_ok_and(|node| {
+                    node.placement.runner_id.as_deref().unwrap_or("local") == runner_id
+                })
+            })
+            .map(|row| (row.workspace_id.clone(), row.path.clone()))
+            .collect()
+    }
+
     /// Shared observational counter for Read/Grep stamps. Prefer the longest
     /// matching workspace path so minted copies do not inherit the launch root.
     /// `root` and `resolved` (each row id with its path) were resolved before

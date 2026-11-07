@@ -25,6 +25,7 @@ const SERVICE_PROCESS_JOIN_BOUND: Duration = Duration::from_secs(2);
 const SERVICE_PROCESS_JOIN_POLL: Duration = Duration::from_millis(5);
 
 pub(in crate::environment::backend) struct HostService {
+    private_cwd: Option<PrivateCwd>,
     /// Taken only by `Drop`, which hands an unjoined leader to the reaper.
     child: Option<tokio::process::Child>,
     process_group: rustix::process::Pid,
@@ -91,6 +92,11 @@ impl HostService {
 impl Drop for HostService {
     fn drop(&mut self) {
         if !self.joined {
+            // An unresolved group may still use its cwd. Retain the private
+            // directory rather than delete live process state without proof.
+            if let Some(directory) = self.private_cwd.take() {
+                std::mem::forget(directory);
+            }
             let _ = rustix::process::kill_process_group(
                 self.process_group,
                 rustix::process::Signal::KILL,
@@ -118,6 +124,11 @@ pub(in crate::environment::backend) fn spawn_host_service(
             .map_err(|error| error.with_proven_no_effect(true))?;
         verified_workspace_root(&workspace)?;
         let environment = request.child_environment();
+        let private_cwd = workspace
+            .private_service_home
+            .as_ref()
+            .map(|excluded| PrivateCwd::new(excluded, process.home.as_deref()))
+            .transpose()?;
         let program =
             resolve_host_process_program(request.request.program(), &process, &environment)
                 .map_err(|error| {
@@ -129,7 +140,11 @@ pub(in crate::environment::backend) fn spawn_host_service(
         let mut command = tokio::process::Command::new(program);
         command
             .args(request.request.arguments())
-            .current_dir(workspace.root())
+            .current_dir(
+                private_cwd
+                    .as_ref()
+                    .map_or(workspace.root(), |directory| directory.0.as_path()),
+            )
             .env_clear()
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
@@ -170,6 +185,7 @@ pub(in crate::environment::backend) fn spawn_host_service(
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
         let mut host = HostService {
+            private_cwd,
             child: Some(child),
             process_group,
             stderr_reader: None,
@@ -193,6 +209,89 @@ pub(in crate::environment::backend) fn spawn_host_service(
             ServiceHandle::new(ServiceOwner::Host(host), stderr_tail),
         ))
     })
+}
+
+struct PrivateCwd(std::path::PathBuf);
+
+impl PrivateCwd {
+    fn new(
+        excluded: &std::path::Path,
+        user_home: Option<&std::path::Path>,
+    ) -> Result<Self, ExecutionBackendError> {
+        use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let excluded = excluded
+            .canonicalize()
+            .map_err(|_| io_error("service product home unavailable"))?;
+        let base = std::env::temp_dir()
+            .canonicalize()
+            .map_err(|_| io_error("service temporary directory unavailable"))?;
+        let user_home = user_home.and_then(|home| home.canonicalize().ok());
+        for _ in 0..64 {
+            let path = base.join(format!(
+                ".plak-mcp-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            match std::fs::DirBuilder::new().mode(0o700).create(&path) {
+                Ok(()) => {
+                    let directory = Self(path);
+                    if directory.0.starts_with(&excluded)
+                        || excluded.starts_with(&directory.0)
+                        || user_home.as_ref().is_some_and(|home| home == &directory.0)
+                    {
+                        return Err(io_error("private service cwd overlaps protected home"));
+                    }
+                    if std::fs::metadata(&directory.0)
+                        .map_err(|_| io_error("private service cwd unavailable"))?
+                        .permissions()
+                        .mode()
+                        & 0o777
+                        != 0o700
+                    {
+                        return Err(io_error("private service cwd is not private"));
+                    }
+                    return Ok(directory);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(_) => return Err(io_error("private service cwd could not be created")),
+            }
+        }
+        Err(io_error("private service cwd names exhausted"))
+    }
+}
+
+impl Drop for PrivateCwd {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+#[cfg(test)]
+mod private_cwd_tests {
+    use super::PrivateCwd;
+
+    #[test]
+    fn each_service_gets_an_empty_private_directory_outside_protected_home() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let product = tempfile::tempdir().unwrap();
+        let first = PrivateCwd::new(product.path(), Some(product.path())).unwrap();
+        let second = PrivateCwd::new(product.path(), Some(product.path())).unwrap();
+        assert_ne!(first.0, second.0);
+        assert_eq!(std::fs::read_dir(&first.0).unwrap().count(), 0);
+        assert_eq!(
+            std::fs::metadata(&first.0).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert!(!first.0.starts_with(product.path()));
+        assert!(!product.path().starts_with(&first.0));
+        assert_ne!(first.0, product.path());
+        let path = first.0.clone();
+        drop(first);
+        assert!(!path.exists());
+        assert!(second.0.is_dir());
+    }
 }
 
 async fn read_stderr_tail(mut stderr: tokio::process::ChildStderr, tail: Arc<ServiceStderrTail>) {

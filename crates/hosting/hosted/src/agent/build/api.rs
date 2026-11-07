@@ -33,6 +33,7 @@ use plakous::prompts::plan::target_instructions;
 
 #[derive(Clone)]
 pub(crate) struct ApiRuntimeSpec<'a> {
+    pub runner_services: Option<plakous::runner::RunnerServices>,
     pub job_config: plakous::tools::JobConfig,
     pub account: crate::account::AccountRef,
     pub sidecars: &'a dyn plakous::tools::SidecarLocator,
@@ -74,7 +75,10 @@ pub(crate) fn runtime_binding(
         session_id = spec.plan_state_authority,
     )
     .entered();
-    let probe = plakous::tools::runner::workspace_probe();
+    let probe = spec.runner_services.as_ref().map_or_else(
+        || Arc::new(plakous::tools::LocalWorkspaceProbe) as Arc<dyn plakous::tools::WorkspaceProbe>,
+        plakous::runner::RunnerServices::workspace_probe,
+    );
     let probe = probe.as_ref();
     let physical_root = probe
         .canonicalize(spec.workspace_root)
@@ -87,7 +91,11 @@ pub(crate) fn runtime_binding(
     let relative_cwd = physical_cwd.strip_prefix(&physical_root).map_err(|_| {
         CliFailure::new("workspace current directory is outside the recorded workspace root")
     })?;
-    let workspace = Arc::new(stamped_workspace_policy(&physical_root, relative_cwd)?);
+    let workspace = Arc::new(stamped_workspace_policy(
+        &physical_root,
+        relative_cwd,
+        spec.runner_services.as_ref(),
+    )?);
     let configuration = configured.configuration().clone();
     let configured_for_composition = configured.clone();
     // Maintained Platform and gateway Custom routes share the same product
@@ -97,7 +105,10 @@ pub(crate) fn runtime_binding(
         .projection_admission(Arc::new(crate::coding_routes::ProductProjectionAdmission))
         .post_compaction_note(Arc::new(plakous::tools::plan_restoration_note))
         .tool_policy(session_tool_policy(spec.tool_fence))
-        .host_process_options(crate::process_environment::options(&physical_root)?)
+        .host_process_options(crate::process_environment::options_on(
+            &physical_root,
+            probe,
+        )?)
         .job_config(spec.job_config)
         .request_slots(crate::request_slots::for_account(spec.account.as_str()));
     if let Some(telemetry) = spec.telemetry {
@@ -291,6 +302,7 @@ pub(crate) fn runtime_binding(
             workspace.root(),
             workspace.cwd(),
             spec.topology_extensions.skills_listing(),
+            spec.runner_services.as_ref(),
         )?;
         let model = configured_for_composition.model();
         let plan = compile_explicit_runtime_profile(
@@ -314,13 +326,17 @@ pub(crate) fn runtime_binding(
             ))
         })?;
     }
-    Ok(SessionRuntimeBinding::new(
+    let runtime = SessionRuntimeBinding::new(
         builder
             .config(config)
             .request_policy(request)
             .tool_result_images(spec.topology_extensions.tool_result_images())
             .image_normalizer(crate::visual_read::normalizer()),
-    ))
+    );
+    Ok(match &spec.runner_services {
+        Some(services) => runtime.with_runner_services(services.clone()),
+        None => runtime,
+    })
 }
 
 /// Session-open API harness profile: the Direct base or the PTC harness

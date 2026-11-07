@@ -1,4 +1,4 @@
-//! Runner protocol, version 3: what a Plakous host and a runner say to each
+//! Runner protocol, version 4: what a Plakous host and a runner say to each
 //! other over one byte stream (spec 01 §8.4).
 //!
 //! A connection carries length-prefixed JSON frames ([`frame`]). The runner
@@ -19,7 +19,8 @@ mod owner;
 
 pub use message::{
     Bind, Hello, HostFrame, LineStatus, Operation, Refusal, Request, RequestClass, RunnerFrame,
-    StoppedForeground, StreamEvent, StreamFrame, TransferOwner, WireError, capabilities, verbs,
+    StoppedForeground, StreamEvent, StreamFrame, TransferOwner, UnpromotedProcess, WireError,
+    capabilities, verbs,
 };
 pub use owner::LineOwner;
 
@@ -27,7 +28,7 @@ pub use owner::LineOwner;
 /// A home-local runner binds any build of it, so every change to the
 /// runner's semantics bumps it (spec 01 §8.4); the frames of each version
 /// are pinned by a test.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// The exact identity two ends compare before any request: the protocol
 /// version, the source revision and the build flavor. A binary id is

@@ -180,9 +180,23 @@ struct LineTransfer {
     owner: Option<LineOwner>,
     connection: u64,
     reported: HashSet<String>,
+    unpromoted: Vec<plakous_runner_protocol::UnpromotedProcess>,
 }
 
 impl RunnerClient {
+    /// Latest link state, not a continuous reachability promise.
+    #[must_use]
+    pub fn is_connected(&self) -> bool {
+        let state = lock(&self.inner.state);
+        state.sender.is_some() && state.refusal.is_none() && !state.closer.is_cancelled()
+    }
+
+    /// Unsettled calls/journal entries require reconnection even without a
+    /// currently attached node.
+    #[must_use]
+    pub fn has_pending_calls(&self) -> bool {
+        !lock(&self.inner.state).pending.is_empty() || !lock(&self.inner.left).is_empty()
+    }
     /// Closes this client's current link without stopping its processes.
     /// Foreground authority lasts until transfer or owner-lease expiry.
     pub fn disconnect(&self) {
@@ -420,6 +434,54 @@ impl RunnerClient {
         owner: &plakous_tools::LineOwner,
     ) -> Result<Vec<plakous_runner_protocol::StoppedForeground>, RunnerFailure> {
         self.inner.transfer(&wire_owner(owner)).await
+    }
+
+    /// Foreground identities from the current connection's owner transfer.
+    /// Inspect these only after journal recovery; an Acked start is not a
+    /// settled driver operation.
+    ///
+    /// # Errors
+    /// The owner cannot be transferred on the current connection.
+    pub async fn unpromoted(
+        &self,
+        owner: &plakous_tools::LineOwner,
+    ) -> Result<Vec<plakous_runner_protocol::UnpromotedProcess>, RunnerFailure> {
+        let owner = wire_owner(owner);
+        self.inner.transfer(&owner).await?;
+        let line = lock(&self.inner.transferred)
+            .lines
+            .get(&owner.line)
+            .cloned();
+        let Some(line) = line else {
+            return Ok(Vec::new());
+        };
+        let result = line.lock().await.unpromoted.clone();
+        Ok(result)
+    }
+
+    /// Keyed cleanup selected by terminal driver-operation state, never by
+    /// runner-key answer/Ack. Caller serializes selection with settlement.
+    /// Both call identity and PID are checked on the runner; promoted jobs
+    /// and unrelated calls cannot be stopped by this control.
+    ///
+    /// # Errors
+    /// Ordinary keyed-control recovery errors; retry uses the same identity.
+    pub async fn stop_settled_foreground(
+        &self,
+        owner: plakous_tools::LineOwner,
+        process: &plakous_runner_protocol::UnpromotedProcess,
+    ) -> Result<Vec<plakous_runner_protocol::StoppedForeground>, RunnerFailure> {
+        let key = format!("foreground-cleanup:{}:{}", owner.line, process.call_key);
+        let answer = self
+            .call(RunnerCall::recorded_control(
+                RunnerVerb::ForegroundStop,
+                serde_json::json!({ "call_key": process.call_key, "pid": process.pid }),
+                owner,
+                key,
+            ))
+            .await?;
+        serde_json::from_value(answer.get("stopped").cloned().unwrap_or(Value::Null))
+            .map_err(|_| RunnerFailure::Unavailable("invalid foreground cleanup answer".into()))
     }
 
     async fn attach<S>(&self, stream: S, again: bool) -> Result<Hello, ConnectError>
@@ -739,7 +801,11 @@ impl Inner {
         let mut from = transferred.owner.clone();
         for _ in 0..2 {
             match self.send_transfer(from.clone(), owner).await? {
-                RunnerFrame::TransferAccepted { mut stopped, .. } => {
+                RunnerFrame::TransferAccepted {
+                    mut stopped,
+                    unpromoted,
+                    ..
+                } => {
                     if transferred.owner.as_ref() != Some(owner) {
                         transferred.reported.clear();
                     }
@@ -751,6 +817,7 @@ impl Inner {
                         }
                     }
                     transferred.owner = Some(owner.clone());
+                    transferred.unpromoted = unpromoted;
                     transferred.connection = connection;
                     return Ok(stopped);
                 }

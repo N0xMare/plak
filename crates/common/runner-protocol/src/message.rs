@@ -7,6 +7,14 @@ use super::{LineOwner, VersionTriple};
 
 /// Operation verbs. Payload schemas belong to the execution environment.
 pub mod verbs {
+    /// Stop one settled call's unpromoted process by call and PID together.
+    pub const FOREGROUND_STOP: &str = "process.foreground_stop";
+    /// Effective workspace roots and default.
+    pub const WORKSPACE_OPTIONS: &str = "workspace.options";
+    /// Bounded checkout discovery on the runner.
+    pub const WORKSPACE_DISCOVER: &str = "workspace.discover";
+    /// Fresh workspace admission on the runner.
+    pub const WORKSPACE_VALIDATE: &str = "workspace.validate";
     /// Read one bounded slice of a workspace file.
     pub const READ_WORKSPACE: &str = "workspace.read";
     /// Run one bounded repository query.
@@ -65,6 +73,16 @@ pub struct StoppedForeground {
     pub ended: String,
 }
 
+/// A live unpromoted process, qualified by its originating call, never PID alone.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct UnpromotedProcess {
+    /// Starting tool call and attempt key.
+    pub call_key: String,
+    /// Leader PID; any control must also validate the call identity.
+    pub pid: u32,
+}
+
 /// The runner's first frame on a connection.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -80,6 +98,8 @@ pub struct Hello {
     pub instance: String,
     /// The machine boot the runner process belongs to.
     pub boot_id: String,
+    /// Stable physical-machine identity; absence requires re-pair before placement.
+    pub machine_id: Option<String>,
     /// The execution backend descriptor the runner's operations present.
     pub descriptor: Value,
     /// What the runner implements (see [`capabilities`]).
@@ -419,6 +439,8 @@ pub enum RunnerFrame {
         /// Foreground processes stopped after their owner lost authority,
         /// diagnostic only: the next full open recovers their tool calls.
         stopped: Vec<StoppedForeground>,
+        /// Still-running foreground calls; their start-key Ack is not settlement.
+        unpromoted: Vec<UnpromotedProcess>,
     },
     /// The owner change could not be recorded; the line's owner is
     /// unchanged.

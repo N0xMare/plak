@@ -19,6 +19,17 @@ fn discovers_global_then_root_to_cwd_with_exact_enrollment_inputs() {
             .unwrap();
     let sources = discovered.sources();
     assert_eq!(
+        discovered,
+        discover_instruction_sources_on(
+            &LocalInstructionSourceReader,
+            &LocalInstructionSourceReader,
+            Some(&home),
+            &root,
+            &nested
+        )
+        .unwrap()
+    );
+    assert_eq!(
         sources
             .iter()
             .map(DiscoveredInstructionSource::content)
@@ -53,6 +64,38 @@ fn discovers_global_then_root_to_cwd_with_exact_enrollment_inputs() {
     assert_eq!(
         registered.provenance(),
         format!("plak-agents-v1:{}", sources[3].scope().scope_label())
+    );
+}
+
+#[test]
+fn equal_host_and_runner_paths_use_explicit_source_authorities() {
+    use crate::test_readers::{RUNNER_ROOT, RemappedReader};
+    let host = tempfile::tempdir().unwrap();
+    let remote = tempfile::tempdir().unwrap();
+    for (directory, content) in [(&host, "host-global"), (&remote, "runner-workspace")] {
+        fs::create_dir(directory.path().join("repo")).unwrap();
+        fs::write(
+            directory.path().join("repo").join(INSTRUCTION_FILE_NAME),
+            content,
+        )
+        .unwrap();
+    }
+    let path = Path::new(RUNNER_ROOT).join("repo");
+    let discovered = discover_instruction_sources_on(
+        &RemappedReader::new(remote.path()),
+        &RemappedReader::new(host.path()),
+        Some(&path),
+        &path,
+        &path,
+    )
+    .unwrap();
+    assert_eq!(
+        discovered
+            .sources()
+            .iter()
+            .map(DiscoveredInstructionSource::content)
+            .collect::<Vec<_>>(),
+        ["host-global", "runner-workspace"]
     );
 }
 

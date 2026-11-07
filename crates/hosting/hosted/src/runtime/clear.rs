@@ -389,7 +389,7 @@ async fn switch_onto_session<P: plakous_host_protocol::ProtocolExtension>(
     // A source this host left (a clear, fork or rebind) may still be
     // releasing its attachment; read its record only after the join.
     let next = load_settled_source(config, events, session_id, waited).await?;
-    let probe = plakous::tools::runner::workspace_probe();
+    let probe = config.state_roots.workspace_probe();
     let probe = probe.as_ref();
     let unavailable = crate::process_environment::probe_unavailable;
     let requested = probe

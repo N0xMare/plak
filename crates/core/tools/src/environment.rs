@@ -30,6 +30,7 @@ pub use config::{
     DelegationSourceRevision, EnvironmentDelegation, EnvironmentVariableName, ExecutionEnvironment,
     ExecutionEnvironmentConfig, ExecutionEnvironmentDescriptor, ExecutionEnvironmentScope,
 };
+pub(crate) use identity::filesystem_object_identity;
 pub use identity::{
     EXECUTION_ENVIRONMENT_DIGEST_VERSION, ExecutionBackendAuthorityId,
     ExecutionBackendAuthorityRevision, ExecutionBackendDescriptor, ExecutionBackendIdentity,
@@ -39,8 +40,8 @@ pub use identity::{
 };
 use identity::{
     HOST_SNAPSHOT_SOURCE_AUTHORITY, HOST_SNAPSHOT_SOURCE_REVISION, environment_digest,
-    filesystem_object_identity, has_supported_digest_format, is_lowercase_identifier,
-    path_identity_bytes, redacted_identifier_debug,
+    has_supported_digest_format, is_lowercase_identifier, path_identity_bytes,
+    redacted_identifier_debug,
 };
 use limits::ExecutionEnvironmentLimitsWire;
 pub use limits::{

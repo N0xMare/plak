@@ -1,0 +1,24 @@
+{"command":{"arguments":["-c"],"command":"echo shell","executable":"/bin/sh","kind":"shell"},"cwd":"sub","keep_stdin_open":true,"next_number":3,"output_spool_threshold":null,"process":{"ceiling":"/","home":"/home/user","path":"/usr/bin:/bin","prefix":{"device":1,"inode":2,"path":"/workspace/tools"}},"stdin":"696e","terminal":"unix_pty"}
+{"command":{"arguments":["literal"],"executable":"/bin/echo","kind":"literal"},"cwd":".","keep_stdin_open":false,"next_number":4,"output_spool_threshold":4096,"stdin":"","terminal":"pipes"}
+{"instance":"instance","session":"07070707070707070707070707070707"}
+{"bytes":"6869","close":true,"session":"07070707070707070707070707070707"}
+{"cursor":10,"max_bytes":65536,"max_records":64,"session":"07070707070707070707070707070707","wait_ms":1000}
+{"more_output":true,"next_cursor":40,"records":[{"bytes":"6f7574","cursor":10,"sequence":1,"stream":"stdout"},{"bytes":"6f7574","cursor":20,"sequence":2,"stream":"stderr"},{"bytes":"6f7574","cursor":30,"sequence":3,"stream":"terminal"}],"skipped_bytes":2,"status":{"status":"running"}}
+{"status":"running"}
+{"code":3,"status":"exited"}
+{"code":null,"status":"exited"}
+{"status":"outcome_unknown"}
+{"status":"released"}
+{"status":"terminated"}
+{"status":"cancelled"}
+{"status":"timed_out"}
+{"status":"output_limit"}
+{"status":"failed"}
+{"status":"cleanup_unresolved"}
+{"grace_ms":200,"reason":"model","session":"07070707070707070707070707070707"}
+{"grace_ms":200,"reason":"user","session":null}
+{"grace_ms":200,"reason":"session_exit","session":null}
+{"grace_ms":200,"reason":"attempt_ended","session":null}
+{"grace_ms":200,"reason":"hard_cap","session":null}
+{"session":"07070707070707070707070707070707"}
+{"instance":"instance","jobs":[{"command":"sleep 30","elapsed_ms":1500,"number":1,"output":"tail","owner":"agent","owner_generation":6,"session_id":"09090909090909090909090909090909","started_at":{"nanoseconds":5,"seconds":1800000000},"status":{"status":"running"}},{"command":"sleep 30","elapsed_ms":1500,"number":2,"output":"tail","owner":"agent","owner_generation":6,"session_id":"09090909090909090909090909090909","started_at":{"nanoseconds":5,"seconds":1800000000},"status":{"code":0,"status":"exited"}},{"command":"sleep 30","elapsed_ms":1500,"number":3,"output":"tail","owner":"agent","owner_generation":6,"session_id":"09090909090909090909090909090909","started_at":{"nanoseconds":5,"seconds":1800000000},"status":{"code":null,"status":"exited"}},{"command":"sleep 30","elapsed_ms":1500,"number":5,"output":"tail","owner":"agent","owner_generation":6,"session_id":"09090909090909090909090909090909","started_at":{"nanoseconds":5,"seconds":1800000000},"status":{"status":"released"}},{"command":"sleep 30","elapsed_ms":1500,"number":6,"output":"tail","owner":"agent","owner_generation":6,"session_id":"09090909090909090909090909090909","started_at":{"nanoseconds":5,"seconds":1800000000},"status":{"status":"outcome_unknown"}},{"command":"sleep 30","elapsed_ms":1500,"number":10,"output":"tail","owner":"agent","owner_generation":6,"session_id":"09090909090909090909090909090909","started_at":{"nanoseconds":5,"seconds":1800000000},"status":{"reason":"model","status":"stopped"}},{"command":"sleep 30","elapsed_ms":1500,"number":11,"output":"tail","owner":"agent","owner_generation":6,"session_id":"09090909090909090909090909090909","started_at":{"nanoseconds":5,"seconds":1800000000},"status":{"reason":"user","status":"stopped"}},{"command":"sleep 30","elapsed_ms":1500,"number":12,"output":"tail","owner":"agent","owner_generation":6,"session_id":"09090909090909090909090909090909","started_at":{"nanoseconds":5,"seconds":1800000000},"status":{"reason":"session_exit","status":"stopped"}},{"command":"sleep 30","elapsed_ms":1500,"number":13,"output":"tail","owner":"agent","owner_generation":6,"session_id":"09090909090909090909090909090909","started_at":{"nanoseconds":5,"seconds":1800000000},"status":{"reason":"attempt_ended","status":"stopped"}},{"command":"sleep 30","elapsed_ms":1500,"number":14,"output":"tail","owner":"agent","owner_generation":6,"session_id":"09090909090909090909090909090909","started_at":{"nanoseconds":5,"seconds":1800000000},"status":{"reason":"hard_cap","status":"stopped"}}]}

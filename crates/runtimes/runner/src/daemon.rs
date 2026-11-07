@@ -58,6 +58,13 @@ impl From<io::Error> for DaemonError {
 /// paths are short (about 100 bytes), so the triple is hashed.
 #[must_use]
 pub fn socket_path(run_directory: &Path, version: &VersionTriple) -> PathBuf {
+    run_directory.join(format!("{}.sock", triple_key(version)))
+}
+
+/// Filesystem key of one exact protocol/revision/flavor triple. Mutable daemon
+/// floors, lock, socket and log must all live beneath this same key.
+#[must_use]
+pub fn triple_key(version: &VersionTriple) -> String {
     let digest = Sha256::digest(
         format!(
             "{}\0{}\0{}",
@@ -70,7 +77,75 @@ pub fn socket_path(run_directory: &Path, version: &VersionTriple) -> PathBuf {
         use std::fmt::Write as _;
         let _ = write!(name, "{byte:02x}");
     }
-    run_directory.join(format!("{name}.sock"))
+    name
+}
+
+#[cfg(test)]
+mod triple_tests {
+    use super::*;
+    use crate::{FileOwnerFloors, Floor, OwnerFloors};
+    use plakous_runner_protocol::LineOwner;
+
+    #[test]
+    fn each_triple_component_isolates_floors_socket_lock_and_log() {
+        let home = tempfile::tempdir().unwrap();
+        let current = VersionTriple::current("current", "debug");
+        let versions = [
+            current.clone(),
+            VersionTriple {
+                protocol: current.protocol + 1,
+                ..current.clone()
+            },
+            VersionTriple {
+                source_revision: "other".into(),
+                ..current.clone()
+            },
+            VersionTriple {
+                flavor: "release".into(),
+                ..current.clone()
+            },
+        ];
+        let mut keys = std::collections::BTreeSet::new();
+        let mut live = Vec::new();
+        for (number, version) in versions.iter().enumerate() {
+            let directory = home.path().join("builds").join(triple_key(version));
+            assert!(keys.insert(directory.clone()));
+            private_directory(&directory).unwrap();
+            let floors = FileOwnerFloors::open(directory.join("owners.json")).unwrap();
+            let floor = Floor {
+                owner: LineOwner {
+                    line: "same-line".into(),
+                    generation: number as u64 + 1,
+                    branch: "branch".into(),
+                    fence: 1,
+                },
+                holder: "same-instance".into(),
+            };
+            floors.record("same-host", &floor).unwrap();
+            let socket = socket_path(&directory, version);
+            let lock = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(socket.with_extension("lock"))
+                .unwrap();
+            lock.try_lock().unwrap();
+            std::fs::write(directory.join("serve.log"), number.to_string()).unwrap();
+            live.push((floors, floor, lock, directory));
+        }
+        for (number, (floors, expected, _lock, directory)) in live.iter().enumerate() {
+            assert_eq!(floors.load(), [("same-host".into(), expected.clone())]);
+            assert_eq!(
+                FileOwnerFloors::open(directory.join("owners.json"))
+                    .unwrap()
+                    .load(),
+                floors.load()
+            );
+            assert_eq!(
+                std::fs::read_to_string(directory.join("serve.log")).unwrap(),
+                number.to_string()
+            );
+        }
+    }
 }
 
 /// Serves `service` on `socket` until the runner is idle for `idle_grace`:

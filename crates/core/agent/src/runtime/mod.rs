@@ -199,9 +199,10 @@ pub struct AgentBuilder {
     model_reresolver: Option<(Arc<dyn ModelReresolver>, plakous_model::Timestamp)>,
     request_slots: Option<RequestSlots>,
     /// The runner the run's environment executes on, when it is not the
-    /// local runner (unsupported; see [`crate::internal::select_runner_backend`]).
+    /// local runner, selected explicitly per node.
     runner_backend: Option<Arc<plakous_tools::internal::runner::RunnerBackend>>,
     local_daemon: Option<Box<plakous_tools::internal::runner::LocalDaemonBackend>>,
+    runner_runtime: Option<tokio::runtime::Handle>,
     /// Another runner's backend descriptor a test stands in for a branch
     /// target's own.
     #[cfg(test)]

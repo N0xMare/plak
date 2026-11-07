@@ -409,7 +409,7 @@ reach the server; it starts nothing until a template that lists it binds.
 | `oauth_callback_port` | integer | `(ephemeral)` | 1024..=65535; requires `auth = "oauth"` | Fixed loopback port of the login callback `http://127.0.0.1:<port>/callback`, for a client registered with that exact redirect. |
 | `tools` | array of string | `(every listed tool)` | MCP tool names, 1 to 128 bytes without whitespace, none twice | Server-level allowlist; `mcp:<id>` means exactly these. |
 | `resources` | bool | `false` | either transport | Give templates that list the server its `mcp__<id>__read_resource` tool (spec 01 §8.5); the server must advertise resources. Without it a server's resources never reach a model. |
-| `placement` | string | `(unset)` | host\|runner; `runner` needs `transport = "stdio"`; unset is host | Where the server's process runs: on the host beside the agent, or on the node's runner. A runner-placed server runs on the runner the process selected, as that runner's user, in the workspace as the runner names it, with its `secret_env` names resolved there from the runner's own secrets (`plak runner secret set`); no host secret value crosses. With no runner selected the host is the node's runner: the server runs here and its `secret_env` names resolve from this home's runner secrets, never its named secrets. A session freezes the placement each server ran under in its MCP tool records. |
+| `placement` | string | `(unset)` | host\|runner; `runner` needs `transport = "stdio"`; unset is host | Where the server's process runs: on the host beside the agent, or on the node's runner. A runner-placed server runs on the node’s explicitly selected runner, as that runner's user, in the workspace as the runner names it, with its `secret_env` names resolved there from the runner's own secrets (`plak runner secret set`); no host secret value crosses. For a local node the host is the node’s runner: the server runs here and its `secret_env` names resolve from this home's runner secrets, never its named secrets. A session freezes the placement each server ran under in its MCP tool records. |
 | `startup_seconds` | integer | `20` | 1..=120 | Budget to start the server and list its tools. |
 | `call_seconds` | integer | `120` | 1..=3600 | Hard per-call ceiling; progress does not extend it. |
 
@@ -450,14 +450,17 @@ only from the home.
 ### 3.6 `[runners.<name>]`
 
 One machine a host may run a node's tools on, reached over ssh as
-`ssh <strict options> -- <ssh> plak runner connect --stdio` (chapter 04 §2.9).
+`ssh <strict options> -- <ssh> <command> runner connect --stdio` (chapter 04 §2.9).
 `<name>` matches `[a-z][a-z0-9-]{0,31}` and is never `local`, the name of the
 host's own runner, which needs no table. Home-scoped. `plak runner pair <name>`
-and `plak runner ps <name>` dial it; no session is placed on a runner yet.
+and `plak runner ps <name>` dial it. Saved sessions resolve pinned identity,
+never a reused alias. Aliases of one identity share one client.
 
 | key | type | default | constraint | meaning |
 | --- | --- | --- | --- | --- |
 | `ssh` | string | `(required)` | 1 to 255 visible ASCII bytes, no whitespace, not starting with `-` | The ssh destination: a `~/.ssh/config` alias or `[user@]host`. |
+
+| `command` | string | `(required)` | absolute path, only `[A-Za-z0-9/._+-]`, no `.` or `..` components | Remote stable-install-link executable, never shell source or a snapshot path. Missing keys require setting the remote stable link before pairing/dialing. |
 
 Any other key is a load error. The runner's own roots, PATH and HOME live in
 its `runner.toml` on that machine, not here (§3.7).
@@ -478,6 +481,23 @@ with which `plak runner serve` refuses to start. Any other key is a load error.
 | `home` | string | `(unset)` | | The `HOME` the daemon and its processes start with. Unset, the user's. |
 | `hosts` | array of strings | `[]` | lowercase uuids | The host identities that may bind (`plak runner allow`). |
 | `idle_exit_seconds` | integer | `300` | | How long the daemon stays up with no connection, job, orphan, service or unacknowledged answer before it exits. |
+
+Effective roots, first-root default and copies support come from paired
+`workspace.options`, never ssh-reading configuration. `workspace.discover` is
+read-only: depth at most two, at most 200 sorted distinct checkouts, a five-second
+cache, bounded directory entries/metadata reads/deadline, and explicit truncation.
+Local discovery bases are startup plus recent-workspace parents, never `/`; this
+does not narrow local admission. Metadata is `{name, head, commit}` with tagged HEAD
+`branch{name}`, `detached`, `unborn{name}` or `unavailable`. Gitdir, commondir and
+metadata symlinks must stay inside the admitted roots/bases and outside the product
+home. No Git executable, hooks, helpers, fetches or working-copy writes run.
+Selection freshly validates UTF-8 absolute canonical directory spelling on its
+runner; containment/protected-home checks precede existence checks.
+
+Host-placed stdio MCP for a nonlocal node uses a fresh empty private 0700 cwd per
+service run, outside and not an ancestor of the product home, never `$HOME` or a
+same-spelled remote workspace. Runner placement uses the frozen node runner’s
+workspace and secrets; local host placement retains its local workspace.
 
 ## 4. `agents/<name>.toml`
 

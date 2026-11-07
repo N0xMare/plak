@@ -283,6 +283,7 @@ impl AgentBuilder {
             model_reresolver: None,
             request_slots: None,
             runner_backend: None,
+            runner_runtime: None,
             local_daemon: None,
             #[cfg(test)]
             target_backend: None,
@@ -294,16 +295,29 @@ impl AgentBuilder {
         backend: plakous_tools::internal::runner::LocalDaemonBackend,
     ) -> Self {
         self.local_daemon = Some(Box::new(backend));
+        self.runner_backend = None;
+        self.runner_runtime = None;
         self
     }
 
     /// Runs the agent's environment on `backend`'s runner instead of the
-    /// local runner. Unsupported; see [`crate::internal::select_runner_backend`].
+    /// local runner, for backend reconstruction tests.
+    #[cfg(test)]
     pub(crate) fn with_runner_backend(
         mut self,
         backend: Arc<plakous_tools::internal::runner::RunnerBackend>,
     ) -> Self {
         self.runner_backend = Some(backend);
+        self
+    }
+
+    pub(crate) fn with_runner_services(
+        mut self,
+        services: plakous_tools::internal::runner::RunnerServices,
+    ) -> Self {
+        self.runner_backend = Some(services.backend());
+        self.runner_runtime = Some(services.runtime().clone());
+        self.local_daemon = None;
         self
     }
 
@@ -1236,6 +1250,10 @@ fn attach_job_environment(
         builder.job_config,
         builder.runner_backend.as_ref(),
     )?;
+    let environment = match &builder.runner_runtime {
+        Some(runtime) => environment.with_runner_runtime(runtime.clone()),
+        None => environment,
+    };
     let environment = match &builder.local_daemon {
         Some(daemon) => daemon
             .attach(environment)

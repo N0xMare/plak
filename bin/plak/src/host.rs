@@ -117,7 +117,7 @@ pub(crate) fn run_host_command(
         identity.instance,
         environment.describe(),
     );
-    scan(&host, owed, stop);
+    scan(&host, owed, stop, &services, runtime.handle());
     // The web endpoint serves beside the control socket and stops with it.
     let web = web.map(|web| runtime.spawn(web.serve()));
     let served = runtime.block_on(async {
@@ -175,16 +175,26 @@ fn scan(
     host: &Arc<SessionHost<crate::surface_protocol::PlakExtension>>,
     owed: Vec<String>,
     stop: crate::web::StopProbe,
+    services: &Services,
+    runtime: &tokio::runtime::Handle,
 ) {
     if owed.is_empty() {
         return;
     }
     let host = Arc::clone(host);
+    let services = services.clone();
+    let runtime = runtime.clone();
     std::thread::spawn(move || {
+        let mut changed = services.runners().changes();
+        let mut pending = Vec::new();
         continue_each(
             owed,
             || stop.stopped(),
             |session| {
+                if !placement_ready(&services, session) {
+                    pending.push(session.to_owned());
+                    return;
+                }
                 eprintln!("plak host: continuing session {session}");
                 if let Err(failure) = host.slot(session).resident() {
                     eprintln!(
@@ -195,7 +205,42 @@ fn scan(
                 host.changed();
             },
         );
+        while !pending.is_empty() && !stop.stopped() {
+            runtime.block_on(async { tokio::select! { _ = changed.changed() => {}, () = tokio::time::sleep(Duration::from_secs(1)) => {} } });
+            pending.retain(|session| {
+                if stop.stopped() || !placement_ready(&services, session) {
+                    return true;
+                }
+                if let Err(failure) = host.slot(session).resident() {
+                    eprintln!(
+                        "plak host: session {session} did not continue: {}",
+                        failure.message()
+                    );
+                }
+                host.changed();
+                false
+            });
+        }
     });
+}
+
+fn placement_ready(services: &Services, session: &str) -> bool {
+    let Ok(paths) = services.paths() else {
+        return false;
+    };
+    let Ok(mut product) = crate::store::ProductStore::open(paths) else {
+        return false;
+    };
+    let Ok(record) = product.load(session) else {
+        return false;
+    };
+    let runner = record
+        .runner
+        .as_ref()
+        .map_or("local", |runner| runner.runner_id.as_str());
+    services.runners().rows().iter().any(|row| {
+        row.runner.runner_id == runner && row.status == plakous::runner::RunnerStatus::Ready
+    })
 }
 
 /// Opens each of `owed` in turn with `open`, until `stopped`.

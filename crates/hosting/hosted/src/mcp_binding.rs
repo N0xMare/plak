@@ -6,6 +6,12 @@ mod available;
 #[path = "mcp_binding/unavailable.rs"]
 mod available;
 pub(crate) use available::{BoundMcpTools, bind_mcp_tools, recorded_mcp_tools};
+
+#[derive(Clone, Default)]
+pub(crate) struct McpNodeServices {
+    pub runner: Option<plakous::runner::RunnerServices>,
+    pub product_home: Option<std::path::PathBuf>,
+}
 #[cfg(feature = "mcp")]
 pub use available::{
     McpProbe, get_mcp_prompt, list_mcp_prompts, mcp_login_status, mcp_oauth_spec, probe_mcp_server,

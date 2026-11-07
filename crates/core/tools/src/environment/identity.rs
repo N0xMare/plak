@@ -743,7 +743,7 @@ pub(super) fn path_identity_bytes(path: &Path) -> Result<Vec<u8>, ExecutionEnvir
         })
 }
 
-pub(super) fn filesystem_object_identity(
+pub(crate) fn filesystem_object_identity(
     path: &Path,
 ) -> Result<HostFilesystemObjectIdentity, ExecutionEnvironmentError> {
     use super::metadata::MetadataExt;

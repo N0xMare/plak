@@ -16,6 +16,8 @@ pub use implementation::*;
 pub(crate) use implementation::{carry_input_window, construct_openrouter_runtime_with_fence};
 /// Inputs for a newly discovered Custom/experimental OpenRouter Chat runtime.
 pub struct ProductOpenRouterSpec {
+    /// Explicit workspace authority of this node.
+    pub runner_services: Option<plakous::runner::RunnerServices>,
     /// Exact local credential selection, independent of the gateway protocol.
     pub account: crate::account::AccountRef,
     /// Construction-bound process budgets.

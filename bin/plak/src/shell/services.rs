@@ -23,6 +23,8 @@ pub(crate) type TelemetrySinkFactory = fn() -> Option<Arc<dyn ExtraTelemetrySink
 
 /// Handles every product command shares for the life of the process.
 pub(crate) struct Services {
+    runners: plakous::runner::RunnerRegistry,
+    runner_overlap: Arc<plakous::runner::MachineOverlapGuard>,
     local_daemon: Option<(
         plakous::tools::runner::LocalDaemonBackend,
         plakous::runner::RunnerClient,
@@ -37,9 +39,22 @@ pub(crate) struct Services {
 }
 
 impl Services {
+    pub(crate) fn runner_probe_context(&self) -> Self {
+        let mut services = self.clone();
+        services.runners = plakous::runner::RunnerRegistry::default();
+        services
+    }
+
+    pub(crate) fn with_runner_registry(&self, registry: plakous::runner::RunnerRegistry) -> Self {
+        let mut services = self.clone();
+        services.runners = registry;
+        services
+    }
     #[cfg(test)]
     pub(crate) fn for_home(paths: PlakPaths) -> Self {
         Self {
+            runners: plakous::runner::RunnerRegistry::default(),
+            runner_overlap: Arc::new(plakous::runner::MachineOverlapGuard::new(None, [])),
             local_daemon: None,
             clock: crate::commands::application::test_clock(),
             home: Home::explicit(paths.clone(), paths.home().join("test-state")),
@@ -75,6 +90,8 @@ impl Services {
             crate::product_doctor::install_credential_state_home(state.to_path_buf());
         }
         Self {
+            runners: plakous::runner::RunnerRegistry::default(),
+            runner_overlap: Arc::new(plakous::runner::MachineOverlapGuard::new(None, [])),
             local_daemon: None,
             clock: Arc::new(plakous::model::SystemClock),
             home,
@@ -104,6 +121,8 @@ impl Clone for Services {
             let _ = extra_telemetry_sink.set(sink.clone());
         }
         Self {
+            runners: self.runners.clone(),
+            runner_overlap: self.runner_overlap.clone(),
             local_daemon: self.local_daemon.clone(),
             clock: Arc::clone(&self.clock),
             home: self.home.clone(),
@@ -116,6 +135,39 @@ impl Clone for Services {
 }
 
 impl Services {
+    pub(crate) const fn runners(&self) -> &plakous::runner::RunnerRegistry {
+        &self.runners
+    }
+
+    pub(crate) fn with_runner_overlap(&self, guard: plakous::runner::MachineOverlapGuard) -> Self {
+        let mut services = self.clone();
+        services.runner_overlap = Arc::new(guard);
+        services
+    }
+
+    pub(crate) fn runner_overlap(&self) -> &plakous::runner::MachineOverlapGuard {
+        &self.runner_overlap
+    }
+
+    pub(crate) fn state_roots_on(
+        &self,
+        context: &PlakPaths,
+        runner_id: &str,
+    ) -> CliResult<plakous_hosted::agent::ProductStateRoots> {
+        let roots = self.state_roots_for(context)?;
+        match self.runners.services(runner_id).map_err(|failure| {
+            crate::CliFailure::new(format!("runner placement refused: {failure:?}"))
+        })? {
+            Some(services) => {
+                let roots = roots.with_runner_services(services);
+                Ok(match self.runners.client(runner_id) {
+                    Some(client) => roots.with_runner_client(client),
+                    None => roots,
+                })
+            }
+            None => Ok(roots),
+        }
+    }
     #[allow(dead_code, reason = "selected only by the optional hosting product")]
     pub(crate) fn with_local_daemon(
         &self,
@@ -177,10 +229,15 @@ impl Services {
             self.session_records()?,
             &self.jobs,
         )?;
-        Ok(match &self.local_daemon {
+        let roots = match &self.local_daemon {
             Some((backend, client)) => roots.with_local_daemon(backend.clone(), client.clone()),
             None => roots,
-        })
+        };
+        let roots = match crate::test_hooks::runner_services() {
+            Some(services) => roots.with_runner_services(services),
+            None => roots,
+        };
+        Ok(roots)
     }
 
     /// The process's one job bound.

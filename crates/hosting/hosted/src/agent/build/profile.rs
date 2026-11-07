@@ -204,10 +204,12 @@ pub(crate) fn enroll_product_instructions(
     workspace_root: &Path,
     cwd: &Path,
     skills_listing: Option<&RegisteredContextSource>,
+    runner: Option<&plakous::runner::RunnerServices>,
 ) -> CliResult<(HarnessProfileSpec, Vec<ResolvedContextSourceFact>)> {
-    let reader = crate::runner_reader::instruction_reader(product_home);
-    let discovery = plakous::prompts::instructions::discover_instruction_sources(
+    let reader = crate::runner_reader::instruction_reader(runner);
+    let discovery = plakous::prompts::instructions::discover_instruction_sources_on(
         reader.as_ref(),
+        &plakous::prompts::instructions::LocalInstructionSourceReader,
         product_home,
         workspace_root,
         cwd,

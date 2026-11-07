@@ -295,24 +295,50 @@ pub(crate) fn session_tool_policy(fence: SessionToolFence) -> Arc<dyn ToolPolicy
 pub(crate) fn stamped_workspace_policy(
     physical_root: &Path,
     relative_cwd: &Path,
+    runner: Option<&plakous::runner::RunnerServices>,
 ) -> CliResult<WorkspacePolicy> {
-    let mut policy = WorkspacePolicy::host(physical_root, relative_cwd)
+    let probe = runner.map_or_else(
+        || {
+            std::sync::Arc::new(plakous::tools::LocalWorkspaceProbe)
+                as std::sync::Arc<dyn plakous::tools::WorkspaceProbe>
+        },
+        plakous::runner::RunnerServices::workspace_probe,
+    );
+    let mut policy = WorkspacePolicy::on_runner(physical_root, relative_cwd, probe.as_ref())
         .map_err(|_| CliFailure::new("workspace policy could not be initialized"))?;
-    if let Some(stamp) = crate::topology_runtime::generation_stamp_for_workspace_root(physical_root)
-        .map_err(crate::process_environment::probe_unavailable)?
+    let runner_id = runner.map(|runner| runner.backend());
+    let runner_id = runner_id
+        .as_ref()
+        .map_or("local", |backend| backend.runner_id().as_str());
+    if let Some(stamp) = crate::topology_runtime::generation_stamp_for_workspace_root(
+        runner_id,
+        physical_root,
+        probe.as_ref(),
+    )
+    .map_err(crate::process_environment::probe_unavailable)?
     {
         policy = policy.with_generation_stamp(stamp);
     }
     Ok(policy)
 }
 
-pub(in crate::agent) fn install_occupancy_fence(copy: &Path) -> CliResult<()> {
+pub(in crate::agent) fn install_occupancy_fence(
+    copy: &Path,
+    runner: Option<&plakous::runner::RunnerServices>,
+) -> CliResult<()> {
+    if runner.is_some() {
+        return Ok(());
+    }
     if crate::git_redirect_fence::is_minted_occupancy_copy(copy)
         && let Err(error) = crate::git_redirect_fence::install_for_copy(
             copy,
-            crate::topology_runtime::workspace_base_for_root(copy)
-                .map_err(crate::process_environment::probe_unavailable)?
-                .as_deref(),
+            crate::topology_runtime::workspace_base_for_root(
+                "local",
+                copy,
+                &plakous::tools::LocalWorkspaceProbe,
+            )
+            .map_err(crate::process_environment::probe_unavailable)?
+            .as_deref(),
         )
     {
         return Err(CliFailure::new(format!(

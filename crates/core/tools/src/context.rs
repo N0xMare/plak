@@ -34,6 +34,36 @@ pub struct WorkspacePolicy {
 }
 
 impl WorkspacePolicy {
+    /// Builds lexical policy from paths freshly resolved by their owning
+    /// runner. No same-spelled host path is inspected.
+    ///
+    /// # Errors
+    /// Refuses unavailable paths, traversal or cwd escape.
+    pub fn on_runner(
+        root: &Path,
+        cwd: &Path,
+        probe: &dyn crate::WorkspaceProbe,
+    ) -> Result<Self, ToolRuntimeError> {
+        let root = probe
+            .canonicalize(root)
+            .map_err(|_| workspace_error("runner workspace unavailable"))?
+            .ok_or_else(|| workspace_error("runner workspace root is missing"))?;
+        let relative = workspace_relative_suffix(&root, cwd)?;
+        let cwd = probe
+            .canonicalize(&root.join(relative))
+            .map_err(|_| workspace_error("runner workspace unavailable"))?
+            .ok_or_else(|| workspace_error("runner workspace cwd is missing"))?;
+        if !cwd.starts_with(&root) {
+            return Err(workspace_error("runner workspace cwd escapes root"));
+        }
+        Ok(Self {
+            root: Arc::new(root),
+            cwd: Arc::new(cwd),
+            isolation: IsolationLevel::Host,
+            generation: Arc::new(AtomicU64::new(0)),
+            stamp_generation: false,
+        })
+    }
     /// Creates a policy after canonicalizing an existing workspace root.
     ///
     /// `cwd` must be a relative path beneath the root and must already exist.

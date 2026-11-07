@@ -17,6 +17,7 @@ use crate::{LocalWorkspaceProbe, ProbeError, WorkspaceProbe};
 #[derive(Deserialize, Serialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 enum ProbeWire {
+    FilesystemIdentity { path: String },
     Canonicalize { path: String },
     IsFile { path: String },
     TreeBytes { path: String },
@@ -62,6 +63,15 @@ fn path(path: &Path) -> Result<String, ProbeError> {
 }
 
 impl WorkspaceProbe for RunnerWorkspaceProbe {
+    fn filesystem_identity(
+        &self,
+        target: &Path,
+    ) -> Result<crate::HostFilesystemObjectIdentity, ProbeError> {
+        serde_json::from_value(self.ask(&ProbeWire::FilesystemIdentity {
+            path: path(target)?,
+        })?)
+        .map_err(|_| ProbeError::Unavailable)
+    }
     fn canonicalize(&self, target: &Path) -> Result<Option<PathBuf>, ProbeError> {
         let answer = self.ask(&ProbeWire::Canonicalize {
             path: path(target)?,
@@ -103,7 +113,8 @@ pub fn serve_probe(payload: Value, admits: &(dyn Fn(&Path) -> bool + Send + Sync
         Ok(question) => question,
         Err(error) => return Box::pin(std::future::ready(Err(backend_failure(&error)))),
     };
-    let (ProbeWire::Canonicalize { path }
+    let (ProbeWire::FilesystemIdentity { path }
+    | ProbeWire::Canonicalize { path }
     | ProbeWire::IsFile { path }
     | ProbeWire::TreeBytes { path }) = &question;
     if !admits(Path::new(path)) {
@@ -115,6 +126,7 @@ pub fn serve_probe(payload: Value, admits: &(dyn Fn(&Path) -> bool + Send + Sync
         tokio::task::spawn_blocking(move || {
             let probe = LocalWorkspaceProbe;
             let answer = match question {
+                ProbeWire::FilesystemIdentity { path } => serde_json::to_value(probe.filesystem_identity(Path::new(&path)).map_err(|_| ServeFailure::Unsupported)?).map_err(|_| ServeFailure::Unsupported)?,
                 ProbeWire::Canonicalize { path } => {
                     match probe.canonicalize(Path::new(&path)).ok().flatten() {
                         None => json!({ "path": null }),

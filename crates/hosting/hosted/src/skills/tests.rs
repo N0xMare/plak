@@ -49,6 +49,7 @@ impl Fixture {
             frozen.map_or(SkillsMode::New, SkillsMode::Frozen),
             &self.workspace,
             SkillsPresentation::Claude,
+            None,
         )
         .unwrap()
     }
@@ -85,6 +86,7 @@ fn every_node_registers_skill_while_skills_are_on_and_only_claude_presents_it() 
             SkillsMode::New,
             &fixture.workspace,
             presentation,
+            None,
         )
         .unwrap();
         assert!(node.tool_registration().unwrap().is_some());
@@ -96,6 +98,7 @@ fn every_node_registers_skill_while_skills_are_on_and_only_claude_presents_it() 
             SkillsMode::Inherited(inherited),
             &fixture.workspace,
             SkillsPresentation::Codex,
+            None,
         )
         .unwrap();
         assert_eq!(node.tool_registration().unwrap().is_some(), registered);

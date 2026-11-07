@@ -351,9 +351,11 @@ The enforcement of "this node may change files" on `execute` is the
 `workspace=fork` snapshot is thrown away unless something seals a candidate
 and a parent adopts it.
 
-A child runs on its parent's runner, and the root on the runner the tree's
-VCS port runs on (the local runner, recorded as none, unless a runner is
-selected). The tree admits a spawn placed elsewhere only by the rules of the
+A child runs on its parent’s runner. Root genesis freezes explicit runner
+placement before publication; reopen verifies that saved identity against node
+services and installs its VCS port. Local remains recorded as none. Workspace
+stamp, mint-base and occupancy lookups are qualified by `(runner_id, path)`;
+equal paths on different machines share no stamp or base. The tree admits a spawn placed elsewhere only by the rules of the
 runner split: an `inherit` child shares its parent's checkout, so another
 runner is `runner_mismatch`; a `fork` or `snapshot` copy on another runner is
 carried there as a git bundle of its parent's live state (§14) and the child

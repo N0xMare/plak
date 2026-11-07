@@ -108,16 +108,21 @@ mod child_runner {
     use std::sync::{Arc, OnceLock};
 
     use plakous::runner::{CallJournal, ClientWindows, FileCallJournal, RunnerClient};
-    use plakous::tools::runner::{RunnerBackend, select_process_runner};
+    use plakous::tools::runner::RunnerBackend;
     use plakous_offline_crash_harness::script::ChildRunnerPlan;
 
     /// The link and the runtime it runs on, kept for the process.
     struct Route {
+        services: plakous::runner::RunnerServices,
         _runtime: tokio::runtime::Runtime,
         _bridge: tokio::process::Child,
     }
 
     static ROUTE: OnceLock<Route> = OnceLock::new();
+
+    pub(super) fn services() -> Option<plakous::runner::RunnerServices> {
+        ROUTE.get().map(|route| route.services.clone())
+    }
 
     pub(super) fn select(plan: &ChildRunnerPlan) -> Result<(), String> {
         if ROUTE.get().is_some() {
@@ -168,14 +173,20 @@ mod child_runner {
             .map_err(|error| format!("the child runner did not bind: {error}"))?;
         let backend = RunnerBackend::new(hello.descriptor, Arc::new(client))
             .map_err(|error| format!("the child runner's descriptor: {error}"))?;
-        select_process_runner(Arc::new(backend), runtime.handle().clone());
+        let services =
+            plakous::runner::RunnerServices::new(Arc::new(backend), runtime.handle().clone());
         drop(guard);
         let _ = ROUTE.set(Route {
+            services,
             _runtime: runtime,
             _bridge: bridge,
         });
         Ok(())
     }
+}
+
+pub(crate) fn runner_services() -> Option<plakous::runner::RunnerServices> {
+    child_runner::services()
 }
 
 /// A `quit-as-handoff` file beside the evidence log makes the agent face's

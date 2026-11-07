@@ -65,15 +65,63 @@ impl RunnerHome {
     }
 
     pub(crate) fn run_directory(&self) -> PathBuf {
-        self.root.join("run")
+        self.build_directory().join("run")
     }
 
     pub(crate) fn floors_path(&self) -> PathBuf {
-        self.root.join("owners.json")
+        self.build_directory().join("owners.json")
     }
 
     pub(crate) fn log_path(&self) -> PathBuf {
-        self.root.join("serve.log")
+        self.build_directory().join("serve.log")
+    }
+
+    pub(crate) fn build_directory(&self) -> PathBuf {
+        self.root
+            .join("builds")
+            .join(plakous::runner::daemon::triple_key(&super::version()))
+    }
+
+    /// Pins the full triple before opening any mutable state. A shortened
+    /// filesystem-key collision fails closed rather than sharing owner floors.
+    pub(crate) fn prepare_build(&self) -> CliResult<()> {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        let directory = self.build_directory();
+        private_directory(&directory)?;
+        let path = directory.join("version.json");
+        let version = super::version();
+        let identity_lock = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(0o600)
+            .open(directory.join("version.lock"))
+            .map_err(|error| CliFailure::new(error.to_string()))?;
+        identity_lock
+            .lock()
+            .map_err(|error| CliFailure::new(error.to_string()))?;
+        match std::fs::read(&path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let bytes = serde_json::to_vec(&version)
+                    .map_err(|error| CliFailure::new(error.to_string()))?;
+                write_private(&path, &bytes)?;
+            }
+            Ok(bytes) => {
+                let recorded =
+                    serde_json::from_slice::<plakous::runner::protocol::VersionTriple>(&bytes).ok();
+                if recorded.as_ref() != Some(&version) {
+                    return Err(CliFailure::new(
+                        "runner build directory belongs to another triple or has incomplete identity; inspect and drain that build before repairing its state",
+                    ));
+                }
+            }
+            Err(error) => {
+                return Err(CliFailure::new(format!(
+                    "runner build identity could not be recorded: {error}"
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// `runner.toml`, or the empty configuration when there is none.
@@ -326,7 +374,8 @@ pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> CliResult<()> {
         let mut file = options.open(&temporary)?;
         file.write_all(bytes)?;
         file.sync_all()?;
-        std::fs::rename(&temporary, path)
+        std::fs::rename(&temporary, path)?;
+        std::fs::File::open(path.parent().unwrap_or_else(|| Path::new(".")))?.sync_all()
     };
     write().map_err(|error| {
         CliFailure::new(format!("{} could not be written: {error}", path.display()))

@@ -312,6 +312,22 @@ pub fn discover_instruction_sources(
     workspace_root: &Path,
     cwd: &Path,
 ) -> Result<InstructionDiscovery, InstructionDiscoveryError> {
+    discover_instruction_sources_on(reader, reader, product_home, workspace_root, cwd)
+}
+
+/// Discovers workspace instructions through their runner and explicitly global
+/// instructions through the host reader. Identical path spellings never choose
+/// an authority. Bounds, identities and ordering match single-reader discovery.
+///
+/// # Errors
+/// Returns the same bounded discovery failures as [`discover_instruction_sources`].
+pub fn discover_instruction_sources_on(
+    reader: &dyn InstructionSourceReader,
+    host_reader: &dyn InstructionSourceReader,
+    product_home: Option<&Path>,
+    workspace_root: &Path,
+    cwd: &Path,
+) -> Result<InstructionDiscovery, InstructionDiscoveryError> {
     let root = canonical_directory(reader, workspace_root)?;
     let cwd = canonical_directory(reader, cwd)?;
     let relative = cwd.strip_prefix(&root).map_err(|_| {
@@ -331,13 +347,13 @@ pub fn discover_instruction_sources(
     let mut remaining = MAX_DISCOVERED_CONTENT_BYTES;
 
     if let Some(home) = product_home {
-        match reader
+        match host_reader
             .canonicalize(home)
             .map_err(InstructionDiscoveryError::Reader)?
         {
             SourceResolution::Resolved(physical_home) => {
                 check_path_bound(&physical_home)?;
-                let global = read_chain(reader, &physical_home, &[], &mut remaining)?;
+                let global = read_chain(host_reader, &physical_home, &[], &mut remaining)?;
                 if let Some(content) = global.into_iter().flatten().next() {
                     sources.push(source(
                         GLOBAL_SOURCE_ID.to_owned(),

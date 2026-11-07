@@ -10,21 +10,28 @@ use super::{NodePlacement, TreeLineage};
 
 /// The VCS port of tree `tree_id`'s workspaces: the system `git`/`jj` port
 /// on the local runner, and the selected runner's port over its link.
-fn session_vcs(tree_id: &str) -> Arc<dyn VcsOps> {
-    match plakous::tools::runner::process_runner() {
-        Some(runner) => {
-            let backend = runner.backend();
-            Arc::new(crate::remote_vcs::RemoteVcs::new(
-                backend.link(),
-                backend.runner_id().as_str().to_owned(),
-                tree_id.to_owned(),
-            ))
-        }
-        None => Arc::new(SystemVcs),
-    }
+fn session_vcs(_tree_id: &str) -> Arc<dyn VcsOps> {
+    Arc::new(SystemVcs)
 }
 
 impl ProductAgentTree {
+    /// Freezes root placement before the first genesis publication. Reopened
+    /// trees verify their persisted placement instead of calling this setter.
+    ///
+    /// # Errors
+    /// Refuses changing placement after any durable publication.
+    pub fn place_genesis_root(&mut self, placement: NodePlacement) -> Result<(), TopologyError> {
+        if self.stored_revision != 0 {
+            return Err(TopologyError::new(
+                TopologyErrorCode::SchemaMismatch,
+                "root placement is already committed",
+            ));
+        }
+        if let Some(root) = self.nodes.get_mut(&self.root_agent_id) {
+            root.placement = placement;
+        }
+        Ok(())
+    }
     /// Bootstraps a root over the system `git`/`jj` port, or the selected
     /// runner's port.
     ///

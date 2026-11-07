@@ -331,6 +331,7 @@ impl fmt::Debug for EnvironmentVariableValue {
 /// Exact workspace authority supplied to a sealed backend.
 #[derive(Clone)]
 pub struct ExecutionWorkspace {
+    private_service_home: Option<Arc<PathBuf>>,
     root: Arc<PathBuf>,
     cwd: Arc<PathBuf>,
     #[cfg_attr(
@@ -348,6 +349,7 @@ pub struct ExecutionWorkspace {
 impl ExecutionWorkspace {
     fn from_environment(environment: &ExecutionEnvironment) -> Self {
         Self {
+            private_service_home: environment.private_service_home.clone(),
             root: Arc::new(environment.root().to_path_buf()),
             cwd: Arc::new(environment.cwd().to_path_buf()),
             root_device: environment.descriptor().root_object().device(),
@@ -679,6 +681,15 @@ impl ExecutionEnvironment {
             }
             Ok(service)
         })
+    }
+
+    /// Gives each host-placed service a fresh empty private cwd, excluding
+    /// the product home and the user's home. This live policy is not identity
+    /// material and must only be used for host services of nonlocal nodes.
+    #[must_use]
+    pub fn with_private_service_cwd(mut self, product_home: std::path::PathBuf) -> Self {
+        self.private_service_home = Some(Arc::new(product_home));
+        self
     }
 
     fn resolved_delegations(&self) -> Arc<[(EnvironmentVariableName, EnvironmentVariableValue)]> {

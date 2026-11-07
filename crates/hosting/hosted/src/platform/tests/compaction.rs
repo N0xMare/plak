@@ -146,6 +146,7 @@ pub(crate) async fn platform_binding(
 ) -> SessionRuntimeBinding {
     let extensions = crate::tools::ProductToolExtensions::default();
     let spec = ApiRuntimeSpec {
+        runner_services: None,
         job_config: plakous::tools::JobConfig::default(),
         account: provider.account().parse().unwrap(),
         sidecars: &NoWorkers,
@@ -344,6 +345,7 @@ async fn openai_product_tools_preserve_optional_schemas_on_production_wire() {
     let extensions = crate::tools::ProductToolExtensions::default();
     let provider = PlatformProvider::OpenAi;
     let spec = ApiRuntimeSpec {
+        runner_services: None,
         job_config: plakous::tools::JobConfig::default(),
         account: provider.account().parse().unwrap(),
         sidecars: &NoWorkers,
@@ -447,6 +449,7 @@ async fn openai_api_native_ptc_wire_is_code_mode_without_the_codex_costume() {
     .unwrap();
     assert_eq!(composition, CompositionSelection::NativePtc);
     let spec = ApiRuntimeSpec {
+        runner_services: None,
         job_config: plakous::tools::JobConfig::default(),
         account: provider.account().parse().unwrap(),
         sidecars: &workers,
@@ -563,6 +566,7 @@ async fn production_api_sessions_compact_once_and_reopen_with_original_configura
         let directory = tempfile::tempdir().unwrap();
         let extensions = crate::tools::ProductToolExtensions::default();
         let mut spec = ApiRuntimeSpec {
+            runner_services: None,
             job_config: plakous::tools::JobConfig::default(),
             account: provider.account().parse().unwrap(),
             sidecars: &NoWorkers,
@@ -734,6 +738,7 @@ async fn completed_compaction_recovers_after_reconstructing_fresh_model_without_
     let database = directory.path().join("recovery.sqlite");
     let extensions = crate::tools::ProductToolExtensions::default();
     let mut spec = ApiRuntimeSpec {
+        runner_services: None,
         job_config: plakous::tools::JobConfig::default(),
         account: provider.account().parse().unwrap(),
         sidecars: &NoWorkers,
@@ -924,6 +929,7 @@ async fn api_working_window_is_measured_in_provider_tokens() {
             let directory = tempfile::tempdir().unwrap();
             let extensions = crate::tools::ProductToolExtensions::default();
             let spec = ApiRuntimeSpec {
+                runner_services: None,
                 job_config: plakous::tools::JobConfig::default(),
                 account: provider.account().parse().unwrap(),
                 sidecars: &NoWorkers,
@@ -1049,6 +1055,7 @@ async fn explicit_none_effort_is_reconstructed_and_sent_on_the_api_wire() {
         let directory = tempfile::tempdir().unwrap();
         let extensions = crate::tools::ProductToolExtensions::default();
         let spec = ApiRuntimeSpec {
+            runner_services: None,
             job_config: plakous::tools::JobConfig::default(),
             account: provider.account().parse().unwrap(),
             sidecars: &NoWorkers,

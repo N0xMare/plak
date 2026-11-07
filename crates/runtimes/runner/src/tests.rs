@@ -52,6 +52,7 @@ fn transferred(tables: &mut Tables, owner: &LineOwner) {
         RunnerFrame::TransferAccepted {
             control_id: "t".into(),
             stopped: Vec::new(),
+            unpromoted: Vec::new(),
         }
     );
 }
@@ -200,6 +201,7 @@ fn owners_are_ordered_by_generation_then_fence_and_must_be_transferred() {
         RunnerFrame::TransferAccepted {
             control_id: "t3".into(),
             stopped: Vec::new(),
+            unpromoted: Vec::new(),
         }
     );
     transferred(&mut tables, &owner(2, 2));
@@ -217,6 +219,7 @@ fn owners_are_ordered_by_generation_then_fence_and_must_be_transferred() {
         RunnerFrame::TransferAccepted {
             control_id: "t4".into(),
             stopped: Vec::new(),
+            unpromoted: Vec::new(),
         }
     );
 }
@@ -331,6 +334,7 @@ fn a_transfer_to_a_newer_owner_is_a_compare_and_swap_from_the_accepted_one() {
         RunnerFrame::TransferAccepted {
             control_id: "t1".into(),
             stopped: Vec::new(),
+            unpromoted: Vec::new(),
         }
     );
     let successor = owner(1, 2);
@@ -349,6 +353,7 @@ fn a_transfer_to_a_newer_owner_is_a_compare_and_swap_from_the_accepted_one() {
         RunnerFrame::TransferAccepted {
             control_id: "t3".into(),
             stopped: Vec::new(),
+            unpromoted: Vec::new(),
         }
     );
     // The accepted owner again is a retry, whatever `from` says.
@@ -357,6 +362,7 @@ fn a_transfer_to_a_newer_owner_is_a_compare_and_swap_from_the_accepted_one() {
         RunnerFrame::TransferAccepted {
             control_id: "t4".into(),
             stopped: Vec::new(),
+            unpromoted: Vec::new(),
         }
     );
     let mut other_line = owner(5, 5);
@@ -409,6 +415,7 @@ fn a_keys_answer_and_acknowledgement_belong_to_the_instance_that_last_sent_it() 
         RunnerFrame::TransferAccepted {
             control_id: "t2".into(),
             stopped: Vec::new(),
+            unpromoted: Vec::new(),
         }
     );
     tables.admit(HOST, "instance-b", &effect("s1", &head, "d", true), now);
@@ -525,6 +532,7 @@ fn accepted() -> RunnerFrame {
     RunnerFrame::TransferAccepted {
         control_id: "t".into(),
         stopped: Vec::new(),
+        unpromoted: Vec::new(),
     }
 }
 

@@ -69,7 +69,10 @@ impl RunnerService {
         let instance = instance.to_owned();
         Box::pin(async move {
             let gate = service.inner.foreground.gate(&host, &owner.line);
-            let guard = if matches!(verb, RunnerVerb::ProcessStart | RunnerVerb::ProcessPromote) {
+            let guard = if matches!(
+                verb,
+                RunnerVerb::ProcessStart | RunnerVerb::ProcessPromote | RunnerVerb::ForegroundStop
+            ) {
                 Some(gate.lock().await)
             } else {
                 None
@@ -80,10 +83,42 @@ impl RunnerService {
             {
                 return Err(lost_process_owner());
             }
+            if verb == RunnerVerb::ForegroundStop {
+                return service
+                    .stop_matching_foreground(&host, &owner.line, payload)
+                    .await;
+            }
             service
                 .sessions(&host, &owner.line, verb, payload, control)
                 .await
         })
+    }
+
+    async fn stop_matching_foreground(
+        &self,
+        host: &str,
+        line: &str,
+        payload: Value,
+    ) -> Result<Value, plakous_tools::internal::runner::ServeFailure> {
+        use plakous_tools::internal::runner::ServeFailure;
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Stop {
+            call_key: String,
+            pid: u32,
+        }
+        let stop: Stop = serde_json::from_value(payload).map_err(|_| ServeFailure::Unsupported)?;
+        let sessions = lock(&self.inner.lines)
+            .get(&(host.to_owned(), line.to_owned()))
+            .map(|(sessions, _)| sessions.clone());
+        let Some(sessions) = sessions else {
+            return Ok(serde_json::json!({"stopped": []}));
+        };
+        tokio::task::spawn_blocking(move || {
+            let stopped = plakous_tools::internal::stop_matching_foreground(&sessions, &stop.call_key, stop.pid);
+            if let Some(error) = stopped.failure { return Err(plakous_tools::internal::runner::serve_failure(&error)); }
+            Ok(serde_json::json!({"stopped": stopped.stopped.into_iter().map(|process| StoppedForeground {call_key: process.call_key, pid: process.pid, ended: format!("{:?}",process.status)}).collect::<Vec<_>>()}))
+        }).await.unwrap_or(Err(ServeFailure::Unsupported))
     }
 
     fn instance_authority(&self, host: &str, instance: &str) -> bool {
@@ -185,10 +220,28 @@ impl RunnerService {
             transfer.to,
         );
         if let RunnerFrame::TransferAccepted {
-            stopped: report, ..
+            stopped: report,
+            unpromoted,
+            ..
         } = &mut answer
         {
             *report = self.foreground_report(host, &owner);
+            if let Some((sessions, _)) =
+                lock(&self.inner.lines).get(&(host.to_owned(), owner.line.clone()))
+            {
+                *unpromoted = plakous_tools::internal::live_foreground(sessions)
+                    .into_iter()
+                    .map(
+                        |(call_key, pid)| plakous_runner_protocol::UnpromotedProcess {
+                            call_key,
+                            pid,
+                        },
+                    )
+                    .collect();
+                unpromoted.sort_by(|left, right| {
+                    (&left.call_key, left.pid).cmp(&(&right.call_key, right.pid))
+                });
+            }
         }
         answer
     }
