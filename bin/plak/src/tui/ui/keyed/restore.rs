@@ -59,6 +59,8 @@ impl App {
             if keep_local
                 && self.pane.keyed.is_local(at)
                 && !matches!(&*block, ScrollBlock::System(text) if Some(text) == self.opening_note.as_ref())
+                && !matches!(&*block, ScrollBlock::Error(text)
+                    if self.pane.refusals.iter().any(|refusal| refusal.note == *text))
             {
                 locals.push(LocalBlock {
                     old_at: at,

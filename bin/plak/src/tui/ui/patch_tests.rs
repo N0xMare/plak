@@ -32,6 +32,28 @@ fn paint(app: &mut App) -> String {
     serialize_frame(terminal.backend().buffer())
 }
 
+#[test]
+fn a_local_stop_acknowledgement_survives_a_same_session_baseline() {
+    use plakous_host_protocol::views::transcript::NoticeScope;
+    let mut app = scoped_app(&TranscriptScope::Root);
+    bind_session(&mut app, "s1");
+    let rows = BTreeMap::from([(
+        RowKey::new(1, Lane::Runtime, 0),
+        TranscriptRow::assistant("the host answer"),
+    )]);
+    app.apply_host_event(scoped_snapshot(&TranscriptScope::Root, 1, &rows));
+    app.apply_host_event(HostEvent::Row(TranscriptRow::info(
+        NoticeScope::Settings,
+        "session work stopped",
+    )));
+    assert!(paint(&mut app).contains("session·work·stopped"));
+    app.apply_host_event(scoped_snapshot(&TranscriptScope::Root, 2, &rows));
+    assert!(paint(&mut app).contains("session·work·stopped"));
+    bind_session(&mut app, "s2");
+    app.apply_host_event(scoped_snapshot(&TranscriptScope::Root, 1, &rows));
+    assert!(!paint(&mut app).contains("session·work·stopped"));
+}
+
 fn scoped_app(scope: &TranscriptScope) -> App {
     let mut app = App::new(launch_basic(), true);
     pin_clock(&mut app);

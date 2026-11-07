@@ -4756,6 +4756,9 @@ created root. Resuming or creating switches this terminal's attachment
 only; other faces and the old session's work remain in the host. Quit,
 terminal close and terminating signals detach. `/stop` sends
 `stop_session` for the attached session and leaves the face attached.
+Its acknowledgement is local terminal chrome, not a host transcript preview:
+it survives a same-session presentation baseline, including when a repeated
+stop writes no new notice. It is not persisted or carried to another session.
 After transport loss the TUI reports `product host disconnected`; it
 never retries a prompt automatically. Once the host restarts, `/attach`
 makes a fresh connection and root attach, or the operator can quit and

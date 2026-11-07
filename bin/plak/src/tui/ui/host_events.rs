@@ -341,8 +341,7 @@ impl App {
                 {
                     return;
                 }
-                let keep_local = self.busy
-                    && self.pane.presentation_ready
+                let keep_local = self.pane.presentation_ready
                     && self.pane.presentation.scope() == &snapshot.scope;
                 let scope = snapshot.scope.clone();
                 if let Err(error) = self.pane.presentation.replace(&snapshot) {
@@ -416,6 +415,11 @@ impl App {
         let root = self.viewed_agent_id().is_none();
         match event {
             HostEvent::Row(row) => {
+                let local = matches!(
+                    &row,
+                    plakous_host_protocol::views::transcript::TranscriptRow::Notice(notice)
+                        if notice.scope == plakous_host_protocol::views::transcript::NoticeScope::Settings
+                );
                 if let Some(mut block) = ScrollBlock::from_row(row) {
                     // Projector settlements replace previews (or restored rows)
                     // by call identity, without moving them past the answer.
@@ -445,7 +449,11 @@ impl App {
                         self.mark_block_changed(index);
                         return;
                     }
-                    self.push_live_block(block);
+                    if local {
+                        self.push_block(block);
+                    } else {
+                        self.push_live_block(block);
+                    }
                 }
             }
             HostEvent::AssistantDelta(delta) => {
