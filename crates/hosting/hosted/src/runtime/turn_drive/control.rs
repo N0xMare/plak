@@ -805,7 +805,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                     if surface::needs_usage(self.host.surface.as_deref(), &intent) {
                         // Provider limits are independent of the running driver.
                         // Show held meters while the coalesced refresh runs.
-                        if let Some(stale) = self.host.held_usage.stale() {
+                        if let Some(stale) = self
+                            .host
+                            .held_usage
+                            .stale(self.host.session.account_ref().ok().as_ref())
+                        {
                             let _ = self.host.events.send(ContentEvent::UsageLimits(stale));
                         }
                         if surface::fresh_usage(self.host.surface.as_deref(), &intent) {

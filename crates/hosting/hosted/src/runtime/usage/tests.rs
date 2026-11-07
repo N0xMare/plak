@@ -185,6 +185,32 @@ fn cached_usage_switches_accounts_without_serving_the_held_projection() {
 }
 
 #[test]
+fn stale_usage_and_retained_clocks_do_not_cross_account_switches() {
+    for (previous, current) in [("codex", "codex/work"), ("codex/work", "codex")] {
+        let held = HeldUsage::default();
+        held.store(&ready_usage_for_account(previous));
+        let old = Instant::now()
+            .checked_sub(Duration::from_secs(120))
+            .unwrap();
+        held.inner.lock().unwrap().as_mut().unwrap().1 = old;
+        assert!(held.stale(Some(&previous.parse().unwrap())).is_some());
+        assert!(held.stale(Some(&current.parse().unwrap())).is_none());
+        let mut incoming = ready_usage_for_account(current);
+        incoming.verticals[0].state =
+            plakous_host_protocol::views::presentation::VerticalUsageState::Unavailable {
+                reason: crate::subscription_usage::USAGE_BUSY_REASON.to_owned(),
+            };
+        let started = Instant::now();
+        let view = held.preserve_and_store(incoming);
+        assert!(held.inner.lock().unwrap().as_ref().unwrap().1 >= started);
+        assert!(matches!(
+            view.verticals[0].state,
+            plakous_host_protocol::views::presentation::VerticalUsageState::Unavailable { .. }
+        ));
+    }
+}
+
+#[test]
 fn named_usage_reads_its_own_busy_compatibility_lock() {
     let root = tempfile::tempdir().unwrap();
     let (subscriptions, default_lock) = default_ready_usage_fixture(root.path());

@@ -719,22 +719,10 @@ pub(super) fn request_subscription_usage_cached<P: plakous_host_protocol::Protoc
     subscriptions: Option<NativeSubscriptions>,
     account: Option<crate::account::AccountRef>,
 ) {
-    if let Some(mut fresh) = held.fresh().filter(|view| {
-        account
-            .as_ref()
-            .filter(|account| account.is_named())
-            .map_or_else(
-                || {
-                    view.verticals
-                        .iter()
-                        .all(|row| !row.vertical.account().contains('/'))
-                },
-                |account| {
-                    view.verticals.len() == 1
-                        && view.verticals[0].vertical.account() == account.as_str()
-                },
-            )
-    }) {
+    if let Some(mut fresh) = held
+        .fresh()
+        .filter(|view| usage_matches_account(view, account.as_ref()))
+    {
         fresh.session = ledger.project();
         let _ = events.send(ContentEvent::UsageLimits(fresh));
         let _ = events.send(ContentEvent::SubscriptionUsage(
@@ -743,6 +731,22 @@ pub(super) fn request_subscription_usage_cached<P: plakous_host_protocol::Protoc
         return;
     }
     refresh.request(subscriptions, account);
+}
+
+fn usage_matches_account(
+    view: &plakous_host_protocol::views::presentation::UsageLimitsView,
+    account: Option<&crate::account::AccountRef>,
+) -> bool {
+    account.filter(|account| account.is_named()).map_or_else(
+        || {
+            view.verticals
+                .iter()
+                .all(|row| !row.vertical.account().contains('/'))
+        },
+        |account| {
+            view.verticals.len() == 1 && view.verticals[0].vertical.account() == account.as_str()
+        },
+    )
 }
 
 impl HeldUsage {
@@ -779,7 +783,11 @@ impl HeldUsage {
         let previous = held.as_ref().map(|(view, _)| view);
         let retained = incoming.verticals.iter().any(|vertical| {
             let named = vertical.vertical.account().parse::<crate::account::AccountRef>().is_ok_and(|account| account.is_named());
-            !named && matches!(
+            let previously_ready = previous.is_some_and(|view| view.verticals.iter().any(|prior| {
+                prior.vertical.account() == vertical.vertical.account()
+                    && matches!(prior.state, plakous_host_protocol::views::presentation::VerticalUsageState::Ready { .. })
+            }));
+            !named && previously_ready && matches!(
                 &vertical.state,
                 plakous_host_protocol::views::presentation::VerticalUsageState::Unavailable { reason }
                     if crate::subscription_usage::is_rate_limited_reason(reason)
@@ -801,9 +809,13 @@ impl HeldUsage {
     /// Returns the held projection stamped with its whole-second age.
     pub(super) fn stale(
         &self,
+        account: Option<&crate::account::AccountRef>,
     ) -> Option<plakous_host_protocol::views::presentation::UsageLimitsView> {
         let held = self.inner.lock().ok()?;
         let (view, observed) = held.as_ref()?;
+        if !usage_matches_account(view, account) {
+            return None;
+        }
         let mut view = view.clone();
         view.stale_age_seconds = Some(observed.elapsed().as_secs());
         Some(view)
