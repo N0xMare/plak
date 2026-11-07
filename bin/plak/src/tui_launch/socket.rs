@@ -79,8 +79,18 @@ impl SocketFace {
     }
 
     pub(super) fn select(&self, requested: Option<&str>) -> CliResult<()> {
-        let answer = if let Some(requested) = requested {
+        if requested.is_some() {
             self.state().new_request = None;
+        }
+        self.select_or_create(requested)
+    }
+
+    pub(super) fn reattach(&self, session: &str) -> CliResult<()> {
+        self.select_or_create(Some(session))
+    }
+
+    fn select_or_create(&self, requested: Option<&str>) -> CliResult<()> {
+        let answer = if let Some(requested) = requested {
             let Answer::Sessions { rows } = self.call(self.list())? else {
                 return Err(CliFailure::new(
                     "the host did not answer with its session directory",

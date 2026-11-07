@@ -4883,7 +4883,8 @@ and stop/attach outcomes unknown at timeout or transport end, are visible.
 An unanswered `new_session` retains its request id across reconnect; the
 next operator `/new` reuses that id rather than creating an orphaned second
 session. It is never replayed automatically. An explicit resume or selection
-retires that unknown creation identity; an accepted creation also retires
+retires that unknown creation identity; automatic reselection after retrying
+an attachment or returning from the config editor preserves it. An accepted creation also retires
 it, so successive `/new` acts create distinct sessions. `/stop` is host-mode only and
 hidden from the embedded palette. Config-editor return reloads terminal
 preferences before opening the terminal again.

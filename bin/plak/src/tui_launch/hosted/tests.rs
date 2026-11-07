@@ -42,6 +42,15 @@ fn welcomed(listener: &UnixListener) -> (UnixStream, BufReader<UnixStream>) {
 
 #[test]
 fn a_new_with_a_lost_answer_is_retried_with_its_original_identity() {
+    lost_new(false);
+}
+
+#[test]
+fn automatic_reselection_keeps_a_lost_new_identity_with_a_previous_attachment() {
+    lost_new(true);
+}
+
+fn lost_new(selected: bool) {
     let root = tempfile::Builder::new()
         .prefix("tf")
         .tempdir_in("/tmp")
@@ -60,7 +69,9 @@ fn a_new_with_a_lost_answer_is_retried_with_its_original_identity() {
         for attempt in 0..2 {
             let (mut stream, mut reader) = welcomed(&listener);
             let mut line = String::new();
-            if attempt == 1 {
+            if selected {
+                select_previous(&mut stream, &mut reader);
+            } else if attempt == 1 {
                 line.clear();
                 reader.read_line(&mut line).unwrap();
                 let ClientFrame::Request {
@@ -108,6 +119,9 @@ fn a_new_with_a_lost_answer_is_retried_with_its_original_identity() {
         }
     });
     let previous = SocketFace::discover(&paths).unwrap().unwrap();
+    if selected {
+        previous.select(Some("previous")).unwrap();
+    }
     previous.send(UserAction::NewSession).unwrap();
     let until = Instant::now() + Duration::from_secs(3);
     while previous.ended().is_none() {
@@ -121,8 +135,71 @@ fn a_new_with_a_lost_answer_is_retried_with_its_original_identity() {
         ))
     ));
     let face = reconnect(&paths, &previous).unwrap();
-    assert!(select_or_list(&face, None).unwrap());
+    assert_eq!(
+        select_or_list(&face, selected.then_some("previous")).unwrap(),
+        !selected
+    );
     face.send(UserAction::NewSession).unwrap();
     drop(face);
     server.join().unwrap();
+}
+
+fn select_previous(stream: &mut UnixStream, reader: &mut BufReader<UnixStream>) {
+    use plakous_host_protocol::wire::{
+        LiveWork, NodeAddress, SessionActivity, SessionEnvironment, SessionResidency, SessionRow,
+    };
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    let ClientFrame::Request {
+        id,
+        op: Op::ListSessions { .. },
+    } = decode_line::<ClientFrame<PlakExtension>>(&line).unwrap()
+    else {
+        panic!("not list_sessions")
+    };
+    let node = NodeAddress {
+        tree_id: "previous".into(),
+        agent_id: "root".into(),
+    };
+    let answer = HostFrame::<PlakExtension>::Response {
+        id,
+        outcome: Outcome::Ok(Answer::Sessions {
+            rows: vec![SessionRow {
+                session: "previous".into(),
+                node: node.clone(),
+                title: None,
+                workspace: "/workspace".into(),
+                profile: None,
+                updated_at: 0,
+                residency: SessionResidency::Resident,
+                activity: SessionActivity::Idle,
+                live_work: LiveWork::default(),
+                environment: SessionEnvironment::Host,
+                hosted_elsewhere: None,
+            }],
+        }),
+    };
+    stream
+        .write_all(encode_line(&answer).unwrap().as_bytes())
+        .unwrap();
+    line.clear();
+    reader.read_line(&mut line).unwrap();
+    let ClientFrame::Request {
+        id,
+        op: Op::Attach { node: attached },
+    } = decode_line::<ClientFrame<PlakExtension>>(&line).unwrap()
+    else {
+        panic!("not attach")
+    };
+    assert_eq!(attached, node);
+    stream
+        .write_all(
+            encode_line(&HostFrame::<PlakExtension>::Response {
+                id,
+                outcome: Outcome::Ok(Answer::Attached { attachment: id }),
+            })
+            .unwrap()
+            .as_bytes(),
+        )
+        .unwrap();
 }

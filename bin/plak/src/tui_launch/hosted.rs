@@ -186,7 +186,7 @@ fn retry_selection(
 
 fn select_or_list(face: &SocketFace, selected: Option<&str>) -> CliResult<bool> {
     if let Some(session) = selected {
-        face.select(Some(session))?;
+        face.reattach(session)?;
         return Ok(false);
     }
     face.list_sessions()?;
