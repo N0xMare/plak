@@ -69,7 +69,22 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
                 ));
                 return Err(CliFailure::hosted_elsewhere(message));
             }
-            config.state_roots.refuse_daemon_line(locator).await?;
+            let holder = config.lease_holder.as_ref().and_then(|name| name(locator));
+            config
+                .state_roots
+                .refuse_daemon_line(locator)
+                .await
+                .map_err(|failure| {
+                    // A process-free open still applies canonical lease expiry.
+                    // Only a D6 refusal yields to the live holder's name here.
+                    if failure.code() == Some("local_runner_processes")
+                        && let Some(holder) = holder
+                    {
+                        CliFailure::hosted_elsewhere(holder)
+                    } else {
+                        failure
+                    }
+                })?;
         }
         let log = SessionLog::open(&config.home, &config.session.id).ok();
         let mut stderr_buf = Vec::new();

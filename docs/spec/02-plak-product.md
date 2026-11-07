@@ -4691,7 +4691,9 @@ when the host starts keeps its custody, and the per-tree
   live foreground process refuses with typed
   `local_runner_processes`: "this session's processes run in the local runner;
   start `plak host`, or see them with `plak runner ps`". It changes no job
-  outcome and stops nothing. When no daemon answers, the open proceeds.
+  outcome and stops nothing. A live runtime holder's name takes precedence
+  over that process refusal; process-free opens retain canonical lease expiry.
+  When no daemon answers, the open proceeds.
 - **Tool environment.** It captures the login shell's `PATH` once at start,
   bounded at 5 s however the shell's startup files behave, as `plak runner
   serve` does when `runner.toml` sets no `path` (the shell runs in a process
