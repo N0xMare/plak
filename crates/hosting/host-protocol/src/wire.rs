@@ -495,7 +495,7 @@ pub enum RequestRefusal {
         /// Requested or saved runner identity.
         runner: RunnerLabel,
         /// Typed placement verdict.
-        reason: PlacementReason,
+        reason: Box<PlacementReason>,
     },
     /// Product binding failed independently of runner readiness.
     BindingRefused {
