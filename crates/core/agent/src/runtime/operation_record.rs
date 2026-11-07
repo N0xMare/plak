@@ -498,6 +498,12 @@ pub(super) fn retain_quiescent_ledger(
         .iter()
         .rposition(|command| is_accepted_root(command));
     let operations = ledger.operations();
+    let last_turn = last_root.and_then(|index| commands[index].turn_id());
+    let last_turn_start = operations
+        .iter()
+        .find(|record| last_turn.is_some() && command_kind_turn_id(record) == last_turn)
+        .map_or(u64::MAX, |record| record.operation_id());
+    let admitting_root = last_turn.is_some() && last_turn_start == u64::MAX;
     let mut unsettled_turns = operations
         .iter()
         .filter_map(|record| {
@@ -525,17 +531,13 @@ pub(super) fn retain_quiescent_ledger(
         .filter(|command| is_accepted_root(command))
         .filter_map(|command| command.turn_id())
         .collect::<BTreeSet<_>>();
-    let last_turn = last_root.and_then(|index| commands[index].turn_id());
-    let root_of = |record: &DurableOperationRecord| match record.kind() {
-        DurableOperationKind::Command {
-            turn_id: Some(turn_id),
-        } => Some(*turn_id),
-        _ => None,
-    };
-    let last_turn_start = operations
-        .iter()
-        .find(|record| last_turn.is_some() && root_of(record) == last_turn)
-        .map_or(u64::MAX, |record| record.operation_id());
+    // A just-appended root receipt has no operation yet. Admission appends a
+    // newer operation before publishing, so the old newest operation need not
+    // survive. Otherwise preserve it, including its whole composition group,
+    // to keep reopen's operation sequence monotonic.
+    let last_operation = (!admitting_root)
+        .then(|| operations.last().map(|record| record.operation_id()))
+        .flatten();
     let latest_response = operations
         .iter()
         .rev()
@@ -553,11 +555,12 @@ pub(super) fn retain_quiescent_ledger(
         .map(|(compaction, provider, _)| [compaction.operation_id(), provider.operation_id()]);
     let base = |record: &DurableOperationRecord| {
         !matches!(record.state(), DurableOperationState::Finalized(_))
+            || Some(record.operation_id()) == last_operation
             || record.operation_id() >= last_turn_start
             || Some(record.operation_id()) == latest_response
             || Some(record.operation_id()) == latest_provider
             || latest_harness.is_some_and(|pair| pair.contains(&record.operation_id()))
-            || root_of(record).is_some_and(|turn_id| kept_roots.contains(&turn_id))
+            || command_kind_turn_id(record).is_some_and(|turn_id| kept_roots.contains(&turn_id))
     };
     let groups = operations
         .iter()
@@ -585,6 +588,13 @@ pub(super) fn retain_quiescent_ledger(
                 "operation ledger retention produced an invalid ledger",
             )
         })
+}
+
+fn command_kind_turn_id(record: &DurableOperationRecord) -> Option<TurnId> {
+    match record.kind() {
+        DurableOperationKind::Command { turn_id } => *turn_id,
+        _ => None,
+    }
 }
 
 /// The evaluation a composition record belongs to, named by its operation.

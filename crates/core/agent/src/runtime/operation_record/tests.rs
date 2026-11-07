@@ -156,6 +156,123 @@ fn settled_root(operation_id: u64, turn_id: TurnId) -> TestResult<DurableOperati
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
+#[test]
+fn new_root_retention_drops_the_previous_newest_composition_group_whole() -> TestResult {
+    let turn = TurnId::try_from(uuid::Uuid::from_u128(0x30))?;
+    let next = TurnId::try_from(uuid::Uuid::from_u128(0x31))?;
+    let attempt = AttemptId::try_from(uuid::Uuid::from_u128(0x32))?;
+    let call = crate::CallId::try_from(uuid::Uuid::from_u128(0x33))?;
+    let evidence = runtime_component(RuntimeComponentKind::Operation, b"settled".to_vec())?;
+    let finalized = |id, kind| -> TestResult<DurableOperationRecord> {
+        DurableOperationRecord::new(
+            id,
+            kind,
+            evidence.clone(),
+            vec![
+                DurableOperationTransition::new(checkpoint(0x34)?, DurableOperationState::Prepared),
+                DurableOperationTransition::new(
+                    checkpoint(0x35)?,
+                    DurableOperationState::Dispatched,
+                ),
+                DurableOperationTransition::new(
+                    checkpoint(0x36)?,
+                    DurableOperationState::Completed(evidence.clone()),
+                ),
+                DurableOperationTransition::new(
+                    checkpoint(0x37)?,
+                    DurableOperationState::Finalized(evidence.clone()),
+                ),
+            ],
+        )
+        .map_err(Into::into)
+    };
+    let ledger = RuntimeOperationLedger::new(
+        vec![root_command(1, turn)?],
+        vec![
+            settled_root(1, turn)?,
+            finalized(
+                2,
+                DurableOperationKind::CompositionEvaluation {
+                    turn_id: turn,
+                    attempt_id: attempt,
+                    call_id: call,
+                    source_index: 0,
+                },
+            )?,
+            finalized(
+                3,
+                DurableOperationKind::CompositionChild {
+                    turn_id: turn,
+                    attempt_id: attempt,
+                    call_id: call,
+                    evaluation_operation_id: 2,
+                    interpreter_generation: 1,
+                    cell_id: "cell".into(),
+                    request_sequence: 1,
+                },
+            )?,
+        ],
+    )?;
+    assert_eq!(
+        retain_quiescent_ledger(&ledger, &BTreeSet::new())?
+            .operations()
+            .len(),
+        3
+    );
+    let ledger = ledger.append_command(root_command(2, next)?)?;
+    let retained = retain_quiescent_ledger(&ledger, &BTreeSet::new())?;
+    assert_eq!(
+        retained
+            .operations()
+            .iter()
+            .map(|record| record.operation_id())
+            .collect::<Vec<_>>(),
+        [1]
+    );
+    // Admission supplies the new sequence anchor in the same publication.
+    let admitted = retained.append_operation(DurableOperationRecord::new(
+        4,
+        DurableOperationKind::Command {
+            turn_id: Some(next),
+        },
+        evidence,
+        vec![DurableOperationTransition::new(
+            checkpoint(0x38)?,
+            DurableOperationState::Prepared,
+        )],
+    )?)?;
+    assert_eq!(
+        admitted.operations().last().ok_or("root")?.operation_id(),
+        4
+    );
+    Ok(())
+}
+
+#[test]
+fn new_root_retention_never_drops_unresolved_operations() -> TestResult {
+    let turn = TurnId::try_from(uuid::Uuid::from_u128(0x40))?;
+    let next = TurnId::try_from(uuid::Uuid::from_u128(0x41))?;
+    let pending = DurableOperationRecord::new(
+        2,
+        DurableOperationKind::Provider {
+            root: ModelOperationRoot::Turn(turn),
+            attempt_id: AttemptId::try_from(uuid::Uuid::from_u128(0x42))?,
+        },
+        runtime_component(RuntimeComponentKind::Operation, b"pending".to_vec())?,
+        vec![DurableOperationTransition::new(
+            checkpoint(0x43)?,
+            DurableOperationState::Prepared,
+        )],
+    )?;
+    let ledger = RuntimeOperationLedger::new(
+        vec![root_command(1, turn)?, root_command(2, next)?],
+        vec![settled_root(1, turn)?, pending.clone()],
+    )?;
+    let retained = retain_quiescent_ledger(&ledger, &BTreeSet::new())?;
+    assert_eq!(retained.operations().last().copied(), Some(&pending));
+    Ok(())
+}
+
 /// Turn A's fold failed after dispatch and the turn was refused; turn B,
 /// the last root, was refused before any provider call. Retention of the
 /// quiescent ledger past the high-water mark drops turn A's records, but

@@ -357,7 +357,12 @@ needed for dedupe and recovery.
 This applies to idle rejected commands as well as turn terminals; a long idle
 rejection sequence cannot permanently fill the 4096-command actor ledger.
 A ledger full during owned work remains recovery-requiring; reopen settles that
-work before quiescent retention can free capacity. Nothing reserves headroom
+work before quiescent retention can free capacity. After adding a new root
+receipt, quiescent admission prunes the previous root’s settled operations
+before appending the new root operation, in the same admission commit. A
+recovered latest turn occupying all 4096 operation slots therefore does not
+prevent re-tasking. Retained root terminal evidence and unresolved operations
+are unchanged. Nothing reserves headroom
 for one turn's rounds and fan-out: retention runs only at quiescence, so a very
 long turn (many rounds of parallel tools or Code Cell children) that starts
 near the high-water mark can reach the 4096-record limit and end

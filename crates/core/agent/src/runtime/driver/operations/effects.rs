@@ -5,8 +5,9 @@ use super::{
     DurableOperationState, DurableOperationTransition, EffectDispatchIntent, HistorySegment,
     OperationId, Ordering, RuntimeComponentKind, RuntimeLifecycle, RuntimeWorkingRoot,
     StoreAdmission, TurnId, durable_command_effect, durable_control_error_kind, durable_rejection,
-    effect_intent_bytes, effect_operation_intent_digest, operation_kind_turn_id, runtime_component,
-    runtime_manifest_error, working_lifecycle,
+    effect_intent_bytes, effect_operation_intent_digest, ledger_needs_retention,
+    operation_kind_turn_id, retain_quiescent_ledger, runtime_component, runtime_manifest_error,
+    working_lifecycle,
 };
 
 impl Driver {
@@ -261,6 +262,21 @@ impl Driver {
                 .ledger()
                 .append_command(record)
                 .map_err(runtime_manifest_error)?;
+            // The new receipt makes the previous root eligible for retention.
+            // Prune before appending its operation: a recovered, finalized
+            // latest turn can occupy every operation slot (spec 01 §3).
+            if matches!(effect, ActorCommandEffect::Root)
+                && manifest.lifecycle() == &RuntimeLifecycle::Quiescent
+                && ledger_needs_retention(&ledger)
+            {
+                let owned_turns = self
+                    .active_root
+                    .iter()
+                    .chain(self.roots.iter())
+                    .map(|root| root.turn_id)
+                    .collect();
+                ledger = retain_quiescent_ledger(&ledger, &owned_turns)?;
+            }
             if let Some(operation_id) = operation_id {
                 ledger = ledger
                     .append_operation(
@@ -311,16 +327,24 @@ impl Driver {
         } else {
             prior_lifecycle
         };
-        self.publish_checkpoint(
-            admission,
-            checkpoint_id,
-            lifecycle,
-            history,
-            ledger,
-            context,
-            family,
-        )
-        .await?;
+        let published = self
+            .publish_checkpoint(
+                admission,
+                checkpoint_id,
+                lifecycle,
+                history,
+                ledger,
+                context,
+                family,
+            )
+            .await?;
+        // The caller inserts this new receipt into the actor index next.
+        // Mirror admission-time retention only after its CAS has succeeded.
+        if published.manifest().ledger().command_count()
+            < self.command_ledger.len().saturating_add(1)
+        {
+            self.retain_command_index(&published);
+        }
         Ok(operation_id)
     }
 

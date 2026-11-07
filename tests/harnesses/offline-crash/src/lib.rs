@@ -21,6 +21,7 @@ pub mod ledger_signature;
 pub mod loopback;
 /// Versioned parent/child control protocol.
 pub mod protocol;
+mod saturated_ledger;
 /// Declarative offline model scripts.
 pub mod script;
 
@@ -28,6 +29,7 @@ pub use crossed_root::seed_crossed_root;
 pub use finalization_debt::{
     seed_fenced_code_cell, seed_finalization_debt, seed_uncertain_terminal_siblings,
 };
+pub use saturated_ledger::seed_saturated_operation_ledger;
 
 pub use fixture::{
     BoundaryController, compaction_runtime_binding,

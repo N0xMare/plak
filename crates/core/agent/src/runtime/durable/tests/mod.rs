@@ -69,6 +69,7 @@ mod provider_outcome_tests;
 mod reresolution_tests;
 mod residency;
 mod round_limit;
+mod saturated_retask;
 mod scheduling_diagnostics;
 mod storage_outage;
 mod store_growth;

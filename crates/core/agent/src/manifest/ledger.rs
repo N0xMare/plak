@@ -433,9 +433,9 @@ impl RuntimeOperationLedger {
     ///
     /// Commands declined by `keep_command` are dropped, and so is every
     /// operation `keep` declines, which must then be `Finalized`. The newest
-    /// command and operation always stay, so the sequences a reopen derives
-    /// from them never go back. The result is rebuilt from the retained
-    /// records rather than appended to `self`.
+    /// command always stays. The caller keeps the newest operation too unless
+    /// it appends a newer one before publication, so a reopen's operation
+    /// sequence never goes back. The result is rebuilt from retained records.
     pub(crate) fn retained(
         &self,
         mut keep_command: impl FnMut(&DurableCommandRecord) -> bool,
@@ -448,11 +448,9 @@ impl RuntimeOperationLedger {
             .filter(|record| keep_command(record) || Some(record.sequence) == last_sequence)
             .cloned()
             .collect();
-        let last_operation =
-            operation_map_last(self.operation_root.as_deref()).map(|record| record.operation_id);
         let mut operations = Vec::new();
         for record in self.operations() {
-            if Some(record.operation_id) == last_operation || keep(record) {
+            if keep(record) {
                 operations.push(record.clone());
             } else if !matches!(record.state(), DurableOperationState::Finalized(_)) {
                 return Err(RuntimeManifestError::InvalidLedger);

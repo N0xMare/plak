@@ -296,15 +296,19 @@ impl Driver {
             self.pending_job_consumptions.clear();
         }
         if retain {
-            let kept = published
-                .manifest()
-                .ledger()
-                .commands()
-                .into_iter()
-                .map(|command| command.command_id().to_owned())
-                .collect::<BTreeSet<_>>();
-            self.command_ledger
-                .retain(|command_id, _| kept.contains(command_id.as_str()));
+            self.retain_command_index(published);
         }
+    }
+
+    pub(super) fn retain_command_index(&mut self, published: &RuntimeCheckpoint) {
+        let kept = published
+            .manifest()
+            .ledger()
+            .commands()
+            .into_iter()
+            .map(|command| command.command_id().to_owned())
+            .collect::<BTreeSet<_>>();
+        self.command_ledger
+            .retain(|command_id, _| kept.contains(command_id.as_str()));
     }
 }
