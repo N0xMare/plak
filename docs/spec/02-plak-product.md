@@ -8941,11 +8941,14 @@ product observations without moving product vocabulary into the agent sink.
 
 ### 7.2 Usage and allowances
 
+There is exactly one usage renderer. `plak usage` and the TUI Usage tab go
+through the same projection and the same text builder, so the CLI and the
+screen cannot disagree.
+
 Until refresh telemetry attributes exact account references, a default account's
 status, doctor and Usage omit recorded refresh outcomes whenever any named slot
 of the same vertical exists. The vertical-only row might belong to that sibling;
 local credential state remains visible and authoritative.
-
 
 Every allowance request carries the current session account reference, including
 a detached shell and a session switched in-process. The worker derives a named
@@ -8953,10 +8956,6 @@ native slot from that reference before reading it; a previously selected store
 or cached projection never supplies another account's allowance under its label.
 The same account check gates stale in-turn views. A retained observation clock
 is reused only when that account's previous Ready meters actually survive.
-
-There is exactly one usage renderer. `plak usage` and the TUI Usage tab go
-through the same projection and the same text builder, so the CLI and the
-screen cannot disagree.
 
 The honesty clauses are the governing law of the whole surface:
 
@@ -9622,12 +9621,6 @@ implying the grant is gone.
 
 ### 8.6 Status
 
-Until refresh telemetry attributes exact account references, a default account's
-status, doctor and Usage omit recorded refresh outcomes whenever any named slot
-of the same vertical exists. The vertical-only row might belong to that sibling;
-local credential state remains visible and authoritative.
-
-
 Both status forms and doctor write one line for each of the seven compiled
 surfaces within 14 days (inclusive) of its deadline or past it, naming the
 surface and exact UTC deadline. The surfaces fall into two classes:
@@ -9653,6 +9646,8 @@ accounts, and closes with the sentence that no provider request was made. A
 section with no rows is omitted, heading and all. A row carries the account, whether it is OAuth or an API key, the
 compatibility acceptance, and the credential state. `plak status <account>`
 prints the same two facts for one account on one line.
+
+Recorded refresh outcomes follow §7.2's named-sibling attribution limitation.
 
 An OAuth account whose offline read fails is still a row, under Setup needed.
 Its PROFILE is `—` and its CREDENTIAL names the state and the repair from the
