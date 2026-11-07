@@ -5,7 +5,6 @@ use crate::commands::host_config::{
     TuiAttachEligibility, build_host_config, tui_attach_eligibility,
 };
 use crate::commands::support::{HOST_WORKER_JOIN_TIMEOUT, join_host_worker_bounded};
-use crate::presentation::tui_presentation_bundle;
 use crate::product_config;
 use crate::store::sessions as product_sessions;
 use plakous_host_protocol::status::HostPhase;
@@ -231,15 +230,7 @@ fn attached_presentation(
     account: &str,
 ) -> CliResult<crate::presentation::TuiPresentationBundle> {
     let selection: plakous_hosted::account::AccountRef = account.parse()?;
-    if selection.is_named() && selection.vertical().is_api() {
-        crate::home::secrets::require_api_key(paths, selection.as_str())?;
-        return Ok(crate::presentation::TuiPresentationBundle {
-            providers: Vec::new(),
-            sections: plakous_host_protocol::views::ReadyCatalog::default(),
-            native_models: Vec::new(),
-        });
-    }
-    tui_presentation_bundle(paths)
+    crate::commands::host_config::binding_presentation(paths, &selection)
 }
 
 fn validate_catalog_for_attach(
@@ -253,8 +244,7 @@ fn validate_catalog_for_attach(
 ) -> Result<(), AttachedConfigError> {
     let selection: plakous_hosted::account::AccountRef =
         account.parse().map_err(CliFailure::from)?;
-    let named_api = selection.is_named() && selection.vertical().is_api();
-    if classify_rebind_fallback && !named_api {
+    if classify_rebind_fallback && !selection.is_named() {
         require_catalog_binding(target, catalog, native_models, account, model)?;
     }
     if tui_attach_eligibility(target, catalog, Some(account), Some(model), effort_explicit)

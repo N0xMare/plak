@@ -24,18 +24,28 @@ pub(crate) fn admit_command(command: &Command) -> CliResult<()> {
         _ => {}
     }
     match command {
-        Command::CompatibilityNotice(provider)
-        | Command::AuthStatus(provider)
+        Command::CompatibilityNotice(provider) => {
+            plakous_hosted::capabilities::require_native(*provider)?;
+        }
+        Command::AuthStatus(provider)
         | Command::AuthRefresh(provider)
         | Command::Models(provider)
         | Command::AuthLogin { provider, .. }
         | Command::AuthLogout { provider, .. }
-        | Command::Run { provider, .. } => plakous_hosted::capabilities::require_native(*provider)?,
-        Command::ModelsOpenRouter | Command::RunOpenRouter { .. } => {
-            plakous_hosted::capabilities::require("openrouter")?;
+        | Command::Run { provider, .. } => {
+            plakous_hosted::capabilities::require(provider.as_str())?;
         }
-        Command::ModelsPlatform(provider) | Command::RunPlatform { provider, .. } => {
-            plakous_hosted::capabilities::require(provider.account())?;
+        Command::ModelsOpenRouter(account) | Command::RunOpenRouter { account, .. } => {
+            plakous_hosted::capabilities::require(account.as_str())?;
+        }
+        Command::ModelsPlatform(account) | Command::RunPlatform { account, .. } => {
+            plakous_hosted::capabilities::require(account.as_str())?;
+        }
+        Command::Agent {
+            account: Some(account),
+            ..
+        } => {
+            plakous_hosted::capabilities::require(account.as_str())?;
         }
         _ => {}
     }

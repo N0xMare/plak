@@ -234,7 +234,13 @@ pub fn project_limits(
     session: SessionLedgerView,
 ) -> UsageLimitsView {
     let collected: Vec<(UsageVertical, VerticalObservation)> = observations.into_iter().collect();
-    let verticals = product_verticals()
+    let mut roster = product_verticals().to_vec();
+    for (vertical, _) in &collected {
+        if !roster.contains(vertical) {
+            roster.push(vertical.clone());
+        }
+    }
+    let verticals = roster
         .into_iter()
         .map(|vertical| {
             let observation = collected
@@ -477,7 +483,9 @@ fn meter_identity(
     // SuperGrok reports exactly one included-credit window, and names its own
     // cadence in the period type. An unnamed cadence stays "Usage limit"
     // rather than being guessed as weekly.
-    if vertical.account() == supergrok_vertical().account() {
+    if crate::capabilities::for_account(vertical.account())
+        .is_some_and(|route| route.account == "grok")
+    {
         let kind = match period {
             Some(SubscriptionUsagePeriod::ProviderPeriod { kind, .. }) => kind.as_str(),
             Some(SubscriptionUsagePeriod::Rolling { .. }) | None => "",
@@ -491,7 +499,9 @@ fn meter_identity(
         };
         return (None, label.to_owned());
     }
-    if vertical.account() == claude_vertical().account() {
+    if crate::capabilities::for_account(vertical.account())
+        .is_some_and(|route| route.account == "claude")
+    {
         let window = match (window_name, duration_seconds) {
             (Some("five_hour"), _) | (_, 18_000) => "5h limit".to_owned(),
             (Some("seven_day"), _) | (_, 604_800) => "Weekly limit".to_owned(),
@@ -893,7 +903,7 @@ pub fn unavailable_reason(reason: SubscriptionUsageUnavailable, account: &str) -
             SubscriptionUsageCredentialState::RefreshRequired => "credential needs a token refresh; the next turn refreshes it, or refresh explicitly".to_owned(),
             // Grok reclaims an ambiguous refresh on its next refresh, so a
             // re-login is the fallback rather than the first remedy there.
-            SubscriptionUsageCredentialState::Quarantined if account == "grok" => {
+            SubscriptionUsageCredentialState::Quarantined if crate::capabilities::for_account(account).is_some_and(|route| route.account == "grok") => {
                 "credential is quarantined after an ambiguous refresh; the next turn retries it, or refresh explicitly; replace the login if that fails"
                     .to_owned()
             }

@@ -3,8 +3,8 @@
 use super::application::{PlakousApplication, catalog_summaries};
 use super::session::load_admitted_product_session;
 use super::support::{
-    application_execution_failure, cli_provider_name, native_processing_tier,
-    product_subscription_request_limits, require_ready, run_composition,
+    application_execution_failure, native_processing_tier, product_subscription_request_limits,
+    require_ready, run_composition,
 };
 use crate::cli_output::{TerminalMode, safe_terminal_block};
 use crate::product_config;
@@ -76,7 +76,7 @@ impl PlakousApplication {
     pub(crate) fn run(
         &mut self,
         config: &product_config::ProductConfig,
-        provider: NativeProvider,
+        selection: &plakous_hosted::account::AccountRef,
         model: &str,
         effort: Option<ReasoningEffort>,
         composition: Option<product_config::ProductCompositionSelection>,
@@ -86,17 +86,15 @@ impl PlakousApplication {
         stderr: &mut dyn io::Write,
         limits: product_host::RunBounds,
     ) -> CliResult<ProcessOutcome> {
+        let provider = super::application::native_provider(selection)?;
+        let account = selection.as_str();
+        let subscriptions = self.subscriptions_for(selection)?;
         if run_expired(limits) {
             return run_timeout(stderr);
         }
         let configured = config.default_binding();
-        let composition = run_composition(composition, &configured, provider, model);
-        crate::build_features::admit_selected(
-            config,
-            Some(cli_provider_name(provider)),
-            Some(model),
-            composition,
-        )?;
+        let composition = run_composition(composition, &configured, selection, model);
+        crate::build_features::admit_selected(config, Some(account), Some(model), composition)?;
         // The repository gate's offline model; see `crate::test_hooks`. A
         // scripted lifecycle binds the requested tuple without a credential
         // refresh or a catalog row, because there is no provider to admit.
@@ -104,7 +102,7 @@ impl PlakousApplication {
         if crate::test_hooks::selected().is_some() {
             let cwd = self.workspace()?;
             let mut session = product_sessions::SessionRecord::new(cwd);
-            session.account = Some(cli_provider_name(provider).to_owned());
+            session.account = Some(account.to_owned());
             session.model = Some(model.to_owned());
             session.effort = effort.map(product_host::effort_label);
             session.composition = composition;
@@ -121,31 +119,30 @@ impl PlakousApplication {
             );
         }
         let priority_requested =
-            provider == NativeProvider::Codex && configured.prefers_priority("codex", model);
+            provider == NativeProvider::Codex && configured.prefers_priority(account, model);
         // Product path: refresh, then fail-closed catalog revalidation.
         // Catalog discovery uses a 0-AuthRefresh gate, so an expired access
         // token with durable Ready status must be rotated here first.
         let Some(refreshed) =
-            run_preparation(&self.executor, limits, self.subscriptions.refresh(provider))?
+            run_preparation(&self.executor, limits, subscriptions.refresh(provider))?
         else {
             return run_timeout(stderr);
         };
-        let refreshed = self.refreshed_credential(provider, refreshed)?;
-        require_ready(provider, refreshed)?;
+        let refreshed = self.refreshed_credential(selection, refreshed)?;
+        require_ready(selection, refreshed)?;
         let model = plakous::model::ModelId::new(model.to_owned()).map_err(|_| {
             CliFailure::classified(CliFailureKind::Usage, "run model id is invalid")
         })?;
         let Some(catalog) = run_preparation(
             &self.executor,
             limits,
-            self.subscriptions.model_catalog(provider),
+            subscriptions.model_catalog(provider),
         )?
         else {
             return run_timeout(stderr);
         };
-        let catalog = catalog.map_err(|error| self.subscription_failure(error, Some(provider)))?;
+        let catalog = catalog.map_err(|error| self.account_failure(error, selection))?;
         let catalog_models = catalog_summaries(provider, &catalog)?;
-        let account = cli_provider_name(provider);
         let catalog_entry = catalog_models
             .iter()
             .find(|entry| entry.exact_id == model.as_str())
@@ -190,7 +187,7 @@ impl PlakousApplication {
         let Some(resolved) = run_preparation(
             &self.executor,
             limits,
-            self.subscriptions.resolve_turn_scoped_provider(
+            subscriptions.resolve_turn_scoped_provider(
                 selected,
                 request_limits,
                 plakous::model::SessionLineage::Root,
@@ -199,11 +196,12 @@ impl PlakousApplication {
         else {
             return run_timeout(stderr);
         };
-        let resolved = resolved.map_err(|error| self.resolution_failure(error.kind(), provider))?;
+        let resolved =
+            resolved.map_err(|error| self.resolution_failure(error.kind(), selection))?;
         let resolved = Arc::new(resolved);
         let cwd = self.workspace()?;
         let mut session = product_sessions::SessionRecord::new(cwd);
-        session.account = Some(cli_provider_name(provider).to_owned());
+        session.account = Some(account.to_owned());
         session.model = Some(resolved.selected_model().as_str().to_owned());
         session.effort = selected_effort.map(product_host::effort_label);
         session.composition = composition;
@@ -211,7 +209,7 @@ impl PlakousApplication {
         let target = product_host::HostTargetAuthority::Native {
             provider,
             resolved,
-            subscriptions: self.subscriptions.clone(),
+            subscriptions: subscriptions.clone(),
             catalog_candidates: Arc::from([]),
         };
         self.run_hosted(
@@ -232,17 +230,17 @@ impl PlakousApplication {
     fn resolution_failure(
         &self,
         error: NativeSubscriptionError,
-        provider: NativeProvider,
+        account: &plakous_hosted::account::AccountRef,
     ) -> CliFailure {
-        let selection = matches!(
+        let usage_refusal = matches!(
             error,
             NativeSubscriptionError::ModelUnavailable
                 | NativeSubscriptionError::ProviderConfigurationRejected
                 | NativeSubscriptionError::ProviderConfigurationPolicyMismatch(_)
                 | NativeSubscriptionError::ProviderConfigurationCompileRejected(_)
         );
-        let failure = self.subscription_failure(error, Some(provider));
-        if selection {
+        let failure = self.account_failure(error, account);
+        if usage_refusal {
             failure.or_kind(CliFailureKind::Usage)
         } else {
             failure
@@ -388,6 +386,8 @@ impl PlakousApplication {
             .account
             .clone()
             .ok_or_else(|| CliFailure::new("session has no exact account binding"))?;
+        let selection: plakous_hosted::account::AccountRef = account.parse()?;
+        let subscriptions = self.subscriptions_for(&selection)?;
         let provider = product_host::oauth_provider_for_account(&account).ok_or_else(|| {
             CliFailure::new(format!(
                 "session account `{account}` is not an OAuth coding account"
@@ -404,12 +404,12 @@ impl PlakousApplication {
         let Some(catalog) = run_preparation(
             &self.executor,
             limits,
-            self.subscriptions.model_catalog(provider),
+            subscriptions.model_catalog(provider),
         )?
         else {
             return run_timeout(stderr);
         };
-        let catalog = catalog.map_err(|error| self.subscription_failure(error, Some(provider)))?;
+        let catalog = catalog.map_err(|error| self.account_failure(error, &selection))?;
         let catalog_models = catalog_summaries(provider, &catalog)?;
         let catalog_entry = catalog_models
             .iter()
@@ -457,7 +457,7 @@ impl PlakousApplication {
         let Some(resolved) = run_preparation(
             &self.executor,
             limits,
-            self.subscriptions.resolve_turn_scoped_provider(
+            subscriptions.resolve_turn_scoped_provider(
                 selected,
                 request_limits,
                 plakous::model::SessionLineage::Root,
@@ -466,11 +466,12 @@ impl PlakousApplication {
         else {
             return run_timeout(stderr);
         };
-        let resolved = resolved.map_err(|error| self.resolution_failure(error.kind(), provider))?;
+        let resolved =
+            resolved.map_err(|error| self.resolution_failure(error.kind(), &selection))?;
         let target = product_host::HostTargetAuthority::Native {
             provider,
             resolved: Arc::new(resolved),
-            subscriptions: self.subscriptions.clone(),
+            subscriptions: subscriptions.clone(),
             catalog_candidates: Arc::from([]),
         };
         self.run_hosted(

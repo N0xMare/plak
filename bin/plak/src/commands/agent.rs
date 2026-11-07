@@ -10,8 +10,6 @@ use super::host_config::build_host_config;
 use super::session::{
     load_admitted_product_session, resolve_api_composition, seed_new_session_binding,
 };
-use super::support::cli_provider_name;
-use crate::presentation::tui_presentation_bundle;
 use crate::product_config;
 use crate::store::sessions as product_sessions;
 use plakous_hosted::error::{CliFailure, CliFailureKind, CliResult, ProcessOutcome};
@@ -36,6 +34,7 @@ use plakous_hosted::runtime as product_host;
 pub(crate) fn run_agent(
     services: &crate::shell::services::Services,
     session_id: Option<String>,
+    account: Option<plakous_hosted::account::AccountRef>,
     provider: Option<NativeProvider>,
     platform: Option<plakous_hosted::binding::PlatformProvider>,
     wire: Option<product_config::ProductWireBinding>,
@@ -69,6 +68,7 @@ pub(crate) fn run_agent(
         services,
         None,
         session_id.map_or(AgentSession::New, AgentSession::Resume),
+        account,
         provider,
         platform,
         wire,
@@ -135,6 +135,7 @@ fn report_pre_dispatch_rejection(stdout: &mut dyn io::Write, failure: CliFailure
 pub(crate) fn new_agent_record(
     cfg: &product_config::ProductConfig,
     cwd: std::path::PathBuf,
+    account: Option<plakous_hosted::account::AccountRef>,
     provider: Option<NativeProvider>,
     platform: Option<plakous_hosted::binding::PlatformProvider>,
     wire: Option<product_config::ProductWireBinding>,
@@ -145,11 +146,20 @@ pub(crate) fn new_agent_record(
 ) -> CliResult<product_sessions::SessionRecord> {
     let mut record = product_sessions::SessionRecord::new(cwd);
     seed_new_session_binding(&mut record, cfg)?;
+    if let Some(account) = &account {
+        record.account = Some(account.to_string());
+    } else if provider.is_some() || platform.is_some() || wire.is_some() {
+        return Err(
+            plakous_hosted::capabilities::AccountAdmissionError::AccountTargetMismatch {
+                account: "<unbound>".into(),
+            }
+            .into(),
+        );
+    }
     if let Some(model) = model {
         record.model = Some(model);
     }
     if let Some(platform) = platform {
-        record.account = Some(platform.account().to_owned());
         record.target_selection =
             product_config::ProductTargetSelection::Platform { provider: platform };
         record.composition = composition.unwrap_or_else(|| {
@@ -157,7 +167,6 @@ pub(crate) fn new_agent_record(
         });
         resolve_api_composition(&mut record, platform)?;
     } else if let Some(wire) = wire {
-        record.account = Some("openrouter".to_owned());
         record.target_selection = product_config::ProductTargetSelection::OpenRouter {
             wire,
             routing: product_config::ProductOpenRouterRoutingSelection::GatewayManaged,
@@ -169,8 +178,7 @@ pub(crate) fn new_agent_record(
             record.composition = product_config::ProductCompositionSelection::Direct;
         }
     } else {
-        if let Some(provider) = provider {
-            record.account = Some(cli_provider_name(provider).to_owned());
+        if provider.is_some() {
             record.target_selection = product_config::ProductTargetSelection::Native;
         }
         if let Some(composition) = composition {
@@ -216,6 +224,7 @@ pub(crate) fn run_agent_after_admission(
     services: &crate::shell::services::Services,
     context: Option<&crate::home::paths::PlakPaths>,
     session: AgentSession,
+    account: Option<plakous_hosted::account::AccountRef>,
     provider: Option<NativeProvider>,
     platform: Option<plakous_hosted::binding::PlatformProvider>,
     wire: Option<product_config::ProductWireBinding>,
@@ -224,6 +233,9 @@ pub(crate) fn run_agent_after_admission(
     effort_explicit: bool,
     composition: Option<product_config::ProductCompositionSelection>,
 ) -> CliResult<product_host::HostConfig<crate::surface_protocol::PlakExtension>> {
+    if let Some(account) = &account {
+        crate::build_features::require_account(account.as_str())?;
+    }
     if let Some(provider) = provider {
         plakous_hosted::capabilities::require_native(provider)?;
     }
@@ -257,6 +269,7 @@ pub(crate) fn run_agent_after_admission(
             let mut record = new_agent_record(
                 &cfg,
                 cwd.clone(),
+                account.clone(),
                 provider,
                 platform,
                 wire,
@@ -294,7 +307,8 @@ pub(crate) fn run_agent_after_admission(
     if crate::home::secrets::is_api_key_account(&account) {
         crate::home::secrets::require_api_key(paths, &account)?;
     }
-    let is_openrouter = account == "openrouter";
+    let selected: plakous_hosted::account::AccountRef = account.parse()?;
+    let is_openrouter = selected.vertical() == plakous_hosted::account::Vertical::OpenRouter;
     let (resolved_effort, resolved_explicit) = if is_openrouter {
         if effort_explicit {
             (
@@ -319,7 +333,7 @@ pub(crate) fn run_agent_after_admission(
         ));
     }
     let presentation_started = Instant::now();
-    let presentation = tui_presentation_bundle(paths)?;
+    let presentation = super::host_config::binding_presentation(paths, &selected)?;
     let presentation_ms =
         u64::try_from(presentation_started.elapsed().as_millis()).unwrap_or(u64::MAX);
     let resolve_started = Instant::now();

@@ -1,6 +1,7 @@
 plak agent — long-lived JSONL host client
 
 USAGE:
+  --account also accepts a full named reference, such as claude/work or openai/work.
   plak agent [--account <codex|grok|claude|openrouter|openai|anthropic|xai-api> --model <exact-id> [options]]
   plak agent --session <uuid>
 

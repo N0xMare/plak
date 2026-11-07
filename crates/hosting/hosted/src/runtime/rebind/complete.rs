@@ -475,11 +475,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
         let source = std::mem::replace(&mut config.session, target_record);
         config.target = match (target.route, &config.target) {
             (RebindRoute::Api(record), _) => {
-                let subscriptions = config
-                    .target
-                    .native_subscriptions()
-                    .cloned()
-                    .ok_or_else(|| CliFailure::new("native subscription authority is missing"))?;
+                let subscriptions = config.state_roots.native_subscriptions()?;
                 match record.target_selection {
                     TargetSelection::Platform { provider } => HostTargetAuthority::Platform {
                         provider,
@@ -498,14 +494,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
                 RebindRoute::Native {
                     provider, resolved, ..
                 },
-                HostTargetAuthority::Native { subscriptions, .. }
-                | HostTargetAuthority::OpenRouter { subscriptions, .. }
-                | HostTargetAuthority::Platform { subscriptions, .. },
+                HostTargetAuthority::Native { .. }
+                | HostTargetAuthority::OpenRouter { .. }
+                | HostTargetAuthority::Platform { .. },
             ) => HostTargetAuthority::Native {
                 provider,
                 resolved: resolved
                     .ok_or_else(|| CliFailure::new("resolved rebind target is missing"))?,
-                subscriptions: subscriptions.clone(),
+                subscriptions: config
+                    .state_roots
+                    .native_subscriptions_for(&config.session.account_ref()?)?,
                 catalog_candidates: match &config.target {
                     HostTargetAuthority::Native {
                         catalog_candidates, ..

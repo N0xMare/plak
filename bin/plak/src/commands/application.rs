@@ -23,10 +23,24 @@ use crate::home::paths as product_paths;
 use crate::presentation::{
     CliModelSummary, CliStatus, CompatibilityState, CredentialState, PresentationBackend,
 };
+use plakous_hosted::account::{AccountRef, Vertical};
 use plakous_hosted::agent as product_agent;
 use plakous_hosted::error::{CliFailure, CliFailureKind, CliResult};
 use plakous_hosted::openrouter as product_openrouter;
 use plakous_hosted::subscription_usage as product_usage;
+
+pub(crate) fn native_provider(account: &AccountRef) -> CliResult<NativeProvider> {
+    account
+        .vertical()
+        .capability()
+        .native_provider()
+        .ok_or_else(|| {
+            plakous_hosted::capabilities::AccountAdmissionError::AccountTargetMismatch {
+                account: account.to_string(),
+            }
+            .into()
+        })
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CliNotice {
@@ -178,14 +192,14 @@ impl CredentialVerdict {
 
     /// The repair for this record as observed by `after`, never naming
     /// `after` itself: a failed step always points somewhere else.
-    pub(crate) fn remedy(self, provider: NativeProvider, after: AccountCommand) -> Option<String> {
-        let name = super::support::cli_provider_name(provider);
+    pub(crate) fn remedy(self, provider: &AccountRef, after: AccountCommand) -> Option<String> {
+        let name = provider.as_str();
         let login = format!("run plak login {name}");
         let refresh = format!("run plak refresh {name}");
         let retire = format!("run plak logout {name} --local");
         let primary = match self {
             Self::Usable(_) => return None,
-            Self::Quarantined if provider == NativeProvider::Xai => {
+            Self::Quarantined if provider.vertical() == Vertical::Grok => {
                 format!("{refresh}; {login} if that fails")
             }
             Self::SignedOut | Self::NeedsLogin(_) | Self::Quarantined => login.clone(),
@@ -228,34 +242,55 @@ pub enum LoginOutcome {
 /// Synchronous account operations. Commands own terminal input and output;
 /// the facade owns login admission, the opaque pending authority, and completion.
 pub trait AccountOps {
-    fn notice(&self, provider: NativeProvider) -> CliResult<CliNotice>;
+    /// Local selections, including the permanent defaults. No credential bytes.
+    fn accounts(&mut self) -> CliResult<Vec<AccountRef>> {
+        plakous_hosted::capabilities::ROUTES
+            .iter()
+            .map(|route| route.account.parse().map_err(CliFailure::from))
+            .collect()
+    }
+    /// A readable sibling with the same authenticated upstream identity, if known.
+    fn same_upstream_account(&mut self, _account: &AccountRef) -> Option<AccountRef> {
+        None
+    }
+    fn remove_account(&mut self, account: &AccountRef) -> CliResult<()> {
+        Err(super::support::account_unavailable(account))
+    }
+    fn prepare_login(&mut self, _account: &AccountRef) -> CliResult<()> {
+        Ok(())
+    }
+    fn end_login_attempt(&mut self, _account: &AccountRef) {}
+    fn notice(&self, provider: &AccountRef) -> CliResult<CliNotice>;
 
-    fn offline_status(&mut self, provider: NativeProvider) -> CliResult<CliStatus>;
+    fn offline_status(&mut self, provider: &AccountRef) -> CliResult<CliStatus>;
 
     /// Offline classification for `plak logout`. A record this build refuses
     /// (another profile or a retired payload format) is [`StoredCredential::Unusable`]
     /// rather than a failure, because local retirement is its repair.
-    fn stored_credential(&mut self, provider: NativeProvider) -> CliResult<StoredCredential>;
+    fn stored_credential(&mut self, provider: &AccountRef) -> CliResult<StoredCredential>;
 
     /// Offline status for the all-accounts table. A failure is that row's
     /// credential cell, not a reason to drop the other accounts.
-    fn offline_status_row(&mut self, provider: NativeProvider) -> Result<CliStatus, String> {
+    fn offline_status_row(&mut self, provider: &AccountRef) -> Result<CliStatus, String> {
         self.offline_status(provider)
             .map_err(|failure| failure.message().to_owned())
     }
 
-    fn subscription_usage(&mut self, provider: NativeProvider) -> CliResult<SubscriptionUsageRead>;
+    fn subscription_usage(&mut self, provider: &AccountRef) -> CliResult<SubscriptionUsageRead>;
 
     /// Whether a `Ready` credential's stored access token has expired, read
     /// locally without provider network I/O.
-    fn access_token_expired(&mut self, provider: NativeProvider) -> CliResult<bool>;
+    fn access_token_expired(&mut self, provider: &AccountRef) -> CliResult<bool>;
 
     /// Reads the OpenRouter inference key's own allowance on demand.
-    fn openrouter_key_usage(&mut self) -> CliResult<product_usage::VerticalObservation>;
+    fn openrouter_key_usage(
+        &mut self,
+        account: &AccountRef,
+    ) -> CliResult<product_usage::VerticalObservation>;
 
     fn acknowledge_exact(
         &mut self,
-        provider: NativeProvider,
+        provider: &AccountRef,
         operator_response: &str,
     ) -> CliResult<()>;
 
@@ -263,7 +298,7 @@ pub trait AccountOps {
 
     fn begin_login(
         &mut self,
-        provider: NativeProvider,
+        provider: &AccountRef,
         mode: NativeLoginMode,
     ) -> CliResult<LoginChallenge<Self::PendingLogin>>;
 
@@ -275,30 +310,30 @@ pub trait AccountOps {
 
     /// Best-effort product-only provenance for Harbor. Failure never changes
     /// the successfully persisted credential or its Ready outcome.
-    fn record_login_host(&mut self, _provider: NativeProvider) -> bool {
+    fn record_login_host(&mut self, _provider: &AccountRef) -> bool {
         true
     }
 
-    fn refresh(&mut self, provider: NativeProvider) -> CliResult<CredentialState>;
+    fn refresh(&mut self, provider: &AccountRef) -> CliResult<CredentialState>;
 
     /// Claims one refresh grant regardless of expiry; returns the new state
     /// and access-token expiry (Unix seconds).
-    fn refresh_now(&mut self, provider: NativeProvider) -> CliResult<(CredentialState, u64)>;
+    fn refresh_now(&mut self, provider: &AccountRef) -> CliResult<(CredentialState, u64)>;
 
-    fn revoke(&mut self, provider: NativeProvider) -> CliResult<Revocation>;
+    fn revoke(&mut self, provider: &AccountRef) -> CliResult<Revocation>;
 
-    fn logout_local(&mut self, provider: NativeProvider) -> CliResult<CredentialState>;
+    fn logout_local(&mut self, provider: &AccountRef) -> CliResult<CredentialState>;
 
     /// Retires a newer build's login state after the operator confirmed it.
-    fn replace_newer_build(&mut self, provider: NativeProvider) -> CliResult<CredentialState>;
+    fn replace_newer_build(&mut self, provider: &AccountRef) -> CliResult<CredentialState>;
 
-    fn models(&mut self, provider: NativeProvider) -> CliResult<Vec<CliModelSummary>>;
+    fn models(&mut self, provider: &AccountRef) -> CliResult<Vec<CliModelSummary>>;
 
-    fn openrouter_models(&mut self) -> CliResult<Vec<String>>;
+    fn openrouter_models(&mut self, account: &AccountRef) -> CliResult<Vec<String>>;
     /// One direct API route's catalog: live list, cache or bundled table.
     fn platform_catalog(
         &mut self,
-        provider: plakous_hosted::binding::PlatformProvider,
+        account: &AccountRef,
     ) -> CliResult<plakous_hosted::platform::ApiModelCatalog>;
 }
 
@@ -349,6 +384,7 @@ pub struct PlakousApplication {
     product: Option<product_paths::PlakPaths>,
     session_records: Option<Arc<dyn crate::store::session_records::SessionRecordStore>>,
     state_home: PathBuf,
+    login_subscriptions: Option<(AccountRef, NativeSubscriptions)>,
     extra_telemetry_sink: Option<Arc<dyn plakous_hosted::agent::ExtraTelemetrySink>>,
     exchange_observer: Option<Arc<dyn plakous::exchange_observation::ExchangeObserver>>,
     /// The process's one job bound, shared by every state root it opens.
@@ -357,6 +393,13 @@ pub struct PlakousApplication {
 }
 
 impl PlakousApplication {
+    /// Supplies read-only home paths without opening a product store or telemetry.
+    pub(crate) fn with_account_home(mut self, paths: Option<product_paths::PlakPaths>) -> Self {
+        if self.product.is_none() {
+            self.product = paths;
+        }
+        self
+    }
     /// `state_home` is the XDG state home and `extra_telemetry_sink` the
     /// binary's optional OTLP bridge; both come from the composition root.
     pub fn new(
@@ -390,6 +433,7 @@ impl PlakousApplication {
             product,
             session_records,
             state_home,
+            login_subscriptions: None,
             extra_telemetry_sink,
             exchange_observer,
             jobs: plakous_hosted::agent::ProcessJobs::default(),
@@ -428,9 +472,60 @@ impl PlakousApplication {
         native_subscription_failure(error, account, &self.state_home)
     }
 
+    pub(crate) fn account_failure(
+        &self,
+        error: plakous::subscriptions::NativeSubscriptionError,
+        account: &AccountRef,
+    ) -> CliFailure {
+        if account.is_named() {
+            use plakous::subscriptions::NativeSubscriptionError;
+            use plakous_hosted::capabilities::AccountAdmissionError;
+            match error {
+                NativeSubscriptionError::AccountBusy => {
+                    return CliFailure::from(AccountAdmissionError::AccountBusy {
+                        account: account.to_string(),
+                    });
+                }
+                NativeSubscriptionError::AccountSignedIn => {
+                    return CliFailure::from(AccountAdmissionError::AccountSignedIn {
+                        account: account.to_string(),
+                    });
+                }
+                _ => {}
+            }
+            if error == NativeSubscriptionError::CredentialUnavailable {
+                return super::support::account_unavailable(account);
+            }
+            return CliFailure::classified(CliFailureKind::Auth, format!("{account}: {error}"))
+                .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::Login {
+                    account: plakous_host_protocol::notice_remedy::AccountTarget::Unspecified,
+                });
+        }
+        match native_provider(account) {
+            Ok(provider) => self.subscription_failure(error, Some(provider)),
+            Err(failure) => failure,
+        }
+    }
+
+    pub(crate) fn subscriptions_for(&self, account: &AccountRef) -> CliResult<NativeSubscriptions> {
+        let provider = native_provider(account)?;
+        if let Some((selected, subscriptions)) = &self.login_subscriptions {
+            if selected == account {
+                return Ok(subscriptions.clone());
+            }
+        }
+        if let Some(name) = account.name() {
+            return self
+                .subscriptions
+                .for_named_account(provider, name.as_str())
+                .map_err(|error| self.account_failure(error, account));
+        }
+        Ok(self.subscriptions.clone())
+    }
+
     pub(super) fn refreshed_credential(
         &mut self,
-        provider: NativeProvider,
+        account: &AccountRef,
         result: Result<
             plakous::subscriptions::NativeAuthStatus,
             plakous::subscriptions::NativeSubscriptionError,
@@ -441,7 +536,11 @@ impl PlakousApplication {
             // The facade does not say why no credential is ready; the offline
             // status does, and names the repair for that state.
             Err(plakous::subscriptions::NativeSubscriptionError::CredentialUnavailable) => {
-                let status = AccountOps::offline_status(self, provider)
+                if account.is_named() {
+                    return Err(super::support::account_unavailable(account));
+                }
+                let provider = native_provider(account)?;
+                let status = AccountOps::offline_status(self, account)
                     .ok()
                     .map(|status| status.credential);
                 Err(credential_unavailable_failure(
@@ -450,7 +549,7 @@ impl PlakousApplication {
                     &self.state_home,
                 ))
             }
-            Err(error) => Err(self.subscription_failure(error, Some(provider))),
+            Err(error) => Err(self.account_failure(error, account)),
         }
     }
 
@@ -486,6 +585,7 @@ impl PlakousApplication {
 
 enum OfflineReadError {
     Execution,
+    Selection(CliFailure),
     Subscription(plakous::subscriptions::NativeSubscriptionError),
 }
 
@@ -514,11 +614,26 @@ fn revocation_from(
 }
 
 impl PlakousApplication {
-    fn read_offline(&mut self, provider: NativeProvider) -> Result<CliStatus, OfflineReadError> {
+    fn read_offline(&mut self, account: &AccountRef) -> Result<CliStatus, OfflineReadError> {
+        let provider = native_provider(account).map_err(OfflineReadError::Selection)?;
+        let subscriptions = self
+            .subscriptions_for(account)
+            .map_err(OfflineReadError::Selection)?;
+        if account.is_named()
+            && !self
+                .executor
+                .block_on(subscriptions.account_exists(provider))
+                .map_err(|_| OfflineReadError::Execution)?
+                .map_err(OfflineReadError::Subscription)?
+        {
+            return Err(OfflineReadError::Subscription(
+                plakous::subscriptions::NativeSubscriptionError::CredentialUnavailable,
+            ));
+        }
         match self
             .executor
             .block_on(super::support::offline_subscription_status(
-                &self.subscriptions,
+                &subscriptions,
                 provider,
             )) {
             Ok(Ok(status)) => Ok(status),
@@ -529,9 +644,118 @@ impl PlakousApplication {
 }
 
 impl AccountOps for PlakousApplication {
-    fn notice(&self, provider: NativeProvider) -> CliResult<CliNotice> {
+    fn remove_account(&mut self, account: &AccountRef) -> CliResult<()> {
+        if !account.is_named() {
+            return Err(CliFailure::from(
+                plakous_hosted::capabilities::AccountAdmissionError::DefaultAccountNotRemovable {
+                    account: account.to_string(),
+                },
+            ));
+        }
+        if account.vertical().is_api() {
+            crate::home::secrets::clear_api_key(self.product_paths()?, account.as_str())
+                .map_err(CliFailure::new)?;
+        } else {
+            let subscriptions = self.subscriptions_for(account)?;
+            self.executor
+                .block_on(subscriptions.remove_signed_out_account(native_provider(account)?))
+                .map_err(application_execution_failure)?
+                .map_err(|error| self.account_failure(error, account))?;
+        }
+        Ok(())
+    }
+    fn accounts(&mut self) -> CliResult<Vec<AccountRef>> {
+        let mut accounts = Vec::new();
+        for route in plakous_hosted::capabilities::ROUTES {
+            let vertical = route.account.parse::<AccountRef>()?.vertical();
+            accounts.push(AccountRef::default_for(vertical));
+            if !vertical.capability().compiled {
+                continue;
+            }
+            let names = if let Some(provider) = vertical.capability().native_provider() {
+                self.executor
+                    .block_on(self.subscriptions.named_accounts(provider))
+                    .map_err(application_execution_failure)?
+                    .map_err(|error| self.subscription_failure(error, Some(provider)))?
+            } else if let Some(paths) = self.product.as_ref() {
+                crate::home::secrets::list_shelf_secrets(
+                    paths,
+                    crate::home::paths::SecretShelf::Api(vertical),
+                )
+                .map_err(CliFailure::new)?
+            } else {
+                Vec::new()
+            };
+            for name in names {
+                accounts.push(format!("{}/{name}", vertical.as_str()).parse()?);
+            }
+        }
+        Ok(accounts)
+    }
+
+    fn same_upstream_account(&mut self, account: &AccountRef) -> Option<AccountRef> {
+        if !account.is_named() {
+            return None;
+        }
+        let provider = native_provider(account).ok()?;
+        let selected = self.subscriptions_for(account).ok()?;
+        let fingerprint = self
+            .executor
+            .block_on(selected.upstream_account_fingerprint(provider))
+            .ok()?
+            .ok()??;
+        let mut siblings = vec![AccountRef::default_for(account.vertical())];
+        let names = self
+            .executor
+            .block_on(self.subscriptions.named_accounts(provider))
+            .ok()?
+            .ok()?;
+        siblings.extend(names.into_iter().take(64).filter_map(|name| {
+            format!("{}/{name}", account.vertical().as_str())
+                .parse()
+                .ok()
+        }));
+        siblings
+            .into_iter()
+            .filter(|sibling| sibling != account)
+            .find(|sibling| {
+                let Ok(subscriptions) = self.subscriptions_for(sibling) else {
+                    return false;
+                };
+                self.executor
+                    .block_on(subscriptions.upstream_account_fingerprint(provider))
+                    .ok()
+                    .and_then(Result::ok)
+                    .flatten()
+                    == Some(fingerprint)
+            })
+    }
+
+    fn prepare_login(&mut self, account: &AccountRef) -> CliResult<()> {
+        let subscriptions = self.subscriptions_for(account)?;
+        let selected = self
+            .executor
+            .block_on(subscriptions.create_account_for_login(native_provider(account)?))
+            .map_err(application_execution_failure)?
+            .map_err(|error| self.account_failure(error, account))?;
+        self.login_subscriptions = Some((account.clone(), selected));
+        Ok(())
+    }
+
+    fn end_login_attempt(&mut self, account: &AccountRef) {
+        if self
+            .login_subscriptions
+            .as_ref()
+            .is_some_and(|(selected, _)| selected == account)
+        {
+            self.login_subscriptions = None;
+        }
+    }
+
+    fn notice(&self, account: &AccountRef) -> CliResult<CliNotice> {
+        let provider = native_provider(account)?;
         let notice = NativeSubscriptions::notice(provider)
-            .map_err(|error| self.subscription_failure(error, Some(provider)))?;
+            .map_err(|error| self.account_failure(error, account))?;
         Ok(CliNotice {
             profile_id: notice.profile_id(),
             notice_revision: notice.notice_revision(),
@@ -540,57 +764,61 @@ impl AccountOps for PlakousApplication {
         })
     }
 
-    fn offline_status(&mut self, provider: NativeProvider) -> CliResult<CliStatus> {
-        self.read_offline(provider).map_err(|error| match error {
+    fn offline_status(&mut self, account: &AccountRef) -> CliResult<CliStatus> {
+        self.read_offline(account).map_err(|error| match error {
             OfflineReadError::Execution => application_execution_failure(()),
-            OfflineReadError::Subscription(error) => {
-                self.subscription_failure(error, Some(provider))
-            }
+            OfflineReadError::Selection(error) => error,
+            OfflineReadError::Subscription(error) => self.account_failure(error, account),
         })
     }
 
-    fn stored_credential(&mut self, provider: NativeProvider) -> CliResult<StoredCredential> {
-        let read = self.read_offline(provider);
+    fn stored_credential(&mut self, account: &AccountRef) -> CliResult<StoredCredential> {
+        let read = self.read_offline(account);
         stored_credential_from(read).map_err(|error| match error {
             OfflineReadError::Execution => application_execution_failure(()),
-            OfflineReadError::Subscription(error) => {
-                self.subscription_failure(error, Some(provider))
-            }
+            OfflineReadError::Selection(error) => error,
+            OfflineReadError::Subscription(error) => self.account_failure(error, account),
         })
     }
 
-    fn offline_status_row(&mut self, provider: NativeProvider) -> Result<CliStatus, String> {
-        self.read_offline(provider).map_err(|error| match error {
+    fn offline_status_row(&mut self, account: &AccountRef) -> Result<CliStatus, String> {
+        let provider = native_provider(account).map_err(|error| error.message().to_owned())?;
+        self.read_offline(account).map_err(|error| match error {
             OfflineReadError::Execution => "application execution failed".to_owned(),
+            OfflineReadError::Selection(error) => error.message().to_owned(),
             OfflineReadError::Subscription(error) => {
-                oauth_status_failure_cell(error, provider, &self.state_home)
+                if account.is_named() {
+                    self.account_failure(error, account).message().to_owned()
+                } else {
+                    oauth_status_failure_cell(error, provider, &self.state_home)
+                }
             }
         })
     }
 
-    fn subscription_usage(&mut self, provider: NativeProvider) -> CliResult<SubscriptionUsageRead> {
+    fn subscription_usage(&mut self, account: &AccountRef) -> CliResult<SubscriptionUsageRead> {
+        let subscriptions = self.subscriptions_for(account)?;
         self.executor
-            .block_on(self.subscriptions.subscription_usage(provider))
+            .block_on(subscriptions.subscription_usage(native_provider(account)?))
             .map_err(application_execution_failure)
     }
 
-    fn access_token_expired(&mut self, provider: NativeProvider) -> CliResult<bool> {
+    fn access_token_expired(&mut self, account: &AccountRef) -> CliResult<bool> {
+        let subscriptions = self.subscriptions_for(account)?;
         self.executor
-            .block_on(self.subscriptions.access_token_expired(provider))
+            .block_on(subscriptions.access_token_expired(native_provider(account)?))
             .map_err(application_execution_failure)?
-            .map_err(|error| self.subscription_failure(error, Some(provider)))
+            .map_err(|error| self.account_failure(error, account))
     }
 
-    fn openrouter_key_usage(&mut self) -> CliResult<product_usage::VerticalObservation> {
+    fn openrouter_key_usage(
+        &mut self,
+        account: &AccountRef,
+    ) -> CliResult<product_usage::VerticalObservation> {
         let credentials =
             crate::openrouter_product::ProductOpenRouterCredentials::shared(self.product_paths()?);
         Ok(
-            match product_openrouter::probe_openrouter_key_usage(
-                credentials.as_ref(),
-                &plakous_hosted::account::AccountRef::default_for(
-                    plakous_hosted::account::Vertical::OpenRouter,
-                ),
-            ) {
+            match product_openrouter::probe_openrouter_key_usage(credentials.as_ref(), account) {
                 product_openrouter::OpenRouterKeyUsageProbe::NotConfigured => {
                     product_usage::VerticalObservation::NotConnected
                 }
@@ -609,32 +837,31 @@ impl AccountOps for PlakousApplication {
 
     fn acknowledge_exact(
         &mut self,
-        provider: NativeProvider,
+        account: &AccountRef,
         operator_response: &str,
     ) -> CliResult<()> {
+        let subscriptions = self.subscriptions_for(account)?;
         self.executor
-            .block_on(
-                self.subscriptions
-                    .acknowledge_exact(provider, operator_response),
-            )
+            .block_on(subscriptions.acknowledge_exact(native_provider(account)?, operator_response))
             .map_err(application_execution_failure)?
-            .map_err(|error| self.subscription_failure(error, Some(provider)))
+            .map_err(|error| self.account_failure(error, account))
     }
 
     /// The facade's pending login does not say whose it is; the account is
     /// kept beside it so a failed completion names the account to log in to.
-    type PendingLogin = (NativeProvider, plakous::subscriptions::PendingNativeLogin);
+    type PendingLogin = (AccountRef, plakous::subscriptions::PendingNativeLogin);
 
     fn begin_login(
         &mut self,
-        provider: NativeProvider,
+        account: &AccountRef,
         mode: NativeLoginMode,
     ) -> CliResult<LoginChallenge<Self::PendingLogin>> {
+        let subscriptions = self.subscriptions_for(account)?;
         let pending = self
             .executor
-            .block_on(self.subscriptions.begin_login(provider, mode))
+            .block_on(subscriptions.begin_login(native_provider(account)?, mode))
             .map_err(application_execution_failure)?
-            .map_err(|error| self.subscription_failure(error, Some(provider)))?;
+            .map_err(|error| self.account_failure(error, account))?;
         let replaced_unusable = pending.replaced_unusable_record();
         let instructions = pending.instructions();
         let authorize_url = instructions.verification_uri().to_owned();
@@ -644,7 +871,7 @@ impl AccountOps for PlakousApplication {
             expires_in: code.expires_in(),
         });
         Ok(LoginChallenge {
-            pending: (provider, pending),
+            pending: (account.clone(), pending),
             authorize_url,
             completion,
             device_code,
@@ -657,7 +884,7 @@ impl AccountOps for PlakousApplication {
         pending: Self::PendingLogin,
         response: LoginResponse<'_>,
     ) -> CliResult<LoginOutcome> {
-        let (provider, pending) = pending;
+        let (account, pending) = pending;
         let completed = match response {
             LoginResponse::Pasted(input) => self
                 .executor
@@ -680,14 +907,22 @@ impl AccountOps for PlakousApplication {
         completed
             .map(credential_state)
             .map(LoginOutcome::Completed)
-            .map_err(|error| self.subscription_failure(error, Some(provider)))
+            .map_err(|error| self.account_failure(error, &account))
     }
 
-    fn record_login_host(&mut self, provider: NativeProvider) -> bool {
-        let directory = self
-            .state_home
-            .join("plak/subscriptions")
-            .join(provider.as_str());
+    fn record_login_host(&mut self, account: &AccountRef) -> bool {
+        let Ok(provider) = native_provider(account) else {
+            return false;
+        };
+        let root = self.state_home.join("plak/subscriptions");
+        let directory = account.name().map_or_else(
+            || root.join(provider.as_str()),
+            |name| {
+                root.join("accounts")
+                    .join(account.vertical().as_str())
+                    .join(name.as_str())
+            },
+        );
         self.executor
             .block_on(async move {
                 tokio::task::spawn_blocking(move || super::login_host::record(&directory))
@@ -697,65 +932,79 @@ impl AccountOps for PlakousApplication {
             .unwrap_or(false)
     }
 
-    fn refresh(&mut self, provider: NativeProvider) -> CliResult<CredentialState> {
+    fn refresh(&mut self, account: &AccountRef) -> CliResult<CredentialState> {
+        let subscriptions = self.subscriptions_for(account)?;
         let result = self
             .executor
-            .block_on(self.subscriptions.refresh(provider))
+            .block_on(subscriptions.refresh(native_provider(account)?))
             .map_err(application_execution_failure)?;
-        self.refreshed_credential(provider, result)
+        self.refreshed_credential(account, result)
     }
 
-    fn refresh_now(&mut self, provider: NativeProvider) -> CliResult<(CredentialState, u64)> {
+    fn refresh_now(&mut self, account: &AccountRef) -> CliResult<(CredentialState, u64)> {
+        let subscriptions = self.subscriptions_for(account)?;
         let result = self
             .executor
-            .block_on(self.subscriptions.refresh_now(provider))
+            .block_on(subscriptions.refresh_now(native_provider(account)?))
             .map_err(application_execution_failure)?;
         let expires_at = result
             .as_ref()
             .ok()
             .map(|forced| forced.access_expires_at());
         let state = self.refreshed_credential(
-            provider,
+            account,
             result.map(plakous::subscriptions::ForcedRefresh::status),
         )?;
         Ok((state, expires_at.unwrap_or(0)))
     }
 
-    fn revoke(&mut self, provider: NativeProvider) -> CliResult<Revocation> {
+    fn revoke(&mut self, account: &AccountRef) -> CliResult<Revocation> {
+        let subscriptions = self.subscriptions_for(account)?;
         let result = self
             .executor
-            .block_on(self.subscriptions.revoke(provider))
+            .block_on(subscriptions.revoke(native_provider(account)?))
             .map_err(application_execution_failure)?;
-        revocation_from(result).map_err(|error| self.subscription_failure(error, Some(provider)))
+        revocation_from(result).map_err(|error| self.account_failure(error, account))
     }
 
-    fn logout_local(&mut self, provider: NativeProvider) -> CliResult<CredentialState> {
+    fn logout_local(&mut self, account: &AccountRef) -> CliResult<CredentialState> {
+        let subscriptions = self.subscriptions_for(account)?;
         self.executor
-            .block_on(self.subscriptions.logout_local(provider))
+            .block_on(subscriptions.logout_local(native_provider(account)?))
             .map_err(application_execution_failure)?
             .map(credential_state)
-            .map_err(|error| self.subscription_failure(error, Some(provider)))
+            .map_err(|error| self.account_failure(error, account))
     }
 
-    fn replace_newer_build(&mut self, provider: NativeProvider) -> CliResult<CredentialState> {
+    fn replace_newer_build(&mut self, account: &AccountRef) -> CliResult<CredentialState> {
+        let subscriptions = self.subscriptions_for(account)?;
         self.executor
-            .block_on(self.subscriptions.replace_newer_build_state(provider))
+            .block_on(subscriptions.replace_newer_build_state(native_provider(account)?))
             .map_err(application_execution_failure)?
             .map(credential_state)
-            .map_err(|error| self.subscription_failure(error, Some(provider)))
+            .map_err(|error| self.account_failure(error, account))
     }
 
-    fn openrouter_models(&mut self) -> CliResult<Vec<String>> {
+    fn openrouter_models(&mut self, account: &AccountRef) -> CliResult<Vec<String>> {
         let paths = self.product_paths()?;
         self.executor
-            .block_on(crate::openrouter_product::list_models(paths))
+            .block_on(crate::openrouter_product::list_models(paths, account))
             .map_err(application_execution_failure)?
     }
 
     fn platform_catalog(
         &mut self,
-        provider: plakous_hosted::binding::PlatformProvider,
+        account: &AccountRef,
     ) -> CliResult<plakous_hosted::platform::ApiModelCatalog> {
+        let provider = account
+            .vertical()
+            .capability()
+            .platform_provider()
+            .ok_or_else(|| {
+                plakous_hosted::capabilities::AccountAdmissionError::AccountTargetMismatch {
+                    account: account.to_string(),
+                }
+            })?;
         let paths = self.product_paths()?.clone();
         let credentials = crate::platform_product::ProductPlatformCredentials::shared(&paths);
         let now = std::time::SystemTime::now()
@@ -765,7 +1014,7 @@ impl AccountOps for PlakousApplication {
             .block_on(async move {
                 plakous_hosted::platform::api_model_catalog(
                     provider,
-                    &provider.account().parse()?,
+                    account,
                     credentials.as_ref(),
                     Some(paths.home()),
                     plakous_hosted::platform::ApiModelLists::Live,
@@ -776,12 +1025,14 @@ impl AccountOps for PlakousApplication {
             .map_err(application_execution_failure)?
     }
 
-    fn models(&mut self, provider: NativeProvider) -> CliResult<Vec<CliModelSummary>> {
+    fn models(&mut self, account: &AccountRef) -> CliResult<Vec<CliModelSummary>> {
+        let provider = native_provider(account)?;
+        let subscriptions = self.subscriptions_for(account)?;
         let catalog = self
             .executor
-            .block_on(self.subscriptions.model_catalog(provider))
+            .block_on(subscriptions.model_catalog(provider))
             .map_err(application_execution_failure)?
-            .map_err(|error| self.subscription_failure(error, Some(provider)))?;
+            .map_err(|error| self.account_failure(error, account))?;
         if catalog.provider() != provider {
             return Err(CliFailure::new("native model catalog provider mismatch"));
         }
@@ -791,11 +1042,11 @@ impl AccountOps for PlakousApplication {
 
 impl PresentationBackend for PlakousApplication {
     fn offline_status(&mut self, provider: NativeProvider) -> CliResult<CliStatus> {
-        AccountOps::offline_status(self, provider)
+        AccountOps::offline_status(self, &super::support::cli_provider_name(provider).parse()?)
     }
 
     fn models(&mut self, provider: NativeProvider) -> CliResult<Vec<CliModelSummary>> {
-        AccountOps::models(self, provider)
+        AccountOps::models(self, &super::support::cli_provider_name(provider).parse()?)
     }
 }
 

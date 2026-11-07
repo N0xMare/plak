@@ -4,7 +4,7 @@ use std::io;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use plakous::subscriptions::{NativeLoginCompletion, NativeLoginMode, NativeProvider};
+use plakous::subscriptions::{NativeLoginCompletion, NativeLoginMode};
 
 use super::application::{AccountOps, LoginChallenge, LoginOutcome, LoginResponse};
 use super::login::read_remote_authorization_interactive;
@@ -72,16 +72,17 @@ impl LoginUi for SystemLoginUi {
 
 pub(crate) fn perform_login(
     accounts: &mut impl AccountOps,
-    provider: NativeProvider,
+    provider: &plakous_hosted::account::AccountRef,
     mode: NativeLoginMode,
     stdin: &mut dyn io::BufRead,
     stderr: &mut dyn io::Write,
     ui: &mut impl LoginUi,
 ) -> CliResult<CredentialState> {
-    let account = oauth_ui::account_cli_name(provider);
+    let account = provider.as_str();
+    let native = super::application::native_provider(provider)?;
     if mode == NativeLoginMode::Browser && ui.ssh_session_detected() {
         return Err(CliFailure::new(oauth_ui::ssh_local_login_refusal_message(
-            provider,
+            account, native,
         )));
     }
     let challenge = accounts.begin_login(provider, mode)?;
@@ -125,7 +126,7 @@ pub(crate) fn perform_login(
 
     let completed = if paste_complete {
         writeln!(stderr).map_err(|_| CliFailure::new("stderr failed"))?;
-        oauth_ui::write_authorization_paste_instructions(stderr, provider, completion)
+        oauth_ui::write_authorization_paste_instructions(stderr, native, completion)
             .map_err(|_| CliFailure::new("stderr failed"))?;
         let input = read_remote_authorization_interactive(
             stdin,
@@ -159,7 +160,7 @@ pub(crate) fn perform_login(
         {
             CliFailure::new(format!(
                 "{message}\n\n{}",
-                oauth_ui::remote_login_hint(provider)
+                oauth_ui::remote_login_hint(account, native)
             ))
         } else {
             base
@@ -169,7 +170,8 @@ pub(crate) fn perform_login(
         LoginOutcome::Completed(state) => Ok(state),
         LoginOutcome::Cancelled => Err(CliFailure::new("login cancelled")),
         LoginOutcome::TimedOut => Err(CliFailure::new(oauth_ui::local_login_timeout_message(
-            provider,
+            account,
+            native,
             oauth_ui::LOCAL_HARD_TIMEOUT,
         ))),
     }

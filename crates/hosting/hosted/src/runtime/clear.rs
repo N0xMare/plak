@@ -243,6 +243,7 @@ pub(super) async fn production_build_clear_candidate<
     // an authoritative outcome rather than being dropped across commit.
     let runtime = crate::agent::coding_session_runtime_binding_attaching_root(
         ProductAgentSpec {
+            account: config.session.account_ref()?,
             prompt_host_facts: config.prompt_host_facts(),
             product_home: Some(config.product_home.clone()),
             tool_selection: super::startup::root_tool_selection(&config.session),

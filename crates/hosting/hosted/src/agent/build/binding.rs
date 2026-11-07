@@ -538,6 +538,15 @@ pub(in crate::agent) async fn coding_session_runtime_binding_for(
     attached_tree: &mut Option<String>,
 ) -> CliResult<SessionRuntimeBinding> {
     let topology_spec = spec.clone();
+    crate::capabilities::require(spec.account.as_str())?;
+    if spec.account.vertical().capability().native_provider() != Some(spec.provider) {
+        return Err(
+            crate::capabilities::AccountAdmissionError::AccountTargetMismatch {
+                account: spec.account.to_string(),
+            }
+            .into(),
+        );
+    }
     crate::capabilities::require_composition(spec.composition)?;
     spec.composition
         .admit_role(spec.topology_caller_id.is_some())?;
@@ -546,6 +555,7 @@ pub(in crate::agent) async fn coding_session_runtime_binding_for(
         product_home,
         prompt_host_facts: _,
         provider,
+        account,
         resolved,
         effort,
         effort_explicit,
@@ -565,6 +575,7 @@ pub(in crate::agent) async fn coding_session_runtime_binding_for(
     let binding_span = tracing::info_span!(
         "session_runtime_binding",
         provider = native_provider_kind(provider),
+        account = %account,
         model = resolved.selected_model().as_str(),
         composition = composition.as_str(),
         session_id = plan_state_authority.as_str(),
@@ -650,7 +661,7 @@ pub(in crate::agent) async fn coding_session_runtime_binding_for(
     let tool_plan = bind_node_tool_plan(
         &tool_selection,
         crate::tool_plan::ToolRoute::native(provider),
-        state_roots.roster_source().account_name(provider),
+        account.as_str(),
         &workspace_root,
         &state_roots,
         crate::mcp_binding::McpBinding::for_attach(topology_attach),
@@ -836,7 +847,7 @@ pub(in crate::agent) async fn coding_session_runtime_binding_for(
     let mut builder = builder
         .tool_policy(session_tool_policy(fence))
         .request_slots(crate::request_slots::for_account(
-            state_roots.roster_source().account_name(provider),
+            account.as_str(),
         ));
     if let Some((reresolver, admitted_until)) = model_reresolver {
         builder = builder.model_reresolver(reresolver, admitted_until);

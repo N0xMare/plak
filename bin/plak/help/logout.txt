@@ -4,6 +4,7 @@ USAGE:
   plak logout <codex|grok|claude> [--local]
 
 DESCRIPTION:
+  A full reference such as claude/work signs out only that named slot.
   Revokes a usable credential at the provider, then retires it locally.
   A credential this build cannot use (quarantined, login required, changed
   profile) is retired locally; its remote grant may remain active.

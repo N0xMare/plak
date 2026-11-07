@@ -13,6 +13,35 @@ use super::{
 use crate::commands::support::native_subscription_failure;
 use crate::presentation::CredentialState;
 
+#[test]
+fn named_removal_refusals_are_typed_and_never_offer_a_default_or_remote_action() {
+    use plakous_hosted::capabilities::AccountAdmissionError;
+    let root = tempfile::tempdir().unwrap();
+    let app = super::PlakousApplication::for_test_accounts(root.path().join("state")).unwrap();
+    let account = "claude/work".parse().unwrap();
+    for (error, next_step) in [
+        (NativeSubscriptionError::AccountBusy, "busy"),
+        (NativeSubscriptionError::AccountSignedIn, "log out first"),
+    ] {
+        let failure = app.account_failure(error, &account);
+        assert_eq!(failure.exit_code(), 3);
+        assert!(failure.message().contains("claude/work"));
+        assert!(failure.message().contains(next_step));
+        assert!(!failure.message().contains("plak logout claude`"));
+        assert!(!failure.message().contains("plak login claude"));
+        assert!(failure.remedy().is_none());
+        assert!(matches!(
+            std::error::Error::source(&failure)
+                .unwrap()
+                .downcast_ref::<AccountAdmissionError>(),
+            Some(
+                AccountAdmissionError::AccountBusy { .. }
+                    | AccountAdmissionError::AccountSignedIn { .. }
+            )
+        ));
+    }
+}
+
 /// Every stored-credential state (including records written by an earlier
 /// build) x every account command: one verdict, a remedy that never names
 /// the command that observed it, and no remedy chain that loops.
@@ -118,6 +147,9 @@ fn stored_credential_matrix_is_consistent_and_never_loops() {
                     Err(OfflineReadError::Subscription(error.clone()))
                 }
                 Err(OfflineReadError::Execution) => Err(OfflineReadError::Execution),
+                Err(OfflineReadError::Selection(_)) => {
+                    panic!("matrix fixtures use native default selections")
+                }
             };
             let verdict = V::classify(read).unwrap_or_else(|_| panic!("{label}"));
             // Logout's view is the same verdict.
@@ -132,7 +164,14 @@ fn stored_credential_matrix_is_consistent_and_never_loops() {
             if label.starts_with("newer-build") {
                 assert_eq!(verdict, V::WrittenByNewerBuild, "{label}");
                 for after in commands {
-                    let remedy = verdict.remedy(provider, after).unwrap_or_default();
+                    let remedy = verdict
+                        .remedy(
+                            &super::super::support::cli_provider_name(provider)
+                                .parse()
+                                .unwrap(),
+                            after,
+                        )
+                        .unwrap_or_default();
                     assert!(remedy.contains("newer plak build"), "{label}: {remedy}");
                 }
             }
@@ -143,7 +182,12 @@ fn stored_credential_matrix_is_consistent_and_never_loops() {
                 ));
             }
             for after in commands {
-                let remedy = verdict.remedy(provider, after);
+                let remedy = verdict.remedy(
+                    &super::super::support::cli_provider_name(provider)
+                        .parse()
+                        .unwrap(),
+                    after,
+                );
                 if let Some(remedy) = &remedy {
                     assert!(
                         !remedy.contains(names(after)),
@@ -166,7 +210,12 @@ fn stored_credential_matrix_is_consistent_and_never_loops() {
                         break;
                     };
                     assert_ne!(next, previous, "{provider:?} {label}: {text} loops");
-                    current = verdict.remedy(provider, next);
+                    current = verdict.remedy(
+                        &super::super::support::cli_provider_name(provider)
+                            .parse()
+                            .unwrap(),
+                        next,
+                    );
                     previous = next;
                 }
             }

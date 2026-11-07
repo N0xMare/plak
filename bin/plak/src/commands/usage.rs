@@ -3,7 +3,6 @@
 //! Every vertical is collected through the one host-owned Usage projection, so
 //! the CLI and the TUI Limits surface can never disagree.
 
-use plakous::subscriptions::NativeProvider;
 use plakous_host_protocol::views::presentation::UsageVertical;
 
 use super::application::AccountOps;
@@ -21,35 +20,46 @@ pub fn collect_usage_limits(
     backend: &mut impl AccountOps,
 ) -> CliResult<plakous_host_protocol::views::presentation::UsageLimitsView> {
     let mut observations = Vec::new();
-    for (vertical, provider) in [
-        (product_usage::codex_vertical(), NativeProvider::Codex),
-        (product_usage::supergrok_vertical(), NativeProvider::Xai),
-        (product_usage::claude_vertical(), NativeProvider::Claude),
-    ] {
-        if selected
-            .as_ref()
-            .is_some_and(|selected| *selected != vertical)
-        {
+    let roster = if let Some(selected) = &selected {
+        vec![selected.clone()]
+    } else {
+        backend
+            .accounts()?
+            .into_iter()
+            .filter_map(|account| usage_vertical_for_account(account.as_str()))
+            .collect()
+    };
+    for vertical in roster {
+        let account: plakous_hosted::account::AccountRef = vertical.account().parse()?;
+        if account.vertical() == plakous_hosted::account::Vertical::OpenRouter {
+            observations.push((vertical, backend.openrouter_key_usage(&account)?));
             continue;
         }
-        let status = backend.offline_status(provider)?;
+        let status = match backend.offline_status(&account) {
+            Ok(status) => status,
+            Err(failure) if selected.is_none() => {
+                observations.push((
+                    vertical,
+                    product_usage::VerticalObservation::Unavailable(failure.message().to_owned()),
+                ));
+                continue;
+            }
+            Err(failure) => return Err(failure),
+        };
         if status.compatibility != CompatibilityState::Current
             || status.credential != CredentialState::Ready
         {
             observations.push((vertical, product_usage::VerticalObservation::NotConnected));
             continue;
         }
-        let usage = backend.subscription_usage(provider)?;
-        observations.push((vertical, product_usage::VerticalObservation::Native(usage)));
-    }
-    if selected
-        .as_ref()
-        .is_none_or(|selected| *selected == product_usage::openrouter_vertical())
-    {
-        observations.push((
-            product_usage::openrouter_vertical(),
-            backend.openrouter_key_usage()?,
-        ));
+        let observation = match backend.subscription_usage(&account) {
+            Ok(usage) => product_usage::VerticalObservation::Native(usage),
+            Err(failure) if selected.is_none() => {
+                product_usage::VerticalObservation::Unavailable(failure.message().to_owned())
+            }
+            Err(failure) => return Err(failure),
+        };
+        observations.push((vertical, observation));
     }
     let mut view = product_usage::project_limits(
         observations,
@@ -65,26 +75,34 @@ pub fn collect_usage_limits(
 
 /// The closed account-name spelling accepted by `plak usage --account`.
 pub fn usage_vertical_for_account(account: &str) -> Option<UsageVertical> {
-    match account {
-        "claude" => Some(product_usage::claude_vertical()),
-        "codex" => Some(product_usage::codex_vertical()),
-        "grok" | "supergrok" => Some(product_usage::supergrok_vertical()),
-        "openrouter" => Some(product_usage::openrouter_vertical()),
-        _ => None,
-    }
+    let account: plakous_hosted::account::AccountRef = account.parse().ok()?;
+    let label = account.vertical().capability().usage_label?;
+    Some(UsageVertical::new(
+        account.as_str(),
+        if account.is_named() {
+            account.as_str()
+        } else {
+            label
+        },
+    ))
 }
 
 /// Whether a Usage refresh may run for this posture: a connected
 /// subscription credential under a current profile. States whose remedy is
 /// `plak login` (or another build) never refresh from Usage. SuperGrok's
 /// quarantine is reclaimable by its next refresh.
-fn can_refresh_usage(provider: NativeProvider, status: crate::presentation::CliStatus) -> bool {
+fn can_refresh_usage(
+    provider: &plakous_hosted::account::AccountRef,
+    status: crate::presentation::CliStatus,
+) -> bool {
     status.compatibility == CompatibilityState::Current
         && match status.credential {
             CredentialState::Ready
             | CredentialState::RefreshRequired
             | CredentialState::Refreshing => true,
-            CredentialState::Quarantined => provider == NativeProvider::Xai,
+            CredentialState::Quarantined => {
+                provider.vertical() == plakous_hosted::account::Vertical::Grok
+            }
             _ => false,
         }
 }
@@ -92,20 +110,19 @@ fn can_refresh_usage(provider: NativeProvider, status: crate::presentation::CliS
 /// The subscription accounts whose Usage vertical offers `[refresh]`: only
 /// those whose credential needs one, decided offline.
 pub(crate) fn usage_refresh_accounts(backend: &mut impl AccountOps) -> Vec<String> {
-    [
-        NativeProvider::Codex,
-        NativeProvider::Xai,
-        NativeProvider::Claude,
-    ]
-    .into_iter()
-    .filter(|provider| {
-        backend.offline_status(*provider).is_ok_and(|status| {
-            can_refresh_usage(*provider, status)
-                && usage_needs_refresh(backend, *provider, status.credential).unwrap_or(false)
+    backend
+        .accounts()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|account| !account.vertical().is_api())
+        .filter(|account| {
+            backend.offline_status(account).is_ok_and(|status| {
+                can_refresh_usage(account, status)
+                    && usage_needs_refresh(backend, account, status.credential).unwrap_or(false)
+            })
         })
-    })
-    .map(|provider| super::support::cli_provider_name(provider).to_owned())
-    .collect()
+        .map(|account| account.to_string())
+        .collect()
 }
 
 /// Whether the credential needs a refresh, decided from local state only.
@@ -114,12 +131,14 @@ pub(crate) fn usage_refresh_accounts(backend: &mut impl AccountOps) -> Vec<Strin
 /// credential is renewed by its claim holder.
 fn usage_needs_refresh(
     backend: &mut impl AccountOps,
-    provider: NativeProvider,
+    provider: &plakous_hosted::account::AccountRef,
     credential: CredentialState,
 ) -> CliResult<bool> {
     match credential {
         CredentialState::RefreshRequired => Ok(true),
-        CredentialState::Quarantined => Ok(provider == NativeProvider::Xai),
+        CredentialState::Quarantined => {
+            Ok(provider.vertical() == plakous_hosted::account::Vertical::Grok)
+        }
         CredentialState::Ready => backend.access_token_expired(provider),
         _ => Ok(false),
     }
@@ -131,7 +150,7 @@ fn usage_needs_refresh(
 /// a credential renewed meanwhile is only re-read.
 pub(crate) fn refresh_usage_credential(
     backend: &mut impl AccountOps,
-    provider: NativeProvider,
+    provider: &plakous_hosted::account::AccountRef,
 ) -> CliResult<()> {
     let status = backend.offline_status(provider)?;
     if !can_refresh_usage(provider, status) {

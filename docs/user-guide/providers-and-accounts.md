@@ -16,6 +16,23 @@ Subscription and API accounts have separate credentials and billing.
 Use `grok` for the SuperGrok subscription and `xai-api` for separately billed
 API sessions. The ambiguous bare spelling `xai` is refused.
 
+Every vertical also accepts a local name, for example `claude/work`, `codex/work`,
+`grok/work` or `openai/work`. Names use lowercase letters, digits and hyphens,
+start with a letter, and have at most 32 characters; `default` is reserved.
+Log in or set a key with the full reference, then use the same reference on
+status, refresh, logout and models, or as `run|agent|usage --account <ref>`.
+Each reference selects only its own credential: no balancing, fallback or
+environment-key lookup for named API keys. Bare references retain their defaults.
+Usage stays separate even when two slots authenticate as the same upstream
+account; login warns that those upstream limits are shared. Provider-reported
+email remains a detail line, never the account selector.
+
+`plak accounts list` lists local selections. `plak accounts rm claude/work`
+removes an already signed-out named slot; a signed-in or busy slot refuses,
+without logging out or revoking remotely. Log out explicitly first. API account
+removal clears that named key. Removal asks for the exact reference unless
+`--yes` is supplied. Defaults cannot be removed; use logout or key clear.
+
 Claude subscription, Anthropic API and OpenRouter Messages retain cited answer
 text and source metadata, including citations received across stream deltas.
 Required native citation tokens survive compatible replay. Unfamiliar

@@ -397,7 +397,7 @@ fn new_record(
         config.root_agent = Some(template.to_owned());
     }
     let mut record = crate::commands::agent::new_agent_record(
-        &config, workspace, None, None, None, None, None, false, None,
+        &config, workspace, None, None, None, None, None, None, false, None,
     )?;
     crate::build_features::admit_selected(
         &config,
@@ -431,6 +431,7 @@ fn open_session(
         services,
         Some(&context),
         crate::commands::agent::AgentSession::Resume(session.to_owned()),
+        None,
         None,
         None,
         None,

@@ -113,7 +113,7 @@ pub(super) fn execute_status_all(
 ) -> CliResult<ProcessOutcome> {
     struct StatusRow {
         ready: bool,
-        provider: &'static str,
+        provider: String,
         kind: &'static str,
         profile: &'static str,
         credential: String,
@@ -122,39 +122,59 @@ pub(super) fn execute_status_all(
     review_expiry::write_warnings(stdout, services.now_unix_seconds())
         .map_err(|_| CliFailure::new("stdout failed"))?;
     let mut rows = Vec::with_capacity(7);
-    for provider in plakous_hosted::capabilities::native_providers() {
+    let accounts = backend.accounts()?;
+    for account in accounts
+        .iter()
+        .filter(|account| !account.vertical().is_api() && account.vertical().capability().compiled)
+    {
+        let provider = commands::application::native_provider(account)?;
+        let label = if account.is_named() {
+            account.to_string()
+        } else {
+            subscription_provider_label(provider).to_owned()
+        };
         // One account's unreadable credential is a Setup needed row.
         // The other verticals, including API keys, still print.
-        match backend.offline_status_row(provider) {
+        match backend.offline_status_row(account) {
             Ok(status) => rows.push(StatusRow {
                 ready: status.compatibility == CompatibilityState::Current
                     && status.credential == CredentialState::Ready,
-                provider: subscription_provider_label(provider),
+                provider: label.clone(),
                 kind: "OAuth",
                 profile: profile_acceptance_label(status.compatibility),
-                credential: commands::support::oauth_refresh_status_detail(
-                    services.paths().ok(),
-                    provider,
-                    status.credential,
-                )
-                .unwrap_or_else(|| status_credential_cell(provider, status.credential)),
+                credential: (!account.is_named())
+                    .then(|| {
+                        commands::support::oauth_refresh_status_detail(
+                            services.paths().ok(),
+                            provider,
+                            status.credential,
+                        )
+                    })
+                    .flatten()
+                    .unwrap_or_else(|| status_credential_cell(provider, status.credential)),
             }),
             Err(credential) => rows.push(StatusRow {
                 ready: false,
-                provider: subscription_provider_label(provider),
+                provider: label,
                 kind: "OAuth",
                 profile: "—",
                 credential,
             }),
         }
     }
-    let api_accounts = ["openai", "xai-api", "anthropic", "openrouter"];
+    let api_accounts: Vec<_> = accounts
+        .iter()
+        .filter(|account| account.vertical().is_api() && account.vertical().capability().compiled)
+        .collect();
     match services.paths() {
         Ok(paths) => {
-            for a in api_accounts.into_iter().filter(|account| {
-                plakous_hosted::capabilities::for_account(account)
-                    .is_some_and(|route| route.compiled)
-            }) {
+            for account in api_accounts {
+                let a = account.as_str();
+                let label = if account.is_named() {
+                    account.to_string()
+                } else {
+                    api_provider_label(a).to_owned()
+                };
                 match product_secrets::key_status(paths, a) {
                     Ok(status) => {
                         let credential = match status.source {
@@ -164,7 +184,7 @@ pub(super) fn execute_status_all(
                         };
                         rows.push(StatusRow {
                             ready: status.source != product_secrets::KeySource::Missing,
-                            provider: api_provider_label(a),
+                            provider: label.clone(),
                             kind: "API key",
                             profile: "—",
                             credential: credential.to_owned(),
@@ -172,7 +192,7 @@ pub(super) fn execute_status_all(
                     }
                     Err(error) => rows.push(StatusRow {
                         ready: false,
-                        provider: api_provider_label(a),
+                        provider: label,
                         kind: "API key",
                         profile: "—",
                         credential: api_key_status_failure_cell(&error),
@@ -181,10 +201,14 @@ pub(super) fn execute_status_all(
             }
         }
         Err(error) => {
-            for a in api_accounts {
+            for account in api_accounts {
                 rows.push(StatusRow {
                     ready: false,
-                    provider: api_provider_label(a),
+                    provider: if account.is_named() {
+                        account.to_string()
+                    } else {
+                        api_provider_label(account.as_str()).to_owned()
+                    },
                     kind: "API key",
                     profile: "—",
                     credential: api_key_status_failure_cell(error.message()),
@@ -204,7 +228,12 @@ pub(super) fn execute_status_all(
         let mut table = cli_output::Table::new(["PROVIDER", "KIND", "PROFILE", "CREDENTIAL"]);
         for row in rows.iter().filter(|row| row.ready == ready) {
             table
-                .push([row.provider, row.kind, row.profile, row.credential.as_str()])
+                .push([
+                    row.provider.as_str(),
+                    row.kind,
+                    row.profile,
+                    row.credential.as_str(),
+                ])
                 .map_err(CliFailure::new)?;
         }
         output
@@ -216,7 +245,8 @@ pub(super) fn execute_status_all(
         .map_err(|_| CliFailure::new("stdout failed"))?;
     let mut deadlines = cli_output::Table::new(["PROVIDER", "REVIEW VALID UNTIL (UTC)"]);
     for provider in plakous_hosted::capabilities::native_providers() {
-        let deadline = format_unix_seconds(backend.notice(provider)?.expires_at);
+        let account = commands::support::cli_provider_name(provider).parse()?;
+        let deadline = format_unix_seconds(backend.notice(&account)?.expires_at);
         deadlines
             .push([subscription_provider_label(provider), deadline.as_str()])
             .map_err(CliFailure::new)?;
@@ -343,7 +373,7 @@ pub(super) fn execute_usage(
     services: &Services,
     backend: &mut impl AccountOps,
     stdout: &mut dyn io::Write,
-    account: Option<String>,
+    account: Option<plakous_hosted::account::AccountRef>,
     session_id: Option<String>,
 ) -> CliResult<ProcessOutcome> {
     if let Some(session_id) = session_id {
@@ -367,7 +397,10 @@ pub(super) fn execute_usage(
         )?;
         return Ok(ProcessOutcome::Success);
     }
-    let selected = match account.as_deref() {
+    let selected = match account
+        .as_ref()
+        .map(plakous_hosted::account::AccountRef::as_str)
+    {
         None => None,
         Some(account) => match usage_vertical_for_account(account) {
             Some(vertical) => Some(vertical),

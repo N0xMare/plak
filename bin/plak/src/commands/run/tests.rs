@@ -61,7 +61,7 @@ fn expired_run_timeout_precedes_authentication_preparation() {
     let outcome = app
         .run(
             &product_config::ProductConfig::default_product(),
-            NativeProvider::Codex,
+            &"codex".parse().unwrap(),
             "offline-model",
             None,
             None,
@@ -940,7 +940,7 @@ fn run_refuses_an_invalid_config_before_any_account_or_session_work() {
     let commands = [
         crate::command::Command::Run {
             limits: plakous_hosted::runtime::RunBounds::default(),
-            provider: NativeProvider::Codex,
+            provider: "codex".parse().unwrap(),
             model: "gpt-5.6-sol".into(),
             effort: None,
             composition: None,
@@ -999,7 +999,7 @@ fn run_with_a_signed_out_subscription_exits_3_naming_plak_login() {
     let failure = crate::execute_application_command(
         crate::command::Command::Run {
             limits: plakous_hosted::runtime::RunBounds::default(),
-            provider: NativeProvider::Codex,
+            provider: "codex".parse().unwrap(),
             model: "gpt-5.6-sol".into(),
             effort: None,
             composition: None,
@@ -1038,7 +1038,7 @@ fn resolution_failures_keep_usage_auth_and_internal_classes_apart() {
         (E::CredentialUnavailable, 3),
         (E::AcceptanceRequired, 3),
     ] {
-        let failure = app.resolution_failure(error, NativeProvider::Codex);
+        let failure = app.resolution_failure(error, &"codex".parse().unwrap());
         assert_eq!(failure.exit_code(), exit, "{}", failure.message());
     }
 }

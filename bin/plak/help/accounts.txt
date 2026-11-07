@@ -1,0 +1,16 @@
+plak accounts — local account selections
+
+USAGE:
+  plak accounts list
+  plak accounts rm <vertical>/<name> [--yes]
+
+DESCRIPTION:
+  List permanent defaults and locally stored named accounts without secret values.
+  Login and key set create named accounts; there is no add command.
+  Remove only an already signed-out native slot, or clear a named API key.
+  A signed-in native slot refuses: log out first. A busy slot refuses: retry later.
+  Removal never logs out or revokes remotely. Default accounts are not removable;
+  use logout or key clear instead. Referencing sessions/templates may refuse later.
+
+OPTIONS:
+  --yes   Skip the confirmation that otherwise requires the full account reference

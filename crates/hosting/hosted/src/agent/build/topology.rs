@@ -20,6 +20,7 @@ pub struct ProductAgentSpec {
     /// Attached host completion channel used by the prompt compiler.
     pub prompt_host_facts: plakous_host_protocol::PromptHostFacts,
     pub provider: NativeProvider,
+    pub account: crate::account::AccountRef,
     pub resolved: Arc<ResolvedProvider>,
     pub effort: Option<ReasoningEffort>,
     pub effort_explicit: bool,
@@ -549,7 +550,7 @@ async fn topology_extensions_from_hub_with_owner(
 /// of the roster vocabulary, not from a table in the constructor.
 pub(in crate::agent) fn spawn_parent_root_account(parent: &SpawnParent) -> &str {
     match parent {
-        SpawnParent::Native(spec) => spec.state_roots.roster_source().account_name(spec.provider),
+        SpawnParent::Native(spec) => spec.account.as_str(),
         SpawnParent::Api(parent) => parent.target.account(),
     }
 }
@@ -775,7 +776,10 @@ pub(crate) fn node_coding_presentation(account: &str, model: &str) -> Option<Cod
     if let Some(provider) = crate::binding::oauth_provider_for_account(account) {
         return crate::coding_routes::selected_route_presentation(provider, model).ok();
     }
-    (account == "openrouter").then_some(CodingPresentation::Pi)
+    (account
+        .parse::<crate::account::AccountRef>()
+        .is_ok_and(|account| account.vertical() == crate::account::Vertical::OpenRouter))
+    .then_some(CodingPresentation::Pi)
 }
 
 /// A parent whose route the catalog cannot place is an error: its await

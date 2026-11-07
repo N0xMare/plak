@@ -11,19 +11,44 @@ pub(crate) fn unavailable_reason(
         return neutral.to_owned();
     };
     match repair {
-        UsageRepair::Credential(UsageCredentialState::RefreshRequired) => format!("credential needs a token refresh; the next turn refreshes it, or run `plak refresh {account}`"),
-        UsageRepair::Credential(UsageCredentialState::Quarantined) if account == "grok" => "credential is quarantined after an ambiguous refresh; the next turn retries it, or run `plak refresh grok`; run `plak login grok` if that fails".into(),
-        UsageRepair::Credential(UsageCredentialState::Quarantined) => format!("credential is quarantined after an ambiguous refresh; run `plak login {account}` to recover"),
-        UsageRepair::Credential(UsageCredentialState::Revoked) => format!("credential is revoked; run `plak login {account}`"),
-        UsageRepair::Credential(UsageCredentialState::LoginRequired) => format!("the stored login was made by an earlier build and cannot be used; run `plak login {account}`"),
-        UsageRepair::Credential(UsageCredentialState::WrittenByNewerBuild) => format!("the stored login was written by a newer plak build; use that build, or replace it with `plak login {account}` (that build must then log in again)"),
-        UsageRepair::RejectedKey(KeySource::File) => format!("{neutral}; run `plak key set openrouter` to replace it"),
+        UsageRepair::Credential(UsageCredentialState::RefreshRequired) => format!(
+            "credential needs a token refresh; the next turn refreshes it, or run `plak refresh {account}`"
+        ),
+        UsageRepair::Credential(UsageCredentialState::Quarantined)
+            if account
+                .parse::<plakous_hosted::account::AccountRef>()
+                .is_ok_and(|account| {
+                    account.vertical() == plakous_hosted::account::Vertical::Grok
+                }) =>
+        {
+            format!(
+                "credential is quarantined after an ambiguous refresh; the next turn retries it, or run `plak refresh {account}`; run `plak login {account}` if that fails"
+            )
+        }
+        UsageRepair::Credential(UsageCredentialState::Quarantined) => format!(
+            "credential is quarantined after an ambiguous refresh; run `plak login {account}` to recover"
+        ),
+        UsageRepair::Credential(UsageCredentialState::Revoked) => {
+            format!("credential is revoked; run `plak login {account}`")
+        }
+        UsageRepair::Credential(UsageCredentialState::LoginRequired) => format!(
+            "the stored login was made by an earlier build and cannot be used; run `plak login {account}`"
+        ),
+        UsageRepair::Credential(UsageCredentialState::WrittenByNewerBuild) => format!(
+            "the stored login was written by a newer plak build; use that build, or replace it with `plak login {account}` (that build must then log in again)"
+        ),
+        UsageRepair::RejectedKey(KeySource::File) => {
+            format!("{neutral}; run `plak key set openrouter` to replace it")
+        }
         UsageRepair::RejectedKey(KeySource::Environment) => neutral.to_owned(),
     }
 }
 
 pub(crate) fn not_connected(account: &str) -> String {
-    let command = if account == "openrouter" {
+    let command = if account
+        .parse::<plakous_hosted::account::AccountRef>()
+        .is_ok_and(|account| account.vertical() == plakous_hosted::account::Vertical::OpenRouter)
+    {
         "plak key set openrouter".to_owned()
     } else {
         format!("plak login {account}")

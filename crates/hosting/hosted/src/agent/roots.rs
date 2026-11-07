@@ -620,6 +620,32 @@ impl ProductStateRoots {
         ))
     }
 
+    /// Constructs only the selected account's native source, without fallback.
+    ///
+    /// # Errors
+    /// Refuses API selections and invalid native source construction.
+    pub fn native_subscriptions_for(
+        &self,
+        account: &crate::account::AccountRef,
+    ) -> CliResult<plakous::subscriptions::NativeSubscriptions> {
+        let provider = account
+            .vertical()
+            .capability()
+            .native_provider()
+            .ok_or_else(
+                || crate::capabilities::AccountAdmissionError::AccountTargetMismatch {
+                    account: account.to_string(),
+                },
+            )?;
+        let subscriptions = self.native_subscriptions()?;
+        if let Some(name) = account.name() {
+            return subscriptions
+                .for_named_account(provider, name.as_str())
+                .map_err(|error| CliFailure::new(format!("{account}: {error}")));
+        }
+        Ok(subscriptions)
+    }
+
     pub(super) fn paths(&self) -> [PathBuf; 2] {
         [self.product.clone(), self.subscriptions.clone()]
     }

@@ -1,6 +1,7 @@
 plak run — non-interactive agent run
 
 USAGE:
+  --account also accepts a full named reference, such as claude/work or openai/work.
   plak run --account <codex|grok|claude|openrouter|openai|anthropic|xai-api> --model <exact-id> [options] -- <prompt>
   plak run --session <session> -- <prompt>   Continue an exact idle session
 

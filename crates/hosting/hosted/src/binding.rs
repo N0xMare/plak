@@ -369,7 +369,7 @@ pub const fn account_target(
 /// `xai-oauth` are the same subscription as `grok`, and `openrouter` (or an
 /// API-key account) has none.
 #[must_use]
-pub const fn oauth_provider_for_account(account: &str) -> Option<NativeProvider> {
+pub fn oauth_provider_for_account(account: &str) -> Option<NativeProvider> {
     match crate::capabilities::for_account(account) {
         Some(route) => route.native_provider(),
         None => None,
@@ -392,14 +392,17 @@ pub fn admit_account_model(account: &str, model: &str) -> crate::CliResult<()> {
         }
         let route = crate::capabilities::for_account(account)
             .ok_or_else(|| RouteRefusal::NotOauth.message(account))?;
-        (route.catalog_label, route.account)
+        (route.catalog_label, account)
     } else if let Some(provider) = PlatformProvider::for_account(account) {
         if crate::platform::platform_model(provider, model).is_some() {
             return Ok(());
         }
         let route = crate::capabilities::for_platform(provider);
-        (route.catalog_label, route.account)
-    } else if account == "openrouter" {
+        (route.catalog_label, account)
+    } else if account
+        .parse::<crate::account::AccountRef>()
+        .is_ok_and(|account| account.vertical() == crate::account::Vertical::OpenRouter)
+    {
         return Ok(());
     } else {
         return Err(RouteRefusal::NotOauth.message(account).into());

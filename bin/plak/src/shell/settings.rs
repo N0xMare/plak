@@ -1008,7 +1008,7 @@ impl ProductSurface {
     }
 
     fn refresh_usage(&self, account: String, events: &Sender<PlakExtension>) {
-        let Some(provider) = oauth_provider_for_account(&account) else {
+        if oauth_provider_for_account(&account).is_none() {
             let _ = events.send(ContentEvent::Extension(
                 SurfaceObservation::UsageCredentialRefreshed {
                     account,
@@ -1016,7 +1016,7 @@ impl ProductSurface {
                 },
             ));
             return;
-        };
+        }
         let Ok(mut running) = self.usage_refreshing.lock() else {
             return;
         };
@@ -1035,7 +1035,8 @@ impl ProductSurface {
                 .map_err(plakous_hosted::error::CliFailure::new)
                 .and_then(crate::commands::application::PlakousApplication::for_accounts)
                 .and_then(|mut backend| {
-                    crate::commands::usage::refresh_usage_credential(&mut backend, provider)
+                    let selection: plakous_hosted::account::AccountRef = account.parse()?;
+                    crate::commands::usage::refresh_usage_credential(&mut backend, &selection)
                 });
             let error = result.err().and_then(|error| {
                 crate::product_doctor::last_failed_refresh(

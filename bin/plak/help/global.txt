@@ -8,6 +8,7 @@ USAGE:
   plak <command> --help             Command-specific help
 
 COMMANDS:
+  accounts    List accounts; remove signed-out named slots or clear named API keys
   login       OAuth/subscription login (codex, grok, claude)
   logout      OAuth logout / local retirement
   status      Credential readiness (no secrets)

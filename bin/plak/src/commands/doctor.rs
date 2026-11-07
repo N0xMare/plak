@@ -156,7 +156,10 @@ pub(crate) fn run_doctor(
     // The same offline classification `plak status` and model runs read.
     let mut accounts = PlakousApplication::for_accounts(state_home.clone());
     let mut credential = |provider| match accounts.as_mut() {
-        Ok(accounts) => accounts.offline_status_row(provider),
+        Ok(accounts) => crate::commands::support::cli_provider_name(provider)
+            .parse()
+            .map_err(|error: plakous_hosted::capabilities::AccountAdmissionError| error.to_string())
+            .and_then(|account| accounts.offline_status_row(&account)),
         Err(failure) => Err(failure.message().to_owned()),
     };
     let path = env::var_os("PATH");

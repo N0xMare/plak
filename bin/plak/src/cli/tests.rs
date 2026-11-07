@@ -6,24 +6,77 @@
 #[test]
 fn unknown_cli_accounts_share_admission_wording_and_registered_aliases() {
     for verb in ["run", "agent"] {
-        let mut arguments = vec![verb, "--account", "openai/work", "--model", "m"];
+        let mut arguments = vec![verb, "--account", "removed/work", "--model", "m"];
         if verb == "run" {
             arguments.extend(["--", "hello"]);
         }
         let error = parse(args(&arguments)).unwrap_err();
-        assert!(error.contains("unknown_account: `openai/work`"), "{error}");
+        assert!(error.contains("unknown_account: `removed/work`"), "{error}");
     }
     assert!(matches!(
         parse(args(&["login", "chatgpt"])).unwrap(),
         Command::AuthLogin {
-            provider: NativeProvider::Codex,
+            provider,
             ..
-        }
-    ));
+        } if provider.as_str() == "codex"));
     assert!(matches!(
         parse(args(&["refresh", "xai-oauth"])).unwrap(),
-        Command::AuthRefresh(NativeProvider::Xai)
+        Command::AuthRefresh(account) if account.as_str() == "grok"
     ));
+}
+
+#[test]
+fn named_cli_accounts_keep_the_full_reference_on_every_command_surface() {
+    for account in ["claude/work", "codex/work", "grok/work"] {
+        for verb in ["status", "refresh", "models"] {
+            let parsed = parse(args(&[verb, account])).unwrap();
+            let selected = match parsed {
+                Command::AuthStatus(selected)
+                | Command::AuthRefresh(selected)
+                | Command::Models(selected) => selected,
+                other => panic!("unexpected command: {other:?}"),
+            };
+            assert_eq!(selected.as_str(), account);
+        }
+        assert!(
+            matches!(parse(args(&["login", account])).unwrap(), Command::AuthLogin { provider, .. } if provider.as_str() == account)
+        );
+        assert!(
+            matches!(parse(args(&["logout", account, "--local"])).unwrap(), Command::AuthLogout { provider, local_only: true } if provider.as_str() == account)
+        );
+        assert!(
+            matches!(parse(args(&["run", "--account", account, "--model", "m", "--", "hello"])).unwrap(), Command::Run { provider, .. } if provider.as_str() == account)
+        );
+        assert!(
+            matches!(parse(args(&["agent", "--account", account, "--model", "m"])).unwrap(), Command::Agent { account: Some(selected), .. } if selected.as_str() == account)
+        );
+    }
+    for account in [
+        "openai/work",
+        "anthropic/work",
+        "xai-api/work",
+        "openrouter/work",
+    ] {
+        assert!(
+            matches!(parse(args(&["key", "set", account])).unwrap(), Command::KeySet { account: selected } if selected.as_str() == account)
+        );
+        assert!(
+            matches!(parse(args(&["key", "clear", account])).unwrap(), Command::KeyClear { account: selected } if selected.as_str() == account)
+        );
+        assert!(
+            matches!(parse(args(&["status", account])).unwrap(), Command::KeyStatus { account: Some(selected) } if selected.as_str() == account)
+        );
+        assert!(parse(args(&["login", account])).is_err());
+        assert!(parse(args(&["refresh", account])).is_err());
+    }
+    assert!(matches!(
+        parse(args(&["accounts", "list"])).unwrap(),
+        Command::AccountsList
+    ));
+    assert!(
+        matches!(parse(args(&["accounts", "rm", "claude/work", "--yes"])).unwrap(), Command::AccountsRemove { account, confirmed: true } if account.as_str() == "claude/work")
+    );
+    assert!(parse(args(&["accounts", "rm", "claude/work", "--local"])).is_err());
 }
 
 #[test]
@@ -268,17 +321,15 @@ fn help_and_login_parse() {
     assert!(matches!(
         parse(["login".into(), "grok".into()]),
         Ok(Command::AuthLogin {
-            provider: NativeProvider::Xai,
+            provider,
             ..
-        })
-    ));
+        }) if provider.as_str() == "grok"));
     assert!(matches!(
         parse(["login".into(), "claude".into()]),
         Ok(Command::AuthLogin {
-            provider: NativeProvider::Claude,
+            provider,
             ..
-        })
-    ));
+        }) if provider.as_str() == "claude"));
     assert!(matches!(
         parse(["login".into(), "--help".into()]),
         Ok(Command::CommandHelp { command }) if command == "login"
@@ -289,7 +340,7 @@ fn help_and_login_parse() {
 fn clap_routes_status() {
     assert!(matches!(
         parse(["status".into(), "codex".into()]),
-        Ok(Command::AuthStatus(NativeProvider::Codex))
+        Ok(Command::AuthStatus(account)) if account.as_str() == "codex"
     ));
 }
 
@@ -485,7 +536,7 @@ fn clap_routes_run_with_delimiter() {
             prompt,
             ..
         } => {
-            assert_eq!(provider, NativeProvider::Codex);
+            assert_eq!(provider.as_str(), "codex");
             assert_eq!(model, "gpt-5.3-codex-spark");
             assert_eq!(prompt, "hello");
         }
@@ -700,7 +751,7 @@ fn clap_routes_claude_oauth_run_sonnet_5_low() {
             prompt,
             ..
         } => {
-            assert_eq!(provider, NativeProvider::Claude);
+            assert_eq!(provider.as_str(), "claude");
             assert_eq!(model, "claude-sonnet-5");
             assert_eq!(effort, Some(plakous::model::ReasoningEffort::Low));
             assert_eq!(prompt, "pong");
@@ -838,77 +889,76 @@ fn product_command_argv_matrix() {
             |c| matches!(c, Command::Resume { session_id: Some(id), handoff: Some(handoff) } if id == "aaaaaaaa" && handoff.as_os_str() == "/tmp/h.json"),
         ),
         (&["status"], |c| matches!(c, Command::StatusAll)),
-        (&["models", "claude"], |c| {
-            matches!(c, Command::Models(NativeProvider::Claude))
-        }),
-        (&["models", "codex"], |c| {
-            matches!(c, Command::Models(NativeProvider::Codex))
-        }),
-        (&["status", "codex"], |c| {
-            matches!(c, Command::AuthStatus(NativeProvider::Codex))
-        }),
+        (
+            &["models", "claude"],
+            |c| matches!(c, Command::Models(account) if account.as_str() == "claude"),
+        ),
+        (
+            &["models", "codex"],
+            |c| matches!(c, Command::Models(account) if account.as_str() == "codex"),
+        ),
+        (
+            &["status", "codex"],
+            |c| matches!(c, Command::AuthStatus(account) if account.as_str() == "codex"),
+        ),
         (&["login", "codex"], |c| {
             matches!(
                 c,
                 Command::AuthLogin {
-                    provider: NativeProvider::Codex,
+                    provider,
                     ..
-                }
-            )
+                } if provider.as_str() == "codex")
         }),
         (&["login", "claude"], |c| {
             matches!(
                 c,
                 Command::AuthLogin {
-                    provider: NativeProvider::Claude,
+                    provider,
                     mode: NativeLoginMode::Browser,
-                }
-            )
+                } if provider.as_str() == "claude")
         }),
         (&["login", "claude", "--remote"], |c| {
             matches!(
                 c,
                 Command::AuthLogin {
-                    provider: NativeProvider::Claude,
+                    provider,
                     mode: NativeLoginMode::Remote,
-                }
-            )
+                } if provider.as_str() == "claude")
         }),
         (&["logout", "grok", "--local"], |c| {
             matches!(
                 c,
                 Command::AuthLogout {
-                    provider: NativeProvider::Xai,
+                    provider,
                     local_only: true
-                }
-            )
+                } if provider.as_str() == "grok")
         }),
         (&["logout", "supergrok", "--local"], |c| {
             matches!(
                 c,
                 Command::AuthLogout {
-                    provider: NativeProvider::Xai,
+                    provider,
                     local_only: true
-                }
-            )
+                } if provider.as_str() == "grok")
         }),
-        (&["refresh", "grok"], |c| {
-            matches!(c, Command::AuthRefresh(NativeProvider::Xai))
-        }),
+        (
+            &["refresh", "grok"],
+            |c| matches!(c, Command::AuthRefresh(account) if account.as_str() == "grok"),
+        ),
         (&["key", "status"], |c| {
             matches!(c, Command::KeyStatus { account: None })
         }),
         (
             &["key", "status", "openai"],
-            |c| matches!(c, Command::KeyStatus { account: Some(a) } if a == "openai"),
+            |c| matches!(c, Command::KeyStatus { account: Some(a) } if a.as_str() == "openai"),
         ),
         (
             &["key", "clear", "openai"],
-            |c| matches!(c, Command::KeyClear { account } if account == "openai"),
+            |c| matches!(c, Command::KeyClear { account } if account.as_str() == "openai"),
         ),
         (
             &["key", "set", "xai-api"],
-            |c| matches!(c, Command::KeySet { account } if account == "xai-api"),
+            |c| matches!(c, Command::KeySet { account } if account.as_str() == "xai-api"),
         ),
         (
             &["secret", "set", "github"],
@@ -1038,7 +1088,7 @@ fn product_command_argv_matrix() {
         }),
         (
             &["run", "--account", "grok", "--model", "m", "--", "hi"],
-            |c| matches!(c, Command::Run { provider: NativeProvider::Xai, prompt, .. } if prompt == "hi"),
+            |c| matches!(c, Command::Run { provider, prompt, .. } if provider.as_str() == "grok" && prompt == "hi"),
         ),
         (
             &[

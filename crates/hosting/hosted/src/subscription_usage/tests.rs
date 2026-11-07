@@ -201,6 +201,70 @@ fn claude_account_email_is_projected_onto_the_account_line()
 }
 
 #[test]
+fn named_usage_keeps_email_detail_and_never_borrows_a_sibling_reading()
+-> Result<(), Box<dyn std::error::Error>> {
+    let named = UsageVertical::new("claude/work", "claude/work");
+    let sibling = UsageVertical::new("claude/other", "claude/other");
+    let snapshot = SubscriptionUsageSnapshot::new(
+        Timestamp::new(1_788_000_000, 0)?,
+        Some("Claude Max".to_owned()),
+        Vec::new(),
+    )?
+    .with_account(Some("user@example.com".to_owned()))?;
+    let view = project_limits(
+        [
+            (
+                named.clone(),
+                VerticalObservation::Native(SubscriptionUsageRead::Snapshot(snapshot)),
+            ),
+            (sibling.clone(), VerticalObservation::NotConnected),
+        ],
+        SessionLedgerView::default(),
+    );
+    let work = view
+        .verticals
+        .iter()
+        .find(|row| row.vertical == named)
+        .unwrap();
+    assert_eq!(work.account_email.as_deref(), Some("user@example.com"));
+    assert!(matches!(work.state, VerticalUsageState::Ready { .. }));
+    for other in [&sibling, &claude_vertical()] {
+        let row = view
+            .verticals
+            .iter()
+            .find(|row| &row.vertical == other)
+            .unwrap();
+        assert_eq!(row.account_email, None);
+        assert!(matches!(row.state, VerticalUsageState::NotConnected));
+    }
+    let text = render_limits_text(&view);
+    assert!(
+        text.contains("claude/work\n  Account: user@example.com (Claude Max)"),
+        "{text}"
+    );
+    assert!(text.contains("claude/other"), "{text}");
+    let incoming = project_limits(
+        [(
+            sibling.clone(),
+            VerticalObservation::Unavailable(USAGE_BUSY_REASON.to_owned()),
+        )],
+        SessionLedgerView::default(),
+    );
+    let held = preserve_ready_across_rate_limit(incoming, Some(&view));
+    let other = held
+        .verticals
+        .iter()
+        .find(|row| row.vertical == sibling)
+        .unwrap();
+    assert!(matches!(
+        other.state,
+        VerticalUsageState::Unavailable { .. }
+    ));
+    assert_eq!(other.account_email, None);
+    Ok(())
+}
+
+#[test]
 fn a_non_ready_vertical_carries_no_numbers_and_no_bar() {
     let view = project_limits(
         [(codex_vertical(), VerticalObservation::NotConnected)],

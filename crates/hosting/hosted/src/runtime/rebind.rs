@@ -197,11 +197,10 @@ pub(super) async fn resolve_rebind_target<P: plakous_host_protocol::ProtocolExte
     let model_id = ModelId::new(model.to_owned())
         .map_err(|_| CliFailure::new("rebind target model identity is invalid"))?;
     let subscriptions = config
-        .target
-        .native_subscriptions()
-        .ok_or_else(|| CliFailure::new("subscription authority is missing"))?;
+        .state_roots
+        .native_subscriptions_for(&account.parse()?)?;
     let (reasoning_efforts, service_tiers, native_tool_mode) =
-        rebind_model_capabilities(watch, config, subscriptions, provider, account, model).await?;
+        rebind_model_capabilities(watch, config, &subscriptions, provider, account, model).await?;
     admit_rebind_effort(&reasoning_efforts, explicit, parsed_effort)?;
     let target_effort = explicit.then_some(parsed_effort);
     let processing_tier = rebind_processing_tier(target_selection, provider, &service_tiers)?;
@@ -233,6 +232,7 @@ pub(super) async fn resolve_rebind_target<P: plakous_host_protocol::ProtocolExte
     let resolved = std::sync::Arc::new(resolved);
     let binding = coding_session_target_binding(resolved.as_ref());
     let spec = ProductAgentSpec {
+        account: account.parse()?,
         prompt_host_facts: config.prompt_host_facts(),
         product_home: Some(config.product_home.clone()),
         tool_selection: super::startup::root_tool_selection(&config.session),

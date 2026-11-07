@@ -90,7 +90,7 @@ fn ssh_session_from_env_detects_any_marker() {
 
 #[test]
 fn ssh_refusal_is_explicit_not_auto_remote() {
-    let m = ssh_local_login_refusal_message(plakous::subscriptions::NativeProvider::Codex);
+    let m = ssh_local_login_refusal_message("codex", plakous::subscriptions::NativeProvider::Codex);
     assert!(m.contains("SSH session detected"));
     assert!(m.contains("plak login codex --remote"));
     assert!(!m.to_ascii_lowercase().contains("auto"));

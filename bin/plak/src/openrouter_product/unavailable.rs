@@ -27,7 +27,10 @@ fn unavailable() -> CliFailure {
     }
     .into()
 }
-pub fn list_models(_: &PlakPaths) -> std::future::Ready<CliResult<Vec<String>>> {
+pub fn list_models(
+    _: &PlakPaths,
+    _: &plakous_hosted::account::AccountRef,
+) -> std::future::Ready<CliResult<Vec<String>>> {
     std::future::ready(Err(unavailable()))
 }
 pub fn probe_openrouter_catalog_allowlist(

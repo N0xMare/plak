@@ -42,12 +42,7 @@ pub(super) fn finish_continue_session(
         return Err("run --session requires an exact session uuid".to_owned());
     }
     let (prompt, images) = prompt.into_draft()?;
-    if prompt.trim().is_empty() && images.is_empty() {
-        return Err("run requires a non-empty prompt after `--`".to_owned());
-    }
-    if prompt.len() > NATIVE_RUN_MAX_PROMPT_BYTES {
-        return Err("run prompt exceeds the maximum supported size".to_owned());
-    }
+    validate_run_prompt(&prompt, images.is_empty())?;
     Ok(Command::ContinueSession {
         limits,
         session_id,
@@ -73,8 +68,11 @@ pub(super) fn finish_run(
     if model.is_empty() {
         return Err("run requires --model".to_owned());
     }
+    let account: super::AccountRef = account
+        .parse()
+        .map_err(|error: plakous_hosted::capabilities::AccountAdmissionError| error.to_string())?;
     let (prompt, images) = prompt.into_draft()?;
-    if let Some(provider) = plakous_hosted::binding::PlatformProvider::for_account(&account) {
+    if let Some(provider) = account.vertical().capability().platform_provider() {
         if protocol.is_some() {
             return Err("--protocol is available only with --account openrouter".into());
         }
@@ -95,6 +93,7 @@ pub(super) fn finish_run(
             return Err("run requires a non-empty prompt within the supported size bound".into());
         }
         return Ok(Command::RunPlatform {
+            account,
             limits,
             provider,
             model,
@@ -104,7 +103,7 @@ pub(super) fn finish_run(
             print_session_id,
         });
     }
-    if account == "openrouter" {
+    if account.vertical() == super::Vertical::OpenRouter {
         let effort = effort
             .map(|value| {
                 RunEffort::parse(&value)
@@ -125,13 +124,9 @@ pub(super) fn finish_run(
             .transpose()?
             .unwrap_or_default();
         let wire = crate::product_config::ProductWireBinding::resolve(selection);
-        if prompt.trim().is_empty() && images.is_empty() {
-            return Err("run requires a non-empty prompt after `--`".to_owned());
-        }
-        if prompt.len() > NATIVE_RUN_MAX_PROMPT_BYTES {
-            return Err("run prompt exceeds the maximum supported size".to_owned());
-        }
+        validate_run_prompt(&prompt, images.is_empty())?;
         return Ok(Command::RunOpenRouter {
+            account,
             limits,
             model,
             effort,
@@ -144,7 +139,7 @@ pub(super) fn finish_run(
     if protocol.is_some() {
         return Err("--protocol is available only with --account openrouter".to_owned());
     }
-    let provider = parse_oauth_account(&account)?;
+    let provider = parse_oauth_account(account.as_str())?;
     // No silent default: the catalog decides whether an effort is required, and
     // `plak run` says so by name when it is (see `PlakousApplication::run`).
     let effort = effort
@@ -153,12 +148,7 @@ pub(super) fn finish_run(
     let composition = composition
         .map(|value| crate::product_config::ProductCompositionSelection::parse(&value))
         .transpose()?;
-    if prompt.trim().is_empty() && images.is_empty() {
-        return Err("run requires a non-empty prompt after `--`".to_owned());
-    }
-    if prompt.len() > NATIVE_RUN_MAX_PROMPT_BYTES {
-        return Err("run prompt exceeds the maximum supported size".to_owned());
-    }
+    validate_run_prompt(&prompt, images.is_empty())?;
     Ok(Command::Run {
         limits,
         provider,
@@ -168,6 +158,16 @@ pub(super) fn finish_run(
         prompt: plakous_host_protocol::Draft::new(prompt, images),
         print_session_id,
     })
+}
+
+fn validate_run_prompt(prompt: &str, no_images: bool) -> Result<(), String> {
+    if prompt.trim().is_empty() && no_images {
+        return Err("run requires a non-empty prompt after `--`".to_owned());
+    }
+    if prompt.len() > NATIVE_RUN_MAX_PROMPT_BYTES {
+        return Err("run prompt exceeds the maximum supported size".to_owned());
+    }
+    Ok(())
 }
 
 pub(super) fn finish_agent(
@@ -194,6 +194,7 @@ pub(super) fn finish_agent(
             return Err("agent --session requires an exact session uuid".to_owned());
         }
         return Ok(Command::Agent {
+            account: None,
             session_id: Some(session_id),
             provider: None,
             platform: None,
@@ -205,15 +206,22 @@ pub(super) fn finish_agent(
             wire_v2: false,
         });
     }
-    if let Some(account) = account.as_deref() {
-        if let Some(platform) = plakous_hosted::binding::PlatformProvider::for_account(account) {
+    let account: Option<super::AccountRef> = account
+        .map(|value| {
+            value.parse().map_err(
+                |error: plakous_hosted::capabilities::AccountAdmissionError| error.to_string(),
+            )
+        })
+        .transpose()?;
+    if let Some(account) = account.as_ref() {
+        if let Some(platform) = account.vertical().capability().platform_provider() {
             if protocol.is_some() {
                 return Err("--protocol is available only with --account openrouter".into());
             }
             return finish_platform_agent(account, platform, model, effort, composition);
         }
-        if account == "openrouter" {
-            return finish_openrouter_agent(model, effort, composition, protocol);
+        if account.vertical() == super::Vertical::OpenRouter {
+            return finish_openrouter_agent(account.clone(), model, effort, composition, protocol);
         }
         if protocol.is_some() {
             return Err("--protocol is available only with --account openrouter".to_owned());
@@ -221,7 +229,9 @@ pub(super) fn finish_agent(
     } else if protocol.is_some() {
         return Err("--protocol is available only with --account openrouter".to_owned());
     }
-    let provider = account.as_deref().map(parse_oauth_account).transpose()?;
+    let provider = account
+        .as_ref()
+        .and_then(|account| account.vertical().capability().native_provider());
     let effort_explicit = effort.is_some();
     let effort = match effort {
         None => None,
@@ -235,6 +245,7 @@ pub(super) fn finish_agent(
         .map(|value| crate::product_config::ProductCompositionSelection::parse(&value))
         .transpose()?;
     Ok(Command::Agent {
+        account,
         session_id: None,
         provider,
         platform: None,
@@ -248,6 +259,7 @@ pub(super) fn finish_agent(
 }
 
 fn finish_openrouter_agent(
+    account: super::AccountRef,
     model: Option<String>,
     effort: Option<String>,
     composition: Option<String>,
@@ -275,6 +287,7 @@ fn finish_openrouter_agent(
         .unwrap_or_default();
     let wire = crate::product_config::ProductWireBinding::resolve(selection);
     Ok(Command::Agent {
+        account: Some(account),
         session_id: None,
         provider: None,
         platform: None,
@@ -288,7 +301,7 @@ fn finish_openrouter_agent(
 }
 
 fn finish_platform_agent(
-    account: &str,
+    account: &super::AccountRef,
     platform: plakous_hosted::binding::PlatformProvider,
     model: Option<String>,
     effort: Option<String>,
@@ -306,7 +319,7 @@ fn finish_platform_agent(
         .as_deref()
         .map(crate::product_config::ProductCompositionSelection::parse)
         .transpose()?;
-    if plakous_hosted::capabilities::require(account).is_ok() {
+    if plakous_hosted::capabilities::require(account.as_str()).is_ok() {
         if model
             .as_deref()
             .is_some_and(|model| !crate::platform_catalog::enrolled(platform, model))
@@ -324,6 +337,7 @@ fn finish_platform_agent(
         }
     }
     Ok(Command::Agent {
+        account: Some(account.clone()),
         session_id: None,
         provider: None,
         platform: Some(platform),

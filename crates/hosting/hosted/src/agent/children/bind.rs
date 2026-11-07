@@ -71,7 +71,10 @@ impl ProductChildSessionBinder {
             };
             if !binding.account.is_empty()
                 && crate::runtime::oauth_provider_for_account(&binding.account).is_none()
-                && binding.account != "openrouter"
+                && !binding
+                    .account
+                    .parse::<crate::account::AccountRef>()
+                    .is_ok_and(|account| account.vertical() == crate::account::Vertical::OpenRouter)
                 && crate::binding::PlatformProvider::for_account(&binding.account).is_none()
             {
                 return Err(crate::agent_tree::TopologyError::new(
@@ -118,7 +121,9 @@ impl ProductChildSessionBinder {
             let subscriptions = self
                 .parent
                 .state_roots()
-                .native_subscriptions()
+                .native_subscriptions_for(&binding.account.parse().map_err(|_| {
+                    refusal(plakous_host_protocol::refusal::ChildCredentialState::CheckUnavailable)
+                })?)
                 .map_err(|_| {
                     refusal(plakous_host_protocol::refusal::ChildCredentialState::CheckUnavailable)
                 })?;
@@ -640,7 +645,9 @@ pub fn spawn_child_start_composition(
 ) -> Result<CompositionSelection, String> {
     let tree_id = spawn_parent_tree_id(parent).to_owned();
     let account = account.filter(|value| !value.is_empty());
-    if account == Some("openrouter")
+    if account
+        .and_then(|account| account.parse::<crate::account::AccountRef>().ok())
+        .is_some_and(|account| account.vertical() == crate::account::Vertical::OpenRouter)
         || account
             .and_then(crate::binding::PlatformProvider::for_account)
             .is_some()
@@ -754,7 +761,9 @@ pub(super) async fn production_child_runtime(
         startup_deadline,
     } = request;
     let account = account.filter(|value| !value.is_empty());
-    if account == Some("openrouter")
+    if account
+        .and_then(|account| account.parse::<crate::account::AccountRef>().ok())
+        .is_some_and(|account| account.vertical() == crate::account::Vertical::OpenRouter)
         || account
             .and_then(crate::binding::PlatformProvider::for_account)
             .is_some()
@@ -1024,7 +1033,7 @@ pub async fn spawned_child_spec(
         spawn_child_composition(parent_composition, target_provider, roster_composition)?;
 
     let subscriptions = state_roots
-        .native_subscriptions()
+        .native_subscriptions_for(&target_account.parse()?)
         .map_err(|failure| failure.message().to_owned())?
         .without_model_lookup_retries();
     // One admission rule with the catalog and inference paths: refresh first
@@ -1082,6 +1091,7 @@ pub async fn spawned_child_spec(
         product_home: inputs.product_home.map(Path::to_path_buf),
         tool_selection: frozen_child_tool_selection(&tree_id, agent_id)?,
         provider: target_provider,
+        account: target_account.parse()?,
         resolved,
         effort: effort_explicit.then_some(target_effort),
         effort_explicit,

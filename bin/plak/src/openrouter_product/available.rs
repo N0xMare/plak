@@ -166,14 +166,14 @@ impl plakous::api_key::ApiKeySource<OpenRouterCredentialRequest<'_>, OpenRouterC
 }
 
 /// Reads model identifiers through the existing authenticated facade catalog route.
-pub async fn list_models(paths: &PlakPaths) -> CliResult<Vec<String>> {
+pub async fn list_models(
+    paths: &PlakPaths,
+    account: &plakous_hosted::account::AccountRef,
+) -> CliResult<Vec<String>> {
     let credentials = ProductOpenRouterCredentials::new(paths.clone());
-    let account = plakous_hosted::account::AccountRef::default_for(
-        plakous_hosted::account::Vertical::OpenRouter,
-    );
-    credentials.preflight(&account)?;
+    credentials.preflight(account)?;
     let client = OpenRouterChatClient::connect_with_retention(
-        credentials.source(&account)?,
+        credentials.source(account)?,
         OpenRouterRetentionPolicy::gateway_default(),
     )
     .and_then(OpenRouterChatClient::with_plak_attribution)

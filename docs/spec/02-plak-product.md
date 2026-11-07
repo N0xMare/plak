@@ -9298,15 +9298,47 @@ ambiguous. A name does not change model behavior, harness/profile identity,
 prompt bytes or compiled route capability. The full reference is selection
 identity, never a provider-reported email. Parsing a reference alone confers
 no credential or runtime admission. API credential construction receives the
-full reference, never a provider-derived default; named native admission is
-separate from parsing.
+full reference, never a provider-derived default. Native runtime construction
+also retains the exact reference alongside its vertical.
 
 The account vocabulary is closed to the seven verticals `claude`, `codex`,
 `grok`, `anthropic`, `openai`, `xai-api`, and `openrouter`, with their existing
-unambiguous aliases and validated names on API verticals. A supplied string outside that vocabulary
+unambiguous aliases and validated names on all seven verticals. A supplied string outside that vocabulary
 is typed `AccountAdmissionError::UnknownAccount`, rendered as
 `unknown_account` with exit 2. Run/agent selection, resume and import refuse
-it before selecting credentials. Named native references are not yet admitted.
+it before selecting credentials.
+
+Auth and catalog commands take a positional account reference; run, agent and
+usage retain `--account <ref>`. Bare forms retain default/all behavior.
+`plak accounts list` reports permanent defaults and local named selections without
+reading secret values. Login and key set create selections; parsing, status and
+refresh never create a missing named native slot. `plak accounts rm <ref>` removes
+only an already signed-out native slot with no live credential; it never logs out
+or revokes remotely. A signed-in slot refuses typed `account_signed_in` and names
+`plak logout <ref>` as its next step; a held lock refuses typed `account_busy`.
+API removal clears only its shelf entry. Defaults refuse typed
+`default_account_not_removable`. Without `--yes`, removal requires
+the full reference as confirmation and explains credential scope, absence of
+remote revocation and possible refusals in referencing sessions/templates.
+Active-lease removal, remote-revocation composition and their crash matrix are
+separate work.
+
+Named slots scope source authority, not provider model/profile behavior. Default
+account binding/configuration identities, prompt renders and v12 export encoding
+remain unchanged; the v11 importer remains. Account/target disagreement refuses
+import and resume before credentials. A missing named slot never selects the
+default or a sibling. Each usage row belongs to one full reference; selecting a
+named account reads only that account. Provider-reported email remains a detail
+line, never the selector, label or identity. Successful named native login warns
+when a bounded local comparison finds the same authenticated upstream account
+as another readable slot of that vertical; shared upstream limits are not summed.
+Unavailable comparison evidence is unknown and does not reject login.
+
+Named credential failures retain typed refusal and full-reference detail, but
+use the existing structured remedy domain's `Unspecified` account. They must not
+render a default slot's login command. Exact named structured remedies await a
+host-protocol/product-store format cut. Refresh events retain their vertical
+labels; full-reference refresh telemetry attribution is a separate increment.
 
 **Auth selects one exact URL and API profile, and API-key and OAuth routes
 never cross or fall back.** A vertical is either a subscription (OAuth) or a

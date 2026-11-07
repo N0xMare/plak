@@ -6,6 +6,7 @@ use plakous::agent::ReasoningEffort;
 use plakous::subscriptions::{NativeLoginMode, NativeProvider};
 
 use crate::{CliFailureKind, product_config};
+use plakous_hosted::account::AccountRef;
 
 /// `plak host`'s arguments.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -121,6 +122,11 @@ pub(crate) enum Command {
     },
     Doctor,
     StatusAll,
+    AccountsList,
+    AccountsRemove {
+        account: AccountRef,
+        confirmed: bool,
+    },
     ConfigShow,
     ConfigSet {
         key: String,
@@ -134,13 +140,13 @@ pub(crate) enum Command {
     /// Remove the discovered project `.plak` from the trust registry.
     ConfigUntrust,
     KeySet {
-        account: String,
+        account: AccountRef,
     },
     KeyClear {
-        account: String,
+        account: AccountRef,
     },
     KeyStatus {
-        account: Option<String>,
+        account: Option<AccountRef>,
     },
     /// `plak secret set` (the host's named secrets) or `plak runner secret
     /// set` (this machine's runner secrets).
@@ -158,7 +164,7 @@ pub(crate) enum Command {
     Mcp(crate::commands::mcp::McpCommand),
     Runner(crate::commands::runner::RunnerCommand),
     Usage {
-        account: Option<String>,
+        account: Option<AccountRef>,
         session_id: Option<String>,
     },
     SessionList,
@@ -242,22 +248,22 @@ pub(crate) enum Command {
         max_bytes: Option<u64>,
     },
     CompatibilityNotice(NativeProvider),
-    AuthStatus(NativeProvider),
+    AuthStatus(AccountRef),
     AuthLogin {
-        provider: NativeProvider,
+        provider: AccountRef,
         mode: NativeLoginMode,
     },
-    AuthRefresh(NativeProvider),
+    AuthRefresh(AccountRef),
     AuthLogout {
-        provider: NativeProvider,
+        provider: AccountRef,
         local_only: bool,
     },
-    Models(NativeProvider),
+    Models(AccountRef),
     /// Authenticated OpenRouter catalog identifier listing.
-    ModelsOpenRouter,
-    ModelsPlatform(plakous_hosted::binding::PlatformProvider),
+    ModelsOpenRouter(AccountRef),
+    ModelsPlatform(AccountRef),
     Run {
-        provider: NativeProvider,
+        provider: AccountRef,
         model: String,
         /// Reasoning effort, exactly as the operator typed `--effort` (SuperGrok/Codex
         /// portable: low|medium|high; the CLI also accepts xhigh|max|ultra and adapters
@@ -270,6 +276,7 @@ pub(crate) enum Command {
         limits: plakous_hosted::runtime::RunBounds,
     },
     RunOpenRouter {
+        account: AccountRef,
         model: String,
         effort: Option<ReasoningEffort>,
         composition: product_config::ProductCompositionSelection,
@@ -279,6 +286,7 @@ pub(crate) enum Command {
         limits: plakous_hosted::runtime::RunBounds,
     },
     RunPlatform {
+        account: AccountRef,
         provider: plakous_hosted::binding::PlatformProvider,
         model: String,
         effort: ReasoningEffort,
@@ -294,6 +302,7 @@ pub(crate) enum Command {
         limits: plakous_hosted::runtime::RunBounds,
     },
     Agent {
+        account: Option<AccountRef>,
         session_id: Option<String>,
         provider: Option<NativeProvider>,
         platform: Option<plakous_hosted::binding::PlatformProvider>,
@@ -375,6 +384,7 @@ impl Command {
     pub(crate) fn speaking_wire(self, v2: bool) -> Self {
         match self {
             Self::Agent {
+                account,
                 session_id,
                 provider,
                 platform,
@@ -385,6 +395,7 @@ impl Command {
                 composition,
                 ..
             } => Self::Agent {
+                account,
                 session_id,
                 provider,
                 platform,
@@ -415,6 +426,7 @@ impl Command {
             Self::Compact { .. } => "compact",
             Self::Doctor => "doctor",
             Self::StatusAll | Self::AuthStatus(_) => "status",
+            Self::AccountsList | Self::AccountsRemove { .. } => "accounts",
             Self::ConfigShow
             | Self::ConfigSet { .. }
             | Self::ConfigEdit
@@ -453,7 +465,7 @@ impl Command {
             Self::AuthLogin { .. } => "login",
             Self::AuthRefresh(_) => "refresh",
             Self::AuthLogout { .. } => "logout",
-            Self::Models(_) | Self::ModelsOpenRouter | Self::ModelsPlatform(_) => "models",
+            Self::Models(_) | Self::ModelsOpenRouter(_) | Self::ModelsPlatform(_) => "models",
             Self::Run { .. }
             | Self::RunOpenRouter { .. }
             | Self::RunPlatform { .. }
@@ -471,7 +483,7 @@ impl Command {
             | Self::AuthRefresh(_)
             | Self::AuthLogout { .. }
             | Self::Models(_)
-            | Self::ModelsOpenRouter => CliFailureKind::Auth,
+            | Self::ModelsOpenRouter(_) => CliFailureKind::Auth,
             _ => CliFailureKind::Internal,
         }
     }
@@ -506,6 +518,7 @@ pub(crate) fn command_is_read_only(command: &Command) -> bool {
     matches!(
         command,
         Command::StatusAll
+            | Command::AccountsList
             | Command::AuthStatus(_)
             | Command::Doctor
             | Command::KeyStatus { .. }

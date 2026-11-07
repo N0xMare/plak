@@ -301,7 +301,9 @@ pub fn no_native_protocol_accounts() -> impl Iterator<Item = &'static str> {
 }
 
 pub(super) fn is_template_account(account: &str) -> bool {
-    template_accounts().any(|known| known == account)
+    account
+        .parse::<plakous_hosted::account::AccountRef>()
+        .is_ok()
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

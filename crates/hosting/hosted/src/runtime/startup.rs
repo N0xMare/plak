@@ -535,6 +535,7 @@ pub(super) fn native_spec<P: plakous_host_protocol::ProtocolExtension>(
         .native_resolved()
         .ok_or_else(|| CliFailure::new("resolved provider authority is missing"))?;
     Ok(ProductAgentSpec {
+        account: config.session.account_ref()?,
         prompt_host_facts: config.prompt_host_facts(),
         product_home: Some(config.product_home.clone()),
         tool_selection: root_tool_selection(&config.session),
@@ -1088,6 +1089,7 @@ pub(super) async fn production_host_runtime_binding<P: plakous_host_protocol::Pr
         .native_resolved()
         .ok_or_else(|| CliFailure::new("resolved provider authority is missing"))?;
     let spec = ProductAgentSpec {
+        account: config.session.account_ref()?,
         prompt_host_facts: config.prompt_host_facts(),
         product_home: Some(config.product_home.clone()),
         tool_selection: root_tool_selection(&config.session),
@@ -1161,6 +1163,7 @@ pub(super) async fn production_open_session_for_host<
         .native_resolved()
         .ok_or_else(|| CliFailure::new("resolved provider authority is missing"))?;
     let spec = ProductAgentSpec {
+        account: session.account_ref().map_err(CliFailure::from)?,
         prompt_host_facts: config.prompt_host_facts(),
         product_home: Some(config.product_home.clone()),
         tool_selection: root_tool_selection(session),

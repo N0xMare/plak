@@ -278,7 +278,17 @@ impl From<crate::capabilities::AccountAdmissionError> for CliFailure {
         if let crate::capabilities::AccountAdmissionError::CapabilityUnavailable(error) = error {
             return Self::from(error);
         }
-        let mut failure = Self::classified(CliFailureKind::Usage, error.to_string());
+        let kind = if matches!(
+            error,
+            crate::capabilities::AccountAdmissionError::AccountUnavailable { .. }
+                | crate::capabilities::AccountAdmissionError::AccountBusy { .. }
+                | crate::capabilities::AccountAdmissionError::AccountSignedIn { .. }
+        ) {
+            CliFailureKind::Auth
+        } else {
+            CliFailureKind::Usage
+        };
+        let mut failure = Self::classified(kind, error.to_string());
         failure.source = Some(Box::new(LookupFailure::Account(error)));
         failure
     }

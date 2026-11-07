@@ -234,8 +234,10 @@ pub fn ssh_session_from_env(
 
 /// Explicit refusal when local browser login is requested under SSH.
 #[must_use]
-pub fn ssh_local_login_refusal_message(provider: plakous::subscriptions::NativeProvider) -> String {
-    let account = account_cli_name(provider);
+pub fn ssh_local_login_refusal_message(
+    account: &str,
+    provider: plakous::subscriptions::NativeProvider,
+) -> String {
     format!(
         "SSH session detected — local browser login is not available here.\n\
          \n\
@@ -250,8 +252,10 @@ pub fn ssh_local_login_refusal_message(provider: plakous::subscriptions::NativeP
 
 /// Remotely-oriented recovery lines for local-login failures.
 #[must_use]
-pub fn remote_login_hint(provider: plakous::subscriptions::NativeProvider) -> String {
-    let account = account_cli_name(provider);
+pub fn remote_login_hint(
+    account: &str,
+    provider: plakous::subscriptions::NativeProvider,
+) -> String {
     format!(
         "If you are on SSH, headless, or the browser is elsewhere, run:\n\
          \n\
@@ -275,13 +279,14 @@ fn remote_follow_up(provider: plakous::subscriptions::NativeProvider) -> &'stati
 /// Format the hard-timeout operator error (static-friendly for tests).
 #[must_use]
 pub fn local_login_timeout_message(
+    account: &str,
     provider: plakous::subscriptions::NativeProvider,
     waited: Duration,
 ) -> String {
     format!(
         "no browser callback within {}s\n\n{}",
         waited.as_secs(),
-        remote_login_hint(provider)
+        remote_login_hint(account, provider)
     )
 }
 

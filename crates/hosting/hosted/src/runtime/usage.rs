@@ -844,17 +844,25 @@ impl<P: plakous_host_protocol::ProtocolExtension> SubscriptionUsageRefresh<P> {
         credentials: Arc<dyn crate::openrouter::OpenRouterCredentials>,
         held: HeldUsage,
         ledger: SessionLedger,
+        account: Option<crate::account::AccountRef>,
     ) -> Self {
         let mut executor = None;
         Self::new_with_projector(events, move |subscriptions| {
             let executor = executor.get_or_insert_with(ApplicationExecutor::new);
             match executor {
                 Ok(executor) => {
-                    let native = refresh_native_subscription_usage(executor, subscriptions);
+                    let native = if let Some(selected) = account.as_ref().filter(|account| account.is_named()) {
+                        refresh_named_subscription_usage(executor, subscriptions, selected)
+                    } else {
+                        refresh_native_subscription_usage(executor, subscriptions)
+                    };
                     let projected = project_subscription_usage(native.clone());
                     // The complete four-vertical projection is the product
                     // surface; the legacy overlay view is derived alongside it.
-                    let mut limits = project_usage_limits(native, credentials.as_ref());
+                    let mut limits = account.as_ref().filter(|account| account.is_named()).map_or_else(
+                        || project_usage_limits(native.clone(), credentials.as_ref()),
+                        |account| project_named_usage_limits(native.clone(), credentials.as_ref(), account),
+                    );
                     limits.session = ledger.project();
                     let limits = held.preserve_and_store(limits);
                     (projected, Some(limits))
@@ -1062,6 +1070,42 @@ pub(super) fn refresh_native_subscription_usage(
         .unwrap_or(NativeSubscriptionRefresh::TimedOut)
 }
 
+fn refresh_named_subscription_usage(
+    executor: &ApplicationExecutor,
+    subscriptions: Option<NativeSubscriptions>,
+    account: &crate::account::AccountRef,
+) -> NativeSubscriptionRefresh {
+    let Some(provider) = account.vertical().capability().native_provider() else {
+        return NativeSubscriptionRefresh::NoSubscriptionStore;
+    };
+    let Some(subscriptions) = subscriptions else {
+        return NativeSubscriptionRefresh::NoSubscriptionStore;
+    };
+    let read = executor.block_on(async {
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            subscription_usage_after_busy_retries(&subscriptions, provider),
+        )
+        .await
+    });
+    let Ok(Ok(read)) = read else {
+        return NativeSubscriptionRefresh::TimedOut;
+    };
+    let mut reads = (None, None, None);
+    match account.vertical() {
+        crate::account::Vertical::Codex => reads.0 = Some(read),
+        crate::account::Vertical::Grok => reads.1 = Some(read),
+        crate::account::Vertical::Claude => reads.2 = Some(read),
+        crate::account::Vertical::Anthropic
+        | crate::account::Vertical::OpenAi
+        | crate::account::Vertical::XaiApi
+        | crate::account::Vertical::OpenRouter => {
+            return NativeSubscriptionRefresh::NoSubscriptionStore;
+        }
+    }
+    NativeSubscriptionRefresh::Read(Box::new(reads))
+}
+
 async fn concurrent_native_subscription_refresh(
     limit: Duration,
     codex: impl Future<Output = plakous::model::SubscriptionUsageRead>,
@@ -1180,6 +1224,64 @@ pub(super) fn project_usage_limits(
         observations,
         plakous_host_protocol::views::presentation::SessionLedgerView::default(),
     )
+}
+
+fn project_named_usage_limits(
+    native: NativeSubscriptionRefresh,
+    credentials: &dyn crate::openrouter::OpenRouterCredentials,
+    account: &crate::account::AccountRef,
+) -> plakous_host_protocol::views::presentation::UsageLimitsView {
+    use crate::account::Vertical;
+    use crate::subscription_usage::VerticalObservation;
+    let vertical = plakous_host_protocol::views::presentation::UsageVertical::new(
+        account.as_str(),
+        account.as_str(),
+    );
+    let observation = if account.vertical() == Vertical::OpenRouter {
+        match crate::openrouter::probe_openrouter_key_usage(credentials, account) {
+            crate::openrouter::OpenRouterKeyUsageProbe::NotConfigured => {
+                VerticalObservation::NotConnected
+            }
+            crate::openrouter::OpenRouterKeyUsageProbe::Ok(usage, label) => {
+                VerticalObservation::OpenRouterKey(usage, label)
+            }
+            crate::openrouter::OpenRouterKeyUsageProbe::Failed(reason) => {
+                VerticalObservation::Unavailable(reason)
+            }
+            crate::openrouter::OpenRouterKeyUsageProbe::Rejected { reason, source } => {
+                VerticalObservation::RejectedKey { reason, source }
+            }
+        }
+    } else if let NativeSubscriptionRefresh::Read(read) = native {
+        let (codex, grok, claude) = *read;
+        let read = match account.vertical() {
+            Vertical::Codex => codex,
+            Vertical::Grok => grok,
+            Vertical::Claude => claude,
+            _ => None,
+        };
+        read.map_or_else(
+            || {
+                VerticalObservation::Unavailable(
+                    "provider allowance is unavailable for this account".to_owned(),
+                )
+            },
+            VerticalObservation::Native,
+        )
+    } else {
+        VerticalObservation::Unavailable(
+            native
+                .unavailable_reason()
+                .unwrap_or(SUBSCRIPTION_USAGE_TIMEOUT_REASON)
+                .to_owned(),
+        )
+    };
+    let mut view = crate::subscription_usage::project_limits(
+        [(vertical.clone(), observation)],
+        plakous_host_protocol::views::presentation::SessionLedgerView::default(),
+    );
+    view.verticals.retain(|entry| entry.vertical == vertical);
+    view
 }
 
 const USAGE_BUSY_RETRIES: u32 = 8;

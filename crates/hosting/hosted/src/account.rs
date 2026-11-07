@@ -194,6 +194,14 @@ mod tests {
             let named: AccountRef = format!("{}/work", vertical.as_str()).parse().unwrap();
             assert_eq!(default.vertical(), named.vertical());
             assert_eq!(default.vertical().require(), named.vertical().require());
+            assert!(std::ptr::eq(
+                capabilities::for_account(default.as_str()).unwrap(),
+                capabilities::for_account(named.as_str()).unwrap()
+            ));
+            assert_eq!(
+                capabilities::require(default.as_str()),
+                capabilities::require(named.as_str())
+            );
             assert_eq!(named.name().unwrap().as_str(), "work");
             assert_eq!(named.to_string(), format!("{}/work", vertical.as_str()));
         }

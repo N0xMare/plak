@@ -24,6 +24,7 @@ const GLOBAL_TAIL: &str = include_str!("../../help/global-tail.txt");
 /// A verb absent from this table falls through to the no-help arm, which is
 /// what a retired verb (`init`, `setup`) must do.
 const COMMAND_PAGES: &[(&str, &str)] = &[
+    ("accounts", include_str!("../../help/accounts.txt")),
     ("version", include_str!("../../help/version.txt")),
     ("login", include_str!("../../help/login.txt")),
     ("logout", include_str!("../../help/logout.txt")),

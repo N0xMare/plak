@@ -4,3 +4,4 @@ USAGE:
   plak refresh <codex|grok|claude>
 
   Forces a token refresh now; ordinary commands refresh on their own.
+  A full reference such as claude/work refreshes only that named slot.

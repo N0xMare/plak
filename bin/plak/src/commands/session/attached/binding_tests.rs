@@ -8,7 +8,7 @@ fn only_explicit_rebind_classifies_an_unknown_account_as_unresolvable() {
     paths.ensure_layout().unwrap();
     let services = crate::shell::services::Services::for_home(paths);
     let mut record = product_sessions::SessionRecord::new(root.path().to_path_buf());
-    record.account = Some("openai/work".into());
+    record.account = Some("unknown/work".into());
     record.model = Some("m".into());
     for purpose in [
         AttachedPurpose::Action,

@@ -282,7 +282,7 @@ fn compatibility_prompt_states_its_dates_and_a_closed_stdin_refuses_with_the_rem
     let mut backend = FakeBackend::new(CompatibilityState::Required, CredentialState::Ready);
     backend.credential = CredentialState::Ready;
     let (result, stdout, stderr) =
-        invoke(Command::Models(NativeProvider::Codex), &mut backend, b"");
+        invoke(Command::Models("codex".parse().unwrap()), &mut backend, b"");
     let failure = result.unwrap_err();
     assert_eq!(failure.exit_code(), 3);
     assert_eq!(
@@ -305,7 +305,7 @@ fn compatibility_prompt_states_its_dates_and_a_closed_stdin_refuses_with_the_rem
     let mut login = FakeBackend::new(CompatibilityState::Required, CredentialState::Ready);
     let (result, _, _) = invoke(
         Command::AuthLogin {
-            provider: NativeProvider::Codex,
+            provider: "codex".parse().unwrap(),
             mode: NativeLoginMode::Browser,
         },
         &mut login,
@@ -321,7 +321,7 @@ fn compatibility_prompt_states_its_dates_and_a_closed_stdin_refuses_with_the_rem
     let mut declined = FakeBackend::new(CompatibilityState::Required, CredentialState::Ready);
     declined.credential = CredentialState::Ready;
     let (result, _, _) = invoke(
-        Command::Models(NativeProvider::Codex),
+        Command::Models("codex".parse().unwrap()),
         &mut declined,
         b"n\n",
     );
@@ -331,7 +331,11 @@ fn compatibility_prompt_states_its_dates_and_a_closed_stdin_refuses_with_the_rem
 
     let mut inactive = FakeBackend::new(CompatibilityState::Inactive, CredentialState::Ready);
     inactive.credential = CredentialState::Ready;
-    let (result, _, _) = invoke(Command::Models(NativeProvider::Codex), &mut inactive, b"");
+    let (result, _, _) = invoke(
+        Command::Models("codex".parse().unwrap()),
+        &mut inactive,
+        b"",
+    );
     let failure = result.unwrap_err();
     assert_eq!(failure.exit_code(), 3);
     assert!(
@@ -363,7 +367,7 @@ fn a_credential_that_is_not_ready_names_its_repair_and_exits_3() {
     ] {
         let mut backend = FakeBackend::new(CompatibilityState::Current, state);
         let (result, _, _) = invoke(
-            Command::AuthRefresh(NativeProvider::Codex),
+            Command::AuthRefresh("codex".parse().unwrap()),
             &mut backend,
             b"",
         );
@@ -441,7 +445,7 @@ fn a_profile_changed_record_reads_as_a_state_beside_its_acceptance() {
     std::fs::set_permissions(&record, std::fs::Permissions::from_mode(0o600)).unwrap();
 
     let mut app = PlakousApplication::for_test_accounts(state).unwrap();
-    let status = AccountOps::offline_status(&mut app, NativeProvider::Claude).unwrap();
+    let status = AccountOps::offline_status(&mut app, &"claude".parse().unwrap()).unwrap();
     assert_eq!(
         status,
         CliStatus {
@@ -456,7 +460,7 @@ fn a_profile_changed_record_reads_as_a_state_beside_its_acceptance() {
         )
     );
     let mut stdout = Vec::new();
-    auth_status(&mut app, NativeProvider::Claude, None, &mut stdout).unwrap();
+    auth_status(&mut app, &"claude".parse().unwrap(), None, &mut stdout).unwrap();
     assert_eq!(
         String::from_utf8(stdout).unwrap(),
         "claude: compatibility=acceptance-required, credential=profile-changed; run plak login claude\n"
@@ -587,7 +591,7 @@ fn seed_cleared_codex_login_recovery(app: &mut PlakousApplication, subscriptions
 
     let notice =
         plakous::subscriptions::NativeSubscriptions::notice(NativeProvider::Codex).unwrap();
-    app.acknowledge_exact(NativeProvider::Codex, notice.notice_revision())
+    app.acknowledge_exact(&"codex".parse().unwrap(), notice.notice_revision())
         .expect("codex acceptance");
     let receipt = std::fs::read_to_string(subscriptions.join("compatibility/codex.json")).unwrap();
     let key = "\"generation\":\"";
@@ -733,7 +737,7 @@ fn status_long_state_path_names_the_account_command() {
     assert!(!grok.contains('…') && !grok.contains("chmod"), "{grok}");
 
     let (result, stdout, _) =
-        run_offline_status(Command::AuthStatus(NativeProvider::Xai), state, product);
+        run_offline_status(Command::AuthStatus("grok".parse().unwrap()), state, product);
     let failure = result.expect_err("status grok must fail");
     assert_eq!(failure.exit_code(), 3, "{stdout}");
     let repair = failure.message();
@@ -763,6 +767,8 @@ enum Call {
 struct FakePendingLogin(NativeLoginMode);
 
 struct FakeBackend {
+    selected_accounts: Vec<plakous_hosted::account::AccountRef>,
+    same_upstream: Option<plakous_hosted::account::AccountRef>,
     login_completion: Option<plakous::subscriptions::NativeLoginCompletion>,
     login_outcome: Option<commands::application::LoginOutcome>,
     login_failure: Option<&'static str>,
@@ -786,6 +792,8 @@ struct FakeBackend {
 impl FakeBackend {
     fn new(compatibility: CompatibilityState, terminal: CredentialState) -> Self {
         Self {
+            selected_accounts: Vec::new(),
+            same_upstream: None,
             login_completion: None,
             login_outcome: None,
             login_failure: None,
@@ -809,7 +817,25 @@ impl FakeBackend {
 }
 
 impl AccountOps for FakeBackend {
-    fn notice(&self, _provider: NativeProvider) -> CliResult<CliNotice> {
+    fn prepare_login(&mut self, account: &plakous_hosted::account::AccountRef) -> CliResult<()> {
+        self.selected_accounts.push(account.clone());
+        Ok(())
+    }
+    fn same_upstream_account(
+        &mut self,
+        account: &plakous_hosted::account::AccountRef,
+    ) -> Option<plakous_hosted::account::AccountRef> {
+        self.selected_accounts.push(account.clone());
+        account
+            .is_named()
+            .then(|| self.same_upstream.clone())
+            .flatten()
+    }
+    fn remove_account(&mut self, account: &plakous_hosted::account::AccountRef) -> CliResult<()> {
+        self.selected_accounts.push(account.clone());
+        Ok(())
+    }
+    fn notice(&self, _provider: &plakous_hosted::account::AccountRef) -> CliResult<CliNotice> {
         Ok(CliNotice {
             profile_id: "fixture-profile",
             notice_revision: "exact-review",
@@ -818,7 +844,11 @@ impl AccountOps for FakeBackend {
         })
     }
 
-    fn offline_status(&mut self, provider: NativeProvider) -> CliResult<CliStatus> {
+    fn offline_status(
+        &mut self,
+        account: &plakous_hosted::account::AccountRef,
+    ) -> CliResult<CliStatus> {
+        let provider = commands::application::native_provider(account)?;
         self.calls.push(Call::Status(provider));
         Ok(CliStatus {
             compatibility: self.compatibility,
@@ -828,8 +858,9 @@ impl AccountOps for FakeBackend {
 
     fn stored_credential(
         &mut self,
-        provider: NativeProvider,
+        account: &plakous_hosted::account::AccountRef,
     ) -> CliResult<commands::application::StoredCredential> {
+        let provider = commands::application::native_provider(account)?;
         self.calls.push(Call::Status(provider));
         Ok(
             commands::application::CredentialVerdict::from_status(CliStatus {
@@ -840,7 +871,11 @@ impl AccountOps for FakeBackend {
         )
     }
 
-    fn subscription_usage(&mut self, provider: NativeProvider) -> CliResult<SubscriptionUsageRead> {
+    fn subscription_usage(
+        &mut self,
+        account: &plakous_hosted::account::AccountRef,
+    ) -> CliResult<SubscriptionUsageRead> {
+        let provider = commands::application::native_provider(account)?;
         self.calls.push(Call::Usage(provider));
         Ok(SubscriptionUsageRead::Unavailable {
             observed_at: plakous::model::Timestamp::new(0, 0)
@@ -849,12 +884,19 @@ impl AccountOps for FakeBackend {
         })
     }
 
-    fn access_token_expired(&mut self, provider: NativeProvider) -> CliResult<bool> {
+    fn access_token_expired(
+        &mut self,
+        account: &plakous_hosted::account::AccountRef,
+    ) -> CliResult<bool> {
+        let provider = commands::application::native_provider(account)?;
         self.calls.push(Call::Expiry(provider));
         Ok(self.access_token_expired)
     }
 
-    fn openrouter_key_usage(&mut self) -> CliResult<product_usage::VerticalObservation> {
+    fn openrouter_key_usage(
+        &mut self,
+        _account: &plakous_hosted::account::AccountRef,
+    ) -> CliResult<product_usage::VerticalObservation> {
         self.openrouter_key_usage
             .clone()
             .map_or(Ok(product_usage::VerticalObservation::NotConnected), Ok)
@@ -862,9 +904,10 @@ impl AccountOps for FakeBackend {
 
     fn acknowledge_exact(
         &mut self,
-        provider: NativeProvider,
+        account: &plakous_hosted::account::AccountRef,
         operator_response: &str,
     ) -> CliResult<()> {
+        let provider = commands::application::native_provider(account)?;
         self.calls
             .push(Call::Acknowledge(provider, operator_response.to_owned()));
         if operator_response == "exact-review" {
@@ -878,9 +921,11 @@ impl AccountOps for FakeBackend {
 
     fn begin_login(
         &mut self,
-        provider: NativeProvider,
+        account: &plakous_hosted::account::AccountRef,
         mode: NativeLoginMode,
     ) -> CliResult<commands::application::LoginChallenge<Self::PendingLogin>> {
+        self.selected_accounts.push(account.clone());
+        let provider = commands::application::native_provider(account)?;
         self.calls.push(Call::Login(provider, mode));
         if let Some(error) = self.login_begin_failure {
             return Err(CliFailure::new(error));
@@ -943,16 +988,24 @@ impl AccountOps for FakeBackend {
             )))
     }
 
-    fn record_login_host(&mut self, _provider: NativeProvider) -> bool {
+    fn record_login_host(&mut self, _provider: &plakous_hosted::account::AccountRef) -> bool {
         !self.host_identity_unavailable
     }
 
-    fn refresh(&mut self, provider: NativeProvider) -> CliResult<CredentialState> {
+    fn refresh(
+        &mut self,
+        account: &plakous_hosted::account::AccountRef,
+    ) -> CliResult<CredentialState> {
+        let provider = commands::application::native_provider(account)?;
         self.calls.push(Call::Refresh(provider));
         Ok(self.terminal)
     }
 
-    fn refresh_now(&mut self, provider: NativeProvider) -> CliResult<(CredentialState, u64)> {
+    fn refresh_now(
+        &mut self,
+        account: &plakous_hosted::account::AccountRef,
+    ) -> CliResult<(CredentialState, u64)> {
+        let provider = commands::application::native_provider(account)?;
         self.calls.push(Call::RefreshNow(provider));
         if let Some(error) = self.refresh_failure {
             return Err(CliFailure::new(error));
@@ -960,7 +1013,11 @@ impl AccountOps for FakeBackend {
         Ok((self.terminal, 1_720_000_000))
     }
 
-    fn revoke(&mut self, provider: NativeProvider) -> CliResult<commands::application::Revocation> {
+    fn revoke(
+        &mut self,
+        account: &plakous_hosted::account::AccountRef,
+    ) -> CliResult<commands::application::Revocation> {
+        let provider = commands::application::native_provider(account)?;
         self.calls.push(Call::Revoke(provider));
         Ok(if self.revoke_refused {
             commands::application::Revocation::Unusable
@@ -969,18 +1026,29 @@ impl AccountOps for FakeBackend {
         })
     }
 
-    fn logout_local(&mut self, provider: NativeProvider) -> CliResult<CredentialState> {
+    fn logout_local(
+        &mut self,
+        account: &plakous_hosted::account::AccountRef,
+    ) -> CliResult<CredentialState> {
+        let provider = commands::application::native_provider(account)?;
         self.calls.push(Call::LogoutLocal(provider));
         Ok(self.terminal)
     }
 
-    fn replace_newer_build(&mut self, provider: NativeProvider) -> CliResult<CredentialState> {
+    fn replace_newer_build(
+        &mut self,
+        account: &plakous_hosted::account::AccountRef,
+    ) -> CliResult<CredentialState> {
+        let provider = commands::application::native_provider(account)?;
         self.calls.push(Call::ReplaceNewerBuild(provider));
         self.credential = CredentialState::Revoked;
         Ok(self.credential)
     }
 
-    fn openrouter_models(&mut self) -> CliResult<Vec<String>> {
+    fn openrouter_models(
+        &mut self,
+        _account: &plakous_hosted::account::AccountRef,
+    ) -> CliResult<Vec<String>> {
         self.calls.push(Call::OpenRouterModels);
         if let Some(failure) = self.models_failure.clone() {
             return Err(failure);
@@ -990,15 +1058,19 @@ impl AccountOps for FakeBackend {
 
     fn platform_catalog(
         &mut self,
-        provider: plakous_hosted::binding::PlatformProvider,
+        account: &plakous_hosted::account::AccountRef,
     ) -> CliResult<plakous_hosted::platform::ApiModelCatalog> {
         Ok(plakous_hosted::platform::bundled_catalog(
-            provider,
+            account.vertical().capability().platform_provider().unwrap(),
             "offline test backend",
         ))
     }
 
-    fn models(&mut self, provider: NativeProvider) -> CliResult<Vec<CliModelSummary>> {
+    fn models(
+        &mut self,
+        account: &plakous_hosted::account::AccountRef,
+    ) -> CliResult<Vec<CliModelSummary>> {
+        let provider = commands::application::native_provider(account)?;
         self.calls.push(Call::Models(provider));
         if let Some(failure) = self.models_failure.clone() {
             return Err(failure);
@@ -1009,11 +1081,11 @@ impl AccountOps for FakeBackend {
 
 impl PresentationBackend for FakeBackend {
     fn offline_status(&mut self, provider: NativeProvider) -> CliResult<CliStatus> {
-        AccountOps::offline_status(self, provider)
+        AccountOps::offline_status(self, &cli_provider_name(provider).parse()?)
     }
 
     fn models(&mut self, provider: NativeProvider) -> CliResult<Vec<CliModelSummary>> {
-        AccountOps::models(self, provider)
+        AccountOps::models(self, &cli_provider_name(provider).parse()?)
     }
 }
 
@@ -1304,15 +1376,15 @@ fn run_composition_is_target_scoped_and_preserves_every_explicit_choice() {
         Some(product_config::ProductCompositionSelection::Direct);
     let configured = root.default_binding();
     assert_eq!(
-        run_composition(None, &configured, NativeProvider::Codex, "gpt-5.6-sol"),
+        run_composition(None, &configured, &"codex".parse().unwrap(), "gpt-5.6-sol"),
         product_config::ProductCompositionSelection::FollowCatalog
     );
     assert_eq!(
-        run_composition(None, &configured, NativeProvider::Xai, "grok-4.6"),
+        run_composition(None, &configured, &"grok".parse().unwrap(), "grok-4.6"),
         product_config::ProductCompositionSelection::Direct
     );
     assert_eq!(
-        run_composition(None, &configured, NativeProvider::Xai, "grok-4.5"),
+        run_composition(None, &configured, &"grok".parse().unwrap(), "grok-4.5"),
         product_config::ProductCompositionSelection::FollowCatalog
     );
     for composition in [
@@ -1325,7 +1397,7 @@ fn run_composition_is_target_scoped_and_preserves_every_explicit_choice() {
             run_composition(
                 Some(composition),
                 &configured,
-                NativeProvider::Codex,
+                &"codex".parse().unwrap(),
                 "gpt-5.6-sol"
             ),
             composition
@@ -2102,7 +2174,7 @@ fn successful_login_stays_ready_when_host_identity_is_unavailable() {
     backend.host_identity_unavailable = true;
     let (result, _, stderr) = invoke(
         Command::AuthLogin {
-            provider: NativeProvider::Claude,
+            provider: "claude".parse().unwrap(),
             mode: NativeLoginMode::Remote,
         },
         &mut backend,
@@ -2113,6 +2185,85 @@ fn successful_login_stays_ready_when_host_identity_is_unavailable() {
     assert!(stderr.contains("login succeeded"));
     assert!(stderr.contains("host login provenance unavailable; credential is ready"));
     assert!(!stderr.contains("machine-id"));
+}
+
+#[test]
+fn named_login_warns_without_rejecting_or_switching_the_selected_slot() {
+    let work = "claude/work".parse().unwrap();
+    let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
+    backend.same_upstream = Some("claude/personal".parse().unwrap());
+    let (result, _, stderr) = invoke(
+        Command::AuthLogin {
+            provider: work,
+            mode: NativeLoginMode::Remote,
+        },
+        &mut backend,
+        b"fixture-code\n",
+    );
+    assert_eq!(result, Ok(ProcessOutcome::Success));
+    assert!(
+        backend
+            .selected_accounts
+            .iter()
+            .all(|account| account.as_str() == "claude/work")
+    );
+    let text = String::from_utf8(stderr).unwrap();
+    assert!(
+        text.contains("same upstream account as claude/personal"),
+        "{text}"
+    );
+    assert!(text.contains("limits are shared"), "{text}");
+    assert!(text.contains("claude/work: login succeeded"), "{text}");
+    let mut unknown = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
+    let (result, _, stderr) = invoke(
+        Command::AuthLogin {
+            provider: "claude/work".parse().unwrap(),
+            mode: NativeLoginMode::Remote,
+        },
+        &mut unknown,
+        b"fixture-code\n",
+    );
+    assert_eq!(result, Ok(ProcessOutcome::Success));
+    assert!(
+        !String::from_utf8(stderr)
+            .unwrap()
+            .contains("same upstream account")
+    );
+}
+
+#[test]
+fn account_removal_requires_exact_confirmation_and_never_removes_defaults() {
+    for (account, confirmed) in [("claude/work", false), ("claude", true)] {
+        let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Revoked);
+        let (result, _, _) = invoke(
+            Command::AccountsRemove {
+                account: account.parse().unwrap(),
+                confirmed,
+            },
+            &mut backend,
+            b"claude/other\n",
+        );
+        assert!(result.is_err());
+        assert_eq!(backend.calls, []);
+        assert_eq!(backend.selected_accounts, []);
+    }
+    let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Revoked);
+    let (result, stdout, _) = invoke(
+        Command::AccountsRemove {
+            account: "claude/work".parse().unwrap(),
+            confirmed: false,
+        },
+        &mut backend,
+        b"claude/work\n",
+    );
+    assert_eq!(result, Ok(ProcessOutcome::Success));
+    assert_eq!(stdout, b"claude/work: removed\n");
+    assert_eq!(
+        backend.calls,
+        [],
+        "removal must not invoke logout, refresh or revocation"
+    );
+    assert_eq!(backend.selected_accounts, ["claude/work".parse().unwrap()]);
 }
 
 fn status_report(backend: &mut FakeBackend, paths: &product_paths::PlakPaths) -> String {
@@ -2177,7 +2328,7 @@ fn cli_status_last_failed_refresh_fixture_is_shared_and_offline()
     let mut stdout = Vec::new();
     assert_eq!(
         execute_command(
-            Command::AuthStatus(NativeProvider::Claude),
+            Command::AuthStatus("claude".parse().unwrap()),
             &services,
             &mut backend,
             &mut Cursor::new([]),
@@ -2711,38 +2862,42 @@ fn parses_both_providers_and_every_credential_verb_and_mode() {
         let name = cli_provider_name(provider);
         assert_eq!(
             parse(args(&["status", name])),
-            Ok(Command::AuthStatus(provider))
+            Ok(Command::AuthStatus(
+                cli_provider_name(provider).parse().unwrap()
+            ))
         );
         assert_eq!(
             parse(args(&["login", name])),
             Ok(Command::AuthLogin {
-                provider,
+                provider: cli_provider_name(provider).parse().unwrap(),
                 mode: NativeLoginMode::Browser,
             })
         );
         assert_eq!(
             parse(args(&["login", name, "--remote"])),
             Ok(Command::AuthLogin {
-                provider,
+                provider: cli_provider_name(provider).parse().unwrap(),
                 mode: NativeLoginMode::Remote,
             })
         );
         assert!(parse(args(&["login", name, "--device"])).is_err());
         assert_eq!(
             parse(args(&["refresh", name])),
-            Ok(Command::AuthRefresh(provider))
+            Ok(Command::AuthRefresh(
+                cli_provider_name(provider).parse().unwrap()
+            ))
         );
         assert_eq!(
             parse(args(&["logout", name])),
             Ok(Command::AuthLogout {
-                provider,
+                provider: cli_provider_name(provider).parse().unwrap(),
                 local_only: false,
             })
         );
         assert_eq!(
             parse(args(&["logout", name, "--local"])),
             Ok(Command::AuthLogout {
-                provider,
+                provider: cli_provider_name(provider).parse().unwrap(),
                 local_only: true,
             })
         );
@@ -2750,7 +2905,7 @@ fn parses_both_providers_and_every_credential_verb_and_mode() {
     assert_eq!(
         parse(args(&["login", "grok", "--remote"])),
         Ok(Command::AuthLogin {
-            provider: NativeProvider::Xai,
+            provider: "grok".parse().unwrap(),
             mode: NativeLoginMode::Remote,
         })
     );
@@ -2771,7 +2926,7 @@ fn parses_exact_run_route_for_both_providers() {
         ])),
         Ok(Command::Run {
             limits: plakous_hosted::runtime::RunBounds::default(),
-            provider: NativeProvider::Xai,
+            provider: "grok".parse().unwrap(),
             model: "exact-model".to_owned(),
             effort: None,
             composition: None,
@@ -2792,7 +2947,7 @@ fn parses_exact_run_route_for_both_providers() {
         ])),
         Ok(Command::Run {
             limits: plakous_hosted::runtime::RunBounds::default(),
-            provider: NativeProvider::Codex,
+            provider: "codex".parse().unwrap(),
             model: "exact-model".to_owned(),
             effort: None,
             composition: None,
@@ -2814,7 +2969,7 @@ fn parses_exact_run_route_for_both_providers() {
         ])),
         Ok(Command::Run {
             limits: plakous_hosted::runtime::RunBounds::default(),
-            provider: NativeProvider::Xai,
+            provider: "grok".parse().unwrap(),
             model: "exact-model".to_owned(),
             effort: Some(ReasoningEffort::High),
             composition: None,
@@ -2836,7 +2991,7 @@ fn parses_exact_run_route_for_both_providers() {
         ])),
         Ok(Command::Run {
             limits: plakous_hosted::runtime::RunBounds::default(),
-            provider: NativeProvider::Codex,
+            provider: "codex".parse().unwrap(),
             model: "gpt-5.3-codex-spark".to_owned(),
             effort: Some(ReasoningEffort::XHigh),
             composition: None,
@@ -2858,7 +3013,7 @@ fn parses_exact_run_route_for_both_providers() {
         ])),
         Ok(Command::Run {
             limits: plakous_hosted::runtime::RunBounds::default(),
-            provider: NativeProvider::Xai,
+            provider: "grok".parse().unwrap(),
             model: "exact-model".to_owned(),
             effort: Some(ReasoningEffort::Medium),
             composition: None,
@@ -2873,7 +3028,7 @@ fn parses_exact_run_route_for_both_providers() {
 fn parses_exact_models_route_for_both_providers() {
     assert_eq!(
         parse(args(&["models", "openrouter"])),
-        Ok(Command::ModelsOpenRouter)
+        Ok(Command::ModelsOpenRouter("openrouter".parse().unwrap()))
     );
     assert!(parse(args(&["models", "unknown"])).is_err());
 
@@ -2884,7 +3039,9 @@ fn parses_exact_models_route_for_both_providers() {
     ] {
         assert_eq!(
             parse(args(&["models", cli_provider_name(provider)])),
-            Ok(Command::Models(provider))
+            Ok(Command::Models(
+                cli_provider_name(provider).parse().unwrap()
+            ))
         );
     }
     assert!(matches!(
@@ -2954,7 +3111,10 @@ fn local_compatibility_notice_exposes_exact_compiled_facts_for_each_provider() {
             .replace("{reviewed_at}", &notice.reviewed_at().to_string())
             .replace("{expires_at}", &notice.expires_at().to_string());
         let mut output = Vec::new();
-        assert_eq!(print_compatibility_notice(provider, &mut output), Ok(()));
+        assert_eq!(
+            print_compatibility_notice(&cli_provider_name(provider).parse().unwrap(), &mut output),
+            Ok(())
+        );
         assert_eq!(output, expected.as_bytes());
     }
 }
@@ -3089,7 +3249,7 @@ fn compatibility_prompt_precedes_representative_network_actions() {
     let cases = [
         (
             Command::AuthLogin {
-                provider: NativeProvider::Codex,
+                provider: "codex".parse().unwrap(),
                 mode: NativeLoginMode::Browser,
             },
             Call::Login(NativeProvider::Codex, NativeLoginMode::Browser),
@@ -3097,20 +3257,20 @@ fn compatibility_prompt_precedes_representative_network_actions() {
         ),
         (
             Command::AuthLogin {
-                provider: NativeProvider::Xai,
+                provider: "grok".parse().unwrap(),
                 mode: NativeLoginMode::Remote,
             },
             Call::Login(NativeProvider::Xai, NativeLoginMode::Remote),
             CredentialState::Ready,
         ),
         (
-            Command::AuthRefresh(NativeProvider::Codex),
+            Command::AuthRefresh("codex".parse().unwrap()),
             Call::RefreshNow(NativeProvider::Codex),
             CredentialState::Ready,
         ),
         (
             Command::AuthLogout {
-                provider: NativeProvider::Xai,
+                provider: "grok".parse().unwrap(),
                 local_only: false,
             },
             Call::Revoke(NativeProvider::Xai),
@@ -3160,7 +3320,7 @@ fn login_over_an_unusable_record_replaces_it_and_says_so_once() {
         backend.credential = unusable;
         let (result, _, stderr) = invoke(
             Command::AuthLogin {
-                provider,
+                provider: cli_provider_name(provider).parse().unwrap(),
                 mode: NativeLoginMode::Remote,
             },
             &mut backend,
@@ -3188,7 +3348,7 @@ fn login_over_an_unusable_record_replaces_it_and_says_so_once() {
     healthy.credential = CredentialState::Ready;
     let (_, _, stderr) = invoke(
         Command::AuthLogin {
-            provider: NativeProvider::Xai,
+            provider: "grok".parse().unwrap(),
             mode: NativeLoginMode::Remote,
         },
         &mut healthy,
@@ -3201,7 +3361,11 @@ fn login_over_an_unusable_record_replaces_it_and_says_so_once() {
 fn refresh_forces_a_grant_and_reports_its_expiry() {
     let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
     backend.credential = CredentialState::Ready;
-    let (result, _, stderr) = invoke(Command::AuthRefresh(NativeProvider::Xai), &mut backend, b"");
+    let (result, _, stderr) = invoke(
+        Command::AuthRefresh("grok".parse().unwrap()),
+        &mut backend,
+        b"",
+    );
     assert_eq!(result, Ok(ProcessOutcome::Success));
     assert!(
         backend
@@ -3229,7 +3393,7 @@ fn models_reports_unusable_credential_before_compatibility_prompt() {
         let mut backend = FakeBackend::new(CompatibilityState::Required, credential);
         backend.credential = credential;
         let (result, stdout, stderr) = invoke(
-            Command::Models(NativeProvider::Codex),
+            Command::Models("codex".parse().unwrap()),
             &mut backend,
             b"yes\n",
         );
@@ -3269,7 +3433,7 @@ fn drifted_model_is_disabled_in_picker_and_explained_in_models() {
         .find(|entry| entry.id == "gpt-5.6-luna")
         .unwrap();
     assert_eq!(entry.unavailable_reason.as_deref(), Some(reason));
-    let (result, stdout, _) = invoke(Command::Models(NativeProvider::Codex), &mut backend, b"");
+    let (result, stdout, _) = invoke(Command::Models("codex".parse().unwrap()), &mut backend, b"");
     assert_eq!(result, Ok(ProcessOutcome::Success));
     let stdout = String::from_utf8(stdout).unwrap();
     assert!(stdout.contains(&format!("unavailable={reason}")));
@@ -3310,7 +3474,11 @@ fn models_run_status_then_exact_acknowledgement_then_discovery() {
             },
         ];
 
-        let (result, stdout, stderr) = invoke(Command::Models(provider), &mut backend, b"yes\r\n");
+        let (result, stdout, stderr) = invoke(
+            Command::Models(cli_provider_name(provider).parse().unwrap()),
+            &mut backend,
+            b"yes\r\n",
+        );
 
         assert_eq!(result, Ok(ProcessOutcome::Success));
         assert_eq!(
@@ -3339,7 +3507,7 @@ fn models_do_not_discover_or_write_listings_when_the_gate_fails() {
     let mut inactive = FakeBackend::new(CompatibilityState::Inactive, CredentialState::Ready);
     inactive.credential = CredentialState::Ready;
     let (result, stdout, _) = invoke(
-        Command::Models(NativeProvider::Codex),
+        Command::Models("codex".parse().unwrap()),
         &mut inactive,
         b"exact-review\n",
     );
@@ -3350,7 +3518,7 @@ fn models_do_not_discover_or_write_listings_when_the_gate_fails() {
     let mut rejected = FakeBackend::new(CompatibilityState::Required, CredentialState::Ready);
     rejected.credential = CredentialState::Ready;
     let (result, stdout, stderr) = invoke(
-        Command::Models(NativeProvider::Xai),
+        Command::Models("grok".parse().unwrap()),
         &mut rejected,
         b"not-exact\n",
     );
@@ -3365,14 +3533,22 @@ fn models_do_not_discover_or_write_listings_when_the_gate_fails() {
 #[test]
 fn openrouter_models_dispatches_only_catalog_and_failure_emits_no_listing() {
     let mut backend = FakeBackend::new(CompatibilityState::Required, CredentialState::SignedOut);
-    let (result, stdout, stderr) = invoke(Command::ModelsOpenRouter, &mut backend, b"");
+    let (result, stdout, stderr) = invoke(
+        Command::ModelsOpenRouter("openrouter".parse().unwrap()),
+        &mut backend,
+        b"",
+    );
     assert_eq!(result, Ok(ProcessOutcome::Success));
     assert_eq!(stdout, b"author/model\n");
     assert_eq!(stderr, [] as [u8; 0]);
     assert_eq!(backend.calls, vec![Call::OpenRouterModels]);
     backend.calls.clear();
     backend.models_failure = Some(CliFailure::new("catalog failed"));
-    let (result, stdout, stderr) = invoke(Command::ModelsOpenRouter, &mut backend, b"");
+    let (result, stdout, stderr) = invoke(
+        Command::ModelsOpenRouter("openrouter".parse().unwrap()),
+        &mut backend,
+        b"",
+    );
     assert!(result.is_err());
     assert_eq!(stdout, [] as [u8; 0]);
     assert_eq!(stderr, [] as [u8; 0]);
@@ -3397,7 +3573,7 @@ fn models_backend_failure_cannot_emit_a_partial_listing() {
     backend.models_failure = Some(CliFailure::new("authenticated catalog failed"));
 
     let (result, stdout, stderr) =
-        invoke(Command::Models(NativeProvider::Codex), &mut backend, b"");
+        invoke(Command::Models("codex".parse().unwrap()), &mut backend, b"");
 
     assert_eq!(
         result.err().map(|error| error.message().to_owned()),
@@ -3421,7 +3597,7 @@ fn status_and_local_logout_never_select_a_network_action() {
         FakeBackend::new(CompatibilityState::Required, CredentialState::Unsupported);
     status_backend.credential = CredentialState::RefreshRequired;
     let (result, stdout, stderr) = invoke(
-        Command::AuthStatus(NativeProvider::Xai),
+        Command::AuthStatus("grok".parse().unwrap()),
         &mut status_backend,
         b"",
     );
@@ -3443,7 +3619,7 @@ fn status_and_local_logout_never_select_a_network_action() {
         FakeBackend::new(CompatibilityState::Required, CredentialState::Revoked);
     let (result, stdout, stderr) = invoke(
         Command::AuthLogout {
-            provider: NativeProvider::Codex,
+            provider: "codex".parse().unwrap(),
             local_only: true,
         },
         &mut logout_backend,
@@ -3469,7 +3645,7 @@ fn compatibility_failure_stops_before_any_network_action() {
     ] {
         let mut backend = FakeBackend::new(compatibility, CredentialState::Ready);
         let (result, stdout, _) = invoke(
-            Command::AuthRefresh(NativeProvider::Codex),
+            Command::AuthRefresh("codex".parse().unwrap()),
             &mut backend,
             b"exact-review\n",
         );
@@ -3480,7 +3656,7 @@ fn compatibility_failure_stops_before_any_network_action() {
 
     let mut backend = FakeBackend::new(CompatibilityState::Required, CredentialState::Ready);
     let (result, _, _) = invoke(
-        Command::AuthRefresh(NativeProvider::Codex),
+        Command::AuthRefresh("codex".parse().unwrap()),
         &mut backend,
         b"wrong-review\n",
     );
@@ -3489,7 +3665,7 @@ fn compatibility_failure_stops_before_any_network_action() {
 
     let mut backend = FakeBackend::new(CompatibilityState::Required, CredentialState::Ready);
     let (result, _, _) = invoke(
-        Command::AuthRefresh(NativeProvider::Codex),
+        Command::AuthRefresh("codex".parse().unwrap()),
         &mut backend,
         b" exact-review\n",
     );
@@ -3507,7 +3683,7 @@ fn concrete_run_declined_compatibility_cannot_open_a_product_session() {
     let result = execute_application_command(
         Command::Run {
             limits: plakous_hosted::runtime::RunBounds::default(),
-            provider: NativeProvider::Codex,
+            provider: "codex".parse().unwrap(),
             model: "gpt-5.6-sol".into(),
             effort: None,
             composition: None,
@@ -3552,7 +3728,7 @@ fn login_over_a_newer_build_record_replaces_it_only_after_a_yes() {
         let mut stderr = Vec::new();
         let result = commands::login::confirm_newer_build_replacement(
             &mut backend,
-            NativeProvider::Xai,
+            &"grok".parse().unwrap(),
             true,
             &mut Cursor::new(input),
             &mut stderr,
@@ -3575,7 +3751,7 @@ fn login_over_a_newer_build_record_replaces_it_only_after_a_yes() {
     let mut stderr = Vec::new();
     let failure = auth_login(
         &mut backend,
-        NativeProvider::Codex,
+        &"codex".parse().unwrap(),
         NativeLoginMode::Browser,
         &mut input,
         &mut stderr,
@@ -3601,7 +3777,7 @@ fn automatic_login_keeps_stdin_unread_and_preserves_browser_mode_after_open_fail
     assert_eq!(
         auth_login(
             &mut backend,
-            NativeProvider::Codex,
+            &"codex".parse().unwrap(),
             NativeLoginMode::Browser,
             &mut input,
             &mut output,
@@ -3638,7 +3814,7 @@ fn codex_remote_login_shows_the_device_code_and_never_reads_stdin() {
     assert_eq!(
         auth_login(
             &mut backend,
-            NativeProvider::Codex,
+            &"codex".parse().unwrap(),
             NativeLoginMode::Remote,
             &mut input,
             &mut output,
@@ -3697,7 +3873,7 @@ fn codex_device_login_cancel_expiry_and_refusal_do_not_retry_or_change_credentia
         let mut ui = commands::login_flow::TestLoginUi::default();
         let result = auth_login(
             &mut backend,
-            NativeProvider::Codex,
+            &"codex".parse().unwrap(),
             NativeLoginMode::Remote,
             &mut Cursor::new([]),
             &mut Vec::new(),
@@ -3756,7 +3932,7 @@ fn pasted_login_uses_the_challenge_completion_and_never_echoes_the_response() {
         assert_eq!(
             auth_login(
                 &mut backend,
-                provider,
+                &cli_provider_name(provider).parse().unwrap(),
                 mode,
                 &mut input,
                 &mut output,
@@ -3801,7 +3977,7 @@ fn cancelled_timed_out_and_failed_logins_do_not_retry_or_change_credentials() {
         let mut ui = commands::login_flow::TestLoginUi::default();
         let result = auth_login(
             &mut backend,
-            NativeProvider::Codex,
+            &"codex".parse().unwrap(),
             NativeLoginMode::Browser,
             &mut Cursor::new([]),
             &mut Vec::new(),
@@ -3833,7 +4009,7 @@ fn login_admission_and_input_refusals_never_complete_or_switch_routes() {
     assert!(
         auth_login(
             &mut backend,
-            NativeProvider::Codex,
+            &"codex".parse().unwrap(),
             NativeLoginMode::Browser,
             &mut Cursor::new([]),
             &mut Vec::new(),
@@ -3852,7 +4028,7 @@ fn login_admission_and_input_refusals_never_complete_or_switch_routes() {
     assert!(
         auth_login(
             &mut backend,
-            NativeProvider::Codex,
+            &"codex".parse().unwrap(),
             NativeLoginMode::Browser,
             &mut Cursor::new([]),
             &mut Vec::new(),
@@ -3868,7 +4044,7 @@ fn login_admission_and_input_refusals_never_complete_or_switch_routes() {
     assert!(
         auth_login(
             &mut backend,
-            NativeProvider::Xai,
+            &"grok".parse().unwrap(),
             NativeLoginMode::Remote,
             &mut Cursor::new(b"\n"),
             &mut Vec::new(),
@@ -3899,10 +4075,10 @@ fn login_and_refresh_accept_only_ready_terminal_state() {
     for terminal in non_ready {
         for command in [
             Command::AuthLogin {
-                provider: NativeProvider::Codex,
+                provider: "codex".parse().unwrap(),
                 mode: NativeLoginMode::Browser,
             },
-            Command::AuthRefresh(NativeProvider::Xai),
+            Command::AuthRefresh("grok".parse().unwrap()),
         ] {
             let mut backend = FakeBackend::new(CompatibilityState::Current, terminal);
             let (result, stdout, _) = invoke(command, &mut backend, b"");
@@ -3931,7 +4107,7 @@ fn remote_logout_requires_revoked_and_local_logout_accepts_safe_retirement_state
         remote.credential = CredentialState::Ready;
         let (result, _, _) = invoke(
             Command::AuthLogout {
-                provider: NativeProvider::Codex,
+                provider: "codex".parse().unwrap(),
                 local_only: false,
             },
             &mut remote,
@@ -3952,7 +4128,7 @@ fn remote_logout_requires_revoked_and_local_logout_accepts_safe_retirement_state
         let mut local = FakeBackend::new(CompatibilityState::Current, terminal);
         let (result, _, _) = invoke(
             Command::AuthLogout {
-                provider: NativeProvider::Xai,
+                provider: "grok".parse().unwrap(),
                 local_only: true,
             },
             &mut local,
@@ -3968,7 +4144,7 @@ fn remote_logout_requires_revoked_and_local_logout_accepts_safe_retirement_state
     remote.credential = CredentialState::RefreshRequired;
     let (_, _, stderr) = invoke(
         Command::AuthLogout {
-            provider: NativeProvider::Xai,
+            provider: "grok".parse().unwrap(),
             local_only: false,
         },
         &mut remote,
@@ -3991,7 +4167,7 @@ fn remote_logout_requires_revoked_and_local_logout_accepts_safe_retirement_state
         let mut local = FakeBackend::new(CompatibilityState::Current, terminal);
         let (result, _, stderr) = invoke(
             Command::AuthLogout {
-                provider: NativeProvider::Codex,
+                provider: "codex".parse().unwrap(),
                 local_only: true,
             },
             &mut local,
@@ -4042,7 +4218,7 @@ fn logout_without_a_flag_retires_unusable_or_absent_credentials_locally() {
         backend.credential = credential;
         let (result, stdout, stderr) = invoke(
             Command::AuthLogout {
-                provider: NativeProvider::Xai,
+                provider: "grok".parse().unwrap(),
                 local_only: false,
             },
             &mut backend,
@@ -4072,7 +4248,7 @@ fn logout_retires_locally_when_the_provider_path_refuses_the_record() {
     backend.revoke_refused = true;
     let (result, stdout, stderr) = invoke(
         Command::AuthLogout {
-            provider: NativeProvider::Xai,
+            provider: "grok".parse().unwrap(),
             local_only: false,
         },
         &mut backend,
@@ -4280,7 +4456,11 @@ fn usage_refresh_is_offered_only_when_a_refresh_is_needed() {
             let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
             backend.credential = credential;
             assert_eq!(
-                refresh_usage_credential(&mut backend, provider).is_ok(),
+                refresh_usage_credential(
+                    &mut backend,
+                    &cli_provider_name(provider).parse().unwrap()
+                )
+                .is_ok(),
                 admitted,
                 "{provider:?} {credential:?}"
             );
@@ -4318,7 +4498,8 @@ fn usage_refresh_is_offered_only_when_a_refresh_is_needed() {
             ["codex", "grok", "claude"]
         );
         expired.calls.clear();
-        refresh_usage_credential(&mut expired, provider).unwrap();
+        refresh_usage_credential(&mut expired, &cli_provider_name(provider).parse().unwrap())
+            .unwrap();
         assert_eq!(
             expired.calls,
             vec![
@@ -4330,7 +4511,8 @@ fn usage_refresh_is_offered_only_when_a_refresh_is_needed() {
 
         let mut valid = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
         valid.credential = CredentialState::Ready;
-        refresh_usage_credential(&mut valid, provider).unwrap();
+        refresh_usage_credential(&mut valid, &cli_provider_name(provider).parse().unwrap())
+            .unwrap();
         assert_eq!(
             valid.calls,
             vec![Call::Status(provider), Call::Expiry(provider)]
@@ -4339,7 +4521,7 @@ fn usage_refresh_is_offered_only_when_a_refresh_is_needed() {
 
     let mut signed_out = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
     assert_eq!(usage_refresh_accounts(&mut signed_out), [] as [String; 0]);
-    let refusal = refresh_usage_credential(&mut signed_out, NativeProvider::Xai).unwrap_err();
+    let refusal = refresh_usage_credential(&mut signed_out, &"grok".parse().unwrap()).unwrap_err();
     assert!(
         refusal
             .message()
@@ -4352,7 +4534,7 @@ fn usage_refresh_is_offered_only_when_a_refresh_is_needed() {
     failure.credential = CredentialState::RefreshRequired;
     failure.refresh_failure = Some("scripted credential refresh failed");
     assert!(
-        refresh_usage_credential(&mut failure, NativeProvider::Claude)
+        refresh_usage_credential(&mut failure, &"claude".parse().unwrap())
             .unwrap_err()
             .message()
             .contains("scripted credential refresh failed")
@@ -4367,7 +4549,7 @@ fn usage_refresh_is_offered_only_when_a_refresh_is_needed() {
     let mut unready = FakeBackend::new(CompatibilityState::Current, CredentialState::Quarantined);
     unready.credential = CredentialState::Quarantined;
     assert!(
-        refresh_usage_credential(&mut unready, NativeProvider::Xai)
+        refresh_usage_credential(&mut unready, &"grok".parse().unwrap())
             .unwrap_err()
             .message()
             .contains("did not produce a ready credential")
@@ -4375,7 +4557,7 @@ fn usage_refresh_is_offered_only_when_a_refresh_is_needed() {
     let mut inactive = FakeBackend::new(CompatibilityState::Required, CredentialState::Ready);
     inactive.credential = CredentialState::Ready;
     assert_eq!(usage_refresh_accounts(&mut inactive), [] as [String; 0]);
-    assert!(refresh_usage_credential(&mut inactive, NativeProvider::Claude).is_err());
+    assert!(refresh_usage_credential(&mut inactive, &"claude".parse().unwrap()).is_err());
     assert!(
         !inactive
             .calls

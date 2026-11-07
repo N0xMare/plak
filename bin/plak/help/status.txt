@@ -5,6 +5,7 @@ USAGE:
 
   The SuperGrok subscription account answers to `grok` and `supergrok`.
   Bare `xai` is ambiguous and refused; use grok or xai-api.
+  All verticals also accept /<name>, such as claude/work or openai/work.
 
   Warns within 14 days of a subscription profile's expiry, or after it, and notes
   when documented API facts are within 14 days of their review-due date, or past it.

@@ -115,20 +115,11 @@ const fn same_id(left: &str, right: &str) -> bool {
     true
 }
 
-pub const fn for_account(account: &str) -> Option<&'static RouteCapability> {
-    let mut index = 0;
-    while index < ROUTES.len() {
-        let route = ROUTES[index];
-        let mut alias = 0;
-        while alias < route.aliases.len() {
-            if same_id(route.aliases[alias], account) {
-                return Some(route);
-            }
-            alias += 1;
-        }
-        index += 1;
-    }
-    None
+pub fn for_account(account: &str) -> Option<&'static RouteCapability> {
+    account
+        .parse::<crate::account::AccountRef>()
+        .ok()
+        .map(|account| account.vertical().capability())
 }
 
 pub const fn for_native(provider: NativeProvider) -> Option<&'static RouteCapability> {
@@ -209,6 +200,10 @@ pub fn require_tools(
 pub enum AccountAdmissionError {
     UnknownAccount { account: String },
     AccountTargetMismatch { account: String },
+    AccountUnavailable { account: String },
+    AccountBusy { account: String },
+    AccountSignedIn { account: String },
+    DefaultAccountNotRemovable { account: String },
     CapabilityUnavailable(CapabilityUnavailable),
 }
 
@@ -220,6 +215,21 @@ impl std::fmt::Display for AccountAdmissionError {
                 formatter,
                 "account_target_mismatch: `{account}` disagrees with the selected target"
             ),
+            Self::AccountUnavailable { account } => {
+                write!(formatter, "account_unavailable: `{account}`")
+            }
+            Self::AccountBusy { account } => write!(
+                formatter,
+                "account_busy: `{account}` is busy; retry after the account operation finishes"
+            ),
+            Self::AccountSignedIn { account } => write!(
+                formatter,
+                "account_signed_in: `{account}`; log out first with `plak logout {account}`"
+            ),
+            Self::DefaultAccountNotRemovable { account } => write!(
+                formatter,
+                "default_account_not_removable: `{account}`; use logout or key clear"
+            ),
             Self::CapabilityUnavailable(error) => error.fmt(formatter),
         }
     }
@@ -228,7 +238,12 @@ impl std::fmt::Display for AccountAdmissionError {
 impl std::error::Error for AccountAdmissionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::UnknownAccount { .. } | Self::AccountTargetMismatch { .. } => None,
+            Self::UnknownAccount { .. }
+            | Self::AccountTargetMismatch { .. }
+            | Self::AccountUnavailable { .. }
+            | Self::AccountBusy { .. }
+            | Self::AccountSignedIn { .. }
+            | Self::DefaultAccountNotRemovable { .. } => None,
             Self::CapabilityUnavailable(error) => Some(error),
         }
     }
@@ -237,11 +252,6 @@ impl std::error::Error for AccountAdmissionError {
 /// Refuses unknown or omitted accounts without choosing another route.
 pub fn require(account: &str) -> Result<(), AccountAdmissionError> {
     let selection: crate::account::AccountRef = account.parse()?;
-    if selection.is_named() && !selection.vertical().is_api() {
-        return Err(AccountAdmissionError::UnknownAccount {
-            account: account.to_owned(),
-        });
-    }
     let route = selection.vertical().capability();
     require_route(route).map_err(AccountAdmissionError::CapabilityUnavailable)
 }

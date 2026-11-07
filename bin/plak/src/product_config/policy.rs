@@ -287,9 +287,13 @@ impl AgentTemplate {
                 "template {name} account is not a supported template account"
             ));
         }
+        let account = self
+            .account
+            .parse::<plakous_hosted::account::AccountRef>()
+            .map_err(|error| error.to_string())?;
         self.validate_composition(self.composition)
             .map_err(|error| format!("template {name}: {error}"))?;
-        if self.account != "openrouter"
+        if account.vertical() != plakous_hosted::account::Vertical::OpenRouter
             && self
                 .protocol
                 .is_some_and(|protocol| protocol != ProductProtocolSelection::Auto)
@@ -323,7 +327,7 @@ impl AgentTemplate {
         }
         match self.extra.as_deref() {
             None => {}
-            Some("priority") if self.account == "codex" => {}
+            Some("priority") if account.vertical() == plakous_hosted::account::Vertical::Codex => {}
             Some("priority") => {
                 return Err(format!(
                     "template {name} Fast mode requires the Codex subscription account"
@@ -365,7 +369,12 @@ impl AgentTemplate {
         &self,
         composition: Option<ProductCompositionSelection>,
     ) -> Result<(), String> {
-        if self.account == "openrouter"
+        if self
+            .account
+            .parse::<plakous_hosted::account::AccountRef>()
+            .is_ok_and(|account| {
+                account.vertical() == plakous_hosted::account::Vertical::OpenRouter
+            })
             && composition == Some(ProductCompositionSelection::NativePtc)
         {
             return Err(plakous_hosted::binding::OPENROUTER_NATIVE_PTC_REFUSAL.to_owned());

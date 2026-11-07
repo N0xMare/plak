@@ -51,6 +51,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn named_request_budgets_keep_full_reference_queue_labels() {
+        for account in ["claude/work", "claude/other", "claude"] {
+            let slots = for_account(account);
+            assert_eq!(slots.label(), account);
+        }
+    }
+
+    #[test]
     fn the_limit_sizes_budgets_built_after_it() {
         assert_eq!(for_account("a").limit(), DEFAULT_REQUESTS_PER_ACCOUNT);
         assert_eq!(for_account("a").label(), "a");

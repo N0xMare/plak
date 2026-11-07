@@ -13,6 +13,13 @@ Operator-facing instructions live in
 
 ## 1. Files and discovery
 
+Accounts accept a canonical `vertical[/name]` reference. A named selection uses
+only its own credential. Aliases normalize at parsing; the vertical determines
+model, effort, composition, skills and protocol behavior.
+`max_concurrent_requests_per_account` is per local reference, not per upstream
+identity: sibling slots never borrow request budgets, even when their upstream
+limits are shared.
+
 Build capabilities are not configuration keys. The persisted account,
 composition and tool-selection vocabulary is unchanged in a feature-reduced
 binary, so read-only session operations still decode it. Session admission
@@ -477,10 +484,10 @@ One flat object plus an optional `[env]` table. The file stem is the name.
 
 | field | type | default | constraint | meaning |
 | --- | --- | --- | --- | --- |
-| `account` | string | `(required)` | codex\|chatgpt\|grok\|supergrok\|xai-oauth\|claude\|openrouter\|openai\|anthropic\|xai-api | Credential lane the copy runs on. |
+| `account` | string | `(required)` | vertical[/name]; vertical is codex\|chatgpt\|grok\|supergrok\|xai-oauth\|claude\|openrouter\|openai\|anthropic\|xai-api; name is [a-z][a-z0-9-]{0,31}, except default | Credential lane the copy runs on. |
 | `model` | string | `(required)` | non-empty; a direct API account must name an enrolled model, checked at load; every other account is checked at bind | Exact model id. |
 | `effort` | string | `(unset)` | none\|low\|medium\|high\|xhigh\|max\|ultra; Codex offers low through max (never ultra); none is an explicit API effort, not an omitted one; a direct API account requires a level on the model's published ladder, checked at load; every other account is checked at bind | Reasoning effort; on a subscription account a typo surfaces as a bind failure, not a load error. |
-| `fast_mode` | bool | `false` | true is only valid with account = "codex" | Fast mode: request the provider's faster processing lane for this Codex subscription template. It is not a model choice and does not grant additional tools. A child runs on its own template's setting, never its parent's. |
+| `fast_mode` | bool | `false` | true is only valid on the codex vertical, including named slots | Fast mode: request the provider's faster processing lane for this Codex subscription template. It is not a model choice and does not grant additional tools. A child runs on its own template's setting, never its parent's. |
 | `composition` | enum | `"plakous-default"` | direct\|plakous-default\|native-ptc\|js-ptc\|py-ptc; native-ptc is refused for openrouter, anthropic and xai-api, and on openai is valid only for a model enrolled as CodeModeOnly | How the model composes the product tools: direct calls one at a time, or a programmatic tool calling (PTC) cell. native-ptc is the provider's own PTC system (today only Codex Code Mode is enrolled); js-ptc and py-ptc are harness PTC on every account. plakous-default uses the versioned Plakous-recommended tool presentation for this provider/model; the resolved presentation is pinned for the session and does not select or substitute a model. |
 | `protocol` | enum | `"auto"` | auto\|chat\|responses\|messages; anything but auto is OpenRouter-only | Wire protocol pin for an OpenRouter model whose family the gateway reports wrongly. |
 | `description` | string | `""` | required and non-blank for a template named in [roster] working_set or in a spawns list | The spawn card a parent routes on: what this agent is for, in the parent's words. |
@@ -516,11 +523,11 @@ Cross-field rules, all checked at load and again before any save:
   `description`, whether or not the working set reaches it. A list may name the
   template itself or close a cycle; a node's menu never carries its own
   template, and the depth bounds end a cycle.
-- `fast_mode = true` requires `account = "codex"`. A template that sets it is a
+- `fast_mode = true` requires the Codex vertical, bare or named. A template that sets it is a
   **Fast** template. Fast and a non-empty `spawns` are legal together anywhere,
   including the root and the working set: `spawns` decides only whether a node
   may be a parent, and every child runs on its own template's tier.
-- `protocol` other than `auto` requires `account = "openrouter"`.
+- `protocol` other than `auto` requires the OpenRouter vertical, bare or named.
 - `composition = "native-ptc"` selects the vertical's own programmatic tool calling system (spec 02 §6.5); today only Codex Code Mode is enrolled, on Codex `CodeModeOnly` rows and OpenAI API models enrolled as `CodeModeOnly`, and other verticals have none enrolled. It is refused for `openrouter`, `anthropic` and `xai-api`; on `openai` it is valid only for a model the API enrollment table marks `CodeModeOnly` (spec 02 §3.1), checked at load. On a subscription account it is checked at bind.
 - `composition = "py-sdk"` in any agent template is a load error: `py-sdk is root-only and has no child result channel`. Select it with `[root] composition = "py-sdk"`, the root settings picker or `--composition py-sdk`. It requires the core single-agent surface and a Direct-capable route; the root opens no topology, and optional tools are refused before inference. `plakous-default` never chooses it.
 - Direct API accounts require an enrolled model and an explicit effort on that model's published ladder (`plak models <account>`); the provider route fixes their wire protocol.

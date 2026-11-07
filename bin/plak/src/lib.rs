@@ -601,7 +601,10 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             Ok(ProcessOutcome::Success)
         }
         Command::CompatibilityNotice(provider) => {
-            print_compatibility_notice(provider, &mut stdout)?;
+            print_compatibility_notice(
+                &commands::support::cli_provider_name(provider).parse()?,
+                &mut stdout,
+            )?;
             Ok(ProcessOutcome::Success)
         }
         Command::TelemetryStatus { views } => product_telemetry::run_telemetry(
@@ -691,6 +694,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
                         .zip(services.session_records().ok())
                 },
             )?
+            .with_account_home(services.paths().ok().cloned())
             .with_process_jobs(services.process_jobs());
             execute_application_command(
                 command,
@@ -889,15 +893,15 @@ fn execute_application_command(
             #[cfg(not(feature = "test-hooks"))]
             let injected = false;
             if !injected {
-                let status = AccountOps::offline_status(backend, provider)?;
+                let status = AccountOps::offline_status(backend, &provider)?;
                 if status.credential != CredentialState::RefreshRequired {
-                    commands::support::require_ready(provider, status.credential)?;
+                    commands::support::require_ready(&provider, status.credential)?;
                 }
             }
-            commands::login::ensure_compatibility(backend, provider, stdin, stderr)?;
+            commands::login::ensure_compatibility(backend, &provider, stdin, stderr)?;
             backend.run(
                 &config,
-                provider,
+                &provider,
                 &model,
                 effort,
                 composition,
@@ -909,6 +913,7 @@ fn execute_application_command(
             )
         }
         Command::RunOpenRouter {
+            account,
             limits,
             model,
             effort,
@@ -918,7 +923,7 @@ fn execute_application_command(
             print_session_id,
         } => backend.run_api(
             &admit(stderr)?,
-            "openrouter".parse()?,
+            account,
             &model,
             effort,
             composition,
@@ -933,6 +938,7 @@ fn execute_application_command(
             limits,
         ),
         Command::RunPlatform {
+            account,
             limits,
             provider,
             model,
@@ -942,7 +948,7 @@ fn execute_application_command(
             print_session_id,
         } => backend.run_api(
             &admit(stderr)?,
-            provider.account().parse()?,
+            account,
             &model,
             Some(effort),
             composition,
@@ -997,25 +1003,27 @@ fn execute_command(
         Command::AuthStatus(provider) => {
             review_expiry::write_warnings(stdout, services.now_unix_seconds())
                 .map_err(|_| CliFailure::new("stdout failed"))?;
-            auth_status(backend, provider, services.paths().ok(), stdout)
+            auth_status(backend, &provider, services.paths().ok(), stdout)
         }
         Command::AuthLogin { provider, mode } => {
-            auth_login(backend, provider, mode, stdin, stderr, login_ui)
+            auth_login(backend, &provider, mode, stdin, stderr, login_ui)
         }
-        Command::AuthRefresh(provider) => auth_refresh(backend, provider, stdin, stderr),
+        Command::AuthRefresh(provider) => auth_refresh(backend, &provider, stdin, stderr),
         Command::AuthLogout {
             provider,
             local_only: true,
-        } => auth_logout_local(backend, provider, stderr),
+        } => auth_logout_local(backend, &provider, stderr),
         Command::AuthLogout {
             provider,
             local_only: false,
-        } => auth_logout(backend, provider, stdin, stderr),
-        Command::Models(provider) => list_models(backend, provider, stdin, stdout, stderr),
-        Command::ModelsOpenRouter => commands::catalog::list_openrouter_models(backend, stdout),
+        } => auth_logout(backend, &provider, stdin, stderr),
+        Command::Models(provider) => list_models(backend, &provider, stdin, stdout, stderr),
+        Command::ModelsOpenRouter(account) => {
+            commands::catalog::list_openrouter_models(backend, &account, stdout)
+        }
         Command::ModelsPlatform(provider) => {
-            let catalog = backend.platform_catalog(provider)?;
-            commands::catalog::list_platform_models(&catalog, stdout)
+            let catalog = backend.platform_catalog(&provider)?;
+            commands::catalog::list_platform_models(&catalog, &provider, stdout)
         }
         Command::ConfigShow => dispatch::execute_config_show(services, stdout),
         Command::ConfigInit => {
@@ -1075,9 +1083,11 @@ fn execute_command(
             .map_err(|_| CliFailure::new("stdout failed"))?;
             Ok(ProcessOutcome::Success)
         }
-        Command::KeySet { account } => key_set(&account, stdin, stderr),
-        Command::KeyClear { account } => key_clear(&account, stdout),
-        Command::KeyStatus { account } => key_status(account, stdout),
+        Command::KeySet { account } => key_set(account.as_str(), stdin, stderr),
+        Command::KeyClear { account } => key_clear(account.as_str(), stdout),
+        Command::KeyStatus { account } => {
+            key_status(account.map(|account| account.to_string()), stdout)
+        }
         Command::SecretSet { shelf, name } => {
             commands::secret::secret_set(services.paths()?, shelf, &name, stdin, stderr)
         }
@@ -1092,6 +1102,15 @@ fn execute_command(
         }
         Command::Runner(_) => unreachable!("runner commands dispatch before the stdio locks"),
         Command::StatusAll => dispatch::execute_status_all(services, backend, stdout),
+        Command::AccountsList => {
+            for account in backend.accounts()? {
+                writeln!(stdout, "{account}").map_err(|_| CliFailure::new("stdout failed"))?;
+            }
+            Ok(ProcessOutcome::Success)
+        }
+        Command::AccountsRemove { account, confirmed } => {
+            commands::login::remove_account(backend, &account, confirmed, stdin, stdout, stderr)
+        }
         Command::SessionList => dispatch::execute_session_list(services, stdout),
         Command::SessionShow { id } => show_session_read_only(services.paths()?, &id, stdout),
         Command::SessionRecover { id } => {
@@ -1251,6 +1270,7 @@ fn write_selected_subscription_usage(
 
 fn run_agent_command(services: &Services, command: Command) -> CliResult<ProcessOutcome> {
     let Command::Agent {
+        account,
         session_id,
         provider,
         platform,
@@ -1267,6 +1287,7 @@ fn run_agent_command(services: &Services, command: Command) -> CliResult<Process
     run_agent(
         services,
         session_id,
+        account,
         provider,
         platform,
         wire,

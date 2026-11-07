@@ -685,7 +685,16 @@ pub(crate) fn cli_human_output() -> cli_output::HumanOutput {
 pub(crate) fn product_account_label(account: Option<&str>) -> String {
     account.map_or_else(
         || "—".to_owned(),
-        |account| cli_output::ProviderLabel::new(account).to_string(),
+        |account| {
+            if account
+                .parse::<plakous_hosted::account::AccountRef>()
+                .is_ok_and(|selection| selection.is_named())
+            {
+                account.to_owned()
+            } else {
+                cli_output::ProviderLabel::new(account).to_string()
+            }
+        },
     )
 }
 

@@ -34,6 +34,39 @@ fn sdk_is_a_root_override_not_a_child_template_capability() {
 }
 
 #[test]
+fn named_templates_canonicalize_aliases_and_keep_vertical_protocol_rules() {
+    for (alias, canonical) in [
+        ("chatgpt/work", "codex/work"),
+        ("supergrok/work", "grok/work"),
+        ("xai-oauth/work", "grok/work"),
+        ("claude/work", "claude/work"),
+    ] {
+        let text = format!("account = \"{alias}\"\nmodel = \"m\"\n");
+        let template = parse_template(&text, "fixture").unwrap();
+        assert_eq!(template.account, canonical);
+    }
+    let fast = parse_template(
+        "account = \"codex/work\"\nmodel = \"m\"\nfast_mode = true\n",
+        "fixture",
+    )
+    .unwrap();
+    assert_eq!(fast.extra.as_deref(), Some("priority"));
+    let wire = parse_template(
+        "account = \"openrouter/work\"\nmodel = \"author/model\"\nprotocol = \"messages\"\n",
+        "fixture",
+    )
+    .unwrap();
+    assert_eq!(wire.protocol, Some(ProductProtocolSelection::Messages));
+    assert!(
+        parse_template(
+            "account = \"claude/work\"\nmodel = \"m\"\nprotocol = \"messages\"\n",
+            "fixture"
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn changing_root_template_clears_only_its_composition_override() {
     let mut config = ProductConfig::default_product();
     config.bind_root_tuple("grok", "grok-4.6", None);

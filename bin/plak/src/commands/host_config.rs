@@ -21,6 +21,23 @@ use crate::store::sessions as product_sessions;
 use plakous_hosted::agent as product_agent;
 use plakous_hosted::runtime as product_host;
 
+pub(super) fn binding_presentation(
+    paths: &product_paths::PlakPaths,
+    account: &plakous_hosted::account::AccountRef,
+) -> crate::CliResult<crate::presentation::TuiPresentationBundle> {
+    if account.is_named() {
+        if account.vertical().is_api() {
+            crate::home::secrets::require_api_key(paths, account.as_str())?;
+        }
+        return Ok(crate::presentation::TuiPresentationBundle {
+            providers: Vec::new(),
+            sections: plakous_host_protocol::views::ReadyCatalog::default(),
+            native_models: Vec::new(),
+        });
+    }
+    tui_presentation_bundle(paths)
+}
+
 pub fn attached_target_accepts_effort(
     target: &product_config::ProductTargetSelection,
     ready_catalog: &plakous_host_protocol::views::ReadyCatalog,
@@ -125,13 +142,24 @@ pub fn deferred_attach_refusal_reason(
 
 /// The selected native account's offline refusal, with its original account and condition.
 pub fn native_credential_refusal(account: Option<&str>) -> Option<HostFailure> {
-    let provider = plakous_hosted::binding::oauth_provider_for_account(account?)?;
+    let account: plakous_hosted::account::AccountRef = account?.parse().ok()?;
+    let provider = account.vertical().capability().native_provider()?;
     let state_home = crate::home::paths::application_state_home().ok()?;
     let mut accounts = PlakousApplication::for_accounts(state_home).ok()?;
-    credential_gate_refusal(
-        provider,
-        super::application::AccountOps::offline_status(&mut accounts, provider),
-    )
+    let status = super::application::AccountOps::offline_status(&mut accounts, &account);
+    if account.is_named() {
+        return match status {
+            Ok(status)
+                if status.credential == crate::presentation::CredentialState::Ready
+                    && status.compatibility == crate::presentation::CompatibilityState::Current =>
+            {
+                None
+            }
+            Ok(_) => Some(super::support::account_unavailable(&account).host_failure()),
+            Err(failure) => Some(failure.host_failure()),
+        };
+    }
+    credential_gate_refusal(provider, status)
 }
 
 pub(crate) fn credential_gate_refusal(
@@ -360,11 +388,15 @@ pub fn build_host_config(
         .filter(|s| !s.trim().is_empty())
         .ok_or_else(|| "no model bound — choose a profile with /agents".to_owned())?;
     let state_home = application_state_home().map_err(|e| format!("state home: {e}"))?;
-    let mut app = PlakousApplication::for_accounts(state_home)
+    let app = PlakousApplication::for_accounts(state_home)
         .map_err(|e| format!("plakous app: {}", e.message()))?;
-    app.subscriptions = state_roots
-        .native_subscriptions()
-        .map_err(|e| format!("native subscriptions: {}", e.message()))?;
+    let selected_account: plakous_hosted::account::AccountRef = account.parse()?;
+    let subscriptions = if selected_account.vertical().is_api() {
+        state_roots.native_subscriptions()
+    } else {
+        state_roots.native_subscriptions_for(&selected_account)
+    }
+    .map_err(|e| format!("native subscriptions: {}", e.message()))?;
     let route = session
         .target_selection
         .route(account)
@@ -377,7 +409,7 @@ pub fn build_host_config(
                     wire.validate()?;
                     (
                         product_host::HostTargetAuthority::OpenRouter {
-                            subscriptions: app.subscriptions.clone(),
+                            subscriptions: subscriptions.clone(),
                             evidence: None,
                         },
                         product_host::effort_from_record(session.effort.as_deref())
@@ -394,7 +426,7 @@ pub fn build_host_config(
                     (
                         product_host::HostTargetAuthority::Platform {
                             provider,
-                            subscriptions: app.subscriptions.clone(),
+                            subscriptions: subscriptions.clone(),
                         },
                         Some(effort),
                     )
@@ -464,7 +496,7 @@ pub fn build_host_config(
     } else {
         match app
             .executor
-            .block_on(app.subscriptions.model_catalog_persisted(provider))
+            .block_on(subscriptions.model_catalog_persisted(provider))
         {
             Ok(Ok(snapshot)) => {
                 let entry = snapshot
@@ -509,7 +541,7 @@ pub fn build_host_config(
     let resolved = app
         .executor
         .block_on(
-            app.subscriptions
+            subscriptions
                 .resolve_turn_scoped_provider_for_attach(selected, limits),
         )
         .map_err(|e| format!("resolve {account}/{model_id}: {e:?}"))?
@@ -540,7 +572,7 @@ pub fn build_host_config(
         target: product_host::HostTargetAuthority::Native {
             provider,
             resolved,
-            subscriptions: app.subscriptions.clone(),
+            subscriptions: subscriptions.clone(),
             catalog_candidates: native_models.to_vec().into(),
         },
         model_id: model_id.to_owned(),

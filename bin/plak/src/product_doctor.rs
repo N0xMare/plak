@@ -1515,7 +1515,10 @@ fn oauth_check(kind: CheckKind, probe: OauthCredentialProbe) -> DoctorCheck {
             "run plak models {} to review and accept the renewed notice; the login is kept",
             crate::commands::support::cli_provider_name(provider)
         )),
-        (verdict, Some(provider)) => verdict.remedy(provider, AccountCommand::Status),
+        (verdict, Some(provider)) => crate::commands::support::cli_provider_name(provider)
+            .parse()
+            .ok()
+            .and_then(|account| verdict.remedy(&account, AccountCommand::Status)),
     };
     let mut check = DoctorCheck::new(
         kind,

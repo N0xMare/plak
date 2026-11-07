@@ -2,6 +2,7 @@ plak models — list catalog models
 
 USAGE:
   plak models <codex|grok|claude|openrouter|openai|anthropic|xai-api>
+  plak models <vertical>/<name>
 
   Subscription catalogs require a ready OAuth login. OpenRouter lists discovered
   model IDs; listing alone does not establish tool or protocol support.

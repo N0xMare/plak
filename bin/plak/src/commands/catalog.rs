@@ -2,8 +2,6 @@
 
 use std::io;
 
-use plakous::subscriptions::NativeProvider;
-
 use super::application::AccountOps;
 use super::login::ensure_catalog_compatibility;
 use super::support::{native_tool_mode_label, native_visibility_label, require_ready};
@@ -12,7 +10,7 @@ use plakous_hosted::error::{CliFailure, CliResult, ProcessOutcome};
 /// Lists the authenticated catalog rows exactly as the provider admits them.
 pub fn list_models(
     backend: &mut impl AccountOps,
-    provider: NativeProvider,
+    provider: &plakous_hosted::account::AccountRef,
     stdin: &mut dyn io::BufRead,
     stdout: &mut dyn io::Write,
     stderr: &mut dyn io::Write,
@@ -68,9 +66,10 @@ pub fn list_models(
 /// Lists OpenRouter catalog IDs; presence alone makes no capability claim.
 pub fn list_openrouter_models(
     backend: &mut impl AccountOps,
+    account: &plakous_hosted::account::AccountRef,
     stdout: &mut dyn io::Write,
 ) -> CliResult<ProcessOutcome> {
-    let models = backend.openrouter_models()?;
+    let models = backend.openrouter_models(account)?;
     for model in models {
         writeln!(stdout, "{model}").map_err(|_| CliFailure::new("stdout failed"))?;
     }
@@ -83,6 +82,7 @@ pub fn list_openrouter_models(
 /// usable row the compositions `platform::api_composition` admits.
 pub fn list_platform_models(
     catalog: &plakous_hosted::platform::ApiModelCatalog,
+    account: &plakous_hosted::account::AccountRef,
     stdout: &mut dyn io::Write,
 ) -> CliResult<ProcessOutcome> {
     use plakous_hosted::binding::CompositionSelection;
@@ -97,10 +97,7 @@ pub fn list_platform_models(
         }
         ApiCatalogSource::Bundled { reason } => format!("bundled table ({reason})"),
     };
-    write(
-        stdout,
-        format!("# {} models · {source}", catalog.provider.account()),
-    )?;
+    write(stdout, format!("# {account} models · {source}"))?;
     for row in &catalog.models {
         let efforts = effort_names(&row.efforts).join(",");
         let windows = format!(

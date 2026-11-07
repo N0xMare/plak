@@ -10,6 +10,17 @@ impl TopCommand {
     )]
     pub(super) fn into_command(self) -> Result<Command, String> {
         match self {
+            Self::Accounts { action } => match action {
+                super::AccountAction::List => Ok(Command::AccountsList),
+                super::AccountAction::Rm { account, confirmed } => Ok(Command::AccountsRemove {
+                    account: account.parse().map_err(
+                        |error: plakous_hosted::capabilities::AccountAdmissionError| {
+                            error.to_string()
+                        },
+                    )?,
+                    confirmed,
+                }),
+            },
             Self::Login { account: None, .. } => Ok(Command::CommandHelp {
                 command: "login".to_owned(),
             }),
@@ -40,7 +51,11 @@ impl TopCommand {
             } => {
                 if crate::product_secrets::is_api_key_account(&account) {
                     Ok(Command::KeyStatus {
-                        account: Some(account),
+                        account: Some(account.parse().map_err(
+                            |error: plakous_hosted::capabilities::AccountAdmissionError| {
+                                error.to_string()
+                            },
+                        )?),
                     })
                 } else {
                     Ok(Command::AuthStatus(parse_oauth_account(&account)?))
@@ -83,21 +98,30 @@ impl TopCommand {
             #[cfg(feature = "maintainer")]
             Self::Compatibility {
                 provider: Some(provider),
-            } => Ok(Command::CompatibilityNotice(parse_oauth_account(
-                &provider,
-            )?)),
+            } => Ok(Command::CompatibilityNotice(
+                parse_oauth_account(&provider)?
+                    .vertical()
+                    .capability()
+                    .native_provider()
+                    .ok_or("compatibility requires a subscription account")?,
+            )),
             Self::Models { provider: None } => Ok(Command::CommandHelp {
                 command: "models".to_owned(),
             }),
             Self::Models {
-                provider: Some(provider),
-            } if provider == "openrouter" => Ok(Command::ModelsOpenRouter),
-            Self::Models {
-                provider: Some(provider),
-            } => match plakous_hosted::binding::PlatformProvider::for_account(&provider) {
-                Some(provider) => Ok(Command::ModelsPlatform(provider)),
-                None => Ok(Command::Models(parse_oauth_account(&provider)?)),
-            },
+                provider: Some(value),
+            } => {
+                let account: super::AccountRef = value.parse().map_err(
+                    |error: plakous_hosted::capabilities::AccountAdmissionError| error.to_string(),
+                )?;
+                if account.vertical() == super::Vertical::OpenRouter {
+                    Ok(Command::ModelsOpenRouter(account))
+                } else if account.vertical().is_api() {
+                    Ok(Command::ModelsPlatform(account))
+                } else {
+                    Ok(Command::Models(account))
+                }
+            }
             Self::Run {
                 account,
                 provider,
@@ -269,7 +293,15 @@ impl TopCommand {
                 account,
                 session_id,
             } => Ok(Command::Usage {
-                account,
+                account: account
+                    .map(|value| {
+                        value.parse().map_err(
+                            |error: plakous_hosted::capabilities::AccountAdmissionError| {
+                                error.to_string()
+                            },
+                        )
+                    })
+                    .transpose()?,
                 session_id,
             }),
             Self::Session { action: None } => Ok(Command::CommandHelp {

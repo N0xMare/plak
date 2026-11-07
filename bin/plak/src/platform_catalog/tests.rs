@@ -70,9 +70,9 @@ fn api_run_and_jsonl_commands_choose_exact_billed_accounts() {
     assert!(matches!(
         historical,
         Command::Run {
-            provider: plakous::subscriptions::NativeProvider::Xai,
+            provider,
             ..
-        }
+        } if provider.as_str() == "grok"
     ));
 }
 
@@ -346,6 +346,7 @@ fn run_and_agent_save_the_same_api_record_for_the_same_arguments() {
                 let agent = crate::commands::agent::new_agent_record(
                     &config,
                     "/offline/workspace".into(),
+                    Some(provider.account().parse().unwrap()),
                     None,
                     Some(provider),
                     None,
@@ -403,7 +404,12 @@ fn run_and_agent_save_the_same_api_record_for_the_same_arguments() {
 fn listing(provider: PlatformProvider) -> String {
     let catalog = plakous_hosted::platform::bundled_catalog(provider, "offline test");
     let mut out = vec![];
-    crate::commands::catalog::list_platform_models(&catalog, &mut out).unwrap();
+    crate::commands::catalog::list_platform_models(
+        &catalog,
+        &provider.account().parse().unwrap(),
+        &mut out,
+    )
+    .unwrap();
     String::from_utf8(out).unwrap()
 }
 
@@ -443,7 +449,9 @@ fn api_catalog_command_lists_every_listed_id_with_status_efforts_and_windows() {
         PlatformProvider::Xai,
     ] {
         let command = crate::cli::parse(["models", provider.account()].map(Into::into)).unwrap();
-        assert!(matches!(command,Command::ModelsPlatform(selected) if selected==provider));
+        assert!(
+            matches!(command,Command::ModelsPlatform(selected) if selected.vertical().capability().platform_provider()==Some(provider))
+        );
         let out = listing(provider);
         assert!(out.starts_with(&format!(
             "# {} models · bundled table (offline test)\n",

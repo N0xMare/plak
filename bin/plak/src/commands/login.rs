@@ -7,12 +7,12 @@
 use std::io::{self, IsTerminal as _};
 
 use crate::terminal_application::read_terminal_secret_line;
-use plakous::subscriptions::{NativeLoginMode, NativeProvider, NativeSubscriptions};
+use plakous::subscriptions::{NativeLoginMode, NativeSubscriptions};
 
 use super::application::{AccountOps, Revocation, StoredCredential};
 use super::support::{
-    cli_provider_name, compatibility_status_name, credential_status_name, profile_date,
-    profile_inactive_failure, require_locally_retired, require_ready, require_revoked,
+    compatibility_status_name, credential_status_name, profile_date, profile_inactive_failure,
+    require_locally_retired, require_ready, require_revoked,
 };
 use crate::home::paths as product_paths;
 use crate::home::secrets as product_secrets;
@@ -22,10 +22,50 @@ use crate::presentation::{
 };
 use plakous_hosted::error::{CliFailure, CliFailureKind, CliResult, ProcessOutcome};
 
+/// Removes only an already signed-out named slot, or clears one named API key.
+pub(crate) fn remove_account(
+    backend: &mut impl AccountOps,
+    account: &plakous_hosted::account::AccountRef,
+    confirmed: bool,
+    stdin: &mut dyn io::BufRead,
+    stdout: &mut dyn io::Write,
+    stderr: &mut dyn io::Write,
+) -> CliResult<ProcessOutcome> {
+    if !account.is_named() {
+        return Err(
+            plakous_hosted::capabilities::AccountAdmissionError::DefaultAccountNotRemovable {
+                account: account.to_string(),
+            }
+            .into(),
+        );
+    }
+    if !confirmed {
+        let scope = if account.vertical().is_api() {
+            "this home's API key"
+        } else {
+            "already signed-out shared native slot; no remote revocation"
+        };
+        writeln!(stderr, "Remove {account} ({scope})? Referencing sessions or templates may refuse afterward. Type {account} to confirm:")
+            .map_err(|_| CliFailure::new("stderr failed"))?;
+        let mut answer = String::new();
+        stdin
+            .read_line(&mut answer)
+            .map_err(|_| CliFailure::new("stdin failed"))?;
+        if answer.trim() != account.as_str() {
+            return Err(CliFailure::new(
+                "account removal was not confirmed; nothing changed",
+            ));
+        }
+    }
+    backend.remove_account(account)?;
+    writeln!(stdout, "{account}: removed").map_err(|_| CliFailure::new("stdout failed"))?;
+    Ok(ProcessOutcome::Success)
+}
+
 /// `plak status <provider>`: offline credential and compatibility posture.
 pub fn auth_status(
     backend: &mut impl AccountOps,
-    provider: NativeProvider,
+    provider: &plakous_hosted::account::AccountRef,
     paths: Option<&product_paths::PlakPaths>,
     stdout: &mut dyn io::Write,
 ) -> CliResult<ProcessOutcome> {
@@ -36,9 +76,15 @@ pub fn auth_status(
     writeln!(
         stdout,
         "{}: compatibility={}, credential={}{repair}",
-        cli_provider_name(provider),
+        provider.as_str(),
         compatibility_status_name(status.compatibility),
-        super::support::oauth_refresh_status_detail(paths, provider, status.credential)
+        (!provider.is_named())
+            .then(|| super::support::oauth_refresh_status_detail(
+                paths,
+                super::application::native_provider(provider).ok()?,
+                status.credential
+            ))
+            .flatten()
             .unwrap_or_else(|| credential_status_name(status.credential).to_owned())
     )
     .map_err(|_| CliFailure::new("stdout failed"))?;
@@ -48,7 +94,21 @@ pub fn auth_status(
 /// `plak login <provider>`: exact acceptance, then the provider login flow.
 pub(crate) fn auth_login(
     backend: &mut impl AccountOps,
-    provider: NativeProvider,
+    provider: &plakous_hosted::account::AccountRef,
+    mode: NativeLoginMode,
+    stdin: &mut dyn io::BufRead,
+    stderr: &mut dyn io::Write,
+    ui: &mut impl super::login_flow::LoginUi,
+) -> CliResult<ProcessOutcome> {
+    backend.prepare_login(provider)?;
+    let result = auth_login_prepared(backend, provider, mode, stdin, stderr, ui);
+    backend.end_login_attempt(provider);
+    result
+}
+
+fn auth_login_prepared(
+    backend: &mut impl AccountOps,
+    provider: &plakous_hosted::account::AccountRef,
     mode: NativeLoginMode,
     stdin: &mut dyn io::BufRead,
     stderr: &mut dyn io::Write,
@@ -76,6 +136,10 @@ pub(crate) fn auth_login(
     .map_err(|failure| failure.or_kind(CliFailureKind::Auth))?;
     let status = super::login_flow::perform_login(backend, provider, mode, stdin, stderr, ui)?;
     require_ready(provider, status)?;
+    if let Some(sibling) = backend.same_upstream_account(provider) {
+        writeln!(stderr, "warning: {}: same upstream account as {sibling}; provider limits are shared, not additional allowance", provider.as_str())
+            .map_err(|_| CliFailure::new("stderr failed"))?;
+    }
     if !backend.record_login_host(provider) {
         let _ = writeln!(
             stderr,
@@ -87,7 +151,7 @@ pub(crate) fn auth_login(
             writeln!(
                 stderr,
                 "{}: login succeeded — credential ready.",
-                cli_provider_name(provider)
+                provider.as_str()
             )
         })
         .map_err(|_| CliFailure::new("stderr failed"))?;
@@ -99,12 +163,12 @@ pub(crate) fn auth_login(
 /// terminal it refuses without asking.
 pub(crate) fn confirm_newer_build_replacement(
     backend: &mut impl AccountOps,
-    provider: NativeProvider,
+    provider: &plakous_hosted::account::AccountRef,
     interactive: bool,
     stdin: &mut dyn io::BufRead,
     stderr: &mut dyn io::Write,
 ) -> CliResult<()> {
-    let account = cli_provider_name(provider);
+    let account = provider.as_str();
     let refusal = |detail: &str| {
         CliFailure::classified(
             CliFailureKind::Auth,
@@ -140,7 +204,7 @@ pub(crate) fn confirm_newer_build_replacement(
 /// `plak refresh <provider>`.
 pub fn auth_refresh(
     backend: &mut impl AccountOps,
-    provider: NativeProvider,
+    provider: &plakous_hosted::account::AccountRef,
     stdin: &mut dyn io::BufRead,
     stderr: &mut dyn io::Write,
 ) -> CliResult<ProcessOutcome> {
@@ -161,7 +225,7 @@ pub fn auth_refresh(
     writeln!(
         stderr,
         "{}: new refresh grant issued — access token valid until {until}.",
-        cli_provider_name(provider)
+        provider.as_str()
     )
     .map_err(|_| CliFailure::new("stderr failed"))?;
     Ok(ProcessOutcome::Success)
@@ -171,7 +235,7 @@ pub fn auth_refresh(
 /// contacting the provider.
 pub fn auth_logout_local(
     backend: &mut impl AccountOps,
-    provider: NativeProvider,
+    provider: &plakous_hosted::account::AccountRef,
     stderr: &mut dyn io::Write,
 ) -> CliResult<ProcessOutcome> {
     let status = retire_local(backend, provider)?;
@@ -182,7 +246,7 @@ pub fn auth_logout_local(
     writeln!(
         stderr,
         "{}: {outcome}; remote credential may remain active",
-        cli_provider_name(provider)
+        provider.as_str()
     )
     .map_err(|_| CliFailure::new("stderr failed"))?;
     Ok(ProcessOutcome::Success)
@@ -192,11 +256,11 @@ pub fn auth_logout_local(
 /// retire one this build cannot use locally, saying the remote grant may remain.
 pub fn auth_logout(
     backend: &mut impl AccountOps,
-    provider: NativeProvider,
+    provider: &plakous_hosted::account::AccountRef,
     stdin: &mut dyn io::BufRead,
     stderr: &mut dyn io::Write,
 ) -> CliResult<ProcessOutcome> {
-    let name = cli_provider_name(provider);
+    let name = provider.as_str();
     let message = match backend.stored_credential(provider)? {
         StoredCredential::Absent => {
             retire_local(backend, provider)?;
@@ -228,17 +292,20 @@ pub fn auth_logout(
     Ok(ProcessOutcome::Success)
 }
 
-fn retire_unusable(backend: &mut impl AccountOps, provider: NativeProvider) -> CliResult<String> {
+fn retire_unusable(
+    backend: &mut impl AccountOps,
+    provider: &plakous_hosted::account::AccountRef,
+) -> CliResult<String> {
     retire_local(backend, provider)?;
     Ok(format!(
         "{}: local credential retired; this build cannot use it, so it was not revoked at the provider and the remote grant may remain active",
-        cli_provider_name(provider)
+        provider.as_str()
     ))
 }
 
 fn retire_local(
     backend: &mut impl AccountOps,
-    provider: NativeProvider,
+    provider: &plakous_hosted::account::AccountRef,
 ) -> CliResult<CredentialState> {
     let status = backend.logout_local(provider)?;
     require_locally_retired(
@@ -341,7 +408,7 @@ enum Asker {
 
 pub fn ensure_compatibility(
     backend: &mut impl AccountOps,
-    provider: NativeProvider,
+    provider: &plakous_hosted::account::AccountRef,
     stdin: &mut dyn io::BufRead,
     stderr: &mut dyn io::Write,
 ) -> CliResult<()> {
@@ -350,7 +417,7 @@ pub fn ensure_compatibility(
 
 pub(super) fn ensure_catalog_compatibility(
     backend: &mut impl AccountOps,
-    provider: NativeProvider,
+    provider: &plakous_hosted::account::AccountRef,
     stdin: &mut dyn io::BufRead,
     stderr: &mut dyn io::Write,
 ) -> CliResult<()> {
@@ -373,7 +440,7 @@ pub(super) fn ensure_catalog_compatibility(
 
 fn accept_compatibility(
     backend: &mut impl AccountOps,
-    provider: NativeProvider,
+    provider: &plakous_hosted::account::AccountRef,
     asker: Asker,
     stdin: &mut dyn io::BufRead,
     stderr: &mut dyn io::Write,
@@ -391,7 +458,7 @@ fn accept_compatibility(
 
 fn accept_compatibility_status(
     backend: &mut impl AccountOps,
-    provider: NativeProvider,
+    provider: &plakous_hosted::account::AccountRef,
     asker: Asker,
     compatibility: CompatibilityState,
     stdin: &mut dyn io::BufRead,
@@ -399,12 +466,14 @@ fn accept_compatibility_status(
 ) -> CliResult<()> {
     match compatibility {
         CompatibilityState::Current => Ok(()),
-        CompatibilityState::Inactive => Err(profile_inactive_failure(Some(provider))),
+        CompatibilityState::Inactive => Err(profile_inactive_failure(Some(
+            super::application::native_provider(provider)?,
+        ))),
         CompatibilityState::Unsupported => Err(CliFailure::classified(
             CliFailureKind::Auth,
             format!(
                 "native compatibility state for {} is not supported by this build; build a newer plak",
-                cli_provider_name(provider)
+                provider.as_str()
             ),
         )),
         CompatibilityState::Required => {
@@ -427,14 +496,14 @@ fn accept_compatibility_status(
 /// whether stdin is a terminal that echoes the answer and its line break.
 fn read_exact_compatibility_response(
     backend: &impl AccountOps,
-    provider: NativeProvider,
+    provider: &plakous_hosted::account::AccountRef,
     asker: Asker,
     echoed: bool,
     stdin: &mut dyn io::BufRead,
     stderr: &mut dyn io::Write,
 ) -> CliResult<String> {
     let notice = backend.notice(provider)?;
-    let account = cli_provider_name(provider);
+    let account = provider.as_str();
     writeln!(
         stderr,
         "{account} uses an experimental revision-pinned compatibility integration."
@@ -547,17 +616,18 @@ pub(crate) fn read_remote_authorization_interactive(
 }
 
 pub fn print_compatibility_notice(
-    provider: NativeProvider,
+    provider: &plakous_hosted::account::AccountRef,
     output: &mut dyn io::Write,
 ) -> CliResult<()> {
-    let notice = NativeSubscriptions::notice(provider).map_err(|_| {
-        let account = cli_provider_name(provider);
-        plakous_hosted::capabilities::CapabilityUnavailable {
-            id: account,
-            kind: plakous_hosted::capabilities::CapabilityKind::Route,
-            feature: account,
-        }
-    })?;
+    let notice = NativeSubscriptions::notice(super::application::native_provider(provider)?)
+        .map_err(|_| {
+            let account = provider.vertical().as_str();
+            plakous_hosted::capabilities::CapabilityUnavailable {
+                id: account,
+                kind: plakous_hosted::capabilities::CapabilityKind::Route,
+                feature: account,
+            }
+        })?;
     writeln!(output, "provider={}", notice.provider().as_str())
         .and_then(|()| writeln!(output, "profile_id={}", notice.profile_id()))
         .and_then(|()| writeln!(output, "source_revision={}", notice.source_revision()))

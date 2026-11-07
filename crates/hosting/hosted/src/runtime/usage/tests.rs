@@ -13,6 +13,63 @@ use crate::runtime::*;
 
 use crate::runtime::test_support::*;
 use crate::sessions::SessionRecord;
+
+struct NoCredentialReads;
+impl crate::openrouter::OpenRouterCredentials for NoCredentialReads {
+    fn preflight(&self, _: &crate::account::AccountRef) -> CliResult<()> {
+        panic!("named native usage must not probe any gateway key")
+    }
+    fn key_label(&self, _: &crate::account::AccountRef) -> CliResult<String> {
+        panic!("named native usage must not inspect a gateway key")
+    }
+    #[cfg(feature = "openrouter")]
+    fn source(
+        &self,
+        _: &crate::account::AccountRef,
+    ) -> CliResult<Arc<plakous::openrouter::OpenRouterKeySource>> {
+        panic!("named native usage must not construct a gateway credential source")
+    }
+}
+
+#[test]
+fn named_host_usage_labels_only_its_own_observation_and_reads_no_gateway_key() {
+    let native = NativeSubscriptionRefresh::Read(Box::new((
+        Some(native_usage_fixture("codex", 1.0)),
+        Some(native_usage_fixture("grok", 2.0)),
+        Some(native_usage_fixture("claude", 12.5)),
+    )));
+    let view =
+        project_named_usage_limits(native, &NoCredentialReads, &"claude/work".parse().unwrap());
+    assert_eq!(view.verticals.len(), 1);
+    assert_eq!(view.verticals[0].vertical.account(), "claude/work");
+    assert_native_percent(&view, 0, "12.5");
+}
+
+#[test]
+fn named_api_host_usage_never_reads_or_creates_native_default_slots() {
+    let root = tempfile::tempdir().unwrap();
+    let state_home = root.path().join("state");
+    let subscriptions = NativeSubscriptions::new(
+        plakous::subscriptions::SubscriptionPaths::from_xdg_state_home(state_home.clone()).unwrap(),
+    );
+    let executor = ApplicationExecutor::new().unwrap();
+    for account in [
+        "openai/work",
+        "anthropic/work",
+        "xai-api/work",
+        "openrouter/work",
+    ] {
+        assert!(matches!(
+            refresh_named_subscription_usage(
+                &executor,
+                Some(subscriptions.clone()),
+                &account.parse().unwrap()
+            ),
+            NativeSubscriptionRefresh::NoSubscriptionStore
+        ));
+    }
+    assert!(!state_home.exists());
+}
 use plakous::agent::TurnUsage;
 use plakous::application::ApplicationExecutor;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};

@@ -56,6 +56,11 @@ pub fn run_shell_host_loop<P: plakous_host_protocol::ProtocolExtension>(
         std::sync::Arc::clone(&config.openrouter_credentials),
         held_usage.clone(),
         session_ledger.clone(),
+        config
+            .session
+            .account
+            .as_deref()
+            .and_then(|account| account.parse().ok()),
     );
     let mut state = ShellState {
         held_usage,
@@ -904,7 +909,10 @@ pub(super) fn profile_target_selection(
     requested_tier: Option<&str>,
     protocol: Option<ProtocolSelection>,
 ) -> Result<TargetSelection, &'static str> {
-    if account == "openrouter" {
+    if account
+        .parse::<crate::account::AccountRef>()
+        .is_ok_and(|account| account.vertical() == crate::account::Vertical::OpenRouter)
+    {
         if requested_tier.is_some_and(|tier| tier != "standard") {
             return Err("model: provider-specific option is not admitted for an OpenRouter target");
         }
@@ -924,7 +932,13 @@ pub(super) fn profile_target_selection(
     }
     match requested_tier {
         None | Some("standard") => Ok(TargetSelection::Native),
-        Some("priority") if account == "codex" => Ok(TargetSelection::NativePriority),
+        Some("priority")
+            if account
+                .parse::<crate::account::AccountRef>()
+                .is_ok_and(|account| account.vertical() == crate::account::Vertical::Codex) =>
+        {
+            Ok(TargetSelection::NativePriority)
+        }
         Some(_) => Err("model: provider-specific option is not admitted for this target"),
     }
 }

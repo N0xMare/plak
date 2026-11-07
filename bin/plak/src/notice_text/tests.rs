@@ -1,5 +1,31 @@
 use super::*;
 
+#[test]
+fn named_credential_refusals_never_render_a_default_account_remedy() {
+    let account = "claude/work".parse().unwrap();
+    let failure = crate::commands::support::account_unavailable(&account);
+    assert_eq!(failure.exit_code(), 3);
+    assert!(failure.message().contains("claude/work"));
+    assert!(matches!(
+        failure.remedy(),
+        Some(NoticeRemedy::Login {
+            account: AccountTarget::Unspecified
+        })
+    ));
+    for frontend in [Frontend::Run, Frontend::Jsonl, Frontend::Tui] {
+        let text = remedy_text(
+            failure.remedy().unwrap(),
+            RemedyContext {
+                frontend,
+                session_id: None,
+            },
+        );
+        assert!(!text.contains("plak login claude"), "{text}");
+        assert!(!text.contains("plak login codex"), "{text}");
+        assert!(!text.contains("plak login grok"), "{text}");
+    }
+}
+
 pub(crate) fn all_remedies() -> Vec<NoticeRemedy> {
     use NoticeRemedy as R;
     vec![

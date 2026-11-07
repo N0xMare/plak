@@ -7,5 +7,6 @@ USAGE:
 
   Key entry is CLI-only: the TUI Providers tab shows status and names this command.
   Use xai-api for the direct API key; grok for the subscription.
-  Env vars override files. Plak never loads .env.
+  Add /<name>, for example openai/work, for a separate file-only key.
+  Env vars override default files only; named keys never read them. Plak never loads .env.
   `key clear` cannot unset process environment variables.

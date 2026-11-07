@@ -11,9 +11,12 @@ use mcp::McpAction;
 use std::ffi::OsString;
 
 use clap::{ArgAction, Parser, Subcommand};
-use plakous::subscriptions::{NativeLoginMode, NativeProvider};
+use plakous::subscriptions::NativeLoginMode;
+#[cfg(test)]
+use plakous::subscriptions::NativeProvider;
 
 use crate::command::{Command, NATIVE_RUN_MAX_PROMPT_BYTES, RunEffort};
+use plakous_hosted::account::{AccountRef, Vertical};
 
 /// The hidden argument a reload passes to name its handoff sidecar.
 pub(crate) const RELOAD_HANDOFF_FLAG: &str = "--reload-handoff";
@@ -263,7 +266,8 @@ fn clap_error(error: clap::Error) -> String {
 fn is_known_command(name: &str) -> bool {
     matches!(
         name,
-        "login"
+        "accounts"
+            | "login"
             | "logout"
             | "status"
             | "refresh"
@@ -335,6 +339,11 @@ impl Cli {
 
 #[derive(Debug, Subcommand)]
 enum TopCommand {
+    /// List or remove local account selections.
+    Accounts {
+        #[command(subcommand)]
+        action: AccountAction,
+    },
     /// OAuth / subscription login.
     Login {
         /// Account id (`codex` | `grok` | `claude`). Omit to print usage.
@@ -531,6 +540,18 @@ enum TopCommand {
     Help,
 }
 
+#[derive(Debug, clap::Subcommand)]
+enum AccountAction {
+    /// List local accounts without reading credential values.
+    List,
+    /// Remove an already signed-out named slot, or clear a named API key.
+    Rm {
+        account: String,
+        #[arg(long = "yes")]
+        confirmed: bool,
+    },
+}
+
 #[derive(Debug, Subcommand)]
 enum WireAction {
     /// Print this build's wire v2 JSON Schema, with its protocol version.
@@ -559,7 +580,13 @@ impl KeyAction {
                 if !crate::product_secrets::is_api_key_account(&account) {
                     return Err("key set requires openai|xai-api|anthropic|openrouter".to_owned());
                 }
-                Ok(Command::KeySet { account })
+                Ok(Command::KeySet {
+                    account: account.parse().map_err(
+                        |error: plakous_hosted::capabilities::AccountAdmissionError| {
+                            error.to_string()
+                        },
+                    )?,
+                })
             }
             Self::Clear {
                 account: Some(account),
@@ -567,7 +594,13 @@ impl KeyAction {
                 if !crate::product_secrets::is_api_key_account(&account) {
                     return Err("key clear requires openai|xai-api|anthropic|openrouter".to_owned());
                 }
-                Ok(Command::KeyClear { account })
+                Ok(Command::KeyClear {
+                    account: account.parse().map_err(
+                        |error: plakous_hosted::capabilities::AccountAdmissionError| {
+                            error.to_string()
+                        },
+                    )?,
+                })
             }
             Self::Status { account } => {
                 if account
@@ -578,7 +611,17 @@ impl KeyAction {
                         "key status requires openai|xai-api|anthropic|openrouter".to_owned()
                     );
                 }
-                Ok(Command::KeyStatus { account })
+                Ok(Command::KeyStatus {
+                    account: account
+                        .map(|value| {
+                            value.parse().map_err(
+                                |error: plakous_hosted::capabilities::AccountAdmissionError| {
+                                    error.to_string()
+                                },
+                            )
+                        })
+                        .transpose()?,
+                })
             }
         }
     }
@@ -951,16 +994,16 @@ struct RunPrompt {
     images: Vec<std::path::PathBuf>,
 }
 
-fn parse_oauth_account(value: &str) -> Result<NativeProvider, String> {
-    let route = plakous_hosted::capabilities::for_account(value).ok_or_else(|| {
-        plakous_hosted::capabilities::AccountAdmissionError::UnknownAccount {
-            account: value.to_owned(),
-        }
-        .to_string()
-    })?;
-    route.native_provider().ok_or_else(|| {
-        format!("account `{value}` is not an OAuth account; use plak key set for API keys")
-    })
+fn parse_oauth_account(value: &str) -> Result<AccountRef, String> {
+    let account: AccountRef = value
+        .parse()
+        .map_err(|error: plakous_hosted::capabilities::AccountAdmissionError| error.to_string())?;
+    if account.vertical().is_api() {
+        return Err(format!(
+            "account `{value}` is not an OAuth account; use plak key set for API keys"
+        ));
+    }
+    Ok(account)
 }
 
 #[cfg(test)]

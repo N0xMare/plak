@@ -163,12 +163,12 @@ pub const fn cli_provider_name(provider: NativeProvider) -> &'static str {
 pub fn run_composition(
     explicit: Option<product_config::ProductCompositionSelection>,
     configured: &product_config::DefaultBinding,
-    provider: NativeProvider,
+    account: &plakous_hosted::account::AccountRef,
     model: &str,
 ) -> product_config::ProductCompositionSelection {
     match explicit {
         Some(composition) => composition,
-        None => configured.composition_for_tuple(Some(cli_provider_name(provider)), Some(model)),
+        None => configured.composition_for_tuple(Some(account.as_str()), Some(model)),
     }
 }
 
@@ -214,7 +214,10 @@ pub const CODEX_CATALOG_SNAPSHOT_MISSING: &str =
 pub fn persist_miss_native_tool_mode(
     account: &str,
 ) -> Result<(Option<NativeToolMode>, bool), String> {
-    if account == "codex" {
+    if account
+        .parse::<plakous_hosted::account::AccountRef>()
+        .is_ok_and(|account| account.vertical() == plakous_hosted::account::Vertical::Codex)
+    {
         Err(CODEX_CATALOG_SNAPSHOT_MISSING.to_owned())
     } else {
         Ok((None, false))
@@ -720,12 +723,32 @@ pub fn application_execution_failure<T>(_: T) -> CliFailure {
     CliFailure::new("application execution failed")
 }
 
-pub fn require_ready(provider: NativeProvider, status: CredentialState) -> CliResult<()> {
+pub fn require_ready(
+    account: &plakous_hosted::account::AccountRef,
+    status: CredentialState,
+) -> CliResult<()> {
     if status == CredentialState::Ready {
         Ok(())
     } else {
-        Err(credential_not_ready(provider, status))
+        if account.is_named() {
+            return Err(account_unavailable(account));
+        }
+        Err(credential_not_ready(
+            super::application::native_provider(account)?,
+            status,
+        ))
     }
+}
+
+pub(crate) fn account_unavailable(account: &plakous_hosted::account::AccountRef) -> CliFailure {
+    CliFailure::from(
+        plakous_hosted::capabilities::AccountAdmissionError::AccountUnavailable {
+            account: account.to_string(),
+        },
+    )
+    .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::Login {
+        account: plakous_host_protocol::notice_remedy::AccountTarget::Unspecified,
+    })
 }
 
 pub fn require_revoked(status: CredentialState, failure: &'static str) -> CliResult<()> {
