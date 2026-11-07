@@ -271,7 +271,10 @@ impl App {
     }
 
     fn request_rebind(&mut self, cause: String) -> Option<UserAction> {
-        if let Some(refusal) = self.reload_refusal().or_else(|| self.carry_refusal()) {
+        if let Some(refusal) = self
+            .background_process_refusal()
+            .or_else(|| self.carry_refusal())
+        {
             self.push_block(ScrollBlock::System(refusal.replacen("reload", "rebind", 1)));
         } else {
             self.pending_rebind = Some(cause);
@@ -284,6 +287,13 @@ impl App {
     /// do not: a reload that resumes the same session hands them off, and
     /// the new build continues each once (spec 02 §5.1).
     pub(super) fn reload_refusal(&self) -> Option<&'static str> {
+        if self.host_mode {
+            return None;
+        }
+        self.background_process_refusal()
+    }
+
+    fn background_process_refusal(&self) -> Option<&'static str> {
         (self.background_processes > 0)
             .then_some("reload refused: background processes are running; stop them first (/ps)")
     }

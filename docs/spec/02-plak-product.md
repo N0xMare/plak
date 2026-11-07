@@ -4552,6 +4552,13 @@ face may attach the same session at once. An embedded TUI already running
 when the host starts keeps its custody, and the per-tree
 `tree_hosted_elsewhere` refusal is unchanged.
 
+A terminal connected to a host whose welcome binary id differs from the
+locally installed binary id shows a persistent, non-blocking notice naming
+both builds. Its remedy is to restart the host unit, or run `plak host stop`
+and start it again. The ids are read-only build facts; the terminal never
+restarts the host. Matching builds show no notice. An unavailable identity
+does not establish a mismatch.
+
 - **One per home and state key.** Before anything else it takes an exclusive
   lock on `state/<key>/host.lock` and holds it for its life; the file names
   its pid and binary id. A second `plak host` of the same home and state key
@@ -4950,8 +4957,9 @@ export, carry, planned handoff, release or host restart. Build checks and
 the installed-client probe run locally, never as local-face-only intents
 on the host socket. A target with another or unknown state key refuses
 with a stop-host/run-its-build remedy, rather than accidentally opening
-an embedded session on another key. The background-process refusal below
-still applies in host mode.
+an embedded session on another key. Running processes do not refuse a hand
+reload in host mode: they belong to the host or its daemon and survive the
+client replacement. Embedded reload keeps its background-process refusal.
 
 Socket discovery applies the same-user run-directory, socket-owner and
 peer-uid checks (§4.6, chapter 04 §4.7). An unbindably long socket path

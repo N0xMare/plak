@@ -152,6 +152,7 @@ fn launch(
     let settings = crate::shell::settings::settings_view(cfg);
     Ok(tui::TuiLaunch {
         host_mode: true,
+        host_notice: face.outdated_host_notice(),
         version: plakous::VERSION,
         session_id: face.session(),
         workspace: workspace.clone(),

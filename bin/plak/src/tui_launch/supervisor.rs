@@ -570,6 +570,7 @@ pub(super) fn run_tui_rounds(
         }
         let launch_base = tui::TuiLaunch {
             host_mode: false,
+            host_notice: None,
             version: plakous::VERSION,
             session_id: Some(state.record.id.clone()),
             workspace: cwd.clone(),

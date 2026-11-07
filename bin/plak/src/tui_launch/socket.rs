@@ -205,6 +205,20 @@ impl SocketFace {
         self.receiver.ended()
     }
 
+    pub(super) fn outdated_host_notice(&self) -> Option<String> {
+        let installed = crate::carry::probe_reload(
+            &self.paths,
+            std::path::Path::new(&self.workspace),
+            None,
+            None,
+        )
+        .0?;
+        outdated_host_notice(
+            self.host_binary.as_deref(),
+            installed.probe.as_ref()?.binary_id.as_deref(),
+        )
+    }
+
     fn note(&self, text: String) {
         self.state()
             .events
@@ -529,6 +543,13 @@ impl SocketFace {
     pub(crate) fn settle(&self, timeout: Duration) -> bool {
         self.sender.settle(timeout)
     }
+}
+
+fn outdated_host_notice(host: Option<&str>, installed: Option<&str>) -> Option<String> {
+    let (host, installed) = (host?, installed?);
+    (host != installed).then(|| format!(
+        "host build {host} differs from installed build {installed}; restart the host unit, or run `plak host stop` and start it again; /reload replaces only this client"
+    ))
 }
 
 fn io_failure(error: std::io::Error) -> CliFailure {

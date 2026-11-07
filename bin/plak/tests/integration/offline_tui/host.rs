@@ -292,6 +292,133 @@ fn a_host_tui_reload_replaces_only_the_client_and_keeps_the_session_resident() {
 }
 
 #[test]
+fn a_host_tui_reload_keeps_a_running_daemon_job() {
+    let fixture = Fixture::with_mode(
+        &json!({
+            "version": 1,
+            "process_tools": true,
+            "repeat_last_step": true,
+            "steps": [
+                {"output": {"tool": {"name": "process_session_start", "arguments": {
+                    "command": "echo $$ $PPID > job.pid; read line",
+                    "workdir": ".", "login": false, "tty": false,
+                    "keep_stdin_open": true, "yield_time_ms": 0,
+                    "max_output_bytes": 8192
+                }}}, "finish": "tool_calls"},
+                {"output": {"text": "daemon job survives client reload"}}
+            ]
+        }),
+        Mode::Host,
+    );
+    let installed = fixture.root.join("installed");
+    std::fs::create_dir_all(&installed).unwrap();
+    install_this_build(&fixture, &installed);
+    let execs = fixture.root.join("client-execs");
+    write_script_file(
+        &installed.join("plak"),
+        &format!(
+            "#!/bin/bash\nif [ \"$1\" != version ]; then echo client >> '{}'; fi\nexec -a plak '{}' \"$@\"\n",
+            execs.display(),
+            fixture.root.join("real-bin/plak").display(),
+        ),
+    );
+    let mut terminal = Terminal::spawn(&fixture, Launch::OnPath(&installed));
+    terminal.wait_ready();
+    terminal.send(b"start a daemon job\r");
+    terminal.wait_screen("daemon job survives client reload");
+    terminal.wait_absent("Esc stop");
+    terminal.send(b"/ps\r");
+    terminal.wait_screen("read line");
+    terminal.send(b"\x1b");
+    let job = std::fs::read_to_string(fixture.workspace().join("job.pid")).unwrap();
+    let (pid, parent) = job.trim().split_once(' ').unwrap();
+    let pid: i32 = pid.parse().unwrap();
+    let parent: u32 = parent.parse().unwrap();
+    assert_ne!(parent, terminal.pid());
+    assert_ne!(
+        parent,
+        fixture.host.lock().unwrap().as_ref().unwrap().child.id()
+    );
+    assert_eq!(std::fs::read_to_string(&execs).unwrap().lines().count(), 1);
+    let client_pid = terminal.pid();
+    assert_client_reload_keeps_host(&fixture, &mut terminal);
+    assert_eq!(terminal.pid(), client_pid, "exec retains the client pid");
+    terminal.send(b"/ps\r");
+    let screen = terminal.wait_screen("read line");
+    assert!(
+        !screen.contains("outcome unknown") && !screen.contains("stopped"),
+        "{screen}"
+    );
+    assert_eq!(std::fs::read_to_string(&execs).unwrap().lines().count(), 2);
+    assert_eq!(
+        std::fs::read_to_string(fixture.workspace().join("job.pid")).unwrap(),
+        job
+    );
+    assert!(nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok());
+    terminal.send(b"\x1b");
+    terminal.quit();
+}
+
+#[test]
+fn a_host_tui_shows_a_persistent_notice_only_when_the_installed_build_differs() {
+    for mismatch in [false, true] {
+        let fixture =
+            Fixture::with_mode(&tool_then_answer("notice does not block work"), Mode::Host);
+        // Developer test binaries have no install manifest. Let an embedded
+        // client finish the normal identity cache before the host's welcome.
+        let warm = Fixture {
+            root: fixture.root.clone(),
+            mode: Mode::Embedded,
+            host: Mutex::default(),
+            owns_root: false,
+        };
+        let terminal = Terminal::spawn_ready(&warm);
+        fixture.wait_for_identity_cache();
+        terminal.quit();
+        let host = running_binary_id(&fixture);
+        let installed_id = if mismatch { "000000000000" } else { &host };
+        let key = fixture.cli(&["version", "--state-key"]);
+        assert!(key.status.success());
+        let key = String::from_utf8(key.stdout).unwrap();
+        let probe = json!({
+            "state_key": key.trim(), "export_versions": [11, 12],
+            "config_error": null, "binary_id": installed_id
+        });
+        let installed = fixture.root.join("installed");
+        std::fs::create_dir_all(&installed).unwrap();
+        write_script_file(
+            &installed.join("plak"),
+            &format!(
+                "#!/bin/bash\nif [ \"$1\" = version ] && [ \"$2\" = --reload-probe ]; then printf '%s\\n' '{}'; else exec -a plak '{}' \"$@\"; fi\n",
+                probe,
+                fixture.root.join("real-bin/plak").display(),
+            ),
+        );
+        let mut terminal = Terminal::spawn(&fixture, Launch::OnPath(&installed));
+        terminal.wait_ready();
+        assert_eq!(Directory::connect(&fixture).binary, host);
+        terminal.send(b"work with this host\r");
+        let screen = terminal.wait_screen("notice does not block work");
+        assert_eq!(
+            screen.contains("differs from installed build"),
+            mismatch,
+            "{screen}"
+        );
+        if mismatch {
+            for expected in [
+                host.as_str(),
+                installed_id,
+                "restart the host unit",
+                "`plak host stop`",
+            ] {
+                assert!(screen.contains(expected), "{screen}");
+            }
+        }
+        terminal.quit();
+    }
+}
+
+#[test]
 fn a_host_tui_refuses_a_hand_reload_that_would_select_another_state_key() {
     let fixture = Fixture::with_mode(
         &tool_then_answer("host stays on this state key"),

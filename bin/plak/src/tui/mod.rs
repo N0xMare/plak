@@ -131,6 +131,8 @@ pub(crate) use plakous_host_protocol::{
 pub struct TuiLaunch {
     /// Work belongs to a separate host; leaving this face only detaches.
     pub host_mode: bool,
+    /// Persistent client-local notice about the connected host's build.
+    pub host_notice: Option<String>,
     /// Workspace package version supplied by the product launcher.
     pub version: &'static str,
     /// Optional session identifier shown in the header when set.
@@ -192,6 +194,7 @@ impl Default for TuiLaunch {
     fn default() -> Self {
         Self {
             host_mode: false,
+            host_notice: None,
             version: "",
             session_id: None,
             workspace: PathBuf::from("."),
@@ -529,6 +532,7 @@ mod tests_entry {
 
         let launch = || TuiLaunch {
             host_mode: false,
+            host_notice: None,
             version: "0.1.0",
             session_id: Some("test-session".into()),
             workspace: PathBuf::from("/tmp"),

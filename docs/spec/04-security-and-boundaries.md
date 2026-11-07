@@ -1740,8 +1740,14 @@ running interactive session to reload onto the installed build (chapter 02
   attachments never receive what answers them or announces a request (the
   build status, the probe's answers, a handed-over request) nor the
   launch's lookup progress, whether as it happens or replayed on attach.
-  stdio's `plak agent --wire v2` is local; the TUI reaches its host in
-  process, not through a wire acceptor. A request that replaces one the host has not yet taken gives the replaced one
+  stdio's `plak agent --wire v2` and the embedded TUI are local. A host-mode
+  TUI is a remote face on the control socket: it checks installed build facts
+  locally and refuses requested reloads locally, never forwarding them to
+  the host. Its hand `/reload` replaces only the client, even with running
+  processes; embedded reload's process refusal is unchanged. A persistent
+  build-mismatch notice names both builds and the host-level remedy (restart
+  its unit, or `plak host stop` and start again), without granting the TUI
+  authority to restart the host. A request that replaces one the host has not yet taken gives the replaced one
   a `superseded` outcome. Outcomes nobody collected are pruned after seven
   days.
 - A request names the installed build it expects. The requester refuses

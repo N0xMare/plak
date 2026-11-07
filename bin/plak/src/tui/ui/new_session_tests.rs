@@ -74,7 +74,7 @@ fn a_host_faces_new_and_quit_leave_running_work_with_the_host() {
 }
 
 #[test]
-fn a_host_face_keeps_the_background_process_reload_refusal() {
+fn a_host_face_can_reload_with_background_processes() {
     let mut app = App::new(
         crate::tui::TuiLaunch {
             host_mode: true,
@@ -85,9 +85,47 @@ fn a_host_face_keeps_the_background_process_reload_refusal() {
     app.background_processes = 1;
     app.set_input("/reload".into());
     assert_eq!(app.handle_key(key(KeyCode::Enter)), None);
-    assert!(blocks_contain(&app, "background processes are running"));
-    assert!(!app.pending_reload);
+    assert!(!blocks_contain(&app, "background processes are running"));
+    assert!(app.pending_reload);
     assert!(!app.should_quit);
+}
+
+#[test]
+fn a_host_face_still_refuses_rebind_with_background_processes() {
+    let mut app = App::new(
+        crate::tui::TuiLaunch {
+            host_mode: true,
+            ..launch_basic()
+        },
+        true,
+    );
+    app.background_processes = 1;
+    app.set_input("/rebind".into());
+    assert_eq!(app.handle_key(key(KeyCode::Enter)), None);
+    assert!(blocks_contain(&app, "rebind refused: background processes"));
+    assert!(app.pending_rebind.is_none());
+}
+
+#[test]
+fn a_host_build_notice_stays_visible_across_transcript_updates() {
+    let notice = "host build 123456abcdef differs from installed build abcdef123456; restart the host unit, or run `plak host stop` and start it again; /reload replaces only this client";
+    let mut app = App::new(
+        crate::tui::TuiLaunch {
+            host_mode: true,
+            host_notice: Some(notice.into()),
+            ..launch_basic()
+        },
+        true,
+    );
+    for _ in 0..3 {
+        let screen = render_to_string(&mut app, 100, 30);
+        assert!(screen.contains("host build 123456abcdef"), "{screen}");
+        assert!(screen.contains("installed build abcdef123456"), "{screen}");
+        assert!(screen.contains("`plak host stop`"), "{screen}");
+        app.push_block(super::ScrollBlock::System(
+            "new transcript row\n".repeat(100),
+        ));
+    }
 }
 
 #[test]

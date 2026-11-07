@@ -67,6 +67,24 @@ impl App {
 
     /// The root view: transcript, queue and history shelves, composer.
     fn draw_root_view(&mut self, frame: &mut Frame<'_>, area: Rect) {
+        let area = if let Some(notice) = &self.host_notice {
+            let width = usize::from(area.width.max(1));
+            let lines = crate::tui::picker::wrap(notice, width);
+            let height = u16::try_from(lines.len()).unwrap_or(u16::MAX);
+            let chunks = Layout::vertical([
+                Constraint::Length(height.min(area.height.saturating_sub(3))),
+                Constraint::Fill(1),
+            ])
+            .split(area);
+            frame.render_widget(
+                Paragraph::new(lines.into_iter().map(Line::from).collect::<Vec<_>>())
+                    .style(self.theme.error),
+                chunks[0],
+            );
+            chunks[1]
+        } else {
+            area
+        };
         // The agent bar is the agent view's; its last rectangle overlaps the
         // chat block's bottom lines and must not outlive the view.
         self.agent_bar_hit = None;

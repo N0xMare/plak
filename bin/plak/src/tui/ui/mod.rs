@@ -420,6 +420,7 @@ type LastTurnUsage = (u64, u64, u64, u64, u64, Option<u64>, Option<u64>);
 )]
 pub(crate) struct App {
     host_mode: bool,
+    host_notice: Option<String>,
     pending_stop_session: bool,
     #[cfg(test)]
     after_draw: Option<fn()>,
@@ -875,6 +876,7 @@ impl App {
         pane.presentation_session.clone_from(&launch.session_id);
         Self {
             host_mode: launch.host_mode,
+            host_notice: launch.host_notice,
             pending_stop_session: false,
             #[cfg(test)]
             after_draw: None,

@@ -12,6 +12,23 @@ use super::*;
 const SESSION: &str = "00000000-0000-4000-8000-000000000001";
 const NEXT: &str = "00000000-0000-4000-8000-000000000002";
 
+#[test]
+fn the_outdated_host_notice_names_both_builds_and_only_a_host_level_remedy() {
+    let notice = outdated_host_notice(Some("123456abcdef"), Some("abcdef123456")).unwrap();
+    for expected in [
+        "host build 123456abcdef",
+        "installed build abcdef123456",
+        "restart the host unit",
+        "`plak host stop` and start it again",
+        "/reload replaces only this client",
+    ] {
+        assert!(notice.contains(expected), "{notice}");
+    }
+    assert_eq!(outdated_host_notice(Some("same"), Some("same")), None);
+    assert_eq!(outdated_host_notice(None, Some("installed")), None);
+    assert_eq!(outdated_host_notice(Some("host"), None), None);
+}
+
 fn paths() -> (tempfile::TempDir, product_paths::PlakPaths) {
     use std::os::unix::fs::PermissionsExt as _;
     let root = tempfile::Builder::new()
