@@ -480,11 +480,13 @@ pub(super) fn parse_template(text: &str, name: &str) -> Result<AgentTemplate, St
         }
     }
     template.validate(name)?;
-    template.account = template
+    let account = template
         .account
         .parse::<plakous_hosted::account::AccountRef>()
-        .map_err(|error| error.to_string())?
-        .to_string();
+        .map_err(|error| error.to_string())?;
+    if account.is_named() {
+        template.account = account.to_string();
+    }
     Ok(template)
 }
 

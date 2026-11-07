@@ -35,6 +35,11 @@ fn sdk_is_a_root_override_not_a_child_template_capability() {
 
 #[test]
 fn named_templates_canonicalize_aliases_and_keep_vertical_protocol_rules() {
+    let bare = parse_template("account = \"supergrok\"\nmodel = \"m\"\n", "fixture").unwrap();
+    assert_eq!(
+        bare.account, "supergrok",
+        "bare default spelling keeps its existing epoch bytes"
+    );
     for (alias, canonical) in [
         ("chatgpt/work", "codex/work"),
         ("supergrok/work", "grok/work"),

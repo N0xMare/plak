@@ -115,6 +115,8 @@ pub fn roster_input_from_config(
         root_template.as_deref(),
         &tool_sections,
     );
+    let bind_hints =
+        bind_hints_for_accounts(templates.values().map(|template| template.account.as_str()));
     RosterInput {
         workspace_idle_seconds: config.workspace_idle_seconds,
         workspace_budget_mib: config.workspace_budget_mib,
@@ -142,7 +144,7 @@ pub fn roster_input_from_config(
         working_set: config.working_set.names().iter().cloned().collect(),
         templates,
         templates_digest,
-        bind_hints: product_bind_hints(),
+        bind_hints,
         tool_sections,
     }
 }
@@ -172,6 +174,24 @@ pub fn product_bind_hints() -> BindHints {
         template_accounts().map(str::to_owned).collect(),
         no_native_protocol_accounts().map(str::to_owned).collect(),
     )
+}
+
+fn bind_hints_for_accounts<'a>(accounts: impl Iterator<Item = &'a str>) -> BindHints {
+    let mut pinnable: BTreeSet<_> = template_accounts().map(str::to_owned).collect();
+    let mut no_native: BTreeSet<_> = no_native_protocol_accounts().map(str::to_owned).collect();
+    for account in accounts {
+        let Ok(selected) = account.parse::<plakous_hosted::account::AccountRef>() else {
+            continue;
+        };
+        if !selected.is_named() {
+            continue;
+        }
+        if no_native.contains(selected.vertical().as_str()) {
+            no_native.insert(selected.to_string());
+        }
+        pinnable.insert(selected.to_string());
+    }
+    BindHints::new(pinnable, no_native)
 }
 
 /// The working set plus every template reachable from it through `spawns`

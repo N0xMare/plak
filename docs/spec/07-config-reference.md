@@ -14,7 +14,8 @@ Operator-facing instructions live in
 ## 1. Files and discovery
 
 Accounts accept a canonical `vertical[/name]` reference. A named selection uses
-only its own credential. Aliases normalize at parsing; the vertical determines
+only its own credential. Named aliases normalize before slot selection; bare
+default templates keep their existing stored spelling. The vertical determines
 model, effort, composition, skills and protocol behavior.
 `max_concurrent_requests_per_account` is per local reference, not per upstream
 identity: sibling slots never borrow request budgets, even when their upstream

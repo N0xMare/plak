@@ -300,9 +300,19 @@ protocol (so a `native-ptc` card on them is refused). The tree itself names no
 account: it only asks whether the card's account is in the frozen set, so every
 spawn path — a product binder, or a binder-less JSONL `invoke_tool` — refuses
 the same card the same way. The roster is carried in the epoch digest, so a
-change to it needs a successor epoch. The API accounts `openai`, `anthropic`
-and `xai-api` belong to both sets: they are admitted accounts and refuse
-native PTC.
+change to it needs a successor epoch. The API accounts `anthropic` and
+`xai-api` belong to both sets: they are admitted accounts and refuse native
+PTC. OpenAI API admits native PTC only on enrolled CodeModeOnly models, so
+its per-model admission stays at the product boundary.
+
+The product adds the exact named references reached by the frozen template
+closure to those existing string sets. Classification of
+a named reference uses its vertical, but membership and credential selection
+keep the complete reference. An un-enrolled sibling name remains inadmissible;
+the tree never parses provider names or falls back to a default account. With
+no named child references these sets and their epoch digest bytes are unchanged.
+A root-only account change moves the line binding, not this card-membership
+roster or the epoch; the root receives its own exact runtime admission.
 
 The host supplies one child controller that declares which child services it
 provides (binding spawned children, mail delivery, live-turn cancellation and
@@ -2935,9 +2945,10 @@ same undispatched request; cancellation/shutdown and different-account refusal
 use the ordinary single-terminal paths (chapter 01 §5.4).
 
 Every session the process builds — the root and every descendant — draws its
-model requests from one budget per account, sized by the home-scoped
+model requests from one budget per local account reference, sized by the home-scoped
 `[orchestration] max_concurrent_requests_per_account` (1–64, default 8; read
-at launch). A request takes a slot before its operation deadline starts and
+at launch). Distinct local names never share the product request budget, even
+when authenticated as one upstream account and sharing upstream limits. A request takes a slot before its operation deadline starts and
 holds it until its response stream ends; a compaction summary is a request
 too. A full budget never fails a request: the request waits in arrival order,
 publishes `ModelRequestQueued` once (TUI status `waiting for a <account>

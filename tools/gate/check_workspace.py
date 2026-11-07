@@ -519,7 +519,7 @@ EXPECTED_PRODUCT_GENERATED_MACROS: dict[SourceKey, tuple[str, ...]] = {
     # files under `bin/plak/help/` included at compile time — three global
     # fragments (head, maintainer verbs, tail) and one page per verb. The
     # renderer supplies only what a page cannot state for itself.
-    ("plak", "src/cli/render.rs"): ("include_str",) * 26,
+    ("plak", "src/cli/render.rs"): ("include_str",) * 27,
     # The source revision the build recipe states, half of the version
     # triple a runner binds on (chapter 01 §8.4); `unknown` when unset.
     ("plak", "src/build_identity.rs"): ("option_env",),
@@ -1554,6 +1554,9 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
 }
 ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     ("plakous-hosted", "src/jobs.rs"): {"tools": {"LineOwner"}},
+    ("plak", "src/platform_product/anthropic.rs"): {
+        "anthropic": {"ANTHROPIC_PLATFORM_ORIGIN"},
+    },
     # The tree's VCS port over the runner link, and the runner extension
     # that answers it (spec 01 §8.5).
     ("plakous-recursive-subagents", "src/remote_vcs.rs"): {

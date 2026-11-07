@@ -661,7 +661,13 @@ pub fn spawn_child_start_composition(
     let target_account = account
         .map(str::to_owned)
         .ok_or_else(|| "spawn child account is missing".to_string())?;
-    let target_provider = crate::runtime::oauth_provider_for_account(target_account.as_str())
+    let selection: crate::account::AccountRef = target_account
+        .parse()
+        .map_err(|error: crate::capabilities::AccountAdmissionError| error.to_string())?;
+    let target_provider = selection
+        .vertical()
+        .capability()
+        .native_provider()
         .ok_or_else(|| {
             format!(
                 "spawn child account {target_account} is neither a supported native OAuth account \
@@ -1014,7 +1020,11 @@ pub async fn spawned_child_spec(
             })
         })
         .ok_or_else(|| "spawn child account is missing".to_string())?;
-    let target_provider = crate::runtime::oauth_provider_for_account(target_account.as_str())
+    let selection: crate::account::AccountRef = target_account.parse()?;
+    let target_provider = selection
+        .vertical()
+        .capability()
+        .native_provider()
         .ok_or_else(|| "spawn child account is not a supported native OAuth account".to_string())?;
     let target_model = tuple_id
         .ok_or_else(|| "spawn child model is missing".to_string())?
@@ -1033,7 +1043,7 @@ pub async fn spawned_child_spec(
         spawn_child_composition(parent_composition, target_provider, roster_composition)?;
 
     let subscriptions = state_roots
-        .native_subscriptions_for(&target_account.parse()?)
+        .native_subscriptions_for(&selection)
         .map_err(|failure| failure.message().to_owned())?
         .without_model_lookup_retries();
     // One admission rule with the catalog and inference paths: refresh first
@@ -1042,11 +1052,16 @@ pub async fn spawned_child_spec(
     subscriptions
         .admit_for_dispatch(target_provider)
         .await
-        .map_err(|error| match error {
-            NativeSubscriptionError::CredentialUnavailable => {
-                "target OAuth account is not Ready".to_string()
+        .map_err(|error| {
+            if selection.is_named() {
+                return child_provider_failure(error, &selection);
             }
-            _ => format!("target OAuth account status could not be read: {error}"),
+            match error {
+                NativeSubscriptionError::CredentialUnavailable => {
+                    "target OAuth account is not Ready".to_string()
+                }
+                _ => format!("target OAuth account status could not be read: {error}"),
+            }
         })?;
     // Enrollment chooses only a presentation candidate. Resolution's one
     // authenticated catalog read must affirm its tool mode and named tier.
@@ -1075,7 +1090,7 @@ pub async fn spawned_child_spec(
                 ),
             )
             .await
-            .map_err(|error| child_provider_failure(error.kind()))?,
+            .map_err(|error| child_provider_failure(error.kind(), &selection))?,
     );
     if resolved.native_tool_mode() != native_tool_mode {
         let row_mode = child_tool_mode_label(resolved.native_tool_mode());
@@ -1091,7 +1106,7 @@ pub async fn spawned_child_spec(
         product_home: inputs.product_home.map(Path::to_path_buf),
         tool_selection: frozen_child_tool_selection(&tree_id, agent_id)?,
         provider: target_provider,
-        account: target_account.parse()?,
+        account: selection,
         resolved,
         effort: effort_explicit.then_some(target_effort),
         effort_explicit,
@@ -1178,8 +1193,16 @@ pub(crate) fn assignment_start_prompt(
     .render()
 }
 
-fn child_provider_failure(error: NativeSubscriptionError) -> String {
-    format!("spawn child provider could not be resolved: {error}")
+fn child_provider_failure(
+    error: NativeSubscriptionError,
+    account: &crate::account::AccountRef,
+) -> String {
+    let detail = format!("spawn child provider could not be resolved: {error}");
+    if account.is_named() {
+        format!("{account}: {detail}")
+    } else {
+        detail
+    }
 }
 
 #[cfg(test)]
@@ -1201,11 +1224,14 @@ mod lookup_failure_tests {
 
     #[test]
     fn child_resolution_keeps_lookup_attempt_count_and_cause() {
-        let message = super::child_provider_failure(super::NativeSubscriptionError::ModelLookup {
-            attempts: 2,
-            cause: "operation deadline",
-            retry_after: None,
-        });
+        let message = super::child_provider_failure(
+            super::NativeSubscriptionError::ModelLookup {
+                attempts: 2,
+                cause: "operation deadline",
+                retry_after: None,
+            },
+            &"codex".parse().unwrap(),
+        );
         assert!(
             message.contains("model lookup failed after 2 attempts: operation deadline"),
             "{message}"
@@ -1220,7 +1246,20 @@ mod lookup_failure_tests {
             super::NativeSubscriptionError::CatalogDocumentRejected,
             super::NativeSubscriptionError::Transport(None),
         ] {
-            assert!(super::child_provider_failure(error.clone()).ends_with(&error.to_string()));
+            assert!(
+                super::child_provider_failure(error.clone(), &"codex".parse().unwrap())
+                    .ends_with(&error.to_string())
+            );
         }
+    }
+
+    #[test]
+    fn named_child_refusal_names_its_exact_reference_without_a_default_remedy() {
+        let message = super::child_provider_failure(
+            super::NativeSubscriptionError::CredentialUnavailable,
+            &"claude/work".parse().unwrap(),
+        );
+        assert!(message.contains("claude/work"));
+        assert!(!message.contains("plak login claude"));
     }
 }

@@ -23,6 +23,72 @@ fn name(value: &str) -> TemplateName {
     TemplateName::parse(value).unwrap()
 }
 
+#[test]
+fn named_epoch_membership_is_explicit_and_preserves_vertical_protocol_rules() {
+    let mut config = ProductConfig::default_product();
+    let mut expected = Vec::new();
+    for (index, vertical) in plakous_hosted::account::Vertical::ALL
+        .into_iter()
+        .enumerate()
+    {
+        let account = format!("{}/work", vertical.as_str());
+        let template_name = format!("slot-{index}");
+        config
+            .templates
+            .insert(template_name.clone(), template(&account, "fixture-model"));
+        expected.push(account);
+    }
+    // Reach all seven cards without exceeding the working-set ceiling.
+    let first = "slot-0".to_owned();
+    config.working_set = WorkingSet::parse([first.as_str()]).unwrap();
+    for index in 0..6 {
+        config
+            .templates
+            .get_mut(&format!("slot-{index}"))
+            .unwrap()
+            .spawns
+            .push(name(&format!("slot-{}", index + 1)));
+    }
+    let input = roster_input_from_config(&config, "claude/root", "fixture-model", None);
+    assert!(!input.bind_hints.admits_account("claude/root"));
+    assert!(!input.bind_hints.admits_account("claude/not-enrolled"));
+    for account in expected {
+        let selected: plakous_hosted::account::AccountRef = account.parse().unwrap();
+        assert!(input.bind_hints.admits_account(&account), "{account}");
+        assert_eq!(
+            input.bind_hints.refuses_native_protocol(&account),
+            no_native_protocol_accounts().any(|vertical| vertical == selected.vertical().as_str())
+        );
+        assert_eq!(
+            input
+                .templates
+                .values()
+                .find(|template| template.account == account)
+                .unwrap()
+                .account,
+            account
+        );
+    }
+    let default = roster_input_from_config(
+        &ProductConfig::default_product(),
+        "claude",
+        "fixture-model",
+        None,
+    );
+    assert_eq!(default.bind_hints, product_bind_hints());
+    let named_root = roster_input_from_config(
+        &ProductConfig::default_product(),
+        "claude/work",
+        "fixture-model",
+        None,
+    );
+    assert_eq!(
+        OrchestrationSnapshot::freeze(default).digest,
+        OrchestrationSnapshot::freeze(named_root).digest,
+        "a root-only account change must not alter the roster epoch"
+    );
+}
+
 /// The epoch freezes each closure card's tool list and the tables those
 /// lists (and the root template's) reach; an unreferenced table is not
 /// epoch state, and spelling a default out changes nothing.
