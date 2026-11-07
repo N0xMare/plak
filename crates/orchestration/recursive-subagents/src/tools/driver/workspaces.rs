@@ -1,6 +1,6 @@
 //! Workspace-size caching and explicit runner probes.
 
-use super::*;
+use super::{Arc, TreeDriver};
 
 pub(super) struct CheckoutSize {
     generation: u64,
