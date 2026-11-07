@@ -3858,6 +3858,7 @@ Config publication is serialized by the home's `config.lock`; writers re-read un
 apply only their own fields: `[tui]` for a terminal and the changed product
 fields for host settings. Other config writers restore fresh `[tui]` values
 under the lock before publication, so they never revert terminal preferences.
+If that baseline cannot be read, the save refuses before staging new templates.
 Terminal and host settings writers merge deltas; other whole-config writers
 remain last-writer-wins for product fields. An explicit `config set tui.*`
 edits that terminal key under the lock rather than publishing a stale snapshot.

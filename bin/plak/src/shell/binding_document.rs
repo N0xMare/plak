@@ -144,7 +144,7 @@ mod tests {
     }
 
     #[test]
-    fn pointer_rename_failure_is_before_publication_and_preserves_active_body() {
+    fn baseline_read_failure_is_before_publication_and_preserves_active_body() {
         let (_tmp, paths) = PlakPaths::isolated_test_home();
         let mut config = ProductConfig::default_product();
         config.bind_root_tuple("grok", "old-model", None);
@@ -154,7 +154,7 @@ mod tests {
             .unwrap();
         let mut draft = edit.current().unwrap();
         draft.model = "new-model".into();
-        // Refuse only the atomic pointer replacement, after the document opened.
+        // Make the locked baseline unreadable after the document opened.
         let backup = paths.config_file().with_extension("old");
         std::fs::rename(paths.config_file(), &backup).unwrap();
         std::fs::create_dir(paths.config_file()).unwrap();
@@ -164,6 +164,6 @@ mod tests {
         std::fs::rename(&backup, paths.config_file()).unwrap();
         let actual = ProductConfig::load(&paths).unwrap();
         assert_eq!(actual.default_model(), Some("old-model"));
-        assert!(paths.user_agents_dir().join("default-2.toml").is_file());
+        assert!(!paths.user_agents_dir().join("default-2.toml").exists());
     }
 }
