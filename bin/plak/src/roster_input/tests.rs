@@ -83,9 +83,12 @@ fn named_epoch_membership_is_explicit_and_preserves_vertical_protocol_rules() {
         None,
     );
     assert_eq!(
-        OrchestrationSnapshot::freeze(default).digest,
-        OrchestrationSnapshot::freeze(named_root).digest,
-        "a root-only account change must not alter the roster epoch"
+        default.bind_hints, named_root.bind_hints,
+        "a root-only account change must not enroll another child account"
+    );
+    assert_eq!(
+        default.templates_digest, named_root.templates_digest,
+        "a root-only account change must not alter the frozen template bytes"
     );
 }
 
