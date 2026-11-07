@@ -33,7 +33,7 @@ fn a_reload_signal_without_web_keeps_serving() {
     reload_signal(&host);
     no_ui_reload(&host.lines);
     assert!(host.child.as_mut().unwrap().try_wait().unwrap().is_none());
-    assert!(Client::connect(&host).rows(1).is_empty());
+    assert_eq!(Client::connect(&host).rows(1), Vec::<SessionRow>::new());
     stop(&mut host);
 }
 
@@ -97,7 +97,7 @@ fn a_reload_signal_during_runner_startup_is_retained() {
         no_ui_reload(&host.lines);
     }
     assert!(host.child.as_mut().unwrap().try_wait().unwrap().is_none());
-    assert!(Client::connect(&host).rows(1).is_empty());
+    assert_eq!(Client::connect(&host).rows(1), Vec::<SessionRow>::new());
     stop(&mut host);
 }
 
