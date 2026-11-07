@@ -31,6 +31,7 @@ use crate::{JobStatus, JobStopReason, JobView};
 const PINNED: &[(u32, &str)] = &[
     (1, include_str!("pinned/v1.jsonl")),
     (2, include_str!("pinned/v2.jsonl")),
+    (3, include_str!("pinned/v3.jsonl")),
 ];
 
 fn session() -> JoinedProcessSessionId {
