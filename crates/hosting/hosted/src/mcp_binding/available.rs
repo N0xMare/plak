@@ -652,8 +652,11 @@ fn service_environment(
         WorkspacePolicy::host(workspace_root, ".").map_err(|_| unavailable.to_owned())?;
     let run = plakous::model::RunId::try_from(uuid::Uuid::new_v4())
         .map_err(|_| unavailable.to_owned())?;
-    let options = crate::process_environment::options(workspace_root)
-        .map_err(|error| error.message().to_owned())?;
+    let options = crate::process_environment::options_on(
+        workspace_root,
+        &plakous::tools::LocalWorkspaceProbe,
+    )
+    .map_err(|error| error.message().to_owned())?;
     let environment = ExecutionEnvironment::host_with_policy_and_process_options(
         ExecutionEnvironmentScope::Run(run),
         workspace,

@@ -822,7 +822,10 @@ async fn pre_pack_openai_api_direct_session_reopen_fails_closed() {
         .tool_policy(crate::agent::session_tool_policy(
             crate::agent::SessionToolFence::Full,
         ))
-        .host_process_options(crate::process_environment::options(&physical).unwrap())
+        .host_process_options(
+            crate::process_environment::options_on(&physical, &plakous::tools::LocalWorkspaceProbe)
+                .unwrap(),
+        )
         .job_config(spec.job_config)
         .tool_projection(projection)
         .harness_plan(plan);
@@ -1125,7 +1128,10 @@ async fn pre_w3_b_grok_session_reopen_fails_closed() {
         .tool_policy(crate::agent::session_tool_policy(
             crate::agent::SessionToolFence::Full,
         ))
-        .host_process_options(crate::process_environment::options(&physical).unwrap())
+        .host_process_options(
+            crate::process_environment::options_on(&physical, &plakous::tools::LocalWorkspaceProbe)
+                .unwrap(),
+        )
         .job_config(spec.job_config)
         .tool_projection(projection)
         .harness_plan(plan);
