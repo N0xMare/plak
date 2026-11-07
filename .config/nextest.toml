@@ -96,6 +96,8 @@ slow-timeout = { period = "300s", terminate-after = 2 }
 [profile.offline]
 default-filter = '''
 not (
+  test(a_reload_signal_)
+  |
   test(an_unattached_stop_stops_a_busy_root_and_live_children)
   |
   test(host_binding_requests_preserve_history_without_another_paid_turn)
@@ -326,6 +328,8 @@ not (
 test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
+  test(a_reload_signal_)
+  |
   test(an_unattached_stop_stops_a_busy_root_and_live_children)
   |
   test(host_binding_requests_preserve_history_without_another_paid_turn)

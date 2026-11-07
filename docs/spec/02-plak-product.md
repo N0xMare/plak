@@ -4772,6 +4772,10 @@ background hash is pending; welcome never waits for that hash.
 `SIGHUP`, which remains a planned handoff. With `--ui`, use `systemctl
 --user reload` with the unit's `ExecReload` below; do not restart the host
 to deploy a web build.
+The host registers reload handling before startup I/O, unconditionally,
+including without `--web`. A reload received during startup is retained
+until it can be served; without `--ui` it logs that no UI build can be
+reloaded and leaves the host running.
 
 The unit runs it as a planned stop, not a crash: `KillMode=mixed` signals the
 host alone. The home-local daemon runs outside that unit's cgroup when

@@ -4,6 +4,103 @@ use super::*;
 
 mod recovery;
 
+fn reload_signal(host: &Host) {
+    assert!(
+        std::process::Command::new("kill")
+            .args(["-USR1", &host.child.as_ref().unwrap().id().to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+}
+
+fn no_ui_reload(lines: &mpsc::Receiver<String>) {
+    loop {
+        if lines
+            .recv_timeout(WAIT)
+            .unwrap()
+            .contains("no UI build to reload")
+        {
+            return;
+        }
+    }
+}
+
+#[test]
+fn a_reload_signal_without_web_keeps_serving() {
+    let Some(fixture) = fixture() else { return };
+    let mut host = start(&fixture);
+    reload_signal(&host);
+    no_ui_reload(&host.lines);
+    assert!(host.child.as_mut().unwrap().try_wait().unwrap().is_none());
+    assert!(Client::connect(&host).rows(1).is_empty());
+    stop(&mut host);
+}
+
+#[test]
+fn a_reload_signal_during_runner_startup_is_retained() {
+    use plakous::runner::protocol::{HostFrame as RunnerHostFrame, RunnerFrame, frame};
+    let Some(fixture) = fixture() else { return };
+    let directory = fixture.home().join("host/runner/v1/run");
+    std::fs::create_dir_all(&directory).unwrap();
+    let listener = std::os::unix::net::UnixListener::bind(directory.join("runner.sock")).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let (child, lines) = spawn(&fixture);
+    let mut host = Host {
+        child: Some(child),
+        socket: PathBuf::new(),
+        lines,
+    };
+    let deadline = std::time::Instant::now() + WAIT;
+    let mut stream = loop {
+        match listener.accept() {
+            Ok((stream, _)) => break stream,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "no startup inspection"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(error) => panic!("inspection: {error}"),
+        }
+    };
+    stream.set_read_timeout(Some(WAIT)).unwrap();
+    stream
+        .write_all(&frame::encode(&RunnerFrame::Hello(obsolete_hello(&fixture))).unwrap())
+        .unwrap();
+    assert!(matches!(
+        runner_frame(&mut stream),
+        RunnerHostFrame::Bind(_)
+    ));
+    let RunnerHostFrame::Lines { request_id } = runner_frame(&mut stream) else {
+        panic!("not inspecting")
+    };
+    // The host is blocked in startup, before it could bind a web endpoint.
+    reload_signal(&host);
+    stream
+        .write_all(
+            &frame::encode(&json!({"kind":"lines", "request_id":request_id, "lines":[]})).unwrap(),
+        )
+        .unwrap();
+    drop(stream);
+    let mut reloaded = false;
+    loop {
+        let line = host.lines.recv_timeout(WAIT).unwrap();
+        reloaded |= line.contains("no UI build to reload");
+        if let Some(rest) = line.strip_prefix("plak host: serving on ") {
+            host.socket = PathBuf::from(rest.split(" (host ").next().unwrap());
+            break;
+        }
+    }
+    if !reloaded {
+        no_ui_reload(&host.lines);
+    }
+    assert!(host.child.as_mut().unwrap().try_wait().unwrap().is_none());
+    assert!(Client::connect(&host).rows(1).is_empty());
+    stop(&mut host);
+}
+
 #[test]
 fn an_eof_before_the_local_runner_hello_is_retried() {
     for protocol in [1, plakous::runner::protocol::PROTOCOL_VERSION] {

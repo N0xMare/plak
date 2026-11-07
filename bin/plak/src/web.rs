@@ -63,15 +63,13 @@ impl WebEndpoint {
         args: &crate::command::HostWeb,
         host: Arc<SessionHost<PlakExtension>>,
         stop: StopProbe,
+        reload: tokio::signal::unix::Signal,
     ) -> CliResult<Self> {
         let listen = Listen::parse(&args.listen).map_err(CliFailure::new)?;
         let paths = services.paths()?;
         let config = ProductConfig::load(paths).map_err(CliFailure::new)?;
         let access = access(&listen, &config, args.dev_login.clone())?;
         let ui = args.ui.as_deref().map(ui::Builds::load).transpose()?;
-        // SIGHUP is a planned session handoff, not an asset reload.
-        let reload = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1())
-            .map_err(|error| CliFailure::new(format!("cannot listen for UI reload: {error}")))?;
         let gate = auth::Gate::new(access, auth::CookieKey::load_or_create(paths)?);
         let (listener, socket_file) = listen::bind(&listen).await?;
         Ok(Self {
@@ -112,6 +110,8 @@ impl WebEndpoint {
                             Ok(Ok(_)) => eprintln!("plak host: UI build reloaded"),
                             result => eprintln!("plak host: UI reload failed; keeping previous build: {result:?}"),
                         }
+                    } else {
+                        eprintln!("plak host: no UI build to reload");
                     }
                 }
             }

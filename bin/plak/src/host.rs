@@ -35,6 +35,19 @@ pub(crate) const HANDOFF_DEADLINE: Duration = Duration::from_secs(60);
 /// stop: the socket, the lock and the runtime.
 const STOP_MARGIN: Duration = Duration::from_secs(5);
 
+fn startup_runtime() -> CliResult<(tokio::runtime::Runtime, tokio::signal::unix::Signal)> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .map_err(|_| CliFailure::new("plak host could not start its runtime"))?;
+    let entered = runtime.enter();
+    let reload = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1())
+        .map_err(|error| CliFailure::new(format!("cannot listen for UI reload: {error}")))?;
+    drop(entered);
+    Ok((runtime, reload))
+}
+
 /// Runs the host until it is asked to stop.
 ///
 /// # Errors
@@ -46,7 +59,9 @@ pub(crate) fn run_host_command(
     services: &Services,
     command: &HostCommand,
 ) -> CliResult<ProcessOutcome> {
-    // Armed first: a stop that arrives during the start still ends the
+    // Arm reload before any startup I/O, even for a control-only host.
+    let (runtime, reload) = startup_runtime()?;
+    // A stop that arrives during the start still ends the
     // process within the deadline.
     crate::signals::install_bounded(crate::signals::cli_announcement(), HANDOFF_DEADLINE, || {});
     crate::signals::count_interrupts();
@@ -58,11 +73,6 @@ pub(crate) fn run_host_command(
     crate::store::tree::bind_custody_host(paths).map_err(CliFailure::new)?;
     let identity = plakous_recursive_subagents::tree::custody_host();
     let environment = environment::HostEnvironment::capture();
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()
-        .map_err(|_| CliFailure::new("plak host could not start its runtime"))?;
     let entered = runtime.enter();
     let bound = socket::Bound::bind(&paths.host_socket(), &lock)?;
     drop(entered);
@@ -72,6 +82,7 @@ pub(crate) fn run_host_command(
     // for what the last one left.
     let owed = sessions.owed()?;
     let host = SessionHost::new(sessions, binary, host_generation());
+    let mut idle_reload = None;
     let web = match &command.web {
         Some(args) => {
             let bound_web = runtime.block_on(crate::web::WebEndpoint::bind(
@@ -79,6 +90,7 @@ pub(crate) fn run_host_command(
                 args,
                 Arc::clone(&host),
                 stop,
+                reload,
             ));
             match bound_web {
                 Ok(endpoint) => {
@@ -91,7 +103,15 @@ pub(crate) fn run_host_command(
                 }
             }
         }
-        None => None,
+        None => {
+            idle_reload = Some(runtime.spawn(async move {
+                let mut reload = reload;
+                while reload.recv().await.is_some() {
+                    eprintln!("plak host: no UI build to reload");
+                }
+            }));
+            None
+        }
     };
     eprintln!(
         "plak host: serving on {} (host {}, instance {}); tools get {}",
@@ -114,6 +134,9 @@ pub(crate) fn run_host_command(
             web.abort();
         }
         let _ = runtime.block_on(web);
+    }
+    if let Some(reload) = idle_reload {
+        reload.abort();
     }
     let stopping = Instant::now();
     // The socket goes first, so no client reaches a host that is handing
