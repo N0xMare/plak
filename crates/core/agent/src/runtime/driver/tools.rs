@@ -133,6 +133,7 @@ impl Driver {
             dispatched: 0,
             operations: Vec::new(),
         };
+        let mut headroom_refused = false;
         for (index, call) in calls.iter().cloned().enumerate() {
             if command.cancellation.is_cancelled() || self.shutdown.is_cancelled() {
                 command.cancellation.cancel();
@@ -149,7 +150,10 @@ impl Driver {
                 .ledger()
                 .operation_count()
                 .saturating_add(self.reserved_top_level_operations);
-            if !crate::runtime::operation_record::has_operation_headroom(charged, 0) {
+            if headroom_refused
+                || !crate::runtime::operation_record::has_operation_headroom(charged, 0)
+            {
+                headroom_refused = true;
                 let error = ToolRuntimeError::new(
                     ToolRuntimeErrorKind::ResourceLimit,
                     crate::runtime::operation_record::BATCH_HEADROOM_REFUSAL,

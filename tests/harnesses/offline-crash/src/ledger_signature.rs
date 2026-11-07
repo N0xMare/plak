@@ -167,7 +167,7 @@ pub fn inspect_family_artifact(
 }
 
 /// One decoded operation's identity, class and latest durable state.
-#[derive(Debug, Serialize)]
+#[derive(Debug, PartialEq, Serialize)]
 pub struct LedgerFact {
     /// Stable operation ordinal within the ledger.
     pub operation: u64,
@@ -177,6 +177,63 @@ pub struct LedgerFact {
     pub state: &'static str,
     /// The fixture answer marker occurs in this settled operation's evidence.
     pub answer_marker: bool,
+}
+
+/// Reads retirement twins' operation facts and exact tagged counter bytes.
+/// Only the bound root UUID is alpha-renamed after checking it names a retained
+/// root command: independently created twins mint different root identities.
+///
+/// # Errors
+/// Returns typed store/schema errors or a malformed counter encoding.
+pub fn inspect_retirement_twin(
+    database: &Path,
+    head: SessionLocator,
+) -> Result<(Vec<LedgerFact>, Vec<u8>), plakous_agent::internal::SessionStoreError> {
+    use plakous_agent::internal::{RuntimeCheckpointCodec, RuntimeObjectKind, SessionStoreError};
+    let loaded = SqliteSessionStore::inspect_branch(
+        database,
+        SessionRef::new(head.session_id(), head.branch_id()),
+    )?;
+    let checkpoint = loaded.checkpoint().checkpoint();
+    let bundle = RuntimeCheckpointCodec::bundle(checkpoint, None)
+        .map_err(|_| SessionStoreError::corrupt())?;
+    let object = bundle
+        .objects()
+        .iter()
+        .find(|object| object.address().kind() == RuntimeObjectKind::OperationLedger)
+        .ok_or_else(SessionStoreError::corrupt)?;
+    let bytes = object.canonical_bytes();
+    let mut offset = 0;
+    for _ in 0..2 {
+        offset += 8;
+        let flag = *bytes.get(offset).ok_or_else(SessionStoreError::corrupt)?;
+        offset += 1 + if flag == 1 { 37 } else { 0 };
+    }
+    let length = u32::from_be_bytes(
+        bytes
+            .get(offset..offset + 4)
+            .ok_or_else(SessionStoreError::corrupt)?
+            .try_into()
+            .map_err(|_| SessionStoreError::corrupt())?,
+    ) as usize;
+    let mut counter = bytes
+        .get(offset + 4..)
+        .ok_or_else(SessionStoreError::corrupt)?
+        .to_vec();
+    if counter.len() != length {
+        return Err(SessionStoreError::corrupt());
+    }
+    match counter.as_mut_slice() {
+        [0] => {}
+        [1, rest @ ..] if rest.len() == 24 => {
+            let root =
+                uuid::Uuid::from_slice(&rest[..16]).map_err(|_| SessionStoreError::corrupt())?;
+            if !checkpoint.manifest().ledger().operations().iter().any(|record| matches!(record.kind(), Kind::Command { turn_id: Some(turn) } if turn.as_uuid() == root)) { return Err(SessionStoreError::corrupt()); }
+            rest[..16].fill(0);
+        }
+        _ => return Err(SessionStoreError::corrupt()),
+    }
+    Ok((ledger_facts(checkpoint.manifest().ledger(), ""), counter))
 }
 
 /// Retirement witnesses read from one immutable checkpoint, even with a live owner.

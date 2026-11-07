@@ -1,6 +1,26 @@
 use super::*;
 use plakous_test_support::{ExpectedRequest, ModelScenario, ScenarioStart, ScenarioStep};
 
+struct LastCallDecisionPolicy(Arc<AtomicUsize>);
+
+impl ToolPolicy for LastCallDecisionPolicy {
+    fn revision(&self) -> ToolPolicyRevision {
+        ToolPolicyRevision::new("test.headroom-decision", 1).expect("fixed revision")
+    }
+    fn evaluate(&self, request: ToolPolicyRequest) -> ToolPolicyFuture {
+        let decision = if request.invocation().call_id().as_uuid() == uuid::Uuid::from_u128(0x6017)
+        {
+            self.0.fetch_add(1, Ordering::AcqRel);
+            ToolPolicyDecision::DecisionRequired(EffectDecisionPrompt::new(
+                "last call requires approval",
+            ))
+        } else {
+            ToolPolicyDecision::Allowed
+        };
+        Box::pin(async move { Ok(decision) })
+    }
+}
+
 #[tokio::test]
 async fn top_level_headroom_refusal_is_definite_source_ordered_and_prejournal() -> TestResult {
     if std::env::var_os("PLAK_TEST_HEADROOM_CHILD").is_none() {
@@ -10,12 +30,13 @@ async fn top_level_headroom_refusal_is_definite_source_ordered_and_prejournal() 
         )
         .strip_prefix("plakous_agent::")
         .ok_or("test name")?;
-        for parallel in ["0", "1"] {
+        for (parallel, decision) in [("0", "0"), ("1", "0"), ("1", "1")] {
             let output = std::process::Command::new(std::env::current_exe()?)
                 .args(["--exact", name, "--nocapture"])
                 .env("PLAK_TEST_HEADROOM_CHILD", "1")
                 .env("PLAK_TEST_LEDGER_HEADROOM_LIMIT", "32")
                 .env("PLAK_TEST_HEADROOM_PARALLEL", parallel)
+                .env("PLAK_TEST_HEADROOM_LAST_DECISION", decision)
                 .output()?;
             assert!(
                 output.status.success(),
@@ -41,6 +62,13 @@ async fn top_level_headroom_refusal_is_definite_source_ordered_and_prejournal() 
         ContextAdmissionRequirement::AnyBounded,
     )?;
     let store = Arc::new(TestCreateStore::default());
+    let decisions = Arc::new(AtomicUsize::new(0));
+    let policy: Arc<dyn ToolPolicy> =
+        if std::env::var("PLAK_TEST_HEADROOM_LAST_DECISION").as_deref() == Ok("1") {
+            Arc::new(LastCallDecisionPolicy(decisions.clone()))
+        } else {
+            Arc::new(AlwaysAllowPolicy)
+        };
     let sessions = DurableSessionRuntime::current(
         store.clone(),
         RuntimeDurability::Required,
@@ -50,7 +78,7 @@ async fn top_level_headroom_refusal_is_definite_source_ordered_and_prejournal() 
         .create(
             "create:headroom",
             AgentBuilder::new(configured, registry, workspace)
-                .tool_policy(Arc::new(AlwaysAllowPolicy))
+                .tool_policy(policy)
                 .request_policy(AgentRequestPolicy::new(
                     GenerationLimits::new(NonZeroU32::new(128), Vec::new())?,
                     ReasoningPolicy::Disabled,
@@ -63,6 +91,11 @@ async fn top_level_headroom_refusal_is_definite_source_ordered_and_prejournal() 
         .await?;
     let result = agent.prompt("call the whole batch").await?.result().await?;
     assert_headroom_result(&result, &store)?;
+    assert_eq!(
+        decisions.load(Ordering::Acquire),
+        0,
+        "a refusal must not be followed by a decision barrier"
+    );
     assert_eq!(model.captured_plans().len(), 2);
     agent.shutdown().await?;
     Ok(())
@@ -125,6 +158,20 @@ fn batch_model(
     authority: &RuntimeModelAuthority,
     batches: impl IntoIterator<Item = usize>,
 ) -> TestResult<Arc<plakous_test_support::ScriptedModel>> {
+    batch_model_for_calls(
+        descriptor,
+        authority,
+        batches
+            .into_iter()
+            .map(|count| vec![("probe".to_owned(), "{}".to_owned()); count]),
+    )
+}
+
+pub(super) fn batch_model_for_calls(
+    descriptor: &ResolvedModelDescriptor,
+    authority: &RuntimeModelAuthority,
+    batches: impl IntoIterator<Item = Vec<(String, String)>>,
+) -> TestResult<Arc<plakous_test_support::ScriptedModel>> {
     let digest = Digest::sha256(DigestDomain::RequestPlan, 1, &[b"headroom batch"])?;
     let response = |index, blocks, finish| -> TestResult<ModelScenario> {
         let item = ConversationItem::new(
@@ -152,18 +199,21 @@ fn batch_model(
     };
     let mut scenarios = Vec::new();
     let mut ordinal = 0;
-    for (round, per_batch) in batches.into_iter().enumerate() {
-        let calls = (0..per_batch)
-            .map(|index| {
+    for (round, batch) in batches.into_iter().enumerate() {
+        let per_batch = batch.len();
+        let calls = batch
+            .into_iter()
+            .enumerate()
+            .map(|(index, (name, arguments))| {
                 Ok(ContentBlock::ToolCall(ToolCallBlock::new(
                     CallId::try_from(uuid::Uuid::from_u128(
                         0x6000 + u128::try_from(ordinal + index)?,
                     ))?,
-                    ToolName::new("probe")?,
+                    ToolName::new(name)?,
                     ToolExecutionOwner::Local,
                     ToolCallState::Requested,
                     ToolCorrelation::default(),
-                    "{}",
+                    arguments,
                 )?))
             })
             .collect::<TestResult<Vec<_>>>()?;

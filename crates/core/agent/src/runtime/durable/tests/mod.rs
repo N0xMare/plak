@@ -57,6 +57,8 @@ pub(super) mod jobs_carry_fixture;
 pub(super) mod landed_round_abandonment;
 #[cfg(feature = "test-hooks")]
 mod ledger_retirement;
+#[cfg(feature = "test-hooks")]
+mod ledger_review;
 mod long_turn_compaction;
 mod native_anchor_tests;
 mod native_capacity_tests;

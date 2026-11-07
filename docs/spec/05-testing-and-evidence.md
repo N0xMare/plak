@@ -2037,6 +2037,18 @@ panicking; the command-id validity assertion remains in force.
 `crash_sweep::durability_twin_pilots` runs the twin pilots of every other
 registered shape without cutting, so a change that makes any strict shape's
 per-store commit sequence differ between twins fails in the durability lane.
+The `ledger_retirement_closed_cells`, `ledger_retirement_interrupted_batch`,
+`ledger_retirement_live_child_process` and `ledger_retirement_yielded_cell`
+shapes cut every indexed publication: closed debt, interrupted slots, a parent
+with both a live child and process, and a LocatorBound cell spanning rounds
+with delivered children below P. The corresponding
+`crash_sweep::durability_ledger_retirement_*` tests run each campaign separately;
+`_pilots` and `_early_relaunches` check the special fixtures and initial cuts.
+Their twin pilots compare final operation ids/states and tagged counter bytes,
+alpha-renaming only independently minted root UUIDs after checking their binding.
+A test-hooks build accepts `PLAK_TEST_LEDGER_RETIREMENT_HIGH_WATER` (8–2048,
+default 2048) and `PLAK_TEST_LEDGER_HEADROOM_LIMIT` (default 3584) to trigger
+retirement/refusal in small serial fixtures. These change no persisted bounds.
 A pilot whose shape's live assertion fails preserves its fixture with the
 face's records (`pilot.jsonl`) and stderr (`pilot.stderr`) beside it, and its
 panic names the fixture, the record kinds, the `credential_wait` rows and

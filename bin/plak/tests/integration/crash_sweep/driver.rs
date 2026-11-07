@@ -311,6 +311,7 @@ fn alternate_lifecycle(
 pub(super) fn pilot(seed: &Fixture, session: &str, shape: &str) -> Vec<trace::Commit> {
     let mut pilots = Vec::new();
     let mut fixtures = Vec::new();
+    let mut retirement_twins = Vec::new();
     for iteration in 0..2 {
         let fixture = seed.fork(&shapes::script(shape));
         // Expose the answer marker before face idle in the first twin; the
@@ -334,6 +335,15 @@ pub(super) fn pilot(seed: &Fixture, session: &str, shape: &str) -> Vec<trace::Co
             outcome.stderr
         );
         let state = summary::read_converged(&fixture);
+        if shape.starts_with("ledger_retirement_") {
+            retirement_twins.push(
+                plakous_offline_crash_harness::ledger_signature::inspect_retirement_twin(
+                    &summary::paths(&fixture).runtime_database(),
+                    state.head.parse().unwrap(),
+                )
+                .unwrap(),
+            );
+        }
         let live = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             (shapes::get(shape).assert_live)(&fixture, &outcome, &state);
         }));
@@ -375,6 +385,12 @@ pub(super) fn pilot(seed: &Fixture, session: &str, shape: &str) -> Vec<trace::Co
         trace::sequences(&pilots[1]),
         "DIVERGENT per-store twin pilots; shape refused"
     );
+    if shape.starts_with("ledger_retirement_") {
+        assert_eq!(
+            retirement_twins[0], retirement_twins[1],
+            "retirement twins differ in final operation ids/states or encoded counter"
+        );
+    }
     let mut pilot = pilots.remove(0);
     pilot.sort_by_key(|commit| (commit.store.clone(), commit.store_ordinal));
     pilot

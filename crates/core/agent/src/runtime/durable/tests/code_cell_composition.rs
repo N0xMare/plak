@@ -300,6 +300,13 @@ pub(super) fn neutral_composition_test_registry() -> TestResult<FrozenToolRegist
 pub(super) fn neutral_composition_test_registry_with_notices(
     completion_notices: bool,
 ) -> TestResult<FrozenToolRegistry> {
+    neutral_composition_registry_with_tools(completion_notices, Vec::new())
+}
+
+pub(super) fn neutral_composition_registry_with_tools(
+    completion_notices: bool,
+    tools: Vec<ToolRegistration>,
+) -> TestResult<FrozenToolRegistry> {
     let mut builder = ToolRegistryBuilder::default();
     // A fixed plan authority, as a product binds a durable one: the
     // process-local default would make every reopen see a different registry.
@@ -316,6 +323,9 @@ pub(super) fn neutral_composition_test_registry_with_notices(
         ),
         &mut builder,
     )?;
+    for tool in tools {
+        builder.register(tool)?;
+    }
     CodexNativeLocalCodeModeV1::register_markers_into(&mut builder)?;
     Ok(builder.freeze())
 }
@@ -369,7 +379,7 @@ pub(super) fn composition_projection_target(
 }
 
 /// `model` configured for the neutral exec/wait Code Cell surface only.
-fn neutral_composition_model(
+pub(super) fn neutral_composition_model(
     model: &Arc<ArtifactModel>,
     descriptor: ResolvedModelDescriptor,
     authority: RuntimeModelAuthority,

@@ -360,6 +360,26 @@ impl LocalCompositionIntegration for FakeComposition {
         target: ProviderModelProjectionIdentityV2,
     ) -> Result<LocalCompositionDescriptor, String> {
         match self {
+            #[cfg(feature = "test-hooks")]
+            Self::Neutral(fixture)
+                if fixture
+                    .descriptor
+                    .nested_tools
+                    .iter()
+                    .any(|tool| tool.name == "probe") =>
+            {
+                let name = ToolName::new("probe").map_err(|error| error.to_string())?;
+                ledger_review::review_composition(
+                    registry,
+                    target,
+                    fixture
+                        .descriptor
+                        .outer_projection
+                        .by_exposed(&name)
+                        .is_some(),
+                )
+                .map_err(|error| error.to_string())
+            }
             Self::Neutral(_) => {
                 neutral_composition_descriptor(registry, target).map_err(|error| error.to_string())
             }
