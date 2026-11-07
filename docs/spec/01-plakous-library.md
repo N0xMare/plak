@@ -5991,7 +5991,7 @@ runner for a session yet.
   command and output cleared. Each names its host, line, accepted owner,
   whether its holder holds it (`adopted`) and its jobs in the
   `jobs.snapshot` schema.
-- **Foreground authority (protocol 2).** An answered start is either a
+- **Foreground authority (protocol 3).** An answered start is either a
   promoted job, which is re-adopted, or an unpromoted process belonging to
   its call and owning instance. Before transferring a line to a newer owner,
   the runner stops its unpromoted processes through the existing terminate

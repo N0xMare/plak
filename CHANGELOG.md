@@ -32,8 +32,8 @@ one cross-build carrier (a build imports its own and the previous version).
   runners once per dial without ambiguous detached fallback, probe socket locks
   before spawning, and reap detached children. Hosts reconnect lost daemon links
   and isolate recovery failures per item. Foreground diagnostics drain on implicit
-  transfers and retire with their owner; embedded opens refuse daemon-held lines
-  without altering job outcomes. Session formats and frozen bindings are unchanged.
+  transfers and retire with their owner; embedded opens refuse live daemon work
+  anywhere in their tree without altering job outcomes. Session formats and frozen bindings are unchanged.
 
 - Runner protocol 3 ends foreground authority at a newer owner transfer or
   instance-lease expiry, not at a transient disconnect. Transfers report stopped

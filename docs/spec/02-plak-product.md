@@ -4658,7 +4658,7 @@ when the host starts keeps its custody, and the per-tree
   recovers the journal after those transfers; and finishes recorded stops
   before serving. A live embedded holder refuses the head lease and is
   skipped. Other state keys' lines are never transferred or stopped.
-  Protocol 2 transfers first stop unpromoted processes and log diagnostic
+  Protocol 3 transfers first stop unpromoted processes and log diagnostic
   reports only; their unanswered tool calls follow existing recovery on the
   next full open. Promoted jobs survive. Older protocol directories are inspected only: their
   jobs are reported `OutcomeUnknown`, never transferred or re-adopted; the

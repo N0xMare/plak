@@ -716,7 +716,7 @@ widens it.
   before accepting it, so a restart does not reopen the line to an older
   owner. The host's leases and commit fencing remain the authority; the
   runner only reduces late effects.
-- **Foreground calls are instance-owned.** Protocol 2 stops unpromoted
+- **Foreground calls are instance-owned.** Protocol 3 stops unpromoted
   processes before a newer line-owner transfer, and at instance-lease lapse
   without a successor. Transfer reports call keys, former PIDs and how they
   ended, with no command text or output. The host logs these under
@@ -725,9 +725,10 @@ widens it.
   inside the lease revokes no foreground authority. Promoted jobs survive.
   Obsolete protocol daemons are inspected only, their jobs reported unknown,
   never transferred or re-adopted by the new protocol.
-  An embedded open refuses a current-protocol daemon-held line before taking
-  canonical ownership or recovering it; inspection never transfers or stops
-  that line. Daemon link recovery retains the same host instance. No detached
+  An embedded open refuses live work on any current-protocol daemon-held
+  line of its tree, including a held child's recorded session head, before
+  taking canonical ownership or recovering it; inspection never transfers or
+  stops those lines. Daemon link recovery retains the same host instance. No detached
   daemon is started after an ambiguous user-manager answer, and every start
   first probes the socket lock.
 - **The home-local runner is the home's own, and only its own.** A home's
