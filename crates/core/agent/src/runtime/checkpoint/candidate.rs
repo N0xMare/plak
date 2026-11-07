@@ -52,6 +52,12 @@ pub(in crate::runtime) fn successor_candidate(
             "checkpoint successor regressed a ledger high-water mark",
         ));
     }
+    if !ledger.preserves_retired_counter_of(prior.ledger()) {
+        return Err(AgentError::new(
+            AgentErrorKind::Internal,
+            "checkpoint successor changed retired attempts without retirement",
+        ));
+    }
     let topology = prior.topology();
     let branch_revision = topology.branch_revision.checked_add(1).ok_or_else(|| {
         AgentError::new(

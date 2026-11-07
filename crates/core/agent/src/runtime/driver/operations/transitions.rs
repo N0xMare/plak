@@ -32,10 +32,28 @@ impl Driver {
         let (history, ledger, context, family) = {
             let authority = self.authority.checkpoint();
             let manifest = authority.manifest();
-            (
-                manifest.canonical().history().clone(),
+            // A queued root can have been admitted while its predecessor was
+            // live. Its dispatch, not that earlier admission, starts accounting.
+            let ledger = if matches!(state, DurableOperationState::Dispatched)
+                && self.active_root.as_ref().is_some_and(|root| {
+                    root.turn_id == turn_id && root.operation_id == operation_id
+                })
+                && manifest
+                    .ledger()
+                    .retired_counter()
+                    .is_some_and(|(root, _)| root != turn_id)
+            {
                 manifest
                     .ledger()
+                    .clone()
+                    .with_retired_attempts(None)
+                    .map_err(runtime_manifest_error)?
+            } else {
+                manifest.ledger().clone()
+            };
+            (
+                manifest.canonical().history().clone(),
+                ledger
                     .transition_operation(
                         operation_id.0,
                         DurableOperationTransition::new(checkpoint_id, state),

@@ -186,3 +186,15 @@ fn the_peak_has_one_spelling_per_state() -> Result<(), Box<dyn std::error::Error
     assert_eq!(serde_json::to_string(&round_tripped)?, written);
     Ok(())
 }
+#[test]
+fn retired_attempts_merge_is_checked_and_changes_no_provider_fields() {
+    let mut usage = TurnUsage::default();
+    usage.record_retired_local_tool_attempts(u64::MAX).unwrap();
+    assert_eq!(usage.local_tool_attempts(), u64::MAX);
+    assert_eq!(usage.model_operations(), 0);
+    assert_eq!(
+        usage.record_local_tool_attempt(),
+        Err(UsageAggregationError::Overflow)
+    );
+    assert_eq!(usage.local_tool_attempts(), u64::MAX);
+}

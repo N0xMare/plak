@@ -475,7 +475,9 @@ fn materialize_ledger(
     {
         return Err(CheckpointBundleError::InvalidTopology);
     }
-    RuntimeOperationLedger::new(commands, operations).map_err(Into::into)
+    RuntimeOperationLedger::new(commands, operations)?
+        .with_retired_attempts(spec.retired_local_tool_attempts)
+        .map_err(Into::into)
 }
 
 fn materialize_sequence<'a>(

@@ -544,6 +544,7 @@ impl BundleBuilder {
         writer.optional_address(command_head);
         writer.count(operation_count)?;
         writer.optional_address(operation_head);
+        writer.raw(&ledger.retired_attempts_bytes())?;
         let mut children = Vec::with_capacity(2);
         children.extend(command_head);
         children.extend(operation_head);
@@ -687,6 +688,7 @@ impl BundleBuilder {
         writer.optional_address(command_head);
         writer.count(ledger.operation_count())?;
         writer.optional_address(operation_head);
+        writer.raw(&ledger.retired_attempts_bytes())?;
         let mut children = Vec::with_capacity(2);
         children.extend(command_head);
         children.extend(operation_head);

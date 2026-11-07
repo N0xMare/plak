@@ -799,7 +799,7 @@ fn checkpoint_commit_identity_golden_matrix_is_debug_independent() -> TestResult
     let cases = [
         (
             RuntimeLifecycle::Quiescent,
-            "33bee2e4f55a05f2c06b06c3698f5f195ccf89a76c7e7e1b9ebc41dab0b9ef7d",
+            "43a06133f79f1ff2c1a67163c29d767dc015befb13c0d71bc48230efde527262",
         ),
         (
             RuntimeLifecycle::Working {
@@ -821,7 +821,7 @@ fn checkpoint_commit_identity_golden_matrix_is_debug_independent() -> TestResult
                     )?,
                 ],
             },
-            "f0dc07a9d69b04bc3a1be65860d17cecb0e0ccf478e914d2fd89310d60a4c3ed",
+            "0a64c87d70a88d59bb1705f0a4366b1456d6bdd5628241b23f9b467793e00025",
         ),
         (
             RuntimeLifecycle::Working {
@@ -843,7 +843,7 @@ fn checkpoint_commit_identity_golden_matrix_is_debug_independent() -> TestResult
                     )?,
                 ],
             },
-            "36d2520645527d19eef861a5750d70b36903007aa5071d36a53a2921b50d7e8e",
+            "71f651558db06e9bd1f8518f6876b6fd4e00a2df4738edb12de0a6c76835cd95",
         ),
         (
             RuntimeLifecycle::Working {
@@ -858,7 +858,7 @@ fn checkpoint_commit_identity_golden_matrix_is_debug_independent() -> TestResult
                     RecoveryAction::CommitRecovery,
                 )?],
             },
-            "ec933b7d744f00c929993e16821627b7fcc7b2faff8b4fc5ee830a80237fad99",
+            "3b3132ca5a45944f52c77e92bb3b59d71013a611e61f890de10f733874134ea9",
         ),
         (
             RuntimeLifecycle::Working {
@@ -873,7 +873,7 @@ fn checkpoint_commit_identity_golden_matrix_is_debug_independent() -> TestResult
                     RecoveryAction::FinalizationRequired,
                 )?],
             },
-            "c44c655d4b108320cf53d167c4adc9d92302d8801312d7b653b96ae0b0a07293",
+            "43afc529aeec7e74d2918e29206ab265ea8ac631cbe6a95f4c13d20926f205cb",
         ),
     ];
     let checkpoint_id = CheckpointId::try_from(uuid::Uuid::from_u128(0x600))?;
@@ -897,7 +897,7 @@ fn checkpoint_commit_identity_golden_matrix_is_debug_independent() -> TestResult
     })?;
     assert_eq!(
         named_identity.to_string(),
-        "e24772cc070f49e7662ddc5f7cacd64b351d523ea6142857040bba75fe5e9830"
+        "5f5832e321f362778ef6f3027c03d942a0fbac63ab101bba2563aa6aef8887a5"
     );
     let actual = cases
         .iter()

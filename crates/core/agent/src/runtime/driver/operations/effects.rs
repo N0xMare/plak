@@ -261,6 +261,13 @@ impl Driver {
                 .ledger()
                 .append_command(record)
                 .map_err(runtime_manifest_error)?;
+            if matches!(effect, ActorCommandEffect::Root)
+                && manifest.lifecycle() == &RuntimeLifecycle::Quiescent
+            {
+                ledger = ledger
+                    .with_retired_attempts(None)
+                    .map_err(runtime_manifest_error)?;
+            }
             let pending_operation = operation_id
                 .map(|operation_id| {
                     DurableOperationRecord::new(

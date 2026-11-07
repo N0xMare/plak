@@ -198,7 +198,7 @@ them on 0.0.2 or start new ones. 0.0.2 state is left untouched for the 0.0.2 bin
 | Store | Owner | Current version |
 | --- | --- | --- |
 | Runtime session store (`runtime.sqlite3`), including the change feed | Plakous | SQLite schema **27** (adds the `lines` heads, each branch's line membership and `line_job_terminals`) |
-| Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **36** (prepared-call records reference their wire-input item list by identity, on top of epoch 35's line membership in the checkpoint topology, line-head job owners and line feed facts and reconstructive image-residency v3 plans/evidence, strategy tag 5 and explicit Released job terminals; component revisions remain frozen) |
+| Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **37** (authenticates the root-bound count of retired dispatched local-tool attempts; component revisions remain frozen) |
 | Product store (`product.sqlite3`): intents and feed-derived views | Plak | schema **36** (adds the write-ahead `carry_intent` of a same-store carry, the session's node, the virtual root profile, the runner display copy, frozen MCP placement, the `switch` workflow kind, the root interrupt cause and continuation decision intents, the clear workflow kind renamed `new` with `plak:new:` operation ids, and no legacy `workflows` table) |
 | Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **10** |
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **21**, disposable, never recovery authority |
@@ -235,7 +235,7 @@ of the one before, and no other store crosses between builds. A pre-release
 format change bumps the store's schema or the runtime format epoch; the
 per-component revision constants inside the checkpoint graph are frozen. Plak
 keeps each build's stores in a state directory named by all four versions
-(chapter 02 §2.5), currently `r27.e36.p36.t10`, so a build never opens files from another version tuple as
+(chapter 02 §2.5), currently `r27.e37.p36.t10`, so a build never opens files from another version tuple as
 session authority. Explicit legacy pruning may take schema-blind SQLite and
 holder locks to prove a directory is
 unused (chapter 02 §2.5). A session another build wrote is

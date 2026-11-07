@@ -356,6 +356,7 @@ pub(super) struct LedgerSpec {
     pub(super) command_head: Option<RuntimeObjectAddress>,
     pub(super) operation_count: usize,
     pub(super) operation_head: Option<RuntimeObjectAddress>,
+    pub(super) retired_local_tool_attempts: Option<(plakous_model::TurnId, u64)>,
 }
 
 pub(super) fn parse_ledger(bytes: &[u8]) -> Result<LedgerSpec, CheckpointBundleError> {
@@ -365,6 +366,20 @@ pub(super) fn parse_ledger(bytes: &[u8]) -> Result<LedgerSpec, CheckpointBundleE
         command_head: reader.optional_address()?,
         operation_count: reader.count()?,
         operation_head: reader.optional_address()?,
+        retired_local_tool_attempts: {
+            let mut counter = BundleReader::new(reader.raw()?);
+            let value = match counter.u8()? {
+                0 => None,
+                1 => Some((
+                    plakous_model::TurnId::try_from(counter.uuid()?)
+                        .map_err(|_| CheckpointBundleError::Malformed)?,
+                    counter.u64()?,
+                )),
+                _ => return Err(CheckpointBundleError::NonCanonical),
+            };
+            counter.finish()?;
+            value
+        },
     };
     reader.finish()?;
     if (value.command_count == 0) != value.command_head.is_none()

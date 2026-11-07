@@ -22,9 +22,8 @@ pub(crate) use object::{component_object_digest, object_address};
 /// object address carries it and nothing from another epoch decodes. Any
 /// pre-release change to a persisted runtime encoding bumps this one number;
 /// the per-component revision constants inside the graph are frozen.
-/// Epoch 36 keeps a prepared-call record's wire-input item list out of the
-/// record, which references it by identity.
-pub const RUNTIME_FORMAT_EPOCH: u32 = 36;
+/// Epoch 37 authenticates the root-bound count of retired local-tool attempts.
+pub const RUNTIME_FORMAT_EPOCH: u32 = 37;
 
 const OBJECT_ADDRESS_BYTES: usize = 1 + 4 + 32;
 const MAX_CHECKPOINT_OBJECTS: usize =

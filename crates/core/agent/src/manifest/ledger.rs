@@ -119,6 +119,7 @@ pub struct RuntimeOperationLedger {
     pub(super) operation_version: Option<Arc<OperationLedgerMutation>>,
     pub(super) command_count: usize,
     pub(super) operation_count: usize,
+    pub(super) retired_local_tool_attempts: Option<(TurnId, u64)>,
 }
 
 /// The actual operation that makes a retained ledger's sequence reconstructive.
@@ -159,6 +160,7 @@ impl RuntimeOperationLedger {
             operation_version: None,
             command_count: 0,
             operation_count: 0,
+            retired_local_tool_attempts: None,
         };
         for record in commands {
             ledger = ledger.append_command(record)?;
@@ -242,6 +244,7 @@ impl RuntimeOperationLedger {
                 command,
                 &operation_count,
                 operation,
+                &self.retired_attempts_bytes(),
             ],
         )
         .map_err(|_| RuntimeManifestError::InvalidDigest)
@@ -328,6 +331,7 @@ impl RuntimeOperationLedger {
             operation_version: self.operation_version.clone(),
             command_count: self.command_count.saturating_add(1),
             operation_count: self.operation_count,
+            retired_local_tool_attempts: self.retired_local_tool_attempts,
         })
     }
 
@@ -368,6 +372,7 @@ impl RuntimeOperationLedger {
             operation_root: Some(operation_root),
             command_count: self.command_count,
             operation_count,
+            retired_local_tool_attempts: self.retired_local_tool_attempts,
         })
     }
 
@@ -407,6 +412,7 @@ impl RuntimeOperationLedger {
             operation_root: Some(operation_root),
             command_count: self.command_count,
             operation_count: self.operation_count,
+            retired_local_tool_attempts: self.retired_local_tool_attempts,
         })
     }
 
@@ -475,7 +481,63 @@ impl RuntimeOperationLedger {
             }
         }
         operations.extend(new_record);
-        Self::new(commands, operations)
+        let mut retained = Self::new(commands, operations)?;
+        retained.retired_local_tool_attempts = self.retired_local_tool_attempts;
+        retained.validate_retired_attempts()?;
+        Ok(retained)
+    }
+
+    pub(crate) fn retired_attempts(&self, turn_id: TurnId) -> u64 {
+        self.retired_local_tool_attempts
+            .filter(|(root, _)| *root == turn_id)
+            .map_or(0, |(_, attempts)| attempts)
+    }
+
+    pub(crate) const fn retired_counter(&self) -> Option<(TurnId, u64)> {
+        self.retired_local_tool_attempts
+    }
+
+    pub(crate) fn preserves_retired_counter_of(&self, prior: &Self) -> bool {
+        if self.retired_counter() == prior.retired_counter() {
+            return true;
+        }
+        let Some((root, _)) = prior.retired_counter() else {
+            return false;
+        };
+        self.retired_counter().is_none()
+            && prior.operations().iter().find(|record| {
+                matches!(record.kind(), DurableOperationKind::Command { turn_id: Some(turn) } if *turn == root)
+            }).is_some_and(|record| matches!(record.state(), DurableOperationState::Finalized(_)))
+    }
+
+    pub(crate) fn with_retired_attempts(
+        mut self,
+        counter: Option<(TurnId, u64)>,
+    ) -> Result<Self, RuntimeManifestError> {
+        self.retired_local_tool_attempts = counter;
+        self.validate_retired_attempts()?;
+        Ok(self)
+    }
+
+    fn validate_retired_attempts(&self) -> Result<(), RuntimeManifestError> {
+        if let Some((root, attempts)) = self.retired_local_tool_attempts
+            && (attempts == 0
+                || !self.operations().iter().any(|record| {
+                    matches!(record.kind(), DurableOperationKind::Command { turn_id: Some(turn) } if *turn == root)
+                }))
+        {
+            return Err(RuntimeManifestError::InvalidLedger);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn retired_attempts_bytes(&self) -> Vec<u8> {
+        let mut bytes = vec![u8::from(self.retired_local_tool_attempts.is_some())];
+        if let Some((root, attempts)) = self.retired_local_tool_attempts {
+            bytes.extend_from_slice(root.as_uuid().as_bytes());
+            bytes.extend_from_slice(&attempts.to_be_bytes());
+        }
+        bytes
     }
 
     /// Cold reconstruction must not allow either minted sequence to go back.
@@ -544,6 +606,7 @@ impl PartialEq for RuntimeOperationLedger {
     fn eq(&self, other: &Self) -> bool {
         self.command_count == other.command_count
             && self.operation_count == other.operation_count
+            && self.retired_local_tool_attempts == other.retired_local_tool_attempts
             && collect_ledger_records(self.command_tail.as_deref(), self.command_count)
                 == collect_ledger_records(other.command_tail.as_deref(), other.command_count)
             && self.operations() == other.operations()

@@ -587,7 +587,7 @@ fn cancel_dispatched_root(
         turn_id: fold.turn_id,
         operation_id: fold.root_operation,
         outcome: DurableTerminalOutcome::Cancelled(cancelled),
-        usage: terminal_turn_usage(&facts.source.manifest().ledger().operations(), fold.turn_id)?,
+        usage: terminal_turn_usage(facts.source.manifest().ledger(), fold.turn_id)?,
     })
     .map_err(|_| {
         AgentError::new(

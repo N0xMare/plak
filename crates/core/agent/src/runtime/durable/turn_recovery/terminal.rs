@@ -361,7 +361,7 @@ fn landed_terminal_recovery_fold(
         }
         _ => return Err(refusal()),
     };
-    let usage = terminal_turn_usage(&records, turn_id)?;
+    let usage = terminal_turn_usage(ledger, turn_id)?;
     let command_id = CommandId::new(command.command_id())
         .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
     let operation = OperationId(root.operation_id());
@@ -400,9 +400,10 @@ fn landed_terminal_recovery_fold(
 /// failed alike; a round record without an outcome counts with usage `None`.
 /// A compaction's own provider attempt is not a round and is not counted,
 /// as the live counters do not count it. Local tool attempts count each
-/// effect, cell evaluation or continuation with a `Dispatched` transition.
+/// effect, cell evaluation or continuation with a `Dispatched` transition, plus the
+/// authenticated root-bound count of retired attempts.
 pub(super) fn terminal_turn_usage(
-    records: &[&DurableOperationRecord],
+    ledger: &RuntimeOperationLedger,
     turn_id: TurnId,
 ) -> Result<TurnUsage, AgentError> {
     let overflow = || {
@@ -418,7 +419,11 @@ pub(super) fn terminal_turn_usage(
             .any(|transition| matches!(transition.state(), DurableOperationState::Dispatched))
     };
     let mut usage = TurnUsage::default();
-    for record in records
+    usage
+        .record_retired_local_tool_attempts(ledger.retired_attempts(turn_id))
+        .map_err(|_| overflow())?;
+    for record in ledger
+        .operations()
         .iter()
         .filter(|record| operation_turn_id(record) == Some(turn_id))
     {

@@ -1332,6 +1332,9 @@ fn tool_group_integrity(tools: &ToolRuntimeManifest) -> Result<Digest, RuntimeMa
 
 fn ledger_group_integrity(ledger: &RuntimeOperationLedger) -> Result<Digest, RuntimeManifestError> {
     let mut writer = Writer::default();
+    writer
+        .bytes
+        .extend_from_slice(&ledger.retired_attempts_bytes());
     writer.usize(ledger.command_count)?;
     writer.optional(ledger.command_tail.is_some());
     if let Some(command_tail) = &ledger.command_tail {

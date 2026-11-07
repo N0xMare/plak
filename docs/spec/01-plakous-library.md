@@ -2610,12 +2610,20 @@ session's orphan is not signalled.
 provider outcome records: each attempt counts once, completed and failed
 alike, contributing its recorded `usage`; an attempt closed as outcome unknown
 counts as an operation with usage `None`. Local tool attempts count each batch
-effect, composition evaluation or composition continuation (wait call) with a
-Dispatched transition. Missing usage stays unreported, never invented. A
-terminal the live driver records carries the live counters, which equal this
-sum over the same records. Child edges, actor controls, batons and compaction
-providers contribute zero. Recorded-decision completion and abandonment use
-this same sum.
+effect, composition evaluation or composition continuation (wait call)
+with a Dispatched transition, plus the
+authenticated root-bound retired-attempt counter. Missing usage stays
+unreported, never invented. A terminal the live driver records carries the
+live counters, which equal this retained-record sum plus the retired-attempt
+counter. The counter is a checked u64 bound to the existing root identity;
+child edges, actor controls, batons and compaction providers contribute
+zero. Both
+recorded-decision completion and abandonment use this same sum. A Quiescent
+head retains the preceding root and its counter until the next root starts;
+the next root resets it only after its predecessor terminal captures usage.
+Zero is canonically encoded as an absent counter; a present counter carries
+the root UUID followed by its nonzero big-endian u64 count, under the
+operation-ledger authority. Rebuilds and recovery enrichment preserve it.
 
 Abandonment never promotes a family artifact or reconstructs a request or
 occupancy anchor: it publishes the head's retained artifact and anchors, so

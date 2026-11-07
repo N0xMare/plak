@@ -43,6 +43,16 @@ pub(super) fn checkpoint_with_review_commands(
     history: CanonicalHistory,
     reverse_obligations: bool,
 ) -> TestResult<RuntimeCheckpoint> {
+    let ledger = RuntimeOperationLedger::new(commands, records)?;
+    checkpoint_with_review_ledger(source, ledger, history, reverse_obligations)
+}
+
+fn checkpoint_with_review_ledger(
+    source: &RuntimeCheckpoint,
+    ledger: RuntimeOperationLedger,
+    history: CanonicalHistory,
+    reverse_obligations: bool,
+) -> TestResult<RuntimeCheckpoint> {
     let prior = source.manifest();
     let RuntimeLifecycle::Working { root, .. } = prior.lifecycle() else {
         return Err("working root".into());
@@ -50,7 +60,6 @@ pub(super) fn checkpoint_with_review_commands(
     let RuntimeWorkingRoot::Turn { turn_id, .. } = root else {
         return Err("turn root".into());
     };
-    let ledger = RuntimeOperationLedger::new(commands, records)?;
     let mut lifecycle = working_lifecycle(*turn_id, &ledger)?;
     if let RuntimeLifecycle::Working {
         root: working_root, ..
@@ -98,6 +107,59 @@ pub(super) fn checkpoint_with_review_commands(
         prior.named_state().clone(),
         prior.durability(),
     )?)?)
+}
+
+#[tokio::test]
+async fn both_recovery_terminal_paths_preserve_retired_attempts() -> TestResult {
+    use super::super::tests::landed_round_abandonment::completed_text_round_cut;
+    for completed in [false, true] {
+        let cut = if completed {
+            completed_text_round_cut().await?
+        } else {
+            root_without_provider_cut(false).await?
+        };
+        let RuntimeLifecycle::Working {
+            root: RuntimeWorkingRoot::Turn { turn_id, .. },
+            ..
+        } = cut.manifest().lifecycle()
+        else {
+            return Err("turn root".into());
+        };
+        let turn_id = *turn_id;
+        let ledger = cut
+            .manifest()
+            .ledger()
+            .clone()
+            .with_retired_attempts(Some((turn_id, 5_100)))?;
+        let cut = checkpoint_with_review_ledger(
+            &cut,
+            ledger,
+            cut.manifest().canonical().history().clone(),
+            false,
+        )?;
+        let checkpoint_id = CheckpointId::try_from(uuid::Uuid::from_u128(0xE8C_998))?;
+        let closure = if completed {
+            let terminal = local_terminal_recovery_fold(&cut)?;
+            terminal_closure_state(&cut, terminal, false, checkpoint_id)?
+        } else {
+            let fold = abandoned_turn_recovery_fold(&cut)?;
+            let claim = abandoned_turn_claim(&fold);
+            abandonment_closure_state(&cut, fold, claim, checkpoint_id)?
+        };
+        let terminal = closure.ledger.operations().into_iter().find_map(|record| {
+            if matches!(record.kind(), DurableOperationKind::Command { turn_id: Some(root) } if *root == turn_id)
+                && let DurableOperationState::Finalized(evidence) = record.state()
+            {
+                decode_terminal_result_record(evidence.bytes())
+            } else {
+                None
+            }
+        }).ok_or("terminal")?;
+        assert_eq!(terminal.usage.local_tool_attempts(), 5_100);
+        assert_eq!(terminal.usage.model_operations(), u64::from(completed));
+        assert_eq!(closure.ledger.retired_attempts(turn_id), 5_100);
+    }
+    Ok(())
 }
 
 fn records(source: &RuntimeCheckpoint) -> Vec<DurableOperationRecord> {

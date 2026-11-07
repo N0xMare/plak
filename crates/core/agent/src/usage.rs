@@ -172,9 +172,16 @@ impl TurnUsage {
     ///
     /// Returns [`UsageAggregationError::Overflow`] rather than saturating.
     pub fn record_local_tool_attempt(&mut self) -> Result<(), UsageAggregationError> {
+        self.record_retired_local_tool_attempts(1)
+    }
+
+    pub(crate) fn record_retired_local_tool_attempts(
+        &mut self,
+        attempts: u64,
+    ) -> Result<(), UsageAggregationError> {
         self.local_tool_attempts = self
             .local_tool_attempts
-            .checked_add(1)
+            .checked_add(attempts)
             .ok_or(UsageAggregationError::Overflow)?;
         Ok(())
     }

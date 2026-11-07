@@ -94,7 +94,10 @@ pub(in crate::runtime) async fn recover_root_turn_publication(
                 .map_err(runtime_manifest_error)?,
             );
         }
-        ledger = RuntimeOperationLedger::new(commands, records).map_err(runtime_manifest_error)?;
+        let counter = ledger.retired_counter();
+        ledger = RuntimeOperationLedger::new(commands, records)
+            .and_then(|ledger| ledger.with_retired_attempts(counter))
+            .map_err(runtime_manifest_error)?;
     }
     if !matches!(
         working_lifecycle(turn_id, &ledger)?,

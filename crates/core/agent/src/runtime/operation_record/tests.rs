@@ -157,6 +157,140 @@ fn settled_root(operation_id: u64, turn_id: TurnId) -> TestResult<DurableOperati
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 #[test]
+fn retired_attempt_counter_is_root_bound_authenticated_and_reconstructive() -> TestResult {
+    let turn = TurnId::try_from(uuid::Uuid::from_u128(0x29))?;
+    let foreign = TurnId::try_from(uuid::Uuid::from_u128(0x2a))?;
+    let ledger =
+        RuntimeOperationLedger::new(vec![root_command(1, turn)?], vec![settled_root(1, turn)?])?;
+    let source_identity = ledger.authority_identity()?;
+    assert!(
+        ledger
+            .clone()
+            .with_retired_attempts(Some((turn, 0)))
+            .is_err()
+    );
+    assert!(
+        ledger
+            .clone()
+            .with_retired_attempts(Some((foreign, 1)))
+            .is_err()
+    );
+    let ledger = ledger.with_retired_attempts(Some((turn, 5_100)))?;
+    assert_eq!(
+        ledger.retired_attempts_bytes(),
+        [
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x29, 0, 0, 0, 0, 0, 0, 0x13, 0xec,
+        ]
+    );
+    assert_ne!(source_identity, ledger.authority_identity()?);
+    assert_eq!(ledger.retired_attempts(turn), 5_100);
+    assert_eq!(ledger.retired_attempts(foreign), 0);
+    let ledger = retain_quiescent_ledger(&ledger, &BTreeSet::new())?;
+    let source = crate::checkpoint_bundle::tests::fixture_with_history_and_ledger(
+        plakous_model::CanonicalHistory::default(),
+        1,
+        false,
+        Some(ledger),
+        None,
+    )?;
+    let bundle = crate::RuntimeCheckpointCodec::bundle(&source, None)?;
+    let restored = crate::RuntimeCheckpointCodec::materialize(&bundle)?;
+    assert_eq!(restored.manifest().ledger().retired_attempts(turn), 5_100);
+    assert_eq!(restored.integrity(), source.integrity());
+    assert_eq!(restored.manifest().ledger(), source.manifest().ledger());
+    assert_eq!(
+        restored
+            .manifest()
+            .ledger()
+            .clone()
+            .with_retired_attempts(None)?
+            .retired_attempts(turn),
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn publication_rejects_unexplained_retired_counter_changes() -> TestResult {
+    use crate::runtime::checkpoint::candidate::{SuccessorFacts, successor_candidate};
+    let turn = TurnId::try_from(uuid::Uuid::from_u128(0x2b))?;
+    let operation = DurableOperationRecord::new(
+        1,
+        DurableOperationKind::Command {
+            turn_id: Some(turn),
+        },
+        runtime_component(RuntimeComponentKind::Operation, b"root".to_vec())?,
+        vec![
+            DurableOperationTransition::new(checkpoint(0x2c)?, DurableOperationState::Prepared),
+            DurableOperationTransition::new(checkpoint(0x2d)?, DurableOperationState::Dispatched),
+        ],
+    )?;
+    let ledger = RuntimeOperationLedger::new(vec![root_command(1, turn)?], vec![operation])?
+        .with_retired_attempts(Some((turn, 7)))?;
+    let lifecycle = working_lifecycle(turn, &ledger)?;
+    let source = crate::checkpoint_bundle::tests::fixture_with_history_and_ledger(
+        plakous_model::CanonicalHistory::default(),
+        1,
+        true,
+        Some(ledger),
+        Some(lifecycle),
+    )?;
+    let bundle = crate::RuntimeCheckpointCodec::bundle(&source, None)?;
+    let manifest = source.manifest();
+    for count in [None, Some(6), Some(7), Some(8)] {
+        let ledger = manifest
+            .ledger()
+            .clone()
+            .with_retired_attempts(count.map(|n| (turn, n)))?;
+        let result = successor_candidate(
+            &source,
+            &bundle,
+            SuccessorFacts {
+                checkpoint_id: checkpoint(0x2e)?,
+                lifecycle: manifest.lifecycle().clone(),
+                history: manifest.canonical().history().clone(),
+                ledger,
+                jobs: manifest.jobs().clone(),
+                named_state: manifest.named_state().clone(),
+                context: manifest.canonical().context().retained_for_exact_resume(),
+                family: manifest.family_artifact().cloned(),
+            },
+            1,
+            None,
+        );
+        if count == Some(7) {
+            assert!(result.is_ok());
+        } else {
+            assert_eq!(
+                result.err().ok_or("counter change published")?.message(),
+                "checkpoint successor changed retired attempts without retirement"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn retention_keeps_counter_root_beyond_the_command_window() -> TestResult {
+    let prior = TurnId::try_from(uuid::Uuid::from_u128(0x2f))?;
+    let latest = TurnId::try_from(uuid::Uuid::from_u128(0x30))?;
+    let mut commands = vec![root_command(1, prior)?];
+    for sequence in 2..300 {
+        commands.push(rejected_command(sequence)?);
+    }
+    commands.push(root_command(300, latest)?);
+    let ledger = RuntimeOperationLedger::new(
+        commands,
+        vec![settled_root(1, prior)?, settled_root(2, latest)?],
+    )?
+    .with_retired_attempts(Some((prior, 17)))?;
+    let retained = retain_quiescent_ledger(&ledger, &BTreeSet::new())?;
+    assert!(retained.operation(1).is_some());
+    assert_eq!(retained.retired_attempts(prior), 17);
+    Ok(())
+}
+
+#[test]
 fn new_root_retention_drops_the_previous_newest_composition_group_whole() -> TestResult {
     let turn = TurnId::try_from(uuid::Uuid::from_u128(0x30))?;
     let next = TurnId::try_from(uuid::Uuid::from_u128(0x31))?;

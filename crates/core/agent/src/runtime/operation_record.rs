@@ -541,6 +541,7 @@ pub(super) fn retain_quiescent_ledger_with_anchor(
         })
         .filter(|command| is_accepted_root(command))
         .filter_map(|command| command.turn_id())
+        .chain(ledger.retired_counter().map(|(root, _)| root))
         .collect::<BTreeSet<_>>();
     // Keep the whole group of an existing anchor. New-root admission supplies
     // its pending operation instead, atomically replacing that sequence anchor.
