@@ -3,12 +3,13 @@
 //! One connection, held for the life of the runtime that owns it, rather than
 //! reopened per save. Every publish is one `Immediate` transaction and a
 //! compare-and-swap on the tree revision. A save writes only the rows that
-//! differ from the tree this connection last committed; with no such image it
-//! replaces the tree's rows wholesale. Both leave the same rows.
+//! differ from the current persisted tree. A stale image is rebuilt under
+//! the same transaction before writing any delta.
 
 use std::collections::BTreeMap;
+use std::os::unix::fs::MetadataExt as _;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, LazyLock, Mutex, Weak};
 
 use plakous_recursive_subagents::tree::{
     CustodyClaim, PersistedTree, ProductAgentTree, Revision, TreeCustody, TreeStore,
@@ -25,7 +26,7 @@ use crate::rows::{
 
 /// The tree's database as a [`TreeStore`].
 pub struct SqliteTreeStore {
-    writer: Mutex<Writer>,
+    writer: Arc<Mutex<Writer>>,
     storage_waiting: std::sync::atomic::AtomicBool,
     /// The database file, canonical when it resolves: the custody scope.
     path: std::path::PathBuf,
@@ -37,6 +38,12 @@ struct Writer {
     images: BTreeMap<String, TreeImage>,
 }
 
+// One writing connection per canonical file in this process: two handles
+// sharing a custody grant must also share its acknowledged image.
+type Writers = BTreeMap<(u64, u64), Weak<Mutex<Writer>>>;
+
+static WRITERS: LazyLock<Mutex<Writers>> = LazyLock::new(|| Mutex::new(BTreeMap::new()));
+
 impl SqliteTreeStore {
     /// Reads one existing tree's exact persisted rows without a writer or
     /// in-memory reopen transition.
@@ -46,13 +53,41 @@ impl SqliteTreeStore {
 
     /// Opens `database`, creating and versioning it when it is new.
     pub fn open(database: &Path) -> Result<Self, OpenError> {
-        Ok(Self {
-            path: std::fs::canonicalize(database).unwrap_or_else(|_| database.to_path_buf()),
-            storage_waiting: std::sync::atomic::AtomicBool::new(false),
-            writer: Mutex::new(Writer {
-                database: SubagentsDatabase::open(database)?,
+        let mut writers = WRITERS
+            .lock()
+            .map_err(|_| OpenError::unavailable_text("tree store writer registry is poisoned"))?;
+        writers.retain(|_, writer| writer.strong_count() > 0);
+        let key = std::fs::symlink_metadata(database)
+            .ok()
+            .filter(std::fs::Metadata::is_file)
+            .map(|metadata| (metadata.dev(), metadata.ino()));
+        let existing = key.and_then(|key| writers.get(&key).and_then(Weak::upgrade));
+        let writer = if let Some(writer) = existing {
+            writer
+                .lock()
+                .map_err(|_| OpenError::unavailable_text("tree store lock is poisoned"))?
+                .database
+                .readmit()?;
+            writer
+        } else {
+            let database_connection = SubagentsDatabase::open(database)?;
+            let metadata = std::fs::metadata(database).map_err(|_| {
+                OpenError::unavailable_text("tree store file identity is unavailable")
+            })?;
+            let key = (metadata.dev(), metadata.ino());
+            let writer = Arc::new(Mutex::new(Writer {
+                database: database_connection,
                 images: BTreeMap::new(),
-            }),
+            }));
+            writers.insert(key, Arc::downgrade(&writer));
+            writer
+        };
+        let path = std::fs::canonicalize(database)
+            .map_err(|_| OpenError::unavailable_text("tree store path is unavailable"))?;
+        Ok(Self {
+            path,
+            storage_waiting: std::sync::atomic::AtomicBool::new(false),
+            writer,
         })
     }
 
@@ -127,7 +162,7 @@ impl SqliteTreeStore {
 impl Writer {
     /// One publish. The image is taken out for the whole save and put back
     /// only by an acknowledged commit, so after any refused, failed or
-    /// ambiguous save the next one replaces the tree wholesale.
+    /// ambiguous save the next one rebuilds its baseline from current rows.
     fn save(
         &mut self,
         tree: &ProductAgentTree,
@@ -151,32 +186,35 @@ impl Writer {
             .map_err(|error| {
                 sqlite_unavailable("could not read agent tree data version", &error)
             })?;
-        let image = match image {
-            Some(mut image) if image.is_current(data_version) => {
-                let swapped = swap_agent_tree_header(&tx, tree)?;
-                if swapped != 1 {
-                    let stored = stored_revision(&tx, tree_id)?;
-                    fence_revision(stored, tree.stored_revision, tree.revision)?;
-                    // Unreachable while the image is current: an image means
-                    // this connection committed the row and nothing removed it.
-                    return Err(TreeStoreError::stale(stored.unwrap_or(0), tree.revision));
-                }
-                let delta = image.write_changes(&tx, tree)?;
-                commit(tx)?;
-                delta.fold_into(&mut image);
-                image
+        let stored = stored_revision(&tx, tree_id)?;
+        fence_revision(stored, tree.stored_revision, tree.revision)?;
+        let image = image
+            .and_then(|mut image| image.validate(data_version, stored, claim).then_some(image));
+        let image = if let Some(image) = image {
+            Some(image)
+        } else {
+            load_agent_tree(&tx, tree_id)
+                .map_err(TreeStoreError::corrupt)?
+                .map(|baseline| TreeImage::of(baseline.rows(), data_version, claim))
+        };
+        let image = if let Some(mut image) = image {
+            let swapped = swap_agent_tree_header(&tx, tree)?;
+            if swapped != 1 {
+                let stored = stored_revision(&tx, tree_id)?;
+                fence_revision(stored, tree.stored_revision, tree.revision)?;
+                // Unreachable while the image is current: an image means
+                // this connection committed the row and nothing removed it.
+                return Err(TreeStoreError::stale(stored.unwrap_or(0), tree.revision));
             }
-            _ => {
-                fence_revision(
-                    stored_revision(&tx, tree_id)?,
-                    tree.stored_revision,
-                    tree.revision,
-                )?;
-                delete_agent_tree_rows(&tx, tree_id)?;
-                insert_agent_tree_rows(&tx, tree)?;
-                commit(tx)?;
-                TreeImage::of(tree, data_version)
-            }
+            let delta = image.write_changes(&tx, tree)?;
+            commit(tx)?;
+            delta.fold_into(&mut image);
+            image.acknowledge(tree.revision, data_version);
+            image
+        } else {
+            insert_agent_tree_rows(&tx, tree)?;
+            commit(tx)?;
+            TreeImage::of(tree, data_version, claim)
         };
         self.images.insert(tree.tree_id.clone(), image);
         Ok(())
@@ -286,14 +324,33 @@ impl TreeStore for SqliteTreeStore {
     }
 
     fn load(&self, tree_id: &str) -> Result<Option<PersistedTree>, TreeStoreError> {
-        self.with_database(|database| {
-            let tx = database
+        self.with_writer(|writer| {
+            writer.images.remove(tree_id);
+            let tx = writer
+                .database
                 .connection
-                .unchecked_transaction()
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                 .map_err(|_| TreeStoreError::unavailable("could not start agent tree read"))?;
             let tree = load_agent_tree(&tx, tree_id).map_err(TreeStoreError::corrupt)?;
+            let data_version = tx
+                .query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))
+                .map_err(|_| {
+                    TreeStoreError::unavailable("could not read agent tree data version")
+                })?;
+            let custody = crate::custody::read(&tx, tree_id)?;
             tx.commit()
                 .map_err(|_| TreeStoreError::unavailable("could not finish agent tree read"))?;
+            if let (Some(tree), Some(custody)) = (&tree, custody) {
+                let grant = CustodyClaim {
+                    tree_id: tree_id.to_owned(),
+                    host: custody.holding.host,
+                    fence: custody.fence,
+                };
+                writer.images.insert(
+                    tree_id.to_owned(),
+                    TreeImage::of(tree.rows(), data_version, &grant),
+                );
+            }
             Ok(tree)
         })
     }
@@ -307,6 +364,13 @@ impl SqliteTreeStore {
     /// The canonical database path custody is scoped to.
     pub(crate) fn custody_path(&self) -> &Path {
         &self.path
+    }
+
+    /// A released tree must not stay resident in another handle's cache.
+    pub(crate) fn forget_image(&self, tree_id: &str) {
+        if let Ok(mut writer) = self.writer.lock() {
+            writer.images.remove(tree_id);
+        }
     }
 }
 
@@ -338,3 +402,6 @@ pub(crate) fn sqlite_write_error(error: rusqlite::Error, phase: String) -> TreeS
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(all(test, feature = "test-support"))]
+mod cache_tests;

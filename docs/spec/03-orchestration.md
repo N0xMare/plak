@@ -3283,13 +3283,33 @@ header with `UPDATE ... WHERE revision = ?` on the revision the handle last
 had acknowledged, requiring
 exactly one changed row, and then writes only the rows that differ from the
 tree the same connection last committed: in-place upserts for new or changed
-keys, nodes first, and keyed deletes for removed keys, nodes last. That image
-is trusted only while SQLite's `data_version` shows no commit by another
-connection. Without a current image (the first save after open, after another
-connection's commit, after any refused or failed save, or after the tree is
-deleted) the save fences the revision, deletes the tree's rows and inserts
-them all. Both paths leave the same rows, and a revision mismatch on either is
-the same `StaleRevision` refusal.
+keys, nodes first, and keyed deletes for removed keys, nodes last. The image
+is keyed by this tree's persisted revision and full custody grant, both
+checked inside the `Immediate` transaction. Database-wide `data_version` is
+only a hint: another tree's write does not invalidate this tree. A fresh
+grant invalidates the image even at the same revision, preserving the
+same-revision receipt contract.
+
+Within one process all store handles for the same physical database file
+share one writing connection and its images. Thus two same-grant handles
+cannot publish divergent private baselines. Registry entries are weak;
+release, break-glass release and deletion discard that tree's image so a
+dormant tree is not retained by another resident tree's connection.
+Load always refreshes the baseline from current rows and the current grant
+in one `Immediate` transaction. A cold, refused, failed or truly stale image
+is rebuilt from current rows inside the save's existing transaction; the
+save then writes deltas, never deleting and reinserting unchanged rows.
+Only an absent tree needs an initial insert. The header CAS, exact
+`StaleRevision` refusals and old-or-new crash outcome are unchanged; a
+quiet save writes no WAL commit, including while another resident tree works.
+
+All production writes of tree domain rows enter the fenced save or delete
+port. Recovery and feed-view repair, maintenance/GC/pruning, and imported
+trees use those same ports. `plak tree release --force` releases the custody
+record, not domain rows; the old grant cannot write, and a new grant advances the fence and
+rebuilds its baseline. Schema admission initializes new files only; it does
+not migrate existing trees across cohorts. Raw row codecs are not an
+unfenced production write path.
 
 Tree-store transaction begin and commit failures report the static phase and
 SQLite category, such as `disk_full` or `database_busy`, without backend text.

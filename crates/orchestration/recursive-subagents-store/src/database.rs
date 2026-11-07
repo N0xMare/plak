@@ -271,11 +271,16 @@ impl SubagentsDatabase {
         #[cfg(feature = "commit-trace")]
         plakous_store::commit_trace::install(&connection, "tree")
             .map_err(|_| OpenError::unavailable("could not install commit trace"))?;
-        SCHEMA.admit(&connection).map_err(|error| match error {
+        let database = Self { connection };
+        database.readmit()?;
+        Ok(database)
+    }
+
+    pub(crate) fn readmit(&self) -> Result<(), OpenError> {
+        SCHEMA.admit(&self.connection).map_err(|error| match error {
             AdmissionError::Unavailable(message) => OpenError::unavailable(message),
             AdmissionError::Unsupported(message) => OpenError::unsupported(message),
-        })?;
-        Ok(Self { connection })
+        })
     }
 }
 

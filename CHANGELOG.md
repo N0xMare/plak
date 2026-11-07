@@ -398,6 +398,11 @@ an export.
 
 ### Plakous
 
+- Tree-store caches are scoped to each tree's revision and custody grant,
+  with one shared writer per database file. Alternating resident trees no
+  longer invalidate each other and continuously rewrite unchanged rows;
+  stale baselines are rebuilt before writing row deltas.
+
 - `plakous::sessions::holder::{sqlite_branch_holder, BranchHolder}` (feature
   `sessions-sqlite`): the process a runtime branch's holder record names,
   unless it is this process or its free lock proves it gone. Probes of

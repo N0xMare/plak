@@ -142,7 +142,7 @@ fn save_failure_identifies_sqlite_cause_without_backend_text() {
 }
 
 /// Only an acknowledged commit leaves an image behind: every refusal,
-/// failure and delete falls the next save back to the whole-tree path.
+/// failure and delete force the next save to rebuild its persisted baseline.
 #[cfg(feature = "test-support")]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod images {
@@ -150,7 +150,7 @@ mod images {
 
     use plakous_recursive_subagents::protocol::{TopologyGrant, WriterMode};
     use plakous_recursive_subagents::tree::{
-        FakeVcs, PersistedTree, ProductAgentTree, TreeStore, TreeStoreErrorKind,
+        FakeVcs, PersistedTree, ProductAgentTree, TreeCustody, TreeStore, TreeStoreErrorKind,
     };
 
     use super::super::SqliteTreeStore;
@@ -176,9 +176,16 @@ mod images {
             WriterMode::SingleLease,
         )
         .unwrap();
+        let claim = store
+            .take_custody(
+                &tree.tree_id,
+                plakous_recursive_subagents::tree::custody_host(),
+                None,
+            )
+            .unwrap();
         for _ in 0..2 {
             tree.revision += 1;
-            let revision = store.save_in_custody(&tree).unwrap();
+            let revision = store.save(&tree, &claim).unwrap();
             tree.acknowledge_revision(revision);
         }
         assert_eq!(images(&store), 1);

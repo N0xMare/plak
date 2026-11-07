@@ -23,7 +23,10 @@ fn now_ms() -> u64 {
         })
 }
 
-fn read(tx: &Transaction<'_>, tree_id: &str) -> Result<Option<CustodyRecord>, TreeStoreError> {
+pub(crate) fn read(
+    tx: &Transaction<'_>,
+    tree_id: &str,
+) -> Result<Option<CustodyRecord>, TreeStoreError> {
     let invalid = || TreeStoreError::corrupt("agent tree custody row is invalid");
     let row = tx
         .query_row(
@@ -202,7 +205,9 @@ impl TreeCustody for SqliteTreeStore {
     fn release_custody(&self, claim: &CustodyClaim) -> Result<(), CustodyError> {
         self.custody_step(&claim.tree_id, |current| {
             Ok((CustodyRecord::release(current, claim)?, ()))
-        })
+        })?;
+        self.forget_image(&claim.tree_id);
+        Ok(())
     }
 
     fn prove_custody(&self, claim: &CustodyClaim) -> Result<(), CustodyError> {
@@ -211,10 +216,12 @@ impl TreeCustody for SqliteTreeStore {
     }
 
     fn break_custody(&self, tree_id: &str) -> Result<Option<CustodyRecord>, CustodyError> {
-        self.custody_step(tree_id, |current| {
+        let held = self.custody_step(tree_id, |current| {
             let broken = CustodyRecord::broken(current);
             let held = broken.as_ref().and_then(|_| current.cloned());
             Ok((broken, held))
-        })
+        })?;
+        self.forget_image(tree_id);
+        Ok(held)
     }
 }

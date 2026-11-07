@@ -3,16 +3,16 @@
 //!
 //! An image is the exact input of the last acknowledged save, so a record
 //! equal to its image entry encodes to the row the file already holds. It is
-//! trusted only while `PRAGMA data_version` is unchanged, that is while no
-//! other connection has committed to the file since.
+//! scoped to the tree's revision and custody grant. A commit to another
+//! tree does not invalidate it.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use plakous_recursive_subagents::epoch::OrchestrationSnapshot;
 use plakous_recursive_subagents::protocol::{AttemptId, CandidateId, TopologyGrant};
 use plakous_recursive_subagents::tree::{
-    AgentCommand, AttemptRecord, CandidateRecord, MailRecord, NodeRecord, OperationRecord,
-    ProductAgentTree, TreeStoreError, WorkspaceRecord,
+    AgentCommand, AttemptRecord, CandidateRecord, CustodyClaim, MailRecord, NodeRecord,
+    OperationRecord, ProductAgentTree, TreeStoreError, WorkspaceRecord,
 };
 use rusqlite::Transaction;
 
@@ -21,6 +21,8 @@ use crate::rows::{Row, delete_row, write_row};
 /// One tree's persisted maps as this connection last committed them.
 pub(crate) struct TreeImage {
     data_version: i64,
+    revision: u64,
+    grant: CustodyClaim,
     nodes: BTreeMap<String, NodeRecord>,
     grants: BTreeMap<String, TopologyGrant>,
     attempts: BTreeMap<AttemptId, AttemptRecord>,
@@ -35,11 +37,12 @@ pub(crate) struct TreeImage {
 }
 
 impl TreeImage {
-    /// The image of `tree` as a whole-tree save just wrote it, at the file's
-    /// `data_version` inside that save's transaction.
-    pub(crate) fn of(tree: &ProductAgentTree, data_version: i64) -> Self {
+    /// The image of persisted `tree`, read or written inside the transaction.
+    pub(crate) fn of(tree: &ProductAgentTree, data_version: i64, grant: &CustodyClaim) -> Self {
         Self {
             data_version,
+            revision: tree.revision,
+            grant: grant.clone(),
             nodes: tree.nodes().clone(),
             grants: tree.grants().clone(),
             attempts: tree.attempts().clone(),
@@ -54,10 +57,31 @@ impl TreeImage {
         }
     }
 
-    /// Whether the file still holds exactly this image: no other connection
-    /// committed since it was taken.
-    pub(crate) const fn is_current(&self, data_version: i64) -> bool {
-        self.data_version == data_version
+    /// The revision is read under the write transaction even when the
+    /// database-wide version did not move. A fresh grant may publish receipts
+    /// at the same revision, so it also invalidates the old baseline.
+    pub(crate) fn validate(
+        &mut self,
+        data_version: i64,
+        revision: Option<u64>,
+        grant: &CustodyClaim,
+    ) -> bool {
+        if revision != Some(self.revision()) || grant != &self.grant {
+            return false;
+        }
+        if self.data_version != data_version {
+            self.data_version = data_version;
+        }
+        true
+    }
+
+    pub(crate) const fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub(crate) fn acknowledge(&mut self, revision: u64, data_version: i64) {
+        self.revision = revision;
+        self.data_version = data_version;
     }
 
     /// Writes the rows of `tree` that differ from this image, after the
