@@ -261,7 +261,7 @@ fn a_runner_daemon_pairs_bridges_lists_and_exits_idle() {
         .enable_all()
         .build()
         .unwrap();
-    runtime.block_on(async {
+    let triple = runtime.block_on(async {
         // The first connect starts the daemon; a host of another version is
         // refused before any request, which names the runner's triple.
         let (refused, _first) =
@@ -276,7 +276,8 @@ fn a_runner_daemon_pairs_bridges_lists_and_exits_idle() {
         probes_stay_under_the_roots(&paired, &home, &work).await;
         vcs_reads_stay_under_the_roots(&paired, &home, &work).await;
         an_unpaired_host_fails_at_once(&home, &work, runner.clone()).await;
-        a_refused_link_ends_the_bridge_at_once(&home, runner).await;
+        a_refused_link_ends_the_bridge_at_once(&home, runner.clone()).await;
+        runner
     });
 
     let listed = plak_command(&home).args(["runner", "ps"]).output().unwrap();
@@ -285,7 +286,10 @@ fn a_runner_daemon_pairs_bridges_lists_and_exits_idle() {
 
     // With every link gone and nothing held, the daemon exits.
     drop(runtime);
-    let run = home.join("runner/run");
+    let run = home
+        .join("runner/builds")
+        .join(plakous::runner::daemon::triple_key(&triple))
+        .join("run");
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         let sockets = std::fs::read_dir(&run).map_or(0, |entries| {

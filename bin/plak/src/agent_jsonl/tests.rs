@@ -744,6 +744,7 @@ fn tool_error_tree_are_required_stdout() {
             state: TreeAdmissionState::Live,
             solicited: false,
             nodes: vec![NodeView {
+                runner: plakous_host_protocol::wire::RunnerLabel::local(),
                 agent_id: "tree-1".into(),
                 parent_agent_id: None,
                 depth: 0,
@@ -794,6 +795,7 @@ fn tool_error_tree_are_required_stdout() {
 #[test]
 fn tree_rows_carry_the_tier_attempt_and_candidate_or_omit_them() {
     let mut child = NodeView {
+        runner: plakous_host_protocol::wire::RunnerLabel::local(),
         agent_id: "tree-1-c1".into(),
         parent_agent_id: Some("tree-1".into()),
         depth: 1,

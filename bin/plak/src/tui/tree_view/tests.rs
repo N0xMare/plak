@@ -8,6 +8,7 @@ use plakous_host_protocol::views::{NodeView, PROJECTED_STATUS_LABELS, TreeView};
 
 fn node(status: NodeStatus, attempt: Option<AttemptStatus>) -> NodeView {
     NodeView {
+        runner: plakous_host_protocol::wire::RunnerLabel::local(),
         agent_id: "c1".to_owned(),
         parent_agent_id: Some("root".to_owned()),
         depth: 1,

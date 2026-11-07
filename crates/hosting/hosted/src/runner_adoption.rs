@@ -43,6 +43,23 @@ pub struct ReadoptFailure {
     pub line: String,
     /// Why.
     pub reason: String,
+    /// A live holder prevented acquisition; the sweep must skip its line,
+    /// not block unrelated placement readiness or transfer its authority.
+    pub held_elsewhere: bool,
+}
+
+struct AdoptionFailure {
+    reason: String,
+    held_elsewhere: bool,
+}
+
+impl From<String> for AdoptionFailure {
+    fn from(reason: String) -> Self {
+        Self {
+            reason,
+            held_elsewhere: false,
+        }
+    }
 }
 
 /// The host-mode start sweep: re-adopts every line `client`'s runner holds
@@ -80,9 +97,10 @@ pub async fn readopt_lines(
         }
         match readopt_line(client, sessions, operation_prefix, &status.line, None).await {
             Ok(line) => readopted.push(line),
-            Err(reason) => failed.push(ReadoptFailure {
+            Err(failure) => failed.push(ReadoptFailure {
                 line: status.line,
-                reason,
+                reason: failure.reason,
+                held_elsewhere: failure.held_elsewhere,
             }),
         }
     }
@@ -144,6 +162,7 @@ pub async fn finish_recorded_stop(
         Some(intent),
     )
     .await
+    .map_err(|failure| failure.reason)
 }
 
 async fn readopt_line(
@@ -152,14 +171,20 @@ async fn readopt_line(
     operation_prefix: &str,
     line: &str,
     stop: Option<&str>,
-) -> Result<Readopted, String> {
+) -> Result<Readopted, AdoptionFailure> {
     let line = LineId::from_str(line).map_err(|error| format!("line id: {error}"))?;
     let operation = SessionOperationId::new(format!("{operation_prefix}:{line}"))
         .map_err(|error| format!("operation id: {error}"))?;
     let head = sessions
         .open_lease_only(&operation, line)
         .await
-        .map_err(|error| format!("the line's head could not be held: {error}"))?;
+        .map_err(|error| AdoptionFailure {
+            held_elsewhere: matches!(
+                error.kind(),
+                AgentSessionsErrorKind::Ownership | AgentSessionsErrorKind::Busy
+            ),
+            reason: format!("the line's head could not be held: {error}"),
+        })?;
     cut("lease");
     let adopted = readopt_held(client, &head, stop).await;
     let released = head

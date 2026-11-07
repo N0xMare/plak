@@ -164,13 +164,10 @@ fn check_start(home: &LocalRunnerHome) -> CliResult<()> {
                     | std::io::ErrorKind::NotADirectory
             ) =>
         {
-            Err(CliFailure::classified(
-                plakous_hosted::error::CliFailureKind::LocalRunnerRefused,
-                format!(
-                    "the home-local runner refused {}: {error}",
-                    home.floors_path().display()
-                ),
-            ))
+            Err(CliFailure::new(format!(
+                "the home-local runner refused {}: {error}",
+                home.floors_path().display()
+            )))
         }
         _ => Ok(()),
     }

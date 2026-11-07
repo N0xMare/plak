@@ -949,6 +949,7 @@ fn unsolicited_tree_snapshot_omits_id_while_prompt_in_flight() {
             state: TreeAdmissionState::Live,
             solicited: false,
             nodes: vec![NodeView {
+                runner: plakous_host_protocol::wire::RunnerLabel::local(),
                 agent_id: "tree-1".into(),
                 parent_agent_id: None,
                 depth: 0,
@@ -1018,6 +1019,7 @@ fn explicit_tree_command_snapshot_uses_tree_command_id() {
             state: TreeAdmissionState::Live,
             solicited: true,
             nodes: vec![NodeView {
+                runner: plakous_host_protocol::wire::RunnerLabel::local(),
                 agent_id: "tree-1".into(),
                 parent_agent_id: None,
                 depth: 0,
@@ -1088,6 +1090,7 @@ fn unsolicited_snapshot_does_not_consume_pending_tree_id() {
             state: TreeAdmissionState::Live,
             solicited: false,
             nodes: vec![NodeView {
+                runner: plakous_host_protocol::wire::RunnerLabel::local(),
                 agent_id: "tree-1".into(),
                 parent_agent_id: None,
                 depth: 0,

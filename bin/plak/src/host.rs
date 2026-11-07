@@ -120,14 +120,8 @@ pub(crate) fn run_host_command(
     scan(&host, owed, stop, &services, runtime.handle());
     // The web endpoint serves beside the control socket and stops with it.
     let web = web.map(|web| runtime.spawn(web.serve()));
-    let served = runtime.block_on(async {
-        bound.serve(&host, move || stop.stopped()).await;
-        Ok(())
-    });
+    runtime.block_on(bound.serve(&host, move || stop.stopped()));
     if let Some(web) = web {
-        if served.is_err() {
-            web.abort();
-        }
         let _ = runtime.block_on(web);
     }
     if let Some(reload) = idle_reload {
@@ -153,7 +147,7 @@ pub(crate) fn run_host_command(
     );
     drop(lock);
     runtime.shutdown_timeout(Duration::from_secs(1));
-    served.map(|()| ProcessOutcome::Success)
+    Ok(ProcessOutcome::Success)
 }
 
 /// This process's generation: it differs on every start.
@@ -236,10 +230,13 @@ fn placement_ready(services: &Services, session: &str) -> bool {
         .runner
         .as_ref()
         .map_or("local", |runner| runner.runner_id.as_str());
-    services.runners().require_connection(runner, true);
-    services.runners().rows().iter().any(|row| {
+    let ready = services.runners().rows().iter().any(|row| {
         row.runner.runner_id == runner && row.status == plakous::runner::RunnerStatus::Ready
-    })
+    });
+    if !ready {
+        services.runners().require_connection(runner, true);
+    }
+    ready
 }
 
 /// Opens each of `owed` in turn with `open`, until `stopped`.

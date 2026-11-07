@@ -31,8 +31,6 @@ pub enum CliFailureKind {
     HostedElsewhere,
     /// An embedded attachment cannot take a daemon-held process line.
     LocalRunnerProcesses,
-    /// The home-local daemon requires operator repair before it can start.
-    LocalRunnerRefused,
 }
 
 impl CliFailureKind {
@@ -45,7 +43,6 @@ impl CliFailureKind {
             Self::Auth => 3,
             Self::Agent | Self::RecoveryRequired => 5,
             Self::HostedElsewhere | Self::LocalRunnerProcesses => 7,
-            Self::LocalRunnerRefused => 8,
         }
     }
 }

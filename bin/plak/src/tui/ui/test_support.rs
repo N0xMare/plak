@@ -949,6 +949,7 @@ pub(super) fn resume_fixture() -> App {
 /// so the canvas adapter is exercised by every TUI test that opens a tree.
 pub(super) fn tree_node(id: &str, parent: Option<&str>, depth: u8) -> NodeView {
     NodeView {
+        runner: plakous_host_protocol::wire::RunnerLabel::local(),
         agent_id: id.to_owned(),
         parent_agent_id: parent.map(str::to_owned),
         depth,

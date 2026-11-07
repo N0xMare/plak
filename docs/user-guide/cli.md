@@ -29,7 +29,6 @@ The binary ID identifies the executable in `/reload` and handoffs.
 | 5 | Agent/runtime failure, an answer truncated at its output limit (`turn_failed:output-limit`; the answer is still printed), or explicit recovery required |
 | 6 | Run reached `--max-turns` or `--timeout` |
 | 7 | `tree_hosted_elsewhere`: another running `plak` holds the session's agent tree (see `plak tree release`) |
-| 8 | `plak host` cannot start or reconnect its local runner: repair the owner floors file named on stderr before restarting the service |
 | 130 | Quit escalated because the turn's terminal did not join and the host abandoned by lease only; clean idle or terminal-joined quit remains 0 |
 
 Every subscription failure ends with what to do about it, for example:
@@ -297,8 +296,8 @@ plak mcp remove github
 
 ### `plak runner serve|connect|allow|ps|pair|secret`
 
-Runners run tools on another machine you can ssh to. No session runs on a
-runner yet; these commands set one up and show what it holds.
+Runners run a placed session's tools on another machine you can ssh to.
+These commands set one up and show what it holds. Local remains the explicit default.
 
 On the runner machine, write `~/.plak/runner/runner.toml` with the workspace
 roots a host may use (never `~/.plak` itself or anything inside it, which
@@ -314,6 +313,7 @@ On the host, name the machine in `config.toml` and pair with it:
 ```toml
 [runners.build]
 ssh = "build-box"          # a ~/.ssh/config alias or [user@]host
+command = "/opt/plak/bin/plak"  # absolute stable executable on the runner
 ```
 
 ```sh
@@ -322,7 +322,11 @@ plak runner ps build       # the lines and jobs it holds for this host
 ```
 
 Pairing needs a build that knows its source revision (a release or
-maintainer install). The host always dials, with fixed strict ssh options,
+maintainer install), matching the runner's protocol, source revision and flavor.
+Pairing records machine identity and admitted roots; re-pair older pins without
+machine evidence. On the same machine, runner roots must not overlap another
+runner's roots or any non-deleted local session workspace or minted copy.
+The host always dials, with fixed strict ssh options,
 `BatchMode` and `StrictHostKeyChecking=yes`, so the ssh key must work without a
 prompt and the runner's host key must already be in `known_hosts` (connect
 once with plain `ssh` to accept it). On the runner machine,

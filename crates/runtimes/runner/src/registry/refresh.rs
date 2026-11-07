@@ -152,12 +152,14 @@ impl RunnerRegistry {
                     _ => false,
                 };
             let failed = matches!(entry.row.status, super::RunnerStatus::Blocked(_));
+            let disconnected = matches!(&entry.connection, Some(Connection::Remote(client, _)) if !client.is_connected());
             if entry.refresh.active
                 || (entry
                     .refresh
                     .completed
                     .is_some_and(|at| at.elapsed() < Duration::from_secs(5))
-                    && !(needed && failed))
+                    && !(needed && failed)
+                    && !disconnected)
             {
                 return;
             }

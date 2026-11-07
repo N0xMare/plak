@@ -282,13 +282,19 @@ async fn bind_local(
         if !client.is_connected() {
             crate::commands::runner::local::reconnect(paths, &client)
                 .await
-                .map_err(|_| unavailable(ProbePhase::Daemon))?;
+                .map_err(|error| {
+                    tracing::warn!(target: "plak.runner", runner_id = "local", phase = "daemon", error = %error, "runner_recovery_failed");
+                    unavailable(ProbePhase::Daemon)
+                })?;
         }
         client
     } else {
         crate::commands::runner::local::dial(paths)
             .await
-            .map_err(|_| unavailable(ProbePhase::Daemon))?
+            .map_err(|error| {
+                tracing::warn!(target: "plak.runner", runner_id = "local", phase = "daemon", error = %error, "runner_recovery_failed");
+                unavailable(ProbePhase::Daemon)
+            })?
     };
     install_reporter(&client);
     let _ = services.with_local_daemon(
@@ -308,7 +314,7 @@ async fn bind_local(
         plakous_hosted::runner_adoption::readopt_lines(&client, &sessions, "plak:host:readopt")
             .await
             .map_err(|_| unavailable(ProbePhase::Reconcile))?;
-    if !failures.is_empty() {
+    if failures.iter().any(|failure| !failure.held_elsewhere) {
         return Err(unavailable(ProbePhase::Reconcile));
     }
     let _ = client.recover().await;
@@ -415,7 +421,7 @@ async fn bind_remote(
     )
     .await
     .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
-    for failure in failures {
+    for failure in failures.iter().filter(|failure| !failure.held_elsewhere) {
         tracing::warn!(target: "plak.runner", phase = "sweep", line = %failure.line, error = %failure.reason, "runner_recovery_failed");
         return Err(unavailable(ProbePhase::Reconcile, false));
     }
@@ -441,6 +447,7 @@ async fn bind_remote(
         discovery,
         services.now_unix_seconds(),
     )?;
+    tracing::info!(target: "plak.runner", runner_id = %remote.id, "runner_reconnected");
     Ok(dialed)
 }
 

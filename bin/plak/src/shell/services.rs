@@ -24,7 +24,7 @@ pub(crate) type TelemetrySinkFactory = fn() -> Option<Arc<dyn ExtraTelemetrySink
 /// Handles every product command shares for the life of the process.
 pub(crate) struct Services {
     runners: plakous::runner::RunnerRegistry,
-    runner_overlap: Arc<plakous::runner::MachineOverlapGuard>,
+    runner_overlap: Arc<OnceLock<plakous::runner::MachineOverlapGuard>>,
     local_daemon: Arc<
         std::sync::RwLock<
             Option<(
@@ -58,7 +58,7 @@ impl Services {
     pub(crate) fn for_home(paths: PlakPaths) -> Self {
         Self {
             runners: plakous::runner::RunnerRegistry::default(),
-            runner_overlap: Arc::new(plakous::runner::MachineOverlapGuard::new(None, [])),
+            runner_overlap: Arc::default(),
             local_daemon: Arc::default(),
             clock: crate::commands::application::test_clock(),
             home: Home::explicit(paths.clone(), paths.home().join("test-state")),
@@ -95,7 +95,7 @@ impl Services {
         }
         Self {
             runners: plakous::runner::RunnerRegistry::default(),
-            runner_overlap: Arc::new(plakous::runner::MachineOverlapGuard::new(None, [])),
+            runner_overlap: Arc::default(),
             local_daemon: Arc::default(),
             clock: Arc::new(plakous::model::SystemClock),
             home,
@@ -145,12 +145,29 @@ impl Services {
 
     pub(crate) fn with_runner_overlap(&self, guard: plakous::runner::MachineOverlapGuard) -> Self {
         let mut services = self.clone();
-        services.runner_overlap = Arc::new(guard);
+        let selected = OnceLock::new();
+        let _ = selected.set(guard);
+        services.runner_overlap = Arc::new(selected);
         services
     }
 
     pub(crate) fn runner_overlap(&self) -> &plakous::runner::MachineOverlapGuard {
-        &self.runner_overlap
+        self.runner_overlap.get_or_init(|| {
+            let Ok(paths) = self.paths() else {
+                return plakous::runner::MachineOverlapGuard::new(None, []);
+            };
+            crate::commands::runner::registry::overlap_guard(paths).unwrap_or_else(|_| {
+                plakous::runner::MachineOverlapGuard::new(None, []).with_admission_store(
+                    paths.home().join("runners/admission.lock"),
+                    || {
+                        Err(plakous::runner::PlacementFailure::RunnerUnreachable {
+                            phase: plakous::runner::ProbePhase::Reconcile,
+                            timed_out: false,
+                        })
+                    },
+                )
+            })
+        })
     }
 
     pub(crate) fn state_roots_on(
@@ -159,6 +176,9 @@ impl Services {
         runner_id: &str,
     ) -> CliResult<plakous_hosted::agent::ProductStateRoots> {
         let roots = self.state_roots_for(context)?;
+        if runner_id == "local" && self.runners.rows().is_empty() {
+            return Ok(roots);
+        }
         match self.runners.services(runner_id).map_err(|failure| {
             crate::CliFailure::new(format!("runner placement refused: {failure:?}"))
         })? {

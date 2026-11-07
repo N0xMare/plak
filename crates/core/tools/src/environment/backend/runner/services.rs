@@ -32,8 +32,8 @@ impl RunnerServices {
         }
     }
 
-    /// Gates new node calls while reconnect reconciliation/configuration is
-    /// blocked. Already admitted futures retain their keyed recovery owner.
+    /// Gates new effects while reconnect reconciliation/configuration is
+    /// blocked. Existing reads and admitted futures retain their recovery owner.
     pub fn set_available(&self, available: bool) {
         self.available.store(available, Ordering::Release);
     }
@@ -87,7 +87,7 @@ impl super::RunnerLink for AdmittedLink {
             .driver_operation_settled(owner, call_id, attempt_id);
     }
     fn call(&self, call: super::RunnerCall) -> super::RunnerCallFuture {
-        if !self.available.load(Ordering::Acquire) {
+        if !self.available.load(Ordering::Acquire) && !call.verb().is_read() {
             return Box::pin(std::future::ready(Err(super::RunnerFailure::Unavailable(
                 "runner is blocked before dispatch".into(),
             ))));

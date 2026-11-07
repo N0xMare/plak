@@ -373,6 +373,10 @@ async fn a_held_line_does_not_prevent_the_next_lines_sweep() {
             .unwrap();
     assert_eq!(failed.len(), 1);
     assert_eq!(failed[0].line, held.line().to_string());
+    assert!(
+        failed[0].held_elsewhere,
+        "readiness must skip the live holder without classifying an unfinished sweep"
+    );
     assert_eq!(readopted.len(), 1);
     assert_eq!(readopted[0].line, free_line);
     held.release().await.unwrap();

@@ -685,9 +685,10 @@ fn daemon_exit_wait_ignores_a_successor_and_a_startup_probe() {
     let fixture = Fixture::new(&json!({"version": 1}));
     let runner = ChildRunner::of(&fixture);
     let old = runner.start();
-    let lock = std::fs::read_dir(runner.home.join("runner/run"))
-        .unwrap()
-        .flatten()
+    let lock = runner
+        .run_directories()
+        .into_iter()
+        .flat_map(|run| std::fs::read_dir(run).unwrap().flatten())
         .map(|entry| entry.path())
         .find(|path| path.extension().is_some_and(|ext| ext == "lock"))
         .unwrap()
@@ -895,14 +896,15 @@ impl ChildRunner {
         let mut child = command.spawn().expect("runner daemon");
         let pid = i32::try_from(child.id()).unwrap();
         std::fs::write(&self.pid_file, pid.to_string()).unwrap();
-        let run = self.home.join("runner").join("run");
         let deadline = Instant::now() + WAIT;
         let log =
             || std::fs::read_to_string(self.home.join("serve-harness.log")).unwrap_or_default();
-        while !std::fs::read_dir(&run).is_ok_and(|entries| {
-            entries
-                .flatten()
-                .any(|entry| entry.path().extension().is_some_and(|ext| ext == "sock"))
+        while !self.run_directories().iter().any(|run| {
+            std::fs::read_dir(run).is_ok_and(|entries| {
+                entries
+                    .flatten()
+                    .any(|entry| entry.path().extension().is_some_and(|ext| ext == "sock"))
+            })
         }) {
             // A daemon that cannot serve, such as one whose socket path is
             // too long for the platform, says why and exits.
@@ -950,14 +952,22 @@ impl ChildRunner {
     /// this runner home, including one started by the host's bridge.
     /// Asking takes no lock and excludes transient startup probes.
     fn holders(&self) -> Vec<i32> {
-        let run = self.home.join("runner").join("run");
-        std::fs::read_dir(run)
+        self.run_directories()
             .into_iter()
-            .flatten()
-            .flatten()
+            .flat_map(|run| std::fs::read_dir(run).into_iter().flatten().flatten())
             .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "lock"))
             .filter_map(|entry| entry.path().canonicalize().ok())
             .flat_map(|lock| daemon_openers(&lock))
+            .collect()
+    }
+
+    fn run_directories(&self) -> Vec<PathBuf> {
+        std::fs::read_dir(self.home.join("runner/builds"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| entry.path().join("run"))
+            .filter(|run| run.is_dir())
             .collect()
     }
 

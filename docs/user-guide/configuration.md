@@ -404,8 +404,10 @@ placement = "runner"
 plak runner secret set github   # on the runner machine
 ```
 
-Until sessions run on a remote runner, this machine is the node's runner, so
-the server runs here and reads `plak runner secret set` values from this home.
+For a remote session, `placement = "runner"` runs the server in that runner's
+workspace and reads its runner-secret store. A host-placed server instead gets
+a fresh empty private directory, not the remote workspace spelling or your home.
+For local sessions the existing local workspace cwd is unchanged.
 
 A stdio MCP server starts when the first session that names it binds, is
 shared by every session in the same workspace, and stops five minutes after

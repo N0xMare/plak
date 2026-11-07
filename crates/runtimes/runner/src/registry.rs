@@ -378,7 +378,17 @@ impl RunnerRegistry {
         let entries = self.entries.read().unwrap_or_else(PoisonError::into_inner);
         let entry = entries.get(id).ok_or_else(|| missing(id))?;
         match &entry.row.status {
-            RunnerStatus::Ready => entry.connection.clone().ok_or_else(reconciling),
+            RunnerStatus::Ready => match &entry.connection {
+                Some(Connection::Remote(client, services))
+                    if !client.is_connected() || !services.is_available() =>
+                {
+                    Err(PlacementFailure::RunnerUnreachable {
+                        phase: ProbePhase::LinkLost,
+                        timed_out: false,
+                    })
+                }
+                connection => connection.clone().ok_or_else(reconciling),
+            },
             RunnerStatus::Unknown => Err(reconciling()),
             RunnerStatus::Blocked(reason) => Err(reason.clone()),
         }

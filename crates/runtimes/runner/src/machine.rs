@@ -26,9 +26,7 @@ pub fn machine_id() -> std::io::Result<String> {
     let value = String::new();
     let value = value.trim().to_ascii_lowercase();
     if !matches!(value.len(), 32 | 36)
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_hexdigit() || byte == b'-')
+        || uuid::Uuid::parse_str(&value).map_or(true, |identity| identity.is_nil())
     {
         return Err(std::io::Error::other("machine identity unavailable"));
     }
