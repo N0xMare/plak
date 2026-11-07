@@ -2377,6 +2377,11 @@ exception to a record finalizing once; it is allowed only for
 `RecoveryRequired` and only once. The feed emits no second `TurnTerminal`.
 Readers, including read-only SQLite inspection, read the report directly from
 the record and do not require the parent checkpoint to survive pruning.
+Historical terminal replay accepts this same sole enrichment when comparing
+the retained record with its original result checkpoint: removing the newly
+added report must reproduce that checkpoint's terminal bytes exactly. Replay
+keeps the original checkpoint and conversation bindings and dispatches nothing;
+a different canonical input under the same command identity remains refused.
 
 These encodings, and the exposed name on each canonical tool call (§6.5), are
 runtime checkpoint format epoch 36 (chapter 00). An earlier-epoch checkpoint

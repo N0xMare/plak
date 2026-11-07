@@ -2,6 +2,91 @@ use super::*;
 use crate::runtime::terminal::{DurableTerminalResultRecord, encode_terminal_result_record};
 
 #[tokio::test]
+async fn recovery_required_enrichment_replays_the_original_command() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let model = artifact_test_model(0, 88_300)?;
+    model.unknown_outcome_from_call.store(0, Ordering::Release);
+    let (registry, _) = session_update_registry(SessionUpdateFixtureMode::Active)?;
+    let make = || session_update_builder(workspace.clone(), model.clone(), registry.clone());
+    let sessions = DurableSessionRuntime::current(
+        Arc::new(TestCreateStore::default()),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("lease")?,
+    )?;
+    let agent = sessions.create("create:enrichment-replay", make()?).await?;
+    let command = CommandId::new("root:enrichment-replay")?;
+    let original = agent
+        .start(command.clone(), "unknown request")
+        .await?
+        .into_turn()
+        .ok_or("original turn")?
+        .result()
+        .await?;
+    assert!(matches!(
+        original.outcome(),
+        TurnResultOutcome::RecoveryRequired(_)
+    ));
+    let checkpoint = original.checkpoint().clone();
+    let original_record = terminal_record_at_checkpoint(&checkpoint, &command)?;
+    assert!(original_record.abandonment.is_none());
+    let _ = agent.shutdown().await;
+    let DurableRuntimeOpen::Opened(reopened) = sessions
+        .open(
+            "open:enrichment-replay",
+            DurableSessionAddress {
+                session_id: checkpoint.manifest().topology().session_id,
+                branch_id: checkpoint.manifest().topology().branch_id,
+                checkpoint_id: checkpoint.id(),
+            },
+            make()?,
+        )
+        .await?
+    else {
+        return Err("exact reopen refused".into());
+    };
+    let report = reopened.abandoned_turn().ok_or("abandonment report")?;
+    let mut enriched = terminal_record_at_checkpoint(&reopened.checkpoint(), &command)?;
+    assert_eq!(enriched.abandonment.take().as_ref(), Some(report));
+    assert_eq!(enriched, original_record);
+    let duplicate = reopened
+        .start(command.clone(), "unknown request")
+        .await?
+        .into_result()
+        .ok_or("historical result")?
+        .result()
+        .await?;
+    assert!(matches!(
+        duplicate.outcome(),
+        TurnResultOutcome::RecoveryRequired(_)
+    ));
+    assert_eq!(duplicate.checkpoint().id(), checkpoint.id());
+    assert_eq!(duplicate.checkpoint().manifest(), checkpoint.manifest());
+    assert_eq!(duplicate.usage(), original.usage());
+    let refused = reopened
+        .command(TurnCommand::Start {
+            command_id: command,
+            input: "different request".into(),
+        })
+        .await?;
+    assert_eq!(
+        refused
+            .acknowledgement()
+            .rejection()
+            .ok_or("input conflict")?
+            .kind(),
+        ControlErrorKind::IdentityConflict
+    );
+    assert_eq!(
+        model.calls.load(Ordering::Acquire),
+        1,
+        "recovery and replay never dispatch"
+    );
+    reopened.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn a_terminal_result_reads_the_recorded_remedy_not_the_conversation() -> TestResult {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
@@ -114,6 +199,7 @@ fn recovery_required_terminal_enrichment_is_add_only_and_once() -> TestResult {
             ))
         };
     let updated = record.append_transition(transition(&enriched)?)?;
+    assert_enrichment_guards(&original, &enriched)?;
     assert_eq!(updated.transitions()[0], record.transitions()[0]);
     assert!(
         updated
@@ -151,5 +237,66 @@ fn recovery_required_terminal_enrichment_is_add_only_and_once() -> TestResult {
             .is_err()
         );
     }
+    Ok(())
+}
+
+fn assert_enrichment_guards(
+    original: &DurableTerminalResultRecord,
+    enriched: &DurableTerminalResultRecord,
+) -> TestResult {
+    let accepts = |before: &DurableTerminalResultRecord,
+                   after: &DurableTerminalResultRecord|
+     -> TestResult<bool> {
+        Ok(crate::runtime::valid_terminal_enrichment(
+            original.turn_id,
+            &encode_terminal_result_record(before)?,
+            &encode_terminal_result_record(after)?,
+        ))
+    };
+    assert!(accepts(original, enriched)?);
+    assert!(!accepts(enriched, enriched)?, "no second enrichment");
+    assert!(!accepts(original, original)?, "a report must be added");
+    let mut cancelled = original.clone();
+    cancelled.outcome = DurableTerminalOutcome::Cancelled(DurableAgentError::from_error(
+        &AgentError::new(AgentErrorKind::Session, "cancelled"),
+    )?);
+    let mut cancelled_enriched = cancelled.clone();
+    cancelled_enriched.abandonment = enriched.abandonment.clone();
+    assert!(
+        !accepts(&cancelled, &cancelled_enriched)?,
+        "RecoveryRequired only"
+    );
+    let mut wrong_turn = original.clone();
+    wrong_turn.turn_id = TurnId::try_from(uuid::Uuid::from_u128(88_106))?;
+    let mut wrong_turn_enriched = wrong_turn.clone();
+    wrong_turn_enriched.abandonment = enriched.abandonment.clone();
+    assert!(!accepts(&wrong_turn, &wrong_turn_enriched)?, "turn binding");
+    let mut changed = enriched.clone();
+    changed.usage.record_model_operation(None)?;
+    assert!(!accepts(original, &changed)?, "usage is immutable");
+    changed = enriched.clone();
+    changed.checkpoint_id = CheckpointId::try_from(uuid::Uuid::from_u128(88_103))?;
+    assert!(!accepts(original, &changed)?, "checkpoint is immutable");
+    changed = enriched.clone();
+    changed.outcome = DurableTerminalOutcome::Cancelled(DurableAgentError::from_error(
+        &AgentError::new(AgentErrorKind::Session, "cancelled"),
+    )?);
+    assert!(!accepts(original, &changed)?, "result is immutable");
+    changed = enriched.clone();
+    changed.conversation_identity = Digest::sha256(
+        DigestDomain::CanonicalHistory,
+        1,
+        &[b"different conversation"],
+    )?;
+    assert!(!accepts(original, &changed)?, "conversation is immutable");
+    changed = enriched.clone();
+    changed.command_id.push_str(":different");
+    assert!(!accepts(original, &changed)?, "command is immutable");
+    changed = enriched.clone();
+    changed.operation_id = OperationId(92);
+    assert!(!accepts(original, &changed)?, "operation is immutable");
+    changed = enriched.clone();
+    changed.remedy = Some(crate::runtime::operation_record::DecidedRemedy::ClearOrFork);
+    assert!(!accepts(original, &changed)?, "remedy is immutable");
     Ok(())
 }

@@ -5,8 +5,8 @@ use crate::runtime::continuation::{terminal_record_at_checkpoint, terminal_recor
 use crate::runtime::driver::Driver;
 use crate::runtime::driver::operations::TurnConsequence;
 use crate::runtime::terminal::{
-    DurableTerminalResultRecord, actor_panic_error, cancelled_error, recovery_gate_error,
-    remove_known_turn, terminal_turn_result,
+    DurableTerminalResultRecord, actor_panic_error, cancelled_error, encode_terminal_result_record,
+    recovery_gate_error, remove_known_turn, terminal_turn_result, valid_terminal_enrichment,
 };
 use crate::runtime::{PromptCommand, TerminalProposal, TurnResult, TurnResultOutcome};
 use crate::{
@@ -412,7 +412,24 @@ impl Driver {
                     "historical terminal checkpoint omitted its root command",
                 )
             })?;
-        if terminal_record_for_command(manifest.ledger(), command)? != *terminal {
+        let historical = terminal_record_for_command(manifest.ledger(), command)?;
+        let encode = |record| {
+            encode_terminal_result_record(record).map_err(|error| {
+                AgentError::new(
+                    AgentErrorKind::Session,
+                    format!("terminal result encoding failed: {error}"),
+                )
+            })
+        };
+        // Recovery adds one report to a RecoveryRequired root without moving
+        // its result checkpoint. The codec admits no other enrichment.
+        if historical != *terminal
+            && !valid_terminal_enrichment(
+                terminal.turn_id,
+                &encode(&historical)?,
+                &encode(terminal)?,
+            )
+        {
             return Err(AgentError::new(
                 AgentErrorKind::Session,
                 "historical terminal checkpoint carries a different result record",
