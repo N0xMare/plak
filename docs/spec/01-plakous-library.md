@@ -4628,7 +4628,11 @@ pending authority. Dropping an abandoned creating attempt cleans up only its
 unchanged empty slot under compatibility; a pre-existing directory, later receipt,
 credential publication or replacement directory is never removed by it.
 `remove_signed_out_account` uses that same lock and path authority, refuses
-credentials or busy writers, and refuses bare defaults.
+credentials or busy writers, and refuses bare defaults. Every non-Revoked
+record, including refresh-required, quarantined, retired, newer or foreign
+credentials, refuses with `AccountSignedIn` and remains untouched. A known
+Revoked tombstone is removable. Abandoned-creator cleanup preserves a published
+record even when neither consent nor a recovery marker changed.
 Local Codex login binds only the compiled callback-port pool. An occupied
 pool returns typed `LoopbackBusy`, exposed by the facade as `AccountBusy`; it
 never falls back to an unpinned listener or a different login mode. Other

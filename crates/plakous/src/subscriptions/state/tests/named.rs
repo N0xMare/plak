@@ -175,6 +175,41 @@ async fn abandoned_creation_cleanup_waits_off_executor_for_a_busy_reader()
 }
 
 #[tokio::test]
+async fn abandoned_creator_preserves_a_published_record_without_consent_changes()
+-> Result<(), Box<dyn Error>> {
+    let root = tempfile::tempdir()?;
+    let paths = SubscriptionPaths::from_xdg_state_home(root.path().join("state"))?;
+    for provider in PROVIDERS {
+        let creator = subscriptions(paths.clone())
+            .for_named_account(provider, "work")?
+            .create_account_for_login(provider)
+            .await?;
+        let path = creator.state.provider_record(provider);
+        let consent = stored_acceptance_generation(&creator.state.paths, provider)?;
+        let profile = SubscriptionIntegrationProfileId::new(
+            NativeSubscriptions::notice(provider)?.profile_id(),
+        )?;
+        let store = PrivateCredentialStore::open_slot(
+            path.clone(),
+            profile.clone(),
+            creator.state.slot_id()?,
+        )?;
+        store.initialize_selected(&record(profile, 1)?)?;
+        let bytes = fs::read(&path)?;
+        assert!(!creator.state.paths.login_recovery_path(provider).exists());
+        assert_eq!(
+            stored_acceptance_generation(&creator.state.paths, provider)?,
+            consent
+        );
+        drop(store);
+        drop(creator);
+        assert!(path.parent().unwrap().is_dir());
+        assert_eq!(fs::read(path)?, bytes);
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn an_abandoned_creator_cannot_remove_a_later_writer_or_recreated_name()
 -> Result<(), Box<dyn Error>> {
     let root = tempfile::tempdir()?;
@@ -243,7 +278,33 @@ async fn named_removal_refuses_defaults_live_credentials_and_busy_writers()
             Err(NativeSubscriptionError::AccountSignedIn)
         );
         assert!(native.state.provider_record(provider).is_file());
+        let path = native.state.provider_record(provider);
+        let ready = fs::read(&path)?;
+        for (field, value) in [
+            ("status", serde_json::json!("refresh_required")),
+            ("status", serde_json::json!("refresh_outcome_unknown")),
+            ("format_version", serde_json::json!(0)),
+            ("format_version", serde_json::json!(999)),
+            ("profile_id", serde_json::json!("foreign-profile")),
+            ("slot_id", serde_json::json!("named-other")),
+        ] {
+            let mut document: serde_json::Value = serde_json::from_slice(&ready)?;
+            document[field] = value;
+            let bytes = serde_json::to_vec(&document)?;
+            fs::write(&path, &bytes)?;
+            assert_eq!(
+                native.remove_signed_out_account(provider).await,
+                Err(NativeSubscriptionError::AccountSignedIn),
+                "{provider:?}: {field}"
+            );
+            assert_eq!(fs::read(&path)?, bytes);
+        }
+        fs::write(&path, &ready)?;
+        store.logout_local()?;
+        assert_eq!(store.status()?, Some(CredentialStatus::Revoked));
         drop(store);
+        native.remove_signed_out_account(provider).await?;
+        assert!(!path.exists());
     }
     Ok(())
 }

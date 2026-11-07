@@ -147,9 +147,16 @@ impl SubscriptionState {
             self.slot_id()?,
         )
         .map_err(|_| NativeSubscriptionError::UnsafeStorage)?;
-        let fence = store
-            .load()
-            .map_err(|_| NativeSubscriptionError::UnsafeStorage)?;
+        let fence = store.load().map_err(|error| match error {
+            plakous_auth::PrivateStoreError::UnsupportedVersion
+            | plakous_auth::PrivateStoreError::WrittenByNewerBuild
+            | plakous_auth::PrivateStoreError::ForeignProfile
+            | plakous_auth::PrivateStoreError::ForeignAccount
+            | plakous_auth::PrivateStoreError::ForeignSlot => {
+                NativeSubscriptionError::AccountSignedIn
+            }
+            _ => NativeSubscriptionError::UnsafeStorage,
+        })?;
         if fence.is_some_and(|fence| fence.status() != CredentialStatus::Revoked) {
             return Err(NativeSubscriptionError::AccountSignedIn);
         }
