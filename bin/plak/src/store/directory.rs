@@ -29,6 +29,19 @@ pub struct DirectoryEntry {
 }
 
 impl ProductStore {
+    /// Distinct committed workspaces of one runner, including archived records.
+    /// Group saved path bytes before limiting so busy workspaces cannot hide recents.
+    pub fn recent_workspaces(&self, runner_id: &str) -> Result<Vec<(String, u64)>, String> {
+        let mut statement = self.connection.prepare(
+            "SELECT workspace_root,MAX(updated_at) AS newest FROM sessions WHERE COALESCE(json_extract(runner_display,'$.runner_id'),'local')=?1 GROUP BY workspace_root COLLATE BINARY ORDER BY newest DESC,workspace_root ASC LIMIT 20",
+        ).map_err(|_|"could not query recent workspaces".to_owned())?;
+        statement
+            .query_map([runner_id], |row| Ok((row.get(0)?, from_i64(row.get(1)?)?)))
+            .map_err(|_| "could not query recent workspaces".to_owned())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| "a recent workspace row is invalid".to_owned())
+    }
+
     /// Every record's identity for startup recovery, without the face's row limit.
     #[allow(
         dead_code,
@@ -141,6 +154,52 @@ impl ProductStore {
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recent_workspaces_group_before_limit_and_keep_archived_runner_scoped_paths() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::home::paths::PlakPaths::explicit(root.path().join("home"));
+        let mut store = ProductStore::open(&paths).unwrap();
+        let common = root.path().join("common");
+        for timestamp in 2000..2260 {
+            let mut record = sessions::SessionRecord::new(common.clone());
+            record.updated_at_unix = timestamp;
+            store.commit(&mut record).unwrap();
+        }
+        for index in 0..25 {
+            let mut record =
+                sessions::SessionRecord::new(root.path().join(format!("older-{index}")));
+            record.updated_at_unix = 100 + index;
+            record.archived = index == 24;
+            store.commit(&mut record).unwrap();
+        }
+        let remote_root = root.path().join("older-24");
+        let mut remote = sessions::SessionRecord::new(remote_root.clone());
+        remote.updated_at_unix = 9999;
+        remote.runner = Some(plakous_hosted::sessions::RunnerDisplay {
+            name: "peer".into(),
+            runner_id: "runner-a".into(),
+            workspace_root: remote_root.clone(),
+            workspace_cwd: remote_root.clone(),
+        });
+        store.commit(&mut remote).unwrap();
+        let mut expected = vec![(common.to_string_lossy().into_owned(), 2259)];
+        expected.extend((6..25).rev().map(|index| {
+            (
+                root.path()
+                    .join(format!("older-{index}"))
+                    .to_string_lossy()
+                    .into_owned(),
+                100 + index,
+            )
+        }));
+        assert_eq!(store.recent_workspaces("local").unwrap(), expected);
+        assert_eq!(
+            store.recent_workspaces("runner-a").unwrap(),
+            [(remote_root.to_string_lossy().into_owned(), 9999)]
+        );
+        assert!(store.recent_workspaces("unknown").unwrap().is_empty());
+    }
 
     #[cfg(unix)]
     #[test]
