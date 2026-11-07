@@ -83,35 +83,32 @@ pub(crate) fn run_host_command(
     let owed = sessions.owed()?;
     let host = SessionHost::new(sessions, binary, host_generation());
     let mut idle_reload = None;
-    let web = match &command.web {
-        Some(args) => {
-            let bound_web = runtime.block_on(crate::web::WebEndpoint::bind(
-                &services,
-                args,
-                Arc::clone(&host),
-                stop,
-                reload,
-            ));
-            match bound_web {
-                Ok(endpoint) => {
-                    eprintln!("plak host: web on {}", endpoint.listener());
-                    Some(endpoint)
-                }
-                Err(failure) => {
-                    bound.remove();
-                    return Err(failure);
-                }
+    let web = if let Some(args) = &command.web {
+        let bound_web = runtime.block_on(crate::web::WebEndpoint::bind(
+            &services,
+            args,
+            Arc::clone(&host),
+            stop,
+            reload,
+        ));
+        match bound_web {
+            Ok(endpoint) => {
+                eprintln!("plak host: web on {}", endpoint.listener());
+                Some(endpoint)
+            }
+            Err(failure) => {
+                bound.remove();
+                return Err(failure);
             }
         }
-        None => {
-            idle_reload = Some(runtime.spawn(async move {
-                let mut reload = reload;
-                while reload.recv().await.is_some() {
-                    eprintln!("plak host: no UI build to reload");
-                }
-            }));
-            None
-        }
+    } else {
+        idle_reload = Some(runtime.spawn(async move {
+            let mut reload = reload;
+            while reload.recv().await.is_some() {
+                eprintln!("plak host: no UI build to reload");
+            }
+        }));
+        None
     };
     eprintln!(
         "plak host: serving on {} (host {}, instance {}); tools get {}",

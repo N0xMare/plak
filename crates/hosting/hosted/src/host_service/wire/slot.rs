@@ -362,8 +362,7 @@ where
                 // The queued fence may still select a late quit. Leave the
                 // slot releasing so no attach reuses that actor: it must
                 // join before reopening, just like any other release.
-                old.request_release();
-                old.end_reopen(None);
+                old.expire_reopen();
                 return Err(CliFailure::new(
                     "the session did not acknowledge its release in time; retry attaching after it releases",
                 ));
