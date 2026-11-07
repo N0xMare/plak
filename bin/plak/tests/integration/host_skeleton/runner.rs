@@ -278,14 +278,18 @@ fn runner_job_survives_host_loss_and_is_readopted_before_attach() {
     let Some(fixture) = fixture() else { return };
     let (mut host, session, node) = start_job(&fixture, false);
     let (pid, daemon) = job(&fixture);
-    let refused = embedded(&fixture, &session).expect_err("a live host's custody was ignored");
+    let refused = embedded(&fixture, &session)
+        .err()
+        .expect("a live host's custody was ignored");
     assert_eq!(refused["code"], "tree_hosted_elsewhere", "{refused}");
     kill(&mut host);
     assert!(
         alive(pid) && alive(daemon),
         "host loss killed the daemon's job"
     );
-    let refused = embedded(&fixture, &session).expect_err("an embedded face took a running job");
+    let refused = embedded(&fixture, &session)
+        .err()
+        .expect("an embedded face took a running job");
     assert_eq!(refused["code"], "local_runner_processes", "{refused}");
     let mut host = start(&fixture);
     assert!(alive(pid));
@@ -318,7 +322,8 @@ fn a_foreground_host_cut_stops_at_transfer_and_records_unknown_once() {
         kill(&mut host);
         assert!(alive(pid));
         let refused = embedded(&fixture, &session)
-            .expect_err("an embedded face took a live foreground process");
+            .err()
+            .expect("an embedded face took a live foreground process");
         assert_eq!(refused["code"], "local_runner_processes", "{refused}");
         // Stop completed, but its transfer answer has not reached a journal.
         for _ in 0..2 {
