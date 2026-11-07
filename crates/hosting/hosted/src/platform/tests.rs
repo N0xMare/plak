@@ -14,6 +14,8 @@ use crate::binding::CompositionSelection;
 use crate::platform::ApiWindow;
 use crate::platform::{platform_model, platform_models};
 use plakous::agent::ReasoningEffort;
+#[path = "tests/default_bindings.rs"]
+mod default_bindings;
 
 struct Credentials(&'static str);
 impl OpenAiCredentials for Credentials {
@@ -125,6 +127,7 @@ async fn product_api_bindings_compile_exact_tools_and_reconstruct_same_credentia
                 "key replacement must not inherit encrypted history"
             );
             assert_eq!(first.target_binding().model().as_str(), model);
+            default_bindings::assert_main_bytes(provider, model, effort, &first.target_binding());
             spec.account = format!("{}/work", provider.account()).parse().unwrap();
             let named =
                 construct_platform_runtime(provider, &Credentials("fixture-key-one"), &spec, None)

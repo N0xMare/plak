@@ -1237,6 +1237,15 @@ directory is not the compatibility-lock parent before committing a record.
 Codex online/offline constructors reject the same record under a different slot
 token. Native source-scope tests preserve default authority bytes while requiring
 sibling names to differ without changing authenticated upstream identity.
+Inventory tests prove absent reads create nothing and verticals remain separate.
+Sibling refresh claims coexist under distinct compatibility locks; quarantining
+one claim cannot quarantine, renew or disclose another slot's credential.
+Named credential refusal rendering keeps the full-reference detail and the
+existing Unspecified remedy; no frontend renders a default-slot login remedy.
+Default API binding/configuration and v12 export bytes are pinned to pre-account
+fixtures; seven-vertical tests pair default and named profile/prompt behavior
+and capability decisions. Usage tests preserve provider email detail without
+copying its reading to a sibling or default row.
 
 Repository tooling tests live in `tests/tooling/`; opt-in live scenarios and
 their status page live in `tests/live/`. Build helpers

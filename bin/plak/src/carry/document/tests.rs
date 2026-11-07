@@ -3,6 +3,15 @@ use std::fs;
 
 const V11_FIXTURE: &str = include_str!("../../../tests/fixtures/session-export-v11.json");
 
+#[test]
+fn default_account_export_bytes_match_the_pre_account_baseline() {
+    let expected = include_str!("../../../tests/fixtures/session-export-v12-default.json");
+    assert_eq!(
+        serde_json::to_vec(&sample_document()).unwrap(),
+        expected.trim_end().as_bytes()
+    );
+}
+
 fn document_versions() -> [CarryDocument; 2] {
     [
         sample_document(),
