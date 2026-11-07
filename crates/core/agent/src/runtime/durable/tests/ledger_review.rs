@@ -258,17 +258,20 @@ async fn in_flight_nested_settlement_keeps_closed_debt_until_outer_boundary() ->
         )
         .strip_prefix("plakous_agent::")
         .ok_or("test name")?;
-        let output = std::process::Command::new(std::env::current_exe()?)
-            .args(["--exact", name, "--nocapture"])
-            .env("PLAK_TEST_LEDGER_SETTLEMENT_CHILD", "1")
-            .env("PLAK_TEST_LEDGER_RETIREMENT_HIGH_WATER", "16")
-            .output()?;
-        assert!(
-            output.status.success(),
-            "{}\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
+        for control in ["none", "cancel", "shutdown"] {
+            let output = std::process::Command::new(std::env::current_exe()?)
+                .args(["--exact", name, "--nocapture"])
+                .env("PLAK_TEST_LEDGER_SETTLEMENT_CHILD", "1")
+                .env("PLAK_TEST_LEDGER_SETTLEMENT_CONTROL", control)
+                .env("PLAK_TEST_LEDGER_RETIREMENT_HIGH_WATER", "16")
+                .output()?;
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
         return Ok(());
     }
     let directory = tempfile::tempdir()?;
@@ -408,9 +411,23 @@ async fn settlement_case(
         );
     }
     assert!(settled.manifest().ledger().retired_counter().is_none());
+    match std::env::var("PLAK_TEST_LEDGER_SETTLEMENT_CONTROL").as_deref() {
+        Ok("cancel") => {
+            turn.control().cancel().await?;
+        }
+        Ok("shutdown") => {
+            let submission = agent
+                .command(TurnCommand::Shutdown {
+                    command_id: CommandId::new("shutdown:in-flight-retirement")?,
+                })
+                .await?;
+            assert!(submission.acknowledgement().is_accepted());
+        }
+        _ => {}
+    }
     evidence.source_release.notify_one();
     let result = turn.result().await?;
-    assert!(matches!(result.outcome(), TurnResultOutcome::Completed(_)));
+    assert_control_retirement(&settled, &result, store)?;
     assert!(
         result
             .checkpoint()
@@ -420,5 +437,94 @@ async fn settlement_case(
             > 0
     );
     assert!(lock_mutex(&store.accepted_commits).len() > 20);
+    Ok(())
+}
+
+fn assert_control_retirement(
+    before: &RuntimeCheckpoint,
+    result: &TurnResult,
+    store: &TestCreateStore,
+) -> TestResult {
+    let control = std::env::var("PLAK_TEST_LEDGER_SETTLEMENT_CONTROL")?;
+    if control == "none" {
+        assert!(matches!(result.outcome(), TurnResultOutcome::Completed(_)));
+        return Ok(());
+    }
+    assert!(matches!(result.outcome(), TurnResultOutcome::Cancelled(_)));
+    let snapshots = lock_mutex(&store.accepted_commits);
+    let receipt = snapshots
+        .iter()
+        .find_map(|(checkpoint, _)| {
+            let ledger = checkpoint.manifest().ledger();
+            ledger
+                .operations()
+                .iter()
+                .any(|record| {
+                    before
+                        .manifest()
+                        .ledger()
+                        .operation(record.operation_id())
+                        .is_none()
+                        && matches!(record.kind(), DurableOperationKind::Command { .. })
+                        && matches!(record.state(), DurableOperationState::Finalized(_))
+                })
+                .then_some(checkpoint)
+        })
+        .ok_or("control receipt publication")?;
+    let ledger = receipt.manifest().ledger();
+    for record in before.manifest().ledger().operations() {
+        assert!(
+            ledger.operation(record.operation_id()).is_some(),
+            "{control} receipt retired {} while the cell was in flight",
+            record.operation_id()
+        );
+    }
+    assert_eq!(
+        ledger.retired_counter(),
+        before.manifest().ledger().retired_counter()
+    );
+    assert!(ledger.operations().iter().any(|record| matches!(
+        record.kind(),
+        DurableOperationKind::CompositionEvaluation { .. }
+    ) && !matches!(
+        record.state(),
+        DurableOperationState::Finalized(_)
+    )));
+    let evaluation = before
+        .manifest()
+        .ledger()
+        .operations()
+        .into_iter()
+        .find(|record| {
+            matches!(
+                record.kind(),
+                DurableOperationKind::CompositionEvaluation { .. }
+            ) && !matches!(record.state(), DurableOperationState::Finalized(_))
+        })
+        .ok_or("in-flight evaluation")?
+        .operation_id();
+    let first_retirement = snapshots
+        .iter()
+        .find(|(checkpoint, _)| {
+            checkpoint
+                .manifest()
+                .ledger()
+                .retired_attempts(result.turn_id())
+                > 0
+        })
+        .ok_or("outer-boundary retirement")?;
+    assert!(
+        matches!(
+            first_retirement
+                .0
+                .manifest()
+                .ledger()
+                .operation(evaluation)
+                .ok_or("retained evaluation at outer boundary")?
+                .state(),
+            DurableOperationState::Finalized(_)
+        ),
+        "{control} retired evidence before the outer boundary"
+    );
     Ok(())
 }
