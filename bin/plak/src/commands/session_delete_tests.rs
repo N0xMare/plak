@@ -237,13 +237,99 @@ fn deletion_reconciles_creation_before_locator_publication() -> TestResult {
     let services = crate::shell::services::Services::for_home(f.paths.clone());
     lifecycle::delete_confirmed(&services, &record.id, false)?;
     assert!(f.product.load(&record.id).checked()?.is_none());
-    assert!(
-        f.runtime
-            .run(f.runtime.sessions.head_is_quiescent(locator))
-            .checked()?
-            .is_err()
-    );
+    let missing = f
+        .runtime
+        .run(f.runtime.sessions.head_is_quiescent(locator))
+        .checked()?
+        .unwrap_err();
+    assert_eq!(missing.kind(), AgentSessionsErrorKind::NotFound);
     assert!(f.product.load(&f.record.id).checked()?.is_some());
+    Ok(())
+}
+
+#[test]
+fn lifecycle_archive_refuses_running_process_without_a_turn() -> TestResult {
+    use plakous::tools::JobHost as _;
+    use plakous_offline_crash_harness::evidence::EvidenceKind;
+    let mut f = fixture(false)?;
+    let host = Arc::new(plakous::tools::LocalJobHost::new());
+    let evidence = f.paths.home().join("process-evidence.jsonl");
+    let controller =
+        BoundaryController::quiet_from_evidence_path(CrashBoundary::None, &evidence).checked()?;
+    let plan = Arc::new(serde_json::from_value(serde_json::json!({
+        "version": plakous_offline_crash_harness::script::SCRIPT_VERSION,
+        "process_tools": true,
+        "steps": [
+            {"output": {"tool": {"name": "process_session_start", "arguments": {
+                "command": "read line", "workdir": ".", "login": false,
+                "tty": false, "keep_stdin_open": true, "yield_time_ms": 0,
+                "max_output_bytes": 8192
+            }}}, "finish": "tool_calls"},
+            {"stream": [{"text": "waiting"}, {"stall": 30000}]}
+        ]
+    }))?);
+    let mut record = product_sessions::SessionRecord::new(f.paths.home().to_path_buf());
+    let binding =
+        plakous_offline_crash_harness::scripted_runtime_binding(f.paths.home(), controller, plan)
+            .checked()?
+            .with_job_host(host.clone());
+    let CreateSessionOutcome::Created { session, .. } = f
+        .runtime
+        .run(f.runtime.sessions.create(CreateSessionRequest::new(
+            SessionOperationId::new(&record.create_operation_id).checked()?,
+            binding,
+        )))
+        .checked()??
+    else {
+        return Err("expected created session".into());
+    };
+    let line = session.line();
+    let agent = session.agent().clone();
+    f.runtime
+        .executor
+        .block_on(async {
+            let turn = agent.prompt("start process").await?;
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                loop {
+                    let dispatched =
+                        plakous_offline_crash_harness::evidence::read_evidence(&evidence)
+                            .unwrap()
+                            .iter()
+                            .filter(|record| record.kind == EvidenceKind::ProviderDispatched)
+                            .count();
+                    if !agent.jobs().is_empty() && dispatched >= 2 {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await?;
+            turn.control().cancel().await?;
+            turn.result().await?;
+            TestResult::Ok(())
+        })
+        .checked()??;
+    assert_eq!(agent.jobs()[0].status, plakous::tools::JobStatus::Running);
+    let locator = f.runtime.run(session.release_for_transfer()).checked()??;
+    record.bind_plakous_locator(locator).checked()?;
+    f.product.commit(&mut record).checked()?;
+    let services = crate::shell::services::Services::for_home(f.paths.clone());
+    let result = lifecycle::archive_offline(&services, &record.id);
+    host.service(line)
+        .ok_or("process service")?
+        .stop_jobs(
+            plakous::tools::JobStopReason::SessionExit,
+            std::time::Duration::from_millis(250),
+        )
+        .checked()?;
+    assert!(matches!(
+        result,
+        Err(LifecycleError::Refused(LifecycleRefusal::Busy {
+            state_unknown: true,
+            ..
+        }))
+    ));
+    assert!(!f.product.load(&record.id).checked()?.archived);
     Ok(())
 }
 

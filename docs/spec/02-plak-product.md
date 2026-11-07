@@ -1533,7 +1533,7 @@ The CLI exposes `plak session rename <full-id> <title>` and
 clears only the archive flag and starts no work.
 `plak session archive <full-id> [--yes]` confirms before hiding the session.
 Lifecycle commands accept full ids home-wide without interpreting a remote
-workspace path on the host; short ids remain workspace-qualified. If a live
+workspace path on the host; deletion retains workspace-qualified short ids. If a live
 host answers, the CLI forwards lifecycle requests to it. Only confirmed host
 absence permits offline mutation; an uncertain connection or refusal never
 falls back.
