@@ -11,6 +11,14 @@ composition, and protocol it named — nothing adjacent. The second is that
 symbol that is nameable, a command that parses, and a route that renders are all
 accessibility facts. None of them is a support or correctness promise.
 
+Offline runner fault injection targets only the recorded daemon that still
+has the fixture home's lock file open, never a host's transient startup probe.
+Its exit wait tracks the killed daemon, not a replacement the live host may
+already have started while redialing. Fixture teardown instead re-lists and
+kills that home's daemons until none remain. A real-daemon regression places
+a successor and a startup probe before the exit observation, on both supported
+platforms.
+
 Direct Anthropic API refusal qualification follows Anthropic's
 [refusals and fallback documentation](https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback),
 which treats partial refused output as incomplete and instructs consumers to

@@ -211,17 +211,15 @@ pub(super) fn kill_local_daemon_only(home: &Path) {
             .flatten()
         {
             if lock.path().extension().is_some_and(|ext| ext == "lock") {
-                for pid in opened_by(&lock.path())
-                    .into_iter()
+                let daemons = daemon_openers(&lock.path());
+                for pid in daemons
+                    .iter()
+                    .copied()
                     .filter_map(rustix::process::Pid::from_raw)
                 {
                     let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
                 }
-                let deadline = Instant::now() + WAIT;
-                while !opened_by(&lock.path()).is_empty() {
-                    assert!(Instant::now() < deadline, "the old daemon did not exit");
-                    std::thread::sleep(Duration::from_millis(10));
-                }
+                wait_for_daemons(&lock.path(), &daemons);
             }
         }
     }
@@ -239,48 +237,53 @@ pub(super) fn kill_home_local_runner(home: &Path) {
             if lock.path().extension().is_none_or(|ext| ext != "lock") {
                 continue;
             }
-            for daemon in opened_by(&lock.path()) {
-                let output = Command::new("ps")
-                    .args(["-axo", "pid=,ppid="])
-                    .output()
-                    .expect("process tree");
-                let pairs = String::from_utf8_lossy(&output.stdout)
-                    .lines()
-                    .filter_map(|line| {
-                        let mut columns = line.split_whitespace();
-                        Some((
-                            columns.next()?.parse::<i32>().ok()?,
-                            columns.next()?.parse::<i32>().ok()?,
-                        ))
-                    })
-                    .collect::<Vec<_>>();
-                let mut owned = vec![daemon];
-                let mut index = 0;
-                while index < owned.len() {
-                    let parent = owned[index];
-                    owned.extend(
-                        pairs
-                            .iter()
-                            .filter(|(_, ppid)| *ppid == parent)
-                            .map(|(pid, _)| *pid),
-                    );
-                    index += 1;
-                }
-                for pid in owned
-                    .into_iter()
-                    .rev()
-                    .filter_map(rustix::process::Pid::from_raw)
-                {
-                    let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
-                    let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
-                }
-            }
             let deadline = Instant::now() + WAIT;
-            while !opened_by(&lock.path()).is_empty() {
+            loop {
+                let daemons = daemon_openers(&lock.path());
+                if daemons.is_empty() {
+                    break;
+                }
                 assert!(
                     Instant::now() < deadline,
                     "a home-local daemon outlived fixture cleanup"
                 );
+                for daemon in daemons {
+                    let output = Command::new("ps")
+                        .args(["-axo", "pid=,ppid="])
+                        .output()
+                        .expect("process tree");
+                    let pairs = String::from_utf8_lossy(&output.stdout)
+                        .lines()
+                        .filter_map(|line| {
+                            let mut columns = line.split_whitespace();
+                            Some((
+                                columns.next()?.parse::<i32>().ok()?,
+                                columns.next()?.parse::<i32>().ok()?,
+                            ))
+                        })
+                        .collect::<Vec<_>>();
+                    let mut owned = vec![daemon];
+                    let mut index = 0;
+                    while index < owned.len() {
+                        let parent = owned[index];
+                        owned.extend(
+                            pairs
+                                .iter()
+                                .filter(|(_, ppid)| *ppid == parent)
+                                .map(|(pid, _)| *pid),
+                        );
+                        index += 1;
+                    }
+                    for pid in owned
+                        .into_iter()
+                        .rev()
+                        .filter_map(rustix::process::Pid::from_raw)
+                    {
+                        let _ =
+                            rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+                        let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
+                    }
+                }
                 std::thread::sleep(Duration::from_millis(20));
             }
         }
@@ -633,6 +636,60 @@ pub(super) fn copy_directory(source: &Path, target: &Path) {
     }
 }
 
+/// Only the recorded daemon, not a host briefly probing the startup lock.
+/// Confirm it still has this fixture's file open before authorizing a signal;
+/// a stale pid in an unlocked file is not authority to kill a process.
+fn daemon_openers(path: &Path) -> Vec<i32> {
+    let Some(holder) = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| text.trim().parse::<i32>().ok())
+    else {
+        return Vec::new();
+    };
+    opened_by(path)
+        .into_iter()
+        .filter(|pid| *pid == holder)
+        .collect()
+}
+
+fn wait_for_daemons(path: &Path, daemons: &[i32]) {
+    let deadline = Instant::now() + WAIT;
+    // The live host may already have redialed and started a successor. Only
+    // the processes we killed must disappear, not every future opener.
+    while opened_by(path).iter().any(|pid| daemons.contains(pid)) {
+        assert!(Instant::now() < deadline, "the old daemon did not exit");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn daemon_exit_wait_ignores_a_successor_and_a_startup_probe() {
+    let fixture = Fixture::new(&json!({"version": 1}));
+    let runner = ChildRunner::of(&fixture);
+    let old = runner.start();
+    let lock = std::fs::read_dir(runner.home.join("runner/run"))
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| path.extension().is_some_and(|ext| ext == "lock"))
+        .unwrap()
+        .canonicalize()
+        .unwrap();
+    let probe = std::fs::File::open(&lock).unwrap();
+    assert!(opened_by(&lock).contains(&i32::try_from(std::process::id()).unwrap()));
+    assert_eq!(daemon_openers(&lock), [old]);
+    runner.kill();
+    // Force the race deterministically: the successor is already listening
+    // before the old daemon's exit is observed by the waiter.
+    let successor = runner.start();
+    assert_ne!(old, successor);
+    wait_for_daemons(&lock, &[old]);
+    assert_eq!(daemon_openers(&lock), [successor]);
+    runner.kill();
+    assert!(daemon_openers(&lock).is_empty());
+    drop(probe);
+}
+
 /// The processes that have `path` open, from their descriptor tables.
 #[cfg(target_os = "linux")]
 fn opened_by(path: &Path) -> Vec<i32> {
@@ -883,7 +940,7 @@ impl ChildRunner {
             .flatten()
             .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "lock"))
             .filter_map(|entry| entry.path().canonicalize().ok())
-            .flat_map(|lock| opened_by(&lock))
+            .flat_map(|lock| daemon_openers(&lock))
             .collect()
     }
 
@@ -891,19 +948,22 @@ impl ChildRunner {
     /// group (the daemon, not its jobs, which run in groups of their own),
     /// and waits until none has its lock file open.
     pub(super) fn kill(&self) {
-        let mut daemons = self.holders();
-        daemons.extend(self.pid());
-        for pid in daemons {
-            let Some(pid) = rustix::process::Pid::from_raw(pid) else {
-                continue;
-            };
-            let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
-            // Reaps a daemon this harness started; any other is not its child.
-            let _ = rustix::process::waitpid(Some(pid), rustix::process::WaitOptions::empty());
-        }
-        let _ = std::fs::remove_file(&self.pid_file);
         let deadline = Instant::now() + WAIT;
-        while !self.holders().is_empty() {
+        loop {
+            let mut daemons = self.holders();
+            daemons.extend(self.pid());
+            if daemons.is_empty() {
+                break;
+            }
+            for pid in daemons {
+                let Some(pid) = rustix::process::Pid::from_raw(pid) else {
+                    continue;
+                };
+                let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+                // Reaps a daemon this harness started; any other is not its child.
+                let _ = rustix::process::waitpid(Some(pid), rustix::process::WaitOptions::empty());
+            }
+            let _ = std::fs::remove_file(&self.pid_file);
             if Instant::now() >= deadline {
                 // A fixture dropped by a failing test reports that failure.
                 assert!(
