@@ -928,11 +928,9 @@ impl ChildRunner {
         None
     }
 
-    /// Every daemon serving from this runner home: each process that has a
-    /// socket's lock file open, which only a daemon of this home keeps open
-    /// for its life. A daemon the host's bridge started is found here as
-    /// well as one this harness started. Asking takes no lock, so it never
-    /// turns away a daemon that is starting.
+    /// Every recorded daemon still holding open a socket's lock file in
+    /// this runner home, including one started by the host's bridge.
+    /// Asking takes no lock and excludes transient startup probes.
     fn holders(&self) -> Vec<i32> {
         let run = self.home.join("runner").join("run");
         std::fs::read_dir(run)
