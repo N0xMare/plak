@@ -232,6 +232,39 @@ fn named_secrets_are_private_files_listed_by_name_only() {
     assert!(set_named_secret(&paths, "big", &"x".repeat(MAX_NAMED_SECRET_BYTES + 1)).is_err());
 }
 
+#[test]
+fn all_secret_shelves_accept_owner_read_only_and_refuse_shared_or_unreadable_modes() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let root = tempdir().unwrap();
+    let paths = PlakPaths::explicit(root.path().join("home"));
+    for shelf in [
+        SecretShelf::Named,
+        SecretShelf::Runner,
+        SecretShelf::Web,
+        SecretShelf::Api(plakous_hosted::account::Vertical::OpenAi),
+    ] {
+        set_shelf_secret(&paths, shelf, "work", "synthetic-secret").unwrap();
+        let path = paths.secret_shelf_dir(shelf).join("work.secret");
+        for mode in [0o400, 0o600] {
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+            assert_eq!(
+                read_shelf_secret(&paths, shelf, "work")
+                    .unwrap()
+                    .unwrap()
+                    .expose_secret(),
+                "synthetic-secret"
+            );
+        }
+        for mode in [0o000, 0o200, 0o440, 0o604, 0o644] {
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+            assert!(
+                read_shelf_secret(&paths, shelf, "work").is_err(),
+                "{shelf:?}: {mode:o}"
+            );
+        }
+    }
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(24))]
 

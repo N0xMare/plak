@@ -947,11 +947,13 @@ is never an argv value; the CLI prompts with masked input. **Plak never loads a
 `.env` file.**
 
 Named API keys use only `secrets/api/<vertical>/<name>.secret`, through the
-API SecretShelf, with 0700 directories and 0600 single-link regular files owned
-by the effective user. They never consult environment variables, default key
+API SecretShelf, with 0700 directories and single-link regular files owned
+by the effective user, created at 0600. They never consult environment variables, default key
 files, generic named secrets or runner secrets. The existing default key paths
 and environment precedence remain unchanged.
 
+All secret shelves accept owner-readable, owner-only file modes on reads
+(`mode & 0o077 == 0 && mode & 0o400 != 0`), including 0400; writes create 0600.
 Secret reads retain a verified directory descriptor. They stat the entry
 relative to that descriptor without following links, open relative to the same
 descriptor with `O_NOFOLLOW`, and revalidate the opened descriptor's owner,
