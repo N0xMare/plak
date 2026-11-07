@@ -98,28 +98,25 @@ pub(crate) async fn dial(paths: &PlakPaths) -> CliResult<RunnerClient> {
     let attempt = async {
         let mut starter = start::Starter::new();
         loop {
-            match tokio::net::UnixStream::connect(home.socket_path()).await {
-                Ok(stream) => {
-                    match RunnerClient::connect_home_local(
-                        stream,
-                        bind.clone(),
-                        ClientWindows::default(),
-                        Some(journal.clone()),
-                    )
-                    .await
-                    {
-                        Ok((client, _)) => return Ok(client),
-                        // An idle daemon can exit with a connection queued.
-                        Err(ConnectError::Closed) => {}
-                        Err(error) => return Err(CliFailure::new(error.to_string())),
-                    }
+            if let Ok(stream) = tokio::net::UnixStream::connect(home.socket_path()).await {
+                match RunnerClient::connect_home_local(
+                    stream,
+                    bind.clone(),
+                    ClientWindows::default(),
+                    Some(journal.clone()),
+                )
+                .await
+                {
+                    Ok((client, _)) => return Ok(client),
+                    // An idle daemon can exit with a connection queued.
+                    Err(ConnectError::Closed) => {}
+                    Err(error) => return Err(CliFailure::new(error.to_string())),
                 }
-                Err(_) => {
-                    check_start(&home)?;
-                    // Socket removal precedes lock release. A busy lock is
-                    // not permission to spawn another daemon.
-                    let _ = starter.start(paths, &home).await;
-                }
+            } else {
+                check_start(&home)?;
+                // Socket removal precedes lock release. A busy lock is
+                // not permission to spawn another daemon.
+                let _ = starter.start(paths, &home).await;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
@@ -135,19 +132,18 @@ pub(crate) async fn reconnect(paths: &PlakPaths, client: &RunnerClient) -> CliRe
     let attempt = async {
         let mut starter = start::Starter::new();
         loop {
-            match tokio::net::UnixStream::connect(home.socket_path()).await {
-                Ok(stream) => match client.reconnect(stream).await {
+            if let Ok(stream) = tokio::net::UnixStream::connect(home.socket_path()).await {
+                match client.reconnect(stream).await {
                     Ok(_) => {
                         let _ = client.recover().await;
                         return Ok(());
                     }
                     Err(ConnectError::Closed) => {}
                     Err(error) => return Err(CliFailure::new(error.to_string())),
-                },
-                Err(_) => {
-                    check_start(&home)?;
-                    let _ = starter.start(paths, &home).await;
                 }
+            } else {
+                check_start(&home)?;
+                let _ = starter.start(paths, &home).await;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }

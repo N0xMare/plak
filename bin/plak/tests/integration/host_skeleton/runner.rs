@@ -621,7 +621,7 @@ fn a_childs_daemon_job_survives_host_loss_and_handoff() {
 }
 
 fn start_child_job(fixture: &Fixture) -> (Host, String, NodeAddress) {
-    start_child_job_variant(fixture, false)
+    start_child_job_variant(fixture, false, &[])
 }
 
 fn write_resume_policy(fixture: &Fixture, policy: &str) {
@@ -641,7 +641,11 @@ fn hold_child_script(fixture: &Fixture) {
     })).unwrap()).unwrap();
 }
 
-fn start_child_job_variant(fixture: &Fixture, busy: bool) -> (Host, String, NodeAddress) {
+fn start_child_job_variant(
+    fixture: &Fixture,
+    busy: bool,
+    env: &[(&str, String)],
+) -> (Host, String, NodeAddress) {
     let marker = fixture.root.join("local-job.marker");
     let child = fixture.root.join("child-script.json");
     std::fs::write(&child, serde_json::to_vec(&json!({"version": 1, "steps": [
@@ -659,7 +663,7 @@ fn start_child_job_variant(fixture: &Fixture, busy: bool) -> (Host, String, Node
         json!({"stream": [{"gate": {"file": marker}}], "output": {"text": ANSWER}})
     });
     fixture.write_script(&script);
-    let host = start(fixture);
+    let host = start_env(fixture, &[], env);
     let mut client = Client::connect(&host);
     let Outcome::Ok(Answer::Created { session, node, .. }) =
         client.request(1, new_session(&fixture.workspace()))
