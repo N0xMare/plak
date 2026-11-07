@@ -925,6 +925,18 @@ effect. Key files are mode `0600` inside the `0700` `secrets/` directory. A key
 is never an argv value; the CLI prompts with masked input. **Plak never loads a
 `.env` file.**
 
+Named API keys use only `secrets/api/<vertical>/<name>.secret`, through the
+API SecretShelf, with 0700 directories and 0600 single-link regular files owned
+by the effective user. They never consult environment variables, default key
+files, generic named secrets or runner secrets. The existing default key paths
+and environment precedence remain unchanged.
+
+Secret reads retain a verified directory descriptor. They stat the entry
+relative to that descriptor without following links, open relative to the same
+descriptor with `O_NOFOLLOW`, and revalidate the opened descriptor's owner,
+mode, type, link count and device/inode identity before reading any bytes.
+This also governs default API key reads, without moving or re-encoding them.
+
 The only account label an API key supplies is a fingerprint — `sha256:` plus
 eight hex characters of the digest — or the name of the environment variable
 that won. OAuth credentials expose no offline identity, so their rows carry no

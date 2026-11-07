@@ -9283,6 +9283,12 @@ variables, spelled the same way `plak doctor` spells them.
 
 ### 8.2 The two credential routes
 
+`plak key set|status|clear <vertical>/<name>` and
+`plak status <api-vertical>/<name>` operate on that exact home-local API key.
+Set creates the named key file; clear removes it. Named keys are file-only,
+so an exported default key variable neither shadows nor blocks these commands.
+Creating a key does not by itself admit an inference route.
+
 The host account vocabulary has a validated `AccountRef`: a total seven-way
 vertical and an optional local name. Names match `[a-z][a-z0-9-]{0,31}` except
 the reserved `default`; aliases normalize before a name, while `xai` remains

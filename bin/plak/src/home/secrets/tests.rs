@@ -4,6 +4,46 @@ use proptest::prelude::*;
 use std::ffi::OsStr;
 use tempfile::tempdir;
 
+#[test]
+fn named_api_keys_are_disjoint_from_defaults_siblings_and_generic_secrets() {
+    let directory = tempdir().unwrap();
+    let paths = PlakPaths::explicit(directory.path().join("home"));
+    set_named_secret(&paths, "work", "generic-secret").unwrap();
+    for vertical in ["openai", "anthropic", "xai-api", "openrouter"] {
+        let account = format!("{vertical}/work");
+        let sibling = format!("{vertical}/personal");
+        assert_eq!(env_var_for_account(&account), None);
+        assert!(resolve_api_key(&paths, &account).unwrap().is_none());
+        set_api_key(&paths, &account, &format!("{vertical}-work-key")).unwrap();
+        set_api_key(&paths, &sibling, &format!("{vertical}-personal-key")).unwrap();
+        assert_eq!(
+            resolve_api_key(&paths, &account).unwrap().unwrap(),
+            format!("{vertical}-work-key")
+        );
+        assert_eq!(
+            resolve_api_key(&paths, &sibling).unwrap().unwrap(),
+            format!("{vertical}-personal-key")
+        );
+        assert_eq!(
+            key_status(&paths, &account).unwrap().source,
+            KeySource::File
+        );
+        assert!(clear_api_key(&paths, &account).unwrap());
+        assert!(resolve_api_key(&paths, &account).unwrap().is_none());
+        assert_eq!(
+            resolve_api_key(&paths, &sibling).unwrap().unwrap(),
+            format!("{vertical}-personal-key")
+        );
+    }
+    assert_eq!(
+        read_named_secret(&paths, "work")
+            .unwrap()
+            .unwrap()
+            .expose_secret(),
+        "generic-secret"
+    );
+}
+
 fn unshadowed_api_key_account() -> Option<&'static str> {
     ["openai", "xai-api", "anthropic", "openrouter"]
         .into_iter()
@@ -70,6 +110,10 @@ fn direct_key_file_enforces_raw_size_limit() {
     let path = paths.api_key_file(account);
 
     fs::write(&path, vec![b'x'; MAX_API_KEY_BYTES]).unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    }
     assert_eq!(
         resolve_api_key(&paths, account).unwrap().unwrap().len(),
         MAX_API_KEY_BYTES
@@ -77,9 +121,10 @@ fn direct_key_file_enforces_raw_size_limit() {
     assert!(file_fingerprint_if_present(&paths, account).is_some());
 
     fs::write(&path, vec![b'x'; MAX_API_KEY_BYTES + 1]).unwrap();
-    assert_eq!(
-        resolve_api_key(&paths, account).unwrap_err(),
-        "API key file is too large"
+    assert!(
+        resolve_api_key(&paths, account)
+            .unwrap_err()
+            .contains("too large")
     );
     assert_eq!(file_fingerprint_if_present(&paths, account), None);
 }

@@ -425,6 +425,7 @@ impl Command {
             Self::SecretSet { shelf, .. }
             | Self::SecretRm { shelf, .. }
             | Self::SecretList { shelf } => match shelf {
+                crate::home::paths::SecretShelf::Api(_) => "key",
                 crate::home::paths::SecretShelf::Named => "secret",
                 crate::home::paths::SecretShelf::Runner => "runner",
                 crate::home::paths::SecretShelf::Web => "web",

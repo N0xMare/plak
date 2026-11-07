@@ -245,6 +245,9 @@ impl PlakPaths {
     /// The directory of one shelf of named secrets.
     #[must_use]
     pub fn secret_shelf_dir(&self, kind: SecretShelf) -> PathBuf {
+        if let SecretShelf::Api(vertical) = kind {
+            return self.secrets_dir().join("api").join(vertical.as_str());
+        }
         self.secrets_dir().join(kind.directory())
     }
 
@@ -276,6 +279,12 @@ impl PlakPaths {
     /// refuses the secrets directory itself.
     pub fn ensure_secret_shelf_dir(&self, kind: SecretShelf) -> Result<(), String> {
         self.ensure_layout()?;
+        if let SecretShelf::Api(vertical) = kind {
+            if !vertical.is_api() {
+                return Err("subscription accounts do not have API key shelves".into());
+            }
+            ensure_private_child(&self.secrets_dir().join("api"), "API secrets directory")?;
+        }
         ensure_private_child(&self.secret_shelf_dir(kind), kind.label())
     }
 
@@ -306,6 +315,12 @@ impl PlakPaths {
             Err(_) => return Err(format!("could not inspect the {}", kind.label())),
         }
         require_private_directory(&self.secrets_dir(), "Plak secrets directory")?;
+        if let SecretShelf::Api(vertical) = kind {
+            if !vertical.is_api() {
+                return Err("subscription accounts do not have API key shelves".into());
+            }
+            require_private_directory(&self.secrets_dir().join("api"), "API secrets directory")?;
+        }
         require_private_directory(&dir, &format!("Plak {}", kind.label()))?;
         Ok(true)
     }
@@ -559,6 +574,8 @@ fn discover_project_root(
 /// server placed on it. A name on one shelf never resolves from the other.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SecretShelf {
+    /// `secrets/api/<vertical>/`: named, file-only API accounts.
+    Api(plakous_hosted::account::Vertical),
     /// `secrets/named/` (`plak secret set`).
     Named,
     /// `secrets/runner/` (`plak runner secret set`).
@@ -570,6 +587,7 @@ pub enum SecretShelf {
 impl SecretShelf {
     const fn directory(self) -> &'static str {
         match self {
+            Self::Api(_) => "api",
             Self::Named => "named",
             Self::Runner => "runner",
             Self::Web => "web",
@@ -578,6 +596,7 @@ impl SecretShelf {
 
     const fn label(self) -> &'static str {
         match self {
+            Self::Api(_) => "API account secrets directory",
             Self::Named => "named secrets directory",
             Self::Runner => "runner secrets directory",
             Self::Web => "web secrets directory",

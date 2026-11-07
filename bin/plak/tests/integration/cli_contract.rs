@@ -47,6 +47,73 @@ fn publication_command(root: &std::path::Path, args: &[&str]) -> Command {
 }
 
 #[test]
+fn named_api_key_commands_ignore_environment_and_the_default_key_file() {
+    use std::process::Stdio;
+    let root = tempfile::tempdir().unwrap();
+    let mut child = publication_command(root.path(), &["key", "set", "openai/work"])
+        .env("OPENAI_API_KEY", "synthetic-environment-key")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"synthetic-named-key\n")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let named = root.path().join("home/secrets/api/openai/work.secret");
+    assert_eq!(
+        std::fs::read_to_string(&named).unwrap(),
+        "synthetic-named-key"
+    );
+    // This unsafe default would fail a validated read; it must not be inspected.
+    std::fs::write(
+        root.path().join("home/secrets/openai.key"),
+        "synthetic-default-key",
+    )
+    .unwrap();
+    for args in [
+        vec!["key", "status", "openai/work"],
+        vec!["status", "openai/work"],
+        vec!["key", "clear", "openai/work"],
+        vec!["key", "status", "openai/work"],
+    ] {
+        let output = publication_command(root.path(), &args)
+            .env("OPENAI_API_KEY", "synthetic-environment-key")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        for secret in [
+            "synthetic-environment-key",
+            "synthetic-default-key",
+            "synthetic-named-key",
+        ] {
+            assert!(!text.contains(secret), "key material escaped in output");
+        }
+        assert!(!text.contains("OPENAI_API_KEY"));
+        assert!(!text.contains("shadow"));
+    }
+    assert!(!named.exists());
+}
+
+#[test]
 fn publication_read_only_commands_leave_missing_home_untouched() {
     for args in [
         vec!["status"],

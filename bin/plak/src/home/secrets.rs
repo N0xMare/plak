@@ -1,26 +1,35 @@
 //! Files-first API key store (env > file > unset).
 
 use std::fs;
-use std::io::{Read as _, Write as _};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use crate::home::paths::{PlakPaths, SecretShelf};
+use plakous_hosted::account::{AccountRef, Vertical};
+
+mod private_read;
 
 const MAX_API_KEY_BYTES: usize = 16 * 1024;
 
 /// API-key account ids (not OAuth subscription accounts).
 #[must_use]
 pub fn is_api_key_account(account: &str) -> bool {
-    matches!(account, "openai" | "xai-api" | "anthropic" | "openrouter")
+    account
+        .parse::<AccountRef>()
+        .is_ok_and(|account| account.vertical().is_api())
 }
 
 #[must_use]
 pub fn env_var_for_account(account: &str) -> Option<&'static str> {
-    match account {
-        "openai" => Some("OPENAI_API_KEY"),
-        "xai-api" => Some("XAI_API_KEY"),
-        "anthropic" => Some("ANTHROPIC_API_KEY"),
-        "openrouter" => Some("OPENROUTER_API_KEY"),
+    let account: AccountRef = account.parse().ok()?;
+    if account.is_named() {
+        return None;
+    }
+    match account.vertical() {
+        Vertical::OpenAi => Some("OPENAI_API_KEY"),
+        Vertical::XaiApi => Some("XAI_API_KEY"),
+        Vertical::Anthropic => Some("ANTHROPIC_API_KEY"),
+        Vertical::OpenRouter => Some("OPENROUTER_API_KEY"),
         _ => None,
     }
 }
@@ -82,6 +91,15 @@ pub fn resolve_api_key(paths: &PlakPaths, account: &str) -> Result<Option<String
             "account `{account}` is not an API-key account; use plak login for OAuth accounts"
         ));
     }
+    let selected: AccountRef = account
+        .parse()
+        .map_err(|error: plakous_hosted::capabilities::AccountAdmissionError| error.to_string())?;
+    if let Some(name) = selected.name() {
+        return Ok(
+            read_shelf_secret(paths, SecretShelf::Api(selected.vertical()), name.as_str())?
+                .map(|secret| secret.expose_secret().to_owned()),
+        );
+    }
     if let Some(name) = env_var_for_account(account)
         && std::env::var_os(name).is_some()
     {
@@ -95,10 +113,9 @@ pub fn resolve_api_key(paths: &PlakPaths, account: &str) -> Result<Option<String
         return Ok(Some(value));
     }
     let path = paths.api_key_file(if account == "xai-api" { "xai" } else { account });
-    if !path.is_file() {
+    let Some(buf) = read_api_key_file(paths, &path)? else {
         return Ok(None);
-    }
-    let buf = read_api_key_file(&path)?;
+    };
     let value = buf.trim().to_owned();
     if value.is_empty() {
         return Ok(None);
@@ -117,6 +134,17 @@ pub fn set_api_key(paths: &PlakPaths, account: &str, key: &str) -> Result<(), St
     if key.is_empty() || key.len() > MAX_API_KEY_BYTES {
         return Err("API key is empty or too large".to_owned());
     }
+    let selected: AccountRef = account
+        .parse()
+        .map_err(|error: plakous_hosted::capabilities::AccountAdmissionError| error.to_string())?;
+    if let Some(name) = selected.name() {
+        return set_shelf_secret(
+            paths,
+            SecretShelf::Api(selected.vertical()),
+            name.as_str(),
+            key,
+        );
+    }
     paths.ensure_layout()?;
     let path = paths.api_key_file(if account == "xai-api" { "xai" } else { account });
     write_private_file(&path, key.as_bytes())?;
@@ -128,6 +156,12 @@ pub fn clear_api_key(paths: &PlakPaths, account: &str) -> Result<bool, String> {
         return Err(format!("account `{account}` is not an API-key account"));
     }
     refuse_env_override(account)?;
+    let selected: AccountRef = account
+        .parse()
+        .map_err(|error: plakous_hosted::capabilities::AccountAdmissionError| error.to_string())?;
+    if let Some(name) = selected.name() {
+        return remove_shelf_secret(paths, SecretShelf::Api(selected.vertical()), name.as_str());
+    }
     let path = paths.api_key_file(if account == "xai-api" { "xai" } else { account });
     if !path.is_file() {
         return Ok(false);
@@ -187,24 +221,18 @@ fn refuse_env_override(account: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn read_api_key_file(path: &Path) -> Result<String, String> {
-    let file = fs::File::open(path).map_err(|_| "could not read API key file".to_owned())?;
-    let mut buf = Vec::with_capacity(MAX_API_KEY_BYTES + 1);
-    file.take((MAX_API_KEY_BYTES + 1) as u64)
-        .read_to_end(&mut buf)
-        .map_err(|_| "could not read API key file".to_owned())?;
-    if buf.len() > MAX_API_KEY_BYTES {
-        return Err("API key file is too large".to_owned());
-    }
-    String::from_utf8(buf).map_err(|_| "could not read API key file".to_owned())
+fn read_api_key_file(paths: &PlakPaths, path: &Path) -> Result<Option<String>, String> {
+    let Some(directory) = private_read::directory(paths, &paths.secrets_dir())? else {
+        return Ok(None);
+    };
+    let name = path.file_name().ok_or("API key file has no name")?;
+    private_read::read(&directory, name)
+        .map(|value| value.map(|value| value.expose_secret().to_owned()))
 }
 
 fn file_fingerprint_if_present(paths: &PlakPaths, account: &str) -> Option<String> {
     let path = paths.api_key_file(if account == "xai-api" { "xai" } else { account });
-    if !path.is_file() {
-        return None;
-    }
-    let buf = read_api_key_file(&path).ok()?;
+    let buf = read_api_key_file(paths, &path).ok()??;
     let value = buf.trim();
     if value.is_empty() {
         return None;
@@ -483,50 +511,13 @@ pub fn read_shelf_secret(
     name: &str,
 ) -> Result<Option<NamedSecret>, String> {
     validate_secret_name(name)?;
-    if !paths.verify_secret_shelf_dir(shelf)? {
-        return Ok(None);
+    if matches!(shelf, SecretShelf::Api(vertical) if !vertical.is_api()) {
+        return Err("subscription accounts do not have API key shelves".into());
     }
-    let path = paths.secret_shelf_file(shelf, name);
-    let metadata = match fs::symlink_metadata(&path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(_) => return Err(format!("could not inspect secret {name}")),
+    let Some(directory) = private_read::directory(paths, &paths.secret_shelf_dir(shelf))? else {
+        return Ok(None);
     };
-    if !metadata.file_type().is_file() {
-        return Err(format!(
-            "secret {name} at {} is not a regular file",
-            path.display()
-        ));
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
-        let mode = metadata.permissions().mode() & 0o777;
-        if metadata.uid() != rustix::process::geteuid().as_raw()
-            || mode & 0o077 != 0
-            || metadata.nlink() != 1
-        {
-            return Err(format!(
-                "secret {name} at {} is not a private single-link file of the current user (mode {mode:o}); run `chmod 600 {}`",
-                path.display(),
-                path.display()
-            ));
-        }
-    }
-    let file = fs::File::open(&path).map_err(|_| format!("could not read secret {name}"))?;
-    let mut buf = zeroize::Zeroizing::new(Vec::with_capacity(MAX_NAMED_SECRET_BYTES + 1));
-    file.take((MAX_NAMED_SECRET_BYTES + 1) as u64)
-        .read_to_end(&mut buf)
-        .map_err(|_| format!("could not read secret {name}"))?;
-    if buf.len() > MAX_NAMED_SECRET_BYTES {
-        return Err(format!("secret {name} is too large"));
-    }
-    let text = std::str::from_utf8(&buf).map_err(|_| format!("secret {name} is not UTF-8"))?;
-    let value = text.trim();
-    if value.is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(NamedSecret(zeroize::Zeroizing::new(value.to_owned()))))
+    private_read::read(&directory, std::ffi::OsStr::new(&format!("{name}.secret")))
 }
 
 /// Exclusively creates `path` 0600 and writes and syncs `bytes`.

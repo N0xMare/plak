@@ -64,6 +64,7 @@ pub fn secret_list(
 
 const fn noun(shelf: SecretShelf) -> &'static str {
     match shelf {
+        SecretShelf::Api(_) => "API account key",
         SecretShelf::Named => "secret",
         SecretShelf::Runner => "runner secret",
         SecretShelf::Web => "web secret",

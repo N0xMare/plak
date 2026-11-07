@@ -96,6 +96,14 @@ mod tests {
         paths.ensure_layout().unwrap();
         // An exported XAI_API_KEY takes precedence; either source must resolve.
         std::fs::write(paths.api_key_file("xai"), "xai-test-key\n").unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(
+                paths.api_key_file("xai"),
+                std::fs::Permissions::from_mode(0o600),
+            )
+            .unwrap();
+        }
         let product = ProductPlatformCredentials::shared(&paths);
         let source = plakous_hosted::platform::XaiCredentials::xai(&*product).unwrap();
         plakous::xai::xai_api_key_generation(source.as_ref()).unwrap();
