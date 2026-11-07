@@ -498,7 +498,7 @@ impl AttachmentCount {
 pub struct KeptActivity {
     /// A turn runs.
     pub busy: bool,
-    /// An approval or a credential wait needs the operator.
+    /// An approval, credential wait or context-capacity decision needs the operator.
     pub awaiting_operator: bool,
     /// Background processes running or stopping.
     pub processes: usize,
@@ -990,9 +990,14 @@ impl<P: ProtocolExtension> HostService<P> {
             match observation {
                 SessionObservation::SetBusy(busy) => kept.busy = *busy,
                 SessionObservation::Processes { running, .. } => kept.processes = *running,
+                SessionObservation::ContextCapacityRecovery(Some(_)) => {
+                    kept.awaiting_operator = true;
+                }
                 _ => {}
             }
         }
+        drop(state);
+        kept.awaiting_operator |= crate::runtime::tree_needs_operator(&self.root().tree_id);
         kept
     }
 

@@ -48,6 +48,7 @@ fn prompted(
         .push(draft.images.iter().map(|image| image.bytes.len()).sum());
     match draft.text.as_str() {
         "approve" => {
+            let _ = busy.send(SessionObservation::SetBusy(true));
             let _ = busy.send(SessionObservation::ApprovalRequired {
                 approval_id: "a1".into(),
                 call_id: None,

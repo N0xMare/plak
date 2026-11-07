@@ -109,6 +109,7 @@ mod agent_transcript;
 mod answer_window_tests;
 mod binding_document;
 mod child_live;
+pub(crate) use child_projection::tree_needs_operator;
 pub(crate) mod child_projection;
 mod clear;
 mod compact;

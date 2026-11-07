@@ -299,10 +299,10 @@ where
                     row.hosted_elsewhere = None;
                     let kept = session.kept_activity();
                     row.live_work.processes = u32::try_from(kept.processes).unwrap_or(u32::MAX);
-                    if kept.busy {
-                        row.activity = SessionActivity::Busy;
-                    } else if kept.awaiting_operator {
+                    if kept.awaiting_operator {
                         row.activity = SessionActivity::AwaitingOperator;
+                    } else if kept.busy {
+                        row.activity = SessionActivity::Busy;
                     }
                 }
             }

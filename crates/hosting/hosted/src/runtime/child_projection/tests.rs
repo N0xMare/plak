@@ -79,6 +79,7 @@ async fn credential_wait_labels_snapshot_without_rewriting_retained_updates() {
         Some("waiting for login")
     );
     assert_eq!(snapshot.progress.credential_wait.as_deref(), Some("claude"));
+    assert!(observation.needs_operator());
     assert!(!snapshot.terminal);
     {
         let state = observation.lock();
@@ -96,6 +97,7 @@ async fn credential_wait_labels_snapshot_without_rewriting_retained_updates() {
     )
     .await;
     assert!(observation.snapshot().progress.activity.is_none());
+    assert!(!observation.needs_operator());
     assert!(!observation.snapshot().terminal);
 }
 

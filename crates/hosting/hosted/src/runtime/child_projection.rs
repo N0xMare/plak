@@ -464,7 +464,30 @@ pub(crate) fn of(
     (observation.turn == child.turn_id()).then_some(observation)
 }
 
+pub(crate) fn tree_needs_operator(tree_id: &str) -> bool {
+    let Some(runtime) = crate::topology_runtime::lookup(tree_id) else {
+        return false;
+    };
+    let Ok(live) = runtime.live.try_lock() else {
+        return false;
+    };
+    live.keys().any(|id| {
+        live.get(id)
+            .and_then(of)
+            .is_some_and(|observation| observation.needs_operator())
+    })
+}
+
 impl ChildObservation {
+    fn needs_operator(&self) -> bool {
+        let state = self.lock();
+        !state.closed
+            && !state.terminal
+            && state.projection.as_ref().is_some_and(|projection| {
+                projection.progress.waiting_for_login || !projection.approvals.is_empty()
+            })
+    }
+
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state
             .lock()

@@ -41,6 +41,39 @@ fn approval(id: &str) -> Observation {
     }
 }
 
+#[test]
+fn directory_attention_tracks_pending_decisions_even_while_busy() {
+    let (service, _intents) = service(32);
+    service.observe(Observation::SetBusy(true));
+    for (waiting, cleared) in [
+        (
+            approval("a1"),
+            Observation::ApprovalResolved {
+                approval_id: "a1".into(),
+                resolution: "denied".into(),
+            },
+        ),
+        (
+            Observation::CredentialWait {
+                account: Some("account".into()),
+            },
+            Observation::CredentialWait { account: None },
+        ),
+        (
+            Observation::ContextCapacityRecovery(Some(
+                plakous_host_protocol::observation::ContextCapacityRecovery::Compactable,
+            )),
+            Observation::ContextCapacityRecovery(None),
+        ),
+    ] {
+        service.observe(waiting);
+        assert!(service.kept_activity().awaiting_operator);
+        assert!(service.kept_activity().busy);
+        service.observe(cleared);
+        assert!(!service.kept_activity().awaiting_operator);
+    }
+}
+
 fn root_patch(from: u64) -> Observation {
     Observation::TranscriptPatch(TranscriptPatch {
         scope: TranscriptScope::Root,

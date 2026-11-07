@@ -62,7 +62,8 @@ pub enum SessionActivity {
     Idle,
     /// A turn runs.
     Busy,
-    /// An approval or a credential wait needs the operator.
+    /// Any node needs an approval or credentials, or a context-capacity
+    /// decision is pending. A turn may still run: submissions must queue.
     AwaitingOperator,
     /// Its host was lost and it holds for the operator's Resume.
     HeldAfterLoss,

@@ -3843,6 +3843,12 @@ latency, and nothing else. Prompt text never reaches a span.
 
 ### 4.4 Wire v2
 
+On protocol 4, directory attention takes precedence over activity:
+`awaiting_operator` means an unresolved approval or credential wait on any
+node, or a pending context-capacity decision, even while a turn runs.
+Clients must treat it as potentially running and submit `follow_up` (Queue),
+not infer idle and submit `prompt`. The row shape and protocol stay unchanged.
+
 Wire v2 is the framed protocol every frontend will speak to a host; it
 replaces the JSONL host of §4.3, which stays byte-identical until it is
 removed. Its types live in `plakous-host-protocol` (`wire`, the observation
