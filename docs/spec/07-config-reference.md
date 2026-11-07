@@ -37,6 +37,15 @@ $PLAK_HOME/            # default ~/.plak
 (`PlakPaths::resolve`). `plak config init` writes a commented reference template that pins no keys when
 `config.toml` is absent and reports the path either way; it never overwrites.
 
+Product config publications, including project-scoped settings and MCP edits,
+serialize on the home's `config.lock` sidecar. The lock is held through the
+atomic rename and parent-directory sync and is released by process exit.
+Terminal preference writers re-read the home baseline under that lock and
+apply only `[tui]`; host settings merge only the product fields changed from
+their original view into the latest effective config. Neither writer republishes
+the other's stale values. Raw external editor writes do not participate in
+this advisory lock.
+
 **Project roots.** Launching below a directory that carries `.plak/config.toml`
 or `.plak/agents/` resolves that directory as the *project root*: the nearest
 ancestor wins, `.plak` must be a real directory (a symlink or plain file is

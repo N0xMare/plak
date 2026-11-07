@@ -345,6 +345,8 @@ pub fn add_server(
     server: &McpServerConfig,
     replace: bool,
 ) -> Result<Added, String> {
+    let _lock = super::publication::ConfigLock::take(paths)
+        .map_err(super::ConfigSaveError::into_message)?;
     let layers = Layers::read(paths)?;
     let path = config_file_for(paths, scope)?;
     let existing = read_optional(&path)?;
@@ -430,6 +432,8 @@ pub fn remove_server(
     id: &str,
     force: bool,
 ) -> Result<Removed, String> {
+    let _lock = super::publication::ConfigLock::take(paths)
+        .map_err(super::ConfigSaveError::into_message)?;
     let layers = Layers::read(paths)?;
     let user_has = layers.home_servers().contains_key(id);
     let project_has = layers
@@ -512,6 +516,8 @@ pub fn edit_template_tools(
     id: &str,
     edit: &TemplateMcpEdit,
 ) -> Result<(PathBuf, Vec<String>), String> {
+    let _lock = super::publication::ConfigLock::take(paths)
+        .map_err(super::ConfigSaveError::into_message)?;
     let layers = Layers::read(paths)?;
     if !layers.merged.templates.contains_key(name) {
         return Err(format!(

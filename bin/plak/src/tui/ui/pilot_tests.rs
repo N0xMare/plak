@@ -399,17 +399,15 @@ fn typed_settings_story_toggles_persists_and_restores_composer_owner() {
             settings_registry::REDUCED_MOTION.to_owned(),
         ))
         .unwrap();
-    let Some(UserAction::Extension(SurfaceIntent::SaveSettings(update))) = save else {
-        panic!("toggle must emit one complete settings replacement: {save:?}");
-    };
-    assert!(update.tui.reduced_motion);
+    assert_eq!(save, None, "terminal preference edits stay local");
+    assert!(app.preferences.reduced_motion);
     assert!(
         app.render_prefs.reduced_motion,
         "preview applies immediately"
     );
 
     app.apply_host_event(HostEvent::Extension(
-        SurfaceObservation::SettingsViewApplied(update),
+        SurfaceObservation::SettingsViewApplied(SettingsView::default()),
     ));
     let applied = app.semantic_snapshot();
     assert_eq!(
@@ -807,10 +805,7 @@ fn picker_confirmation_and_canvas_owners_expose_only_executable_actions() {
     let saved = reset
         .dispatch_pilot_action(PilotAction::Invoke("confirm".to_owned()))
         .unwrap();
-    assert!(matches!(
-        saved,
-        Some(UserAction::Extension(SurfaceIntent::SaveSettings(_)))
-    ));
+    assert_eq!(saved, None, "a terminal reset stays local");
     assert_eq!(reset.semantic_snapshot().owner, "settings");
 }
 

@@ -7,6 +7,9 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ## Unreleased
 
+- Persist terminal preference resets locally and serialize configuration
+  publication so independent terminal and host settings edits are merged.
+
 - Preserve terminal-local theme and reading preferences across wire settings
   saves and reconnects. Automatic reattachment also keeps an unresolved
   new-session request's identity until the operator retries or selects a session.

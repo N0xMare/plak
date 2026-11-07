@@ -71,9 +71,13 @@ impl App {
     /// Terminal preferences are saved locally; product settings go to the host.
     pub(super) fn persist_settings(&mut self) -> Option<UserAction> {
         let update = self.settings_menu.as_ref()?.draft.clone();
+        let product_changed = self
+            .settings_snapshot
+            .as_ref()
+            .is_none_or(|snapshot| snapshot.product != update.product);
         if update.tui != self.preferences {
             if let Some(paths) = &self.preferences_home
-                && let Err(message) = update.tui.save(paths)
+                && let Err(message) = update.tui.save(paths, &self.preferences)
             {
                 self.settings_error = Some(format!("terminal preferences: {message}"));
                 self.mark_dirty();
@@ -87,7 +91,7 @@ impl App {
             }
         }
         self.mark_dirty();
-        Some(UserAction::Extension(SurfaceIntent::SaveSettings(update)))
+        product_changed.then_some(UserAction::Extension(SurfaceIntent::SaveSettings(update)))
     }
 
     /// A click on a chooser's choice focuses and previews it; a double-click

@@ -7,6 +7,7 @@ mod load;
 #[cfg(feature = "mcp")]
 pub(crate) mod mcp_edit;
 mod policy;
+mod publication;
 mod readiness;
 #[cfg(any(test, feature = "tui"))]
 pub(crate) mod settings;

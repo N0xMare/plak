@@ -770,10 +770,10 @@ pub(super) fn save_settings(
         crate::product_config::ConfigWriteScope::User
     };
     match config
-        .save_scoped(paths, scope)
+        .save_settings_delta(paths, &current, scope)
         .map_err(crate::product_config::ConfigSaveError::into_message)
     {
-        Ok(()) => {
+        Ok(config) => {
             let note = settings_saved_note(&current, &config, changes_root_binding);
             let _ = events.send(ContentEvent::Extension(
                 SurfaceObservation::SettingsViewApplied(settings_view(&config)),

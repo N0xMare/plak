@@ -533,7 +533,7 @@ impl ProductConfig {
     /// One key's value copied from a same-shaped config — the project
     /// overlay's contribution, or the baseline restore on a user-scope save.
     /// The match is exhaustive so a new `ConfigField` cannot merge silently.
-    fn assign_overlay_field(&mut self, field: ConfigField, source: &Self) {
+    pub(super) fn assign_overlay_field(&mut self, field: ConfigField, source: &Self) {
         match field {
             ConfigField::RootAgent => self.root_agent = source.root_agent.clone(),
             ConfigField::RootComposition => self.root_composition = source.root_composition,
@@ -1066,6 +1066,11 @@ impl ProductConfig {
     /// project-origin key keeps its baseline value and project templates are
     /// not written into `~/.plak/agents`.
     pub fn save_publication_aware(&self, paths: &PlakPaths) -> Result<(), ConfigSaveError> {
+        let _lock = super::publication::ConfigLock::take(paths)?;
+        self.save_user_unlocked(paths)
+    }
+
+    pub(super) fn save_user_unlocked(&self, paths: &PlakPaths) -> Result<(), ConfigSaveError> {
         let mut user_view = self.clone();
         if self
             .origins
@@ -1094,6 +1099,7 @@ impl ProductConfig {
     /// `.plak/agents/` gains only the templates that differ from (or are
     /// absent from) the user directory. Requires a trusted project.
     pub fn save_project_publication_aware(&self, paths: &PlakPaths) -> Result<(), ConfigSaveError> {
+        let _lock = super::publication::ConfigLock::take(paths)?;
         self.save_project_with_fault(paths, &mut |_, _| Ok(()))
     }
 
@@ -1101,7 +1107,7 @@ impl ProductConfig {
         clippy::too_many_lines,
         reason = "Project save preserves the stage, permission, sync, replace, and injected-failure cleanup sequence as one transaction."
     )]
-    fn save_project_with_fault(
+    pub(super) fn save_project_with_fault(
         &self,
         paths: &PlakPaths,
         fault: &mut impl FnMut(&Path, AtomicStage) -> Result<(), String>,

@@ -371,6 +371,8 @@ fn template_files(dir: &Path) -> Result<Vec<(String, PathBuf)>, String> {
 }
 
 pub fn init_if_missing(paths: &PlakPaths) -> Result<bool, String> {
+    let _lock =
+        super::publication::ConfigLock::take(paths).map_err(ConfigSaveError::into_message)?;
     paths.ensure_layout()?;
     let path = paths.config_file();
     if path.is_file() {

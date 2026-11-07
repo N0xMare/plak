@@ -50,6 +50,10 @@ fn wire_settings_views_never_replace_local_preferences_and_edits_persist_locally
     use crate::tui::SettingsTheme;
 
     let (_root, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+    let mut config = crate::product_config::ProductConfig::default_product();
+    config.theme = crate::product_config::ProductTheme::CatppuccinLatte;
+    config.tui_mouse = false;
+    config.save(&paths).unwrap();
     let mut launch = launch_basic();
     launch.reload_home = Some(paths.clone());
     launch.theme = SettingsTheme::CatppuccinLatte;
@@ -69,7 +73,10 @@ fn wire_settings_views_never_replace_local_preferences_and_edits_persist_locally
     }
     app.settings_menu.as_mut().unwrap().draft.tui.scroll_lines = 8;
     app.settings_menu.as_mut().unwrap().draft.tui.theme = SettingsTheme::CatppuccinMocha;
-    assert!(app.persist_settings().is_some());
+    assert!(
+        app.persist_settings().is_none(),
+        "terminal-only edits never go to the host"
+    );
     app.apply_host_event(HostEvent::Extension(
         SurfaceObservation::SettingsViewApplied(SettingsView::default()),
     ));
@@ -242,10 +249,10 @@ fn a_theme_choice_previews_on_click_and_applies_on_double_click() {
     assert_eq!(app.theme.id, super::theme_for(second).id, "and previews");
 
     terminal.draw(|frame| app.draw(frame)).unwrap();
-    assert!(matches!(
+    assert_eq!(
         app.handle_mouse(left_click(hit.rect.x + 4, hit.rect.y)),
-        Some(UserAction::Extension(SurfaceIntent::SaveSettings(_)))
-    ));
+        None
+    );
     assert!(!choosing(&app), "a double-click applies like Enter");
     assert_eq!(app.settings_menu.as_ref().unwrap().draft.tui.theme, second);
     assert_eq!(app.theme.id, super::theme_for(second).id);
@@ -658,10 +665,11 @@ fn every_settings_row_applies_on_change_and_persists_immediately() {
     app.settings_menu.as_mut().unwrap().selected =
         settings_row(crate::tui::settings_registry::MOUSE);
     let emitted = app.handle_key(key(KeyCode::Char(' ')));
-    let Some(UserAction::Extension(SurfaceIntent::SaveSettings(update))) = emitted else {
-        panic!("a switch must persist on change: {emitted:?}");
-    };
-    assert!(!update.tui.mouse);
+    assert_eq!(
+        emitted, None,
+        "a terminal switch persists without a host request"
+    );
+    assert!(!app.preferences.mouse);
 
     // An enum row: the chooser previews live and commits on Enter.
     app.settings_menu.as_mut().unwrap().selected =
@@ -678,10 +686,11 @@ fn every_settings_row_applies_on_change_and_persists_immediately() {
         "a preview is not a save"
     );
     let emitted = app.handle_key(key(KeyCode::Enter));
-    let Some(UserAction::Extension(SurfaceIntent::SaveSettings(update))) = emitted else {
-        panic!("a committed choice must persist: {emitted:?}");
-    };
-    assert_ne!(update.tui.theme, crate::tui::SettingsTheme::DefaultDark);
+    assert_eq!(emitted, None);
+    assert_ne!(
+        app.preferences.theme,
+        crate::tui::SettingsTheme::DefaultDark
+    );
 
     // An int row: the stepper commits on Enter.
     app.settings_menu.as_mut().unwrap().selected =
@@ -693,18 +702,14 @@ fn every_settings_row_applies_on_change_and_persists_immediately() {
     );
     app.handle_key(key(KeyCode::Up));
     let emitted = app.handle_key(key(KeyCode::Enter));
-    let Some(UserAction::Extension(SurfaceIntent::SaveSettings(update))) = emitted else {
-        panic!("a committed step must persist: {emitted:?}");
-    };
-    assert_eq!(update.tui.scroll_lines, 4);
+    assert_eq!(emitted, None);
+    assert_eq!(app.preferences.scroll_lines, 4);
 
     // `d` then `Enter` confirms the reset at once. There is no settle.
     app.handle_key(key(KeyCode::Char('d')));
     let emitted = app.handle_key(key(KeyCode::Enter));
-    let Some(UserAction::Extension(SurfaceIntent::SaveSettings(update))) = emitted else {
-        panic!("a reset must persist: {emitted:?}");
-    };
-    assert_eq!(update.tui.scroll_lines, 3);
+    assert_eq!(emitted, None);
+    assert_eq!(app.preferences.scroll_lines, 3);
 
     terminal.draw(|frame| app.draw(frame)).unwrap();
     assert_eq!(
@@ -868,9 +873,8 @@ fn settings_reset_is_taken_from_the_live_draft_at_confirm() {
             "the pop-up survives the echo"
         );
         let sent = app.handle_key(key(KeyCode::Enter));
-        let Some(UserAction::Extension(SurfaceIntent::SaveSettings(update))) = sent else {
-            panic!("{sent:?}");
-        };
+        assert_eq!(sent, None);
+        let update = &app.settings_menu.as_ref().unwrap().draft;
         assert_eq!(update.tui.scroll_lines, 3, "the bound row resets");
         assert_eq!(
             update.product.compaction, changed.product.compaction,
