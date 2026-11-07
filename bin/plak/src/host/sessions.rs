@@ -43,6 +43,7 @@ impl ProductSessions {
     pub(super) fn new(
         services: &Services,
         idle_release: Option<std::time::Duration>,
+        _runtime: Option<tokio::runtime::Handle>,
     ) -> CliResult<Self> {
         let tree =
             crate::store::tree::open_tree_store(services.paths()?).map_err(CliFailure::new)?;
