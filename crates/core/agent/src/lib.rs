@@ -231,8 +231,7 @@ pub mod internal {
         RequestSlots, ReresolvedModel, Turn, TurnContextCapacity, TurnRecoveryOperationId,
         TurnResult, TurnResultHandle, TurnResultOutcome, TurnSubmission, WeakAgent,
         abandon_and_release_many, checkpoint_closes_on_reopen, checkpoint_recovery_verdict,
-        close_admission, compile_explicit_runtime_profile, lease_released, preserve_daemon_jobs,
-        shutdown_for_transfer,
+        close_admission, compile_explicit_runtime_profile, lease_released, shutdown_for_transfer,
     };
     pub use crate::session::{
         AcquireBranch, ArchiveReceipt, ArchiveSession, BranchHead, BranchLease, BranchRevision,

@@ -3967,6 +3967,9 @@ stop intent; a re-cut repeats the key, not the process effect. Child stops
 use the current attempt's existing anchored interrupt operation, and find
 the line through its recorded session locator; a held child's daemon job
 therefore stops even when no child runtime is materialized. A later root
+attachment that rebuilds a held child transfers its daemon jobs on ordinary
+release rather than stopping them. Each child stop is attempted even when
+an earlier child refuses; failures are collected and logged. A later root
 admission ends an old root stop, and a stop never follows an old product
 record onto a successor head. Terminals are
 recorded under that lease. Only this serving process finishes those stops,

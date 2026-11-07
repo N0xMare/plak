@@ -180,7 +180,11 @@ impl PreparedAgent {
         }
         let job_sessions = self.job_sessions.clone();
         let has_job_host = self.job_host.is_some();
-        let job_release_mode = Arc::new(Mutex::new(crate::runtime::JobReleaseMode::default()));
+        let job_release_mode = Arc::new(Mutex::new(if self.daemon_processes {
+            crate::runtime::JobReleaseMode::Transfer
+        } else {
+            crate::runtime::JobReleaseMode::default()
+        }));
         // Only a nonempty root genesis is a seed; fork/rebind successors have
         // a parent checkpoint and must not gain seed-only occupancy scheduling.
         let seed_compaction_pending = checkpoint_owner

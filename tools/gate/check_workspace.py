@@ -536,7 +536,7 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
     SourceKey, list[tuple[str, tuple[tuple[str, str], ...]]]
 ] = {
     # A separate process group survives host loss; the daemon clears its environment.
-    ("plak", "src/commands/runner/local.rs"): [
+    ("plak", "src/commands/runner/local/start.rs"): [
         ("std::process::Command", (("punct", "&"), ("identifier", "executable"))),
     ],
     # Doctor's one cleared-env, five-second, own-group local version probe.
@@ -656,8 +656,12 @@ ALLOWED_CLI_MACROS = {
 }
 # Per-source additions to ALLOWED_CLI_MACROS.
 ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
+    ("plakous-hosted", "src/agent/roots.rs"): {"warn"},
+    ("plak", "src/commands/runner/local.rs"): {"warn"},
+    ("plak", "src/host.rs"): {"select"},
+    ("plak", "src/host/runner.rs"): {"info", "warn"},
     # Typed, output-free runner diagnostics and the recorded stop's fixed payload.
-    ("plakous-hosted", "src/runner_adoption.rs"): {"info", "json"},
+    ("plakous-hosted", "src/runner_adoption.rs"): {"info", "json", "warn"},
     # The tree stage a VCS effect runs as, read by a runner-backed port.
     ("plakous-workspace", "src/occupancy_vcs/stage.rs"): {"task_local"},
     ("plakous-host-protocol", "src/observation.rs"): {"define_observations"},
@@ -1665,8 +1669,16 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         "runner": {"RunnerClient"},
         "tools": {"runner::LocalDaemonBackend"},
     },
-    ("plakous-hosted", "src/runtime/host_loop/release.rs"): {
-        "agent": {"preserve_daemon_jobs"},
+    ("plakous-hosted", "src/agent/roots/local_runner.rs"): {
+        "runner": {
+            "ClientWindows",
+            "ConnectError",
+            "RunnerClient",
+            "protocol",
+            "Bind",
+            "PROTOCOL_VERSION",
+            "VersionTriple",
+        },
     },
     # `test-hooks` only: the offline script's child runner, bound and journaled
     # as a host's dial is, then selected for the process (spec 01 §8.5).

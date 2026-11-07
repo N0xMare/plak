@@ -182,6 +182,16 @@ pub(super) enum ExpectedTerminal {
 
 pub(super) const REGISTRY: &[Shape] = &[
     Shape {
+        name: "embedded_open_after_host_crash",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: host_runner::script,
+        configure: host_runner::configure,
+        setup: no_setup,
+        lifecycle: prompt_then_quit,
+        assert_live: host_runner::assert_running,
+    },
+    Shape {
         name: "runner_job_survives_host_loss_host",
         subset: false,
         terminal: ExpectedTerminal::Answer,

@@ -64,6 +64,9 @@ pub async fn readopt_lines(
     sessions: &AgentSessions,
     operation_prefix: &str,
 ) -> Result<(Vec<Readopted>, Vec<ReadoptFailure>), RunnerFailure> {
+    if crate::test_support_runner::selected("skip-readopt") {
+        return Ok((Vec::new(), Vec::new()));
+    }
     let mut readopted = Vec::new();
     let mut failed = Vec::new();
     for status in client.lines().await? {
@@ -89,29 +92,37 @@ pub async fn readopt_lines(
 /// Reports inspected jobs of an obsolete runner without transferring it.
 /// Existing full-open recovery settles missing promoted jobs as unknown.
 ///
-/// # Errors
-/// A job snapshot could not be decoded.
 pub async fn report_obsolete_lines(
     sessions: &AgentSessions,
     lines: Vec<plakous::runner::protocol::LineStatus>,
-) -> Result<(), String> {
+) {
     for status in lines {
-        let Ok(line) = LineId::from_str(&status.line) else {
-            continue;
+        let line = match LineId::from_str(&status.line) {
+            Ok(line) => line,
+            Err(error) => {
+                tracing::warn!(target: "plak.runner", phase = "inspection", line = %status.line, error = %error, "runner_recovery_failed");
+                continue;
+            }
         };
-        if sessions
-            .line_head(line)
-            .await
-            .is_err_and(|error| error.kind() == AgentSessionsErrorKind::NotFound)
-        {
-            continue;
+        match sessions.line_head(line).await {
+            Ok(_) => {}
+            Err(error) if error.kind() == AgentSessionsErrorKind::NotFound => continue,
+            Err(error) => {
+                tracing::warn!(target: "plak.runner", phase = "inspection", line = %line, error = %error, "runner_recovery_failed");
+                continue;
+            }
         }
-        let (_, jobs) = decode_jobs_snapshot(status.jobs).map_err(|error| error.to_string())?;
+        let jobs = match decode_jobs_snapshot(status.jobs) {
+            Ok((_, jobs)) => jobs,
+            Err(error) => {
+                tracing::warn!(target: "plak.runner", phase = "inspection", line = %line, error = %error, "runner_recovery_failed");
+                continue;
+            }
+        };
         for job in jobs {
             tracing::info!(target: "plak.runner", line = %line, job = job.number, status = "outcome_unknown", "obsolete_protocol");
         }
     }
-    Ok(())
 }
 
 /// Finishes a recorded stop only while holding and transferring the line's head.
@@ -157,7 +168,7 @@ async fn readopt_line(
         head.fence(),
     );
     let adopted = async {
-        let stopped_foreground = client
+        let _ = client
             .transfer_owner(&owner)
             .await
             .map_err(|error| format!("the runner refused the transfer: {error:?}"))?;
@@ -194,9 +205,6 @@ async fn readopt_line(
                         .map_err(|error| format!("the line's jobs: {error}"))
                 },
             )?;
-        for stopped in stopped_foreground {
-            tracing::info!(target: "plak.runner", line = %line, call_key = %stopped.call_key, pid = stopped.pid, ended = %stopped.ended, "stopped_foreground");
-        }
         let recorded = head
             .record_job_terminals(&jobs)
             .await

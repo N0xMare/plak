@@ -23,7 +23,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
         mut config: HostConfig<P>,
         actions: &'a crate::surface_protocol::UserActionReceiver<P>,
         events: Sender<P>,
-        startup: Option<std::sync::mpsc::SyncSender<Result<(), String>>>,
+        startup: Option<std::sync::mpsc::SyncSender<Result<(), CliFailure>>>,
         executor: std::rc::Rc<super::session_executor::SessionExecutor>,
     ) -> CliResult<Self> {
         let storage_interrupt = actions.storage_interrupt_probe();
@@ -55,6 +55,9 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
         config.session.queue_projection_debt = false;
         let attach_started = Instant::now();
         config.runtime_factory.clone().configure(&mut config);
+        if let Some(locator) = config.session.plakous_locator {
+            config.state_roots.refuse_daemon_line(locator).await?;
+        }
         let log = SessionLog::open(&config.home, &config.session.id).ok();
         let mut stderr_buf = Vec::new();
         config.state_roots = config

@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod recovery;
+
 #[test]
 fn an_eof_before_the_local_runner_hello_is_retried() {
     for protocol in [1, plakous::runner::protocol::PROTOCOL_VERSION] {
@@ -16,9 +18,14 @@ fn an_eof_before_the_local_runner_hello_is_retried() {
             std::fs::remove_file(socket).unwrap();
             drop(stream);
         });
-        let mut host = start(&fixture);
+        let mut host = start_env(&fixture, &[], &[("PLAK_LOG", "info".into())]);
         dropped.join().unwrap();
         stop(&mut host);
+        let log = std::fs::read_to_string(fixture.home().join("logs/plak.log")).unwrap_or_default();
+        assert!(
+            !log.contains("runner_recovery_failed"),
+            "a normal idle EOF is not a recovery failure: {log}"
+        );
     }
 }
 
@@ -129,18 +136,13 @@ fn a_starter_losing_to_the_exiting_daemons_lock_is_retried() {
     let lock = std::fs::File::create(home.join("run/runner.lock")).unwrap();
     lock.try_lock().unwrap();
     let release = std::thread::spawn(move || {
-        let deadline = std::time::Instant::now() + WAIT;
-        while !std::fs::read_to_string(home.join("serve.log"))
-            .unwrap_or_default()
-            .contains("the local socket lock is still held")
-        {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "no starter lost the socket lock"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let spawned_while_locked = home.join("serve.log").exists();
         drop(lock);
+        assert!(
+            !spawned_while_locked,
+            "a daemon was spawned while its lock was held"
+        );
     });
     let mut host = start(&fixture);
     release.join().unwrap();
@@ -154,16 +156,19 @@ fn an_unreachable_user_manager_falls_back_to_a_detached_runner() {
     let bin = fixture.root.join("manager-bin");
     std::fs::create_dir(&bin).unwrap();
     let marker = fixture.root.join("manager-called");
-    let manager = bin.join("systemd-run");
+    let manager = bin.join("systemctl");
     std::fs::write(
         &manager,
         format!(
-            "#!/bin/sh\nprintf called > '{}'\nexit 1\n",
+            "#!/bin/sh\nprintf called > '{}'\nprintf 'offline\\n'\nexit 1\n",
             marker.display()
         ),
     )
     .unwrap();
     std::fs::set_permissions(&manager, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let rejected = bin.join("systemd-run");
+    std::fs::write(&rejected, "#!/bin/sh\nexit 1\n").unwrap();
+    std::fs::set_permissions(&rejected, std::fs::Permissions::from_mode(0o755)).unwrap();
     let mut host = start_env(
         &fixture,
         &[],
@@ -570,10 +575,17 @@ fn handoff_keeps_jobs(policy: &str) {
 fn a_childs_daemon_job_survives_host_loss_and_handoff() {
     let Some(probe) = fixture() else { return };
     drop(probe);
-    for handoff in [false, true] {
+    for (handoff, policy) in [
+        (false, "continue"),
+        (false, "hold"),
+        (true, "continue"),
+        (true, "hold"),
+    ] {
         let fixture = fixture().unwrap();
+        write_resume_policy(&fixture, policy);
         let (mut host, session, node) = start_child_job(&fixture);
         let (pid, daemon) = job(&fixture);
+        hold_child_script(&fixture);
         assert!(alive(pid));
         assert_ne!(daemon.cast_unsigned(), host.child.as_ref().unwrap().id());
         if handoff {
@@ -582,13 +594,11 @@ fn a_childs_daemon_job_survives_host_loss_and_handoff() {
             kill(&mut host);
         }
         assert!(alive(pid), "the child's job died with its host");
-        if !handoff {
-            std::fs::remove_file(fixture.root.join("child-script.json")).unwrap();
-        }
         let mut host = start(&fixture);
         assert!(alive(pid), "the sweep stopped the child's job");
         let mut client = Client::connect(&host);
         client.attach(1, &node);
+        std::thread::sleep(std::time::Duration::from_secs(5));
         assert!(alive(pid));
         job(&fixture);
         assert_eq!(
@@ -601,6 +611,27 @@ fn a_childs_daemon_job_survives_host_loss_and_handoff() {
 }
 
 fn start_child_job(fixture: &Fixture) -> (Host, String, NodeAddress) {
+    start_child_job_variant(fixture, false)
+}
+
+fn write_resume_policy(fixture: &Fixture, policy: &str) {
+    let config = fixture.home().join("config.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(
+        config,
+        format!("{text}\n[host]\nresume_after_loss = \"{policy}\"\n"),
+    )
+    .unwrap();
+}
+
+fn hold_child_script(fixture: &Fixture) {
+    // A fresh offline binding answers the continuation, not a second start.
+    std::fs::write(fixture.root.join("child-script.json"), serde_json::to_vec(&json!({
+        "version": 1, "steps": [{"stream": [{"gate": {"file": fixture.root.join("never")}}], "output": {"text": "child held"}}]
+    })).unwrap()).unwrap();
+}
+
+fn start_child_job_variant(fixture: &Fixture, busy: bool) -> (Host, String, NodeAddress) {
     let marker = fixture.root.join("local-job.marker");
     let child = fixture.root.join("child-script.json");
     std::fs::write(&child, serde_json::to_vec(&json!({"version": 1, "steps": [
@@ -612,9 +643,11 @@ fn start_child_job(fixture: &Fixture) -> (Host, String, NodeAddress) {
     let mut script = spawning_script();
     script["product_child_script"] = json!(child);
     script["steps"].as_array_mut().unwrap().truncate(1);
-    script["steps"].as_array_mut().unwrap().push(json!({
-        "stream": [{"gate": {"file": marker}}], "output": {"text": ANSWER}
-    }));
+    script["steps"].as_array_mut().unwrap().push(if busy {
+        json!({"stream": [{"gate": {"file": marker}}, {"text": PREFIX}, {"stall": 30000}]})
+    } else {
+        json!({"stream": [{"gate": {"file": marker}}], "output": {"text": ANSWER}})
+    });
     fixture.write_script(&script);
     let host = start(fixture);
     let mut client = Client::connect(&host);
@@ -624,7 +657,12 @@ fn start_child_job(fixture: &Fixture) -> (Host, String, NodeAddress) {
         panic!("not created")
     };
     let attachment = client.attach(2, &node);
-    client.prompt(3, attachment, "delegate a process", ANSWER);
+    client.prompt(
+        3,
+        attachment,
+        "delegate a process",
+        if busy { PREFIX } else { ANSWER },
+    );
     let deadline = std::time::Instant::now() + WAIT;
     loop {
         use plakous_offline_crash_harness::evidence::{EvidenceKind, read_evidence};

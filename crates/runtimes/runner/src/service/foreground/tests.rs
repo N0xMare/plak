@@ -15,15 +15,20 @@ use std::time::Duration;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_admitted_start_queued_past_its_instance_lease_has_no_effect() {
-    queued_start_loses_authority(true).await;
+    queued_start_loses_authority(0).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_admitted_start_queued_behind_a_newer_transfer_has_no_effect() {
-    queued_start_loses_authority(false).await;
+    queued_start_loses_authority(1).await;
 }
 
-async fn queued_start_loses_authority(expire: bool) {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_renewed_instance_cannot_run_a_queued_start_before_readopting_its_orphan() {
+    queued_start_loses_authority(2).await;
+}
+
+async fn queued_start_loses_authority(change: u8) {
     let root = tempfile::tempdir().unwrap();
     let scope =
         ExecutionEnvironmentScope::Run("00000000-0000-0000-0000-000000000001".parse().unwrap());
@@ -80,13 +85,13 @@ async fn queued_start_loses_authority(expire: bool) {
     .await
     .unwrap();
     // Its request crossed admission, but could not acquire the execution gate.
-    if expire {
+    if change == 0 {
         let key = ("home".to_owned(), "before".to_owned());
         let mut leases = lock(&service.inner.leases);
         let lease = leases.get_mut(&key).unwrap();
         lease.connections = 0;
         lease.released = Some(Instant::now());
-    } else {
+    } else if change == 1 {
         let mut tables = lock(&service.inner.tables);
         let previous = tables.owner("home", &owner.line().to_string()).unwrap().0;
         let mut newer = previous.clone();
@@ -101,6 +106,10 @@ async fn queued_start_loses_authority(expire: bool) {
             ),
             RunnerFrame::TransferAccepted { .. }
         ));
+    } else {
+        // The late bind renews the instance lease, not its orphaned line.
+        lock(&service.inner.tables).orphan("home", "before");
+        assert!(service.instance_authority("home", "before"));
     }
     drop(guard);
     let refused = tokio::time::timeout(Duration::from_secs(5), start)
@@ -114,6 +123,66 @@ async fn queued_start_loses_authority(expire: bool) {
     );
     assert!(refused.proven_no_effect());
     assert!(!marker.exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pending_foreground_cleanup_prevents_idle_exit_and_releases_its_gate() {
+    let root = tempfile::tempdir().unwrap();
+    let scope =
+        ExecutionEnvironmentScope::Run("00000000-0000-0000-0000-000000000001".parse().unwrap());
+    let (service, link) = queued_link(root.path(), scope).await;
+    let backend = link.backend();
+    let environment = runner_environment(
+        scope,
+        root.path(),
+        ".",
+        ExecutionEnvironmentConfig::default(),
+        backend.clone(),
+    )
+    .unwrap();
+    let owner = plakous_tools::LineOwner::new(
+        "00000000-0000-0000-0000-0000000000a1".parse().unwrap(),
+        1,
+        "00000000-0000-0000-0000-0000000000b1".parse().unwrap(),
+        1,
+    );
+    RunnerSessions::new(&backend, &environment, owner)
+        .jobs()
+        .await
+        .unwrap();
+    let gate = service
+        .inner
+        .foreground
+        .gate("home", &owner.line().to_string());
+    let guard = gate.lock().await;
+    link.sever();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while service
+            .inner
+            .open
+            .load(std::sync::atomic::Ordering::Acquire)
+            != 0
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        !service.is_idle(),
+        "the cleanup is queued behind its line gate"
+    );
+    assert!(service.inner.foreground.pending());
+    drop(guard);
+    drop(gate);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !service.is_idle() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(lock(&service.inner.foreground.gates).is_empty());
 }
 
 async fn queued_link(

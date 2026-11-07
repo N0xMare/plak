@@ -2,6 +2,8 @@
 //! session store, the topology tree store, and the telemetry it emits
 //! through.
 
+mod local_runner;
+
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -384,19 +386,37 @@ impl ProductStateRoots {
             .map_err(|error| CliFailure::new(error.detail))?
             .map_or_else(Vec::new, |tree| tree.rows().recorded_process_stops());
         let sessions = self.runtime_sessions()?;
+        let mut failures: Vec<String> = Vec::new();
         for (locator, intent) in stops {
-            let locator = locator
-                .parse::<plakous::sessions::SessionLocator>()
-                .map_err(|error| CliFailure::new(error.to_string()))?;
-            let head = sessions
-                .line_head_of(locator)
-                .await
-                .map_err(|error| CliFailure::new(error.to_string()))?;
-            crate::runner_adoption::finish_recorded_stop(client, &sessions, head.line(), &intent)
+            let result = async {
+                let locator = locator
+                    .parse::<plakous::sessions::SessionLocator>()
+                    .map_err(|error| CliFailure::new(error.to_string()))?;
+                let head = sessions
+                    .line_head_of(locator)
+                    .await
+                    .map_err(|error| CliFailure::new(error.to_string()))?;
+                crate::runner_adoption::finish_recorded_stop(
+                    client,
+                    &sessions,
+                    head.line(),
+                    &intent,
+                )
                 .await
                 .map_err(CliFailure::new)?;
+                Ok::<_, CliFailure>(())
+            }
+            .await;
+            if let Err(error) = result {
+                tracing::warn!(target: "plak.runner", phase = "child_stop", locator = %locator, error = %error, "runner_recovery_failed");
+                failures.push(error.to_string());
+            }
         }
-        Ok(())
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(CliFailure::new(failures.join("; ")))
+        }
     }
 
     /// Applies this host's transport without changing a session's binding.

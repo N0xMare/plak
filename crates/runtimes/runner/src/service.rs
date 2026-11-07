@@ -112,6 +112,7 @@ struct Running {
 #[derive(Default)]
 struct HostLease {
     connections: usize,
+    // Monotonic lease time excludes suspend on both supported platforms.
     released: Option<Instant>,
 }
 
@@ -594,6 +595,7 @@ impl RunnerService {
     pub fn is_idle(&self) -> bool {
         let now = Instant::now();
         self.expire_leases(now);
+        self.inner.foreground.prune();
         if self.inner.open.load(Ordering::Acquire) != 0 || !lock(&self.inner.services).is_empty() {
             return false;
         }

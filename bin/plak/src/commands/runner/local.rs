@@ -1,5 +1,7 @@
 //! The host's journaled connection to its home-local process daemon.
 
+mod start;
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -19,10 +21,29 @@ pub(crate) async fn older(
             .home()
             .join("host/runner")
             .join(format!("v{protocol}/run/runner.sock"));
-        let Ok(stream) = tokio::net::UnixStream::connect(socket).await else {
-            continue;
+        let stream = match tokio::net::UnixStream::connect(socket).await {
+            Ok(stream) => stream,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+                ) =>
+            {
+                continue;
+            }
+            Err(error) => {
+                tracing::warn!(target: "plak.runner", phase = "inspection", protocol, error = %error, "runner_recovery_failed");
+                continue;
+            }
         };
-        let mut bind = super::bind(super::host_id(paths)?, true);
+        let host_id = match super::host_id(paths) {
+            Ok(id) => id,
+            Err(error) => {
+                tracing::warn!(target: "plak.runner", phase = "inspection", protocol, error = %error, "runner_recovery_failed");
+                continue;
+            }
+        };
+        let mut bind = super::bind(host_id, true);
         bind.version.protocol = protocol;
         let inspect = async {
             let (client, _) = match RunnerClient::connect_home_local(
@@ -46,11 +67,15 @@ pub(crate) async fn older(
                     CliFailure::new(format!("the old runner inspection failed: {error:?}"))
                 })
         };
-        lines.extend(
-            tokio::time::timeout(super::START_WAIT, inspect)
-                .await
-                .map_err(|_| CliFailure::new("the old runner did not answer"))??,
-        );
+        match tokio::time::timeout(super::START_WAIT, inspect).await {
+            Ok(Ok(inspected)) => lines.extend(inspected),
+            Ok(Err(error)) => {
+                tracing::warn!(target: "plak.runner", phase = "inspection", protocol, error = %error, "runner_recovery_failed");
+            }
+            Err(error) => {
+                tracing::warn!(target: "plak.runner", phase = "inspection", protocol, error = %error, "runner_recovery_failed");
+            }
+        }
     }
     Ok(lines)
 }
@@ -71,6 +96,7 @@ pub(crate) async fn dial(paths: &PlakPaths) -> CliResult<RunnerClient> {
     );
     let bind = super::bind(super::host_id(paths)?, false);
     let attempt = async {
+        let mut starter = start::Starter::new();
         loop {
             match tokio::net::UnixStream::connect(home.socket_path()).await {
                 Ok(stream) => {
@@ -89,10 +115,9 @@ pub(crate) async fn dial(paths: &PlakPaths) -> CliResult<RunnerClient> {
                     }
                 }
                 Err(_) => {
-                    // A previous starter can lose to a daemon that removed
-                    // its socket but has not yet released its lock. Starting
-                    // once, then only connecting, would never recover.
-                    let _ = start(paths, &home).await;
+                    // Socket removal precedes lock release. A busy lock is
+                    // not permission to spawn another daemon.
+                    let _ = starter.start(paths, &home).await;
                 }
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
@@ -103,62 +128,29 @@ pub(crate) async fn dial(paths: &PlakPaths) -> CliResult<RunnerClient> {
         .map_err(|_| CliFailure::new("the home-local runner did not answer within 10 s"))?
 }
 
-async fn start(paths: &PlakPaths, home: &LocalRunnerHome) -> std::io::Result<()> {
-    use std::os::unix::fs::OpenOptionsExt as _;
-
-    let executable = std::env::current_exe()?;
-    if crate::environment::service_managed() && !crate::test_hooks::runner_detached() {
-        use sha2::{Digest as _, Sha256};
-        let digest = Sha256::digest(paths.home().as_os_str().as_encoded_bytes());
-        let hash = digest[..12]
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
-        let unit = format!("plak-runner-{hash}-v{}", super::version().protocol);
-        let mut manager = tokio::process::Command::new("systemd-run");
-        manager
-            .args([
-                "--user",
-                "--collect",
-                "--unit",
-                &unit,
-                "--property=Type=exec",
-            ])
-            .arg(format!("--setenv=PLAK_HOME={}", paths.home().display()))
-            .arg("--setenv=PATH=/usr/bin:/bin");
-        if let Some(home) = crate::environment::inherited_home() {
-            manager.arg(format!("--setenv=HOME={home}"));
+/// Reconnects the existing client so every session retains the same transport.
+pub(crate) async fn reconnect(paths: &PlakPaths, client: &RunnerClient) -> CliResult<()> {
+    let home = LocalRunnerHome::of(paths);
+    let attempt = async {
+        let mut starter = start::Starter::new();
+        loop {
+            match tokio::net::UnixStream::connect(home.socket_path()).await {
+                Ok(stream) => match client.reconnect(stream).await {
+                    Ok(_) => {
+                        let _ = client.recover().await;
+                        return Ok(());
+                    }
+                    Err(ConnectError::Closed) => {}
+                    Err(error) => return Err(CliFailure::new(error.to_string())),
+                },
+                Err(_) => {
+                    let _ = starter.start(paths, &home).await;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        manager
-            .arg("--")
-            .arg(&executable)
-            .args(["runner", "serve", "--local"])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .kill_on_drop(true);
-        if matches!(tokio::time::timeout(Duration::from_secs(1), manager.status()).await, Ok(Ok(status)) if status.success())
-        {
-            return Ok(());
-        }
-    }
-    let log = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .mode(0o600)
-        .open(home.root().join("serve.log"))?;
-    let mut command = std::process::Command::new(&executable);
-    command.args(["runner", "serve", "--local"]);
-    command
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin")
-        .env("PLAK_HOME", paths.home())
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(log);
-    if let Some(home) = crate::environment::inherited_home() {
-        command.env("HOME", home);
-    }
-    std::os::unix::process::CommandExt::process_group(&mut command, 0);
-    command.spawn().map(drop)
+    };
+    tokio::time::timeout(super::START_WAIT, attempt)
+        .await
+        .map_err(|_| CliFailure::new("the home-local runner did not reconnect within 10 s"))?
 }

@@ -3,6 +3,83 @@ use std::sync::Arc;
 
 use super::ProductStateRoots;
 
+#[tokio::test]
+async fn child_process_stop_collects_every_failure_instead_of_stopping_at_the_first() {
+    use crate::agent_tree::{InterruptCause, ProductAgentTree};
+    use crate::agent_tree_protocol::{SpawnAgentRequest, WriterMode};
+    let home = tempfile::tempdir().unwrap();
+    let mut roots = ProductStateRoots::with_doubles(home.path().into(), home.path().join("state"));
+    roots.daemon_client = Some(bound_daemon(home.path()).await);
+    let mut tree = ProductAgentTree::bootstrap_root_for_test(
+        "stop-failures",
+        "root",
+        "owner",
+        home.path().into(),
+        "tuple",
+        WriterMode::SingleLease,
+    )
+    .unwrap();
+    for locator in ["invalid-one", "invalid-two"] {
+        let child = tree
+            .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+            .unwrap();
+        tree.bind_session_locator(&child.agent_id, locator).unwrap();
+        tree.set_active_turn(&child.agent_id, true).unwrap();
+    }
+    tree.interrupt_running_descendants_for(InterruptCause::Stopped)
+        .unwrap();
+    assert_eq!(tree.recorded_process_stops().len(), 2);
+    let published = roots.tree_store().unwrap().save_in_custody(&tree).unwrap();
+    tree.acknowledge_revision(published);
+    let failure = roots
+        .finish_child_process_stops("stop-failures")
+        .await
+        .unwrap_err();
+    assert_eq!(failure.message().split("; ").count(), 2, "{failure}");
+    roots.daemon_client.as_ref().unwrap().disconnect();
+}
+
+async fn bound_daemon(workspace: &std::path::Path) -> plakous::runner::RunnerClient {
+    use plakous::runner::protocol::{Bind, VersionTriple};
+    use plakous::runner::{ClientWindows, RunnerClient, RunnerIdentity, RunnerService};
+    use plakous::tools::{
+        ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope, RunnerId,
+    };
+    let version = VersionTriple::current("stop-failures", "debug");
+    let environment = ExecutionEnvironment::host(
+        ExecutionEnvironmentScope::Run(uuid::Uuid::new_v4().try_into().unwrap()),
+        workspace,
+        ".",
+        ExecutionEnvironmentConfig::default(),
+    )
+    .unwrap();
+    let service = RunnerService::new(
+        environment,
+        RunnerIdentity {
+            runner_id: RunnerId::new("stop-failures").unwrap(),
+            version: version.clone(),
+            boot_id: "boot".into(),
+            binary_id: None,
+        },
+    )
+    .unwrap();
+    let (host, runner) = tokio::io::duplex(65536);
+    tokio::spawn(async move { service.serve_connection(runner).await });
+    RunnerClient::connect(
+        host,
+        Bind {
+            host_id: "home".into(),
+            host_instance: "instance".into(),
+            version,
+            inspect: false,
+        },
+        ClientWindows::default(),
+    )
+    .await
+    .unwrap()
+    .0
+}
+
 /// Makes `sessions` the process's shared runtime service of `roots`, so a
 /// test controls its retention bounds.
 pub(crate) fn seed_runtime_sessions(

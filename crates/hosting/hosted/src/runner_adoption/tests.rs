@@ -292,16 +292,124 @@ async fn obsolete_inspection_preserves_jobs(
     fence: u64,
 ) {
     let inspected = client.lines().await.unwrap();
-    crate::runner_adoption::report_obsolete_lines(sessions, inspected.clone())
-        .await
-        .unwrap();
-    crate::runner_adoption::report_obsolete_lines(sessions, inspected)
-        .await
-        .unwrap();
+    let mut malformed = inspected[0].clone();
+    malformed.jobs = serde_json::Value::Null;
+    crate::runner_adoption::report_obsolete_lines(sessions, vec![malformed]).await;
+    crate::runner_adoption::report_obsolete_lines(sessions, inspected.clone()).await;
+    crate::runner_adoption::report_obsolete_lines(sessions, inspected).await;
     let still_held = client.lines().await.unwrap();
     assert_eq!(still_held[0].owner.as_ref().unwrap().fence, fence);
     let (_, jobs) =
         plakous::tools::runner::decode_jobs_snapshot(still_held[0].jobs.clone()).unwrap();
     assert_eq!(jobs.len(), 1);
     assert_eq!(jobs[0].status, JobStatus::Running);
+}
+
+#[tokio::test]
+async fn a_held_line_does_not_prevent_the_next_lines_sweep() {
+    let directory = tempfile::tempdir().unwrap();
+    let workspace = directory.path();
+    let sessions =
+        AgentSessions::new(SessionBackend::sqlite(workspace.join("runtime.sqlite3")).unwrap())
+            .unwrap();
+    let controller = BoundaryController::quiet_from_evidence_path(
+        CrashBoundary::None,
+        workspace.join("evidence.jsonl"),
+    )
+    .unwrap();
+    let mut heads = Vec::new();
+    for id in ["one", "two"] {
+        let CreateSessionOutcome::Created { session, .. } = sessions
+            .create(CreateSessionRequest::new(
+                SessionOperationId::new(format!("sweep:create:{id}")).unwrap(),
+                runtime_binding(workspace, controller.clone()).unwrap(),
+            ))
+            .await
+            .unwrap()
+        else {
+            panic!("new session")
+        };
+        let line = session.line();
+        session.release().await.unwrap();
+        heads.push(
+            sessions
+                .open_lease_only(
+                    &SessionOperationId::new(format!("sweep:hold:{id}")).unwrap(),
+                    line,
+                )
+                .await
+                .unwrap(),
+        );
+    }
+    heads.sort_by_key(plakous::sessions::LeaseOnlyHead::line);
+    let (client, backend) = memory_runner(workspace).await;
+    let environment = runner_environment(
+        scope(),
+        workspace,
+        ".",
+        ExecutionEnvironmentConfig::default(),
+        backend.clone(),
+    )
+    .unwrap();
+    for head in &heads {
+        let owner = LineOwner::new(
+            head.line(),
+            head.generation(),
+            head.locator().branch_id(),
+            head.fence(),
+        );
+        RunnerSessions::new(&backend, &environment, owner)
+            .jobs()
+            .await
+            .unwrap();
+    }
+    let free = heads.pop().unwrap();
+    let free_line = free.line();
+    free.release().await.unwrap();
+    let held = heads.pop().unwrap();
+    let (readopted, failed) =
+        crate::runner_adoption::readopt_lines(&client, &sessions, "sweep:retry")
+            .await
+            .unwrap();
+    assert_eq!(failed.len(), 1);
+    assert_eq!(failed[0].line, held.line().to_string());
+    assert_eq!(readopted.len(), 1);
+    assert_eq!(readopted[0].line, free_line);
+    held.release().await.unwrap();
+    client.disconnect();
+}
+
+async fn memory_runner(workspace: &Path) -> (RunnerClient, Arc<RunnerBackend>) {
+    let service = RunnerService::new(
+        ExecutionEnvironment::host(
+            scope(),
+            workspace,
+            ".",
+            ExecutionEnvironmentConfig::default(),
+        )
+        .unwrap(),
+        RunnerIdentity {
+            runner_id: RunnerId::new("sweep").unwrap(),
+            version: version(),
+            boot_id: "boot".into(),
+            binary_id: None,
+        },
+    )
+    .unwrap();
+    let (host, runner) = tokio::io::duplex(65536);
+    tokio::spawn(async move { service.serve_connection(runner).await });
+    let (client, hello) = RunnerClient::connect(
+        host,
+        Bind {
+            host_id: "home".into(),
+            host_instance: "instance".into(),
+            version: version(),
+            inspect: false,
+        },
+        ClientWindows::default(),
+    )
+    .await
+    .unwrap();
+    let backend = Arc::new(RunnerBackend::new(hello.descriptor, Arc::new(client.clone())).unwrap());
+    (client, backend)
 }

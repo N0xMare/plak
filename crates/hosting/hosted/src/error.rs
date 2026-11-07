@@ -29,6 +29,8 @@ pub enum CliFailureKind {
     /// The agent tree is in another live host process's custody
     /// (`tree_hosted_elsewhere`).
     HostedElsewhere,
+    /// An embedded attachment cannot take a daemon-held process line.
+    LocalRunnerProcesses,
 }
 
 impl CliFailureKind {
@@ -40,7 +42,7 @@ impl CliFailureKind {
             Self::Usage => 2,
             Self::Auth => 3,
             Self::Agent | Self::RecoveryRequired => 5,
-            Self::HostedElsewhere => 7,
+            Self::HostedElsewhere | Self::LocalRunnerProcesses => 7,
         }
     }
 }
@@ -336,6 +338,15 @@ impl CliFailure {
             .with_attach_failure(AttachFailure::TreeHostedElsewhere)
     }
 
+    /// Refuses an embedded attachment without opening or recovering its line.
+    #[must_use]
+    pub fn local_runner_processes() -> Self {
+        Self::classified(
+            CliFailureKind::LocalRunnerProcesses,
+            "this session's processes run in the local runner; start `plak host`, or see them with `plak runner ps`",
+        )
+    }
+
     /// Internal failure with the default category.
     pub fn new(message: impl Into<String>) -> Self {
         Self::classified(CliFailureKind::Internal, message)
@@ -529,6 +540,7 @@ impl CliFailure {
     pub const fn code(&self) -> Option<&'static str> {
         match self.kind {
             CliFailureKind::HostedElsewhere => Some("tree_hosted_elsewhere"),
+            CliFailureKind::LocalRunnerProcesses => Some("local_runner_processes"),
             _ => None,
         }
     }

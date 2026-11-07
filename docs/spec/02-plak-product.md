@@ -4664,6 +4664,24 @@ when the host starts keeps its custody, and the per-tree
   in its own collected unit; without a reachable user manager, or outside
   a service, it starts detached in its own process group. The daemon's
   environment never supplies a later host's process context.
+  Each dial decides that launch policy once. Only a free socket lock permits
+  a start; a managed dial requests the unit at most once, and unit-exists,
+  timeout or other ambiguous manager answers never authorize a detached
+  fallback. Only a proven unreachable manager does. Detached children are
+  reaped by a waiter. A closed daemon link is redialed under the same bound,
+  reconnecting the existing client and recovering its journal; lines transfer
+  on their next call. Exhausting the bound ends the host non-zero for restart.
+  Inspection, sweep and recorded-stop failures are structured `plak.runner`
+  diagnostics scoped to their protocol, line or session. The next item still
+  runs; live child stops collect failures after attempting every child.
+  Every daemon-backed agent release other than an explicit stop transfers its
+  jobs, including held children materialized after host loss. Embedded agents
+  remain direct and stop their jobs on exit.
+  An embedded open inspects the current-protocol home-local daemon before
+  opening the canonical session. A listed line refuses with typed
+  `local_runner_processes`: "this session's processes run in the local runner;
+  start `plak host`, or see them with `plak runner ps`". It changes no job
+  outcome and stops nothing. When no daemon answers, the open proceeds.
 - **Tool environment.** It captures the login shell's `PATH` once at start,
   bounded at 5 s however the shell's startup files behave, as `plak runner
   serve` does when `runner.toml` sets no `path` (the shell runs in a process

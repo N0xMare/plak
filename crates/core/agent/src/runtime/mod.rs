@@ -103,10 +103,7 @@ pub(crate) use terminal::{
 pub(crate) use terminal::{checkpoint_retained_history, history_prunable_at};
 
 mod agent;
-pub use agent::{
-    abandon_and_release_many, close_admission, lease_released, preserve_daemon_jobs,
-    shutdown_for_transfer,
-};
+pub use agent::{abandon_and_release_many, close_admission, lease_released, shutdown_for_transfer};
 mod operation_record;
 
 mod cleanup;
@@ -228,6 +225,7 @@ struct PreparedToolInvocation {
 }
 
 struct PreparedAgent {
+    daemon_processes: bool,
     job_sessions: plakous_tools::JoinedProcessSessions,
     job_host: Option<Arc<dyn plakous_tools::JobHost>>,
     job_owner: plakous_tools::JobOwner,

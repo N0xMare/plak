@@ -2,7 +2,7 @@
 //! one runner connection, carries streams, watches the link's liveness, and
 //! survives a reconnection.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -29,6 +29,9 @@ use crate::journal::{CallJournal, JournalEntry};
 use crate::streams::{
     Credit, INITIAL_CREDIT, Outbound, StreamEnds, Window, receive_stream, send_stream,
 };
+
+type ForegroundReporter =
+    Arc<dyn Fn(&str, &plakous_runner_protocol::StoppedForeground) + Send + Sync>;
 
 /// How long the host waits on its runner.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -106,6 +109,8 @@ pub struct RunnerClient {
 }
 
 struct Inner {
+    connected: tokio::sync::Notify,
+    foreground_reporter: Mutex<Option<ForegroundReporter>>,
     bind: Bind,
     windows: ClientWindows,
     /// Bound to this home's home-local runner (spec 01 §8.4): any build of
@@ -123,7 +128,6 @@ struct Inner {
     next: AtomicU64,
     state: Mutex<State>,
     transferred: Mutex<Transferred>,
-    stopped_foreground: Mutex<HashMap<String, Vec<plakous_runner_protocol::StoppedForeground>>>,
 }
 
 struct State {
@@ -168,7 +172,14 @@ pub struct RecoveredCall {
 #[derive(Default)]
 struct Transferred {
     instance: String,
-    lines: HashMap<String, Arc<tokio::sync::Mutex<Option<LineOwner>>>>,
+    lines: HashMap<String, Arc<tokio::sync::Mutex<LineTransfer>>>,
+}
+
+#[derive(Default)]
+struct LineTransfer {
+    owner: Option<LineOwner>,
+    connection: u64,
+    reported: HashSet<String>,
 }
 
 impl RunnerClient {
@@ -253,12 +264,13 @@ impl RunnerClient {
         };
         let client = Self {
             inner: Arc::new(Inner {
+                connected: tokio::sync::Notify::new(),
+                foreground_reporter: Mutex::default(),
                 bind,
                 windows,
                 home_local,
                 journal,
                 left: Mutex::new(left),
-                stopped_foreground: Mutex::default(),
                 ids: uuid::Uuid::new_v4().simple().to_string(),
                 next: AtomicU64::new(0),
                 state: Mutex::new(State {
@@ -306,6 +318,21 @@ impl RunnerClient {
     #[must_use]
     pub fn instance(&self) -> String {
         lock(&self.inner.state).instance.clone()
+    }
+
+    /// Waits until the current transport closes, including its dead-window timeout.
+    pub async fn closed(&self) {
+        let closer = lock(&self.inner.state).closer.clone();
+        closer.cancelled().await;
+    }
+
+    /// Installs the product's diagnostic sink for every accepted transfer,
+    /// including implicit transfers before calls. Reports are never retained here.
+    pub fn report_foreground_with(
+        &self,
+        report: impl Fn(&str, &plakous_runner_protocol::StoppedForeground) + Send + Sync + 'static,
+    ) {
+        *lock(&self.inner.foreground_reporter) = Some(Arc::new(report));
     }
 
     /// Replays every keyed call a previous host process left in the journal
@@ -392,10 +419,7 @@ impl RunnerClient {
         &self,
         owner: &plakous_tools::LineOwner,
     ) -> Result<Vec<plakous_runner_protocol::StoppedForeground>, RunnerFailure> {
-        self.inner.transfer(&wire_owner(owner)).await?;
-        Ok(lock(&self.inner.stopped_foreground)
-            .remove(&owner.line().to_string())
-            .unwrap_or_default())
+        self.inner.transfer(&wire_owner(owner)).await
     }
 
     async fn attach<S>(&self, stream: S, again: bool) -> Result<Hello, ConnectError>
@@ -442,17 +466,24 @@ impl RunnerClient {
             state.sender = Some(sender);
             state.connection
         };
+        if again && let Some(journal) = &self.inner.journal {
+            let pending = journal
+                .pending()
+                .map_err(|error| ConnectError::Journal(error.to_string()))?;
+            let state = lock(&self.inner.state);
+            *lock(&self.inner.left) = pending
+                .into_iter()
+                .filter(|entry| !state.pending.contains_key(&entry.request.request_id))
+                .collect();
+        }
         // A runner forgets a line's holder once its owner lease runs out, so
         // after a new connection every line is transferred again before its
         // next call.
-        if again {
-            *lock(&self.inner.transferred) = Transferred::default();
-            lock(&self.inner.stopped_foreground).clear();
-        }
         let inner = Arc::clone(&self.inner);
         tokio::spawn(async move { inner.read(reader, connection, closer).await });
         let inner = Arc::clone(&self.inner);
         tokio::spawn(async move { inner.ping(connection).await });
+        self.inner.connected.notify_waiters();
         Ok(hello)
     }
 }
@@ -487,6 +518,21 @@ impl State {
 }
 
 impl Inner {
+    async fn wait_connected(&self) -> Result<(), RunnerFailure> {
+        let connected = self.connected.notified();
+        tokio::pin!(connected);
+        connected.as_mut().enable();
+        let ready = {
+            let state = lock(&self.state);
+            state.sender.is_some() && !state.closer.is_cancelled()
+        };
+        if ready {
+            return Ok(());
+        }
+        tokio::time::timeout(self.windows.read, connected)
+            .await
+            .map_err(|_| RunnerFailure::Unavailable("the runner did not reconnect".into()))
+    }
     async fn read<R: AsyncRead + Unpin>(
         &self,
         mut reader: FrameStream<R>,
@@ -668,9 +714,15 @@ impl Inner {
     /// owner last transferred for its line. A transfer from an owner the
     /// runner no longer accepts is answered with the one it does; a newer
     /// `owner` (a fresher lease) transfers again from that one, once.
-    async fn transfer(&self, owner: &LineOwner) -> Result<(), RunnerFailure> {
+    async fn transfer(
+        &self,
+        owner: &LineOwner,
+    ) -> Result<Vec<plakous_runner_protocol::StoppedForeground>, RunnerFailure> {
+        let (instance, connection) = {
+            let state = lock(&self.state);
+            (state.instance.clone(), state.connection)
+        };
         let line = {
-            let instance = lock(&self.state).instance.clone();
             let mut transferred = lock(&self.transferred);
             if transferred.instance != instance {
                 *transferred = Transferred {
@@ -681,16 +733,26 @@ impl Inner {
             Arc::clone(transferred.lines.entry(owner.line.clone()).or_default())
         };
         let mut transferred = line.lock().await;
-        if transferred.as_ref() == Some(owner) {
-            return Ok(());
+        if transferred.owner.as_ref() == Some(owner) && transferred.connection == connection {
+            return Ok(Vec::new());
         }
-        let mut from = transferred.clone();
+        let mut from = transferred.owner.clone();
         for _ in 0..2 {
             match self.send_transfer(from.clone(), owner).await? {
-                RunnerFrame::TransferAccepted { stopped, .. } => {
-                    lock(&self.stopped_foreground).insert(owner.line.clone(), stopped);
-                    *transferred = Some(owner.clone());
-                    return Ok(());
+                RunnerFrame::TransferAccepted { mut stopped, .. } => {
+                    if transferred.owner.as_ref() != Some(owner) {
+                        transferred.reported.clear();
+                    }
+                    stopped.retain(|process| transferred.reported.insert(process.call_key.clone()));
+                    let reporter = lock(&self.foreground_reporter).clone();
+                    if let Some(reporter) = reporter {
+                        for process in &stopped {
+                            reporter(&owner.line, process);
+                        }
+                    }
+                    transferred.owner = Some(owner.clone());
+                    transferred.connection = connection;
+                    return Ok(stopped);
                 }
                 RunnerFrame::StaleOwner { current, .. }
                     if owner.is_newer_than(&current) && from.as_ref() != Some(&current) =>
@@ -830,6 +892,9 @@ impl Inner {
     }
 
     async fn call(&self, call: RunnerCall) -> Result<Value, RunnerFailure> {
+        if self.home_local {
+            self.wait_connected().await?;
+        }
         if self.home_local && call.verb().family() != RunnerVerbFamily::Sessions {
             return Err(RunnerFailure::Unavailable(
                 "the home-local runner carries only process sessions".into(),

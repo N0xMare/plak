@@ -90,7 +90,7 @@ pub fn spawn_host_worker<P: plakous_host_protocol::ProtocolExtension>(
             Some(startup_tx.clone()),
         );
         if let Err(err) = &result {
-            let _ = startup_tx.send(Err(err.message().to_owned()));
+            let _ = startup_tx.send(Err(err.clone()));
             // A notice, not an error row: the failure itself is the worker's
             // result, which every surface reports once as its terminal error.
             let _ = event_tx.notice(
@@ -111,7 +111,7 @@ pub fn spawn_host_worker<P: plakous_host_protocol::ProtocolExtension>(
 }
 
 pub(super) fn await_host_startup<P: plakous_host_protocol::ProtocolExtension>(
-    startup_rx: std::sync::mpsc::Receiver<Result<(), String>>,
+    startup_rx: std::sync::mpsc::Receiver<Result<(), CliFailure>>,
     action_tx: crate::surface_protocol::UserActionSender<P>,
     event_rx: crate::surface_protocol::HostEventReceiver<P>,
     handle: HostWorkerHandle,
@@ -124,7 +124,7 @@ pub(super) fn await_host_startup<P: plakous_host_protocol::ProtocolExtension>(
                 .join()
                 .map_err(|_| CliFailure::new("plak product host failed while joining startup"))?
             {
-                Ok(_) => Err(CliFailure::new(error)),
+                Ok(_) => Err(error),
                 Err(termination) => Err(termination),
             }
         }

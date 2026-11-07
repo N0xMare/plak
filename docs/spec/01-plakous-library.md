@@ -6003,6 +6003,10 @@ runner for a session yet.
   job on the runner, which the sweep discovers. A crash after termination
   but before the transfer answer leaves its diagnostic report for the next
   transfer; it creates no session record.
+  Explicit and implicit accepted transfers both drain diagnostic reports into
+  the product log. A newer accepted owner retires reports already delivered to
+  its predecessor; a reconnecting client suppresses repeats for the same owner.
+  Gates without a live operation are pruned rather than retained per old line.
 - **Owner leases.** Leases are per host instance. An instance holds the lines
   it is the holder of while it has a connection and for the owner lease
   (300 s) after its last one ends; other instances of the same `host_id`
@@ -6020,6 +6024,7 @@ runner for a session yet.
   not stop foreground calls: the same instance can reconnect and finish
   them. Termination failures keep cleanup pending for the next tick; the
   runner cannot idle-exit while a foreground process or cleanup remains.
+  Owner-lease time is monotonic and excludes suspend on both supported platforms.
 - **Daemon.** The daemon serves one `RunnerService` on a socket of mode 0600
   in a 0700 directory, named after the protocol version and a hash of the
   version triple, and closes a connection from another user before its hello.
@@ -7262,10 +7267,16 @@ stop a child's jobs. Recovery-required child failure stops jobs with attempt-end
 attribution before parking or releasing its owner. Terminal snapshots remain
 available for durable reconciliation even if the failed runtime cannot publish.
 
+For the home-local daemon transport in host mode, ordinary releases instead
+transfer jobs, including a held child rebuilt and released after host loss.
+Only explicit stops select terminal cleanup; an embedded agent stays direct
+and its release remains terminal. The daemon, not an in-process registry,
+keeps promoted work through host loss.
+
 The host decides release disposition. Before that decision a driver that exits
 itself (including RecoveryRequired, fatal error or panic) closes admission for
-its exact owner but leaves promoted processes running. `shutdown()`, explicit
-shutdown commands and `Drop` select Terminal; process-exit abandonment closes
+its exact owner but leaves promoted processes running. For in-process jobs,
+`shutdown()`, explicit shutdown commands and `Drop` select Terminal; process-exit abandonment closes
 admission and starts bounded stops, without a second driver stop pass. Only
 same-branch recovery/authority-refresh callers and live-attempt child
 retirement (interrupted, RecoveryRequired recycle, a child recovery) select

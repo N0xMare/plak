@@ -67,7 +67,7 @@ pub(super) fn run_host_loop<P: plakous_host_protocol::ProtocolExtension>(
     config: HostConfig<P>,
     actions: &crate::surface_protocol::UserActionReceiver<P>,
     events: Sender<P>,
-    startup: Option<std::sync::mpsc::SyncSender<Result<(), String>>>,
+    startup: Option<std::sync::mpsc::SyncSender<Result<(), CliFailure>>>,
 ) -> CliResult<()> {
     run(config, actions, events, startup, None)
 }
@@ -80,7 +80,7 @@ pub(super) fn run<P: plakous_host_protocol::ProtocolExtension>(
     config: HostConfig<P>,
     actions: &crate::surface_protocol::UserActionReceiver<P>,
     events: Sender<P>,
-    startup: Option<std::sync::mpsc::SyncSender<Result<(), String>>>,
+    startup: Option<std::sync::mpsc::SyncSender<Result<(), CliFailure>>>,
     one_shot: Option<&mut super::oneshot::OneShotState>,
 ) -> CliResult<()> {
     let executor = std::rc::Rc::new(
@@ -754,7 +754,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
         config: HostConfig<P>,
         actions: &'a crate::surface_protocol::UserActionReceiver<P>,
         events: Sender<P>,
-        startup: Option<std::sync::mpsc::SyncSender<Result<(), String>>>,
+        startup: Option<std::sync::mpsc::SyncSender<Result<(), CliFailure>>>,
     ) -> CliResult<Self> {
         let executor = std::rc::Rc::new(
             session_executor::SessionExecutor::new()

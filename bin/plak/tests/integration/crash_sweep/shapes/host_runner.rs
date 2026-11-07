@@ -11,6 +11,7 @@ pub(in super::super) fn is_host(shape: &str) -> bool {
             | "host_handoff_keeps_jobs"
             | "host_crash_mid_readopt"
             | "host_crash_mid_stop"
+            | "embedded_open_after_host_crash"
     )
 }
 
@@ -71,7 +72,7 @@ fn alive(pid: i32) -> bool {
     nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok()
 }
 
-fn promoted(fixture: &Fixture) -> bool {
+fn runner_lines(fixture: &Fixture) -> Vec<plakous::runner::protocol::LineStatus> {
     use plakous::runner::protocol::{Bind, PROTOCOL_VERSION, VersionTriple};
     use plakous::runner::{ClientWindows, RunnerClient};
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -83,7 +84,7 @@ fn promoted(fixture: &Fixture) -> bool {
             .home()
             .join(format!("host/runner/v{PROTOCOL_VERSION}/run/runner.sock"));
         let Ok(stream) = tokio::net::UnixStream::connect(socket).await else {
-            return false;
+            return Vec::new();
         };
         let bind = Bind {
             host_id: std::fs::read_to_string(fixture.home().join("host-id"))
@@ -100,13 +101,7 @@ fn promoted(fixture: &Fixture) -> bool {
                 .unwrap();
         let lines = client.lines().await.unwrap();
         client.disconnect();
-        lines.into_iter().any(|line| {
-            plakous::tools::runner::decode_jobs_snapshot(line.jobs)
-                .unwrap()
-                .1
-                .iter()
-                .any(|job| job.status == plakous::tools::JobStatus::Running)
-        })
+        lines
     })
 }
 
@@ -134,7 +129,15 @@ pub(in super::super) fn after_kill(
 ) -> Value {
     assert!(starts(fixture) <= 1);
     let pid = job(fixture);
-    let was_promoted = promoted(fixture);
+    let lines = runner_lines(fixture);
+    let held = !lines.is_empty();
+    let was_promoted = lines.into_iter().any(|line| {
+        plakous::tools::runner::decode_jobs_snapshot(line.jobs)
+            .unwrap()
+            .1
+            .iter()
+            .any(|job| job.status == plakous::tools::JobStatus::Running)
+    });
     if shape != "host_crash_mid_stop"
         && let Some(pid) = pid
     {
@@ -144,6 +147,14 @@ pub(in super::super) fn after_kill(
         super::super::super::offline_support::kill_local_daemon_only(&fixture.home());
     }
     let before = summary::read(fixture);
+    if shape == "embedded_open_after_host_crash" && held {
+        assert_embedded_refused(fixture, session);
+        assert_eq!(
+            summary::read(fixture).jobs,
+            before.jobs,
+            "the embedded refusal changed job outcomes"
+        );
+    }
     let dispatches = invariants::dispatches(fixture).len();
     let mut followup = script();
     followup["steps"] = json!([{"output": {"text": FOLLOWUP}, "finish": "stop"}]);
@@ -204,4 +215,23 @@ pub(in super::super) fn after_kill(
     json!({"outcome": if after.original_answers > 0 { "COMPLETED_ONCE" } else { "HELD" }, "invariants": true,
         "dispatches": once, "before": before, "recovered": after, "global_order": commits,
         "global_ordinal": commits.last().unwrap().ordinal})
+}
+
+fn assert_embedded_refused(fixture: &Fixture, session: &str) {
+    let outcome = fixture
+        .command()
+        .args(["agent", "--session", session])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&outcome.stdout),
+        String::from_utf8_lossy(&outcome.stderr)
+    );
+    assert_eq!(outcome.status.code(), Some(7), "{text}");
+    assert!(
+        text.contains("this session's processes run in the local runner"),
+        "{text}"
+    );
 }

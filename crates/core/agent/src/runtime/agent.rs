@@ -74,18 +74,6 @@ pub fn close_admission(agent: &Agent) {
     );
 }
 
-/// Marks a daemon-backed owner's release as a transfer, without stopping its driver.
-pub fn preserve_daemon_jobs(agent: &Agent) {
-    let mut mode = agent
-        .inner
-        .job_release_mode
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if *mode == super::JobReleaseMode::Pending {
-        *mode = super::JobReleaseMode::Transfer;
-    }
-}
-
 /// Unsupported facade plumbing for an explicit same-branch owner transfer.
 ///
 /// # Errors
@@ -699,6 +687,8 @@ impl Agent {
 
     /// Stops admission, cancels active work, terminalizes queued turns, and
     /// waits for the private actor to exit. Calling this from clones is idempotent.
+    /// Home-local daemon jobs transfer on ordinary release; explicit stops
+    /// and terminal shutdown commands still stop them.
     ///
     /// # Errors
     ///
@@ -792,12 +782,22 @@ impl Agent {
     /// can save its recovery handoff before batched release. The host must
     /// follow with `abandon_and_release` and enforce its process-exit bound.
     pub fn begin_abandon(&self) {
-        *self
-            .inner
-            .job_release_mode
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = super::JobReleaseMode::Abandon;
-        self.begin_job_stop();
+        let transfer = {
+            let mut mode = self
+                .inner
+                .job_release_mode
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if *mode == super::JobReleaseMode::Transfer {
+                true
+            } else {
+                *mode = super::JobReleaseMode::Abandon;
+                false
+            }
+        };
+        if !transfer {
+            self.begin_job_stop();
+        }
         self.inner.accepting.store(false, Ordering::Release);
         plakous_tools::internal::close_job_admission(
             &self.inner.job_sessions,

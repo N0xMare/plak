@@ -19,11 +19,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         // Taken first, whether or not this release succeeds: a later
         // release never inherits a planned handoff.
         let handoff = self.role.actions.take_planned_handoff();
-        if handoff && self.role.config.state_roots.daemon_processes() {
-            if let Some(agent) = self.opened.agent() {
-                plakous::agent::preserve_daemon_jobs(agent);
-            }
-        }
         self.role.pending_resume = None;
         self.quit_abandoned_turn =
             self.role.events.quit_receipt.outcome() == super::super::HostQuitOutcome::Escalated;
@@ -57,7 +52,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 .saturating_sub(std::time::Duration::from_millis(150))
                 .min(std::time::Duration::from_millis(400))
         };
-        let keep_jobs = handoff && self.role.config.state_roots.daemon_processes();
+        let keep_jobs = self.role.config.state_roots.daemon_processes();
         let stop_failure = if keep_jobs {
             None
         } else if abandon {

@@ -2050,7 +2050,19 @@ no new handoff and revives nothing, under both policies. That probe cuts
 between settling the original host's cancellation and recording its handoff,
 so the idle successor cannot borrow an earlier attachment's authority.
 `a_childs_daemon_job_survives_host_loss_and_handoff` covers a real
-child's process. Start-environment coverage uses two hosts sharing one daemon
+child's process with its binding present and its job still running five seconds
+after attachment; the busy-root case pins the same law. A slow user-manager
+fixture checks success, unit-exists and timeout without a detached fallback.
+Link-loss probes require another process start on the serving host, and require
+non-zero exit when bounded redial fails. The startup journal probe leaves a real
+pair of answered keys unacknowledged, then proves both are spent and the journal
+empty. A held first line cannot prevent the next line's sweep, and child-stop
+recovery collects every failure rather than returning after the first.
+The exact-name lane checker uses full binary-relative test paths, rejects bare
+module and suffix matches, and preserves exact lane/exclusion comparison.
+`embedded_open_after_host_crash` adds indexed refusal cuts: a daemon-held line
+refuses embedded open without a job terminal, and the next host still adopts it.
+Start-environment coverage uses two hosts sharing one daemon
 with distinct login-shell PATHs and HOMEs. An EOF before Hello, contention
 with an exiting daemon's socket lock, and an unreachable user manager have
 deterministic fixtures. A version-1 socket accepts only an inspecting bind

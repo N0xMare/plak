@@ -227,7 +227,7 @@ pub(crate) fn recover(
     }
 }
 
-fn record_stop(fixture: &Fixture, session: &str) {
+pub(super) fn record_stop(fixture: &Fixture, session: &str) {
     use plak::store::session_records::SessionRecordStore as _;
     use plakous_hosted::sessions::projector::{RootInterrupt, RootLossIntent, RootStopAnchor};
     let store = plak::store::session_records::SqliteSessionStore::new(

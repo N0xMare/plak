@@ -66,7 +66,7 @@ pub(crate) fn run_host_command(
     let entered = runtime.enter();
     let bound = socket::Bound::bind(&paths.host_socket(), &lock)?;
     drop(entered);
-    let services = runner::prepare(services, &environment, &runtime)?;
+    let (services, runner_client) = runner::prepare(services, &environment, &runtime)?;
     let sessions = sessions::ProductSessions::new(&services, command.idle_release)?;
     // Read before the host serves, so nothing this host does is mistaken
     // for what the last one left.
@@ -103,8 +103,16 @@ pub(crate) fn run_host_command(
     scan(&host, owed, stop);
     // The web endpoint serves beside the control socket and stops with it.
     let web = web.map(|web| runtime.spawn(web.serve()));
-    runtime.block_on(bound.serve(&host, move || stop.stopped()));
+    let served = runtime.block_on(async {
+        tokio::select! {
+            () = bound.serve(&host, move || stop.stopped()) => Ok(()),
+            result = runner::supervise(paths, &runner_client) => result,
+        }
+    });
     if let Some(web) = web {
+        if served.is_err() {
+            web.abort();
+        }
         let _ = runtime.block_on(web);
     }
     let stopping = Instant::now();
@@ -127,7 +135,7 @@ pub(crate) fn run_host_command(
     );
     drop(lock);
     runtime.shutdown_timeout(Duration::from_secs(1));
-    Ok(ProcessOutcome::Success)
+    served.map(|()| ProcessOutcome::Success)
 }
 
 /// This process's generation: it differs on every start.

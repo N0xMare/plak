@@ -725,6 +725,11 @@ widens it.
   inside the lease revokes no foreground authority. Promoted jobs survive.
   Obsolete protocol daemons are inspected only, their jobs reported unknown,
   never transferred or re-adopted by the new protocol.
+  An embedded open refuses a current-protocol daemon-held line before taking
+  canonical ownership or recovering it; inspection never transfers or stops
+  that line. Daemon link recovery retains the same host instance. No detached
+  daemon is started after an ambiguous user-manager answer, and every start
+  first probes the socket lock.
 - **The home-local runner is the home's own, and only its own.** A home's
   home-local runner (`plak runner serve --local`, chapter 01 §8.4) carries
   the local runner's processes for that home's hosts. It accepts only that

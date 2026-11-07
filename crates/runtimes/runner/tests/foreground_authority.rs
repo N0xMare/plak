@@ -232,8 +232,10 @@ async fn a_new_owner_stops_and_reports_foreground_but_preserves_promoted_jobs() 
             );
             let third = Link::new(&fixture.service, "third").await;
             let repeated = third.client.transfer_owner(&owner(3)).await.unwrap();
-            assert_eq!(repeated.len(), 1);
-            assert_eq!(repeated[0], stopped[0]);
+            assert!(
+                repeated.is_empty(),
+                "a newer accepted owner retires delivered reports"
+            );
         }
     }
 }
@@ -262,6 +264,43 @@ async fn foreground_owner_lease_expiry_stops_without_a_successor() {
     link.reconnect(&fixture.service).await;
     let stopped = link.client.transfer_owner(&owner(1)).await.unwrap();
     assert_eq!(stopped.len(), 1);
+    assert!(!alive(fixture.pid()));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_implicit_transfer_delivers_each_foreground_report_once() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let fixture = Fixture::new(Duration::from_secs(10));
+    let before = Link::new(&fixture.service, "before").await;
+    fixture.start(&before).await;
+    let mut after = Link::new(&fixture.service, "after").await;
+    let count = Arc::new(AtomicUsize::new(0));
+    let seen = Arc::clone(&count);
+    after.client.report_foreground_with(move |line, stopped| {
+        assert_eq!(line, owner(2).line().to_string());
+        assert_ne!(stopped.call_key, "");
+        assert_ne!(stopped.pid, 0);
+        seen.fetch_add(1, Ordering::Relaxed);
+    });
+    let env = runner_environment(
+        environment(fixture.root.path()).descriptor().scope(),
+        fixture.root.path(),
+        ".",
+        ExecutionEnvironmentConfig::default(),
+        after.backend.clone(),
+    )
+    .unwrap();
+    RunnerSessions::new(&after.backend, &env, owner(2))
+        .jobs()
+        .await
+        .unwrap();
+    assert_eq!(count.load(Ordering::Relaxed), 1);
+    assert_eq!(after.client.transfer_owner(&owner(2)).await.unwrap(), []);
+    after.reconnect(&fixture.service).await;
+    assert_eq!(after.client.transfer_owner(&owner(2)).await.unwrap(), []);
+    let third = Link::new(&fixture.service, "third").await;
+    assert_eq!(third.client.transfer_owner(&owner(3)).await.unwrap(), []);
+    assert_eq!(count.load(Ordering::Relaxed), 1);
     assert!(!alive(fixture.pid()));
 }
 

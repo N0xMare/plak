@@ -882,6 +882,7 @@ impl PreparedAgent {
         let executor = builder.executor()?;
         Ok(Self {
             job_sessions,
+            daemon_processes: builder.local_daemon.is_some(),
             job_host: builder.job_host,
             job_owner,
             model: builder.model,

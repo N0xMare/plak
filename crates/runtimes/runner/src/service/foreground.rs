@@ -1,7 +1,7 @@
 //! Foreground authority ends at a newer transfer or an expired instance lease.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Instant;
 
 use plakous_runner_protocol::{LineOwner, RunnerFrame, StoppedForeground, TransferOwner};
@@ -16,18 +16,32 @@ type Gate = Arc<tokio::sync::Mutex<()>>;
 
 #[derive(Default)]
 pub(super) struct Authority {
-    gates: Mutex<HashMap<Key, Gate>>,
+    gates: Mutex<HashMap<Key, Weak<tokio::sync::Mutex<()>>>>,
     expiring: Mutex<HashSet<Key>>,
-    reports: Mutex<HashMap<Key, Vec<StoppedForeground>>>,
+    reports: Mutex<HashMap<Key, Reports>>,
+}
+
+#[derive(Default)]
+struct Reports {
+    stopped: Vec<StoppedForeground>,
+    delivered: Option<(LineOwner, usize)>,
 }
 
 impl Authority {
     fn gate(&self, host: &str, line: &str) -> Gate {
-        Arc::clone(
-            lock(&self.gates)
-                .entry((host.to_owned(), line.to_owned()))
-                .or_default(),
-        )
+        let mut gates = lock(&self.gates);
+        gates.retain(|_, gate| gate.strong_count() != 0);
+        let gate = gates.entry((host.to_owned(), line.to_owned())).or_default();
+        if let Some(gate) = gate.upgrade() {
+            return gate;
+        }
+        let fresh = Arc::new(tokio::sync::Mutex::new(()));
+        *gate = Arc::downgrade(&fresh);
+        fresh
+    }
+
+    pub(super) fn prune(&self) {
+        lock(&self.gates).retain(|_, gate| gate.strong_count() != 0);
     }
 
     pub(super) fn pending(&self) -> bool {
@@ -107,6 +121,7 @@ impl RunnerService {
                 stored
                     .entry((host.to_owned(), line.to_owned()))
                     .or_default()
+                    .stopped
                     .extend(reports);
             }
             if let Some(failure) = stopped.failure {
@@ -116,11 +131,23 @@ impl RunnerService {
         Ok(())
     }
 
-    fn foreground_report(&self, host: &str, line: &str) -> Vec<StoppedForeground> {
-        lock(&self.inner.foreground.reports)
-            .get(&(host.to_owned(), line.to_owned()))
-            .cloned()
-            .unwrap_or_default()
+    fn foreground_report(&self, host: &str, owner: &LineOwner) -> Vec<StoppedForeground> {
+        let mut reports = lock(&self.inner.foreground.reports);
+        let key = (host.to_owned(), owner.line.clone());
+        let Some(report) = reports.get_mut(&key) else {
+            return Vec::new();
+        };
+        if let Some((delivered, count)) = &report.delivered
+            && owner.is_newer_than(delivered)
+        {
+            report.stopped.drain(..*count);
+        }
+        if report.stopped.is_empty() {
+            reports.remove(&key);
+            return Vec::new();
+        }
+        report.delivered = Some((owner.clone(), report.stopped.len()));
+        report.stopped.clone()
     }
 
     pub(super) async fn transfer_foreground(
@@ -149,7 +176,7 @@ impl RunnerService {
                 detail,
             };
         }
-        let stopped = self.foreground_report(host, &transfer.to.line);
+        let owner = transfer.to.clone();
         let mut answer = lock(&self.inner.tables).transfer(
             host,
             instance,
@@ -161,7 +188,7 @@ impl RunnerService {
             stopped: report, ..
         } = &mut answer
         {
-            *report = stopped;
+            *report = self.foreground_report(host, &owner);
         }
         answer
     }
