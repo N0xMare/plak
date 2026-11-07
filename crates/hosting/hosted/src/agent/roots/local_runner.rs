@@ -65,7 +65,7 @@ impl ProductStateRoots {
                 .load(tree_id)
                 .map_err(|error| CliFailure::new(error.to_string()))?
             {
-                for node in tree.nodes().values() {
+                for node in tree.rows().nodes().values() {
                     if let Some(recorded) = &node.session_locator {
                         locators.push(
                             recorded

@@ -86,12 +86,6 @@ fn an_upgraded_host_inspects_the_old_protocol_and_starts_a_separate_daemon() {
     });
     let mut host = start_env(&fixture, &[], &[("PLAK_LOG", "info".into())]);
     inspect.join().unwrap();
-    let log = std::fs::read_to_string(fixture.home().join("logs/plak.log")).unwrap();
-    assert!(
-        log.contains("obsolete_protocol") && log.contains("outcome_unknown"),
-        "{log}"
-    );
-    assert!(!log.contains("runner_recovery_failed"), "{log}");
     assert!(socket.exists());
     assert!(
         fixture
@@ -109,6 +103,12 @@ fn an_upgraded_host_inspects_the_old_protocol_and_starts_a_separate_daemon() {
     );
     stopped(pid);
     stop(&mut host);
+    let log = std::fs::read_to_string(fixture.home().join("logs/plak.log")).unwrap();
+    assert!(
+        log.contains("obsolete_protocol") && log.contains("outcome_unknown"),
+        "{log}"
+    );
+    assert!(!log.contains("runner_recovery_failed"), "{log}");
 }
 
 fn obsolete_hello(fixture: &Fixture) -> plakous::runner::protocol::Hello {
