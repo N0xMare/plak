@@ -30,6 +30,7 @@ pub struct SocketFace {
 
 #[derive(Default)]
 struct State {
+    creation: Option<CreationSelection>,
     host_notice_probe_started: bool,
     host_notice: Option<String>,
     session: Option<String>,
@@ -39,6 +40,13 @@ struct State {
     events: VecDeque<HostEvent>,
     unsent: VecDeque<client::SendError<PlakExtension>>,
     listener: Option<(String, crate::reload_request::Listener)>,
+}
+
+#[derive(Clone)]
+struct CreationSelection {
+    runner: plakous_host_protocol::wire::RunnerLabel,
+    workspace: String,
+    profile: Option<String>,
 }
 
 impl SocketFace {
@@ -80,6 +88,68 @@ impl SocketFace {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    pub(super) fn place(&self, runner: Option<&str>, workspace: Option<&str>) -> CliResult<()> {
+        use plakous_host_protocol::wire::{WorkspaceOptions, WorkspaceProbe};
+        let Answer::Options { options } = self.call(Op::SessionOptions { workspace: None })? else {
+            return Err(CliFailure::new(
+                "the host did not answer with session options",
+            ));
+        };
+        let requested = runner.unwrap_or("local");
+        let row = options
+            .runners
+            .iter()
+            .find(|row| {
+                row.runner.name == requested || row.aliases.iter().any(|alias| alias == requested)
+            })
+            .ok_or_else(|| {
+                CliFailure::new(format!(
+                    "runner {requested} was not returned by the host; no session was created"
+                ))
+            })?;
+        let path = workspace
+            .map(str::to_owned)
+            .or_else(|| {
+                row.recent_workspaces
+                    .first()
+                    .map(|recent| recent.path.clone())
+            })
+            .or_else(|| row.default_workspace.clone())
+            .ok_or_else(|| {
+                CliFailure::new("the runner has no default workspace; supply --workspace")
+            })?;
+        let Answer::Options { options: validated } = self.call(Op::SessionOptions {
+            workspace: Some(WorkspaceProbe {
+                runner: row.runner.clone(),
+                path,
+            }),
+        })?
+        else {
+            return Err(CliFailure::new("the host did not validate the workspace"));
+        };
+        let canonical_path = match validated.workspace {
+            Some(WorkspaceOptions::Valid { canonical_path, .. }) => canonical_path,
+            Some(WorkspaceOptions::Refused { refusal }) => {
+                return Err(CliFailure::new(format!(
+                    "workspace refused: {refusal:?}; no session was created"
+                )));
+            }
+            None => {
+                return Err(CliFailure::new(
+                    "the host omitted workspace validation; no session was created",
+                ));
+            }
+        };
+        let mut state = self.state();
+        state.new_request = None;
+        state.creation = Some(CreationSelection {
+            runner: row.runner.clone(),
+            workspace: canonical_path,
+            profile: options.profiles.current,
+        });
+        Ok(())
+    }
+
     pub(super) fn select(&self, requested: Option<&str>) -> CliResult<()> {
         if requested.is_some() {
             self.state().new_request = None;
@@ -93,7 +163,12 @@ impl SocketFace {
 
     fn select_or_create(&self, requested: Option<&str>) -> CliResult<()> {
         let answer = if let Some(requested) = requested {
-            let Answer::Sessions { rows } = self.call(self.list())? else {
+            let Answer::Sessions { rows } = self.call(Op::ListSessions {
+                workspace: None,
+                runner: None,
+                include_archived: false,
+            })?
+            else {
                 return Err(CliFailure::new(
                     "the host did not answer with its session directory",
                 ));
@@ -106,6 +181,11 @@ impl SocketFace {
                 .find(|row| row.session == id)
                 .ok_or_else(|| CliFailure::new("the selected session left the directory"))?;
             refuse_elsewhere(row)?;
+            self.state().creation = Some(CreationSelection {
+                runner: row.runner.clone(),
+                workspace: row.workspace.clone(),
+                profile: None,
+            });
             self.select_root(row.session.clone(), row.node.clone())?;
             return Ok(());
         } else {
@@ -163,19 +243,39 @@ impl SocketFace {
     }
 
     fn list(&self) -> Op<PlakExtension> {
+        let selected = self.state().creation.clone();
         Op::ListSessions {
-            workspace: Some(self.workspace.clone()),
+            runner: Some(
+                selected
+                    .as_ref()
+                    .map_or("local", |selection| selection.runner.runner_id.as_str())
+                    .to_owned(),
+            ),
+            include_archived: false,
+            workspace: Some(
+                selected.map_or_else(|| self.workspace.clone(), |selection| selection.workspace),
+            ),
         }
     }
 
     fn new_session(&self) -> Op<PlakExtension> {
-        let request_id = self
-            .state()
+        let mut state = self.state();
+        let selected = state.creation.clone();
+        let request_id = state
             .new_request
             .get_or_insert_with(|| uuid::Uuid::new_v4().to_string())
             .clone();
         Op::NewSession {
-            workspace: self.workspace.clone(),
+            runner: selected.as_ref().map_or_else(
+                plakous_host_protocol::wire::RunnerLabel::local,
+                |selection| selection.runner.clone(),
+            ),
+            profile: selected
+                .as_ref()
+                .and_then(|selection| selection.profile.clone()),
+            model: None,
+            workspace: selected
+                .map_or_else(|| self.workspace.clone(), |selection| selection.workspace),
             template: None,
             request_id,
         }
@@ -368,7 +468,9 @@ impl SocketFace {
             };
             let Some(action) = action else {
                 let text = match outcome {
-                    Outcome::Ok(Answer::Stopped) => crate::tui::SESSION_STOPPED_ACK.to_owned(),
+                    Outcome::Ok(Answer::Stopped {
+                        runner_pending: false,
+                    }) => crate::tui::SESSION_STOPPED_ACK.to_owned(),
                     other => format!("stop refused: {other:?}"),
                 };
                 self.state()

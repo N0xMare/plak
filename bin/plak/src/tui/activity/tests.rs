@@ -6,6 +6,26 @@ fn all(_: usize) -> bool {
 }
 
 #[test]
+fn tool_rows_consume_the_host_operation_instead_of_reclassifying_the_display_name() {
+    let mut item: plakous_host_protocol::views::transcript::ToolItem = serde_json::from_str(
+        r#"{"call_id":"call","name":"unknown_alias","activity_kind":"tool","state":"done","subject":"7"}"#,
+    ).unwrap();
+    item.wire_operation = Some(plakous_host_protocol::views::ToolOperation::ReadProcess);
+    let block = ScrollBlock::from_tool_item(item);
+    assert_eq!(verb(&block), Some(ToolVerb::ReadProcess));
+    let plans = plan(std::slice::from_ref(&block), RenderPrefs::default());
+    let label = item_label(
+        "unknown_alias",
+        "done",
+        ActivityKind::Tool,
+        Some("7"),
+        None,
+        &plans[0],
+    );
+    assert_eq!(label, "Read output of process 7");
+}
+
+#[test]
 fn process_actions_name_the_operation_and_outcome() {
     for (name, state, subject, expected) in [
         ("Shell", "running", "cargo test", "  ⠼ $ cargo test"),

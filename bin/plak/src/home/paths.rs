@@ -95,6 +95,18 @@ impl PlakPaths {
         }
     }
 
+    /// A runner-owned workspace uses host-home product configuration only.
+    /// No host filesystem discovery is performed for its path spelling.
+    #[must_use]
+    pub fn for_remote_workspace(&self, workspace: &Path) -> Self {
+        Self {
+            home: self.home.clone(),
+            default_home: self.default_home.clone(),
+            project_root: None,
+            workspace: Some(workspace.to_owned()),
+        }
+    }
+
     /// The same home with `root` as the project whose `.plak/agents/` is read.
     #[must_use]
     pub fn with_project_root(mut self, root: PathBuf) -> Self {

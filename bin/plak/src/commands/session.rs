@@ -5,6 +5,7 @@ mod binding;
 mod delete;
 pub(crate) mod import_export;
 pub(crate) mod lifecycle;
+pub(crate) mod import_placement;
 mod lookup;
 mod read_only;
 pub(crate) mod rebind;
@@ -15,7 +16,9 @@ pub(crate) use attached::{
 };
 
 pub use binding::seed_new_session_binding;
-pub(crate) use binding::{ROOT_BINDING_REMEDY, resolve_api_composition};
+pub(crate) use binding::{
+    ROOT_BINDING_REMEDY, resolve_api_composition, seed_new_session_binding_on,
+};
 
 pub use delete::confirm_session_mutation;
 #[cfg(test)]

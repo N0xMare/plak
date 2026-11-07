@@ -1388,6 +1388,30 @@ fn the_private_host_resume_marker_is_distinct_from_embedded_resume() {
 }
 
 #[test]
+fn placement_flags_only_launch_the_tui_and_preserve_runner_owned_path_bytes() {
+    assert!(
+        matches!(parse(args(&["--runner", "machine", "--workspace", "/remote/work"])),
+        Ok(Command::TuiPlacement { runner: Some(runner), workspace: Some(workspace) })
+            if runner == "machine" && workspace == "/remote/work")
+    );
+    assert!(matches!(
+        parse(args(&["--workspace", "/host/work"])),
+        Ok(Command::TuiPlacement {
+            runner: None,
+            workspace: Some(_)
+        })
+    ));
+    for argv in [
+        &["--runner"][..],
+        &["--workspace"][..],
+        &["--runner", "machine", "run", "--", "prompt"][..],
+        &["--runner", "machine", "agent"][..],
+    ] {
+        assert!(parse(args(argv)).is_err(), "{argv:?}");
+    }
+}
+
+#[test]
 fn top_level_init_and_setup_are_absent_but_config_init_remains() {
     for retired in ["init", "setup"] {
         assert_eq!(

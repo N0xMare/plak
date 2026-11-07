@@ -410,7 +410,10 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
     if command_needs_product_state(&command)
         || matches!(
             command,
-            Command::Tui { .. } | Command::Resume { .. } | Command::HostResume { .. }
+            Command::Tui { .. }
+                | Command::TuiPlacement { .. }
+                | Command::Resume { .. }
+                | Command::HostResume { .. }
         )
     {
         build_identity::allow_identity_cache_writes();
@@ -497,6 +500,13 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             session_id,
             resume_picker,
         } => return launch_tui(&services, session_id, resume_picker, None),
+        Command::TuiPlacement { runner, workspace } => {
+            return tui_launch::launch_placed_tui(
+                &services,
+                runner.as_deref(),
+                workspace.as_deref(),
+            );
+        }
         Command::HostResume { session_id } => {
             return tui_launch::launch_host_tui(&services, session_id);
         }
@@ -1255,6 +1265,7 @@ fn execute_command(
         | Command::RunPlatform { .. }
         | Command::ContinueSession { .. }
         | Command::Tui { .. }
+        | Command::TuiPlacement { .. }
         | Command::Resume { .. }
         | Command::HostResume { .. }
         | Command::Agent { .. }

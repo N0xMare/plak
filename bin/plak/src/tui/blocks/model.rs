@@ -304,6 +304,8 @@ pub enum ScrollBlock {
 /// The operator-side state of one tool item's detail (spec 02 §5.4).
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ItemView {
+    /// Host-classified semantic operation retained independently of display names.
+    pub operation: Option<plakous_host_protocol::views::ToolOperation>,
     /// The host's answer for this call's full input and output.
     pub fetched: Option<std::sync::Arc<CallDetailOutcome>>,
     /// The output window's hidden middle is shown.
@@ -499,6 +501,7 @@ impl ScrollBlock {
     /// earned: a resumed `12.3s` does not reload as `12315ms`, a rejection
     /// stays `⊘` and a failure keeps its detail.
     pub(in crate::tui) fn from_tool_item(tool: ToolItem) -> Self {
+        let operation = tool.operation();
         let kind = tool.kind;
         let state =
             super::presented_tool_state(&tool.state, tool.duration_ms().map(Duration::from_millis));
@@ -521,7 +524,10 @@ impl ScrollBlock {
             wait: tool.wait,
             started_at_ms: tool.started_at_ms,
             finished_at_ms: tool.finished_at_ms,
-            view: ItemView::default(),
+            view: ItemView {
+                operation: Some(operation),
+                ..ItemView::default()
+            },
         }
     }
 

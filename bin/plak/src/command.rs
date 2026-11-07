@@ -107,6 +107,10 @@ pub(crate) enum Command {
         session_id: Option<String>,
         resume_picker: bool,
     },
+    TuiPlacement {
+        runner: Option<String>,
+        workspace: Option<String>,
+    },
     Resume {
         session_id: Option<String>,
         /// The reload handoff sidecar the old build named (hidden).
@@ -436,7 +440,7 @@ impl Command {
             | Self::CarryProbe { .. }
             | Self::ReopenProbe { .. }
             | Self::ExportVersion => "version",
-            Self::Tui { .. } => "tui",
+            Self::Tui { .. } | Self::TuiPlacement { .. } => "tui",
             Self::Resume { .. } | Self::HostResume { .. } | Self::ImportResume { .. } => "resume",
             Self::Fork { .. } => "fork",
             Self::Compact { .. } => "compact",

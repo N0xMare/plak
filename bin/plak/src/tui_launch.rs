@@ -97,6 +97,19 @@ pub(crate) fn launch_host_tui(
     hosted::run(services, face, session_id, false, None)
 }
 
+pub(crate) fn launch_placed_tui(
+    services: &Services,
+    runner: Option<&str>,
+    workspace: Option<&str>,
+) -> CliResult<ProcessOutcome> {
+    refuse_without_terminal(services, None, false)?;
+    let face = socket::SocketFace::discover(services.paths()?)?.ok_or_else(|| {
+        CliFailure::new("--runner/--workspace requires a running host; start `plak host` first; no embedded session was started")
+    })?;
+    face.place(runner, workspace)?;
+    hosted::run(services, face, None, false, None)
+}
+
 fn begin_tui_session_launch(
     _paths: &product_paths::PlakPaths,
     _record: &mut product_sessions::SessionRecord,

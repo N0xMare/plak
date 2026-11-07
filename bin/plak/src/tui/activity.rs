@@ -3,9 +3,8 @@
 
 use super::blocks::{
     DisplayMode, RenderPrefs, RowPlan, SUBMILLISECOND_ELAPSED, ScrollBlock, ToolVerb,
-    display_tool_title_for, format_group_elapsed, humanize_tool, process_subject_verb,
-    recorded_tool_duration, row_indent, subject_tool_verb, tool_is_failed, tool_is_interrupted,
-    tool_is_running, tool_state_detail,
+    format_group_elapsed, humanize_tool, process_subject_verb, recorded_tool_duration, row_indent,
+    subject_tool_verb, tool_is_failed, tool_is_interrupted, tool_is_running, tool_state_detail,
 };
 use super::presentation::ActivityKind;
 use plakous_host_protocol::views::transcript::WaitFacts;
@@ -19,7 +18,11 @@ pub(super) fn hud_verb(name: &str, kind: ActivityKind, subject: Option<&str>) ->
     if name == "wait" {
         return "waiting";
     }
-    match subject_tool_verb(name, kind, subject) {
+    hud_verb_for(subject_tool_verb(name, kind, subject))
+}
+
+pub(super) fn hud_verb_for(verb: ToolVerb) -> &'static str {
+    match verb {
         ToolVerb::Run => "running command",
         ToolVerb::WaitProcess => "waiting",
         ToolVerb::ReadProcess => "reading",
@@ -57,8 +60,13 @@ fn verb(block: &ScrollBlock) -> Option<ToolVerb> {
             name,
             kind,
             subject,
+            view,
             ..
-        } => Some(subject_tool_verb(name, *kind, subject.as_deref())),
+        } => Some(
+            view.operation
+                .map(super::blocks::operation_verb)
+                .unwrap_or_else(|| subject_tool_verb(name, *kind, subject.as_deref())),
+        ),
         _ => None,
     }
 }
@@ -496,7 +504,7 @@ fn summary(blocks: &[ScrollBlock], counted: &dyn Fn(usize) -> bool) -> Summary {
         } else {
             failed
         };
-        match subject_tool_verb(name, *kind, subject.as_deref()) {
+        match verb(block).unwrap_or(ToolVerb::Generic) {
             ToolVerb::Read | ToolVerb::List | ToolVerb::Fetch => counts.reads += 1,
             ToolVerb::Search => counts.searches += 1,
             ToolVerb::Edit => {
@@ -556,7 +564,10 @@ fn summary(blocks: &[ScrollBlock], counted: &dyn Fn(usize) -> bool) -> Summary {
             ToolVerb::WebSearch => counts.record_other("web search".to_owned()),
             ToolVerb::XSearch => counts.record_other("X search".to_owned()),
             ToolVerb::GenerateImage => counts.record_other("image generation".to_owned()),
-            ToolVerb::Mcp => counts.record_other(display_tool_title_for(name, *kind)),
+            ToolVerb::Mcp => counts.record_other(super::blocks::display_tool_title_with_verb(
+                name,
+                ToolVerb::Mcp,
+            )),
             ToolVerb::Compact | ToolVerb::Generic => counts.record_other(humanize_tool(name)),
         }
     }
@@ -615,6 +626,11 @@ pub(super) fn plan(blocks: &[ScrollBlock], prefs: RenderPrefs) -> Vec<RowPlan> {
     #[cfg(test)]
     PLAN_CALLS.set(PLAN_CALLS.get() + 1);
     let mut plans = vec![RowPlan::default(); blocks.len()];
+    for (plan, block) in plans.iter_mut().zip(blocks) {
+        if let ScrollBlock::Tool { view, .. } = block {
+            plan.operation = view.operation;
+        }
+    }
     let mut start = 0;
     while start < blocks.len() {
         let starts_group = is_activity_tool(&blocks[start])
@@ -1191,10 +1207,14 @@ pub(super) fn item_label_raw(
 ) -> String {
     let running = tool_is_running(state) || plan.activity_running;
     let subject = subject.unwrap_or_default();
+    let verb = plan
+        .operation
+        .map(super::blocks::operation_verb)
+        .unwrap_or_else(|| subject_tool_verb(name, kind, Some(subject)));
     let mut label = if let Some(label) = &plan.activity_action {
         label.clone()
     } else if let Some(facts) = wait {
-        let head = match subject_tool_verb(name, kind, Some(subject)) {
+        let head = match verb {
             ToolVerb::WaitAgent | ToolVerb::Agent => if running {
                 "Waiting for agents"
             } else {
@@ -1218,7 +1238,7 @@ pub(super) fn item_label_raw(
         } else {
             subject
         };
-        match subject_tool_verb(name, kind, Some(subject)) {
+        match verb {
             verb if process_subject_verb(subject) == Some(verb) => {
                 if !running && let Some(subject) = subject.strip_prefix("Waiting on process ") {
                     format!("Waited on process {subject}")
@@ -1240,7 +1260,10 @@ pub(super) fn item_label_raw(
             | ToolVerb::InputProcess
             | ToolVerb::InterruptProcess
             | ToolVerb::StopProcess => {
-                format!("{} {or_unknown}", display_tool_title_for(name, kind))
+                format!(
+                    "{} {or_unknown}",
+                    super::blocks::display_tool_title_with_verb(name, verb)
+                )
             }
             ToolVerb::Edit => match edit_counts(subject) {
                 Some((a, b)) => {
@@ -1280,7 +1303,10 @@ pub(super) fn item_label_raw(
             ToolVerb::SpawnAgent => format!("Spawn agent {subject}"),
             ToolVerb::WaitAgent => format!("Wait on agents {subject}"),
             ToolVerb::Agent => format!("Agent {subject}"),
-            _ => format!("{} {subject}", display_tool_title_for(name, kind)),
+            _ => format!(
+                "{} {subject}",
+                super::blocks::display_tool_title_with_verb(name, verb)
+            ),
         }
     };
     if tool_is_interrupted(state) && plan.activity_action.is_none() {
@@ -1324,7 +1350,8 @@ pub(super) fn item_meta(
         parts.push(meta.clone());
     } else if tool_is_failed(state)
         // A process wait already names its exit in the subject.
-        && !(subject_tool_verb(name, kind, subject) == ToolVerb::WaitProcess
+        && !(plan.operation.map(super::blocks::operation_verb)
+            .unwrap_or_else(|| subject_tool_verb(name, kind, subject)) == ToolVerb::WaitProcess
             && subject.is_some_and(|subject| subject.contains(" · exited ")))
         && let Some(exit) = failure_exit(state)
     {

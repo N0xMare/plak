@@ -12,6 +12,95 @@ use super::*;
 const SESSION: &str = "00000000-0000-4000-8000-000000000001";
 const NEXT: &str = "00000000-0000-4000-8000-000000000002";
 
+fn placement_options() -> plakous_host_protocol::wire::SessionOptions {
+    use plakous_host_protocol::wire::{RunnerLabel, RunnerOptions, RunnerStatus, SessionOptions};
+    let mut profiles = plakous_host_protocol::views::ProfilesView::default();
+    profiles.current = Some("claude-default".into());
+    SessionOptions {
+        runners: vec![RunnerOptions {
+            runner: RunnerLabel {
+                name: "machine".into(),
+                runner_id: "pinned".into(),
+            },
+            aliases: vec!["other-name".into()],
+            status: RunnerStatus::Ready,
+            checked_at: Some(1),
+            blocked_since: None,
+            roots: Some(vec!["/remote".into()]),
+            default_workspace: Some("/remote".into()),
+            recent_workspaces: Vec::new(),
+            discovered_workspaces: Vec::new(),
+            discovery_truncated: false,
+        }],
+        models: Default::default(),
+        profiles,
+        templates: Vec::new(),
+        workspace: None,
+    }
+}
+
+#[test]
+fn remote_launch_uses_host_picker_identity_and_canonical_validation_without_fallback() {
+    use plakous_host_protocol::wire::WorkspaceOptions;
+    for refused in [false, true] {
+        let (_root, paths) = paths();
+        let listener = UnixListener::bind(paths.host_socket()).unwrap();
+        let peer = thread::spawn(move || {
+            let mut peer = Peer::accept(&listener);
+            peer.send(HostFrame::Welcome(welcome()));
+            let (id, op) = peer.request();
+            assert!(matches!(op, Op::SessionOptions { workspace: None }));
+            peer.answer(
+                id,
+                Answer::Options {
+                    options: Box::new(placement_options()),
+                },
+            );
+            let (id, op) = peer.request();
+            assert!(
+                matches!(op, Op::SessionOptions { workspace: Some(ref workspace) }
+                if workspace.runner.runner_id == "pinned" && workspace.path == "/remote/alias")
+            );
+            let mut options = placement_options();
+            options.workspace = Some(if refused {
+                WorkspaceOptions::Refused {
+                    refusal: plakous_host_protocol::wire::PlacementReason::WorkspaceRefused {
+                        kind: plakous_host_protocol::wire::WorkspaceRefusalKind::OutsideRoots,
+                        canonical: None,
+                    },
+                }
+            } else {
+                WorkspaceOptions::Valid {
+                    canonical_path: "/remote/work".into(),
+                    profiles: Default::default(),
+                    templates: Vec::new(),
+                    models: Default::default(),
+                }
+            });
+            peer.answer(
+                id,
+                Answer::Options {
+                    options: Box::new(options),
+                },
+            );
+        });
+        let face = SocketFace::discover(&paths).unwrap().unwrap();
+        let verdict = face.place(Some("other-name"), Some("/remote/alias"));
+        if refused {
+            assert!(verdict.unwrap_err().message().contains("workspace refused"));
+            assert!(face.state().creation.is_none());
+            assert!(face.session().is_none());
+        } else {
+            verdict.unwrap();
+            assert!(
+                matches!(face.new_session(), Op::NewSession { runner, workspace, profile: Some(profile), template: None, model: None, .. }
+                if runner.runner_id == "pinned" && runner.name == "machine" && workspace == "/remote/work" && profile == "claude-default")
+            );
+        }
+        peer.join().unwrap();
+    }
+}
+
 #[test]
 fn the_outdated_host_notice_names_both_builds_and_only_a_host_level_remedy() {
     let notice = outdated_host_notice(Some("123456abcdef"), Some("abcdef123456")).unwrap();
@@ -118,6 +207,7 @@ impl Peer {
         );
         self.answer(id, Answer::Attached { attachment: id });
         self.send(HostFrame::Event {
+            client_id: None,
             attachment: id,
             seq: 1,
             class: plakous_host_protocol::observation::ObservationClass::State,
@@ -136,6 +226,12 @@ fn node(session: &str) -> NodeAddress {
 
 fn row() -> SessionRow {
     SessionRow {
+        runner: plakous_host_protocol::wire::RunnerLabel::local(),
+        runner_status: plakous_host_protocol::wire::RunnerStatus::Unknown,
+        needs_operator: false,
+        activity_seq: 0,
+        archived: false,
+        differences: Vec::new(),
         session: SESSION.into(),
         node: node(SESSION),
         title: Some("shared transcript".into()),
@@ -210,8 +306,21 @@ fn directory_new_resume_stop_and_leaving_use_the_host_socket() {
         let mut peer = Peer::accept(&listener);
         peer.send(HostFrame::Welcome(welcome()));
         let (id, op) = peer.request();
-        assert!(matches!(op, Op::ListSessions { workspace: Some(_) }));
-        peer.answer(id, Answer::Sessions { rows: vec![row()] });
+        assert!(matches!(
+            op,
+            Op::ListSessions {
+                runner: None,
+                include_archived: false,
+                workspace: None
+            }
+        ));
+        let mut placed = row();
+        placed.runner = plakous_host_protocol::wire::RunnerLabel {
+            name: "peer".into(),
+            runner_id: "peer-id".into(),
+        };
+        placed.workspace = "/peer/work".into();
+        peer.answer(id, Answer::Sessions { rows: vec![placed] });
         peer.attach(SESSION, false);
         let (id, op) = peer.request();
         let Op::NewSession { request_id, .. } = op else {
@@ -237,7 +346,12 @@ fn directory_new_resume_stop_and_leaving_use_the_host_socket() {
                 session: NEXT.into()
             }
         );
-        peer.answer(id, Answer::Stopped);
+        peer.answer(
+            id,
+            Answer::Stopped {
+                runner_pending: false,
+            },
+        );
         assert!(
             matches!(peer.read(), ClientFrame::Bye),
             "leaving never sends stop or release"
@@ -246,6 +360,14 @@ fn directory_new_resume_stop_and_leaving_use_the_host_socket() {
     let face = SocketFace::discover(&paths).unwrap().unwrap();
     face.restore_new_request(Some("an-unknown-earlier-creation".into()));
     face.select(Some(SESSION)).unwrap();
+    assert_eq!(
+        face.state().creation.as_ref().unwrap().runner.runner_id,
+        "peer-id"
+    );
+    assert_eq!(
+        face.state().creation.as_ref().unwrap().workspace,
+        "/peer/work"
+    );
     assert!(
         face.state().new_request.is_none(),
         "explicit selection retires an unknown creation"
@@ -340,6 +462,7 @@ fn save_settings_over_the_socket_preserves_terminal_preferences() {
             })
             .unwrap();
         peer.send(HostFrame::Event {
+            client_id: None,
             attachment,
             seq: 2,
             class: plakous_host_protocol::observation::ObservationClass::Addressed,

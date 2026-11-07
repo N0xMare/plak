@@ -24,6 +24,8 @@ impl plakous_hosted::host_service::wire::HostSessions<PlakExtension> for NoSessi
     fn rows(
         &self,
         _workspace: Option<&str>,
+        _runner: Option<&str>,
+        _include_archived: bool,
     ) -> Result<Vec<plakous_host_protocol::wire::SessionRow>, String> {
         Ok(Vec::new())
     }
@@ -54,9 +56,7 @@ impl plakous_hosted::host_service::wire::HostSessions<PlakExtension> for NoSessi
 
     fn create(
         &self,
-        _workspace: &str,
-        _template: Option<&str>,
-        _request_id: &str,
+        _request: &plakous_hosted::host_service::wire::Creation<'_>,
     ) -> Result<
         plakous_hosted::host_service::wire::Created,
         plakous_host_protocol::wire::RequestRefusal,
@@ -130,7 +130,11 @@ fn an_admitted_connection_is_welcomed_to_the_directory_and_a_stop_ends_the_host(
         &mut client,
         &ClientFrame::Request {
             id: 1,
-            op: Op::ListSessions { workspace: None },
+            op: Op::ListSessions {
+                runner: None,
+                include_archived: false,
+                workspace: None,
+            },
         },
     );
     assert_eq!(

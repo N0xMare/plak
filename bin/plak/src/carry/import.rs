@@ -25,12 +25,6 @@ impl CarryDocument {
         local_handoff: bool,
     ) -> Result<CarriedImport, ImportError> {
         self.validate()?;
-        if let Some(runner) = self.runner.as_ref().filter(|runner| !runner.is_local()) {
-            return Err(ImportError::Invalid(format!(
-                "the session ran on runner {} ({}); this build runs sessions only on its local runner",
-                runner.name, runner.runner_id
-            )));
-        }
         let profile = self
             .profile
             .take()
@@ -39,6 +33,16 @@ impl CarryDocument {
                 working_set: profile.working_set,
             });
         let mut record = SessionRecord::new(self.workspace_root.clone());
+        record.runner = self
+            .runner
+            .as_ref()
+            .filter(|runner| !runner.is_local())
+            .map(|runner| plakous_hosted::sessions::RunnerDisplay {
+                name: runner.name.clone(),
+                runner_id: runner.runner_id.clone(),
+                workspace_root: self.workspace_root.display().to_string(),
+                workspace_cwd: self.workspace_root.display().to_string(),
+            });
         let note = self.import_note(&record.id);
         let history = self
             .history
@@ -135,15 +139,18 @@ pub(crate) struct CarriedImport {
 /// state `source_key`, if any. Carrying the same session twice would fork its
 /// conversation into two copies, so callers reuse this one instead.
 pub(crate) fn already_carried(
-    store: &dyn crate::store::session_records::SessionRecordStore,
+    services: &Services,
     workspace: &Path,
+    runner_id: &str,
     source_id: &str,
     source_key: &str,
 ) -> Result<Option<SessionRecord>, String> {
-    Ok(store
-        .list_for_workspace(workspace)?
-        .into_iter()
-        .find(|record| record.carried_forward_from() == Some((source_id, source_key))))
+    let paths = services
+        .paths()
+        .map_err(|failure| failure.message().to_owned())?;
+    crate::store::ProductStore::open(paths)
+        .map_err(|error| error.to_string())?
+        .carried_forward(workspace, runner_id, source_id, source_key)
 }
 
 /// The link a carried-forward record shows in listings and the TUI.
@@ -204,7 +211,13 @@ pub(crate) fn import_and_resume(
         ))
     })?;
     let source_id = document.source().0.to_owned();
-    let paths = services.paths()?.for_workspace(document.workspace_root());
+    let paths = if document.runner_id() == "local" {
+        services.paths()?.for_workspace(document.workspace_root())
+    } else {
+        services
+            .paths()?
+            .for_remote_workspace(document.workspace_root())
+    };
     crate::product_config::SessionPolicy::load(&paths).map_err(CliFailure::new)?;
     if !rustix::termios::isatty(std::io::stdin()) || !std::io::stdout().is_terminal() {
         return Err(CliFailure::classified(
@@ -218,9 +231,13 @@ pub(crate) fn import_and_resume(
         .map_err(CliFailure::new)?
         .to_path_buf();
     let requested = fs::canonicalize(&cwd).unwrap_or(cwd);
-    let recorded = fs::canonicalize(document.workspace_root())
-        .unwrap_or_else(|_| document.workspace_root().to_path_buf());
-    if requested != recorded {
+    let recorded = if document.runner_id() == "local" {
+        fs::canonicalize(document.workspace_root())
+            .unwrap_or_else(|_| document.workspace_root().to_path_buf())
+    } else {
+        document.workspace_root().to_path_buf()
+    };
+    if document.runner_id() == "local" && requested != recorded {
         return Err(CliFailure::new(format!(
             "session {source_id} belongs to {}; import-resume from {} was refused before creating a successor",
             recorded.display(),
@@ -229,6 +246,12 @@ pub(crate) fn import_and_resume(
     }
     crate::home::state::ensure_usable_state(services.paths()?, &mut std::io::stderr().lock())
         .map_err(CliFailure::new)?;
+    let placement = commands::session::import_placement::ImportPlacement::prepare(
+        services,
+        document.runner_id(),
+        document.workspace_root(),
+    )?;
+    let services = &placement.services;
     let local_handoff = consume_handoff_receipt(
         path,
         services.paths()?.home(),
@@ -242,9 +265,8 @@ pub(crate) fn import_and_resume(
         handoff.profile,
     );
     let (record, note) = imported.map_err(|failure| {
-        CliFailure::new(format!(
-            "could not carry the session forward: {}; the export is kept at {}",
-            failure.message(),
+        failure.with_context(format!(
+            "could not carry the session forward; the export is kept at {}",
             path.display()
         ))
     })?;
@@ -258,9 +280,8 @@ pub(crate) fn import_and_resume(
 }
 
 fn import_resume_failure(failure: CliFailure, successor: &str, source: &str) -> CliFailure {
-    CliFailure::new(format!(
-        "{}; session {successor} was carried forward from {source}; fix the error and run: plak --resume {successor}",
-        failure.message()
+    failure.with_context(format!(
+        "session {successor} was carried forward from {source}; fix the error and run: plak --resume {successor}"
     ))
 }
 

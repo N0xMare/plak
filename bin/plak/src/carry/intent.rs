@@ -154,10 +154,13 @@ pub(crate) fn resolve_open(
         if !superseded(services, locator)? {
             break;
         }
-        let store = services.session_records()?;
         if let Some(next) = super::already_carried(
-            store.as_ref(),
+            services,
             &record.workspace_root,
+            record
+                .runner
+                .as_ref()
+                .map_or("local", |runner| runner.runner_id.as_str()),
             &record.id,
             &crate::home::state::state_key(),
         )
@@ -223,10 +226,13 @@ pub(crate) fn pending_successor(
     services: &crate::shell::services::Services,
     source: &SessionRecord,
 ) -> CliResult<Option<SessionRecord>> {
-    let store = services.session_records()?;
     Ok(super::already_carried(
-        store.as_ref(),
+        services,
         &source.workspace_root,
+        source
+            .runner
+            .as_ref()
+            .map_or("local", |runner| runner.runner_id.as_str()),
         &source.id,
         &crate::home::state::state_key(),
     )

@@ -337,17 +337,12 @@ fn malformed_v12_documents_are_refused() {
     let mut remote = valid;
     remote["runner"] = serde_json::json!({"name":"build-box","runner_id":"build-box"});
     fs::write(&path, remote.to_string()).unwrap();
-    let error = read_document(&path)
-        .unwrap()
-        .into_import()
-        .map(|_| ())
-        .unwrap_err()
-        .to_string();
-    assert!(
-        error.contains(
-            "ran on runner build-box (build-box); this build runs sessions only on its local runner"
-        ),
-        "{error}"
+    let imported = read_document(&path).unwrap().into_import().unwrap();
+    let runner = imported.record.runner.unwrap();
+    assert_eq!(runner.runner_id, "build-box");
+    assert_eq!(
+        runner.workspace_root,
+        imported.record.workspace_root.display().to_string()
     );
 }
 

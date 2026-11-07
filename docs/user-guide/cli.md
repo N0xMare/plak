@@ -7,6 +7,8 @@ binary you just built. Run those first if anything here looks stale.
 
 ```
 plak                              open the TUI (new session in the cwd)
+plak --runner <name> --workspace <path>
+                                  open the TUI on a host-selected runner/workspace
 plak <command> [options]
 plak help                         the command list
 plak <command> --help             one command's help
@@ -16,6 +18,16 @@ A bare command that needs an argument prints that command's help instead of
 failing — `plak run`, `plak login`, `plak key set`, `plak session show` — and
 that is a successful exit, not an error. `plak version` prints, for example, `plak 0.0.3 (release; binary 0123456789ab)`.
 The binary ID identifies the executable in `/reload` and handoffs.
+
+`--runner` and `--workspace` are TUI launch flags, not `run` or `agent`
+options. They require a running host and never fall back to an embedded/local
+session. The runner name must be returned by that host's picker; local means
+the host machine, not the client. The host validates the workspace on the
+selected runner and returns its canonical spelling before creation. With no
+workspace flag, the picker uses that runner's most recent workspace or its
+default. New sessions use the host's default profile; embedded `/new` remains
+payload-free and also uses the home default. A placement or workspace refusal
+creates no session.
 
 ## Exit codes
 

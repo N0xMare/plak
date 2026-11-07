@@ -102,7 +102,7 @@ pub(super) struct CarryRunner {
 }
 
 impl CarryRunner {
-    /// The host's own local runner, which every session runs on today.
+    /// The host's own local runner.
     pub(super) fn local() -> Self {
         let local = plakous::tools::RunnerId::local();
         Self {
@@ -126,7 +126,7 @@ impl CarryRunner {
         Ok(())
     }
 
-    /// Whether this is the local runner, the only one this build runs tools on.
+    /// Whether this is the host-local placement.
     pub(super) fn is_local(&self) -> bool {
         plakous::tools::RunnerId::new(self.runner_id.clone()).is_ok_and(|runner| runner.is_local())
     }
@@ -280,6 +280,13 @@ impl CarryDocument {
     /// The workspace the exported session belonged to.
     pub(crate) fn workspace_root(&self) -> &Path {
         &self.workspace_root
+    }
+
+    /// Saved placement identity; version 11 has no runner and is local.
+    pub(crate) fn runner_id(&self) -> &str {
+        self.runner
+            .as_ref()
+            .map_or("local", |runner| runner.runner_id.as_str())
     }
 
     pub(crate) fn message_count(&self) -> usize {

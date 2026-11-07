@@ -10,7 +10,10 @@ pub(crate) fn require_account(account: &str) -> CliResult<()> {
 
 pub(crate) fn admit_command(command: &Command) -> CliResult<()> {
     match command {
-        Command::Tui { .. } | Command::Resume { .. } | Command::HostResume { .. } => {
+        Command::Tui { .. }
+        | Command::TuiPlacement { .. }
+        | Command::Resume { .. }
+        | Command::HostResume { .. } => {
             require_feature("tui")?;
         }
         Command::Mcp(_) => require_feature("mcp")?,

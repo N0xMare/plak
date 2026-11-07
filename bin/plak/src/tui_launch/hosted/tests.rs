@@ -165,6 +165,12 @@ fn select_previous(stream: &mut UnixStream, reader: &mut BufReader<UnixStream>) 
         id,
         outcome: Outcome::Ok(Answer::Sessions {
             rows: vec![SessionRow {
+                runner: plakous_host_protocol::wire::RunnerLabel::local(),
+                runner_status: plakous_host_protocol::wire::RunnerStatus::Unknown,
+                needs_operator: false,
+                activity_seq: 0,
+                archived: false,
+                differences: Vec::new(),
                 session: "previous".into(),
                 node: node.clone(),
                 title: None,

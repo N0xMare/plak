@@ -143,9 +143,14 @@ pub(crate) fn new_agent_record(
     effort: Option<ReasoningEffort>,
     effort_explicit: bool,
     composition: Option<product_config::ProductCompositionSelection>,
+    workspace_probe: Option<&dyn plakous::tools::WorkspaceProbe>,
 ) -> CliResult<product_sessions::SessionRecord> {
     let mut record = product_sessions::SessionRecord::new(cwd);
-    seed_new_session_binding(&mut record, cfg)?;
+    if let Some(probe) = workspace_probe {
+        super::session::seed_new_session_binding_on(&mut record, cfg, probe)?;
+    } else {
+        seed_new_session_binding(&mut record, cfg)?;
+    }
     if let Some(account) = &account {
         record.account = Some(account.to_string());
     } else if provider.is_some() || platform.is_some() || wire.is_some() {
@@ -277,6 +282,7 @@ pub(crate) fn run_agent_after_admission(
                 effort,
                 effort_explicit,
                 composition,
+                None,
             )?;
             crate::build_features::admit_selected(
                 &cfg,
@@ -289,7 +295,13 @@ pub(crate) fn run_agent_after_admission(
             record
         }
     };
-    let state_roots = services.state_roots_for(paths)?;
+    let state_roots = services.state_roots_on(
+        paths,
+        record
+            .runner
+            .as_ref()
+            .map_or("local", |runner| runner.runner_id.as_str()),
+    )?;
     let account = record.account.clone().ok_or_else(|| {
         CliFailure::classified(
             CliFailureKind::Usage,

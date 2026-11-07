@@ -3,6 +3,8 @@ Plak coding agent (CLI + TUI) on plakous
 
 USAGE:
   plak                              Open TUI (new session in cwd; interactive terminal required)
+  plak --runner <name> --workspace <path>
+                                    Open TUI on host-selected placement (running host required)
   plak <command> [options]
   plak help                         Global help (this message)
   plak <command> --help             Command-specific help

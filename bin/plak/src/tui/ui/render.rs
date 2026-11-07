@@ -294,13 +294,15 @@ impl App {
                 kind,
                 name,
                 subject,
+                view,
                 ..
             } = block
         {
-            return Some(super::composer_chrome::activity_label(
+            return Some(super::composer_chrome::activity_label_on(
                 name,
                 *kind,
                 subject.as_deref(),
+                view.operation,
             ));
         }
         if self

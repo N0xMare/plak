@@ -549,8 +549,8 @@ pub(crate) fn carry_foreign_session(
     let Some((key, id)) = crate::home::state::foreign_session(paths, requested) else {
         return Ok(None);
     };
-    if let Some(existing) = already_carried(services.session_records()?.as_ref(), cwd, &id, &key)
-        .map_err(CliFailure::new)?
+    if let Some(existing) =
+        already_carried(services, cwd, "local", &id, &key).map_err(CliFailure::new)?
     {
         let note = format!(
             "session {id} ({key}) was already carried forward as {}; resuming it",

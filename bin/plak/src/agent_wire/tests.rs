@@ -100,6 +100,7 @@ fn the_adapter_attaches_the_root_and_carries_intents_and_events() {
     sent_frames.push(request(
         3,
         Op::Intent {
+            client_id: None,
             attachment: ROOT_ATTACHMENT,
             intent: sent,
             blobs: taken.ids,
@@ -108,6 +109,7 @@ fn the_adapter_attaches_the_root_and_carries_intents_and_events() {
     sent_frames.push(request(
         4,
         Op::Intent {
+            client_id: None,
             attachment: 9,
             intent: SessionIntent::Interrupt,
             blobs: Vec::new(),
@@ -145,7 +147,7 @@ fn the_adapter_attaches_the_root_and_carries_intents_and_events() {
                     attachment: ROOT_ATTACHMENT
                 })
             ),
-            (3, Outcome::Ok(Answer::Accepted)),
+            (3, Outcome::Ok(Answer::Accepted { duplicate: false })),
             (4, Outcome::Refused(RequestRefusal::NotAttached)),
         ]
     );
@@ -327,6 +329,7 @@ fn only_a_local_face_may_probe_or_check_the_installed_build() {
         let intent = |id, intent| ClientFrame::Request {
             id,
             op: Op::Intent {
+                client_id: None,
                 attachment: ROOT_ATTACHMENT,
                 intent: SessionIntent::Extension(intent),
                 blobs: Vec::new(),

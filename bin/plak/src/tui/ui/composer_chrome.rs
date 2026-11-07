@@ -36,14 +36,31 @@ impl Default for ComposerChrome {
     }
 }
 
+#[cfg(test)]
 pub(super) fn activity_label(name: &str, kind: ActivityKind, subject: Option<&str>) -> String {
-    if crate::tui::blocks::subject_tool_verb(name, kind, subject)
-        == crate::tui::blocks::ToolVerb::Mcp
+    activity_label_on(name, kind, subject, None)
+}
+
+pub(super) fn activity_label_on(
+    name: &str,
+    kind: ActivityKind,
+    subject: Option<&str>,
+    operation: Option<plakous_host_protocol::views::ToolOperation>,
+) -> String {
+    let verb = operation
+        .map(crate::tui::blocks::operation_verb)
+        .unwrap_or_else(|| crate::tui::blocks::subject_tool_verb(name, kind, subject));
+    if verb == crate::tui::blocks::ToolVerb::Mcp
         && let Some(call) = crate::tui::presentation::McpCall::parse(name)
     {
         return format!("calling mcp:{}", call.server);
     }
-    crate::tui::activity::hud_verb(name, kind, subject).to_owned()
+    operation
+        .map_or_else(
+            || crate::tui::activity::hud_verb(name, kind, subject),
+            |_| crate::tui::activity::hud_verb_for(verb),
+        )
+        .to_owned()
 }
 
 /// One sent-steer row. Known text is the steer; an unknown acknowledgement
@@ -131,15 +148,26 @@ const MIN_PATH_TAIL: usize = 4;
 /// ` path · branch ` fitted to `width` cells: the path keeps its tail behind
 /// `…` before it is dropped, and the branch is clipped last. Empty when not
 /// even a clipped branch fits.
-pub(super) fn workspace_border_text(view: &crate::tui::WorkspaceChrome, width: usize) -> String {
+pub(super) fn workspace_border_text(
+    view: &crate::tui::WorkspaceChrome,
+    runner: &plakous_host_protocol::wire::RunnerLabel,
+    width: usize,
+) -> String {
     let path = crate::tui::surface_views::workspace_path(view);
     let path = path.as_str();
     let branch = view.branch.as_deref();
-    let framed = |path: &str| match branch {
-        Some(branch) if path.is_empty() => format!(" {branch} "),
-        Some(branch) => format!(" {path} · {branch} "),
-        None if path.is_empty() => String::new(),
-        None => format!(" {path} "),
+    let placement = (runner.runner_id != "local").then_some(runner.name.as_str());
+    let framed = |path: &str| {
+        let body = match branch {
+            Some(branch) if path.is_empty() => format!(" {branch} "),
+            Some(branch) => format!(" {path} · {branch} "),
+            None if path.is_empty() => String::new(),
+            None => format!(" {path} "),
+        };
+        match placement {
+            Some(name) => format!(" {name} ·{body}"),
+            None => body,
+        }
     };
     let full = framed(path);
     if full.width() <= width {
@@ -150,8 +178,12 @@ pub(super) fn workspace_border_text(view: &crate::tui::WorkspaceChrome, width: u
     if tail_budget >= MIN_PATH_TAIL {
         return framed(&format!("…{}", tail_text(path, tail_budget)));
     }
-    let Some(branch) = branch else {
-        return String::new();
+    let Some(_) = branch else {
+        return placement
+            .filter(|_| width >= 3)
+            .map_or_else(String::new, |name| {
+                format!(" {} ", clip_text(name, width - 2))
+            });
     };
     let bare = framed("");
     if bare.width() <= width {
@@ -160,7 +192,7 @@ pub(super) fn workspace_border_text(view: &crate::tui::WorkspaceChrome, width: u
     if width < 4 {
         return String::new();
     }
-    format!(" {}… ", clip_text(branch, width - 3))
+    format!(" {}… ", clip_text(bare.trim(), width - 3))
 }
 
 /// The longest grapheme tail of `text` that fits `width` cells.
@@ -507,6 +539,7 @@ impl App {
         // One border cell stays visible after the corner.
         let text = workspace_border_text(
             &self.workspace_chrome,
+            &self.session_info.runner,
             usize::from(area.width.saturating_sub(3)).saturating_sub(chips_room),
         );
         let width = u16::try_from(text.width()).unwrap_or(0);

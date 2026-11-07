@@ -359,7 +359,27 @@ pub fn build_host_config(
     resume_publication: Option<Arc<std::sync::atomic::AtomicBool>>,
     native_models: &[HostLaunchNativeModelFact],
 ) -> Result<product_host::HostConfig<crate::surface_protocol::PlakExtension>, crate::CliFailure> {
-    let policy = product_config::SessionPolicy::load(paths)?;
+    let mut policy = product_config::SessionPolicy::load(paths)?;
+    if let Some(profile) = &session.root_profile {
+        let config = product_config::ProductConfig::load(paths).map_err(crate::CliFailure::new)?;
+        let selected = crate::profiles::selection_config(
+            &config,
+            &crate::profiles::SessionSelection {
+                root: profile.root_template.clone(),
+                working_set: profile.working_set.clone(),
+            },
+        )
+        .map_err(crate::CliFailure::new)?;
+        policy.root_template = selected.root_template_fact().map(|mut fact| {
+            if let Some(account) = &session.account {
+                fact.account.clone_from(account);
+            }
+            if let Some(model) = &session.model {
+                fact.model.clone_from(model);
+            }
+            fact
+        });
+    }
     policy.install_request_budget();
     let lease_holder = Some(crate::store::holders::lease_holder(paths, &session.id));
     // The repository gate's offline model, when this build carries the hook and

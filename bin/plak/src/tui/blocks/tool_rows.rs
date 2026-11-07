@@ -138,8 +138,16 @@ impl ToolVerb {
 /// the canonical tool name selects the remaining normative verbs.
 #[must_use]
 pub fn tool_verb(name: &str, kind: ActivityKind) -> ToolVerb {
+    operation_verb(plakous_host_protocol::views::ToolOperation::classify(
+        name, kind,
+    ))
+}
+
+/// Terminal wording for an already host-classified operation.
+#[must_use]
+pub fn operation_verb(operation: plakous_host_protocol::views::ToolOperation) -> ToolVerb {
     use plakous_host_protocol::views::ToolOperation;
-    match ToolOperation::classify(name, kind) {
+    match operation {
         ToolOperation::Run => ToolVerb::Run,
         ToolOperation::WaitProcess => ToolVerb::WaitProcess,
         ToolOperation::ReadProcess => ToolVerb::ReadProcess,
@@ -225,13 +233,18 @@ pub fn display_tool_title(name: &str) -> String {
 /// Display title for a tool row with its host-classified kind.
 #[must_use]
 pub fn display_tool_title_for(name: &str, kind: ActivityKind) -> String {
-    if tool_verb(name, kind) == ToolVerb::Mcp
+    display_tool_title_with_verb(name, tool_verb(name, kind))
+}
+
+/// Tool title from a host-supplied semantic verb, without reclassifying its label.
+#[must_use]
+pub fn display_tool_title_with_verb(name: &str, verb: ToolVerb) -> String {
+    if verb == ToolVerb::Mcp
         && let Some(call) = McpCall::parse(name)
     {
         return format!("mcp:{} {}", call.server, call.tool);
     }
-    tool_verb(name, kind)
-        .label()
+    verb.label()
         .map_or_else(|| capitalize(&humanize_tool(name)), str::to_owned)
 }
 

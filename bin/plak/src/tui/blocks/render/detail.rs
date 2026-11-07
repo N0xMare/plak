@@ -142,7 +142,11 @@ pub(super) fn push_item_detail(
             Line::from(Span::styled("preview", theme.chrome_dim)),
         );
     }
-    let verb = subject_tool_verb(item.name, item.kind, item.subject);
+    let verb = item
+        .view
+        .operation
+        .map(crate::tui::blocks::operation_verb)
+        .unwrap_or_else(|| subject_tool_verb(item.name, item.kind, item.subject));
     // A code cell's source is already drawn above its detail.
     if item.kind != ActivityKind::Compose {
         for line in input_lines(verb, text.input, theme) {

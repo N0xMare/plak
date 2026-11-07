@@ -143,23 +143,38 @@ fn build_attached_host_config(
         });
         if classify_rebind_fallback && unknown_account {
             // Choosing the configured root requires a valid local policy first.
-            let paths = services.paths()?.for_workspace(&record.workspace_root);
+            let paths = if record.runner.is_some() {
+                services
+                    .paths()?
+                    .for_remote_workspace(&record.workspace_root)
+            } else {
+                services.paths()?.for_workspace(&record.workspace_root)
+            };
             product_config::SessionPolicy::load(&paths).map_err(CliFailure::new)?;
             return Err(AttachedConfigError::Unresolvable(error));
         }
         return Err(error.into());
     }
-    let paths = &services.paths()?.for_workspace(&record.workspace_root);
+    let context = if record.runner.is_some() {
+        services
+            .paths()?
+            .for_remote_workspace(&record.workspace_root)
+    } else {
+        services.paths()?.for_workspace(&record.workspace_root)
+    };
+    let paths = &context;
     product_config::SessionPolicy::load(paths).map_err(CliFailure::new)?;
-    let cwd = services
-        .paths()?
-        .workspace()
-        .map_err(CliFailure::new)?
-        .to_path_buf();
+    let cwd = record.workspace_root.clone();
     // The repository gate's offline model; see `crate::test_hooks`.
     #[cfg(feature = "test-hooks")]
     if let Some(selection) = crate::test_hooks::selected() {
-        let state_roots = services.state_roots_for(paths)?;
+        let state_roots = services.state_roots_on(
+            paths,
+            record
+                .runner
+                .as_ref()
+                .map_or("local", |runner| runner.runner_id.as_str()),
+        )?;
         let (effort, explicit) = product_host::effort_from_config(record.effort.as_deref());
         return selection
             .map_err(CliFailure::new)
@@ -208,7 +223,13 @@ fn build_attached_host_config(
         explicit,
         classify_rebind_fallback,
     )?;
-    let state_roots = services.state_roots_for(paths)?;
+    let state_roots = services.state_roots_on(
+        paths,
+        record
+            .runner
+            .as_ref()
+            .map_or("local", |runner| runner.runner_id.as_str()),
+    )?;
     build_host_config(
         paths,
         &state_roots,

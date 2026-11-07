@@ -12,8 +12,23 @@ pub fn seed_new_session_binding(
     record: &mut product_sessions::SessionRecord,
     config: &product_config::ProductConfig,
 ) -> CliResult<()> {
-    if !crate::build_identity::JJ_ENABLED && record.workspace_root.join(".jj").exists() {
-        if !record.workspace_root.join(".git").exists() {
+    seed_new_session_binding_on(record, config, &plakous::tools::LocalWorkspaceProbe)
+}
+
+/// Seed a binding using the workspace owner's probe, never host path guesses.
+pub(crate) fn seed_new_session_binding_on(
+    record: &mut product_sessions::SessionRecord,
+    config: &product_config::ProductConfig,
+    probe: &dyn plakous::tools::WorkspaceProbe,
+) -> CliResult<()> {
+    let exists = |path: &std::path::Path| {
+        probe
+            .canonicalize(path)
+            .map(|path| path.is_some())
+            .map_err(|error| CliFailure::new(error.to_string()))
+    };
+    if !crate::build_identity::JJ_ENABLED && exists(&record.workspace_root.join(".jj"))? {
+        if !exists(&record.workspace_root.join(".git"))? {
             return Err(CliFailure::new(
                 "this build has no jj support; use a build with the jj feature",
             ));
@@ -97,6 +112,34 @@ pub(crate) const ROOT_BINDING_REMEDY: &str = "select a valid root template with 
 #[cfg(test)]
 mod vcs_selection_tests {
     use super::*;
+
+    #[test]
+    fn a_placed_session_uses_its_runner_probe_not_the_same_spelled_host_directory() {
+        struct Remote;
+        impl plakous::tools::WorkspaceProbe for Remote {
+            fn canonicalize(
+                &self,
+                _: &std::path::Path,
+            ) -> Result<Option<std::path::PathBuf>, plakous::tools::ProbeError> {
+                Ok(None)
+            }
+            fn is_file(&self, _: &std::path::Path) -> Result<bool, plakous::tools::ProbeError> {
+                panic!("not a binding probe")
+            }
+            fn tree_bytes(
+                &self,
+                _: &std::path::Path,
+            ) -> Result<Option<u64>, plakous::tools::ProbeError> {
+                panic!("not a binding probe")
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join(".jj")).unwrap();
+        let mut record = product_sessions::SessionRecord::new(root.path().to_owned());
+        let config = product_config::ProductConfig::default_product();
+        seed_new_session_binding_on(&mut record, &config, &Remote).unwrap();
+        assert!(record.transcript.pending_notices().is_empty());
+    }
 
     #[test]
     fn new_session_refuses_jj_only_or_records_one_colocated_notice() {

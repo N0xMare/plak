@@ -319,6 +319,10 @@ fn is_maintainer_command(_name: &str) -> bool {
     infer_subcommands = false
 )]
 struct Cli {
+    #[arg(long, value_name = "RUNNER")]
+    runner: Option<String>,
+    #[arg(long, value_name = "PATH")]
+    workspace: Option<String>,
     #[arg(short = 'h', long = "help", action = ArgAction::SetTrue, hide = true)]
     help: bool,
     #[arg(short = 'V', long = "version", action = ArgAction::SetTrue, hide = true)]
@@ -334,6 +338,15 @@ impl Cli {
         }
         if self.version {
             return Ok(Command::Version);
+        }
+        if self.runner.is_some() || self.workspace.is_some() {
+            if self.command.is_some() {
+                return Err("--runner and --workspace are TUI launch flags; run and agent host clients are not supported".to_owned());
+            }
+            return Ok(Command::TuiPlacement {
+                runner: self.runner,
+                workspace: self.workspace,
+            });
         }
         match self.command {
             None => Ok(Command::Tui {

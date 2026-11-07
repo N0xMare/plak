@@ -181,11 +181,26 @@ pub(super) fn import_prepared_with_fallback(
         mut note,
         profile: document_profile,
     } = carried;
+    let placement = super::import_placement::ImportPlacement::prepare(
+        services,
+        record
+            .runner
+            .as_ref()
+            .map_or("local", |runner| runner.runner_id.as_str()),
+        &record.workspace_root,
+    )?;
+    let services = &placement.services;
     let resumed = carry.as_ref().and_then(|carry| carry.resume.as_ref());
     if let Some(intent) = resumed {
         resume_identity(&mut record, &mut note, intent);
     }
-    let paths = services.paths()?.for_workspace(&record.workspace_root);
+    let paths = if record.runner.is_some() {
+        services
+            .paths()?
+            .for_remote_workspace(&record.workspace_root)
+    } else {
+        services.paths()?.for_workspace(&record.workspace_root)
+    };
     product_config::SessionPolicy::load(&paths).map_err(CliFailure::new)?;
     let (source_id, source_key) = record
         .carried_forward_from()
@@ -232,7 +247,15 @@ pub(super) fn import_prepared_with_fallback(
     let projected = (|| -> CliResult<()> {
         let executor = plakous::application::ApplicationExecutor::new()
             .map_err(|_| CliFailure::new("application executor failed"))?;
-        let sessions = services.state_roots()?.runtime_sessions()?;
+        let sessions = services
+            .state_roots_on(
+                &paths,
+                record
+                    .runner
+                    .as_ref()
+                    .map_or("local", |runner| runner.runner_id.as_str()),
+            )?
+            .runtime_sessions()?;
         let records = services.session_records()?;
         executor
             .block_on(product_host::project_session(&sessions, &records, &record))
@@ -265,8 +288,12 @@ fn refuse_carried_twice(
     resumed: Option<&product_sessions::SessionRecord>,
 ) -> CliResult<()> {
     if let Some(existing) = crate::carry::already_carried(
-        services.session_records()?.as_ref(),
+        services,
         &record.workspace_root,
+        record
+            .runner
+            .as_ref()
+            .map_or("local", |runner| runner.runner_id.as_str()),
         source_id,
         source_key,
     )
@@ -356,18 +383,24 @@ fn keep_source_profile(
     note: &mut String,
 ) {
     match successor_profile(paths, profile) {
-        Ok((selected, profile)) => {
+        Ok((mut selected, profile)) => {
+            if let Some(template) = selected
+                .root_agent
+                .as_ref()
+                .and_then(|name| selected.templates.get_mut(name))
+            {
+                if let Some(account) = &config.session.account {
+                    template.account.clone_from(account);
+                }
+                if let Some(model) = &config.session.model {
+                    template.model.clone_from(model);
+                }
+            }
             config.root_template = selected.root_template_fact();
-            config.state_roots =
-                config
-                    .state_roots
-                    .clone()
-                    .with_roster_source(std::sync::Arc::new(
-                        crate::roster_input::ProductRosterSource::for_selection(
-                            paths.clone(),
-                            profile.clone(),
-                        ),
-                    ));
+            config.session.root_profile = Some(plakous_hosted::sessions::RootProfile {
+                root_template: profile.root.clone(),
+                working_set: profile.working_set.clone(),
+            });
         }
         // The import's summary line carries it once: the CLI prints it and the
         // TUI opens the successor with it as its opening note.
@@ -425,7 +458,24 @@ fn import_host_config(
     };
     let mut fallback = record.clone();
     fallback.target_selection = product_config::ProductTargetSelection::Native;
-    super::binding::seed_new_session_binding(&mut fallback, root)?;
+    let paths = services.paths()?;
+    let context = if record.runner.is_some() {
+        paths.for_remote_workspace(&record.workspace_root)
+    } else {
+        paths.for_workspace(&record.workspace_root)
+    };
+    let roots = services.state_roots_on(
+        &context,
+        record
+            .runner
+            .as_ref()
+            .map_or("local", |runner| runner.runner_id.as_str()),
+    )?;
+    super::binding::seed_new_session_binding_on(
+        &mut fallback,
+        root,
+        roots.workspace_probe().as_ref(),
+    )?;
     if fallback.account != record.account
         || fallback.model != record.model
         || fallback.effort != record.effort

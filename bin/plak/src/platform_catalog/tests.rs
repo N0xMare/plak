@@ -354,6 +354,7 @@ fn run_and_agent_save_the_same_api_record_for_the_same_arguments() {
                     Some(ReasoningEffort::Low),
                     true,
                     composition,
+                    None,
                 );
                 let context = format!("{provider:?}/{model}/{composition:?}");
                 match (run, agent) {

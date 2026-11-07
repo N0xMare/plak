@@ -124,6 +124,8 @@ pub fn wants_separator(previous_drawn: Option<&ScrollBlock>, block: &ScrollBlock
     reason = "one flag per independent fold/caret axis"
 )]
 pub struct RowPlan {
+    /// Host-classified operation, independent of exposed tool labels.
+    pub operation: Option<plakous_host_protocol::views::ToolOperation>,
     pub(crate) mail_summary: Option<String>,
     pub(crate) activity_summary: Option<String>,
     pub(crate) activity_action: Option<String>,

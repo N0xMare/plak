@@ -695,7 +695,13 @@ fn workspace_facts_sit_in_the_composer_bottom_border_and_narrow_path_first() {
 
 #[test]
 fn a_workspace_without_a_branch_keeps_its_path_tail_until_it_drops() {
-    use super::composer_chrome::workspace_border_text;
+    let workspace_border_text = |view: &crate::tui::WorkspaceChrome, width| {
+        super::composer_chrome::workspace_border_text(
+            view,
+            &plakous_host_protocol::wire::RunnerLabel::local(),
+            width,
+        )
+    };
     let view = |path: &str| crate::tui::WorkspaceChrome {
         path: path.into(),
         ..Default::default()
@@ -709,6 +715,23 @@ fn a_workspace_without_a_branch_keeps_its_path_tail_until_it_drops() {
     assert_eq!(
         workspace_border_text(&view("~/path · not-a-branch"), 80),
         " ~/path · not-a-branch "
+    );
+}
+
+#[test]
+fn remote_workspace_border_names_the_host_runner_without_reclassifying_the_path() {
+    let runner = plakous_host_protocol::wire::RunnerLabel {
+        name: "peer".into(),
+        runner_id: "saved-id".into(),
+    };
+    let view = crate::tui::WorkspaceChrome {
+        path: "/peer/work".into(),
+        home: None,
+        branch: None,
+    };
+    assert_eq!(
+        super::composer_chrome::workspace_border_text(&view, &runner, 80),
+        " peer · /peer/work "
     );
 }
 
