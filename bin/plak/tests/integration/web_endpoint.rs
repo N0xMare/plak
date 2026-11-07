@@ -413,6 +413,70 @@ fn a_tailnet_client_attaches_prompts_and_reads_the_answer() {
 }
 
 #[test]
+fn ui_reload_preserves_a_live_session_socket_and_rejects_an_invalid_replacement() {
+    let fixture = Fixture::new(&json!({"version":1,"steps":[{"output":{"text":ANSWER}}]}));
+    let mut web = start(&fixture);
+    let cookie = cookie(&web);
+    let mut socket = upgrade(&web, &cookie);
+    let root = hello(&mut socket);
+    attach(&mut socket, &root, 1);
+    let policy = "default-src 'none'; frame-ancestors 'none'";
+    let reload = |web: &Web, expected: &str| {
+        assert!(
+            std::process::Command::new("kill")
+                .args(["-USR1", &web.child.as_ref().unwrap().id().to_string()])
+                .status()
+                .unwrap()
+                .success()
+        );
+        loop {
+            if web.lines.recv_timeout(WAIT).unwrap().contains(expected) {
+                break;
+            }
+        }
+    };
+    std::fs::write(
+        fixture.root.join("ui/csp.json"),
+        json!({"header":policy}).to_string(),
+    )
+    .unwrap();
+    std::fs::write(fixture.root.join("ui/index.html"), "replacement").unwrap();
+    reload(&web, "UI build reloaded");
+    assert_eq!(
+        page(&web, Some(LOGIN), HOST).header("content-security-policy"),
+        Some(policy)
+    );
+    send(
+        &mut socket,
+        &ClientFrame::Request {
+            id: 2,
+            op: Op::Ping,
+        },
+    );
+    assert_eq!(response(&mut socket, 2), json!({"ok":{"answer":"pong"}}));
+    std::fs::write(
+        fixture.root.join("ui/csp.json"),
+        r#"{"header":"frame-ancestors *"}"#,
+    )
+    .unwrap();
+    reload(&web, "UI reload failed; keeping previous build");
+    assert_eq!(
+        page(&web, Some(LOGIN), HOST).header("content-security-policy"),
+        Some(policy)
+    );
+    send(
+        &mut socket,
+        &ClientFrame::Request {
+            id: 3,
+            op: Op::Ping,
+        },
+    );
+    assert_eq!(response(&mut socket, 3), json!({"ok":{"answer":"pong"}}));
+    drop(socket);
+    interrupt_and_wait(&mut web);
+}
+
+#[test]
 fn a_web_face_and_a_terminal_share_one_hosts_transcript() {
     let fixture = Fixture::new(&json!({
         "version": 1,

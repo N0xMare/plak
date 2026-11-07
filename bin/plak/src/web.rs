@@ -37,7 +37,7 @@ pub(crate) struct Served {
     pub(crate) host: Arc<SessionHost<PlakExtension>>,
     /// Whether the process was asked to stop since it began serving.
     pub(crate) stop: StopProbe,
-    pub(crate) ui: Option<ui::Ui>,
+    pub(crate) ui: Option<ui::Builds>,
     pub(crate) gate: auth::Gate,
 }
 
@@ -47,6 +47,7 @@ pub(crate) struct WebEndpoint {
     listener: listen::Bound,
     socket_file: Option<listen::SocketFile>,
     served: Arc<Served>,
+    reload: tokio::signal::unix::Signal,
 }
 
 impl WebEndpoint {
@@ -67,13 +68,17 @@ impl WebEndpoint {
         let paths = services.paths()?;
         let config = ProductConfig::load(paths).map_err(CliFailure::new)?;
         let access = access(&listen, &config, args.dev_login.clone())?;
-        let ui = args.ui.as_deref().map(ui::Ui::load).transpose()?;
+        let ui = args.ui.as_deref().map(ui::Builds::load).transpose()?;
+        // SIGHUP is a planned session handoff, not an asset reload.
+        let reload = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1())
+            .map_err(|error| CliFailure::new(format!("cannot listen for UI reload: {error}")))?;
         let gate = auth::Gate::new(access, auth::CookieKey::load_or_create(paths)?);
         let (listener, socket_file) = listen::bind(&listen).await?;
         Ok(Self {
             listen,
             listener,
             socket_file,
+            reload,
             served: Arc::new(Served {
                 host,
                 stop,
@@ -90,9 +95,27 @@ impl WebEndpoint {
 
     /// Serves until the process is asked to stop, then removes the socket
     /// it bound.
-    pub(crate) async fn serve(self) {
+    pub(crate) async fn serve(mut self) {
         tracing::info!(target: "plak::web", listener = %self.listen, "plak host web endpoint serving");
-        listen::serve(self.listener, Arc::clone(&self.served)).await;
+        let serving = listen::serve(self.listener, Arc::clone(&self.served));
+        tokio::pin!(serving);
+        loop {
+            tokio::select! {
+                () = &mut serving => break,
+                Some(()) = self.reload.recv() => {
+                    if self.served.ui.is_some() {
+                        let builds = Arc::clone(&self.served);
+                        let result = tokio::task::spawn_blocking(move || {
+                            builds.ui.as_ref().map(ui::Builds::reload).transpose()
+                        }).await;
+                        match result {
+                            Ok(Ok(_)) => eprintln!("plak host: UI build reloaded"),
+                            result => eprintln!("plak host: UI reload failed; keeping previous build: {result:?}"),
+                        }
+                    }
+                }
+            }
+        }
         listen::cleanup(self.socket_file);
     }
 }

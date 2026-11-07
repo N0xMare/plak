@@ -519,7 +519,8 @@ fn route(mut request: Request<Incoming>, served: &Arc<Served>) -> Routed {
         });
         return Ok(super::socket::switching_protocols(&accept));
     }
-    let mut response = super::ui::respond(served.ui.as_ref(), &request);
+    let ui = served.ui.as_ref().map(super::ui::Builds::snapshot);
+    let mut response = super::ui::respond(ui.as_deref(), &request);
     if !gate.cookie_holds(request.headers(), &login) {
         if let Ok(cookie) = gate.set_cookie(&login) {
             tracing::info!(target: "plak::web", login = %login, "web login");

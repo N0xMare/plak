@@ -1848,6 +1848,11 @@ provider status responses.
 
 ### 2.6 Spawned-binary lifecycles
 
+UI reload evidence keeps a real session WebSocket open across `SIGUSR1`,
+checks the replacement policy and continued wire service, and rejects an
+invalid replacement while retaining the old build. SIGHUP remains a
+planned host handoff, never an asset reload.
+
 A class of defect lives only in the process: how a signal ends it, what its
 writer does when the reader stops reading, whether a failed shutdown still
 terminates the stream, and whether a session an earlier process wrote reopens.
@@ -3635,6 +3640,10 @@ tuple refuses with an exact message is evidence of the same weight as one
 asserting a success.
 
 ### 3.2 Live scenarios
+
+Host UI asset deployment uses `SIGUSR1`/`ExecReload` without restarting
+the host. Automated offline evidence does not substitute for human review
+of the served UI; no paid live run is needed to validate its asset swap.
 
 JSONL terminal classification uses `turn_lifecycle.model_error_kind` and
 `http_status` before rendered prose or bracketed physical-attempt summaries.

@@ -1,4 +1,5 @@
 use hyper::header::{HeaderMap, HeaderValue};
+use std::sync::Arc;
 
 use super::auth::{issue_for_test, test_key, verify_for_test};
 use super::listen::Listen;
@@ -113,6 +114,60 @@ fn ui_dir() -> tempfile::TempDir {
     std::fs::write(dir.path().join("_app/immutable/a.js"), "asset").unwrap();
     std::fs::write(dir.path().join(".secret"), "not served").unwrap();
     dir
+}
+
+#[tokio::test]
+async fn ui_reload_swaps_files_and_policy_together_and_keeps_old_build_on_failure() {
+    use http_body_util::BodyExt as _;
+    let dir = ui_dir();
+    let builds = super::ui::Builds::load(dir.path()).unwrap();
+    let old = builds.snapshot();
+    let policy = "default-src 'none'; frame-ancestors 'none'";
+    std::fs::write(dir.path().join("index.html"), "new build").unwrap();
+    std::fs::write(
+        dir.path().join("csp.json"),
+        serde_json::json!({"header": policy}).to_string(),
+    )
+    .unwrap();
+    builds.reload().unwrap();
+    let current = builds.snapshot();
+    assert!(!Arc::ptr_eq(&old, &current));
+    let response = get(&current, "/", &[]);
+    assert_eq!(header(&response, "content-security-policy"), Some(policy));
+    assert_eq!(
+        response.into_body().collect().await.unwrap().to_bytes(),
+        "new build"
+    );
+    assert_eq!(
+        get(&old, "/", &[])
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes(),
+        "<!doctype html>app"
+    );
+
+    for invalid in [
+        "not json",
+        r#"{"header":"frame-ancestors *"}"#,
+        r#"{"header":"frame-ancestors 'none'","unexpected":true}"#,
+    ] {
+        std::fs::write(dir.path().join("csp.json"), invalid).unwrap();
+        assert!(Ui::load(dir.path()).is_err());
+        assert!(builds.reload().is_err());
+        assert!(Arc::ptr_eq(&current, &builds.snapshot()));
+    }
+    std::fs::write(
+        dir.path().join("csp.json"),
+        serde_json::json!({"header": policy}).to_string(),
+    )
+    .unwrap();
+    let huge = std::fs::File::create(dir.path().join("large.js")).unwrap();
+    huge.set_len(32 * 1024 * 1024 + 1).unwrap();
+    assert!(Ui::load(dir.path()).is_err());
+    assert!(builds.reload().is_err());
+    assert!(Arc::ptr_eq(&current, &builds.snapshot()));
 }
 
 fn get(

@@ -720,7 +720,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plak", "src/commands/application.rs"): {"select"},
     # The web endpoint: logins, connections and refusals (no secret or frame),
     # and the accept loop and one connection's socket, session and pings.
-    ("plak", "src/web.rs"): {"info"},
+    ("plak", "src/web.rs"): {"info", "pin", "select"},
     ("plak", "src/web/auth.rs"): {"info", "warn"},
     ("plak", "src/web/listen.rs"): {"select"},
     ("plak", "src/web/socket.rs"): {"info", "select"},

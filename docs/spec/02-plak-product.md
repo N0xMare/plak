@@ -4521,7 +4521,7 @@ chapter 04 §2.10; its keys are `[web]` (chapter 07 §3).
 - **Static files.** `--ui <dir>` must hold `csp.json`
   (`{"header": "...", "report_only_header": "..."}`, the second optional),
   whose `header` must carry `frame-ancestors 'none'`; without `--ui` only
-  `/wire` answers. The build is read once at start, into memory: every
+  `/wire` answers. The build is read at start into memory: every
   regular file whose path has no component starting with `.` (a symlink only
   to a file inside the directory), at most 4096 files, 32 MiB a file and 128
   MiB in all. `GET` and `HEAD` serve exactly those files; any other path
@@ -4538,6 +4538,12 @@ chapter 04 §2.10; its keys are `[web]` (chapter 07 §3).
   build without one included) gets a worker that unregisters itself and
   reloads its pages, with `Clear-Site-Data: "cache", "storage"`, so a worker
   registered from a stray path cannot persist.
+  `SIGUSR1` re-reads the same `--ui` path using exactly the startup loader,
+  including CSP, frame-ancestors and all file/byte limits. The complete
+  validated build swaps atomically; each HTTP response uses one build for
+  both its file and policy. Failure logs the error and keeps the previous
+  build. Existing sockets, sessions and terminals survive. No origin,
+  login allowlist or capability configuration is reloaded.
 - **Logs.** Logins (a cookie issued), connections opened and closed, and
   refusals with their reason, path and login (the presented one for a login
   not allowed, bounded and printable), at most 60 refusal lines a minute
@@ -4743,6 +4749,11 @@ background hash is pending; welcome never waits for that hash.
   released by then is left to the crash law (`owner_lost`). It prints
   `plak host: serving on <socket> (host <host id>, instance <instance>);
   tools get <source>` once it accepts.
+
+`SIGUSR1` reloads UI assets only (§4.5). It deliberately differs from
+`SIGHUP`, which remains a planned handoff. With `--ui`, use `systemctl
+--user reload` with the unit's `ExecReload` below; do not restart the host
+to deploy a web build.
 
 The unit runs it as a planned stop, not a crash: `KillMode=mixed` signals the
 host alone. The home-local daemon runs outside that unit's cgroup when

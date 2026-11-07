@@ -1,10 +1,11 @@
 //! The web UI's static files: exactly the build's files from `--ui`, read
-//! once at start into memory (the build is immutable), the SPA fallback to
+//! into immutable in-memory snapshots, the SPA fallback to
 //! `index.html`, the cache rules, the build's CSP as a header on every
 //! response, and the service-worker kill switch.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, PoisonError, RwLock};
 
 use bytes::Bytes;
 use http_body_util::Full;
@@ -43,6 +44,31 @@ pub(crate) struct Ui {
     files: BTreeMap<String, File>,
     csp: HeaderValue,
     csp_report_only: Option<HeaderValue>,
+}
+
+/// A validated build. Each request retains one snapshot for both files and CSP.
+pub(crate) struct Builds {
+    root: PathBuf,
+    current: RwLock<Arc<Ui>>,
+}
+
+impl Builds {
+    pub(crate) fn load(root: &Path) -> CliResult<Self> {
+        Ok(Self {
+            root: root.to_path_buf(),
+            current: RwLock::new(Arc::new(Ui::load(root)?)),
+        })
+    }
+
+    pub(crate) fn snapshot(&self) -> Arc<Ui> {
+        Arc::clone(&self.current.read().unwrap_or_else(PoisonError::into_inner))
+    }
+
+    pub(crate) fn reload(&self) -> CliResult<()> {
+        let next = Arc::new(Ui::load(&self.root)?);
+        *self.current.write().unwrap_or_else(PoisonError::into_inner) = next;
+        Ok(())
+    }
 }
 
 /// `csp.json` in the UI directory, as the web build writes it.
