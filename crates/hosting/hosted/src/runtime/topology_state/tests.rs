@@ -22,9 +22,7 @@ fn a_failed_recovery_join_does_not_retrack_its_spent_handle() {
             super::mark_root_interrupted_for_run(&tree_id)
                 .await
                 .unwrap();
-            crate::topology_runtime::force_release(&tree_id)
-                .await
-                .unwrap();
+            crate::topology_runtime::force_release(&tree_id).await;
         })
         .unwrap();
 }
@@ -63,9 +61,89 @@ fn idle_stop_joins_child_recovery_before_acquiring_process_stop_leases() {
         .unwrap();
 }
 
+#[test]
+fn a_hung_recovery_does_not_prevent_working_children_from_being_stopped() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    let root = tempfile::tempdir().unwrap();
+    let tree_id = uuid::Uuid::new_v4().to_string();
+    let runtime = crate::runtime::test_kit::install_idle_topology_hub(&tree_id, root.path());
+    let executor = plakous::application::ApplicationExecutor::new().unwrap();
+    executor
+        .block_on(async {
+            let child = runtime
+                .mutate_then_emit(false, |tree| {
+                    let child = tree
+                        .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+                        .unwrap();
+                    tree.set_active_turn(&child.agent_id, true).unwrap();
+                    Ok(child.agent_id)
+                })
+                .await
+                .unwrap();
+            let signalled = Arc::new(AtomicBool::new(false));
+            let released = Arc::new(AtomicBool::new(false));
+            let finish = Arc::new(tokio::sync::Notify::new());
+            assert!(
+                runtime
+                    .try_occupy_live(
+                        child.clone(),
+                        Box::new(DelayedChild(
+                            released.clone(),
+                            finish.clone(),
+                            Some(signalled.clone())
+                        ))
+                    )
+                    .await
+                    .is_ok()
+            );
+            let (release, waiting) = tokio::sync::oneshot::channel();
+            assert!(
+                runtime.track_recovery(runtime.driver().tasks().spawn(async move {
+                    let _ = waiting.await;
+                }))
+            );
+            let error = super::mark_root_interrupted_for_run(&tree_id)
+                .await
+                .unwrap_err();
+            assert!(error.contains("child recovery exceeded"), "{error}");
+            assert!(runtime.recovery_running());
+            assert_eq!(
+                runtime
+                    .read(|tree| tree.node(&child).unwrap().status)
+                    .unwrap(),
+                NodeStatus::Interrupted
+            );
+            assert_eq!(
+                runtime
+                    .read(|tree| tree.interrupt_cause_of(&child))
+                    .unwrap(),
+                Some(crate::agent_tree::InterruptCause::Stopped)
+            );
+            tokio::time::timeout(std::time::Duration::from_secs(1), async {
+                while !signalled.load(Ordering::SeqCst) {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            assert!(
+                !released.load(Ordering::SeqCst),
+                "the signal path must not join retirement"
+            );
+            finish.notify_one();
+            release.send(()).unwrap();
+            crate::topology_runtime::force_release(&tree_id).await;
+        })
+        .unwrap();
+}
+
 struct DelayedChild(
     std::sync::Arc<std::sync::atomic::AtomicBool>,
     std::sync::Arc<tokio::sync::Notify>,
+    Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 );
 impl crate::topology_runtime::LiveChildHandle for DelayedChild {
     fn agent(&self) -> Option<plakous::agent::Agent> {
@@ -110,6 +188,9 @@ impl crate::topology_runtime::LiveChildHandle for DelayedChild {
         _driver: crate::agent_tree_tools::TreeDriver,
         dispatched: Option<tokio::sync::oneshot::Sender<()>>,
     ) -> std::pin::Pin<Box<dyn Future<Output = crate::topology_runtime::LiveRelease> + Send>> {
+        if let Some(signalled) = &self.2 {
+            signalled.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
         if let Some(dispatched) = dispatched {
             let _ = dispatched.send(());
         }
@@ -144,7 +225,7 @@ fn root_interrupt_signals_children_and_shutdown_joins_their_release() {
         executor
             .block_on(runtime.try_occupy_live(
                 child.clone(),
-                Box::new(DelayedChild(cancelled.clone(), finish.clone()))
+                Box::new(DelayedChild(cancelled.clone(), finish.clone(), None))
             ))
             .unwrap()
             .is_ok()

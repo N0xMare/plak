@@ -3959,8 +3959,13 @@ observed as the operator's interrupt is, and the rest of the stop waits
 until the workflow ends. The idle stop also joins tracked child recovery
 before interrupting and retiring children, so recovery has released its
 canonical leases before the daemon stop takes a fresh head lease. This join
-uses the host release bound; a timed-out recovery remains tracked and the stop
-reports failure rather than claiming completion. The running-turn stop signal
+uses the host release bound. If recovery exceeds that bound or fails, the stop
+still records the descendants' `stopped` interrupts and the root interruption,
+and signals child cancellation without joining their retirement. Unjoined
+recoveries remain tracked. Only daemon stops for child lines still owned by
+recovery are skipped; other child lines are attempted. The root stop record
+may commit, but the request reports failure rather than claiming full completion.
+The running-turn stop signal
 does not wait for recovery. Failed joins retain only unjoined recovery handles;
 a completed or failed handle is consumed once, never polled again on retry.
 *Durable before and after:* a crash before the

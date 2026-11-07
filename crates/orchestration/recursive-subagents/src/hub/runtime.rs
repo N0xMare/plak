@@ -420,9 +420,8 @@ impl ProductTopologyRuntime {
         })
     }
 
-    /// Whether a `recover_node` run holds `agent_id`, without claiming it,
-    /// so a test can watch a claim being released between tries.
-    #[cfg(any(test, feature = "test-support"))]
+    /// Whether a recovery holds `agent_id`, without claiming it. A stop
+    /// cannot take that child's canonical lease until the recovery releases it.
     pub fn is_recovering(&self, agent_id: &str) -> bool {
         self.recovering
             .lock()

@@ -219,9 +219,11 @@ async fn interrupt_root(tree_id: &str, stop: ChildStop) -> Result<usize, String>
     let Some(runtime) = lookup(tree_id) else {
         return Ok(0);
     };
-    if matches!(stop, ChildStop::Join) {
-        join_stop_recoveries(&runtime).await?;
-    }
+    let recovery_failure = if matches!(stop, ChildStop::Join) {
+        join_stop_recoveries(&runtime).await.err()
+    } else {
+        None
+    };
     let cause = match stop {
         ChildStop::Cascade => crate::agent_tree::InterruptCause::Cascade,
         ChildStop::Signal | ChildStop::Join => crate::agent_tree::InterruptCause::Stopped,
@@ -236,11 +238,18 @@ async fn interrupt_root(tree_id: &str, stop: ChildStop) -> Result<usize, String>
         })
         .await?;
     let count = interrupted.len();
-    let join = matches!(stop, ChildStop::Join);
+    let join = matches!(stop, ChildStop::Join) && recovery_failure.is_none();
     if join {
         interrupted = runtime.live.lock().await.keys().cloned().collect();
     }
-    cancel_interrupted_children(&runtime, &interrupted, join, tree_id).await?;
+    let cancelled = cancel_interrupted_children(&runtime, &interrupted, join, tree_id).await;
+    if let Some(error) = recovery_failure {
+        return Err(match cancelled {
+            Ok(()) => error,
+            Err(cancel) => format!("{error}; {cancel}"),
+        });
+    }
+    cancelled?;
     Ok(count)
 }
 

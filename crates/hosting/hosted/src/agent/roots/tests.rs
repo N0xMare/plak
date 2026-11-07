@@ -80,6 +80,67 @@ async fn bound_daemon(workspace: &std::path::Path) -> plakous::runner::RunnerCli
     .0
 }
 
+#[tokio::test]
+async fn a_process_stop_skips_only_the_child_line_owned_by_recovery() {
+    use crate::agent_tree::{InterruptCause, ProductAgentTree};
+    use crate::agent_tree_protocol::{SpawnAgentRequest, WriterMode};
+    let home = tempfile::tempdir().unwrap();
+    let mut roots = ProductStateRoots::with_doubles(home.path().into(), home.path().join("state"));
+    roots.daemon_client = Some(bound_daemon(home.path()).await);
+    let tree_id = uuid::Uuid::new_v4().to_string();
+    let mut tree = ProductAgentTree::bootstrap_root_for_test(
+        &tree_id,
+        "root",
+        "owner",
+        home.path().into(),
+        "tuple",
+        WriterMode::SingleLease,
+    )
+    .unwrap();
+    let mut ids = Vec::new();
+    for locator in ["invalid-one", "invalid-two"] {
+        let child = tree
+            .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+            .unwrap();
+        tree.bind_session_locator(&child.agent_id, locator).unwrap();
+        tree.set_active_turn(&child.agent_id, true).unwrap();
+        ids.push(child.agent_id);
+    }
+    tree.interrupt_running_descendants_for(InterruptCause::Stopped)
+        .unwrap();
+    let published = roots.tree_store().unwrap().save_in_custody(&tree).unwrap();
+    tree.acknowledge_revision(published);
+    tree.advance_session_locator(&ids[0], "recovery-advanced-locator")
+        .unwrap();
+    let runtime = crate::topology_runtime::insert_root(tree_id.clone(), tree, None)
+        .await
+        .unwrap();
+    let claim = runtime.claim_recovery(&ids[0]).unwrap();
+    let (release, waiting) = tokio::sync::oneshot::channel();
+    assert!(
+        runtime.track_recovery(runtime.driver().tasks().spawn(async move {
+            let _claim = claim;
+            let _ = waiting.await;
+        }))
+    );
+    let failure = roots
+        .finish_child_process_stops(&tree_id)
+        .await
+        .unwrap_err();
+    assert_eq!(failure.message().split("; ").count(), 2, "{failure}");
+    assert_eq!(
+        failure
+            .message()
+            .matches("child recovery still owns")
+            .count(),
+        1,
+        "{failure}"
+    );
+    release.send(()).unwrap();
+    crate::topology_runtime::force_release(&tree_id).await;
+    roots.daemon_client.as_ref().unwrap().disconnect();
+}
+
 /// Makes `sessions` the process's shared runtime service of `roots`, so a
 /// test controls its retention bounds.
 pub(crate) fn seed_runtime_sessions(

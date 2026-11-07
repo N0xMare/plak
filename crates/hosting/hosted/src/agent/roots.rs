@@ -384,11 +384,32 @@ impl ProductStateRoots {
             .tree_store()?
             .load(tree_id)
             .map_err(|error| CliFailure::new(error.detail))?
-            .map_or_else(Vec::new, |tree| tree.rows().recorded_process_stops());
+            .map_or_else(Vec::new, |tree| {
+                let rows = tree.rows();
+                rows.recorded_process_stops()
+                    .into_iter()
+                    .map(|(locator, intent)| {
+                        let agent = rows
+                            .nodes()
+                            .values()
+                            .find(|node| node.session_locator.as_deref() == Some(locator.as_str()))
+                            .map(|node| node.agent_id.clone());
+                        (agent, locator, intent)
+                    })
+                    .collect()
+            });
         let sessions = self.runtime_sessions()?;
         let mut failures: Vec<String> = Vec::new();
-        for (locator, intent) in stops {
+        for (agent, locator, intent) in stops {
             let result = async {
+                if let Some(agent) = agent
+                    && let Some(runtime) = crate::topology_runtime::lookup(tree_id)
+                    && runtime.is_recovering(&agent)
+                {
+                    return Err(CliFailure::new(
+                        "child recovery still owns the process-stop line",
+                    ));
+                }
                 let locator = locator
                     .parse::<plakous::sessions::SessionLocator>()
                     .map_err(|error| CliFailure::new(error.to_string()))?;
