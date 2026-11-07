@@ -96,9 +96,10 @@ slow-timeout = { period = "300s", terminate-after = 2 }
 [profile.offline]
 default-filter = '''
 not (
-  test(a_reopen_ack_timeout_)
+  test(a_reopen_ack_timeout_releases_the_slot_and_joins_a_late_quit)
   |
-  test(a_reload_signal_)
+  test(a_reload_signal_without_web_keeps_serving)
+  | test(a_reload_signal_during_runner_startup_is_retained)
   |
   test(an_unattached_stop_stops_a_busy_root_and_live_children)
   |
@@ -330,9 +331,10 @@ not (
 test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
-  test(a_reopen_ack_timeout_)
+  test(a_reopen_ack_timeout_releases_the_slot_and_joins_a_late_quit)
   |
-  test(a_reload_signal_)
+  test(a_reload_signal_without_web_keeps_serving)
+  | test(a_reload_signal_during_runner_startup_is_retained)
   |
   test(an_unattached_stop_stops_a_busy_root_and_live_children)
   |

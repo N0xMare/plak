@@ -1442,6 +1442,9 @@ includes follow the module location; manifest-root fixture paths do not move.
 Dormant-stop recovery and real-process UI signal reload scenarios belong
 to the serial lane, excluded from offline parallel execution. Their waits
 are for explicit observations, log acknowledgements or process settlement.
+Reload-signal probes cover both blocked runner startup and a control-only
+host. Launcher timeout evidence gates mailbox reads, checks the bounded
+refusal, then permits the late quit and verifies a fresh actor is opened.
 
 Three mechanisms keep wall-clock and resource assumptions honest, and none of
 them relaxes an assertion to buy parallelism.
