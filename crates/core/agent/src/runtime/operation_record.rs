@@ -22,12 +22,27 @@ use plakous_model::{
 use plakous_tools::ToolInvocation;
 use std::collections::BTreeSet;
 
+mod headroom;
 mod provider_outcome;
+pub(super) use headroom::{
+    BATCH_HEADROOM_REFUSAL, NESTED_HEADROOM_REFUSAL, TOOL_REQUEST_RECORD_RESERVATION,
+    has_operation_headroom,
+};
+mod retirement;
 #[cfg(test)]
 pub(in crate::runtime) use provider_outcome::test_support;
 pub(in crate::runtime) use provider_outcome::{
     DecidedRemedy, FailTurnShape, ProviderAttemptResult, ProviderOutcome, RoundDecision,
     TurnBudgets, provider_outcome, recorded_provider_response,
+};
+pub(super) use retirement::{
+    has_retirement_boundary, ledger_matches_retirement, retire_live_ledger,
+    validate_live_retirement,
+};
+#[cfg(test)]
+pub(in crate::runtime) use retirement::{
+    retire_test_ledger,
+    tests::{retirement_fixture, retirement_leaf, retirement_round},
 };
 
 impl TurnRecoveryOperationId {

@@ -483,7 +483,11 @@ pub(in crate::runtime) fn validate_compaction_receipt(
                 identity.workflow_id,
                 operations.request.turn_fence,
             )
-            || manifest.ledger() != &expected.ledger
+            || !crate::runtime::operation_record::ledger_matches_retirement(
+                &expected.ledger,
+                manifest.ledger(),
+                manifest.lifecycle(),
+            )
             || manifest.canonical().context() != &expected.context
         {
             return Err(AgentError::from_store(SessionStoreError::corrupt()));

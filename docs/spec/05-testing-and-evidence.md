@@ -1877,7 +1877,11 @@ to a provider, because a gate run that silently tested nothing is worse than a
 failing one.
 
 The document is `plakous_offline_crash_harness::script::ScriptPlan`: a version,
-a list of assistant steps, and the fixture dials the compaction ladder needs. A
+a list of assistant steps, and the fixture dials the compaction ladder needs.
+The test-only `tree_process_tools` dial explicitly adds the standard coding/process
+packs to the topology fixture's one registry and requires `tree`; ordinary registry
+selectors remain mutually exclusive. It exercises retirement in a parent with both
+a live child turn and a live process without changing product bindings. A
 step names its output (text, a tool call with arguments, a reasoning-only block,
 or nothing), its stop reason, its usage figures, an optional stall, and an
 optional provider fault — refused before the stream, reported in band after a

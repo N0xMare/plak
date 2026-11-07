@@ -17,6 +17,8 @@ use std::sync::{Arc, Mutex};
 pub(in crate::runtime) mod resources;
 pub(super) use resources::InterpreterResources;
 
+#[cfg(test)]
+mod headroom_tests;
 pub(in crate::runtime) mod nested;
 mod state;
 

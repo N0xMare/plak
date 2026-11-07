@@ -10,6 +10,7 @@ pub(super) mod child;
 pub(super) mod dormant;
 pub(super) mod handoff;
 pub(super) mod host_runner;
+mod ledger_retirement;
 pub(super) mod lineage;
 pub(super) mod recovery;
 mod residency;
@@ -240,6 +241,46 @@ pub(super) const REGISTRY: &[Shape] = &[
         setup: no_setup,
         lifecycle: prompt_then_quit,
         assert_live: host_runner::assert_stopped,
+    },
+    Shape {
+        name: "ledger_retirement_interrupted_batch",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: ledger_retirement::interrupted_batch_script,
+        configure: ledger_retirement::configure,
+        setup: no_setup,
+        lifecycle: prompt_then_quit,
+        assert_live: ledger_retirement::assert_interrupted_batch,
+    },
+    Shape {
+        name: "ledger_retirement_yielded_cell",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: ledger_retirement::yielded_script,
+        configure: ledger_retirement::configure_yielded,
+        setup: no_setup,
+        lifecycle: ledger_retirement::yielded_lifecycle,
+        assert_live: ledger_retirement::assert_yielded,
+    },
+    Shape {
+        name: "ledger_retirement_live_child_process",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: child::script,
+        configure: child::configure_retirement,
+        setup: no_setup,
+        lifecycle: child::retirement_lifecycle,
+        assert_live: child::assert_retirement,
+    },
+    Shape {
+        name: "ledger_retirement_closed_cells",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: ledger_retirement::script,
+        configure: ledger_retirement::configure,
+        setup: no_setup,
+        lifecycle: prompt_then_quit,
+        assert_live: ledger_retirement::assert_live,
     },
     Shape {
         name: "image_residency_admission",

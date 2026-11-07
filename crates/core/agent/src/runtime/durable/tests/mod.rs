@@ -55,6 +55,8 @@ mod jobs;
 pub(super) mod jobs_carry_fixture;
 #[path = "../landed_round_abandonment_tests.rs"]
 pub(super) mod landed_round_abandonment;
+#[cfg(feature = "test-hooks")]
+mod ledger_retirement;
 mod long_turn_compaction;
 mod native_anchor_tests;
 mod native_capacity_tests;
@@ -301,6 +303,7 @@ use tokio::sync::Notify;
 use cancel_cell::*;
 use checkpoint_fixtures::*;
 use code_cell_abandonment::*;
+pub(in crate::runtime) use code_cell_composition::headroom_test_construction;
 use code_cell_composition::*;
 use compaction_admission::*;
 use composition_scheduler::*;

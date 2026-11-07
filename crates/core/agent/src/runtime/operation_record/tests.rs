@@ -79,10 +79,10 @@ fn retention_keeps_owned_roots_outside_the_settled_command_window()
     Ok(())
 }
 
-fn root_command(sequence: u64, turn_id: TurnId) -> TestResult<DurableCommandRecord> {
+pub(super) fn root_command(sequence: u64, turn_id: TurnId) -> TestResult<DurableCommandRecord> {
     let command = TurnCommand::Start {
         command_id: CommandId::new(format!("root:{sequence}"))?,
-        input: "root".into(),
+        input: format!("root:{sequence}").into(),
     };
     let envelope = DurableCommandEnvelope {
         version: 1,
@@ -104,7 +104,7 @@ fn root_command(sequence: u64, turn_id: TurnId) -> TestResult<DurableCommandReco
     )?)
 }
 
-fn rejected_command(sequence: u64) -> TestResult<DurableCommandRecord> {
+pub(super) fn rejected_command(sequence: u64) -> TestResult<DurableCommandRecord> {
     let command = TurnCommand::Start {
         command_id: CommandId::new(format!("rejected:{sequence}"))?,
         input: "".into(),
@@ -287,6 +287,86 @@ fn retention_keeps_counter_root_beyond_the_command_window() -> TestResult {
     let retained = retain_quiescent_ledger(&ledger, &BTreeSet::new())?;
     assert!(retained.operation(1).is_some());
     assert_eq!(retained.retired_attempts(prior), 17);
+    Ok(())
+}
+
+#[test]
+fn quiescent_publication_cannot_discard_the_preceding_root_counter() -> TestResult {
+    use crate::runtime::checkpoint::candidate::{SuccessorFacts, successor_candidate};
+    let turn = TurnId::try_from(uuid::Uuid::from_u128(0x700))?;
+    let ledger =
+        RuntimeOperationLedger::new(vec![root_command(1, turn)?], vec![settled_root(1, turn)?])?
+            .with_retired_attempts(Some((turn, 7)))?;
+    let source = crate::checkpoint_bundle::tests::fixture_with_history_and_ledger(
+        plakous_model::CanonicalHistory::default(),
+        1,
+        true,
+        Some(ledger),
+        Some(RuntimeLifecycle::Quiescent),
+    )?;
+    let bundle = crate::RuntimeCheckpointCodec::bundle(&source, None)?;
+    let manifest = source.manifest();
+    let candidate = successor_candidate(
+        &source,
+        &bundle,
+        SuccessorFacts {
+            checkpoint_id: checkpoint(0x701)?,
+            lifecycle: RuntimeLifecycle::Quiescent,
+            history: manifest.canonical().history().clone(),
+            ledger: manifest.ledger().clone().with_retired_attempts(None)?,
+            jobs: manifest.jobs().clone(),
+            named_state: manifest.named_state().clone(),
+            context: manifest.canonical().context().retained_for_exact_resume(),
+            family: manifest.family_artifact().cloned(),
+        },
+        1,
+        None,
+    );
+    assert_eq!(
+        candidate
+            .err()
+            .ok_or("idle counter reset published")?
+            .message(),
+        "checkpoint successor changed retired attempts without retirement"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_working_turn_cannot_inherit_another_roots_retired_counter() -> TestResult {
+    let old = TurnId::try_from(uuid::Uuid::from_u128(0x710))?;
+    let next = TurnId::try_from(uuid::Uuid::from_u128(0x711))?;
+    let command = root_command(2, next)?;
+    let record = DurableOperationRecord::new(
+        2,
+        DurableOperationKind::Command {
+            turn_id: Some(next),
+        },
+        runtime_component(
+            RuntimeComponentKind::Operation,
+            command.command_component().bytes().to_vec(),
+        )?,
+        vec![
+            DurableOperationTransition::new(checkpoint(0x712)?, DurableOperationState::Prepared),
+            DurableOperationTransition::new(checkpoint(0x713)?, DurableOperationState::Dispatched),
+        ],
+    )?;
+    let ledger = RuntimeOperationLedger::new(
+        vec![root_command(1, old)?, command],
+        vec![settled_root(1, old)?, record],
+    )?;
+    for counter in [Some((old, 7)), None] {
+        let ledger = ledger.clone().with_retired_attempts(counter)?;
+        let lifecycle = working_lifecycle(next, &ledger)?;
+        let result = crate::checkpoint_bundle::tests::fixture_with_history_and_ledger(
+            plakous_model::CanonicalHistory::default(),
+            3,
+            true,
+            Some(ledger),
+            Some(lifecycle),
+        );
+        assert_eq!(result.is_ok(), counter.is_none());
+    }
     Ok(())
 }
 

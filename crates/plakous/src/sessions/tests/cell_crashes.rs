@@ -17,6 +17,7 @@ use plakous_test_support::{
     ExpectedRequest, ModelScenario, ScenarioStart, ScenarioStep, ScriptedModel,
 };
 use std::os::unix::fs::PermissionsExt as _;
+mod ledger_retirement;
 
 #[derive(Default)]
 struct Probe(AtomicUsize);
@@ -116,7 +117,10 @@ fn scenario(engine: Engine) -> TestResult<ModelScenario> {
     ))
 }
 
-fn registry(engine: Engine, probe: Arc<Probe>) -> TestResult<FrozenToolRegistry> {
+fn registry(
+    engine: Engine,
+    probe: Arc<dyn plakous_tools::ToolExecutor>,
+) -> TestResult<FrozenToolRegistry> {
     let mut registry = ToolRegistryBuilder::default();
     plakous_tools::register_packs(
         &crate::tools::standard_coding_packs_in_memory()?,
@@ -173,6 +177,31 @@ fn binding(
     registry: FrozenToolRegistry,
     first: bool,
 ) -> TestResult<(SessionRuntimeBinding, Arc<ScriptedModel>)> {
+    let scenarios = if first {
+        vec![scenario(engine)?]
+    } else {
+        Vec::new()
+    };
+    binding_scenarios(
+        root,
+        worker,
+        engine,
+        registry,
+        scenarios,
+        plakous_agent::AgentConfig::default(),
+        LocalDurabilityDisposition::DurableRequired,
+    )
+}
+
+fn binding_scenarios(
+    root: &Path,
+    worker: &Path,
+    engine: Engine,
+    registry: FrozenToolRegistry,
+    scenarios: Vec<ModelScenario>,
+    config: plakous_agent::AgentConfig,
+    durability: LocalDurabilityDisposition,
+) -> TestResult<(SessionRuntimeBinding, Arc<ScriptedModel>)> {
     let facts = descriptor()?;
     let authority = RuntimeModelAuthority::new(
         &facts,
@@ -186,17 +215,35 @@ fn binding(
         timestamp()?,
         None,
     )?;
-    let scenarios = if first {
-        vec![scenario(engine)?]
-    } else {
-        Vec::new()
-    };
     let model = Arc::new(
         ScriptedModel::new(facts.clone(), scenarios)
             .with_runtime_authority(authority.clone())
             .with_context_observation(crate::test_model::context_observation()?)
             .with_call_recovery(plakous_test_support::ScriptedRecoveryState::new()),
     );
+    let runtime = binding_model(
+        root,
+        worker,
+        engine,
+        registry,
+        config,
+        durability,
+        (model.clone(), authority),
+    )?;
+    Ok((runtime, model))
+}
+
+fn binding_model(
+    root: &Path,
+    worker: &Path,
+    engine: Engine,
+    registry: FrozenToolRegistry,
+    config: plakous_agent::AgentConfig,
+    durability: LocalDurabilityDisposition,
+    model: (Arc<dyn LanguageModel>, RuntimeModelAuthority),
+) -> TestResult<SessionRuntimeBinding> {
+    let (model, authority) = model;
+    let facts = descriptor()?;
     let configured = crate::test_model::configured_model_for_operation(
         model.clone(),
         facts,
@@ -206,7 +253,7 @@ fn binding(
             .iter()
             .filter(|tool| engine.markers().contains(&tool.name().as_str()))
             .cloned(),
-        LocalDurabilityDisposition::DurableRequired,
+        durability,
         OutputBoundDisposition::Enforced(NonZeroU32::new(128).ok_or("output bound")?),
         plakous_model::ToolPresentationMode::LocalCompositionOnly,
     )?;
@@ -244,6 +291,7 @@ fn binding(
         &workspace,
     )?;
     let builder = AgentBuilder::new(configured, registry, workspace)
+        .config(config)
         .harness_plan(plan)
         .request_policy(AgentRequestPolicy::new(
             GenerationLimits::new(NonZeroU32::new(128), Vec::new())?,
@@ -253,12 +301,8 @@ fn binding(
             Arc::new(FixedClock::new(timestamp()?)),
             Arc::new(SystemIdGenerator),
         );
-    Ok((
-        SessionRuntimeBinding::new(crate::local_composition::attach_local_composition(
-            builder,
-            Some(attachment),
-        )?),
-        model,
+    Ok(SessionRuntimeBinding::new(
+        crate::local_composition::attach_local_composition(builder, Some(attachment))?,
     ))
 }
 

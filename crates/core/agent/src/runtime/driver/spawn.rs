@@ -255,6 +255,7 @@ impl PreparedAgent {
             compaction_in_flight: false,
             turn_budgets: crate::runtime::operation_record::TurnBudgets::default(),
             pressure_folds_committed: 0,
+            reserved_top_level_operations: 0,
             artifact_producer_prefix: None,
             context_anchor,
             request_anchor,

@@ -8,6 +8,36 @@ use super::*;
 mod expedite;
 pub(super) mod terminal;
 
+pub(in crate::runtime) fn headroom_test_construction() -> TestResult<LocalCompositionConstruction> {
+    let registry = neutral_composition_test_registry()?;
+    let model_descriptor = neutral_composition_test_descriptor()?;
+    let authority = artifact_authority(&model_descriptor, 1)?;
+    let model = Arc::new(ArtifactModel::new(
+        model_descriptor.clone(),
+        authority.clone(),
+        0,
+        0xc0de_6000,
+        false,
+    ));
+    let descriptor = neutral_composition_for(&model, &model_descriptor, &authority, &registry)?;
+    let identity = descriptor.identity;
+    Ok(LocalCompositionConstruction {
+        integration: Arc::new(FakeComposition::Neutral(FakeCompositionIntegration {
+            descriptor: descriptor.clone(),
+            evidence: Arc::default(),
+            lifecycle: LocalCompositionLifecycle::RootTurnJoined,
+        })),
+        descriptor,
+        attachment: LocalCompositionAttachmentIdentity {
+            profile: identity,
+            artifact: identity,
+            binding: identity,
+            engine_contract: identity,
+            evidence_receipt: None,
+        },
+    })
+}
+
 #[derive(Default)]
 pub(super) struct FakeCompositionEvidence {
     pub(super) counters: CompositionCounters,

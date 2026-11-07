@@ -330,6 +330,16 @@ pub(in crate::runtime) fn code_cell_abandonment_fold(
             obligation.kind(),
             obligation.action(),
         ) {
+            // A yielded cell can span later model rounds. Their unobserved
+            // provider outcomes remain the ordinary turn fold's responsibility.
+            (
+                DurableOperationKind::Provider { .. },
+                DurableOperationState::Prepared
+                | DurableOperationState::Dispatched
+                | DurableOperationState::OutcomeUnknown(_),
+                RecoveryObligationKind::ProviderAttempt,
+                RecoveryAction::ProviderEvidenceRequired,
+            ) => turn_abandonment = true,
             (
                 DurableOperationKind::Command {
                     turn_id: Some(root_turn),

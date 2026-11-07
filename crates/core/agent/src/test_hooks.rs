@@ -27,6 +27,24 @@ pub(crate) fn working_prune_margin(production: u64) -> u64 {
         .unwrap_or(production)
 }
 
+/// A lower operation-only high-water for short deterministic retirement pilots.
+pub(crate) fn ledger_retirement_high_water(production: usize) -> usize {
+    std::env::var("PLAK_TEST_LEDGER_RETIREMENT_HIGH_WATER")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .filter(|value| (8..=production).contains(value))
+        .unwrap_or(production)
+}
+
+/// Lower admission headroom without consuming the production settlement reserve.
+pub(crate) fn ledger_headroom_limit(production: usize) -> usize {
+    std::env::var("PLAK_TEST_LEDGER_HEADROOM_LIMIT")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .filter(|value| (1..=production).contains(value))
+        .unwrap_or(production)
+}
+
 // Mid-turn retention calls before this turn has a provider round. The round
 // loop must not call retention on its first iteration. `#[tokio::test]` polls
 // on the test thread, so a thread-local stays with that test.

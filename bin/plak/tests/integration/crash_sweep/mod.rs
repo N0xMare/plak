@@ -30,6 +30,59 @@ fn durability_subset() {
     run(&shapes::names(true), jobs, 1, false, "subset");
 }
 
+#[test]
+fn durability_ledger_retirement_closed_cells() {
+    retirement_cuts("ledger_retirement_closed_cells");
+}
+
+#[test]
+fn durability_ledger_retirement_live_child_process() {
+    retirement_cuts("ledger_retirement_live_child_process");
+}
+
+#[test]
+fn durability_ledger_retirement_yielded_cell() {
+    retirement_cuts("ledger_retirement_yielded_cell");
+}
+
+#[test]
+fn durability_ledger_retirement_interrupted_batch() {
+    retirement_cuts("ledger_retirement_interrupted_batch");
+}
+
+fn retirement_cuts(shape: &str) {
+    run(&[shape], 1, 1, true, "retirement");
+}
+
+#[test]
+fn durability_ledger_retirement_pilots() {
+    for shape in [
+        "ledger_retirement_live_child_process",
+        "ledger_retirement_yielded_cell",
+    ] {
+        let (seed, session) = driver::setup(shape);
+        driver::pilot(&seed, &session, shape);
+    }
+}
+
+#[test]
+fn durability_ledger_retirement_early_relaunches() {
+    for shape in [
+        "ledger_retirement_live_child_process",
+        "ledger_retirement_yielded_cell",
+    ] {
+        let (seed, session) = driver::setup(shape);
+        let baseline = summary::read_converged(&seed);
+        let pilot = driver::pilot(&seed, &session, shape);
+        let target = pilot
+            .iter()
+            .find(|commit| commit.store == "product")
+            .unwrap();
+        let row = driver::cut(&seed, &session, shape, &baseline, &pilot, target);
+        assert_eq!(row["invariants"], true, "{shape}: {row}");
+    }
+}
+
 /// Every shape the strict sweep cuts must replay its twin pilots to identical
 /// per-store commit sequences, or its cuts are not comparable. The subset's
 /// shapes prove it inside `durability_subset`; this proves it for the rest

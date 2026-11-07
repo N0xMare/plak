@@ -138,6 +138,38 @@ impl Driver {
                 command.cancellation.cancel();
                 return Err(cancelled_error());
             }
+            self.reserved_top_level_operations = progress
+                .read_only
+                .len()
+                .saturating_mul(crate::runtime::operation_record::TOOL_REQUEST_RECORD_RESERVATION);
+            let charged = self
+                .authority
+                .checkpoint()
+                .manifest()
+                .ledger()
+                .operation_count()
+                .saturating_add(self.reserved_top_level_operations);
+            if !crate::runtime::operation_record::has_operation_headroom(charged, 0) {
+                let error = ToolRuntimeError::new(
+                    ToolRuntimeErrorKind::ResourceLimit,
+                    crate::runtime::operation_record::BATCH_HEADROOM_REFUSAL,
+                );
+                let (item, clip) = canonicalize_observed_tool_execution(
+                    result_entry_ids[index],
+                    ToolExecutionResult::new(normalized_tool_failure(&call, &error)?, false),
+                    &mut self.observation_budget,
+                )?;
+                publish_observation_clip(
+                    &command.shared,
+                    command.turn_id,
+                    attempt_id,
+                    call.call_id(),
+                    call.exposed_name(),
+                    clip,
+                );
+                progress.items[index] = Some(item);
+                continue;
+            }
             let source_index = u32::try_from(index).map_err(|_| {
                 AgentError::new(
                     AgentErrorKind::Internal,
@@ -270,6 +302,7 @@ impl Driver {
                 .await?,
             );
         }
+        self.reserved_top_level_operations = 0;
         let items = progress
             .items
             .into_iter()

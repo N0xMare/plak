@@ -1845,7 +1845,7 @@ fn finalized_composition_transitions(seed: u128) -> TestResult<Vec<DurableOperat
     ])
 }
 
-fn composition_graph_records() -> TestResult<Vec<DurableOperationRecord>> {
+pub(crate) fn composition_graph_records() -> TestResult<Vec<DurableOperationRecord>> {
     let turn_id = id(89_201)?;
     let attempt_id = id(89_202)?;
     let evaluation_call_id = id(89_203)?;

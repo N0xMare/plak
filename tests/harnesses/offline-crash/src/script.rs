@@ -195,6 +195,10 @@ pub struct ScriptPlan {
     /// script whose author did not decide.
     #[serde(default)]
     pub tree: bool,
+    /// Add the standard coding/process packs to the topology fixture's one
+    /// registry, so a parent can own a process while a child turn is live.
+    #[serde(default)]
+    pub tree_process_tools: bool,
     /// Publish the scripted tree through the product `subagents.sqlite3`
     /// instead of the in-memory store.
     ///
@@ -578,6 +582,7 @@ impl ScriptPlan {
         // Code Mode script they would be ignored, and a green run would be
         // about a tree that was never there.
         let tree_dials = [
+            ("tree_process_tools", self.tree_process_tools),
             ("durable_tree", self.durable_tree),
             (
                 "disk_full_at_child_locator",

@@ -120,7 +120,14 @@ impl Driver {
                 }
             }
             LocalCompositionEvent::NestedCall { call, responder } => {
-                state.admit_nested(call, responder)?;
+                let charged = self
+                    .authority
+                    .checkpoint()
+                    .manifest()
+                    .ledger()
+                    .operation_count()
+                    .saturating_add(self.reserved_top_level_operations);
+                state.admit_nested(call, responder, charged)?;
             }
         }
         Ok(())

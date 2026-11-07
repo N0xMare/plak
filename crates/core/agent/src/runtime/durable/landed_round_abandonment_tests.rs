@@ -358,18 +358,30 @@ pub(in crate::runtime::durable) async fn completed_tool_round_cut(
     reopen: bool,
     completed_debt: bool,
 ) -> TestResult<RuntimeCheckpoint> {
+    completed_tool_round_cut_with_lineage(mode, reopen, completed_debt, false).await
+}
+
+pub(in crate::runtime::durable) async fn completed_tool_round_cut_with_lineage(
+    mode: SessionUpdateFixtureMode,
+    reopen: bool,
+    completed_debt: bool,
+    programmatic: bool,
+) -> TestResult<RuntimeCheckpoint> {
     let directory = tempfile::tempdir()?;
     let descriptor = durable_test_descriptor("test.route")?;
-    let model = Arc::new(
-        ArtifactModel::new(
-            descriptor.clone(),
-            artifact_authority(&descriptor, 1)?,
-            0,
-            0xE8C_000,
-            false,
-        )
-        .with_tool_first(),
-    );
+    let model = ArtifactModel::new(
+        descriptor.clone(),
+        artifact_authority(&descriptor, 1)?,
+        usize::from(programmatic),
+        0xE8C_000,
+        false,
+    )
+    .with_tool_first();
+    let model = Arc::new(if programmatic {
+        model.with_programmatic_local_tool()?
+    } else {
+        model
+    });
     let (registry, _) = session_update_registry(mode)?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
     let store = Arc::new(TestCreateStore::default());
@@ -386,10 +398,12 @@ pub(in crate::runtime::durable) async fn completed_tool_round_cut(
         .await?;
     let turn = agent.prompt("run the tool then answer").await?;
     let turn_id = turn.id();
-    assert!(matches!(
-        turn.result().await?.outcome(),
-        TurnResultOutcome::Completed(_)
-    ));
+    let result = turn.result().await?;
+    assert!(
+        matches!(result.outcome(), TurnResultOutcome::Completed(_)),
+        "{:?}",
+        result.outcome()
+    );
     let cut = lock_mutex(&store.state).stored_commits.values().find_map(|stored| {
         let checkpoint = stored.checkpoint();
         let records = checkpoint.manifest().ledger().operations();

@@ -120,6 +120,14 @@ pub struct RuntimeOperationLedger {
     pub(super) command_count: usize,
     pub(super) operation_count: usize,
     pub(super) retired_local_tool_attempts: Option<(TurnId, u64)>,
+    // Construction evidence only: checked and discarded before publication.
+    retirement_source: Option<Box<LiveRetirementProof>>,
+}
+
+#[derive(Clone, Debug)]
+struct LiveRetirementProof {
+    source: RuntimeOperationLedger,
+    owned: BTreeSet<TurnId>,
 }
 
 /// The actual operation that makes a retained ledger's sequence reconstructive.
@@ -161,6 +169,7 @@ impl RuntimeOperationLedger {
             command_count: 0,
             operation_count: 0,
             retired_local_tool_attempts: None,
+            retirement_source: None,
         };
         for record in commands {
             ledger = ledger.append_command(record)?;
@@ -332,6 +341,7 @@ impl RuntimeOperationLedger {
             command_count: self.command_count.saturating_add(1),
             operation_count: self.operation_count,
             retired_local_tool_attempts: self.retired_local_tool_attempts,
+            retirement_source: self.retirement_source.clone(),
         })
     }
 
@@ -373,6 +383,7 @@ impl RuntimeOperationLedger {
             command_count: self.command_count,
             operation_count,
             retired_local_tool_attempts: self.retired_local_tool_attempts,
+            retirement_source: self.retirement_source.clone(),
         })
     }
 
@@ -413,6 +424,7 @@ impl RuntimeOperationLedger {
             command_count: self.command_count,
             operation_count: self.operation_count,
             retired_local_tool_attempts: self.retired_local_tool_attempts,
+            retirement_source: self.retirement_source.clone(),
         })
     }
 
@@ -483,6 +495,9 @@ impl RuntimeOperationLedger {
         operations.extend(new_record);
         let mut retained = Self::new(commands, operations)?;
         retained.retired_local_tool_attempts = self.retired_local_tool_attempts;
+        retained
+            .retirement_source
+            .clone_from(&self.retirement_source);
         retained.validate_retired_attempts()?;
         Ok(retained)
     }
@@ -493,8 +508,48 @@ impl RuntimeOperationLedger {
             .map_or(0, |(_, attempts)| attempts)
     }
 
+    pub(crate) fn validate_composition_evidence(&self) -> Result<(), RuntimeManifestError> {
+        validate_composition_graph(self)
+    }
+
     pub(crate) const fn retired_counter(&self) -> Option<(TurnId, u64)> {
         self.retired_local_tool_attempts
+    }
+
+    pub(crate) fn retirement_source(&self) -> Option<&Self> {
+        self.retirement_source.as_ref().map(|proof| &proof.source)
+    }
+
+    pub(crate) fn with_retirement_source(
+        mut self,
+        source: &Self,
+        owned: &BTreeSet<TurnId>,
+    ) -> Self {
+        let mut proof = source.retirement_source.clone().unwrap_or_else(|| {
+            Box::new(LiveRetirementProof {
+                source: source.clone(),
+                owned: BTreeSet::new(),
+            })
+        });
+        proof.owned.extend(owned);
+        self.retirement_source = Some(proof);
+        self
+    }
+
+    pub(crate) fn retirement_preserves_owned_roots(&self) -> bool {
+        self.retirement_source.as_ref().is_none_or(|proof| {
+            proof.owned.iter().all(|turn| {
+                let Some(root) = proof.source.operations().into_iter().find(|record| matches!(record.kind(), DurableOperationKind::Command { turn_id: Some(bound) } if bound == turn)) else { return false; };
+                self.operation(root.operation_id()).is_some()
+                    && proof.source.commands().iter().find(|command| command.turn_id() == Some(*turn) && command.command_component().bytes() == root.request().bytes())
+                        .is_some_and(|command| self.commands().contains(command))
+            })
+        })
+    }
+
+    pub(crate) fn without_retirement_source(mut self) -> Self {
+        self.retirement_source = None;
+        self
     }
 
     pub(crate) fn preserves_retired_counter_of(&self, prior: &Self) -> bool {

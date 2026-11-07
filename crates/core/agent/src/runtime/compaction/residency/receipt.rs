@@ -45,11 +45,11 @@ pub(in crate::runtime) fn validate(
         || evidence.before != request.plan.before
         || evidence.after != request.plan.after
         || evidence.after_input_tokens >= request.before_input_tokens
-        || expected_ledger.authority_identity().map_err(|_| refuse())?
-            != manifest
-                .ledger()
-                .authority_identity()
-                .map_err(|_| refuse())?
+        || !crate::runtime::operation_record::ledger_matches_retirement(
+            &expected_ledger,
+            manifest.ledger(),
+            manifest.lifecycle(),
+        )
         || manifest.lifecycle() != prior.lifecycle()
         || manifest.harness_plan_component() != prior.harness_plan_component()
         || manifest.binding() != prior.binding()

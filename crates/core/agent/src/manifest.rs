@@ -1395,3 +1395,5 @@ fn bounded_text(
     reason = "negative assertions use expect/expect_err to preserve precise typed failure diagnostics"
 )]
 mod tests;
+#[cfg(test)]
+pub(crate) use tests::composition_graph_records;

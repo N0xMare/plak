@@ -366,11 +366,55 @@ are unchanged. Retention preserves the actual highest operation, or installs
 the actual pending new-root operation with a strictly higher id before checking
 capacity. Every publication, including recovery and cold ledger rebuilds,
 refuses a successor whose highest operation id or command sequence is lower
-than its parent's. Nothing reserves headroom
-for one turn's rounds and fan-out: retention runs only at quiescence, so a very
-long turn (many rounds of parallel tools or Code Cell children) that starts
-near the high-water mark can reach the 4096-record limit and end
-recovery-requiring. This is an accepted limit, not a configuration error.
+than its parent's.
+
+A live root also retires finalized, dependency-free operation evidence in the
+same fenced commit as a semantic finalization, never in a nested-call
+Settlement or a prune-only publication. Let P be the newest live-turn round
+provider in the staged successor (not a compaction provider). Without P nothing
+retires. Keep every id >= P, the root, every non-Finalized record (including raw
+Completed outcomes), every live-turn round provider and the exact transitive
+references of retained evidence, frames and runtime owners. A live composition
+group stays whole, including delivered children below P; only fully closed,
+unreferenced groups retire. If a yielded cell spans a later unobserved model
+round, the turn abandonment fold closes both the exact cell group and that
+provider attempt without restarting either. Preserve the latest response/provenance, newest
+finalized-provider fence, failed paid-fold pairs, latest successful fold pair,
+and latest harness-fold pair. Post-P fold evidence cannot disappear and change
+an open/committed/unsent Fold or Retry closure row. Settled controls remain while
+their command receipts or recovery readers require them.
+
+Live retirement counts **operations only**: high-water 2048, target 1536, minimum
+sweep 512; at 3072 reclaim even one eligible record. Pins win over the target.
+Quiescent retention keeps its existing combined command/operation high-water.
+The pre-CAS builder checks every removed record against staged finalizations,
+the P cutoff, pins and reference closure, and checks the root-bound retired
+local-attempt counter equals its old value plus exactly the removed dispatched
+effects/evaluations/continuations (§5.5). History, ledger and counter publish
+atomically; failed
+or fenced CAS installs none, lost acknowledgement reconciles the exact commit,
+and reopening after publication needs no retired ancestor to reconstruct usage.
+
+Provider evidence is bounded by 1024 model rounds, one wrap-up and at most two
+refunded retries. Process-session records stay pinned, including finalized
+records: N spanning sessions retain N such records, so this class is a residual
+capacity limit, not bounded closed debt. Session-id uniqueness is over retained
+evidence; runtime-minted ids are not caller-reusable keys. Referenced foreign
+sessions stay too. A larger live-frontier representation is not implemented.
+
+Before journaling a new nested call or preparing a top-level batch call, charge
+retained operations plus four records for every accepted outstanding request,
+including queued top-level work. Refuse a request whose charge exceeds 3584,
+leaving 512 slots for settlement and boundary bookkeeping (at most 16 nested
+requests, four records each, plus closure/terminal work). A nested refusal is
+catchable InvalidInput with text `nested call not admitted: runtime operation
+headroom is low; finish this cell and continue in a new call`. Same-id admitted
+duplicates replay their recorded disposition first. A refused new request has
+no sequence, child edge, effect, dispatch or recovery gate. Top-level excess
+calls receive a definite ResourceLimit result in source order before journaling.
+Existing per-cell totals and outstanding limits are unchanged. Closing the cell
+and advancing a boundary can free closed debt for a later call; pinned frontier
+evidence is never discarded to admit more work.
 A duplicate preserves the original rejection; consumers classify its rejection
 before its disposition. Only `CommandAck::is_accepted()` denotes admission.
 
@@ -1137,6 +1181,10 @@ the owner's lease gate (the heartbeat waits for it), bounded by the store
 operation deadline and checkpoint-pruning work. SQLite defers the object walk
 to its bounded background lane (§5.2). This never changes or delays the published result: it runs after
 publication, and a failure is only a `RetentionFinished` telemetry observation.
+This store-level checkpoint/object reclamation is distinct from in-turn
+operation-ledger retirement (§3.1), which publishes with semantic finalization
+and authenticates removed local-attempt contributions (§5.5). Neither operation
+adds a paid dispatch or changes a recovery closure row.
 The live owner also prunes at a Working head, at the top of every model round
 after the first of a turn's run (a turn's first round is not delayed, and
 between rounds no workflow of the turn is mid-flight), under
@@ -1212,7 +1260,7 @@ that spells the string with escapes is refused because decoding a segment
 requires its bytes to equal their re-encoding. Canonical segment bytes and
 identities are therefore a function of the media bytes alone. The encoded
 text is bounded before decoding, and inline media bytes are bounded at 16 MiB
-like every canonical block. This is runtime checkpoint format epoch 36.
+like every canonical block. This is runtime checkpoint format epoch 37.
 
 Reconstructive components have a 4 MiB byte budget except `Operation`, whose
 budget is 64 MiB because it retains complete requests and outcomes. This is a
@@ -2388,7 +2436,7 @@ keeps the original checkpoint and conversation bindings and dispatches nothing;
 a different canonical input under the same command identity remains refused.
 
 These encodings, and the exposed name on each canonical tool call (§6.5), are
-runtime checkpoint format epoch 36 (chapter 00). An earlier-epoch checkpoint
+runtime checkpoint format epoch 37 (chapter 00). An earlier-epoch checkpoint
 does not decode and is refused as an incompatible build (§5.4); sessions cross
 the bump only through the export document.
 
@@ -2628,9 +2676,12 @@ operation-ledger authority. Rebuilds and recovery enrichment preserve it.
 Abandonment never promotes a family artifact or reconstructs a request or
 occupancy anchor: it publishes the head's retained artifact and anchors, so
 the next request's artifact, cache affinity, history and stable prefix are
-unchanged. History retention never prunes at a Working head (§4), so every
-checkpoint a working recovery can still read survives until the turn closes
-into a new quiescent head.
+unchanged. Checkpoint/object pruning at a Working head (§4) retains the
+head's recovery closure and the bounded recent checkpoint horizon; live ledger
+retirement (§3.1) separately removes only finalized dependency-free records
+below P. Neither permits reopening to infer dispatch authority from absence.
+The authenticated head counter survives pruning; retained evidence missing from
+its closure is integrity failure, never replay permission.
 
 An unresolved working turn blocks new prompts on its owner and exposes exactly
 one closed recovery phase: exact commit recovery, provider evidence required,
@@ -3706,7 +3757,7 @@ committed and the working bounds, the two parts of the request's encoding the
 view identity leaves out. Plan validation therefore never re-serializes the
 request or its history. The plan digest is recorded in prepared-call and
 response records and re-derived on recovery, so it is part of runtime
-checkpoint format epoch 36.
+checkpoint format epoch 37.
 
 **Read-only model lookup exchanges.** The shared bounded GET retry in
 `plakous-exchange` applies where the operator is waiting on a bind: `plak run`,
@@ -5543,7 +5594,7 @@ tool's restore bind the canonical name; provider replay sends the exposed name
 exactly, every kernel alike; views label a call by its exposed name, display
 telemetry records it, and classification follows the canonical name. Tool
 results correlate by call identity and record no name. This is part of
-runtime checkpoint format epoch 36.
+runtime checkpoint format epoch 37.
 V2 lowering preserves the canonical input contract's wire shape: structured
 targets receive semantic JSON, while bounded UTF-8 targets receive the exact
 validated text. In particular, Codex `apply_patch` sends its `*** Begin Patch`
@@ -7885,7 +7936,7 @@ runtime under the ordinary mutating write-ahead claim, so a crash after the
 claim settles `OutcomeUnknown` and is never replayed. Provider-hosted MCP and
 connectors stay in the stop class below. Its
 serialized variant names are part of the canonical history encoding and so of
-runtime checkpoint format epoch 36.
+runtime checkpoint format epoch 37.
 
 Caller lineage and `ToolExecutionOwner` are independent axes. A customer tool
 called by a provider program MAY retain a local or MCP owner and MUST traverse

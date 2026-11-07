@@ -46,18 +46,7 @@ pub(in crate::runtime) fn successor_candidate(
         family,
     } = facts;
     let prior = checkpoint.manifest();
-    if !ledger.preserves_high_water_of(prior.ledger()) {
-        return Err(AgentError::new(
-            AgentErrorKind::Internal,
-            "checkpoint successor regressed a ledger high-water mark",
-        ));
-    }
-    if !ledger.preserves_retired_counter_of(prior.ledger()) {
-        return Err(AgentError::new(
-            AgentErrorKind::Internal,
-            "checkpoint successor changed retired attempts without retirement",
-        ));
-    }
+    let ledger = validate_successor_ledger(prior, ledger, &lifecycle)?;
     let topology = prior.topology();
     let branch_revision = topology.branch_revision.checked_add(1).ok_or_else(|| {
         AgentError::new(
@@ -126,4 +115,106 @@ pub(in crate::runtime) fn successor_candidate(
         expected_ref,
         commit_identity,
     })
+}
+
+fn validate_successor_ledger(
+    prior: &RuntimeManifest,
+    ledger: RuntimeOperationLedger,
+    lifecycle: &RuntimeLifecycle,
+) -> Result<RuntimeOperationLedger, AgentError> {
+    if !ledger.preserves_high_water_of(prior.ledger()) {
+        return Err(AgentError::new(
+            AgentErrorKind::Internal,
+            "checkpoint successor regressed a ledger high-water mark",
+        ));
+    }
+    if let Some(source) = ledger.retirement_source() {
+        let RuntimeLifecycle::Working {
+            root: crate::RuntimeWorkingRoot::Turn { turn_id, .. },
+            ..
+        } = lifecycle
+        else {
+            return Err(AgentError::new(
+                AgentErrorKind::Internal,
+                "live retirement lacks its working root",
+            ));
+        };
+        if !ledger.retirement_preserves_owned_roots()
+            || !source.is_retained_successor_of(prior.ledger())
+            || !counter_successor_ok(prior.ledger(), source, lifecycle)
+            || prior
+                .ledger()
+                .operations()
+                .iter()
+                .any(|record| source.operation(record.operation_id()).is_none())
+        {
+            return Err(AgentError::new(
+                AgentErrorKind::Internal,
+                "retirement source disagrees with its parent",
+            ));
+        }
+        crate::runtime::operation_record::validate_live_retirement(source, &ledger, *turn_id)?;
+    } else if !counter_successor_ok(prior.ledger(), &ledger, lifecycle) {
+        return Err(AgentError::new(
+            AgentErrorKind::Internal,
+            "checkpoint successor changed retired attempts without retirement",
+        ));
+    } else if matches!(lifecycle, RuntimeLifecycle::Working { .. })
+        && matches!(prior.lifecycle(), RuntimeLifecycle::Working { .. })
+        && prior
+            .ledger()
+            .operations()
+            .iter()
+            .any(|record| ledger.operation(record.operation_id()).is_none())
+    {
+        return Err(AgentError::new(
+            AgentErrorKind::Internal,
+            "working ledger removal lacks its staged retirement evidence",
+        ));
+    }
+    Ok(ledger.without_retirement_source())
+}
+
+fn counter_successor_ok(
+    prior: &RuntimeOperationLedger,
+    ledger: &RuntimeOperationLedger,
+    lifecycle: &RuntimeLifecycle,
+) -> bool {
+    if !ledger.preserves_retired_counter_of(prior) {
+        return false;
+    }
+    if ledger.retired_counter() == prior.retired_counter() {
+        return true;
+    }
+    let Some((old_root, _)) = prior.retired_counter() else {
+        return false;
+    };
+    let RuntimeLifecycle::Working {
+        root: crate::RuntimeWorkingRoot::Turn { turn_id, .. },
+        ..
+    } = lifecycle
+    else {
+        return false;
+    };
+    if *turn_id == old_root {
+        return false;
+    }
+    let Some(command) = ledger.commands().into_iter().find(|command| {
+        command.turn_id() == Some(*turn_id)
+            && crate::runtime::operation_record::is_accepted_root(command)
+    }) else {
+        return false;
+    };
+    let Some(root) = ledger.operations().into_iter().find(|record| matches!(record.kind(), crate::DurableOperationKind::Command { turn_id: Some(turn) } if *turn == *turn_id)) else { return false; };
+    root.request().bytes() == command.command_component().bytes()
+        && match (prior.operation(root.operation_id()), root.state()) {
+            (
+                None,
+                crate::DurableOperationState::Prepared | crate::DurableOperationState::Dispatched,
+            ) => true,
+            (Some(before), crate::DurableOperationState::Dispatched) => {
+                matches!(before.state(), crate::DurableOperationState::Prepared)
+            }
+            _ => false,
+        }
 }

@@ -47,6 +47,63 @@ fn request(workflow_id: SessionWorkflowId) -> TestResult<DurableCompactionReques
     })
 }
 
+pub(in crate::runtime) fn retirement_fold_pair(
+    id: u64,
+    successful: bool,
+) -> TestResult<Vec<DurableOperationRecord>> {
+    let mut bytes = [0; 32];
+    bytes[..8].copy_from_slice(&id.to_be_bytes());
+    let workflow = SessionWorkflowId::new(bytes)?;
+    let request = request(workflow)?;
+    let prepared = request.source_checkpoint;
+    let dispatched =
+        crate::runtime::compaction::record::compaction_checkpoint_id(workflow, b"dispatch")?;
+    let completed =
+        crate::runtime::compaction::record::compaction_checkpoint_id(workflow, b"completed")?;
+    let evidence = compaction_operation_component(&ModelResponse::new(
+        Vec::new(),
+        FinishDetails::new(FinishReason::Length, None),
+        None,
+        None,
+        request.cut,
+    ))?;
+    let finalization = crate::runtime::compaction::record::compaction_checkpoint_id(
+        workflow,
+        if successful { b"success" } else { b"failed" },
+    )?;
+    [
+        DurableOperationKind::Compaction {
+            workflow_id: workflow,
+        },
+        DurableOperationKind::Provider {
+            root: ModelOperationRoot::SessionWorkflow(workflow),
+            attempt_id: AttemptId::try_from(Uuid::from_u128(u128::from(id) + 0x40000))?,
+        },
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(offset, kind)| {
+        Ok(DurableOperationRecord::new(
+            id + u64::try_from(offset)?,
+            kind,
+            compaction_operation_component(&request)?,
+            vec![
+                DurableOperationTransition::new(prepared, DurableOperationState::Prepared),
+                DurableOperationTransition::new(dispatched, DurableOperationState::Dispatched),
+                DurableOperationTransition::new(
+                    completed,
+                    DurableOperationState::Completed(evidence.clone()),
+                ),
+                DurableOperationTransition::new(
+                    finalization,
+                    DurableOperationState::Finalized(evidence.clone()),
+                ),
+            ],
+        )?)
+    })
+    .collect()
+}
+
 #[test]
 fn latest_harness_fold_requires_finalized_compaction_record() -> TestResult {
     let workflow = SessionWorkflowId::try_from([1; 32])?;

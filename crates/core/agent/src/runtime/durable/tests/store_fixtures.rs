@@ -82,6 +82,8 @@ pub(super) struct TestCreateStore {
     pub(super) force_recover_commit_not_found: AtomicBool,
     pub(super) recover_commit_error: Mutex<Option<SessionStoreError>>,
     pub(super) reject_next_commit: Mutex<Option<SessionStoreError>>,
+    pub(super) reject_retirement_commit: Mutex<Option<SessionStoreError>>,
+    pub(super) refused_retirement: Mutex<Option<Arc<RuntimeCheckpoint>>>,
     pub(super) full_after_completed_round: AtomicBool,
     pub(super) full_until: Mutex<Option<tokio::time::Instant>>,
     pub(super) remain_full_after_round: AtomicBool,
@@ -854,6 +856,21 @@ impl SessionStore for TestCreateStore {
                 .checkpoint()
                 .validated_checkpoint()
                 .map_err(|_| SessionStoreError::corrupt())?;
+            if checkpoint.manifest().ledger().retired_counter().is_some()
+                && let Some(error) = lock_mutex(&self.reject_retirement_commit).take()
+            {
+                // Immutable objects may arrive before a rejected/fenced CAS;
+                // their presence must not install the candidate's authority.
+                lock_mutex(&self.state).persisted_objects.extend(
+                    request
+                        .checkpoint()
+                        .supplied_objects()
+                        .iter()
+                        .map(crate::checkpoint_bundle::RuntimeObject::address),
+                );
+                *lock_mutex(&self.refused_retirement) = Some(checkpoint);
+                return Err(error);
+            }
             if checkpoint
                 .manifest()
                 .ledger()

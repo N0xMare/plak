@@ -80,3 +80,5 @@ pub(in crate::runtime) fn latest_harness_fold(
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+pub(in crate::runtime) use tests::retirement_fold_pair;

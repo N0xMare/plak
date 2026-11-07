@@ -229,6 +229,29 @@ pub(super) fn paths(fixture: &Fixture) -> PlakPaths {
     PlakPaths::explicit(fixture.home())
 }
 
+fn product_runtime_locator(product: &Connection) -> SessionLocator {
+    let head: String = product
+        .query_row(
+            "SELECT locator FROM sessions ORDER BY rowid LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("product session");
+    head.parse().expect("product runtime locator")
+}
+
+pub(super) fn read_live_frontier(
+    fixture: &Fixture,
+) -> plakous_offline_crash_harness::ledger_signature::LiveFrontierFacts {
+    let paths = paths(fixture);
+    let locator = product_runtime_locator(&open(&paths.product_database()));
+    plakous_offline_crash_harness::ledger_signature::inspect_live_frontier(
+        &paths.runtime_database(),
+        locator,
+    )
+    .expect("one live checkpoint's frontier")
+}
+
 struct RuntimeFacts {
     ledger: Value,
     durable_answer: bool,
@@ -310,11 +333,14 @@ fn runtime_facts(database: &Path, locator: SessionLocator) -> RuntimeFacts {
 )]
 pub(super) fn read(fixture: &Fixture) -> Summary {
     let paths = paths(fixture);
+    let product = open(&paths.product_database());
+    // Hosted children share the runtime database, not the product session.
+    let session = product_runtime_locator(&product);
     let runtime = open(&paths.runtime_database());
     let head: String = runtime
         .query_row(
-            "SELECT session_id || '/' || branch_id || '/' || checkpoint_id FROM branches",
-            [],
+            "SELECT session_id || '/' || branch_id || '/' || checkpoint_id FROM branches WHERE session_id = ?1",
+            [session.session_id().to_string()],
             |r| r.get(0),
         )
         .expect("runtime head");
@@ -353,7 +379,6 @@ pub(super) fn read(fixture: &Fixture) -> Summary {
         .unwrap(),
     )
     .unwrap();
-    let product = open(&paths.product_database());
     let (product_locator, revision) = product
         .query_row(
             "SELECT json_extract(v.state,'$.head.session_id') || '/' || json_extract(v.state,'$.head.branch_id') || '/' || json_extract(v.state,'$.head.checkpoint_id'),revision FROM sessions LEFT JOIN session_views v ON v.session_id=sessions.id",

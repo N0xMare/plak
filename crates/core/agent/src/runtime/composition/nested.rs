@@ -339,10 +339,25 @@ pub(in crate::runtime) fn reserve_local_composition_nested_slot(
 }
 
 impl CompositionOwner {
+    fn admission_outstanding(&self) -> usize {
+        self.pending_nested
+            .len()
+            .saturating_add(self.active_nested)
+            .saturating_add(self.completed_nested.len())
+            .saturating_add(self.pending_deliveries.len())
+            .saturating_add(
+                self.nested_replays
+                    .values()
+                    .map(|replay| replay.waiters.len())
+                    .sum::<usize>(),
+            )
+    }
+
     pub(in super::super) fn admit_nested(
         &mut self,
         call: crate::local_composition::LocalCompositionNestedCall,
         responder: Box<dyn crate::local_composition::LocalCompositionNestedResponder>,
+        charged_operations: usize,
     ) -> Result<(), AgentError> {
         if self.cell.as_ref() != Some(&call.cell_id) {
             return queue_local_composition_nested_result(
@@ -356,18 +371,7 @@ impl CompositionOwner {
         }
         let request_digest = local_composition_nested_request_digest(&call)?;
         let limit = self.integration.max_outstanding_nested_calls();
-        let outstanding = self
-            .pending_nested
-            .len()
-            .saturating_add(self.active_nested)
-            .saturating_add(self.completed_nested.len())
-            .saturating_add(self.pending_deliveries.len())
-            .saturating_add(
-                self.nested_replays
-                    .values()
-                    .map(|replay| replay.waiters.len())
-                    .sum::<usize>(),
-            );
+        let outstanding = self.admission_outstanding();
         if let Some(replay) = self.nested_replays.get_mut(&call.runtime_call_id) {
             if matches!(
                 replay.disposition,
@@ -398,6 +402,19 @@ impl CompositionOwner {
                     )
                 });
             return queue_local_composition_nested_result(self, responder, result);
+        }
+        if !crate::runtime::operation_record::has_operation_headroom(
+            charged_operations,
+            outstanding,
+        ) {
+            return queue_local_composition_nested_result(
+                self,
+                responder,
+                Err(AgentError::new(
+                    AgentErrorKind::InvalidInput,
+                    crate::runtime::operation_record::NESTED_HEADROOM_REFUSAL,
+                )),
+            );
         }
         // Reject malformed custom source before assigning a child sequence.
         // The durable ledger requires every assigned sequence to have an edge;

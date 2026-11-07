@@ -8,7 +8,7 @@ use crate::runtime::durable::tests::landed_round_abandonment::{
     completed_text_round_cut, completed_tool_round_cut, root_without_provider_cut,
 };
 use crate::runtime::operation_record::test_support::{outcome_component, recorded_decision_bytes};
-use plakous_model::{AttemptId, CompactionBlock, SessionWorkflowRootId};
+use plakous_model::{AttemptId, CanonicalHistory, CompactionBlock, SessionWorkflowRootId};
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
@@ -488,4 +488,291 @@ async fn committed_scheduled_fold_after_continue_uses_model_round_wording() -> T
     let note = row.note(AbandonmentCause::ProcessLost).ok_or("note")?;
     assert!(note.contains("model round completed") && note.contains("committed compaction"));
     assert_row(&with_fold(&source, true)?, row, note)
+}
+
+fn retirement_checkpoint(
+    ledger: RuntimeOperationLedger,
+    turn: TurnId,
+    history: CanonicalHistory,
+) -> TestResult<RuntimeCheckpoint> {
+    let lifecycle = working_lifecycle(turn, &ledger)?;
+    crate::checkpoint_bundle::tests::fixture_with_history_and_ledger(
+        history,
+        3,
+        true,
+        Some(ledger),
+        Some(lifecycle),
+    )
+}
+
+#[test]
+fn retired_closed_cells_count_dispatched_waits_but_not_child_edges() -> TestResult {
+    use crate::runtime::operation_record::{retire_test_ledger, retirement_fixture};
+    let (ledger, turn) = retirement_fixture(200, RoundDecision::Continue)?;
+    let mut records = ledger
+        .operations()
+        .into_iter()
+        .filter(|record| !(101..=103).contains(&record.operation_id()))
+        .cloned()
+        .collect::<Vec<_>>();
+    for record in crate::manifest::composition_graph_records()? {
+        let mut kind = record.kind().clone();
+        match &mut kind {
+            DurableOperationKind::CompositionEvaluation { turn_id, .. }
+            | DurableOperationKind::CompositionContinuation { turn_id, .. }
+            | DurableOperationKind::CompositionChild { turn_id, .. } => *turn_id = turn,
+            _ => return Err("composition fixture kind".into()),
+        }
+        records.push(DurableOperationRecord::new(
+            record.operation_id(),
+            kind,
+            record.request().clone(),
+            record.transitions().to_vec(),
+        )?);
+    }
+    records.sort_by_key(DurableOperationRecord::operation_id);
+    let full =
+        RuntimeOperationLedger::new(ledger.commands().into_iter().cloned().collect(), records)?;
+    let retained = retire_test_ledger(&full, turn, 16)?;
+    for id in 101..=103 {
+        assert!(retained.operation(id).is_none(), "closed group {id}");
+    }
+    let before = terminal_turn_usage(&full, turn)?;
+    assert_eq!(before.local_tool_attempts(), 199);
+    assert_eq!(terminal_turn_usage(&retained, turn)?, before);
+    Ok(())
+}
+
+#[test]
+fn retirement_preserves_open_scheduled_committed_scheduled_and_overflow_rows() -> TestResult {
+    use crate::runtime::operation_record::{retire_test_ledger, retirement_fixture};
+    for (decision, committed, expected) in [
+        (RoundDecision::Continue, false, FoldRow::OpenScheduled),
+        (
+            RoundDecision::Continue,
+            true,
+            FoldRow::CommittedScheduled(RoundBoundary::Model),
+        ),
+        (
+            RoundDecision::OverflowFold,
+            true,
+            FoldRow::CommittedOverflow,
+        ),
+    ] {
+        let (ledger, turn) = retirement_fixture(100, decision)?;
+        let source = retirement_checkpoint(ledger, turn, CanonicalHistory::default())?;
+        let source = with_fold(&source, committed)?;
+        assert_eq!(
+            super::fold_row(&source, turn, OperationId(1))?,
+            Some(expected)
+        );
+        let retained = retire_test_ledger(source.manifest().ledger(), turn, 16)?;
+        assert!(retained.operation_count() < source.manifest().ledger().operation_count());
+        let after = retirement_checkpoint(
+            retained,
+            turn,
+            source.manifest().canonical().history().clone(),
+        )?;
+        assert_eq!(
+            super::fold_row(&after, turn, OperationId(1))?,
+            Some(expected)
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn retirement_preserves_unsent_fold_retry_and_retained_round_witnesses() -> TestResult {
+    use crate::runtime::operation_record::{
+        retire_test_ledger, retirement_fixture, retirement_round,
+    };
+    for (decision, expected) in [
+        (RoundDecision::OverflowFold, replay::UnsentDecision::Fold),
+        (
+            RoundDecision::RetryOutputLimit,
+            replay::UnsentDecision::Retry,
+        ),
+    ] {
+        let (ledger, turn) = retirement_fixture(100, decision)?;
+        assert_eq!(
+            replay::unsent_decision(&ledger, turn, OperationId(1))?,
+            Some(expected)
+        );
+        let retained = retire_test_ledger(&ledger, turn, 16)?;
+        assert!(retained.operation_count() < ledger.operation_count());
+        assert_eq!(
+            replay::unsent_decision(&retained, turn, OperationId(1))?,
+            Some(expected)
+        );
+    }
+    let (ledger, turn) = retirement_fixture(100, RoundDecision::Continue)?;
+    let ledger = ledger.append_operation(retirement_round(
+        103,
+        turn,
+        RoundDecision::RetryOutputLimit,
+    )?)?;
+    let retained = retire_test_ledger(&ledger, turn, 16)?;
+    assert!(replay::retained_round(
+        retained.operation(102).ok_or("earlier round")?
+    )?);
+    Ok(())
+}
+
+#[tokio::test]
+async fn retirement_respects_closed_baton_references_reaches_target_and_matches_its_twin()
+-> TestResult {
+    use crate::runtime::operation_record::{retire_test_ledger, retirement_leaf, retirement_round};
+    let source = crate::runtime::durable::tests::landed_round_abandonment::completed_tool_round_cut_with_lineage(
+        SessionUpdateFixtureMode::JoinedForeground, false, false, true,
+    ).await?;
+    let (turn, root) = turn_and_root(&source)?;
+    let (component, attempt, effect) = completed_batch_frame(&source)?;
+    let mut records = finalized_batch_records(&source)?;
+    let mut next = records.last().ok_or("last operation")?.operation_id() + 1;
+    for _ in 0..100 {
+        records.push(retirement_leaf(next, turn)?);
+        next += 1;
+    }
+    let baton = next;
+    records.push(DurableOperationRecord::new(
+        baton,
+        DurableOperationKind::ToolBatchContinuation {
+            turn_id: turn,
+            attempt_id: attempt,
+        },
+        component.clone(),
+        vec![
+            DurableOperationTransition::new(
+                CheckpointId::try_from(uuid::Uuid::from_u128(0x9901))?,
+                DurableOperationState::ContinuationRequired(component.clone()),
+            ),
+            DurableOperationTransition::new(
+                CheckpointId::try_from(uuid::Uuid::from_u128(0x9902))?,
+                DurableOperationState::Finalized(component),
+            ),
+        ],
+    )?);
+    records.push(retirement_round(baton + 1, turn, RoundDecision::Continue)?);
+    let full = RuntimeOperationLedger::new(
+        source
+            .manifest()
+            .ledger()
+            .commands()
+            .into_iter()
+            .cloned()
+            .collect(),
+        records,
+    )?;
+    let retained = retire_test_ledger(&full, turn, 16)?;
+    assert!(retained.operation_count() <= 12);
+    assert!(retained.operation(baton).is_some());
+    assert_eq!(retained.operation(effect), full.operation(effect));
+    assert_eq!(
+        terminal_turn_usage(&retained, turn)?,
+        terminal_turn_usage(&full, turn)?
+    );
+    let before =
+        retirement_checkpoint(full, turn, source.manifest().canonical().history().clone())?;
+    let after = retirement_checkpoint(
+        retained,
+        turn,
+        source.manifest().canonical().history().clone(),
+    )?;
+    assert_eq!(
+        super::fold_row(&before, turn, root)?,
+        super::fold_row(&after, turn, root)?
+    );
+    let close = |checkpoint: &RuntimeCheckpoint| -> TestResult<_> {
+        let Some(RootClosure::Abandon { fold, claim }) = root_turn_closure_for_test(checkpoint)?
+        else {
+            return Err("abandonment twin".into());
+        };
+        Ok(abandonment_closure_state(
+            checkpoint,
+            fold,
+            claim,
+            checkpoint.id(),
+        )?)
+    };
+    let before = close(&before)?;
+    let after = close(&after)?;
+    assert_eq!(before.history.identity(), after.history.identity());
+    assert_eq!(
+        before.ledger.operation(root.0),
+        after.ledger.operation(root.0)
+    );
+    Ok(())
+}
+
+fn finalized_batch_records(source: &RuntimeCheckpoint) -> TestResult<Vec<DurableOperationRecord>> {
+    source
+        .manifest()
+        .ledger()
+        .operations()
+        .into_iter()
+        .map(|record| {
+            let mut transitions = record.transitions().to_vec();
+            if let DurableOperationState::ContinuationRequired(evidence) = record.state() {
+                transitions.push(DurableOperationTransition::new(
+                    CheckpointId::try_from(uuid::Uuid::from_u128(0x9900))?,
+                    DurableOperationState::Finalized(evidence.clone()),
+                ));
+            }
+            Ok(DurableOperationRecord::new(
+                record.operation_id(),
+                record.kind().clone(),
+                record.request().clone(),
+                transitions,
+            )?)
+        })
+        .collect()
+}
+
+fn completed_batch_frame(
+    source: &RuntimeCheckpoint,
+) -> TestResult<(ReconstructiveComponent, AttemptId, u64)> {
+    use crate::runtime::continuation::{ContinuationToolSlot, RuntimeContinuation};
+    let ledger = source.manifest().ledger();
+    let record = ledger
+        .operations()
+        .into_iter()
+        .find(|record| {
+            matches!(
+                record.kind(),
+                DurableOperationKind::ToolBatchContinuation { .. }
+            )
+        })
+        .ok_or("batch frame")?;
+    let RuntimeContinuation::AwaitToolBatchV2(mut frame) =
+        serde_json::from_slice(record.request().bytes())?
+    else {
+        return Err("tool batch".into());
+    };
+    let call = frame
+        .provider_response
+        .output()
+        .iter()
+        .flat_map(ConversationItem::blocks)
+        .find_map(|block| match block {
+            ContentBlock::ToolCall(call) => Some(call.clone()),
+            _ => None,
+        })
+        .ok_or("tool call")?;
+    let effect = ledger.operations().into_iter().find(|record| matches!(record.kind(), DurableOperationKind::Effect { call_id, .. } if *call_id == call.call_id())).ok_or("effect")?.operation_id();
+    let item = source.manifest().canonical().history().segments().iter().flat_map(HistorySegment::items).find(|item| item.blocks().iter().any(|block| matches!(block, ContentBlock::ToolResult(result) if result.call_id() == call.call_id()))).ok_or("committed result")?.clone();
+    frame.slots = vec![ContinuationToolSlot::Completed {
+        call,
+        result_entry_id: item.id(),
+        item,
+        operation_id: OperationId(effect),
+    }];
+    let attempt = frame.attempt_id;
+    Ok((
+        runtime_component(
+            RuntimeComponentKind::Operation,
+            serde_json::to_vec(&RuntimeContinuation::AwaitToolBatchV2(frame))?,
+        )?,
+        attempt,
+        effect,
+    ))
 }

@@ -88,6 +88,74 @@ pub(super) fn configure_handoff(fixture: &Fixture) {
     write_scripts(fixture, NEVER, false);
 }
 
+pub(in super::super) fn is_handoff(shape: &str) -> bool {
+    matches!(
+        shape,
+        "handoff_resume_child"
+            | "handoff_resume_deaf_child"
+            | "ledger_retirement_live_child_process"
+    )
+}
+
+pub(super) fn configure_retirement(fixture: &Fixture) {
+    configure_handoff(fixture);
+    fixture.set_ledger_retirement_high_water(8);
+    let mut script: Value =
+        serde_json::from_slice(&std::fs::read(fixture.script()).unwrap()).unwrap();
+    script["tree_process_tools"] = json!(true);
+    let steps = script["steps"].as_array_mut().unwrap();
+    let answer = steps.pop().unwrap();
+    steps.push(json!({"stream":[{"gate":{"file":fixture.root.join(CHILD_PARKED)}}],"output":{"tool":{"name":"process_session_start","arguments":{
+        "command":"read line","workdir":".","login":false,"tty":false,"keep_stdin_open":true,"yield_time_ms":0,"max_output_bytes":8192
+    }}},"finish":"tool_calls"}));
+    steps.extend((0..6).map(|_| json!({"output":{"tool":{"name":"process_session_poll","arguments":{"session_id":"$session_id","cursor":"$cursor","yield_time_ms":0,"max_output_bytes":8192,"max_output_records":64}}},"finish":"tool_calls"})));
+    steps[4]["gate"] = json!({"file":fixture.root.join("parent-retired-live")});
+    steps.push(answer);
+    fixture.write_script(&script);
+}
+
+pub(super) fn assert_retirement(
+    fixture: &Fixture,
+    outcome: &AgentOutcome,
+    state: &summary::Summary,
+) {
+    assert_handoff_live(fixture, outcome, state);
+    let ledger = state.ledger.as_array().unwrap();
+    assert!(
+        ledger.len() < 30,
+        "parent closed debt did not retire: {ledger:?}"
+    );
+    assert!(ledger.iter().filter(|row| row["kind"] == "effect").count() < 8);
+    assert!(fixture.root.join("parent-retired-live").exists());
+    assert_eq!(
+        outcome
+            .records()
+            .iter()
+            .filter(|row| row["kind"] == "job_promoted")
+            .count(),
+        1
+    );
+}
+
+pub(super) fn retirement_lifecycle(
+    fixture: &Fixture,
+    records: &[Value],
+    state: &mut Lifecycle,
+) -> Option<Value> {
+    if super::ledger_retirement::provider_dispatches(fixture) >= 5 {
+        let snapshot = summary::read_live_frontier(fixture);
+        let effects = snapshot
+            .ledger
+            .iter()
+            .filter(|row| row.kind == "effect")
+            .count();
+        if snapshot.working && snapshot.live_process && effects < 4 {
+            std::fs::write(fixture.root.join("parent-retired-live"), b"").unwrap();
+        }
+    }
+    handoff_lifecycle(fixture, records, state)
+}
+
 pub(super) fn configure_deaf_handoff(fixture: &Fixture) {
     write_scripts(fixture, NEVER, true);
 }
@@ -450,10 +518,14 @@ pub(in super::super) fn after_kill(
     // while it runs and never asks for a second request.
     let _ = std::fs::remove_file(fixture.root.join(CHILD_RELEASE));
     write_child(fixture, NEVER, false);
-    fixture.write_script(&root(
+    let configured: Value =
+        serde_json::from_slice(&std::fs::read(fixture.script()).unwrap()).unwrap();
+    let mut restart = root(
         fixture,
         &json!([{"output": {"text": FOLLOWUP}, "finish": "stop"}]),
-    ));
+    );
+    restart["tree_process_tools"] = json!(configured["tree_process_tools"] == true);
+    fixture.write_script(&restart);
     let mut reopened = relaunch("relaunch-1");
     let restored = reopened.wait_for("the restored queue", |row| row["kind"] == "queue");
     let requeued = restored["items"]

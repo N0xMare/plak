@@ -96,6 +96,14 @@ mod test_hooks {
         production
     }
 
+    pub(crate) const fn ledger_retirement_high_water(production: usize) -> usize {
+        production
+    }
+
+    pub(crate) const fn ledger_headroom_limit(production: usize) -> usize {
+        production
+    }
+
     #[cfg(test)]
     pub(crate) fn note_working_prune_before_provider() {}
 

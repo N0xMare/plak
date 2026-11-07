@@ -489,6 +489,17 @@ pub(super) fn validate_lifecycle(
     ledger: &RuntimeOperationLedger,
 ) -> Result<(), RuntimeManifestError> {
     validate_lifecycle_shape(lifecycle)?;
+    if let (
+        Some((counter_root, _)),
+        RuntimeLifecycle::Working {
+            root: RuntimeWorkingRoot::Turn { turn_id, .. },
+            ..
+        },
+    ) = (ledger.retired_counter(), lifecycle)
+        && counter_root != *turn_id
+    {
+        return Err(RuntimeManifestError::InvalidLedger);
+    }
     match lifecycle {
         RuntimeLifecycle::Quiescent => {
             if !canonical.working.segments().is_empty() || ledger.unresolved_operation_count() != 0

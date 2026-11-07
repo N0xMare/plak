@@ -426,8 +426,9 @@ pub fn topology_runtime_binding(
 /// [`topology_runtime_binding`] driven by a script rather than the fixed
 /// topology scenario.
 ///
-/// The registry is the caller's tree registrations and nothing else, so a
-/// scripted step's `tool` output names a topology tool by its registered name.
+/// The registry is the caller's tree registrations, plus the standard coding
+/// packs only when `tree_process_tools` explicitly requests them. A scripted
+/// step's `tool` output names a tool by its registered name.
 /// This is the only route from a spawned process to a real child: an injected
 /// runtime binding replaces the whole tool registry, so unless the topology
 /// tools are the registry, `spawn_agent` does not exist for the model to call.
@@ -493,6 +494,17 @@ pub(super) fn scripted_topology_runtime_binding_inner(
     let mut registry = ToolRegistryBuilder::default();
     for registration in tree_tools {
         registry.register(registration)?;
+    }
+    if script.tree_process_tools {
+        let process = Arc::new(ProcessSessionTools::posix_sh()?);
+        let plan_state = Arc::new(InMemoryPlanState::with_identity(PlanStateIdentity::new(
+            "offline.topology.process.plan-state",
+            1,
+        )?));
+        plakous::tools::register_packs(
+            &plakous::tools::standard_coding_packs(plan_state, process),
+            &mut registry,
+        )?;
     }
     let registry = registry.freeze();
     let exposures = registry

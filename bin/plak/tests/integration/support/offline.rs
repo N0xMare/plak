@@ -10,7 +10,7 @@ use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 pub(super) const WAIT: Duration = Duration::from_secs(45);
@@ -22,6 +22,7 @@ pub(super) struct Fixture {
     workspace_override: Option<PathBuf>,
     preserve: AtomicBool,
     session_lease_seconds: Option<u64>,
+    ledger_retirement_high_water: AtomicUsize,
 }
 
 static FIXTURE_ORDINAL: AtomicU32 = AtomicU32::new(0);
@@ -41,6 +42,7 @@ impl Fixture {
             workspace_override: None,
             preserve: AtomicBool::new(false),
             session_lease_seconds: None,
+            ledger_retirement_high_water: AtomicUsize::new(0),
         };
         std::fs::create_dir_all(fixture.home().join("agents")).expect("home");
         std::fs::create_dir_all(fixture.workspace()).expect("workspace");
@@ -67,6 +69,10 @@ impl Fixture {
     pub(super) fn fork(&self, script: &Value) -> Self {
         let mut fixture = Self::new(script);
         fixture.workspace_override = Some(self.workspace());
+        fixture.ledger_retirement_high_water.store(
+            self.ledger_retirement_high_water.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
         std::fs::remove_dir_all(fixture.home()).expect("empty fork home");
         copy_directory(&self.home(), &fixture.home());
         ChildRunner::at(self).fork_into(&fixture);
@@ -107,6 +113,11 @@ impl Fixture {
         self.preserve.store(true, Ordering::Relaxed);
     }
 
+    pub(super) fn set_ledger_retirement_high_water(&self, operations: usize) {
+        self.ledger_retirement_high_water
+            .store(operations, Ordering::Relaxed);
+    }
+
     /// A `plak` command bound to this fixture's home, workspace and script.
     pub(super) fn command(&self) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_plak"));
@@ -123,6 +134,13 @@ impl Fixture {
             .env("PLAK_TEST_EVIDENCE", self.root.join("evidence.jsonl"));
         if let Some(seconds) = self.session_lease_seconds {
             command.env("PLAK_TEST_SESSION_LEASE_SECONDS", seconds.to_string());
+        }
+        let high_water = self.ledger_retirement_high_water.load(Ordering::Relaxed);
+        if high_water != 0 {
+            command.env(
+                "PLAK_TEST_LEDGER_RETIREMENT_HIGH_WATER",
+                high_water.to_string(),
+            );
         }
         forward_coverage_environment(&mut command);
         std::fs::create_dir_all(self.root.join("tmp")).expect("tmp");

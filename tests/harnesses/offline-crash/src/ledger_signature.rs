@@ -179,6 +179,43 @@ pub struct LedgerFact {
     pub answer_marker: bool,
 }
 
+/// Retirement witnesses read from one immutable checkpoint, even with a live owner.
+pub struct LiveFrontierFacts {
+    /// Content-free operations at that checkpoint.
+    pub ledger: Vec<LedgerFact>,
+    /// Whether the checkpoint has a working root.
+    pub working: bool,
+    /// Whether at least one promoted process has no terminal yet.
+    pub live_process: bool,
+}
+
+/// Reads the live branch once without racing separate exact-head inspections.
+///
+/// # Errors
+/// Returns the store's typed schema, integrity or lookup error.
+pub fn inspect_live_frontier(
+    database: &Path,
+    head: SessionLocator,
+) -> Result<LiveFrontierFacts, plakous_agent::internal::SessionStoreError> {
+    let loaded = SqliteSessionStore::inspect_branch(
+        database,
+        SessionRef::new(head.session_id(), head.branch_id()),
+    )?;
+    let manifest = loaded.checkpoint().checkpoint().manifest();
+    Ok(LiveFrontierFacts {
+        ledger: ledger_facts(manifest.ledger(), ""),
+        working: !matches!(
+            manifest.lifecycle(),
+            plakous_agent::internal::RuntimeLifecycle::Quiescent
+        ),
+        live_process: manifest
+            .jobs()
+            .rows()
+            .iter()
+            .any(|job| job.terminal.is_none()),
+    })
+}
+
 /// Decodes the authoritative head through agent internals without writable open.
 ///
 /// # Errors
@@ -192,11 +229,17 @@ pub fn inspect_ledger(
         database,
         SessionRef::new(head.session_id(), head.branch_id()),
     )?;
-    Ok(loaded
-        .checkpoint()
-        .checkpoint()
-        .manifest()
-        .ledger()
+    Ok(ledger_facts(
+        loaded.checkpoint().checkpoint().manifest().ledger(),
+        answer,
+    ))
+}
+
+fn ledger_facts(
+    ledger: &plakous_agent::internal::RuntimeOperationLedger,
+    answer: &str,
+) -> Vec<LedgerFact> {
+    ledger
         .operations()
         .iter()
         .map(|op| {
@@ -239,7 +282,7 @@ pub fn inspect_ledger(
                 answer_marker,
             }
         })
-        .collect())
+        .collect()
 }
 
 /// Content-free ownership evidence retained alongside a crash finding.

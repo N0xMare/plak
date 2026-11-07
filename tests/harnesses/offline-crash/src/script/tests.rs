@@ -12,6 +12,17 @@ fn hosted_tool_call_final_dial_is_admitted() {
 use super::*;
 
 #[test]
+fn process_tools_can_be_explicitly_composed_into_the_topology_fixture() {
+    for (tree, expected) in [(false, false), (true, true)] {
+        let plan: ScriptPlan = serde_json::from_value(serde_json::json!({
+            "version":1,"tree":tree,"tree_process_tools":true,
+        }))
+        .expect("document");
+        assert_eq!(plan.validate().is_ok(), expected);
+    }
+}
+
+#[test]
 fn a_script_reads_its_closed_document_shape() {
     let plan: ScriptPlan = serde_json::from_str(
         r#"{"version":1,"steps":[

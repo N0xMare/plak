@@ -325,7 +325,7 @@ another session's jobs.
   state/
     r27.e37.p36.t10/            this build's state (§2.5)
       sessions/<id>.events.jsonl  append-only agent-readable event log
-      runtime.sqlite3             Plakous semantic runtime and change feed, schema 27, epoch 36
+      runtime.sqlite3             Plakous semantic runtime and change feed, schema 27, epoch 37
       product.sqlite3             Plak intents and feed-derived views, schema 36
       subagents.sqlite3           the agent tree, schema 10
       custody-hosts/<instance>.lock  each live host process's custody liveness lock (chapter 03 §14)

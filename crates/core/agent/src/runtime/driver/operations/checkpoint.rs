@@ -129,19 +129,7 @@ impl Driver {
             .with_occupancy_anchor(self.context_anchor)
             .and_then(|context| context.with_request_anchor(self.request_anchor.clone()))
             .map_err(runtime_manifest_error)?;
-        let retain = lifecycle == RuntimeLifecycle::Quiescent && ledger_needs_retention(&ledger);
-        let ledger = if retain {
-            // Terminal authority can precede delivery to a still-owned root.
-            let owned_turns = self
-                .active_root
-                .iter()
-                .chain(self.roots.iter())
-                .map(|root| root.turn_id)
-                .collect();
-            retain_quiescent_ledger(&ledger, &owned_turns)?
-        } else {
-            ledger
-        };
+        let (ledger, retain) = self.retained_checkpoint_ledger(&lifecycle, ledger)?;
         let observation = self
             .local_composition
             .as_ref()
@@ -209,6 +197,44 @@ impl Driver {
             retain,
         );
         Ok(published)
+    }
+
+    fn retained_checkpoint_ledger(
+        &self,
+        lifecycle: &RuntimeLifecycle,
+        ledger: RuntimeOperationLedger,
+    ) -> Result<(RuntimeOperationLedger, bool), AgentError> {
+        let owned_turns = self
+            .active_root
+            .iter()
+            .chain(self.roots.iter())
+            .map(|root| root.turn_id)
+            .collect();
+        let prior = self.authority.checkpoint();
+        let ledger = if lifecycle != &RuntimeLifecycle::Quiescent
+            && !self.local_composition.is_in_flight()
+            && crate::runtime::operation_record::has_retirement_boundary(
+                prior.manifest().ledger(),
+                &ledger,
+            )
+            && let Some(root) = &self.active_root
+        {
+            crate::runtime::operation_record::retire_live_ledger(
+                &ledger,
+                root.turn_id,
+                &owned_turns,
+            )?
+        } else {
+            ledger
+        };
+        let retain = lifecycle == &RuntimeLifecycle::Quiescent && ledger_needs_retention(&ledger);
+        if retain {
+            // Terminal authority can precede delivery to a still-owned root.
+            Ok((retain_quiescent_ledger(&ledger, &owned_turns)?, true))
+        } else {
+            let update_index = ledger.retirement_source().is_some();
+            Ok((ledger, update_index))
+        }
     }
 
     fn checkpoint_jobs(

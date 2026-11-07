@@ -85,7 +85,43 @@ async fn dispatched_wait_recovery_usage_matches_the_live_yielded_cell_turn() -> 
         })
         .ok_or("recorded-terminal recovery cut")?;
     assert_eq!(recovered.usage, result.usage());
+    assert_yielded_cell_later_round_abandonment(&store, result.turn_id())?;
     agent.shutdown().await?;
+    Ok(())
+}
+
+fn assert_yielded_cell_later_round_abandonment(
+    store: &TestCreateStore,
+    turn: TurnId,
+) -> TestResult {
+    let mut cuts = 0;
+    for (checkpoint, _) in lock_mutex(&store.accepted_commits).iter() {
+        let ledger = checkpoint.manifest().ledger();
+        let Some(cell) = ledger.operations().into_iter().find(|record| {
+            matches!(
+                record.kind(),
+                DurableOperationKind::CompositionEvaluation { .. }
+            ) && matches!(record.state(), DurableOperationState::LocatorBound(_))
+        }) else {
+            continue;
+        };
+        let Some(provider) = ledger.operations().into_iter().find(|record| record.operation_id() > cell.operation_id() && matches!(record.kind(), DurableOperationKind::Provider { root: ModelOperationRoot::Turn(root), .. } if *root == turn) && matches!(record.state(), DurableOperationState::Prepared | DurableOperationState::Dispatched)) else { continue; };
+        let fold = abandoned_turn_recovery_fold(checkpoint)?;
+        assert_eq!(fold.turn_id, turn);
+        assert_eq!(
+            fold.provider_operations,
+            vec![OperationId(provider.operation_id())]
+        );
+        assert!(
+            fold.effect_operations
+                .contains(&OperationId(cell.operation_id()))
+        );
+        cuts += 1;
+    }
+    assert!(
+        cuts >= 2,
+        "both prepared and dispatched later-round cuts must be covered"
+    );
     Ok(())
 }
 

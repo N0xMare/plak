@@ -75,11 +75,6 @@ impl Driver {
                     )
                     .map_err(runtime_manifest_error)?;
             }
-            for record in appended {
-                ledger = ledger
-                    .append_operation(record)
-                    .map_err(runtime_manifest_error)?;
-            }
             (
                 history,
                 ledger,
@@ -173,6 +168,7 @@ impl Driver {
                 )?)
             }
         };
+        let finalizing = !required.is_empty();
         for operation_id in required {
             let evidence = ledger
                 .operation(operation_id.0)
@@ -213,6 +209,23 @@ impl Driver {
                         DurableOperationState::Finalized(evidence),
                     ),
                 )
+                .map_err(runtime_manifest_error)?;
+        }
+        // Make the closed debt reclaimable before a continuation's append can
+        // hit capacity. Nested settlements never run this planner.
+        if finalizing && !finalize_turn && !self.local_composition.is_in_flight() {
+            let owned = self
+                .active_root
+                .iter()
+                .chain(self.roots.iter())
+                .map(|root| root.turn_id)
+                .collect();
+            ledger =
+                crate::runtime::operation_record::retire_live_ledger(&ledger, turn_id, &owned)?;
+        }
+        for record in appended {
+            ledger = ledger
+                .append_operation(record)
                 .map_err(runtime_manifest_error)?;
         }
         let lifecycle = working_lifecycle(turn_id, &ledger)?;

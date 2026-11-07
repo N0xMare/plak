@@ -54,11 +54,11 @@ pub(super) fn validate(
         || evidence.source_checkpoint != source.id()
         || serde_json::to_vec(&request).map_err(|_| refuse())? != record.request().bytes()
         || serde_json::to_vec(&evidence).map_err(|_| refuse())? != component.bytes()
-        || expected.authority_identity().map_err(|_| refuse())?
-            != manifest
-                .ledger()
-                .authority_identity()
-                .map_err(|_| refuse())?
+        || !crate::runtime::operation_record::ledger_matches_retirement(
+            &expected,
+            manifest.ledger(),
+            manifest.lifecycle(),
+        )
         || manifest.lifecycle() != source_manifest.lifecycle()
         || manifest.harness_plan_component() != source_manifest.harness_plan_component()
         || manifest.binding() != source_manifest.binding()

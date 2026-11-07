@@ -53,6 +53,23 @@ test-group = 'cli-contract-serial'
 filter = 'binary(local_transport)'
 test-group = 'native-auth-serial'
 
+# Each store's long-turn fixture executes real nested calls.
+[[profile.default.overrides]]
+filter = 'test(ledger_retirement_5000_real_leaf_calls_in_closed_cells_memory) | test(ledger_retirement_5000_real_leaf_calls_in_closed_cells_sqlite)'
+slow-timeout = { period = "60s", terminate-after = 60 }
+
+[[profile.default.overrides]]
+filter = '''
+test(ledger_retirement_5000_direct_batch_calls)
+| test(crash_sweep::durability_ledger_retirement_closed_cells)
+| test(crash_sweep::durability_ledger_retirement_live_child_process)
+| test(crash_sweep::durability_ledger_retirement_yielded_cell)
+| test(crash_sweep::durability_ledger_retirement_interrupted_batch)
+| test(crash_sweep::durability_ledger_retirement_pilots)
+| test(crash_sweep::durability_ledger_retirement_early_relaunches)
+'''
+slow-timeout = { period = "60s", terminate-after = 60 }
+
 # Opt-in (ignored) pruning sweep-cost measurement over a large store.
 [[profile.default.overrides]]
 filter = 'test(sqlite_prune_sweep_cost_on_a_large_store)'
@@ -80,6 +97,11 @@ slow-timeout = { period = "300s", terminate-after = 2 }
 default-filter = '''
 not (
   test(=foreground_owner_lease_expiry_stops_without_a_successor)
+  | test(ledger_retirement_5000_real_leaf_calls_in_closed_cells_memory)
+  | test(ledger_retirement_5000_real_leaf_calls_in_closed_cells_sqlite)
+  | test(ledger_retirement_5000_direct_batch_calls)
+  | test(ledger_retirement_low_threshold_closed_cells_reopen_both_stores)
+  | test(ledger_retirement_nested_refusal_cell_finishes_and_next_cell_succeeds)
   | test(explicit_leftover_disown_is_released_and_reopen_is_read_only)
   | test(dropping_the_last_pooled_hyper_h1_client_closes_its_socket)
   | test(jj_cli_doctor_kills_hanging_process_group_at_five_seconds)
@@ -217,6 +239,12 @@ not (
   | test(session_switch_drives_a_retained_approval_without_idle_or_ready)
   | test(crash_sweep::durability_subset)
   | test(crash_sweep::durability_twin_pilots)
+  | test(crash_sweep::durability_ledger_retirement_closed_cells)
+  | test(crash_sweep::durability_ledger_retirement_live_child_process)
+  | test(crash_sweep::durability_ledger_retirement_yielded_cell)
+  | test(crash_sweep::durability_ledger_retirement_interrupted_batch)
+  | test(crash_sweep::durability_ledger_retirement_pilots)
+  | test(crash_sweep::durability_ledger_retirement_early_relaunches)
   | test(host_crash_cuts_of_create_materialize_and_release_recover)
   | test(host_crash_sigkill_mid_handoff_continues_each_handed_off_turn_once)
   | test(host_crash_cuts_of_the_start_scan_continue_once_or_hold)
@@ -290,6 +318,11 @@ test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
   test(=foreground_owner_lease_expiry_stops_without_a_successor)
+  | test(ledger_retirement_5000_real_leaf_calls_in_closed_cells_memory)
+  | test(ledger_retirement_5000_real_leaf_calls_in_closed_cells_sqlite)
+  | test(ledger_retirement_5000_direct_batch_calls)
+  | test(ledger_retirement_low_threshold_closed_cells_reopen_both_stores)
+  | test(ledger_retirement_nested_refusal_cell_finishes_and_next_cell_succeeds)
   | test(explicit_leftover_disown_is_released_and_reopen_is_read_only)
   | test(dropping_the_last_pooled_hyper_h1_client_closes_its_socket)
   | test(jj_cli_doctor_kills_hanging_process_group_at_five_seconds)
@@ -434,6 +467,12 @@ default-filter = '''
   | test(session_switch_drives_a_retained_approval_without_idle_or_ready)
   | test(crash_sweep::durability_subset)
   | test(crash_sweep::durability_twin_pilots)
+  | test(crash_sweep::durability_ledger_retirement_closed_cells)
+  | test(crash_sweep::durability_ledger_retirement_live_child_process)
+  | test(crash_sweep::durability_ledger_retirement_yielded_cell)
+  | test(crash_sweep::durability_ledger_retirement_interrupted_batch)
+  | test(crash_sweep::durability_ledger_retirement_pilots)
+  | test(crash_sweep::durability_ledger_retirement_early_relaunches)
   | test(host_crash_cuts_of_create_materialize_and_release_recover)
   | test(host_crash_sigkill_mid_handoff_continues_each_handed_off_turn_once)
   | test(host_crash_cuts_of_the_start_scan_continue_once_or_hold)
