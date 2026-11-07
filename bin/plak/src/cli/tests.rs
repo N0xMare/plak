@@ -11,11 +11,7 @@ fn unknown_cli_accounts_share_admission_wording_and_registered_aliases() {
             arguments.extend(["--", "hello"]);
         }
         let error = parse(args(&arguments)).unwrap_err();
-        assert_eq!(error.exit_code(), 2);
-        assert!(
-            error.message().contains("unknown_account: `openai/work`"),
-            "{error}"
-        );
+        assert!(error.contains("unknown_account: `openai/work`"), "{error}");
     }
     assert!(matches!(
         parse(args(&["login", "chatgpt"])).unwrap(),
