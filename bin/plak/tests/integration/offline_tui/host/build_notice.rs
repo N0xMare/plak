@@ -125,7 +125,7 @@ fn reconnect_notice(late: bool) {
     let finished = fixture.root.join("old-probe-finished");
     let body = if late {
         format!(
-            "if [ \"$1\" = version ] && [ \"$2\" = --reload-probe ] && [ ! -e '{started}' ]; then\ntouch '{started}'\nwhile [ ! -e '{release}' ]; do sleep 0.02; done\n'{real}' \"$@\"\ntouch '{finished}'\nexit 0\nfi",
+            "if [ \"$1\" = version ] && [ \"$2\" = --reload-probe ] && [ ! -e '{started}' ]; then\ntouch '{started}'\nn=0\nwhile [ ! -e '{release}' ] && [ $((n += 1)) -le 200 ]; do sleep 0.02; done\n[ -e '{release}' ] || exit 1\n'{real}' \"$@\"\ntouch '{finished}'\nexit 0\nfi",
             started = probe_started.display(),
             release = release.display(),
             finished = finished.display(),
@@ -196,7 +196,7 @@ fn a_host_reload_refuses_if_the_host_stops_before_client_exec() {
     let installed = installed_wrapper(
         &fixture,
         &format!(
-            "if [ \"$1\" != version ]; then\nif [ -e '{started}' ]; then\nkill -KILL {pid}\nprintf '%s\\n' \"$@\" > '{args}'\ntouch '{stopped}'\nwhile [ ! -e '{release}' ]; do sleep 0.02; done\nfi\ntouch '{started}'\nfi",
+            "if [ \"$1\" != version ]; then\nif [ -e '{started}' ]; then\nkill -KILL {pid}\nprintf '%s\\n' \"$@\" > '{args}'\ntouch '{stopped}'\nn=0\nwhile [ ! -e '{release}' ] && [ $((n += 1)) -le 200 ]; do sleep 0.02; done\n[ -e '{release}' ] || exit 1\nfi\ntouch '{started}'\nfi",
             started = started.display(),
             args = args.display(),
             stopped = stopped.display(),

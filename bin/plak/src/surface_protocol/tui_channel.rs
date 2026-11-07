@@ -87,7 +87,9 @@ impl TuiEventReceiver {
     pub(crate) fn host_notice(&self) -> Option<String> {
         match self {
             Self::Socket(face) => face.host_notice(),
-            _ => None,
+            Self::Wire(_) => None,
+            #[cfg(test)]
+            Self::InProcess(_) | Self::Refusing(_) => None,
         }
     }
 

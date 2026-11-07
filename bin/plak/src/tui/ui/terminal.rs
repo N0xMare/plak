@@ -730,7 +730,7 @@ pub(super) fn run_app(
         app.maybe_flush_pending_prompt_after_attach(actions);
         app.poll_attachments();
         app.poll_usage_decoration();
-        let host_notice = events.and_then(|events| events.host_notice());
+        let host_notice = events.and_then(crate::tui::HostEventReceiver::host_notice);
         if app.host_notice != host_notice {
             app.host_notice = host_notice;
             app.mark_dirty();
