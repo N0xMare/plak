@@ -101,9 +101,13 @@ fn forward_keys_are_written_only_when_set_explicitly() {
     assert!(!initialized.lines().any(|line| line == "[host]"));
     assert!(!ProductConfig::default_product().render().contains("[host]"));
 
-    let mut config = ProductConfig::load(&paths).unwrap();
-    config.set_key("tui.scroll_lines", "5").unwrap();
-    config.save(&paths).unwrap();
+    ProductConfig::save_terminal_key(
+        &paths,
+        super::super::ConfigWriteScope::User,
+        "tui.scroll_lines",
+        "5",
+    )
+    .unwrap();
     let saved = fs::read_to_string(paths.config_file()).unwrap();
     assert!(!saved.lines().any(|line| line == "[host]"), "{saved}");
     assert!(
@@ -140,9 +144,13 @@ fn forward_keys_are_written_only_when_set_explicitly() {
     );
 
     let fresh = PlakPaths::isolated_test_home();
-    let mut config = ProductConfig::default_product();
-    config.set_key("tui.scroll_lines", "5").unwrap();
-    config.save(&fresh.1).unwrap();
+    ProductConfig::save_terminal_key(
+        &fresh.1,
+        super::super::ConfigWriteScope::User,
+        "tui.scroll_lines",
+        "5",
+    )
+    .unwrap();
     let rendered = fs::read_to_string(fresh.1.config_file()).unwrap();
     assert!(!rendered.contains("[host]"), "{rendered}");
 }

@@ -3,10 +3,12 @@
 #[test]
 fn resetting_terminal_integer_and_theme_preferences_persists_locally() {
     let (_root, paths) = crate::home::paths::PlakPaths::isolated_test_home();
-    let mut config = crate::product_config::ProductConfig::default_product();
-    config.scroll_lines = 9;
-    config.theme = crate::product_config::ProductTheme::CatppuccinMocha;
-    config.save(&paths).unwrap();
+    let config = crate::product_config::ProductConfig::update_user(&paths, |config| {
+        config.scroll_lines = 9;
+        config.theme = crate::product_config::ProductTheme::CatppuccinMocha;
+        Ok(())
+    })
+    .unwrap();
     let settings = crate::shell::settings::settings_view(&config);
     let mut launch = launch_basic();
     launch.theme = settings.tui.theme;
@@ -50,10 +52,12 @@ fn wire_settings_views_never_replace_local_preferences_and_edits_persist_locally
     use crate::tui::SettingsTheme;
 
     let (_root, paths) = crate::home::paths::PlakPaths::isolated_test_home();
-    let mut config = crate::product_config::ProductConfig::default_product();
-    config.theme = crate::product_config::ProductTheme::CatppuccinLatte;
-    config.tui_mouse = false;
-    config.save(&paths).unwrap();
+    crate::product_config::ProductConfig::update_user(&paths, |config| {
+        config.theme = crate::product_config::ProductTheme::CatppuccinLatte;
+        config.tui_mouse = false;
+        Ok(())
+    })
+    .unwrap();
     let mut launch = launch_basic();
     launch.reload_home = Some(paths.clone());
     launch.theme = SettingsTheme::CatppuccinLatte;

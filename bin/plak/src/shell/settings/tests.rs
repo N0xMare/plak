@@ -9,14 +9,16 @@ use plakous_host_protocol::status::HostPhase;
 #[test]
 fn a_wire_decoded_settings_save_keeps_terminal_preferences() {
     let (_root, paths) = PlakPaths::isolated_test_home();
-    let mut config = ProductConfig::default_product();
-    config.theme = crate::product_config::ProductTheme::CatppuccinLatte;
-    config.tui_mouse = false;
-    config.scroll_lines = 9;
-    config.show_thinking = false;
-    config.group_tool_calls = false;
-    config.reduced_motion = true;
-    config.save(&paths).unwrap();
+    let config = ProductConfig::update_user(&paths, |config| {
+        config.theme = crate::product_config::ProductTheme::CatppuccinLatte;
+        config.tui_mouse = false;
+        config.scroll_lines = 9;
+        config.show_thinking = false;
+        config.group_tool_calls = false;
+        config.reduced_motion = true;
+        Ok(())
+    })
+    .unwrap();
     let expected = settings_view(&config).tui;
     let mut update = settings_view(&config);
     update.product.compaction = !config.compaction_enabled;

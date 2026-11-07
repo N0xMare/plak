@@ -87,8 +87,12 @@ pub(super) fn execute_config_set(
             .map_err(|_| CliFailure::new("stdout failed"))?;
         return Ok(ProcessOutcome::Success);
     }
-    cfg.save_scoped(paths, scope)
-        .map_err(|error| CliFailure::new(error.into_message()))?;
+    (if key.starts_with("tui.") {
+        product_config::ProductConfig::save_terminal_key(paths, scope, &key, &value)
+    } else {
+        cfg.save_scoped(paths, scope)
+    })
+    .map_err(|error| CliFailure::new(error.into_message()))?;
     let scope_note = if scope == product_config::ConfigWriteScope::Project {
         " · project"
     } else {

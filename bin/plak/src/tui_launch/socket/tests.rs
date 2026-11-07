@@ -261,14 +261,16 @@ fn save_settings_over_the_socket_preserves_terminal_preferences() {
     use plakous_hosted::runtime::{Sender, SurfaceFacts, SurfaceHandler, SurfacePhase, UsageReads};
 
     let (_root, paths) = paths();
-    let mut config = crate::product_config::ProductConfig::default_product();
-    config.theme = crate::product_config::ProductTheme::CatppuccinLatte;
-    config.tui_mouse = false;
-    config.scroll_lines = 9;
-    config.show_thinking = false;
-    config.group_tool_calls = false;
-    config.reduced_motion = true;
-    config.save(&paths).unwrap();
+    let config = crate::product_config::ProductConfig::update_user(&paths, |config| {
+        config.theme = crate::product_config::ProductTheme::CatppuccinLatte;
+        config.tui_mouse = false;
+        config.scroll_lines = 9;
+        config.show_thinking = false;
+        config.group_tool_calls = false;
+        config.reduced_motion = true;
+        Ok(())
+    })
+    .unwrap();
     let expected = settings_view(&config).tui;
     let mut update = settings_view(&config);
     update.product.compaction = !config.compaction_enabled;

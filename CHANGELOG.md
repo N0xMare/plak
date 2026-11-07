@@ -7,6 +7,9 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ## Unreleased
 
+- Preserve current terminal preferences when a stale product configuration
+  snapshot is saved; explicit terminal-key edits still apply under the lock.
+
 - Refresh hosted-terminal preferences on every UI relaunch, including resume
   and rebind.
 

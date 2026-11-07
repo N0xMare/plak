@@ -3856,7 +3856,11 @@ The same is true for a confirmed terminal reset, including a no-op reset of
 a row already at its default.
 Config publication is serialized by the home's `config.lock`; writers re-read under that lock and
 apply only their own fields: `[tui]` for a terminal and the changed product
-fields for host settings. One face cannot revert another's independent edit.
+fields for host settings. Other config writers restore fresh `[tui]` values
+under the lock before publication, so they never revert terminal preferences.
+Terminal and host settings writers merge deltas; other whole-config writers
+remain last-writer-wins for product fields. An explicit `config set tui.*`
+edits that terminal key under the lock rather than publishing a stale snapshot.
 Confirmed resets use the same local publication path as other terminal
 preference edits, including integer and theme rows.
 The wheel notch uses the local launch preferences or open draft even after

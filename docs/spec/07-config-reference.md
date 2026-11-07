@@ -39,12 +39,16 @@ $PLAK_HOME/            # default ~/.plak
 
 Product config publications, including project-scoped settings and MCP edits,
 serialize on the home's `config.lock` sidecar. The lock is held through the
-atomic rename and parent-directory sync and is released by process exit.
+atomic rename and parent-directory sync and is released when the publication
+completes (or by process exit).
 Terminal preference writers re-read the home baseline under that lock and
 apply only `[tui]`; host settings merge only the product fields changed from
 their original view into the latest effective config. Neither writer republishes
 the other's stale values. Raw external editor writes do not participate in
 this advisory lock.
+Other whole-config writers preserve fresh `[tui]` values under that lock;
+their product fields remain last-writer-wins. An explicit `config set tui.*`
+is a terminal-key publication against the locked fresh baseline.
 
 **Project roots.** Launching below a directory that carries `.plak/config.toml`
 or `.plak/agents/` resolves that directory as the *project root*: the nearest

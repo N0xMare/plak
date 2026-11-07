@@ -311,9 +311,8 @@ fn user_scope_save_never_flattens_project_values() {
     .unwrap();
     project_trust::trust(&paths, project.path()).unwrap();
 
-    let mut config = ProductConfig::load(&paths).unwrap();
-    config.set_key("tui.scroll_lines", "7").unwrap();
-    config.save_scoped(&paths, ConfigWriteScope::User).unwrap();
+    ProductConfig::save_terminal_key(&paths, ConfigWriteScope::User, "tui.scroll_lines", "7")
+        .unwrap();
     let global_text = fs::read_to_string(paths.config_file()).unwrap();
     assert!(global_text.contains("scroll_lines = 7"), "{global_text}");
     assert!(
@@ -343,10 +342,7 @@ fn project_scope_save_writes_only_the_delta() {
     project_trust::trust(&paths, project.path()).unwrap();
     let global_before = fs::read(paths.config_file()).unwrap();
 
-    let mut config = ProductConfig::load(&paths).unwrap();
-    config.set_key("tui.theme", "light").unwrap();
-    config
-        .save_scoped(&paths, ConfigWriteScope::Project)
+    ProductConfig::save_terminal_key(&paths, ConfigWriteScope::Project, "tui.theme", "light")
         .unwrap();
     let project_text = fs::read_to_string(home.join("config.toml")).unwrap();
     assert!(
@@ -608,6 +604,13 @@ fn save_and_reload(cfg: &ProductConfig) -> ProductConfig {
     let (_tmp, paths) = PlakPaths::isolated_test_home();
     paths.ensure_layout().unwrap();
     cfg.save(&paths).unwrap();
+    ProductConfig::update_user(&paths, |fresh| {
+        for row in CONFIG_KEYS.iter().filter(|row| row.section() == "tui") {
+            fresh.assign_overlay_field(row.field, cfg);
+        }
+        Ok(())
+    })
+    .unwrap();
     ProductConfig::load(&paths).unwrap()
 }
 
@@ -2391,9 +2394,13 @@ fn hand_written_home() -> (tempfile::TempDir, PlakPaths, String) {
 #[test]
 fn a_single_key_save_keeps_every_other_byte_of_the_file() {
     let (_tmp, paths, before) = hand_written_home();
-    let mut config = ProductConfig::load(&paths).unwrap();
-    config.set_key("tui.theme", "catppuccin-latte").unwrap();
-    config.save(&paths).unwrap();
+    ProductConfig::save_terminal_key(
+        &paths,
+        ConfigWriteScope::User,
+        "tui.theme",
+        "catppuccin-latte",
+    )
+    .unwrap();
     let after = fs::read_to_string(paths.config_file()).unwrap();
     assert_eq!(
         after,
@@ -2421,10 +2428,11 @@ fn an_inline_table_section_is_edited_in_place() {
         "# inline\ntui = { mouse = false, theme = \"catppuccin-mocha\" }\n[root]\nagent = \"lead\"\n",
     )
     .unwrap();
-    let mut config = ProductConfig::load(&paths).unwrap();
-    config.set_key("tui.theme", "catppuccin-latte").unwrap();
-    config.set_key("tui.scroll_lines", "7").unwrap();
-    config.save(&paths).unwrap();
+    ProductConfig::update_user(&paths, |config| {
+        config.set_key("tui.theme", "catppuccin-latte")?;
+        config.set_key("tui.scroll_lines", "7")
+    })
+    .unwrap();
     let after = fs::read_to_string(paths.config_file()).unwrap();
     assert!(after.starts_with("# inline\n"), "{after}");
     assert!(after.contains("mouse = false"), "{after}");
@@ -2492,9 +2500,8 @@ fn a_theme_alias_is_rewritten_canonically_by_any_save() {
         fs::write(paths.config_file(), &before).unwrap();
 
         // A save of an unrelated key still normalizes the alias.
-        let mut config = ProductConfig::load(&paths).unwrap();
-        config.set_key("tui.scroll_lines", "7").unwrap();
-        config.save(&paths).unwrap();
+        ProductConfig::save_terminal_key(&paths, ConfigWriteScope::User, "tui.scroll_lines", "7")
+            .unwrap();
 
         let after = fs::read_to_string(paths.config_file()).unwrap();
         assert!(

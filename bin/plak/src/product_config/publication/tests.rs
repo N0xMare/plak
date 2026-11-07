@@ -9,6 +9,69 @@ use std::time::Duration;
 use super::*;
 
 #[test]
+fn review_a_stale_whole_config_save_keeps_a_later_terminal_edit() {
+    let (_root, paths) = PlakPaths::isolated_test_home();
+    ProductConfig::default_product().save(&paths).unwrap();
+    let mut stale = ProductConfig::load(&paths).unwrap();
+    ProductConfig::update_user(&paths, |config| {
+        config.scroll_lines = 9;
+        config.tui_mouse = false;
+        config.theme = super::super::ProductTheme::CatppuccinLatte;
+        config.show_thinking = false;
+        config.group_tool_calls = false;
+        config.reduced_motion = true;
+        config.reload_requests = true;
+        Ok(())
+    })
+    .unwrap();
+    stale.compaction_enabled = !stale.compaction_enabled;
+    stale.save(&paths).unwrap();
+    let saved = ProductConfig::load(&paths).unwrap();
+    assert_eq!(saved.scroll_lines, 9);
+    assert!(!saved.tui_mouse);
+    assert_eq!(saved.theme, super::super::ProductTheme::CatppuccinLatte);
+    assert!(!saved.show_thinking);
+    assert!(!saved.group_tool_calls);
+    assert!(saved.reduced_motion);
+    assert!(saved.reload_requests);
+    assert_eq!(saved.compaction_enabled, stale.compaction_enabled);
+    ProductConfig::save_terminal_key(&paths, ConfigWriteScope::User, "tui.scroll_lines", "7")
+        .unwrap();
+    let saved = ProductConfig::load(&paths).unwrap();
+    assert_eq!(
+        saved.scroll_lines, 7,
+        "explicit terminal key edits still apply"
+    );
+    assert!(!saved.tui_mouse);
+}
+
+#[test]
+fn a_stale_project_snapshot_keeps_current_terminal_preferences() {
+    let (_root, home_paths) = PlakPaths::isolated_test_home();
+    let project = tempfile::tempdir().unwrap();
+    let paths = home_paths.with_project_root(project.path().to_owned());
+    ProductConfig::default_product().save(&paths).unwrap();
+    std::fs::create_dir(project.path().join(".plak")).unwrap();
+    std::fs::write(
+        project.path().join(".plak/config.toml"),
+        "[tui]\nscroll_lines = 3\n",
+    )
+    .unwrap();
+    super::super::project_trust::trust(&paths, project.path()).unwrap();
+    let mut stale = ProductConfig::load(&paths).unwrap();
+    ProductConfig::save_terminal_key(&paths, ConfigWriteScope::Project, "tui.scroll_lines", "9")
+        .unwrap();
+    stale.compaction_enabled = false;
+    stale
+        .save_scoped(&paths, ConfigWriteScope::Project)
+        .unwrap();
+    let saved = ProductConfig::load(&paths).unwrap();
+    assert_eq!(saved.scroll_lines, 9);
+    assert!(!saved.compaction_enabled);
+    assert_eq!(ProductConfig::load_user(&paths).unwrap().scroll_lines, 3);
+}
+
+#[test]
 fn concurrent_terminal_and_host_writers_keep_both_changes() {
     let (_root, paths) = PlakPaths::isolated_test_home();
     let before = ProductConfig::default_product();
