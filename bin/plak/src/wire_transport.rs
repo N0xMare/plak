@@ -16,6 +16,61 @@ use plakous_host_protocol::client::Transport;
 /// is typed with.
 pub use crate::surface_protocol::PlakExtension;
 
+pub(crate) mod discovery;
+
+/// Forward a confirmed lifecycle mutation to the home's host when it owns the
+/// home. Absence is the only permission to consider the offline fenced path;
+/// handshake, refusal and uncertain responses never authorize fallback.
+pub(crate) fn forward_lifecycle(
+    paths: &crate::home::paths::PlakPaths,
+    op: plakous_host_protocol::wire::Op<PlakExtension>,
+) -> crate::CliResult<Option<plakous_host_protocol::wire::Outcome>> {
+    use plakous_host_protocol::client;
+    use plakous_host_protocol::wire::{Hello, Op, WIRE_VERSION};
+    use std::time::Duration;
+    if !matches!(
+        &op,
+        Op::RenameSession { .. } | Op::ArchiveSession { .. } | Op::DeleteSession { .. }
+    ) {
+        return Err(crate::CliFailure::new(
+            "not a directory lifecycle operation",
+        ));
+    }
+    let Some(transport) = discovery::connect(paths, Duration::from_secs(10))? else {
+        return Ok(None);
+    };
+    let (sender, receiver, _) = client::connect_directory::<PlakExtension>(
+        transport,
+        Hello {
+            proto: WIRE_VERSION,
+            binary_id: crate::build_identity::known_binary_id()
+                .unwrap_or_else(|| "unknown".to_owned()),
+            caps: Vec::new(),
+        },
+    )
+    .map_err(|error| {
+        crate::CliFailure::new(format!(
+            "host lifecycle handshake failed: {error}; no offline mutation attempted"
+        ))
+    })?;
+    let id = sender
+        .request_operation(op)
+        .ok_or_else(|| crate::CliFailure::new("host disconnected; lifecycle outcome unknown"))?;
+    let (answered, outcome) = receiver
+        .recv_response(Duration::from_secs(90))
+        .map_err(|error| {
+            crate::CliFailure::new(format!(
+                "host lifecycle outcome unknown: {error}; inspect the session before retrying"
+            ))
+        })?;
+    if answered != id {
+        return Err(crate::CliFailure::new(
+            "host answered another lifecycle request; outcome unknown",
+        ));
+    }
+    Ok(Some(outcome))
+}
+
 /// Connects to the host socket at `path` after checking that the socket
 /// and its directory belong to this user, the directory is closed to
 /// everyone else, and the file is a socket; once connected, the peer must

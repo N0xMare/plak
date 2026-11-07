@@ -786,6 +786,15 @@ projections stay outside stored/exported history. Named-account remedy targets
 must preserve the validated exact vertical/name; they never fall back to a
 different account's credentials.
 
+Confirmed rename, archive, unarchive and delete CLI requests use the same-user
+host socket whenever a host owns the home. Only an absent host permits the
+offline lease-fenced path; a held host lock during startup/shutdown, failed
+handshake, explicit refusal or lost/uncertain answer never permits fallback.
+The wire operations are `rename_session {session,title}` (required nullable
+title), `archive_session {session,archived}` and `delete_session
+{session,abandon_children}`; acknowledgements and typed lifecycle refusals are
+returned unchanged to the calling product command.
+
 `plak host --web` (chapter 02 §4.5) serves the host's sessions to browsers
 on the tailnet. Everything a client admitted there can do, an operator at
 the TUI can do, except the local-face intents of §4.6: it holds the serving

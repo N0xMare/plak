@@ -19,6 +19,118 @@ fn private_run() -> (tempfile::TempDir, std::path::PathBuf) {
     (root, run)
 }
 
+#[test]
+fn lifecycle_forwarding_never_turns_a_host_refusal_or_unknown_outcome_into_offline_permission() {
+    use plakous_host_protocol::wire::{
+        Answer, ClientFrame, HostFrame, Op, Outcome, RequestRefusal, Welcome, decode_line,
+        encode_line,
+    };
+    use std::io::{BufRead as _, Write as _};
+
+    let (_root, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+    assert!(
+        forward_lifecycle(
+            &paths,
+            Op::ArchiveSession {
+                session: "s".into(),
+                archived: true
+            }
+        )
+        .unwrap()
+        .is_none()
+    );
+    let directory = paths.host_socket().parent().unwrap().to_owned();
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let operations = [
+        Op::RenameSession {
+            session: "s".into(),
+            title: None,
+        },
+        Op::ArchiveSession {
+            session: "s".into(),
+            archived: true,
+        },
+        Op::ArchiveSession {
+            session: "s".into(),
+            archived: false,
+        },
+        Op::DeleteSession {
+            session: "s".into(),
+            abandon_children: false,
+        },
+    ];
+    for (index, op) in operations.into_iter().enumerate() {
+        let listener = UnixListener::bind(paths.host_socket()).unwrap();
+        let expected = op.clone();
+        let peer = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            assert!(matches!(
+                decode_line::<ClientFrame<PlakExtension>>(&line).unwrap(),
+                ClientFrame::Hello(_)
+            ));
+            stream
+                .write_all(
+                    encode_line(&HostFrame::<PlakExtension>::Welcome(Welcome {
+                        proto: WIRE_VERSION,
+                        binary_id: "fixture".into(),
+                        host_generation: 1,
+                        caps: Vec::new(),
+                        session: None,
+                    }))
+                    .unwrap()
+                    .as_bytes(),
+                )
+                .unwrap();
+            line.clear();
+            reader.read_line(&mut line).unwrap();
+            let ClientFrame::Request { id, op } =
+                decode_line::<ClientFrame<PlakExtension>>(&line).unwrap()
+            else {
+                panic!("expected lifecycle request")
+            };
+            assert_eq!(op, expected);
+            if index == 3 {
+                return;
+            }
+            let outcome = if index == 0 {
+                Outcome::Ok(Answer::Renamed {
+                    session: "s".into(),
+                    title: None,
+                })
+            } else {
+                Outcome::Refused(RequestRefusal::SessionUnavailable {
+                    detail: "refused by fixture".into(),
+                })
+            };
+            stream
+                .write_all(
+                    encode_line(&HostFrame::<PlakExtension>::Response { id, outcome })
+                        .unwrap()
+                        .as_bytes(),
+                )
+                .unwrap();
+        });
+        let result = forward_lifecycle(&paths, op);
+        peer.join().unwrap();
+        match index {
+            0 => assert!(matches!(
+                result.unwrap(),
+                Some(Outcome::Ok(Answer::Renamed { .. }))
+            )),
+            3 => assert!(result.is_err()),
+            _ => assert!(matches!(result.unwrap(), Some(Outcome::Refused(_)))),
+        }
+        std::fs::remove_file(paths.host_socket()).unwrap();
+    }
+}
+
 /// The host socket is used only in a directory private to this user and
 /// only when it is a socket.
 #[test]
