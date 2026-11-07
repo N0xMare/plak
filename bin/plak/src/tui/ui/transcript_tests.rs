@@ -2945,14 +2945,18 @@ fn the_scroll_lines_row_sets_the_wheel_notch() {
         "with no snapshot the notch is the schema default"
     );
 
-    app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
-        SettingsView {
-            tui: crate::tui_preferences::TuiPreferences {
-                scroll_lines: 7,
-                ..(SettingsView::default()).tui
-            },
-            ..SettingsView::default()
+    let mut launch = launch_basic();
+    launch.settings = Some(SettingsView {
+        tui: crate::tui_preferences::TuiPreferences {
+            scroll_lines: 7,
+            ..(SettingsView::default()).tui
         },
+        ..SettingsView::default()
+    });
+    app = App::new(launch, true);
+    pin_clock(&mut app);
+    app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
+        SettingsView::default(),
     )));
     app.mouse_scroll_queue = 0;
     app.last_wheel_at = None;

@@ -3851,6 +3851,8 @@ on the host preserves its current `[tui]` values and never copies terminal
 preferences from a wire update. The TUI applies preference edits locally and
 publishes its own home's `[tui]` section; received settings views and save
 acknowledgements update product settings only, never theme or render preferences.
+The wheel notch uses the local launch preferences or open draft even after
+a host settings refresh.
 The views a
 surface opens (settings, usage, profiles, MCP, acknowledgements, profile
 verdicts) are addressed, the session profile and workspace chrome states.
