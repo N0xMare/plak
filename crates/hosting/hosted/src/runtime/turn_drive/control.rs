@@ -809,13 +809,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                             let _ = self.host.events.send(ContentEvent::UsageLimits(stale));
                         }
                         if surface::fresh_usage(self.host.surface.as_deref(), &intent) {
-                            self.host
-                                .subscription_usage_refresh
-                                .request_fresh(self.host.subscription_service.clone());
+                            self.host.subscription_usage_refresh.request_fresh(
+                                self.host.subscription_service.clone(),
+                                self.host.session.account_ref().ok(),
+                            );
                         } else {
                             request_subscription_usage_service(
                                 self.host.subscription_service.clone(),
                                 self.host.subscription_usage_refresh,
+                                self.host.session.account_ref().ok(),
                             );
                         }
                     }

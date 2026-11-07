@@ -8939,6 +8939,11 @@ product observations without moving product vocabulary into the agent sink.
 
 ### 7.2 Usage and allowances
 
+Every allowance request carries the current session account reference, including
+a detached shell and a session switched in-process. The worker derives a named
+native slot from that reference before reading it; a previously selected store
+or cached projection never supplies another account's allowance under its label.
+
 There is exactly one usage renderer. `plak usage` and the TUI Usage tab go
 through the same projection and the same text builder, so the CLI and the
 screen cannot disagree.

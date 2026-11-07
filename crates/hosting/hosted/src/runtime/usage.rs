@@ -698,8 +698,9 @@ pub(super) fn usage_watch_due(last: Option<Instant>, now: Instant) -> bool {
 pub(super) fn request_subscription_usage_service<P: plakous_host_protocol::ProtocolExtension>(
     subscriptions: Option<NativeSubscriptions>,
     refresh: &SubscriptionUsageRefresh<P>,
+    account: Option<crate::account::AccountRef>,
 ) {
-    refresh.request(subscriptions);
+    refresh.request(subscriptions, account);
 }
 
 /// Serves a still-fresh held projection, or starts a provider read.
@@ -716,8 +717,24 @@ pub(super) fn request_subscription_usage_cached<P: plakous_host_protocol::Protoc
     events: &Sender<P>,
     refresh: &SubscriptionUsageRefresh<P>,
     subscriptions: Option<NativeSubscriptions>,
+    account: Option<crate::account::AccountRef>,
 ) {
-    if let Some(mut fresh) = held.fresh() {
+    if let Some(mut fresh) = held.fresh().filter(|view| {
+        account
+            .as_ref()
+            .filter(|account| account.is_named())
+            .map_or_else(
+                || {
+                    view.verticals
+                        .iter()
+                        .all(|row| !row.vertical.account().contains('/'))
+                },
+                |account| {
+                    view.verticals.len() == 1
+                        && view.verticals[0].vertical.account() == account.as_str()
+                },
+            )
+    }) {
         fresh.session = ledger.project();
         let _ = events.send(ContentEvent::UsageLimits(fresh));
         let _ = events.send(ContentEvent::SubscriptionUsage(
@@ -725,7 +742,7 @@ pub(super) fn request_subscription_usage_cached<P: plakous_host_protocol::Protoc
         ));
         return;
     }
-    refresh.request(subscriptions);
+    refresh.request(subscriptions, account);
 }
 
 impl HeldUsage {
@@ -847,10 +864,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> SubscriptionUsageRefresh<P> {
         credentials: Arc<dyn crate::openrouter::OpenRouterCredentials>,
         held: HeldUsage,
         ledger: SessionLedger,
-        account: Option<crate::account::AccountRef>,
     ) -> Self {
         let mut executor = None;
-        Self::new_with_projector(events, move |subscriptions| {
+        Self::new_with_projector(events, move |(subscriptions, account)| {
             let executor = executor.get_or_insert_with(ApplicationExecutor::new);
             match executor {
                 Ok(executor) => {
@@ -883,7 +899,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> SubscriptionUsageRefresh<P> {
     pub(super) fn new_with_projector(
         events: &Sender<P>,
         mut project: impl FnMut(
-            Option<NativeSubscriptions>,
+            (
+                Option<NativeSubscriptions>,
+                Option<crate::account::AccountRef>,
+            ),
         ) -> (
             plakous_host_protocol::views::presentation::SubscriptionUsageView,
             Option<plakous_host_protocol::views::presentation::UsageLimitsView>,
@@ -899,8 +918,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> SubscriptionUsageRefresh<P> {
             .name("plak-subscription-usage".to_owned())
             .spawn(move || {
                 // The read's guard settles it once its projection is published.
-                while let Ok((subscriptions, _read)) = receiver.recv() {
-                    let (projected, limits) = project(subscriptions);
+                while let Ok(request) = receiver.recv() {
+                    let super::SubscriptionUsageRequest {
+                        subscriptions,
+                        account,
+                        _read,
+                    } = request;
+                    let (projected, limits) = project((subscriptions, account));
                     let _ = worker_events.send(ContentEvent::SubscriptionUsage(projected));
                     if let Some(limits) = limits {
                         let _ = worker_events.send(ContentEvent::UsageLimits(limits));
@@ -930,20 +954,32 @@ impl<P: plakous_host_protocol::ProtocolExtension> SubscriptionUsageRefresh<P> {
         held: &HeldUsage,
         ledger: &SessionLedger,
         subscriptions: Option<NativeSubscriptions>,
+        account: Option<crate::account::AccountRef>,
     ) {
         let due = self
             .last_request
             .lock()
             .is_ok_and(|last| last.is_some_and(|at| at.elapsed() >= Duration::from_secs(300)));
         if due {
-            request_subscription_usage_cached(held, ledger, &self.events, self, subscriptions);
+            request_subscription_usage_cached(
+                held,
+                ledger,
+                &self.events,
+                self,
+                subscriptions,
+                account,
+            );
         }
     }
 
     /// Re-reads allowances on the coalesced in-turn path while the Usage tab
     /// is open. A request younger than the freshness window is left alone, so
     /// the busy tick does not start a read every pass.
-    pub(super) fn poll_while_watched(&self, subscriptions: Option<NativeSubscriptions>) {
+    pub(super) fn poll_while_watched(
+        &self,
+        subscriptions: Option<NativeSubscriptions>,
+        account: Option<crate::account::AccountRef>,
+    ) {
         let due = self
             .last_request
             .lock()
@@ -952,7 +988,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> SubscriptionUsageRefresh<P> {
             // A busy re-read keeps the figures already on screen. The loading
             // note is only for a tab that has no observation yet, which the
             // open itself announces.
-            self.request_inner(subscriptions, false, false);
+            self.request_inner(subscriptions, account, false, false);
         }
     }
 
@@ -963,19 +999,28 @@ impl<P: plakous_host_protocol::ProtocolExtension> SubscriptionUsageRefresh<P> {
         }
     }
 
-    pub(super) fn request(&self, subscriptions: Option<NativeSubscriptions>) {
-        self.request_inner(subscriptions, false, true);
+    pub(super) fn request(
+        &self,
+        subscriptions: Option<NativeSubscriptions>,
+        account: Option<crate::account::AccountRef>,
+    ) {
+        self.request_inner(subscriptions, account, false, true);
     }
 
     /// An explicit credential change must be read even if an older read is in flight.
     /// The bounded request channel coalesces multiple explicit requests into one follow-up.
-    pub(super) fn request_fresh(&self, subscriptions: Option<NativeSubscriptions>) {
-        self.request_inner(subscriptions, true, true);
+    pub(super) fn request_fresh(
+        &self,
+        subscriptions: Option<NativeSubscriptions>,
+        account: Option<crate::account::AccountRef>,
+    ) {
+        self.request_inner(subscriptions, account, true, true);
     }
 
     fn request_inner(
         &self,
         subscriptions: Option<NativeSubscriptions>,
+        account: Option<crate::account::AccountRef>,
         fresh: bool,
         announce_loading: bool,
     ) {
@@ -1003,7 +1048,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> SubscriptionUsageRefresh<P> {
             ));
         }
         // A refused send drops its guard; a queued read absorbs this request.
-        match requests.try_send((subscriptions, self.reads.begin())) {
+        match requests.try_send(super::SubscriptionUsageRequest {
+            subscriptions,
+            account,
+            _read: self.reads.begin(),
+        }) {
             Ok(()) | Err(std::sync::mpsc::TrySendError::Full(_)) => {}
             Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
                 self.in_flight
@@ -1082,6 +1131,12 @@ fn refresh_named_subscription_usage(
         return NativeSubscriptionRefresh::NoSubscriptionStore;
     };
     let Some(subscriptions) = subscriptions else {
+        return NativeSubscriptionRefresh::NoSubscriptionStore;
+    };
+    let Some(name) = account.name() else {
+        return NativeSubscriptionRefresh::NoSubscriptionStore;
+    };
+    let Ok(subscriptions) = subscriptions.for_named_account(provider, name.as_str()) else {
         return NativeSubscriptionRefresh::NoSubscriptionStore;
     };
     let read = executor.block_on(async {

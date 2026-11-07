@@ -582,11 +582,6 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
             config.state_roots.openrouter_credentials(),
             held_usage.clone(),
             session_ledger.clone(),
-            config
-                .session
-                .account
-                .as_deref()
-                .and_then(|account| account.parse().ok()),
         );
         if config.session.store_revision != 0 {
             persist(&*config.store, &mut config.session);

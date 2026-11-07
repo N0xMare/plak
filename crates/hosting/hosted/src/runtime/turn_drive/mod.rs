@@ -601,9 +601,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> crate::node::TurnPort for Root
                 // every non-advancing revision, so an idle tree costs a lookup
                 // and nothing leaves.
                 if surface::usage_watch_armed(self.host.surface.as_deref()) {
-                    self.host
-                        .subscription_usage_refresh
-                        .poll_while_watched(self.host.subscription_service.clone());
+                    self.host.subscription_usage_refresh.poll_while_watched(
+                        self.host.subscription_service.clone(),
+                        self.host.session.account_ref().ok(),
+                    );
                 }
                 flush_assistant_delta(
                     &mut self.delta_buf,

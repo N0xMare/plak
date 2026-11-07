@@ -130,6 +130,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     &self.role.held_usage,
                     &self.role.session_ledger,
                     self.role.config.target.native_subscriptions().cloned(),
+                    self.role.config.session.account_ref().ok(),
                 );
             }
             // Child status transitions, grandchild spawns, and mail changes have
@@ -912,10 +913,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                             if surface::fresh_usage(self.role.config.surface.as_deref(), &intent) {
                                 self.role.subscription_usage_refresh.request_fresh(
                                     self.role.config.target.native_subscriptions().cloned(),
+                                    self.role.config.session.account_ref().ok(),
                                 );
                             } else {
                                 self.role.subscription_usage_refresh.request(
                                     self.role.config.target.native_subscriptions().cloned(),
+                                    self.role.config.session.account_ref().ok(),
                                 );
                             }
                         }

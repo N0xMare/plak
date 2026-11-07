@@ -15,6 +15,123 @@ use crate::runtime::test_support::*;
 use crate::sessions::SessionRecord;
 
 struct NoCredentialReads;
+
+fn default_ready_usage_fixture(root: &std::path::Path) -> (NativeSubscriptions, std::fs::File) {
+    use plakous::auth::*;
+    use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+    let state = root.join("state");
+    let layout = state.join("plak/subscriptions");
+    for path in [
+        &state,
+        &state.join("plak"),
+        &layout,
+        &layout.join("compatibility"),
+        &layout.join("codex"),
+    ] {
+        std::fs::create_dir(path).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let profile = SubscriptionIntegrationProfileId::new(
+        NativeSubscriptions::notice(NativeProvider::Codex)
+            .unwrap()
+            .profile_id(),
+    )
+    .unwrap();
+    let store = PrivateCredentialStore::open_slot(
+        layout.join("codex/credential.json"),
+        profile.clone(),
+        CredentialSlotId::new("primary").unwrap(),
+    )
+    .unwrap();
+    store
+        .initialize_selected(
+            &CredentialRecord::new(
+                profile,
+                AccountBinding::new("default-upstream").unwrap(),
+                CredentialGeneration::new(1).unwrap(),
+                CredentialStatus::Ready,
+                SecretBytes::new(b"synthetic-ready".to_vec()),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    // A default read must be observably Busy, never reach real provider HTTP.
+    let lock = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(layout.join("compatibility/.codex.lock"))
+        .unwrap();
+    lock.lock().unwrap();
+    (
+        NativeSubscriptions::new(
+            plakous::subscriptions::SubscriptionPaths::from_xdg_state_home(state).unwrap(),
+        ),
+        lock,
+    )
+}
+
+fn receive_usage(
+    events: &crate::surface_protocol::HostEventReceiver<TestExtension>,
+) -> plakous_host_protocol::views::presentation::UsageLimitsView {
+    loop {
+        if let HostEvent::UsageLimits(view) = events.recv_timeout(Duration::from_secs(30)).unwrap()
+        {
+            return view;
+        }
+    }
+}
+
+#[test]
+fn named_shell_usage_never_reads_the_ready_default_store() {
+    let root = tempfile::tempdir().unwrap();
+    let (subscriptions, _lock) = default_ready_usage_fixture(root.path());
+    let mut session = SessionRecord::new(root.path().to_path_buf());
+    session.account = Some("codex/work".into());
+    let mut fixture = test_kit::shell_host_on_doubles::<TestExtension>(root.path(), session, None);
+    fixture.config.subscriptions = Some(subscriptions);
+    let (actions, events, worker) = test_kit::spawn_shell_host_on_doubles(fixture.config);
+    actions
+        .send(UserAction::Extension(ProbeIntent::InspectUsage))
+        .unwrap();
+    let view = receive_usage(&events);
+    assert_eq!(view.verticals.len(), 1);
+    assert_eq!(view.verticals[0].vertical.account(), "codex/work");
+    assert!(!format!("{:?}", view.verticals[0].state).contains("Busy"));
+    assert!(
+        !format!("{:?}", view.verticals[0].state)
+            .contains(crate::subscription_usage::USAGE_BUSY_REASON)
+    );
+    drop(actions);
+    worker.join().unwrap();
+}
+
+#[test]
+fn usage_refresh_follows_default_named_and_default_rebind_requests() {
+    let root = tempfile::tempdir().unwrap();
+    let (subscriptions, _lock) = default_ready_usage_fixture(root.path());
+    let (config, _) = fresh_injected_attached_host(root.path());
+    let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let refresh = SubscriptionUsageRefresh::new(
+        &Sender::over(wire),
+        config.state_roots.openrouter_credentials(),
+        HeldUsage::default(),
+        SessionLedger::default(),
+    );
+    for account in ["codex", "codex/work", "codex"] {
+        refresh.request_fresh(Some(subscriptions.clone()), Some(account.parse().unwrap()));
+        let view = receive_usage(&events);
+        let row = view
+            .verticals
+            .iter()
+            .find(|row| row.vertical.account() == account)
+            .unwrap();
+        let busy =
+            format!("{:?}", row.state).contains(crate::subscription_usage::USAGE_BUSY_REASON);
+        assert_eq!(busy, account == "codex", "{account}: {row:?}");
+        assert_eq!(view.verticals.len(), if account == "codex" { 4 } else { 1 });
+    }
+}
 impl crate::openrouter::OpenRouterCredentials for NoCredentialReads {
     fn preflight(&self, _: &crate::account::AccountRef) -> CliResult<()> {
         panic!("named native usage must not probe any gateway key")
@@ -634,11 +751,11 @@ fn subscription_refresh_coalesces_bursts_into_one_in_flight_read() {
         )
     });
 
-    refresh.request(None);
+    refresh.request(None, None);
     // A liveness bound only: generous, so load never trips it.
     started_rx.recv_timeout(Duration::from_secs(30)).unwrap();
     for _ in 0..20 {
-        refresh.request(None);
+        refresh.request(None, None);
     }
     release_tx.send(()).unwrap();
     drop(refresh);
@@ -679,11 +796,11 @@ fn explicit_post_credential_read_is_queued_behind_an_older_read() {
             None,
         )
     });
-    refresh.request(None);
+    refresh.request(None, None);
     // A liveness bound only: generous, so load never trips it.
     started_rx.recv_timeout(Duration::from_secs(30)).unwrap();
     for _ in 0..20 {
-        refresh.request_fresh(None);
+        refresh.request_fresh(None, None);
     }
     release_tx.send(()).unwrap();
     drop(refresh);
@@ -709,10 +826,10 @@ fn usage_reads_settle_only_after_the_running_and_queued_reads() {
     });
     let reads = refresh.reads();
     assert!(reads.wait_settled(Duration::ZERO), "nothing was requested");
-    refresh.request(None);
+    refresh.request(None, None);
     started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-    refresh.request_fresh(None);
-    refresh.request(None);
+    refresh.request_fresh(None, None);
+    refresh.request(None, None);
     assert!(!reads.wait_settled(Duration::from_millis(20)));
     release_tx.send(()).unwrap();
     started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
@@ -752,9 +869,9 @@ fn idle_usage_serves_a_fresh_held_projection_without_another_read() {
         };
     held.store(&view);
 
-    request_subscription_usage_cached(&held, &ledger, &events, &refresh, None);
+    request_subscription_usage_cached(&held, &ledger, &events, &refresh, None, None);
     let first: Vec<_> = rx.try_iter().collect();
-    request_subscription_usage_cached(&held, &ledger, &events, &refresh, None);
+    request_subscription_usage_cached(&held, &ledger, &events, &refresh, None, None);
     let second: Vec<_> = rx.try_iter().collect();
     thread::sleep(Duration::from_millis(50));
     drop(refresh);
@@ -815,7 +932,7 @@ fn idle_usage_reads_when_nothing_is_held() {
         )
     });
 
-    request_subscription_usage_cached(&held, &ledger, &events, &refresh, None);
+    request_subscription_usage_cached(&held, &ledger, &events, &refresh, None, None);
     // A liveness bound only: generous, so load never trips it.
     started_rx.recv_timeout(Duration::from_secs(30)).unwrap();
     let during: Vec<_> = rx.try_iter().collect();
@@ -897,7 +1014,7 @@ fn a_held_busy_projection_starts_another_read() {
     }
     held.store(&view);
 
-    request_subscription_usage_cached(&held, &ledger, &events, &refresh, None);
+    request_subscription_usage_cached(&held, &ledger, &events, &refresh, None, None);
     // A liveness bound only: generous, so load never trips it.
     started_rx.recv_timeout(Duration::from_secs(30)).unwrap();
     release_tx.send(()).unwrap();
@@ -1190,7 +1307,7 @@ fn dropping_the_usage_refresh_is_bounded_even_while_a_read_is_running() {
             None,
         )
     });
-    refresh.request(None);
+    refresh.request(None, None);
     running.recv_timeout(Duration::from_secs(30)).unwrap();
     let (dropped, detached) = channel();
     let teardown = thread::spawn(move || {
@@ -1391,17 +1508,17 @@ fn busy_watch_rereads_only_after_the_freshness_interval() {
             None,
         )
     });
-    refresh.poll_while_watched(None);
+    refresh.poll_while_watched(None, None);
     let deadline = Instant::now() + Duration::from_secs(2);
     while calls.load(Ordering::Acquire) < 1 && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(10));
     }
     thread::sleep(Duration::from_millis(30));
-    refresh.poll_while_watched(None);
+    refresh.poll_while_watched(None, None);
     thread::sleep(Duration::from_millis(30));
     assert_eq!(calls.load(Ordering::Acquire), 1);
     refresh.backdate_last_request(crate::subscription_usage::USAGE_PROJECTION_FRESHNESS);
-    refresh.poll_while_watched(None);
+    refresh.poll_while_watched(None, None);
     let deadline = Instant::now() + Duration::from_secs(2);
     while calls.load(Ordering::Acquire) < 2 && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(10));
@@ -1422,7 +1539,7 @@ fn busy_watch_does_not_announce_loading() {
             None,
         )
     });
-    refresh.poll_while_watched(None);
+    refresh.poll_while_watched(None, None);
     let mut saw_loading = false;
     let mut saw_read = false;
     let deadline = Instant::now() + Duration::from_secs(2);

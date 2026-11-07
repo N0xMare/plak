@@ -56,11 +56,6 @@ pub fn run_shell_host_loop<P: plakous_host_protocol::ProtocolExtension>(
         std::sync::Arc::clone(&config.openrouter_credentials),
         held_usage.clone(),
         session_ledger.clone(),
-        config
-            .session
-            .account
-            .as_deref()
-            .and_then(|account| account.parse().ok()),
     );
     let mut state = ShellState {
         held_usage,
@@ -490,9 +485,10 @@ fn handle_shell_extension<P: plakous_host_protocol::ProtocolExtension>(
     if super::surface::needs_usage(config.surface.as_deref(), &intent) {
         report_unavailable_context(events);
         if super::surface::fresh_usage(config.surface.as_deref(), &intent) {
-            state
-                .subscription_usage_refresh
-                .request_fresh(config.subscriptions.clone());
+            state.subscription_usage_refresh.request_fresh(
+                config.subscriptions.clone(),
+                config.session.account_ref().ok(),
+            );
         } else {
             request_subscription_usage_cached(
                 &state.held_usage,
@@ -500,6 +496,7 @@ fn handle_shell_extension<P: plakous_host_protocol::ProtocolExtension>(
                 events,
                 &state.subscription_usage_refresh,
                 config.subscriptions.clone(),
+                config.session.account_ref().ok(),
             );
         }
     }
