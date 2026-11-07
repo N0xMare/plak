@@ -15,6 +15,98 @@ use plakous_offline_crash_harness::{BoundaryController, runtime_binding};
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
+#[test]
+fn offline_archive_fences_owners_and_live_children_without_archiving_runtime() -> TestResult {
+    let mut f = fixture(false).checked()?;
+    let services = crate::shell::services::Services::for_home(f.paths.clone());
+    let locator = f.record.plakous_locator.ok_or("root locator").checked()?;
+    let operation = SessionOperationId::new("archive:test-hold").checked()?;
+    let held = f
+        .runtime
+        .run(f.runtime.sessions.hold_branch(&operation, locator))
+        .checked()??;
+    assert!(matches!(
+        super::lifecycle::archive_offline(&services, &f.record.id),
+        Err(LifecycleError::Refused(LifecycleRefusal::Open))
+    ));
+    f.runtime.run(held.release()).checked()??;
+    assert!(
+        matches!(super::lifecycle::archive_offline(&services,&f.record.id),Err(LifecycleError::Refused(LifecycleRefusal::Busy{children,..})) if children.contains(&f.child_id))
+    );
+    assert!(!f.product.load(&f.record.id).checked()?.archived);
+    f.tree.abandon_recovery_for_delete(&f.child_id).checked()?;
+    crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
+    super::lifecycle::archive_offline(&services, &f.record.id).checked()?;
+    assert!(f.product.load(&f.record.id).checked()?.archived);
+    AgentSessions::export_history_sqlite(f.paths.runtime_database(), locator).checked()?;
+    // Metadata archival releases every fence; unarchive can reopen the same runtime.
+    let held = f
+        .runtime
+        .run(f.runtime.sessions.hold_branch(&operation, locator))
+        .checked()??;
+    f.runtime.run(held.release()).checked()??;
+    Ok(())
+}
+
+#[test]
+fn deletion_lifecycle_crash_worker() {
+    let Ok(home) = std::env::var("PLAK_LIFECYCLE_CRASH_HOME") else {
+        return;
+    };
+    let paths = crate::home::paths::PlakPaths::explicit(home.into());
+    let id = std::env::var("PLAK_LIFECYCLE_CRASH_SESSION").unwrap();
+    let services = crate::shell::services::Services::for_home(paths);
+    super::lifecycle::delete_confirmed(&services, &id, true).unwrap();
+    panic!("deletion did not reach crash cut");
+}
+
+#[test]
+fn lifecycle_deletion_crash_cuts_finish_without_recovery_or_cascade() -> TestResult {
+    for cut in [
+        "delete_root_archived",
+        "delete_abandon_committed",
+        "delete_child_deleted",
+        "delete_runtime_deleted",
+        "delete_tree_deleted",
+        "delete_before_commit",
+        "delete_after_commit",
+    ] {
+        let mut f = fixture(false).checked()?;
+        let mut unrelated = product_sessions::SessionRecord::new(f.paths.home().to_owned());
+        f.product.commit(&mut unrelated).checked()?;
+        let output = std::process::Command::new(std::env::current_exe().checked()?)
+            .args([
+                "--exact",
+                "commands::session::delete::deletion_tests::deletion_lifecycle_crash_worker",
+                "--nocapture",
+            ])
+            .env("PLAK_LIFECYCLE_CRASH_HOME", f.paths.home())
+            .env("PLAK_LIFECYCLE_CRASH_SESSION", &f.record.id)
+            .env("PLAK_LIFECYCLE_CRASH_CUT", cut)
+            .output()
+            .checked()?;
+        assert_eq!(
+            output.status.code(),
+            Some(91),
+            "cut {cut}: {} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let services = crate::shell::services::Services::for_home(f.paths.clone());
+        if cut == "delete_after_commit" {
+            assert!(matches!(
+                super::lifecycle::delete_confirmed(&services, &f.record.id, true),
+                Err(LifecycleError::Refused(LifecycleRefusal::NotFound))
+            ));
+        } else {
+            super::lifecycle::delete_confirmed(&services, &f.record.id, true).checked()?;
+        }
+        assert!(f.product.load(&f.record.id).is_err());
+        assert!(f.product.load(&unrelated.id).is_ok());
+    }
+    Ok(())
+}
+
 trait Checked<T> {
     fn checked(self) -> TestResult<T>;
 }
@@ -122,6 +214,9 @@ fn delete_without_abandon_flag_still_refuses_recovery_required_tree() -> TestRes
     assert!(refusal.message().contains("need recovery"));
     assert!(refusal.message().contains("--abandon-children"));
     assert!(
+        matches!(&refusal, LifecycleError::Refused(LifecycleRefusal::RecoveryRequiredTree {children,..}) if children.contains(&f.child_id))
+    );
+    assert!(
         f.runtime
             .run(f.runtime.sessions.head_is_quiescent(root))
             .checked()??
@@ -136,6 +231,9 @@ fn delete_without_abandon_flag_still_refuses_recovery_required_tree() -> TestRes
         .ok_or("flagged delete accepted a live child")
         .checked()?;
     assert!(refusal.message().contains(&live.agent_id));
+    assert!(
+        matches!(&refusal, LifecycleError::Refused(LifecycleRefusal::LiveTree {children,..}) if children.contains(&live.agent_id))
+    );
     assert_eq!(
         f.tree.node(&f.child_id).checked()?.status,
         NodeStatus::RecoveryRequired
@@ -311,6 +409,10 @@ fn delete_abandon_flag_never_closes_a_leased_child_obligation() -> TestResult {
             .ok_or("a leased child was abandoned")
             .checked()?;
     assert!(refusal.message().contains("open in a running plak"));
+    assert!(matches!(
+        refusal,
+        LifecycleError::Refused(LifecycleRefusal::Open)
+    ));
     let persisted = crate::store::tree::open_tree_store(&f.paths)
         .checked()?
         .load(&f.record.id)
@@ -418,6 +520,9 @@ fn delete_abandon_flag_refuses_fork_source_recovery() -> TestResult {
         .ok_or("source with a dependent fork was accepted")
         .checked()?;
     assert!(dependency.message().contains("continue from it"));
+    assert!(
+        matches!(&dependency, LifecycleError::Refused(LifecycleRefusal::ForkDependency {dependents,..}) if dependents.contains(&record.id))
+    );
     let refusal = deletion_plan(&f.paths, &mut f.product, &record, locator, true)
         .err()
         .ok_or("fork abandoned source tree")

@@ -1250,7 +1250,9 @@ fn switch_selection(pending: bool) -> Box<SwitchSelection> {
 /// continues the node and records the profile only on a virtual tree.
 #[test]
 fn each_successor_records_the_node_of_the_tree_it_compiles_against() {
-    let source = bound_session("/work/nodes");
+    let mut source = bound_session("/work/nodes");
+    source.title_override = Some("source label".into());
+    source.archived = true;
     assert_eq!(source.node, SessionNode::genesis(&source.id));
     assert_eq!(
         (source.root_profile.as_ref(), source.runner.as_ref()),
@@ -1290,6 +1292,10 @@ fn each_successor_records_the_node_of_the_tree_it_compiles_against() {
         })
         .unwrap();
     assert_eq!(clear.node, SessionNode::genesis(&clear.id));
+    for session in [&fork, &rebind, &stayed, &clear] {
+        assert_eq!(session.title_override, None);
+        assert!(!session.archived);
+    }
     for pending in [false, true] {
         let selection = switch_selection(pending);
         let switched = successor_from_fact(
@@ -1300,6 +1306,8 @@ fn each_successor_records_the_node_of_the_tree_it_compiles_against() {
             branch_locator(12, 13),
         );
         assert_eq!(switched.node, source.node);
+        assert_eq!(switched.title_override, None);
+        assert!(!switched.archived);
         assert_eq!(switched.model.as_deref(), Some("grok-target"));
         assert_eq!(switched.root_profile, Some(selection.root.clone()));
     }

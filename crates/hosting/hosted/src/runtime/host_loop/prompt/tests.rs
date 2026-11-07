@@ -7,6 +7,45 @@
 use crate::surface_protocol::HostEvent;
 use plakous_host_protocol::status::{HostStatusDetail, SteerSource};
 
+#[test]
+fn archived_resident_never_admits_a_prompt_from_its_stale_record() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut config, _) = fresh_injected_attached_host(root.path());
+    let store = std::sync::Arc::new(crate::session_store::MemoryStore::new());
+    config.store = store.clone();
+    let (action_tx, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let mut host =
+        RootActor::open_blocking(config, &actions, crate::runtime::Sender::over(wire), None)
+            .unwrap();
+    action_tx
+        .send(UserAction::Prompt("must not run".into()))
+        .unwrap();
+    let HostStep::Prompt {
+        text,
+        queued_delivery,
+        user_echoed,
+    } = host
+        .block(async |host| host.next_prompt(None).await)
+        .unwrap()
+    else {
+        panic!("prompt")
+    };
+    store.archive_for_test(&host.role.config.session.id);
+    host.block(async |host| {
+        host.run_prompt(text, queued_delivery, user_echoed, None)
+            .await
+    })
+    .unwrap();
+    assert_eq!(host.role.config.session.root_turn_count, 0);
+    assert!(
+        !events
+            .try_iter()
+            .any(|event| matches!(event, HostEvent::PromptStarted(_)))
+    );
+    host.block(async |host| host.release().await).unwrap();
+}
+
 #[cfg(test)]
 mod preparation_compaction_tests;
 #[cfg(test)]

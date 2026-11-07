@@ -4,6 +4,7 @@ mod attached;
 mod binding;
 mod delete;
 pub(crate) mod import_export;
+pub(crate) mod lifecycle;
 mod lookup;
 mod read_only;
 pub(crate) mod rebind;

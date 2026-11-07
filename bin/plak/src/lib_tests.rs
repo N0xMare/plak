@@ -2463,7 +2463,9 @@ fn command_and_attach_workers_share_one_lazy_product_store() {
         let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
         let mut output = Vec::new();
         execute_command(
-            Command::SessionList,
+            Command::SessionList {
+                include_archived: false,
+            },
             &services,
             &mut backend,
             &mut Cursor::new([]),
@@ -2637,7 +2639,9 @@ fn command_store_reopens_after_product_home_replacement() {
     let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
     let mut output = Vec::new();
     execute_command(
-        Command::SessionList,
+        Command::SessionList {
+            include_archived: false,
+        },
         &services,
         &mut backend,
         &mut Cursor::new([]),

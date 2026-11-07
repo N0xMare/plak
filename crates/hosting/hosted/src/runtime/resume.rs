@@ -19,6 +19,10 @@ pub(super) fn emit_resume_choices<P: plakous_host_protocol::ProtocolExtension>(
     sessions: Vec<SessionRecord>,
     in_place: impl Fn(&SessionRecord) -> bool,
 ) {
+    let sessions: Vec<_> = sessions
+        .into_iter()
+        .filter(|session| !session.archived)
+        .collect();
     let total = sessions.len();
     let choices = sessions
         .into_iter()
@@ -32,7 +36,10 @@ pub(super) fn emit_resume_choices<P: plakous_host_protocol::ProtocolExtension>(
                 effort: session.effort,
                 extra: (session.target_selection == TargetSelection::NativePriority)
                     .then(|| "Fast".to_owned()),
-                title: session.title.filter(|title| !title.trim().is_empty()),
+                title: session
+                    .title_override
+                    .or(session.title)
+                    .filter(|title| !title.trim().is_empty()),
                 // The store bounds the projection; the picker clips it again to
                 // the row it actually has.
                 first_prompt: session.first_prompt,

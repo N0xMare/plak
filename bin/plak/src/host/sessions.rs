@@ -615,6 +615,7 @@ mod tests {
             workspace_root: "/w".into(),
             updated_at_unix: 0,
             title: None,
+            archived: false,
             account: Some("codex".into()),
             model: Some("gpt".into()),
             node: plakous_hosted::sessions::SessionNode::genesis("s"),

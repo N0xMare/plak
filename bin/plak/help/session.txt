@@ -1,7 +1,11 @@
 plak session — session utilities
 
 USAGE:
-  plak session list
+  plak session list [--include-archived]
+  plak session rename <full-id> <title>
+  plak session rename <full-id> --clear
+  plak session archive <full-id> [--yes]
+  plak session unarchive <full-id>
   plak session show <session>[.cN]
   plak session log <session>[.cN] [--kind kind] [--tail N (default 100)] [--json]
   plak session recover <session>
@@ -24,6 +28,11 @@ USAGE:
   and imports versions 12 and 11. Both preserve named state. Version 10 and
   older are refused.
   Session IDs accept an unambiguous prefix of at least four characters.
+  rename/archive/unarchive require full session IDs. rename sets a title override;
+  --clear reveals the generated title again. archive hides a quiescent session
+  from ordinary lists and makes it read-only; unarchive starts no work.
+  --include-archived includes hidden sessions in the list. Archive requires
+  confirmation, and refuses live owners, children, processes or unknown activity.
   --abandon-children explicitly retires recovery-required children before delete.
 
   delete removes a session and all of its retained history, with its finished

@@ -276,13 +276,17 @@ pub(super) fn execute_status_all(
 pub(super) fn execute_session_list(
     services: &Services,
     stdout: &mut dyn io::Write,
+    include_archived: bool,
 ) -> CliResult<ProcessOutcome> {
     let paths = services.paths()?;
     let cwd = paths.workspace().map_err(CliFailure::new)?.to_path_buf();
     let sessions = services
         .session_records()?
         .list_for_workspace(&cwd)
-        .map_err(CliFailure::from)?;
+        .map_err(CliFailure::from)?
+        .into_iter()
+        .filter(|session| include_archived || !session.archived)
+        .collect::<Vec<_>>();
     if sessions.is_empty() {
         writeln!(stdout, "No sessions in this workspace.")
             .map_err(|_| CliFailure::new("stdout failed"))?;

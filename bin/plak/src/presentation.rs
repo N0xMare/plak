@@ -657,7 +657,12 @@ pub(crate) fn transcript_entry(
 
 /// First meaningful transcript snippet for session lists / resume picker.
 pub(crate) fn session_preview_line(session: &product_sessions::SessionRecord) -> String {
-    if let Some(title) = session.title.as_deref().filter(|t| !t.is_empty()) {
+    if let Some(title) = session
+        .title_override
+        .as_deref()
+        .or(session.title.as_deref())
+        .filter(|t| !t.is_empty())
+    {
         return title.chars().take(48).collect();
     }
     for row in session.transcript.iter() {

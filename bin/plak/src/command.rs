@@ -170,7 +170,20 @@ pub(crate) enum Command {
         account: Option<AccountRef>,
         session_id: Option<String>,
     },
-    SessionList,
+    SessionList {
+        include_archived: bool,
+    },
+    SessionRename {
+        id: String,
+        title: Option<String>,
+    },
+    SessionUnarchive {
+        id: String,
+    },
+    SessionArchive {
+        id: String,
+        yes: bool,
+    },
     SessionShow {
         id: String,
     },
@@ -448,7 +461,10 @@ impl Command {
             Self::Mcp(_) => "mcp",
             Self::Runner(_) => "runner",
             Self::Usage { .. } => "usage",
-            Self::SessionList
+            Self::SessionList { .. }
+            | Self::SessionRename { .. }
+            | Self::SessionUnarchive { .. }
+            | Self::SessionArchive { .. }
             | Self::SessionShow { .. }
             | Self::SessionRecover { .. }
             | Self::SessionExport { .. }
@@ -501,7 +517,10 @@ pub(crate) fn command_needs_product_state(command: &Command) -> bool {
             | Command::ContinueSession { .. }
             | Command::Agent { .. }
             | Command::Host(_)
-            | Command::SessionList
+            | Command::SessionList { .. }
+            | Command::SessionRename { .. }
+            | Command::SessionUnarchive { .. }
+            | Command::SessionArchive { .. }
             | Command::SessionRecover { .. }
             | Command::SessionExport { .. }
             | Command::SessionImport { .. }

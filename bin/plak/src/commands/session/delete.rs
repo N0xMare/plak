@@ -1,5 +1,6 @@
 //! Session deletion and garbage collection.
 
+use super::lifecycle::{LifecycleError, LifecycleRefusal};
 use super::lookup::load_exact_product_session;
 use crate::store::sessions as product_sessions;
 use plakous::sessions::{AgentSessions, AgentSessionsErrorKind, SessionLocator};
@@ -60,45 +61,57 @@ fn read_confirmation(operation: &str, stdin: &mut dyn io::BufRead) -> CliResult<
     Ok(response)
 }
 
-/// Why `plak session delete` refused to delete a session.
-#[derive(Debug, Eq, PartialEq)]
-enum SessionDeleteRefusal {
-    /// A running plak owns the session (or one of its finished children): its
-    /// runtime branch lease is live.
-    Open,
-    /// The session's agent tree has children still running or resumable.
-    LiveTree { children: Vec<String> },
-    /// The session's agent tree has children whose state needs recovery.
-    RecoveryRequiredTree { children: Vec<String> },
-    /// Other sessions continue from this one or share its runtime history.
-    ForkDependency { dependents: Vec<String> },
+type SessionDeleteRefusal = LifecycleRefusal;
+
+fn delete_refused(_id: &str, refusal: &SessionDeleteRefusal) -> LifecycleError {
+    LifecycleError::Refused(refusal.clone())
 }
 
-impl std::fmt::Display for SessionDeleteRefusal {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Open => formatter.write_str("it is open in a running plak; close it there first"),
-            Self::LiveTree { children } => write!(
-                formatter,
-                "its agent tree has child agents still running or resumable ({}); close them first",
-                children.join(", ")
-            ),
-            Self::RecoveryRequiredTree { children } => write!(
-                formatter,
-                "its agent tree has child agents that need recovery ({}); resolve them first (u in the Agents tab retries one) or delete with --abandon-children",
-                children.join(", ")
-            ),
-            Self::ForkDependency { dependents } => write!(
-                formatter,
-                "sessions {} continue from it or share its runtime history",
-                dependents.join(", ")
-            ),
+fn cli_delete_error(id: &str, error: LifecycleError) -> CliFailure {
+    match error {
+        LifecycleError::Refused(reason) => {
+            CliFailure::new(format!("session {id} cannot be deleted: {reason}"))
         }
+        LifecycleError::Failure(error) => error,
     }
 }
 
-fn delete_refused(id: &str, refusal: &SessionDeleteRefusal) -> CliFailure {
-    CliFailure::new(format!("session {id} cannot be deleted: {refusal}"))
+pub(super) fn delete_confirmed(
+    services: &crate::shell::services::Services,
+    id: &str,
+    abandon_children: bool,
+) -> Result<(), LifecycleError> {
+    let paths = services.paths()?;
+    let mut product = crate::store::ProductStore::open(paths)
+        .map_err(|error| CliFailure::new(error.to_string()))?;
+    product.lifecycle_metadata(id)?;
+    let record = services
+        .session_records()?
+        .load(id)
+        .map_err(CliFailure::new)?;
+    if let Some(successor) = crate::carry::pending_successor(services, &record)? {
+        return Err(delete_refused(
+            id,
+            &SessionDeleteRefusal::fork_dependency(vec![successor.id]),
+        ));
+    }
+    if let Some(locator) = record.plakous_locator {
+        let runtime = RuntimeDeletion::new(services)?;
+        delete_confirmed_session(
+            paths,
+            &mut product,
+            &runtime,
+            &record,
+            locator,
+            abandon_children,
+        )?;
+    } else {
+        // A never-opened reservation owns no runtime history or tree.
+        product
+            .delete_session(id, record.store_revision)
+            .map_err(CliFailure::new)?;
+    }
+    Ok(())
 }
 
 /// What deleting one session removes besides its own runtime history: the
@@ -136,17 +149,11 @@ pub(crate) fn delete_session(
         .ok_or_else(|| CliFailure::new("session has no exact canonical Plakous locator"))?;
     let mut product = crate::store::ProductStore::open(paths)
         .map_err(|error| CliFailure::new(error.to_string()))?;
-    deletion_plan(paths, &mut product, &record, locator, abandon_children)?;
+    deletion_plan(paths, &mut product, &record, locator, abandon_children)
+        .map_err(|error| cli_delete_error(&record.id, error))?;
     confirm_deletion(&record.id, confirmed, stdin, stderr)?;
-    let runtime = RuntimeDeletion::new(services)?;
-    delete_confirmed_session(
-        paths,
-        &mut product,
-        &runtime,
-        &record,
-        locator,
-        abandon_children,
-    )?;
+    super::lifecycle::delete_confirmed(services, &record.id, abandon_children)
+        .map_err(|error| cli_delete_error(&record.id, error))?;
     writeln!(stdout, "deleted session {}", record.id).map_err(|_| CliFailure::new("stdout failed"))
 }
 
@@ -175,7 +182,7 @@ fn delete_confirmed_session(
     record: &product_sessions::SessionRecord,
     locator: SessionLocator,
     abandon_children: bool,
-) -> CliResult<Reclaimed> {
+) -> Result<Reclaimed, LifecycleError> {
     let mut plan = deletion_plan(paths, product, record, locator, abandon_children)?;
     let settled_children = plan
         .children
@@ -185,6 +192,8 @@ fn delete_confirmed_session(
         .collect::<Vec<_>>();
     runtime.refuse_unsettled_children(&record.id, &settled_children)?;
     let root = runtime.archive(&record.id, locator)?;
+    #[cfg(test)]
+    crate::store::lifecycle_crash_cut("delete_root_archived");
     // Fence every unresolved child before closing its durable obligation. A
     // held lease still refuses explicit abandonment; no recovery is executed.
     let mut archived_children = std::collections::BTreeMap::new();
@@ -194,28 +203,25 @@ fn delete_confirmed_session(
         }
     }
     publish_abandoned_children(paths, &mut plan)?;
+    #[cfg(test)]
+    crate::store::lifecycle_crash_cut("delete_abandon_committed");
     let mut reclaimed = Reclaimed::default();
     for (agent_id, child) in &plan.children {
         let archived = match archived_children.remove(agent_id) {
             Some(archived) => Ok(archived),
             None => runtime.archive(&record.id, *child),
         };
-        let child = archived
-            .and_then(|archived| {
-                remove_job_outputs(paths, &archived)?;
-                runtime.delete(archived)
-            })
-            .map_err(|error| {
-                CliFailure::new(format!(
-                    "child agent {agent_id} of session {}: {}",
-                    record.id,
-                    error.message()
-                ))
-            })?;
+        let archived = archived?;
+        remove_job_outputs(paths, &archived)?;
+        let child = runtime.delete(archived)?;
+        #[cfg(test)]
+        crate::store::lifecycle_crash_cut("delete_child_deleted");
         reclaimed.add(child);
     }
     remove_job_outputs(paths, &root)?;
     reclaimed.add(runtime.delete(root)?);
+    #[cfg(test)]
+    crate::store::lifecycle_crash_cut("delete_runtime_deleted");
     if let Some((tree_id, revision)) = &plan.tree {
         use plakous_recursive_subagents::tree::TreeStore as _;
         crate::home::state_artifacts::remember_deleted_tree(paths, tree_id)
@@ -229,6 +235,8 @@ fn delete_confirmed_session(
                 CliFailure::new(format!("agent tree deletion failed: {}", error.detail))
             })?;
     }
+    #[cfg(test)]
+    crate::store::lifecycle_crash_cut("delete_tree_deleted");
     // The tree id of a session's own tree is the session id. Deleting by that
     // id is a no-op for a fork (its acknowledgements live on the source tree)
     // and idempotent when gc retries after the tree rows are already gone.
@@ -310,14 +318,14 @@ fn deletion_plan(
     record: &product_sessions::SessionRecord,
     locator: SessionLocator,
     abandon_children: bool,
-) -> CliResult<DeletionPlan> {
+) -> Result<DeletionPlan, LifecycleError> {
     let dependents = product
         .session_dependents(&record.id, locator.session_id())
         .map_err(CliFailure::new)?;
     if !dependents.is_empty() {
         return Err(delete_refused(
             &record.id,
-            &SessionDeleteRefusal::ForkDependency { dependents },
+            &SessionDeleteRefusal::fork_dependency(dependents),
         ));
     }
     let (tree_id, observed) = crate::topology_product::inspect_session_tree(paths, record)?;
@@ -336,7 +344,7 @@ fn deletion_plan(
         if node.parent_agent_id.is_none() {
             continue;
         }
-        let label = crate::cli_output::safe_terminal_text(&node.agent_id, 64);
+        let label = node.agent_id.clone();
         if node.status == plakous_host_protocol::topology::NodeStatus::RecoveryRequired {
             recovering.push(label.clone());
             if !may_abandon {
@@ -358,15 +366,13 @@ fn deletion_plan(
     if !recovering.is_empty() && !may_abandon {
         return Err(delete_refused(
             &record.id,
-            &SessionDeleteRefusal::RecoveryRequiredTree {
-                children: recovering,
-            },
+            &SessionDeleteRefusal::recovery_required_tree(recovering),
         ));
     }
     if !live.is_empty() {
         return Err(delete_refused(
             &record.id,
-            &SessionDeleteRefusal::LiveTree { children: live },
+            &SessionDeleteRefusal::live_tree(live),
         ));
     }
     if tree_id != record.id {
@@ -474,7 +480,7 @@ impl RuntimeDeletion {
         &self,
         session_id: &str,
         children: &[(String, SessionLocator)],
-    ) -> CliResult<()> {
+    ) -> Result<(), LifecycleError> {
         let mut unsettled = Vec::new();
         for (agent_id, child) in children {
             let mut head = *child;
@@ -494,14 +500,16 @@ impl RuntimeDeletion {
                         if current == head {
                             return Err(CliFailure::new(format!(
                                 "child agent {agent_id} runtime head could not be read: {error}"
-                            )));
+                            ))
+                            .into());
                         }
                         head = current;
                     }
                     Err(error) => {
                         return Err(CliFailure::new(format!(
                             "child agent {agent_id} runtime head could not be read: {error}"
-                        )));
+                        ))
+                        .into());
                     }
                 }
             }
@@ -511,16 +519,18 @@ impl RuntimeDeletion {
         }
         Err(delete_refused(
             session_id,
-            &SessionDeleteRefusal::LiveTree {
-                children: unsettled,
-            },
+            &SessionDeleteRefusal::live_tree(unsettled),
         ))
     }
 
     /// Archives the runtime session at its current head. A live owner's lease
     /// refuses it as open; a session an earlier run already archived (or
     /// deleted) is carried on to its deletion.
-    fn archive(&self, session_id: &str, recorded: SessionLocator) -> CliResult<RuntimeArchive> {
+    fn archive(
+        &self,
+        session_id: &str,
+        recorded: SessionLocator,
+    ) -> Result<RuntimeArchive, LifecycleError> {
         let mut head = recorded;
         let mut stale_retried = false;
         loop {
@@ -543,7 +553,8 @@ impl RuntimeDeletion {
                 Err(error) => {
                     return Err(CliFailure::new(format!(
                         "runtime session archive failed: {error}"
-                    )));
+                    ))
+                    .into());
                 }
             }
         }
@@ -843,6 +854,7 @@ fn finish_interrupted_deletes(
             // Gone by now when a record deleted above took it as its child.
             runtime
                 .delete(RuntimeArchive::Earlier(archived.session_id()))
+                .map_err(LifecycleError::from)
                 .map(|report| {
                     let found = report.is_some();
                     reclaimed.add(report);

@@ -47,6 +47,11 @@ fn load_product_session(
         }
     })?;
     admit(&record)?;
+    if for_work && record.archived {
+        return Err(CliFailure::new(
+            "session_archived: unarchive this session before admitting work",
+        ));
+    }
     let requested = std::fs::canonicalize(&cwd).unwrap_or(cwd);
     let recorded = std::fs::canonicalize(&record.workspace_root)
         .unwrap_or_else(|_| record.workspace_root.clone());

@@ -19,6 +19,7 @@ pub struct DirectoryEntry {
     pub workspace_root: PathBuf,
     pub updated_at_unix: u64,
     pub title: Option<String>,
+    pub archived: bool,
     pub account: Option<String>,
     pub model: Option<String>,
     pub node: plakous_hosted::sessions::SessionNode,
@@ -46,6 +47,25 @@ impl ProductStore {
     ///
     /// The read failed or a row does not decode.
     pub fn directory(&mut self, workspace: Option<&Path>) -> Result<Vec<DirectoryEntry>, String> {
+        self.directory_with_archived(workspace, false)
+    }
+
+    /// Include archived records only when explicitly requested, before limiting rows.
+    pub fn directory_with_archived(
+        &mut self,
+        workspace: Option<&Path>,
+        include_archived: bool,
+    ) -> Result<Vec<DirectoryEntry>, String> {
+        self.directory_filtered(workspace, None, include_archived)
+    }
+
+    /// Runner ids, workspace and archived visibility all filter before the limit.
+    pub fn directory_filtered(
+        &mut self,
+        workspace: Option<&Path>,
+        runner_id: Option<&str>,
+        include_archived: bool,
+    ) -> Result<Vec<DirectoryEntry>, String> {
         let identity = workspace.map(|workspace| {
             sessions::workspace_identity(workspace)
                 .to_string_lossy()
@@ -54,26 +74,30 @@ impl ProductStore {
         let mut statement = self
             .connection
             .prepare(
-                "SELECT sessions.id,sessions.workspace_root,sessions.updated_at,sessions.title,sessions.account,sessions.model,sessions.node_tree_id,sessions.node_agent_id,sessions.root_profile,CASE WHEN v.session_id IS NULL THEN sessions.locator ELSE v.head_locator END FROM sessions LEFT JOIN session_views v ON v.session_id=sessions.id WHERE ?1 IS NULL OR sessions.workspace_identity=?1 ORDER BY sessions.updated_at DESC, sessions.id ASC LIMIT ?2",
+                "SELECT sessions.id,sessions.workspace_root,sessions.updated_at,COALESCE(sessions.title_override,sessions.title),sessions.account,sessions.model,sessions.node_tree_id,sessions.node_agent_id,sessions.root_profile,CASE WHEN v.session_id IS NULL THEN sessions.locator ELSE v.head_locator END,sessions.archived FROM sessions LEFT JOIN session_views v ON v.session_id=sessions.id WHERE (?1 IS NULL OR sessions.workspace_identity=?1) AND (?3 OR sessions.archived=0) AND (?4 IS NULL OR COALESCE(json_extract(sessions.runner_display,'$.runner_id'),'local')=?4) ORDER BY sessions.updated_at DESC, sessions.id ASC LIMIT ?2",
             )
             .map_err(|_| "could not query the session directory".to_owned())?;
         let rows = statement
-            .query_map((identity, MAX_DIRECTORY_ROWS), |row| {
-                Ok(DirectoryEntry {
-                    id: row.get(0)?,
-                    workspace_root: PathBuf::from(row.get::<_, String>(1)?),
-                    updated_at_unix: from_i64(row.get(2)?)?,
-                    title: row.get(3)?,
-                    account: row.get(4)?,
-                    model: row.get(5)?,
-                    node: decode_node(row, 6)?,
-                    root_profile: decode_root_profile(row, 8)?,
-                    locator: row
-                        .get::<_, Option<String>>(9)?
-                        .map(|value| value.parse().map_err(|_| rusqlite::Error::InvalidQuery))
-                        .transpose()?,
-                })
-            })
+            .query_map(
+                (identity, MAX_DIRECTORY_ROWS, include_archived, runner_id),
+                |row| {
+                    Ok(DirectoryEntry {
+                        id: row.get(0)?,
+                        workspace_root: PathBuf::from(row.get::<_, String>(1)?),
+                        updated_at_unix: from_i64(row.get(2)?)?,
+                        title: row.get(3)?,
+                        archived: row.get(10)?,
+                        account: row.get(4)?,
+                        model: row.get(5)?,
+                        node: decode_node(row, 6)?,
+                        root_profile: decode_root_profile(row, 8)?,
+                        locator: row
+                            .get::<_, Option<String>>(9)?
+                            .map(|value| value.parse().map_err(|_| rusqlite::Error::InvalidQuery))
+                            .transpose()?,
+                    })
+                },
+            )
             .map_err(|_| "could not query the session directory".to_owned())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| "a session directory row is invalid".to_owned())?;

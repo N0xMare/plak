@@ -168,6 +168,7 @@ impl ProductStore {
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|error| super::write_error(error, "product store write failed"))?;
+        super::lifecycle::admit_work(&tx, session_id)?;
         insert_submission(&tx, &mut self.verified_submissions, session_id, submission)?;
         tx.commit()
             .map_err(|error| super::write_error(error, "product store write failed"))
@@ -181,9 +182,12 @@ impl ProductStore {
     ) -> Result<(), RecordStoreError> {
         self.durability(true)?;
         let (reason, selection) = encode_workflow_kind(&request.kind);
-        let changed = self
+        let tx = self
             .connection
-            .execute(
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| super::write_error(error, "product store write failed"))?;
+        super::lifecycle::admit_work(&tx, session_id)?;
+        let changed = tx.execute(
                 "INSERT INTO workflow_requests(session_id,operation_id,source_locator,kind,compact_reason,selection,anchor) VALUES(?1,?2,?3,?4,?5,?6,COALESCE((SELECT applied_seq FROM projector_cursors WHERE session_id=?1),0)) ON CONFLICT(operation_id) DO NOTHING",
                 params![
                     session_id,
@@ -194,6 +198,8 @@ impl ProductStore {
                     selection,
                 ],
             )
+            .map_err(|error| super::write_error(error, "product store write failed"))?;
+        tx.commit()
             .map_err(|error| super::write_error(error, "product store write failed"))?;
         if changed == 0 {
             let existing = self.load_intents(session_id)?;
@@ -227,6 +233,7 @@ impl ProductStore {
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|error| super::write_error(error, "product store write failed"))?;
+        super::lifecycle::admit_work(&tx, &session.id)?;
         let (reason, selection) = encode_workflow_kind(&request.kind);
         let inserted = tx.execute(
             "INSERT INTO workflow_requests(session_id,operation_id,source_locator,kind,compact_reason,selection,anchor) VALUES(?1,?2,?3,?4,?5,?6,COALESCE((SELECT applied_seq FROM projector_cursors WHERE session_id=?1),0)) ON CONFLICT(operation_id) DO NOTHING",

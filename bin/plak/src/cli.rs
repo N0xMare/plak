@@ -872,7 +872,25 @@ enum TreeAction {
 #[derive(Debug, Subcommand)]
 enum SessionAction {
     /// List sessions for the current workspace.
-    List,
+    List {
+        #[arg(long)]
+        include_archived: bool,
+    },
+    /// Set a home-local title override, or clear it with --clear.
+    Rename {
+        id: Option<String>,
+        title: Option<String>,
+        #[arg(long, conflicts_with = "title")]
+        clear: bool,
+    },
+    /// Make an archived session writable again, without starting work.
+    Unarchive { id: Option<String> },
+    /// Hide a dormant, quiescent session and make it read-only.
+    Archive {
+        id: Option<String>,
+        #[arg(long)]
+        yes: bool,
+    },
     /// Show session summary + event counts.
     Show { id: Option<String> },
     /// Print agent-readable event log (JSONL).
@@ -938,9 +956,24 @@ enum SessionAction {
 impl SessionAction {
     fn into_command(self) -> Result<Command, String> {
         match self {
-            Self::List => Ok(Command::SessionList),
+            Self::List { include_archived } => Ok(Command::SessionList { include_archived }),
+            Self::Rename {
+                id: Some(id),
+                title,
+                clear,
+            } => {
+                if title.is_none() && !clear {
+                    return Err("session rename needs a title or --clear".to_owned());
+                }
+                Ok(Command::SessionRename { id, title })
+            }
+            Self::Unarchive { id: Some(id) } => Ok(Command::SessionUnarchive { id }),
+            Self::Archive { id: Some(id), yes } => Ok(Command::SessionArchive { id, yes }),
             // A bare leaf routes to the parent group's help.
             Self::Show { id: None }
+            | Self::Rename { id: None, .. }
+            | Self::Unarchive { id: None }
+            | Self::Archive { id: None, .. }
             | Self::Log { id: None, .. }
             | Self::Recover { id: None }
             | Self::Export { id: None, .. }

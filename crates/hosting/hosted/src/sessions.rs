@@ -175,6 +175,10 @@ pub struct SessionRecord {
     /// reconstructed from account/model strings or current defaults.
     pub target_selection: ProductTargetSelection,
     pub title: Option<String>,
+    /// Home-local operator label, never part of an export or binding.
+    pub title_override: Option<String>,
+    /// Archived sessions remain inspectable but admit no work.
+    pub archived: bool,
     /// Product-only lineage for branch presentation; Plakous remains canonical authority.
     pub source_product_session_id: Option<String>,
     pub source_workflow_operation_id: Option<String>,
@@ -346,6 +350,8 @@ impl SessionRecord {
             composition: ProductCompositionSelection::FollowCatalog,
             target_selection: ProductTargetSelection::Native,
             title: None,
+            title_override: None,
+            archived: false,
             source_product_session_id: None,
             source_workflow_operation_id: None,
             plakous_locator: None,

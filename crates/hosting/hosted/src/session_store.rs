@@ -243,6 +243,8 @@ pub trait SessionRecordStore: Send + Sync {
     ) -> Result<Vec<crate::sessions::TranscriptRow>, RecordStoreError>;
 
     /// Records rooted at `workspace`, newest first, as listing projections.
+    /// Includes archived records for lineage and dependency authority; faces
+    /// explicitly filter them before presenting resume choices.
     ///
     /// # Errors
     /// A message when the store cannot be read.
@@ -353,6 +355,20 @@ mod memory {
     }
 
     impl MemoryStore {
+        #[cfg(test)]
+        #[allow(
+            clippy::expect_used,
+            reason = "fixture requires an already stored session"
+        )]
+        pub(crate) fn archive_for_test(&self, id: &str) {
+            self.state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .records
+                .get_mut(id)
+                .expect("stored test session")
+                .archived = true;
+        }
         /// Terminal observations emitted by winning projector transactions.
         pub fn projected_usage_emissions(
             &self,
@@ -678,8 +694,14 @@ mod memory {
                 None,
             )?;
         }
+        let operator_fields =
+            current.map(|record| (record.title_override.clone(), record.archived));
         sync_queue(&mut bindings, current, session)?;
         persist_notices(state, session, expected == 0)?;
+        if let Some((title_override, archived)) = operator_fields {
+            session.title_override = title_override;
+            session.archived = archived;
+        }
         session.transcript.mark_committed();
         let mut stored = session.clone();
         stored.store_revision = next;

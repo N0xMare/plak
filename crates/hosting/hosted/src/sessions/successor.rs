@@ -22,6 +22,8 @@ impl SessionRecord {
         target.id = request.successor_product_id();
         target.create_operation_id = format!("plak:create:{}", target.id);
         target.store_revision = 0;
+        target.title_override = None;
+        target.archived = false;
         target.created_at_unix = successor.created_at_unix;
         target.updated_at_unix = successor.created_at_unix;
         target.source_product_session_id = Some(self.id.clone());
@@ -92,6 +94,8 @@ impl SessionRecord {
         target.source_workflow_operation_id = Some(request.operation_id.clone());
         target.plakous_locator = Some(locator);
         target.title = None;
+        target.title_override = None;
+        target.archived = false;
         target.transcript = crate::sessions::ProductTranscript::default();
         target.first_prompt = None;
         target.prompt_history.clear();

@@ -323,7 +323,7 @@ another session's jobs.
   secrets/mcp-oauth/<id>/     MCP server OAuth logins, one private record each (§2.3)
   cache/api-models/<account>-<fingerprint>.json  API model lists, 6 h TTL (§2.3), disposable
   state/
-    r27.e37.p36.t10/            this build's state (§2.5)
+    r27.e37.p37.t10/            this build's state (§2.5)
       sessions/<id>.events.jsonl  append-only agent-readable event log
       runtime.sqlite3             Plakous semantic runtime and change feed, schema 27, epoch 37
       product.sqlite3             Plak intents and feed-derived views, schema 36
@@ -599,7 +599,7 @@ them for a session is the rebuild. All keyed views cascade with the session.
 
 Workflow requests and feed-derived workflow completions are the only workflow
 model. Session records carry no workflow journal or two-phase workflow states,
-and product schema 36 has no legacy `workflows` table. Recovery
+and product schema 37 has no legacy `workflows` table. Recovery
 blocking reads the runtime's context disposition, not a product journal flag.
 
 `session show` reports the projected tool-call counter alongside transcript size.
@@ -913,7 +913,7 @@ recovery authority.
 Plak does not migrate state. Each build keeps its state in
 `~/.plak/state/<key>/`, where the key names every persisted format the build
 reads: `r<runtime schema>.e<runtime format epoch>.p<product schema>.t<tree
-schema>`, for example `r27.e37.p36.t10`. The key is derived from the stores'
+schema>`, for example `r27.e37.p37.t10`. The key is derived from the stores'
 own version constants, never hand-bumped, so a format change cannot forget to
 move it. A build therefore never finds another build's files in its own
 directory, and a whole-store incompatibility never blocks startup. State-directory
@@ -1523,6 +1523,27 @@ snapshot exists, a paid compaction fallback is not offered.
 
 #### 2.5.2 Deleting a session
 
+Session lifecycle metadata is home-local. A nullable `title_override` sets or
+clears the operator's label without changing the generated `title`, history or
+binding. Non-null labels contain 1–128 Unicode scalars, at most 512 UTF-8 bytes,
+no control characters, and at least one non-whitespace character. They are never
+trimmed or truncated, and may change while the session is busy or archived.
+The CLI exposes `plak session rename <full-id> <title>` and
+`plak session rename <full-id> --clear`. `plak session unarchive <full-id>`
+clears only the archive flag and starts no work.
+`plak session archive <full-id> [--yes]` confirms before hiding the session.
+
+Archive is reversible and hides a session from default lists and pickers.
+Explicit archived-inclusive lists filter before applying row limits. An archived
+session is read-only until explicitly unarchived; inspection must not open its
+runtime, recover, drain its queue or execute a continuation. Rename, unarchive
+and guarded delete remain available. Repeating the archive state is a no-op.
+Archive refuses a busy turn, any live child, a running process, or incomplete
+running-state evidence. The host holds the whole-tree admission barrier from
+that check through the durable metadata commit. Unarchive starts nothing.
+For deletion through the host, a busy resident owner is refused, while an idle
+resident owner is released before the same confirmed deletion service below.
+
 `plak session delete <id> [--yes] [--abandon-children]` removes one session and all of its retained
 runtime history. It is a remedy when logical retention bounds are full; physical
 disk exhaustion may first require freeing disk space: Plakous never
@@ -1654,6 +1675,14 @@ not count.
 
 ### 2.6 Intents, views, and the projector
 
+Without a host, archive takes non-executing runtime branch leases on the root
+and every finished child through the activity read and metadata commit. A live
+lease refuses open; unresolved jobs refuse unknown running state. A reservation
+that never had a runtime branch also refuses `Busy {state_unknown: true}`
+offline: no existing branch can fence a concurrent first creation. A running
+host can serialize that reservation and archive it. Reversible product archive
+never uses deletion's irreversible runtime archive operation.
+
 Projector reads are planned only for records on the product session's followed
 lineage (or its initial creation record); sibling-branch facts advance the
 cursor without loading their checkpoint contents. Missing required reads still
@@ -1686,6 +1715,7 @@ view, and nothing is both.
 | Session record of a fork or rebind successor | view | the `Branched` record that published it, joined with the fork or rebind request intent | written by the source projector: identities derived from the request's operation id, locator from the branch record; when eligible it also writes seeded successor views/cursor at the branch sequence, otherwise the successor rebuilds from its own lineage |
 | Frozen root tools: when the session was created on its `[root] agent` template's tuple, the template's name, account, model and tools list, the canonical tables they reach, and the MCP tool records listed then, each with the placement its server ran under; otherwise none (chapter 03 §3) | intent | `plak:create:<id>` | written once, with the locator, by the first runtime creation of a created, imported or cleared session; successors copy the source's; never rewritten |
 | `updated_at` | intent | — | stamped by the host on each operator action that writes an intent of the session |
+| `title_override`, `archived` | intent | product-session id | home-local presentation/admission metadata; fresh successors and imports start with None/false; never exported. Separate revision-fenced, serialized writes preserve runtime projections; runtime saves never overwrite these columns |
 | `first_prompt` | not stored | — | a read projection of the first user row of the transcript view, for pickers and lists |
 | Selection: account, model, effort, composition, target selection | intent | the create request, then each rebind request | the effective selection is a view: the selection of the request whose `WorkflowSettled { Published }` the successor was created from, else the creation selection |
 | Head locator | view | `Created`, `Advanced`, `Branched` on the session's branch | the checkpoint of the newest applied record on that branch |

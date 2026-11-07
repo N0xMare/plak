@@ -821,7 +821,14 @@ fn product_command_argv_matrix() {
         (&["config", "untrust"], |c| {
             matches!(c, Command::ConfigUntrust)
         }),
-        (&["session", "list"], |c| matches!(c, Command::SessionList)),
+        (&["session", "list"], |c| {
+            matches!(
+                c,
+                Command::SessionList {
+                    include_archived: false
+                }
+            )
+        }),
         (
             &["session", "show", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"],
             |c| matches!(c, Command::SessionShow { id } if id.starts_with("aaaa")),

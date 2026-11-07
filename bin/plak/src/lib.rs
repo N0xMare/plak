@@ -1120,7 +1120,40 @@ fn execute_command(
         Command::AccountsRemove { account, confirmed } => {
             commands::login::remove_account(backend, &account, confirmed, stdin, stdout, stderr)
         }
-        Command::SessionList => dispatch::execute_session_list(services, stdout),
+        Command::SessionList { include_archived } => {
+            dispatch::execute_session_list(services, stdout, include_archived)
+        }
+        Command::SessionRename { id, title } => {
+            commands::session::lifecycle::rename_session(services, &id, title.as_deref())?;
+            writeln!(stdout, "renamed session {id}")
+                .map_err(|_| CliFailure::new("stdout failed"))?;
+            Ok(ProcessOutcome::Success)
+        }
+        Command::SessionUnarchive { id } => {
+            let activity = commands::session::lifecycle::SessionActivity {
+                turn: false,
+                children: Vec::new(),
+                processes: Vec::new(),
+                state_unknown: true,
+            };
+            commands::session::lifecycle::set_archived(services, &id, false, &activity)?;
+            writeln!(stdout, "unarchived session {id}")
+                .map_err(|_| CliFailure::new("stdout failed"))?;
+            Ok(ProcessOutcome::Success)
+        }
+        Command::SessionArchive { id, yes } => {
+            commands::session::confirm_session_mutation(
+                "session archive",
+                &id,
+                yes,
+                stdin,
+                stderr,
+            )?;
+            commands::session::lifecycle::archive_offline(services, &id)?;
+            writeln!(stdout, "archived session {id}")
+                .map_err(|_| CliFailure::new("stdout failed"))?;
+            Ok(ProcessOutcome::Success)
+        }
         Command::SessionShow { id } => show_session_read_only(services.paths()?, &id, stdout),
         Command::SessionRecover { id } => {
             let record = load_admitted_product_session(

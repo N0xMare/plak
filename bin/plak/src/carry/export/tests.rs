@@ -64,6 +64,27 @@ fn settled_export_matches_the_writable_projector_path() {
     let record = records.load(&record.id).unwrap();
     assert!(current_projection(&paths, &record).unwrap().is_some());
     let mut read_only = export_session(&paths, &record).unwrap();
+    // Lifecycle metadata is home-local: neither overrides nor archival may
+    // alter a v12 document, even a single serialized byte.
+    let original_bytes = serde_json::to_vec(&read_only).unwrap();
+    let mut metadata = crate::store::ProductStore::open(&paths).unwrap();
+    metadata
+        .set_title_override(&record.id, Some("operator label"))
+        .unwrap();
+    metadata.set_archived(&record.id, true).unwrap();
+    let renamed = records.load(&record.id).unwrap();
+    assert_eq!(
+        serde_json::to_vec(&export_session(&paths, &renamed).unwrap()).unwrap(),
+        original_bytes
+    );
+    assert_eq!(crate::carry::VERSION, 12);
+    let imported = export_session(&paths, &renamed)
+        .unwrap()
+        .into_import()
+        .unwrap()
+        .record;
+    assert_eq!(imported.title_override, None);
+    assert!(!imported.archived);
     let mut writable = export_after_projection(&paths, &record).unwrap();
     read_only.local_digest = None;
     writable.local_digest = None;

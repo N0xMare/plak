@@ -50,6 +50,11 @@ pub(crate) fn load_for_work(
     record: SessionRecord,
     stderr: &mut dyn std::io::Write,
 ) -> CliResult<SessionRecord> {
+    if record.archived {
+        return Err(CliFailure::new(
+            "session_archived: unarchive this session before settling a carry",
+        ));
+    }
     let workspace = record.workspace_root.clone();
     let mut note = None;
     let record = resume(services, Some(&workspace), record, &mut note)?;
@@ -94,6 +99,11 @@ pub(crate) fn resume(
     note: &mut Option<String>,
 ) -> CliResult<SessionRecord> {
     let mut notes = note.take().into_iter().collect::<Vec<_>>();
+    if record.archived {
+        return Err(CliFailure::new(
+            "session_archived: unarchive this session before settling a carry",
+        ));
+    }
     if let Some(workspace) = workspace {
         notes.extend(settle_workspace(services, workspace));
     }
@@ -118,6 +128,11 @@ pub(crate) fn resolve_open(
     let mut record = record;
     let mut notes = Vec::new();
     for _ in 0..MAX_FOLLOWED {
+        if record.archived {
+            return Err(CliFailure::new(
+                "session_archived: unarchive this session before settling a carry",
+            ));
+        }
         if record.carry_intent.is_some() && record.plakous_locator.is_none() {
             record = current_record(services, &record)?;
         }
@@ -233,7 +248,9 @@ pub(crate) fn settle_workspace(
     };
     records
         .into_iter()
-        .filter(|record| record.carry_intent.is_some() && record.plakous_locator.is_none())
+        .filter(|record| {
+            !record.archived && record.carry_intent.is_some() && record.plakous_locator.is_none()
+        })
         .filter_map(|record| match store.load(&record.id) {
             Ok(record) => Some(match settle(services, record) {
                 Ok(

@@ -179,7 +179,7 @@ fn a_cross_connection_writer_moves_the_projection_cursor_without_store_failure()
 
 #[test]
 fn historical_clear_and_submissions_are_consumed_without_withdrawal_after_retention() {
-    assert_eq!(crate::store::SCHEMA_VERSION, 36);
+    assert_eq!(crate::store::SCHEMA_VERSION, 37);
     let root = tempdir().unwrap();
     let (mut store, id) = store_with_session(root.path());
     let mut source = store.load(&id).unwrap();
@@ -772,7 +772,7 @@ fn keyed_views_round_trip_change_only_touched_keys_and_rebuild_under_cas() {
     let root = tempdir().unwrap();
     let paths = PlakPaths::explicit(root.path().join("p"));
     let (mut store, session) = store_with_session(root.path());
-    assert_eq!(super::super::SCHEMA_VERSION, 36);
+    assert_eq!(super::super::SCHEMA_VERSION, 37);
     let empty = SessionViews::empty();
     let first = with_bookkeeping(views_at(1, &[]));
     store

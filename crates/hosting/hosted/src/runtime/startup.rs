@@ -385,6 +385,20 @@ pub(super) async fn build_session_from_config<P: plakous_host_protocol::Protocol
     stderr_buf: &mut Vec<u8>,
 ) -> CliResult<AttachedCodingSession> {
     stderr_buf.clear();
+    let archived = if config.session.store_revision == 0 {
+        config.session.archived
+    } else {
+        config
+            .store
+            .load(&config.session.id)
+            .map_err(CliFailure::new)?
+            .archived
+    };
+    if archived {
+        return Err(CliFailure::new(
+            "session_archived: unarchive this session before opening a runtime",
+        ));
+    }
     let seed = config.seed_history.take();
     if seed.is_some() && config.session.plakous_locator.is_some() {
         return Err(CliFailure::new(

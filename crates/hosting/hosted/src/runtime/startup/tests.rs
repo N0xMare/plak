@@ -80,6 +80,22 @@ fn replay_fallback_authors_one_persistable_notice_only_when_needed() {
 use super::*;
 use crate::runtime::*;
 
+#[test]
+fn an_archived_record_never_opens_or_creates_a_runtime() {
+    let root = tempfile::tempdir().unwrap();
+    let executor = plakous::application::ApplicationExecutor::new().unwrap();
+    let (mut config, _) = test_support::fresh_injected_attached_host(root.path());
+    config.session.archived = true;
+    let refused = executor
+        .block_on(build_session_from_config(&mut config, &mut Vec::new()))
+        .unwrap()
+        .err()
+        .expect("archived runtime opened");
+    assert!(refused.message().starts_with("session_archived:"));
+    assert!(config.session.plakous_locator.is_none());
+    assert!(!config.product_home.join("runtime.sqlite3").exists());
+}
+
 use crate::runtime::clear::*;
 
 use crate::runtime::shell::*;

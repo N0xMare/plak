@@ -24,7 +24,7 @@ use sessions::{
     SessionWorkflowKind, StoreBaseline, digest_parts,
 };
 
-pub(crate) const SCHEMA_VERSION: i64 = 36;
+pub(crate) const SCHEMA_VERSION: i64 = 37;
 const MAX_LIST_SESSIONS_SQL: i64 = 500;
 const MAX_LIST_PROMPTS_SQL: i64 = 500;
 const MAX_LIST_PROMPT_BYTES: usize = 1024 * 1024;
@@ -377,6 +377,12 @@ impl ProductStore {
             .connection
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(write_refusal)?;
+        if submission.is_some() && session.archived {
+            return Err("session_archived: unarchive this session before admitting work".into());
+        }
+        if submission.is_some() && expected > 0 {
+            lifecycle::admit_work(&transaction, &session.id)?;
+        }
         let next = commit_in_transaction(
             &transaction,
             session,
@@ -407,10 +413,19 @@ impl ProductStore {
         }
         let queue_commands =
             views::queue_commands_of(&transaction, &mut self.verified_submissions, &session.id)?;
+        let operator_fields = transaction
+            .query_row(
+                "SELECT title_override,archived FROM sessions WHERE id=?1",
+                [&session.id],
+                |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, bool>(1)?)),
+            )
+            .map_err(|error| write_error(error, "could not read operator metadata"))?;
         transaction.commit().map_err(|error| {
             write_error(error, "could not durably commit product session".to_owned())
         })?;
         session.store_revision = next;
+        session.title_override = operator_fields.0;
+        session.archived = operator_fields.1;
         session.transcript.mark_committed();
         self.remember(session);
         session.queue_commands = queue_commands;
@@ -491,7 +506,7 @@ fn load_record(
 ) -> Result<SessionRecord, String> {
     let mut session = connection
             .query_row(
-                "SELECT revision, create_operation_id, workspace_root, created_at, updated_at, account, model, effort, title, source_session_id, source_operation_id, locator, composition, target_selection, frozen_tools, carry_intent, node_tree_id, node_agent_id, root_profile, runner_display FROM sessions WHERE id = ?1",
+                "SELECT revision, create_operation_id, workspace_root, created_at, updated_at, account, model, effort, title, source_session_id, source_operation_id, locator, composition, target_selection, frozen_tools, carry_intent, node_tree_id, node_agent_id, root_profile, runner_display, title_override, archived FROM sessions WHERE id = ?1",
                 [id],
                 |row| {
                     let locator: Option<String> = row.get(11)?;
@@ -518,6 +533,8 @@ fn load_record(
                         node: decode_node(row, 16)?,
                         root_profile: decode_root_profile(row, 18)?,
                         runner: decode_runner_display(row, 19)?,
+                        title_override: row.get(20)?,
+                        archived: row.get(21)?,
                     })
                 },
             )
@@ -680,9 +697,13 @@ impl ProductStore {
                 "product session {id} changed before it could be deleted"
             ));
         }
+        #[cfg(test)]
+        lifecycle::crash_cut("delete_before_commit");
         transaction
             .commit()
             .map_err(|_| "could not durably delete the product session".to_owned())?;
+        #[cfg(test)]
+        lifecycle::crash_cut("delete_after_commit");
         self.baselines.remove(id);
         self.verified_submissions.forget_session(id);
         Ok(())
@@ -712,7 +733,7 @@ impl ProductStore {
             .map_err(|_| "could not start product listing read".to_owned())?;
         let mut query_count = 0usize;
         let mut statement = transaction.prepare(
-            "SELECT id,create_operation_id,workspace_root,created_at,updated_at,account,model,effort,title,source_session_id,source_operation_id,CASE WHEN v.session_id IS NULL THEN sessions.locator ELSE v.head_locator END,composition,target_selection,COALESCE(v.root_turn_count,0),COALESCE(v.tool_call_count,0),COALESCE(v.compaction_count,0),sessions.carry_intent,sessions.node_tree_id,sessions.node_agent_id,sessions.root_profile,sessions.runner_display FROM sessions LEFT JOIN session_views v ON v.session_id=sessions.id WHERE workspace_identity = ?1 ORDER BY updated_at DESC, id ASC LIMIT ?2"
+            "SELECT id,create_operation_id,workspace_root,created_at,updated_at,account,model,effort,title,source_session_id,source_operation_id,CASE WHEN v.session_id IS NULL THEN sessions.locator ELSE v.head_locator END,composition,target_selection,COALESCE(v.root_turn_count,0),COALESCE(v.tool_call_count,0),COALESCE(v.compaction_count,0),sessions.carry_intent,sessions.node_tree_id,sessions.node_agent_id,sessions.root_profile,sessions.runner_display,sessions.title_override,sessions.archived FROM sessions LEFT JOIN session_views v ON v.session_id=sessions.id WHERE workspace_identity = ?1 ORDER BY updated_at DESC, id ASC LIMIT ?2"
         ).map_err(|_| "could not query product sessions".to_owned())?;
         query_count += 1;
         let mut sessions = statement
@@ -763,6 +784,8 @@ impl ProductStore {
                     node: decode_node(row, 18)?,
                     root_profile: decode_root_profile(row, 20)?,
                     runner: decode_runner_display(row, 21)?,
+                    title_override: row.get(22)?,
+                    archived: row.get(23)?,
                 })
             })
             .map_err(|_| "could not query product sessions".to_owned())?
@@ -879,8 +902,8 @@ fn insert_session(tx: &Transaction<'_>, s: &SessionRecord) -> Result<(), RecordS
         .into_owned();
     let locator = s.plakous_locator.map(|value| value.to_string());
     let changed = tx.execute(
-        "INSERT INTO sessions(id, revision, create_operation_id, workspace_root, workspace_identity, created_at, updated_at, account, model, effort, title, source_session_id, source_operation_id, locator, composition, target_selection, frozen_tools, carry_intent, node_tree_id, node_agent_id, root_profile, runner_display) VALUES (?1,1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)",
-        params![s.id, s.create_operation_id, workspace, workspace_identity, to_i64(s.created_at_unix)?, to_i64(s.updated_at_unix)?, s.account, s.model, s.effort, s.title, s.source_product_session_id, s.source_workflow_operation_id, locator, s.composition.as_str(), serde_json::to_string(&s.target_selection).map_err(|_|"target selection is not serializable")?, encoded_frozen_tools(s)?, encoded_carry_intent(s)?, s.node.tree_id, s.node.agent_id, encoded_root_profile(s)?, encoded_runner_display(s)?],
+        "INSERT INTO sessions(id, revision, create_operation_id, workspace_root, workspace_identity, created_at, updated_at, account, model, effort, title, source_session_id, source_operation_id, locator, composition, target_selection, frozen_tools, carry_intent, node_tree_id, node_agent_id, root_profile, runner_display, title_override, archived) VALUES (?1,1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)",
+        params![s.id, s.create_operation_id, workspace, workspace_identity, to_i64(s.created_at_unix)?, to_i64(s.updated_at_unix)?, s.account, s.model, s.effort, s.title, s.source_product_session_id, s.source_workflow_operation_id, locator, s.composition.as_str(), serde_json::to_string(&s.target_selection).map_err(|_|"target selection is not serializable")?, encoded_frozen_tools(s)?, encoded_carry_intent(s)?, s.node.tree_id, s.node.agent_id, encoded_root_profile(s)?, encoded_runner_display(s)?, s.title_override, s.archived],
     ).map_err(|error| write_error(error, "product session identity already exists or is invalid".to_owned()))?;
     if changed != 1 {
         return Err("product session insert was not exact".to_owned().into());
@@ -1329,7 +1352,7 @@ const SCHEMA_OBJECTS: &[(&str, &str)] = &[
     ),
     (
         "sessions",
-        "CREATE TABLE sessions(id TEXT PRIMARY KEY,revision INTEGER NOT NULL CHECK(revision>0),create_operation_id TEXT NOT NULL UNIQUE,workspace_root TEXT NOT NULL,workspace_identity TEXT NOT NULL,created_at INTEGER NOT NULL CHECK(created_at>=0),updated_at INTEGER NOT NULL CHECK(updated_at>=0),account TEXT,model TEXT,effort TEXT,title TEXT,source_session_id TEXT,source_operation_id TEXT,locator TEXT, composition TEXT NOT NULL DEFAULT 'plakous-default' CHECK(composition IN('direct','plakous-default','native-ptc','js-ptc','py-ptc','py-sdk')), target_selection TEXT NOT NULL DEFAULT '\"native\"', frozen_tools TEXT CHECK(frozen_tools IS NULL OR json_valid(frozen_tools)), carry_intent TEXT CHECK(carry_intent IS NULL OR (json_valid(carry_intent) AND locator IS NULL)), node_tree_id TEXT NOT NULL CHECK(length(node_tree_id) BETWEEN 1 AND 128), node_agent_id TEXT NOT NULL CHECK(length(node_agent_id) BETWEEN 1 AND 128), root_profile TEXT CHECK(root_profile IS NULL OR json_valid(root_profile)), runner_display TEXT CHECK(runner_display IS NULL OR json_valid(runner_display)))",
+        "CREATE TABLE sessions(id TEXT PRIMARY KEY,revision INTEGER NOT NULL CHECK(revision>0),create_operation_id TEXT NOT NULL UNIQUE,workspace_root TEXT NOT NULL,workspace_identity TEXT NOT NULL,created_at INTEGER NOT NULL CHECK(created_at>=0),updated_at INTEGER NOT NULL CHECK(updated_at>=0),account TEXT,model TEXT,effort TEXT,title TEXT,source_session_id TEXT,source_operation_id TEXT,locator TEXT, composition TEXT NOT NULL DEFAULT 'plakous-default' CHECK(composition IN('direct','plakous-default','native-ptc','js-ptc','py-ptc','py-sdk')), target_selection TEXT NOT NULL DEFAULT '\"native\"', frozen_tools TEXT CHECK(frozen_tools IS NULL OR json_valid(frozen_tools)), carry_intent TEXT CHECK(carry_intent IS NULL OR (json_valid(carry_intent) AND locator IS NULL)), node_tree_id TEXT NOT NULL CHECK(length(node_tree_id) BETWEEN 1 AND 128), node_agent_id TEXT NOT NULL CHECK(length(node_agent_id) BETWEEN 1 AND 128), root_profile TEXT CHECK(root_profile IS NULL OR json_valid(root_profile)), runner_display TEXT CHECK(runner_display IS NULL OR json_valid(runner_display)), title_override TEXT, archived INTEGER NOT NULL CHECK(archived IN (0,1)))",
     ),
     (
         "sessions_workspace_updated",
@@ -1426,6 +1449,9 @@ pub(crate) mod benchmark;
 pub mod directory;
 /// Who holds a session another process has open.
 pub mod holders;
+mod lifecycle;
+#[cfg(test)]
+pub(crate) use lifecycle::crash_cut as lifecycle_crash_cut;
 /// The product's SQLite implementation of the hosted session-record port.
 pub mod session_records;
 /// The product session record's durable half: the free functions that open

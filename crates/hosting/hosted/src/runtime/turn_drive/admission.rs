@@ -58,6 +58,15 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
         job_events,
         runtime_factory,
     } = host;
+    if store.load(&session.id)?.archived {
+        return Ok(DrivenTurn::continuing(
+            super::TurnHostOutcome::AdmissionRejected {
+                error: "session_archived: unarchive this session before admitting work".into(),
+                stop_drain: true,
+                remedy: None,
+            },
+        ));
+    }
     job_agent.set_unread_mail_pending(false);
     job_agent.set_notice_delivery_available(host_wakes && !session.child_wake_suppressed);
     let runtime_session = session

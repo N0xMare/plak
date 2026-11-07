@@ -669,10 +669,14 @@ Safe independent entries may be removed while protected entries are kept.
 Review `kept:` reasons before manually removing anything. Export files under
 `carry/` are never selected. Implementation details live in spec 02 §2.5.
 
-### `plak session list|show|log|recover|export|import|reload|delete|gc`
+### `plak session list|rename|archive|unarchive|show|log|recover|export|import|reload|delete|gc`
 
 ```
-plak session list
+plak session list [--include-archived]
+plak session rename <full-id> <title>
+plak session rename <full-id> --clear
+plak session archive <full-id> [--yes]
+plak session unarchive <full-id>
 plak session show <uuid>[.cN]
 plak session log <uuid>[.cN] [--kind tool] [--tail N] [--json]
 plak session recover <uuid>
@@ -683,7 +687,12 @@ plak session delete <uuid> [--yes] [--abandon-children]
 plak session gc <uuid> | --all
 ```
 
-Every session id here may be the full id or an unambiguous prefix of at least
+Rename sets a home-local title override, even while busy; `--clear` restores the
+generated title. Archive hides a session from ordinary lists and makes it
+read-only until explicitly unarchived. It refuses running or uncertain work;
+unarchive starts nothing. `--include-archived` includes hidden sessions.
+Rename, archive and unarchive require full ids. Other session ids may be the
+full id or an unambiguous prefix of at least
 four characters among this workspace's sessions, as `plak resume` and the
 exit line print it. For `show` and `log`, append `.cN` to select child `cN` in that root session's
 agent tree, for example `plak session log <uuid>.c1`. These are read-only child
