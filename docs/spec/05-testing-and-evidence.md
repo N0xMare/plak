@@ -1422,6 +1422,22 @@ explicit stop. Closing stdin during termination must not race a `read` command's
 natural exit and obscure the stop attribution being asserted; natural-exit
 preservation remains covered separately.
 
+A hosted quit regression expires the terminal-join deadline after cancellation
+settles, before the host polls the already-published result. It requires a clean
+quit and the canonical cancelled lifecycle, not lease-only abandonment. The
+injected deadline models host descheduling without a wall-clock wait, so this
+regression runs in the parallel lane; the real-binary quit latency checks keep
+their unchanged serial budgets.
+
+The real-binary `real_*quit_releases*` checks accept exactly the two specified
+quit statuses: joined release (0) and lease-only abandonment (130), never a
+signal death. The JSONL check correlates that status with `cancelled` versus
+`unresolved` for the admitted turn. Both paths still require the owned child's
+TERM witness, terminal restoration on the PTY face, and a successful next turn
+after reopening exactly the same session. Host load can legitimately spend
+the bounded cancel/join windows; requiring only exit 0 would assert an
+unpromised scheduling deadline rather than release and recovery.
+
 The product-revision CAS probes run serially with `PLAK_TEST_CAS_SAMPLES`
 independent homes each (positive integer, default 6, two process launches per
 home). `PLAK_TEST_CAS_SAMPLES=30` selects a thirty-home qualification probe.

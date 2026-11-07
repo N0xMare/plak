@@ -4411,8 +4411,8 @@ fn real_process_quit_fixture(promoted: bool) {
         quit_started.elapsed()
     );
     assert!(
-        status.success(),
-        "the TUI quit did not exit cleanly; cooked output was:\n{}",
+        status.signal().is_none() && matches!(status.exit_code(), 0 | 130),
+        "the TUI quit failed ({status:?}); cooked output was:\n{}",
         String::from_utf8_lossy(&raw)
     );
     let leave = raw
@@ -4446,7 +4446,11 @@ fn real_process_quit_fixture(promoted: bool) {
     resumed.send(b"carry on\r");
     resumed.wait_screen("resumed owned process session");
     resumed.send(b"\x11");
-    assert!(resumed.finish().success());
+    let status = resumed.finish();
+    assert!(
+        status.signal().is_none() && matches!(status.exit_code(), 0 | 130),
+        "{status:?}"
+    );
 
     assert_eq!(
         session_event_files(&fixture),
@@ -4457,7 +4461,8 @@ fn real_process_quit_fixture(promoted: bool) {
 
 /// The same lifecycle on the JSONL face: interrupt then quit is the product's
 /// own shutdown order, and the typed lifecycle correlates one turn id from
-/// admitted to its real terminal — never a fabricated `completed`.
+/// admitted to its real terminal, or `unresolved` when the bounded quit
+/// abandons it — never a fabricated `completed` or `cancelled`.
 #[test]
 fn real_process_jsonl_quit_releases_and_resumes_exact_session() {
     let fixture = Fixture::new(&owned_process_script("unreachable"));
@@ -4472,7 +4477,13 @@ fn real_process_jsonl_quit_releases_and_resumes_exact_session() {
     agent.send(&json!({"v": 1, "kind": "interrupt"}));
     agent.send(&quit_frame());
     let outcome = agent.finish();
-    assert!(outcome.status.success(), "stderr:\n{}", outcome.stderr);
+    assert!(
+        matches!(outcome.status.code(), Some(0 | 130)),
+        "status: {}; stdout:\n{}\nstderr:\n{}",
+        outcome.status,
+        outcome.lines.join("\n"),
+        outcome.stderr
+    );
     outcome.assert_exactly_one_terminal_record();
     assert_owned_process_stopped(&fixture.workspace());
 
@@ -4493,7 +4504,11 @@ fn real_process_jsonl_quit_releases_and_resumes_exact_session() {
         .collect::<Vec<_>>();
     assert_eq!(
         terminals,
-        ["cancelled"],
+        [if outcome.status.success() {
+            "cancelled"
+        } else {
+            "unresolved"
+        }],
         "the interrupted turn's terminal evidence was {lifecycles:?}"
     );
     assert!(
@@ -5467,8 +5482,8 @@ fn a_compaction_over_a_template_mcp_call_commits_and_continues() {
 /// §6 quit over a live nested process: Ctrl+Q while a real cell's
 /// `exec_command` is still inside its yield must restore the terminal, let
 /// the process group's TERM reach the child's trap, and keep the session
-/// resumable — the reopened composition proves the evaluator reattached by
-/// running a real two-call cell.
+/// resumable, including a bounded quit's exit 130. The reopened composition
+/// proves the evaluator reattached by running a real two-call cell.
 #[test]
 fn real_composition_quit_releases_nested_process() {
     let fixture = Fixture::new(&code_mode_owned_script());
@@ -5482,8 +5497,8 @@ fn real_composition_quit_releases_nested_process() {
     terminal.send(b"\x11");
     let (status, raw) = terminal.finish_with_raw();
     assert!(
-        status.success(),
-        "the composition quit did not exit cleanly; cooked output was:\n{}",
+        status.signal().is_none() && matches!(status.exit_code(), 0 | 130),
+        "the composition quit failed ({status:?}); cooked output was:\n{}",
         String::from_utf8_lossy(&raw)
     );
     let leave = raw
@@ -5520,7 +5535,11 @@ fn real_composition_quit_releases_nested_process() {
     resumed.send(b"run nested\r");
     resumed.wait_screen("the composed answer");
     resumed.send(b"\x11");
-    assert!(resumed.finish().success());
+    let status = resumed.finish();
+    assert!(
+        status.signal().is_none() && matches!(status.exit_code(), 0 | 130),
+        "{status:?}"
+    );
 
     assert_eq!(
         session_event_files(&fixture),

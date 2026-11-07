@@ -304,14 +304,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> crate::node::TurnPort for Root
             return crate::node::Pass::Again;
         }
 
-        if self.abandoned_by_quit
-            || self
-                .quit_join_deadline
-                .is_some_and(|deadline| Instant::now() >= deadline)
-        {
-            self.abandoned_by_quit = true;
-            return crate::node::Pass::Done;
-        }
+        // The drive polls a ready result before the urgent quit deadline.
+        // Checking elapsed time here would abandon an already-published
+        // terminal when this pass was descheduled past that deadline.
         if turn_finalization_ready(self.turn_result.is_some(), self.events_done) {
             return crate::node::Pass::Done;
         }

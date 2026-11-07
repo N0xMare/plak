@@ -5398,7 +5398,9 @@ terminal the host already holds needs none. A quick
 local cancel retains its ordinary interrupted terminal and transcript. After
 settlement, quit gives the terminal result another 100 ms to become observable;
 if it remains late, the host abandons without synthesizing an interrupted
-result. Every explicit host `Quit` intent and a disconnected control plane use
+result. A ready terminal result takes precedence over the expired join timer:
+host scheduling or projection work must not abandon a result already available
+when the drive resumes. Every explicit host `Quit` intent and a disconnected control plane use
 this same bounded-settle rule,
 regardless of whether its producer also requested process-exit abandonment,
 except a planned handoff (`/reload`, chapter 03 §14.1), whose cancel is bounded

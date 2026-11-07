@@ -1,10 +1,28 @@
 //! Which quit branch each session took and the order of its durable writes,
-//! plus an injected cancel refusal for the next interrupt. Test builds only.
+//! plus injected cancel refusals and join expiry. Test builds only.
 
 use std::sync::{Mutex, PoisonError};
 
 static STEPS: Mutex<Vec<(String, &'static str)>> = Mutex::new(Vec::new());
 static CANCEL_REFUSALS: Mutex<Vec<(String, plakous::agent::ControlError)>> = Mutex::new(Vec::new());
+static EXPIRED_JOINS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Resume the next quit join with its result settled and its deadline expired.
+pub(in crate::runtime) fn expire_next_join(session: &str) {
+    EXPIRED_JOINS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .push(session.to_owned());
+}
+
+pub(super) fn take_expired_join(session: &str) -> bool {
+    let mut joins = EXPIRED_JOINS.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(index) = joins.iter().position(|id| id == session) {
+        joins.remove(index);
+        return true;
+    }
+    false
+}
 
 /// The quit path of `session` reached `step`.
 pub(super) fn step(session: &str, step: &'static str) {

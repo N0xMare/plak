@@ -360,6 +360,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                     }
                     self.quit_after_terminal = true;
                     self.quit_join_deadline = Some(Instant::now() + QUIT_RESULT_JOIN);
+                    #[cfg(test)]
+                    if super::quit_trace::take_expired_join(&self.host.session.id) {
+                        self.control.wait_until_settled().await;
+                        self.quit_join_deadline = Some(Instant::now());
+                    }
                     if let Some(observer) = &self.turn_observer {
                         observer.observe(HostBoundary::ProductPublished);
                     }
