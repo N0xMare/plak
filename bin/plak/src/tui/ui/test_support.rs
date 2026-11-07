@@ -489,6 +489,7 @@ pub(super) fn usage_fixture() -> App {
         stale_age_seconds: None,
     };
     app.session_info = SessionInfoView {
+        runner: plakous_host_protocol::wire::RunnerLabel::local(),
         storage_level: plakous_host_protocol::views::presentation::StorageLevel::Available,
         session_store_percent: None,
         host_version: "0.1.0".into(),

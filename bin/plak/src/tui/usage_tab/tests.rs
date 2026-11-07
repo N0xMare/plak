@@ -1040,6 +1040,7 @@ fn a_stale_limits_projection_states_its_age() {
 
 fn session_fixture() -> SessionInfoView {
     SessionInfoView {
+        runner: plakous_host_protocol::wire::RunnerLabel::local(),
         storage_level: plakous_host_protocol::views::presentation::StorageLevel::Available,
         session_store_percent: None,
         host_version: "0.1.0".to_owned(),

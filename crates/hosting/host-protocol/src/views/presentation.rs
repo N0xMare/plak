@@ -776,6 +776,9 @@ pub enum StorageLevel {
 )]
 #[serde(deny_unknown_fields)]
 pub struct SessionInfoView {
+    /// This attached node's saved placement, decorated by the host.
+    /// In-process chrome only; never persisted, exported or projected on JSONL v1.
+    pub runner: crate::wire::RunnerLabel,
     /// Product-home capacity level, with no operator paths or rendered prose.
     /// In-process chrome only; not persisted or projected on JSONL v1.
     pub storage_level: StorageLevel,

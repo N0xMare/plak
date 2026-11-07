@@ -4,6 +4,52 @@ use crate::Core;
 type Client = ClientFrame<Core>;
 type Host = HostFrame<Core>;
 
+#[test]
+fn attached_session_info_requires_runner_and_stays_outside_jsonl_history() {
+    let info = crate::views::presentation::SessionInfoView {
+        runner: RunnerLabel {
+            name: "machine".to_owned(),
+            runner_id: "saved-id".to_owned(),
+        },
+        ..Default::default()
+    };
+    let mut value = serde_json::to_value(&info).unwrap();
+    assert_eq!(
+        value["runner"],
+        serde_json::json!({"name":"machine","runner_id":"saved-id"})
+    );
+    assert_eq!(
+        serde_json::from_value::<crate::views::presentation::SessionInfoView>(value.clone())
+            .unwrap(),
+        info
+    );
+    value.as_object_mut().unwrap().remove("runner");
+    assert!(serde_json::from_value::<crate::views::presentation::SessionInfoView>(value).is_err());
+    let schema = serde_json::to_value(schemars::schema_for!(
+        crate::views::presentation::SessionInfoView
+    ))
+    .unwrap();
+    assert!(
+        schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|field| field == "runner")
+    );
+    assert!(
+        crate::jsonl::project_host_event::<Core>(
+            &SessionObservation::SessionInfo(info),
+            crate::envelope::JsonlCorrelation {
+                prompt_id: None,
+                omit_unknown_turn_id: false,
+                command_id: None,
+                pending_tree_snapshot_id: None
+            },
+        )
+        .is_none()
+    );
+}
+
 fn pin_client(value: &str) {
     let frame: Client = decode_line(value).unwrap();
     assert_eq!(encode_line(&frame).unwrap().trim_end(), value);

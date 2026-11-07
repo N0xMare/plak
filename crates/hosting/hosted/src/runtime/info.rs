@@ -256,6 +256,13 @@ fn session_info_view_with_storage<P: plakous_host_protocol::ProtocolExtension>(
         HostTargetAuthority::Registered { .. } => None,
     };
     plakous_host_protocol::views::presentation::SessionInfoView {
+        runner: config.session.runner.as_ref().map_or_else(
+            plakous_host_protocol::wire::RunnerLabel::local,
+            |runner| plakous_host_protocol::wire::RunnerLabel {
+                name: runner.name.clone(),
+                runner_id: runner.runner_id.clone(),
+            },
+        ),
         storage_level: match storage {
             crate::session_store::StorageAdmission::Available => {
                 plakous_host_protocol::views::presentation::StorageLevel::Available

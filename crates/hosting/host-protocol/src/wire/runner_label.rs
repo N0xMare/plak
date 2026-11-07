@@ -23,6 +23,12 @@ impl RunnerLabel {
     }
 }
 
+impl Default for RunnerLabel {
+    fn default() -> Self {
+        Self::local()
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {

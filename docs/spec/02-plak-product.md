@@ -3904,6 +3904,11 @@ Local is explicitly `{name:"local",runner_id:"local"}`. The saved node id is
 authority; the host decorates the canonical configured alias, or uses the saved
 id when no alias remains. This does not expand JSONL v1 tree frames.
 
+`SessionInfoView.runner` is also required and names the attached node's own
+saved placement, decorated by the host. Clients pair the existing product
+workspace text with this label; a child never borrows its root's placement.
+This is in-process chrome, not a persisted/exported field or a JSONL v1 event.
+
 The client protocol number is **5**. It must match exactly; the runner
 transport has its own independent version. Protocol 5 adds explicit placement,
 bounded creation options, directory lifecycle and process-local draft identity.
