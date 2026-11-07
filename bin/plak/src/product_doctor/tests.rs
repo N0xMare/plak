@@ -192,6 +192,50 @@ fn last_failed_refresh_fixture_ignores_began_and_clears_on_completed()
 }
 
 #[test]
+fn named_siblings_suppress_unattributed_default_refresh_failures()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (_guard, paths) = crate::product_paths::PlakPaths::isolated_test_home();
+    paths.ensure_layout()?;
+    let state = tempfile::tempdir()?;
+    install_credential_state_home(state.path().to_path_buf());
+    drop(crate::telemetry_store::TelemetryStore::open(&paths)?);
+    let db = rusqlite::Connection::open(paths.telemetry_database())?;
+    for (account, provider) in [("codex", "codex"), ("grok", "xai"), ("claude", "claude")] {
+        db.execute("INSERT INTO credential_refreshes (at, provider, phase, failure_class, generation) VALUES (1720000100000000000, ?1, 'quarantined', 'timeout', 2)", [provider])?;
+        let record = state
+            .path()
+            .join("plak/subscriptions")
+            .join(provider)
+            .join("credential.json");
+        assert!(last_failed_refresh(&paths, account, &jiff::tz::TimeZone::UTC).is_some());
+        let row =
+            crate::telemetry_store::TelemetryStore::latest_credential_refresh(&paths, provider)
+                .map_err(|error| error.to_string())?;
+        assert!(matches!(
+            probe_oauth_credential(provider, Err("synthetic".into()), &record, Ok(row.clone()))
+                .last_refresh,
+            OauthRefreshLookup::Row(_)
+        ));
+        let named = state
+            .path()
+            .join("plak/subscriptions/accounts")
+            .join(account)
+            .join("work");
+        std::fs::create_dir_all(&named)?;
+        assert_eq!(
+            last_failed_refresh(&paths, account, &jiff::tz::TimeZone::UTC),
+            None
+        );
+        assert!(matches!(
+            probe_oauth_credential(provider, Err("synthetic".into()), &record, Ok(row))
+                .last_refresh,
+            OauthRefreshLookup::None
+        ));
+    }
+    Ok(())
+}
+
+#[test]
 fn last_failed_refresh_names_the_sub_reason_and_a_retired_record_needs_login()
 -> Result<(), Box<dyn std::error::Error>> {
     let (_guard, paths) = crate::product_paths::PlakPaths::isolated_test_home();

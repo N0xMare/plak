@@ -2,6 +2,26 @@
 
 use super::current_credential_generation;
 
+pub(super) fn record_has_named_sibling(record: &std::path::Path, provider: &str) -> bool {
+    let Some(subscriptions) = record.parent().and_then(std::path::Path::parent) else {
+        return true;
+    };
+    let vertical = if provider == "xai" { "grok" } else { provider };
+    match std::fs::read_dir(subscriptions.join("accounts").join(vertical)) {
+        Ok(mut entries) => entries.any(|entry| {
+            let Ok(entry) = entry else { return true };
+            let reference = format!("{vertical}/{}", entry.file_name().to_string_lossy());
+            reference
+                .parse::<plakous_hosted::account::AccountRef>()
+                .is_ok()
+                && entry
+                    .file_type()
+                    .map_or(true, |kind| kind.is_dir() || kind.is_symlink())
+        }),
+        Err(error) => error.kind() != std::io::ErrorKind::NotFound,
+    }
+}
+
 /// A failure row belongs to the record its claim left behind: quarantine keeps
 /// the claim generation and a restore advances it once. A record newer than
 /// that (a later login, logout, or refresh) makes the row history, not state.
@@ -22,6 +42,17 @@ pub(crate) fn last_failed_refresh(
         "claude" => "claude",
         _ => return None,
     };
+    if super::CREDENTIAL_STATE_HOME.get().is_some_and(|home| {
+        record_has_named_sibling(
+            &home
+                .join("plak/subscriptions")
+                .join(provider)
+                .join("credential.json"),
+            provider,
+        )
+    }) {
+        return None;
+    }
     let row =
         crate::telemetry_store::TelemetryStore::latest_refresh_outcome(paths, provider).ok()??;
     if !refresh_row_is_current(row.generation, current_credential_generation(provider)) {

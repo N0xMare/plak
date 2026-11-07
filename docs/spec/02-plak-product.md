@@ -8939,6 +8939,12 @@ product observations without moving product vocabulary into the agent sink.
 
 ### 7.2 Usage and allowances
 
+Until refresh telemetry attributes exact account references, a default account's
+status, doctor and Usage omit recorded refresh outcomes whenever any named slot
+of the same vertical exists. The vertical-only row might belong to that sibling;
+local credential state remains visible and authoritative.
+
+
 Every allowance request carries the current session account reference, including
 a detached shell and a session switched in-process. The worker derives a named
 native slot from that reference before reading it; a previously selected store
@@ -9611,6 +9617,12 @@ removes it in their provider account. The product says that plainly rather than
 implying the grant is gone.
 
 ### 8.6 Status
+
+Until refresh telemetry attributes exact account references, a default account's
+status, doctor and Usage omit recorded refresh outcomes whenever any named slot
+of the same vertical exists. The vertical-only row might belong to that sibling;
+local credential state remains visible and authoritative.
+
 
 Both status forms and doctor write one line for each of the seven compiled
 surfaces within 14 days (inclusive) of its deadline or past it, naming the

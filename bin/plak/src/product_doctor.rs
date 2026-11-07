@@ -479,6 +479,9 @@ pub fn probe_oauth_credential(
         credential,
         record: inspect_oauth_record(record_path),
         last_refresh: match last_refresh {
+            _ if refresh::record_has_named_sibling(record_path, provider) => {
+                OauthRefreshLookup::None
+            }
             Ok(Some(row)) => OauthRefreshLookup::Row(OauthRefreshTelemetry::from_store_row(row)),
             Ok(None) => OauthRefreshLookup::None,
             Err(detail) => OauthRefreshLookup::Unavailable(detail),
