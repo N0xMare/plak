@@ -583,6 +583,9 @@ impl RunnerService {
                 host_id: line_host,
                 line,
                 jobs,
+                foreground: sessions.active_session_ids().into_iter().any(|id| {
+                    !sessions.is_promoted(id) && sessions.joined_terminal_status(id).is_none()
+                }),
             });
         }
         lines

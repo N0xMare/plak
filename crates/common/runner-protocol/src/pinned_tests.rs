@@ -18,6 +18,7 @@ use crate::{
 const PINNED: &[(u32, &str)] = &[
     (1, include_str!("pinned/v1.jsonl")),
     (2, include_str!("pinned/v2.jsonl")),
+    (3, include_str!("pinned/v3.jsonl")),
 ];
 
 fn owner() -> LineOwner {
@@ -267,6 +268,7 @@ fn runner_frames() -> Vec<RunnerFrame> {
                 line: "line".into(),
                 owner: Some(owner()),
                 adopted: true,
+                foreground: false,
                 jobs: json!({"jobs": []}),
             }],
         },

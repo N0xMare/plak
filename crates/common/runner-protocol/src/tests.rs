@@ -163,6 +163,7 @@ fn optional_fields_stay_off_the_wire_until_set() {
             line: "line".into(),
             owner: Some(owner(1, 2)),
             adopted: false,
+            foreground: false,
             jobs: json!({"jobs": []}),
         }],
     };

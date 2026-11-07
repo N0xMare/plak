@@ -775,10 +775,9 @@ fn host_crash_cuts_of_create_materialize_and_release_recover() {
     );
 }
 
-/// A daemon-held line refuses embedded opens even after the host releases
-/// the session. Without that daemon's ownership, the released session opens.
+/// Custody precedes inspection; process-free release permits embedded open.
 #[test]
-fn an_embedded_face_is_refused_a_daemon_line_until_the_daemon_is_gone() {
+fn an_embedded_face_respects_custody_then_opens_a_process_free_release() {
     let Some(fixture) = fixture() else { return };
     fixture.write_script(&json!({
         "version": 1,
@@ -796,10 +795,9 @@ fn an_embedded_face_is_refused_a_daemon_line_until_the_daemon_is_gone() {
     let refused = embedded(&fixture, &session)
         .err()
         .expect("a second live session opened");
-    assert_eq!(refused["code"], "local_runner_processes", "{refused}");
+    assert_eq!(refused["code"], "tree_hosted_elsewhere", "{refused}");
     let message = refused["message"].as_str().unwrap();
-    assert!(message.contains("start `plak host`"), "{message}");
-    assert!(message.contains("plak runner ps"), "{message}");
+    assert!(message.contains("plak host"), "{message}");
     assert_eq!(
         client.request(
             4,
@@ -809,11 +807,6 @@ fn an_embedded_face_is_refused_a_daemon_line_until_the_daemon_is_gone() {
         ),
         Outcome::Ok(Answer::Released)
     );
-    let refused = embedded(&fixture, &session)
-        .err()
-        .expect("release discarded daemon ownership");
-    assert_eq!(refused["code"], "local_runner_processes", "{refused}");
-    kill_local_daemon_only(&fixture.home());
     embedded(&fixture, &session).expect("plak agent opened the released session");
 }
 
@@ -923,8 +916,7 @@ fn a_sigterm_hands_a_running_turn_to_the_next_host_which_continues_it_once() {
     assert_eq!(root_record(&fixture, &session).1, 1);
 }
 
-/// `release_session` detaches and becomes dormant at once, but embedded
-/// opens remain refused until the daemon no longer holds the line.
+/// A process-free release detaches and permits an embedded open.
 #[test]
 fn a_released_session_is_dormant_but_keeps_its_daemon_line() {
     let Some(fixture) = fixture() else { return };
@@ -960,11 +952,6 @@ fn a_released_session_is_dormant_but_keeps_its_daemon_line() {
     }
     assert!(detached, "the attachment did not end with detached");
     assert_eq!(client.rows(5)[0].residency, SessionResidency::Dormant);
-    let refused = embedded(&fixture, &session)
-        .err()
-        .expect("release discarded daemon ownership");
-    assert_eq!(refused["code"], "local_runner_processes", "{refused}");
-    kill_local_daemon_only(&fixture.home());
     embedded(&fixture, &session).expect("plak agent opened the released session");
 }
 

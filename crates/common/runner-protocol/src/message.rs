@@ -225,6 +225,8 @@ pub struct LineStatus {
     /// The line's jobs, as `jobs.snapshot` answers them, in the execution
     /// environment's schema.
     pub jobs: Value,
+    /// Whether an unpromoted foreground process is still live on this line.
+    pub foreground: bool,
 }
 
 /// One frame of a multiplexed stream: a long-lived process's output, its

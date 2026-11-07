@@ -221,3 +221,63 @@ async fn queued_link(
     .unwrap();
     (service, link)
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn line_inspection_distinguishes_foreground_jobs_and_terminal_work() {
+    let root = tempfile::tempdir().unwrap();
+    let scope =
+        ExecutionEnvironmentScope::Run("00000000-0000-0000-0000-000000000001".parse().unwrap());
+    let (service, link) = queued_link(root.path(), scope).await;
+    let backend = link.backend();
+    let environment = runner_environment(
+        scope,
+        root.path(),
+        ".",
+        ExecutionEnvironmentConfig::default(),
+        backend.clone(),
+    )
+    .unwrap();
+    let owner = plakous_tools::LineOwner::new(
+        "00000000-0000-0000-0000-0000000000a1".parse().unwrap(),
+        1,
+        "00000000-0000-0000-0000-0000000000b1".parse().unwrap(),
+        1,
+    );
+    let sessions = RunnerSessions::new(&backend, &environment, owner);
+    sessions.jobs().await.unwrap();
+    assert!(!service.lines(Some("home")).await[0].foreground);
+    let id = sessions
+        .start(
+            JoinedProcessStartRequest::new(
+                JoinedProcessCommand::literal("/bin/sh", ["-c".into(), "read line".into()])
+                    .unwrap(),
+                ".",
+                Vec::new(),
+                true,
+                JoinedProcessTerminalMode::Pipes,
+            )
+            .unwrap(),
+            OperationContext::new(plakous_model::CancellationToken::new()).with_class(
+                OperationClass::EffectCall {
+                    call_id: "00000000-0000-0000-0000-000000000001".parse().unwrap(),
+                    attempt_id: "00000000-0000-0000-0000-000000000002".parse().unwrap(),
+                },
+            ),
+        )
+        .await
+        .unwrap();
+    let status = &service.lines(Some("home")).await[0];
+    assert!(status.foreground);
+    assert_eq!(status.jobs["jobs"].as_array().unwrap().len(), 0);
+    sessions.promote(id).await.unwrap();
+    let status = &service.lines(Some("home")).await[0];
+    assert!(!status.foreground);
+    assert_eq!(status.jobs["jobs"][0]["status"]["status"], "running");
+    sessions
+        .stop_jobs(plakous_tools::JobStopReason::User, Duration::ZERO)
+        .await
+        .unwrap();
+    let status = &service.lines(Some("home")).await[0];
+    assert!(!status.foreground);
+    assert_eq!(status.jobs["jobs"][0]["status"]["status"], "stopped");
+}

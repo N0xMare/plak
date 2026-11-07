@@ -4621,8 +4621,9 @@ when the host starts keeps its custody, and the per-tree
   idle release, so a turn, pending work, a process or a resident child still
   keeps it, and so does an attach made since). The answer is `released` once
   the release committed, so another host attachment may open the session at
-  once. An embedded face may open only when the home-local daemon no longer
-  holds the line; release does not discard that ownership. When no release
+  once. An embedded face may open when the home-local daemon has no running
+  job or live foreground process on the line; a retained process-free line
+  does not prevent release to an embedded face. When no release
   began within 10 s, the answer is `resident {reason}` (`attachment` when one
   was made since or another connection still holds the session, a stop
   still draining included, `processes` while one runs, `work` otherwise),
@@ -4650,7 +4651,8 @@ when the host starts keeps its custody, and the per-tree
   selects `LocalDaemonBackend` through its services for every root and child.
   It retries connect, start and connect under one 10 s bound, including an EOF
   before Hello and a starter losing to an idle daemon's final socket/lock
-  cleanup. It then sweeps the runner's lines known to its runtime store,
+  cleanup (daemon lock acquisition retries probes for up to 250 ms).
+  It then sweeps the runner's lines known to its runtime store,
   under each head's lease, transferring owners and recording ended jobs;
   recovers the journal after those transfers; and finishes recorded stops
   before serving. A live embedded holder refuses the head lease and is
@@ -4673,14 +4675,19 @@ when the host starts keeps its custody, and the per-tree
   reaped by a waiter. A closed daemon link is redialed under the same bound,
   reconnecting the existing client and recovering its journal; lines transfer
   on their next call. Exhausting the bound ends the host non-zero for restart.
+  A refused owner floors file is a permanent start failure: startup and
+  redial name the file and cause on stderr and exit 8, which the service unit
+  excludes from restart until an operator repairs the cause.
   Inspection, sweep and recorded-stop failures are structured `plak.runner`
   diagnostics scoped to their protocol, line or session. The next item still
   runs; live child stops collect failures after attempting every child.
   Every daemon-backed agent release other than an explicit stop transfers its
   jobs, including held children materialized after host loss. Embedded agents
   remain direct and stop their jobs on exit.
-  An embedded open inspects the current-protocol home-local daemon before
-  opening the canonical session. A listed line refuses with typed
+  An embedded open checks the live holder first, preserving
+  `tree_hosted_elsewhere`, then inspects the current-protocol home-local daemon
+  before opening the canonical session. A listed line with a running job or
+  live foreground process refuses with typed
   `local_runner_processes`: "this session's processes run in the local runner;
   start `plak host`, or see them with `plak runner ps`". It changes no job
   outcome and stops nothing. When no daemon answers, the open proceeds.
@@ -4720,6 +4727,7 @@ KillMode=mixed
 KillSignal=SIGTERM
 TimeoutStopSec=90
 Restart=on-failure
+RestartPreventExitStatus=8
 ```
 
 ## 5. The terminal interface

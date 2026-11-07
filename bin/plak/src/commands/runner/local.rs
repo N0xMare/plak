@@ -115,6 +115,7 @@ pub(crate) async fn dial(paths: &PlakPaths) -> CliResult<RunnerClient> {
                     }
                 }
                 Err(_) => {
+                    check_start(&home)?;
                     // Socket removal precedes lock release. A busy lock is
                     // not permission to spawn another daemon.
                     let _ = starter.start(paths, &home).await;
@@ -144,6 +145,7 @@ pub(crate) async fn reconnect(paths: &PlakPaths, client: &RunnerClient) -> CliRe
                     Err(error) => return Err(CliFailure::new(error.to_string())),
                 },
                 Err(_) => {
+                    check_start(&home)?;
                     let _ = starter.start(paths, &home).await;
                 }
             }
@@ -153,4 +155,28 @@ pub(crate) async fn reconnect(paths: &PlakPaths, client: &RunnerClient) -> CliRe
     tokio::time::timeout(super::START_WAIT, attempt)
         .await
         .map_err(|_| CliFailure::new("the home-local runner did not reconnect within 10 s"))?
+}
+
+fn check_start(home: &LocalRunnerHome) -> CliResult<()> {
+    match plakous::runner::FileOwnerFloors::open(home.floors_path()) {
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::InvalidData
+                    | std::io::ErrorKind::PermissionDenied
+                    | std::io::ErrorKind::InvalidInput
+                    | std::io::ErrorKind::IsADirectory
+                    | std::io::ErrorKind::NotADirectory
+            ) =>
+        {
+            Err(CliFailure::classified(
+                plakous_hosted::error::CliFailureKind::LocalRunnerRefused,
+                format!(
+                    "the home-local runner refused {}: {error}",
+                    home.floors_path().display()
+                ),
+            ))
+        }
+        _ => Ok(()),
+    }
 }

@@ -56,6 +56,19 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
         let attach_started = Instant::now();
         config.runtime_factory.clone().configure(&mut config);
         if let Some(locator) = config.session.plakous_locator {
+            let trees = config.state_roots.tree_store()?;
+            let tree_id =
+                super::super::rebind::durable_tree_id(&config.topology_rows(), &config.session);
+            if let Some(holder) =
+                crate::agent_tree::holder_elsewhere(trees.custody_port(), &tree_id)
+                    .map_err(|error| CliFailure::new(error.to_string()))?
+            {
+                let message = config.lease_holder.as_ref().and_then(|name| name(locator)).unwrap_or_else(|| format!(
+                    "this session is held by another plak process (pid {} on {}); release it there or stop that process",
+                    holder.instance.pid(), holder.host_name,
+                ));
+                return Err(CliFailure::hosted_elsewhere(message));
+            }
             config.state_roots.refuse_daemon_line(locator).await?;
         }
         let log = SessionLog::open(&config.home, &config.session.id).ok();

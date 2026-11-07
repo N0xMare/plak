@@ -104,13 +104,7 @@ pub async fn serve_socket(
             .mode(0o600)
             .open(socket.with_extension("lock"))?
     };
-    match lock.try_lock() {
-        Ok(()) => {}
-        Err(std::fs::TryLockError::WouldBlock) => {
-            return Err(DaemonError::AlreadyServing(socket.to_path_buf()));
-        }
-        Err(std::fs::TryLockError::Error(error)) => return Err(DaemonError::Io(error)),
-    }
+    take_lock(&lock, socket).await?;
     // The lock file names its holder, so an operator or a harness can find
     // the daemon that serves a socket; the lock proves the name current.
     {
@@ -157,6 +151,22 @@ pub async fn serve_socket(
     let _ = std::fs::remove_file(socket);
     drop(lock);
     result
+}
+
+async fn take_lock(lock: &std::fs::File, socket: &Path) -> Result<(), DaemonError> {
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(250);
+    loop {
+        match lock.try_lock() {
+            Ok(()) => return Ok(()),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                if tokio::time::Instant::now() >= deadline {
+                    return Err(DaemonError::AlreadyServing(socket.to_path_buf()));
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            Err(std::fs::TryLockError::Error(error)) => return Err(DaemonError::Io(error)),
+        }
+    }
 }
 
 /// Bridges this process's stdin and stdout to the daemon on `socket`
@@ -294,6 +304,52 @@ fn owner_uid(directory: &Path) -> io::Result<u32> {
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_start_waits_out_a_concurrent_lock_probe() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("runner.lock");
+        let probe = std::fs::File::create(&path).unwrap();
+        probe.lock().unwrap();
+        let socket = directory.path().join("runner.sock");
+        let service = RunnerService::new(
+            plakous_tools::ExecutionEnvironment::host(
+                plakous_tools::ExecutionEnvironmentScope::Run(
+                    "00000000-0000-0000-0000-000000000001".parse().unwrap(),
+                ),
+                directory.path(),
+                ".",
+                plakous_tools::ExecutionEnvironmentConfig::default(),
+            )
+            .unwrap(),
+            crate::RunnerIdentity {
+                runner_id: plakous_tools::RunnerId::new("probe-test").unwrap(),
+                version: VersionTriple::current("test", "debug"),
+                boot_id: "boot".into(),
+                binary_id: None,
+            },
+        )
+        .unwrap();
+        let acquire = serve_socket(service, &socket, Duration::from_secs(1));
+        tokio::pin!(acquire);
+        tokio::select! {
+            biased;
+            result = &mut acquire => panic!("the probe must not refuse startup: {result:?}"),
+            () = tokio::task::yield_now() => {}
+        }
+        probe.unlock().unwrap();
+        tokio::select! {
+            biased;
+            result = &mut acquire => panic!("the daemon must first bind its socket: {result:?}"),
+            () = async { while !socket.exists() { tokio::task::yield_now().await; } } => {}
+        }
+        assert!(matches!(
+            probe.try_lock(),
+            Err(std::fs::TryLockError::WouldBlock)
+        ));
+        acquire.await.unwrap();
+        assert!(!socket.exists());
+    }
 
     #[test]
     fn a_socket_path_past_the_platform_limit_is_refused_by_name() {

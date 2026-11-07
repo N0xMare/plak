@@ -41,7 +41,7 @@ fn a_host_exits_nonzero_when_its_lost_daemon_cannot_restart() {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     loop {
         if let Some(status) = host.child.as_mut().unwrap().try_wait().unwrap() {
-            assert!(!status.success());
+            assert_eq!(status.code(), Some(8));
             host.child.take();
             break;
         }
@@ -50,6 +50,51 @@ fn a_host_exits_nonzero_when_its_lost_daemon_cannot_restart() {
             panic!("the host did not fail after bounded redial");
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let stderr = host.lines.iter().collect::<Vec<_>>().join("\n");
+    assert!(
+        stderr.contains("owners.json") && stderr.contains("owner floors"),
+        "{stderr}"
+    );
+    for detached in ["0", "1"] {
+        let (mut child, lines) = spawn_env(
+            &fixture,
+            &[],
+            &[("PLAK_TEST_RUNNER_DETACHED", detached.into())],
+        );
+        assert_eq!(cut_exit(&mut child).code(), Some(8));
+        let stderr = lines.iter().collect::<Vec<_>>().join("\n");
+        assert!(stderr.contains("owners.json"), "{stderr}");
+    }
+}
+
+#[test]
+fn a_transient_daemon_failure_keeps_the_redial_bound() {
+    for detached in ["0", "1"] {
+        let Some(fixture) = fixture() else { return };
+        let mut host = start_env(
+            &fixture,
+            &[],
+            &[("PLAK_TEST_RUNNER_DETACHED", detached.into())],
+        );
+        let version = plakous::runner::protocol::PROTOCOL_VERSION;
+        let socket = fixture
+            .home()
+            .join(format!("host/runner/v{version}/run/runner.sock"));
+        std::fs::remove_file(&socket).unwrap();
+        // A listener that never sends Hello is transient, not a start refusal.
+        let _listener = std::os::unix::net::UnixListener::bind(socket).unwrap();
+        kill_local_daemon_only(&fixture.home());
+        let began = std::time::Instant::now();
+        let status = cut_exit(host.child.as_mut().unwrap());
+        host.child.take();
+        assert_eq!(status.code(), Some(1));
+        assert!(
+            began.elapsed() >= std::time::Duration::from_secs(9),
+            "transient redial did not retry"
+        );
+        let stderr = host.lines.iter().collect::<Vec<_>>().join("\n");
+        assert!(stderr.contains("did not reconnect within 10 s"), "{stderr}");
     }
 }
 
@@ -255,13 +300,22 @@ fn a_lost_daemon_is_redialed_while_the_host_serves() {
 
 #[test]
 fn a_busy_roots_child_job_survives_attach_after_host_loss() {
-    for policy in ["continue", "hold"] {
+    for (policy, handoff) in [
+        ("continue", false),
+        ("hold", false),
+        ("continue", true),
+        ("hold", true),
+    ] {
         let Some(fixture) = fixture() else { return };
         write_resume_policy(&fixture, policy);
         let (mut host, session, node) = start_child_job_variant(&fixture, true);
         let (pid, _) = job(&fixture);
         hold_child_script(&fixture);
-        kill(&mut host);
+        if handoff {
+            stop(&mut host);
+        } else {
+            kill(&mut host);
+        }
         let mut host = start(&fixture);
         let mut client = Client::connect(&host);
         client.attach(1, &node);

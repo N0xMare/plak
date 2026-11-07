@@ -62,7 +62,7 @@ impl ProductStateRoots {
                 .map_err(|error| CliFailure::new(error.to_string()))?;
             if lines
                 .iter()
-                .any(|line| line.line == head.line().to_string())
+                .any(|line| line.line == head.line().to_string() && has_processes(line))
             {
                 return Err(CliFailure::local_runner_processes());
             }
@@ -73,5 +73,37 @@ impl ProductStateRoots {
             .map_err(|_| {
                 CliFailure::new("the local runner did not answer the embedded inspection")
             })?
+    }
+}
+
+fn has_processes(line: &plakous::runner::protocol::LineStatus) -> bool {
+    line.foreground
+        || line.jobs["jobs"]
+            .as_array()
+            .is_some_and(|jobs| jobs.iter().any(|job| job["status"]["status"] == "running"))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn only_live_work_refuses_an_embedded_open() {
+        let mut line = plakous::runner::protocol::LineStatus {
+            host_id: "host".into(),
+            line: "line".into(),
+            owner: None,
+            adopted: true,
+            jobs: serde_json::json!({"jobs": []}),
+            foreground: false,
+        };
+        assert!(!super::has_processes(&line));
+        for status in ["exited", "stopped", "released", "outcome_unknown"] {
+            line.jobs = serde_json::json!({"jobs": [{"status": {"status": status}}]});
+            assert!(!super::has_processes(&line), "{status}");
+        }
+        line.jobs = serde_json::json!({"jobs": [{"status": {"status": "running"}}]});
+        assert!(super::has_processes(&line));
+        line.jobs = serde_json::json!({"jobs": []});
+        line.foreground = true;
+        assert!(super::has_processes(&line));
     }
 }

@@ -110,7 +110,10 @@ fn an_upgraded_host_inspects_the_old_protocol_and_starts_a_separate_daemon() {
     assert!(
         fixture
             .home()
-            .join("host/runner/v2/run/runner.sock")
+            .join(format!(
+                "host/runner/v{}/run/runner.sock",
+                plakous::runner::protocol::PROTOCOL_VERSION
+            ))
             .exists()
     );
     stop(&mut host);
@@ -280,6 +283,8 @@ fn runner_job_survives_host_loss_and_is_readopted_before_attach() {
         alive(pid) && alive(daemon),
         "host loss killed the daemon's job"
     );
+    let refused = embedded(&fixture, &session).expect_err("an embedded face took a running job");
+    assert_eq!(refused["code"], "local_runner_processes", "{refused}");
     let mut host = start(&fixture);
     assert!(alive(pid));
     let mut client = Client::connect(&host);
