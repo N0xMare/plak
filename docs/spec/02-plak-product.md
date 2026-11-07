@@ -1687,6 +1687,11 @@ offline: no existing branch can fence a concurrent first creation. A running
 host can serialize that reservation and archive it. Reversible product archive
 never uses deletion's irreversible runtime archive operation.
 
+Directory workspace filters use the local canonical identity only for the
+local runner. A pinned non-local runner filters by its id and the exact saved
+UTF-8 `workspace_root` spelling, without consulting the host filesystem.
+Workspace, runner and archived filters all precede the directory row limit.
+
 Projector reads are planned only for records on the product session's followed
 lineage (or its initial creation record); sibling-branch facts advance the
 cursor without loading their checkpoint contents. Missing required reads still

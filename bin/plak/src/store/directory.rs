@@ -66,20 +66,36 @@ impl ProductStore {
         runner_id: Option<&str>,
         include_archived: bool,
     ) -> Result<Vec<DirectoryEntry>, String> {
-        let identity = workspace.map(|workspace| {
-            sessions::workspace_identity(workspace)
-                .to_string_lossy()
-                .into_owned()
-        });
+        let nonlocal = runner_id.is_some_and(|runner| runner != "local");
+        let identity = workspace
+            .map(|workspace| {
+                if nonlocal {
+                    workspace
+                        .to_str()
+                        .map(str::to_owned)
+                        .ok_or_else(|| "remote workspace filter is not UTF-8".to_owned())
+                } else {
+                    Ok(sessions::workspace_identity(workspace)
+                        .to_string_lossy()
+                        .into_owned())
+                }
+            })
+            .transpose()?;
         let mut statement = self
             .connection
             .prepare(
-                "SELECT sessions.id,sessions.workspace_root,sessions.updated_at,COALESCE(sessions.title_override,sessions.title),sessions.account,sessions.model,sessions.node_tree_id,sessions.node_agent_id,sessions.root_profile,CASE WHEN v.session_id IS NULL THEN sessions.locator ELSE v.head_locator END,sessions.archived FROM sessions LEFT JOIN session_views v ON v.session_id=sessions.id WHERE (?1 IS NULL OR sessions.workspace_identity=?1) AND (?3 OR sessions.archived=0) AND (?4 IS NULL OR COALESCE(json_extract(sessions.runner_display,'$.runner_id'),'local')=?4) ORDER BY sessions.updated_at DESC, sessions.id ASC LIMIT ?2",
+                "SELECT sessions.id,sessions.workspace_root,sessions.updated_at,COALESCE(sessions.title_override,sessions.title),sessions.account,sessions.model,sessions.node_tree_id,sessions.node_agent_id,sessions.root_profile,CASE WHEN v.session_id IS NULL THEN sessions.locator ELSE v.head_locator END,sessions.archived FROM sessions LEFT JOIN session_views v ON v.session_id=sessions.id WHERE (?1 IS NULL OR (CASE WHEN ?5 THEN sessions.workspace_root ELSE sessions.workspace_identity END)=?1) AND (?3 OR sessions.archived=0) AND (?4 IS NULL OR COALESCE(json_extract(sessions.runner_display,'$.runner_id'),'local')=?4) ORDER BY sessions.updated_at DESC, sessions.id ASC LIMIT ?2",
             )
             .map_err(|_| "could not query the session directory".to_owned())?;
         let rows = statement
             .query_map(
-                (identity, MAX_DIRECTORY_ROWS, include_archived, runner_id),
+                (
+                    identity,
+                    MAX_DIRECTORY_ROWS,
+                    include_archived,
+                    runner_id,
+                    nonlocal,
+                ),
                 |row| {
                     Ok(DirectoryEntry {
                         id: row.get(0)?,
@@ -125,6 +141,57 @@ impl ProductStore {
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn remote_workspace_filters_match_saved_bytes_without_host_canonicalization() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::home::paths::PlakPaths::explicit(root.path().join("home"));
+        let actual = root.path().join("actual");
+        let alias = root.path().join("alias");
+        std::fs::create_dir_all(&actual).unwrap();
+        std::os::unix::fs::symlink(&actual, &alias).unwrap();
+        let mut store = ProductStore::open(&paths).unwrap();
+        let mut remote = sessions::SessionRecord::new(alias.clone());
+        remote.runner = Some(plakous_hosted::sessions::RunnerDisplay {
+            name: "peer".into(),
+            runner_id: "runner-a".into(),
+            workspace_root: alias.clone(),
+            workspace_cwd: alias.clone(),
+        });
+        store.commit(&mut remote).unwrap();
+        let mut local = sessions::SessionRecord::new(actual.clone());
+        store.commit(&mut local).unwrap();
+        for present_on_host in [true, false] {
+            if !present_on_host {
+                std::fs::remove_file(&alias).unwrap();
+            }
+            let rows = store
+                .directory_filtered(Some(&alias), Some("runner-a"), false)
+                .unwrap();
+            assert_eq!(
+                rows.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
+                [remote.id.as_str()]
+            );
+            assert_eq!(rows[0].workspace_root, alias);
+            assert!(
+                store
+                    .directory_filtered(Some(&actual), Some("runner-a"), false)
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+        std::os::unix::fs::symlink(&actual, &alias).unwrap();
+        assert_eq!(
+            store
+                .directory_filtered(Some(&alias), Some("local"), false)
+                .unwrap()
+                .into_iter()
+                .map(|row| row.id)
+                .collect::<Vec<_>>(),
+            [local.id]
+        );
+    }
 
     /// The directory lists the newest sessions first, across workspaces or
     /// of one, and a tree's newest session is the one an attach of its root

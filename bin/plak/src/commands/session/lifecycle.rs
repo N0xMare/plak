@@ -213,8 +213,7 @@ pub(crate) fn rename_session(
     let paths = services.paths()?;
     let mut store = crate::store::ProductStore::open(paths)
         .map_err(|error| CliFailure::new(error.to_string()))?;
-    store.set_title_override(id, title)?;
-    Ok(title.map(str::to_owned))
+    store.set_title_override(id, title)
 }
 
 /// The host holds a nonresident session's slot through this call. Existing
@@ -359,7 +358,10 @@ mod tests {
                 .as_deref(),
             Some("archived label")
         );
-        rename_session(&services, &record.id, None).unwrap();
+        assert_eq!(
+            rename_session(&services, &record.id, None).unwrap(),
+            Some("generated".into())
+        );
         set_archived(&services, &record.id, false).unwrap();
         assert_eq!(
             store.directory(None).unwrap()[0].title.as_deref(),

@@ -49,12 +49,13 @@ impl ProductStore {
         &mut self,
         id: &str,
         title: Option<&str>,
-    ) -> Result<(), LifecycleError> {
+    ) -> Result<Option<String>, LifecycleError> {
         self.write_lifecycle(id, title, None, &|| Ok(()))
     }
 
     pub(crate) fn set_archived(&mut self, id: &str, archived: bool) -> Result<(), LifecycleError> {
         self.write_lifecycle(id, None, Some(archived), &|| Ok(()))
+            .map(|_| ())
     }
 
     pub(crate) fn set_archived_checked(
@@ -64,6 +65,7 @@ impl ProductStore {
         verify: &dyn Fn() -> Result<(), LifecycleError>,
     ) -> Result<(), LifecycleError> {
         self.write_lifecycle(id, None, Some(archived), verify)
+            .map(|_| ())
     }
 
     fn write_lifecycle(
@@ -72,7 +74,7 @@ impl ProductStore {
         title: Option<&str>,
         archived: Option<bool>,
         verify: &dyn Fn() -> Result<(), LifecycleError>,
-    ) -> Result<(), LifecycleError> {
+    ) -> Result<Option<String>, LifecycleError> {
         self.durability(true).map_err(CliFailure::new)?;
         let transaction = self
             .connection
@@ -111,13 +113,20 @@ impl ProductStore {
                 .map_err(|_| CliFailure::new("invalid commit pause fixture"))?;
             std::thread::sleep(std::time::Duration::from_millis(milliseconds));
         }
+        let title = transaction
+            .query_row(
+                "SELECT COALESCE(title_override,title) FROM sessions WHERE id=?1",
+                [id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .map_err(|error| CliFailure::new(error.to_string()))?;
         verify()?;
         transaction
             .commit()
             .map_err(|error| CliFailure::new(error.to_string()))?;
         #[cfg(test)]
         crash_cut("metadata_after_commit");
-        Ok(())
+        Ok(title)
     }
 }
 
@@ -253,9 +262,11 @@ mod tests {
         let operation = std::env::var("PLAK_LIFECYCLE_CRASH_OPERATION").unwrap();
         let mut store = ProductStore::open(&paths).unwrap();
         match operation.as_str() {
-            "rename" => store
-                .set_title_override(&id, Some("committed title"))
-                .unwrap(),
+            "rename" => {
+                store
+                    .set_title_override(&id, Some("committed title"))
+                    .unwrap();
+            }
             "archive" => store.set_archived(&id, true).unwrap(),
             "delete" => {
                 let revision = store.load(&id).unwrap().store_revision;
