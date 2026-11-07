@@ -649,6 +649,9 @@ impl RunnerService {
                 }
             }
             HostFrame::Ack { request_id } => {
+                self.inner
+                    .foreground
+                    .acknowledge(host, instance, &request_id);
                 lock(&self.inner.tables).acknowledge(host, instance, &request_id);
             }
             HostFrame::TransferOwner(transfer) => {

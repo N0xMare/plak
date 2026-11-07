@@ -33,6 +33,8 @@ use crate::streams::{
 type ForegroundReporter =
     Arc<dyn Fn(&str, &plakous_runner_protocol::StoppedForeground) + Send + Sync>;
 
+mod foreground;
+
 /// How long the host waits on its runner.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ClientWindows {
@@ -109,6 +111,7 @@ pub struct RunnerClient {
 }
 
 struct Inner {
+    foreground: foreground::Calls,
     connected: tokio::sync::Notify,
     foreground_reporter: Mutex<Option<ForegroundReporter>>,
     bind: Bind,
@@ -278,6 +281,7 @@ impl RunnerClient {
         };
         let client = Self {
             inner: Arc::new(Inner {
+                foreground: foreground::Calls::default(),
                 connected: tokio::sync::Notify::new(),
                 foreground_reporter: Mutex::default(),
                 bind,
@@ -380,6 +384,14 @@ impl RunnerClient {
             if held_elsewhere {
                 kept.push(entry.clone());
             }
+            if entry.request.operation.verb
+                == plakous_tools::internal::runner::RunnerVerb::ForegroundStop.as_str()
+                && let (Some(owner), Ok(value)) = (&entry.request.owner, &answer)
+                && let Some(reports) = value.get("stopped").cloned()
+                && let Ok(reports) = serde_json::from_value(reports)
+            {
+                self.inner.report_cleanup(&owner.line, reports).await;
+            }
             if answered && let Some(journal) = &self.inner.journal {
                 let _ = journal.settle(&entry.request.request_id);
             }
@@ -447,16 +459,7 @@ impl RunnerClient {
         owner: &plakous_tools::LineOwner,
     ) -> Result<Vec<plakous_runner_protocol::UnpromotedProcess>, RunnerFailure> {
         let owner = wire_owner(owner);
-        self.inner.transfer(&owner).await?;
-        let line = lock(&self.inner.transferred)
-            .lines
-            .get(&owner.line)
-            .cloned();
-        let Some(line) = line else {
-            return Ok(Vec::new());
-        };
-        let result = line.lock().await.unpromoted.clone();
-        Ok(result)
+        self.inner.unpromoted(&owner).await
     }
 
     /// Keyed cleanup selected by terminal driver-operation state, never by
@@ -471,7 +474,7 @@ impl RunnerClient {
         owner: plakous_tools::LineOwner,
         process: &plakous_runner_protocol::UnpromotedProcess,
     ) -> Result<Vec<plakous_runner_protocol::StoppedForeground>, RunnerFailure> {
-        let key = format!("foreground-cleanup:{}:{}", owner.line, process.call_key);
+        let key = format!("foreground-cleanup:{}:{}", owner.line(), process.call_key);
         let answer = self
             .call(RunnerCall::recorded_control(
                 RunnerVerb::ForegroundStop,
@@ -809,12 +812,18 @@ impl Inner {
                     if transferred.owner.as_ref() != Some(owner) {
                         transferred.reported.clear();
                     }
-                    stopped.retain(|process| transferred.reported.insert(process.call_key.clone()));
                     let reporter = lock(&self.foreground_reporter).clone();
                     if let Some(reporter) = reporter {
                         for process in &stopped {
-                            reporter(&owner.line, process);
+                            if transferred.reported.insert(process.call_key.clone()) {
+                                reporter(&owner.line, process);
+                            }
+                            self.acknowledge_foreground(&owner.line, process);
                         }
+                    } else {
+                        stopped.retain(|process| {
+                            transferred.reported.insert(process.call_key.clone())
+                        });
                     }
                     transferred.owner = Some(owner.clone());
                     transferred.unpromoted = unpromoted;
@@ -959,6 +968,19 @@ impl Inner {
     }
 
     async fn call(&self, call: RunnerCall) -> Result<Value, RunnerFailure> {
+        let gate = call
+            .owner()
+            .filter(|_| !call.verb().is_read() && call.verb() != RunnerVerb::ForegroundStop)
+            .map(|owner| self.foreground.gate(&owner.line().to_string()));
+        let foreground_guard = match &gate {
+            Some(gate) => Some(gate.lock().await),
+            None => None,
+        };
+        if foreground_guard.is_some()
+            && let Some(owner) = call.owner()
+        {
+            self.cleanup_foreground(*owner).await?;
+        }
         if self.home_local {
             self.wait_connected().await?;
         }
@@ -988,7 +1010,9 @@ impl Inner {
         }
         let request_id = request.request_id.clone();
         let (answer, mut answered) = oneshot::channel();
+        self.foreground.register(&call);
         self.dispatch(request, frame, answer)?;
+        drop(foreground_guard);
         let expiry = tokio::time::sleep(window);
         tokio::pin!(expiry);
         let cancellation = call.cancellation().clone();
@@ -1161,6 +1185,21 @@ impl Inner {
 }
 
 impl RunnerLink for RunnerClient {
+    fn driver_operation_settled(
+        &self,
+        owner: plakous_tools::LineOwner,
+        call_id: plakous_model::CallId,
+        attempt_id: plakous_model::AttemptId,
+    ) {
+        if self.inner.foreground.settled(owner, call_id, attempt_id)
+            && let Ok(runtime) = tokio::runtime::Handle::try_current()
+        {
+            let client = self.clone();
+            runtime.spawn(async move {
+                let _ = client.reconcile_settled_foreground().await;
+            });
+        }
+    }
     fn call(&self, call: RunnerCall) -> RunnerCallFuture {
         let inner = Arc::clone(&self.inner);
         Box::pin(async move { inner.call(call).await })

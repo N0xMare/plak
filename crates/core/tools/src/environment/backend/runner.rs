@@ -503,6 +503,15 @@ pub type RunnerOpenFuture =
 /// How a [`RunnerBackend`] reaches its runner. The implementation frames,
 /// keys and fences each call; it never interprets the payload.
 pub trait RunnerLink: Send + Sync + 'static {
+    /// A committed terminal driver operation, serialized with that driver's
+    /// next dispatch. This is not a runner-key answer or acknowledgement.
+    fn driver_operation_settled(
+        &self,
+        _owner: LineOwner,
+        _call_id: CallId,
+        _attempt_id: AttemptId,
+    ) {
+    }
     /// Sends one call and answers its result.
     fn call(&self, call: RunnerCall) -> RunnerCallFuture;
 
@@ -796,6 +805,18 @@ pub fn runner_environment(
 }
 
 impl ExecutionEnvironment {
+    /// Notifies runner transport only after the owning driver operation's
+    /// terminal checkpoint is committed. Direct local execution needs no hook.
+    pub fn driver_operation_settled(&self, call_id: CallId, attempt_id: AttemptId) {
+        let Some(owner) = self.line_owner else {
+            return;
+        };
+        if let Some(link) = &self.runner_link {
+            link.driver_operation_settled(owner, call_id, attempt_id);
+        } else if let Some(daemon) = &self.local_daemon {
+            daemon.driver_operation_settled(owner, call_id, attempt_id);
+        }
+    }
     /// Pins the executor of this node's runner link. This live service fact
     /// is not part of its frozen execution descriptor.
     #[must_use]

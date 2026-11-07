@@ -31,6 +31,13 @@ fn project_node(tree: &ProductAgentTree, id: &str) -> Option<NodeView> {
     let workspace = tree.workspace(&node.workspace_id);
     let attempt = tree.attempt(id);
     Some(NodeView {
+        runner: node.placement.runner_id.as_ref().map_or_else(
+            plakous_host_protocol::wire::RunnerLabel::local,
+            |runner_id| plakous_host_protocol::wire::RunnerLabel {
+                name: runner_id.clone(),
+                runner_id: runner_id.clone(),
+            },
+        ),
         agent_id: node.agent_id.clone(),
         parent_agent_id: node.parent_agent_id.clone(),
         depth: node.depth,
@@ -206,6 +213,28 @@ fn attempt_sequence(agent_id: &str, attempt_id: &AttemptId) -> Option<u32> {
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runner_labels_project_each_nodes_saved_identity_not_its_roots_identity() {
+        use crate::tree::test_support::{spawn_req, tree};
+        let (_directory, mut agents) = tree();
+        assert_eq!(
+            project_tree_view(&agents).nodes[0].runner,
+            plakous_host_protocol::wire::RunnerLabel::local()
+        );
+        let child = agents
+            .spawn_agent("root", &spawn_req(), None)
+            .unwrap()
+            .agent_id;
+        agents.nodes.get_mut("root").unwrap().placement.runner_id = Some("root-runner".into());
+        agents.nodes.get_mut(&child).unwrap().placement.runner_id = Some("child-runner".into());
+        let view = project_tree_view(&agents);
+        for (id, runner) in [("root", "root-runner"), (child.as_str(), "child-runner")] {
+            let row = view.nodes.iter().find(|node| node.agent_id == id).unwrap();
+            assert_eq!(row.runner.runner_id, runner);
+            assert_eq!(row.runner.name, runner);
+        }
+    }
 
     /// `<agent_id>-a<seq>` is read back rather than stored twice, and an id
     /// that does not belong to the node yields nothing rather than a number.

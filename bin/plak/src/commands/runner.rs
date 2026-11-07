@@ -129,14 +129,27 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
             .map_err(|error| {
                 CliFailure::new(format!("runner root {}: {error}", first.display()))
             })?;
-    let (roots, outside) = (config.roots.clone(), excluded.clone());
+    let (roots, outside) = (
+        config
+            .roots
+            .iter()
+            .chain(&config.copies)
+            .cloned()
+            .collect::<Vec<_>>(),
+        excluded.clone(),
+    );
     let workspaces = Arc::new(move |root: &Path, cwd: &Path| {
         if !home::admitted_workspace(&roots, &outside, root) {
             return Err(plakous::tools::runner::workspace_refusal());
         }
         ExecutionEnvironment::host(scope, root, cwd, ExecutionEnvironmentConfig::default())
     });
-    let roots = config.roots.clone();
+    let roots = config
+        .roots
+        .iter()
+        .chain(&config.copies)
+        .cloned()
+        .collect::<Vec<_>>();
     let probe_excluded = excluded.clone();
     let probe_paths = Arc::new(move |candidate: &Path| {
         home::admitted_probe_path(&roots, &probe_excluded, candidate)
@@ -572,10 +585,21 @@ async fn pair(paths: &PlakPaths, name: &str, stdout: &mut dyn std::io::Write) ->
     };
     let directory = paths.home().join("runners").join(name);
     private_directory(&directory)?;
-    home::write_private(
-        &directory.join("runner.json"),
-        &serde_json::to_vec_pretty(&record).map_err(|error| CliFailure::new(error.to_string()))?,
-    )?;
+    let bytes =
+        serde_json::to_vec_pretty(&record).map_err(|error| CliFailure::new(error.to_string()))?;
+    registry::overlap_guard(paths)?
+        .with_pin_admission(
+            plakous::runner::RunnerPin {
+                runner_id: record.runner_id.clone(),
+                machine_id: record.machine_id.clone(),
+                roots: record.roots.clone(),
+            },
+            || {
+                home::write_private(&directory.join("runner.json"), &bytes)
+                    .map_err(|_| plakous::runner::PlacementFailure::RunnerNotPaired)
+            },
+        )
+        .map_err(|failure| CliFailure::new(format!("runner pairing refused: {failure:?}")))?;
     writeln!(
         stdout,
         "paired host {host_id} with runner {name} ({})",

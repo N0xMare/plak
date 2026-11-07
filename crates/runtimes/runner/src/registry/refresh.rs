@@ -205,7 +205,9 @@ impl RunnerRegistry {
             () = tokio::time::sleep(Duration::from_secs(25)) => {
                 let phase = self.entries.read().unwrap_or_else(PoisonError::into_inner).get(&id).map_or(ProbePhase::Reconcile, |entry| entry.refresh.phase);
                 self.blocked(&id, PlacementFailure::RunnerUnreachable {phase, timed_out: true}, now());
-                if phase == ProbePhase::Reconcile { drop(permit); work.await } else { let result = work.await; drop(permit); result }
+                let result = work.await;
+                drop(permit);
+                result
             }
         };
         match result {

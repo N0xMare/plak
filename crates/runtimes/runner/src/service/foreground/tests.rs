@@ -14,6 +14,146 @@ use plakous_tools::{
 use std::time::Duration;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reports_survive_a_new_owner_until_the_consumers_receipt_is_acknowledged() {
+    let root = tempfile::tempdir().unwrap();
+    let scope =
+        ExecutionEnvironmentScope::Run("00000000-0000-0000-0000-000000000001".parse().unwrap());
+    let (service, _link) = queued_link(root.path(), scope).await;
+    let report = StoppedForeground {
+        call_key: "call:attempt".into(),
+        pid: 123,
+        ended: "Stopped".into(),
+    };
+    let mut owner = LineOwner {
+        line: "line".into(),
+        generation: 1,
+        branch: "owner".into(),
+        fence: 1,
+    };
+    lock(&service.inner.foreground.reports).insert(
+        ("home".into(), "line".into()),
+        Reports {
+            stopped: vec![report.clone()],
+            delivered: HashSet::new(),
+        },
+    );
+    let receipt = plakous_runner_protocol::foreground_report_id("line", &report);
+    service
+        .inner
+        .foreground
+        .acknowledge("home", "first", &receipt);
+    assert_eq!(
+        service.foreground_report("home", "first", &owner),
+        vec![report.clone()]
+    );
+    owner.fence += 1;
+    assert_eq!(
+        service.foreground_report("home", "second", &owner),
+        vec![report.clone()]
+    );
+    service
+        .inner
+        .foreground
+        .acknowledge("other-home", "second", &receipt);
+    service
+        .inner
+        .foreground
+        .acknowledge("home", "undelivered", &receipt);
+    let wrong_pid = StoppedForeground {
+        pid: 456,
+        ..report.clone()
+    };
+    service.inner.foreground.acknowledge(
+        "home",
+        "second",
+        &plakous_runner_protocol::foreground_report_id("line", &wrong_pid),
+    );
+    assert!(service.inner.foreground.pending());
+    service
+        .inner
+        .foreground
+        .acknowledge("home", "second", &receipt);
+    assert!(
+        service
+            .foreground_report("home", "second", &owner)
+            .is_empty()
+    );
+    assert!(!service.inner.foreground.pending());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_answered_start_survives_live_reconnect_but_terminal_driver_cleanup_preserves_jobs() {
+    let root = tempfile::tempdir().unwrap();
+    let scope =
+        ExecutionEnvironmentScope::Run("00000000-0000-0000-0000-000000000001".parse().unwrap());
+    let (service, mut link) = link_with_lease(root.path(), scope, Duration::from_secs(300)).await;
+    let backend = link.backend();
+    let environment = runner_environment(
+        scope,
+        root.path(),
+        ".",
+        ExecutionEnvironmentConfig::default(),
+        backend.clone(),
+    )
+    .unwrap();
+    let owner = plakous_tools::LineOwner::new(
+        "00000000-0000-0000-0000-0000000000a1".parse().unwrap(),
+        1,
+        "00000000-0000-0000-0000-0000000000b1".parse().unwrap(),
+        1,
+    );
+    let sessions = RunnerSessions::new(&backend, &environment, owner);
+    let start = || {
+        JoinedProcessStartRequest::new(
+            JoinedProcessCommand::literal("/bin/sh", ["-c".into(), "read line".into()]).unwrap(),
+            ".",
+            Vec::new(),
+            true,
+            JoinedProcessTerminalMode::Pipes,
+        )
+        .unwrap()
+    };
+    let first: plakous_model::CallId = "00000000-0000-0000-0000-000000000001".parse().unwrap();
+    let second: plakous_model::CallId = "00000000-0000-0000-0000-000000000002".parse().unwrap();
+    let attempt: plakous_model::AttemptId = "00000000-0000-0000-0000-000000000003".parse().unwrap();
+    let control = |call_id| {
+        OperationContext::new(plakous_model::CancellationToken::new()).with_class(
+            OperationClass::EffectCall {
+                call_id,
+                attempt_id: attempt,
+            },
+        )
+    };
+    let job = sessions.start(start(), control(first)).await.unwrap();
+    sessions.promote(job).await.unwrap();
+    sessions.start(start(), control(second)).await.unwrap();
+    link.reconnect().await.unwrap();
+    sessions.jobs().await.unwrap();
+    assert!(
+        service.lines(Some("home")).await[0].foreground,
+        "answer/Ack and a reconnect inside the effect window do not settle a driver operation"
+    );
+    backend
+        .link()
+        .driver_operation_settled(owner, second, attempt);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while service.lines(Some("home")).await[0].foreground {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        service.lines(Some("home")).await[0].jobs["jobs"][0]["status"]["status"],
+        "running"
+    );
+    sessions
+        .stop_jobs(plakous_tools::JobStopReason::User, Duration::ZERO)
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_admitted_start_queued_past_its_instance_lease_has_no_effect() {
     queued_start_loses_authority(0).await;
 }
@@ -189,6 +329,14 @@ async fn queued_link(
     root: &std::path::Path,
     scope: ExecutionEnvironmentScope,
 ) -> (RunnerService, Loopback) {
+    link_with_lease(root, scope, Duration::ZERO).await
+}
+
+async fn link_with_lease(
+    root: &std::path::Path,
+    scope: ExecutionEnvironmentScope,
+    lease: Duration,
+) -> (RunnerService, Loopback) {
     let environment =
         ExecutionEnvironment::host(scope, root, ".", ExecutionEnvironmentConfig::default())
             .unwrap();
@@ -202,7 +350,7 @@ async fn queued_link(
             binary_id: None,
         },
         crate::RunnerLimits {
-            owner_lease: Duration::ZERO,
+            owner_lease: lease,
             ..crate::RunnerLimits::default()
         },
     )

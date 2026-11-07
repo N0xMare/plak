@@ -77,6 +77,15 @@ struct AdmittedLink {
 }
 
 impl super::RunnerLink for AdmittedLink {
+    fn driver_operation_settled(
+        &self,
+        owner: crate::LineOwner,
+        call_id: plakous_model::CallId,
+        attempt_id: plakous_model::AttemptId,
+    ) {
+        self.inner
+            .driver_operation_settled(owner, call_id, attempt_id);
+    }
     fn call(&self, call: super::RunnerCall) -> super::RunnerCallFuture {
         if !self.available.load(Ordering::Acquire) {
             return Box::pin(std::future::ready(Err(super::RunnerFailure::Unavailable(

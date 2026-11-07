@@ -22,7 +22,7 @@ mod machine;
 mod overlap;
 mod registry;
 
-pub use overlap::{MachineOverlapGuard, RunnerPin};
+pub use overlap::{AdmissionSnapshot, MachineOverlapGuard, RunnerPin};
 
 pub use plakous_tools::internal::runner::RunnerServices;
 pub use registry::{

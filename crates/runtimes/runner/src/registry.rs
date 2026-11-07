@@ -423,7 +423,7 @@ impl RunnerRegistry {
             .ok_or_else(|| missing(id))?;
         match &entry.connection {
             Some(Connection::Remote(_, services)) => Ok(services.clone()),
-            _ => Err(super::registry::reconciling()),
+            _ => Err(reconciling()),
         }
     }
 

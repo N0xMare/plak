@@ -25,10 +25,14 @@ pub(crate) type TelemetrySinkFactory = fn() -> Option<Arc<dyn ExtraTelemetrySink
 pub(crate) struct Services {
     runners: plakous::runner::RunnerRegistry,
     runner_overlap: Arc<plakous::runner::MachineOverlapGuard>,
-    local_daemon: Option<(
-        plakous::tools::runner::LocalDaemonBackend,
-        plakous::runner::RunnerClient,
-    )>,
+    local_daemon: Arc<
+        std::sync::RwLock<
+            Option<(
+                plakous::tools::runner::LocalDaemonBackend,
+                plakous::runner::RunnerClient,
+            )>,
+        >,
+    >,
     clock: Arc<dyn plakous::model::Clock>,
     home: Home,
     session_records: OnceLock<Arc<crate::store::session_records::SqliteSessionStore>>,
@@ -55,7 +59,7 @@ impl Services {
         Self {
             runners: plakous::runner::RunnerRegistry::default(),
             runner_overlap: Arc::new(plakous::runner::MachineOverlapGuard::new(None, [])),
-            local_daemon: None,
+            local_daemon: Arc::default(),
             clock: crate::commands::application::test_clock(),
             home: Home::explicit(paths.clone(), paths.home().join("test-state")),
             session_records: OnceLock::new(),
@@ -92,7 +96,7 @@ impl Services {
         Self {
             runners: plakous::runner::RunnerRegistry::default(),
             runner_overlap: Arc::new(plakous::runner::MachineOverlapGuard::new(None, [])),
-            local_daemon: None,
+            local_daemon: Arc::default(),
             clock: Arc::new(plakous::model::SystemClock),
             home,
             session_records: OnceLock::new(),
@@ -174,9 +178,20 @@ impl Services {
         backend: plakous::tools::runner::LocalDaemonBackend,
         client: plakous::runner::RunnerClient,
     ) -> Self {
-        let mut services = self.clone();
-        services.local_daemon = Some((backend, client));
+        let services = self.clone();
+        *services
+            .local_daemon
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((backend, client));
         services
+    }
+
+    pub(crate) fn local_runner_client(&self) -> Option<plakous::runner::RunnerClient> {
+        self.local_daemon
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .map(|(_, client)| client.clone())
     }
     pub(crate) fn now_unix_seconds(&self) -> u64 {
         self.clock.now().seconds()
@@ -229,7 +244,11 @@ impl Services {
             self.session_records()?,
             &self.jobs,
         )?;
-        let roots = match &self.local_daemon {
+        let roots = match &*self
+            .local_daemon
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        {
             Some((backend, client)) => roots.with_local_daemon(backend.clone(), client.clone()),
             None => roots,
         };

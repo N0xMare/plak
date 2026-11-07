@@ -4708,8 +4708,8 @@ background hash is pending; welcome never waits for that hash.
   under an idle root, and a crashed host's turn whose loss no open has
   recorded yet, are not found by the scan: they continue, or hold, at the
   session's next open.
-- **Local process daemon.** After binding its control socket, before serving
-  either endpoint or opening sessions, it dials the home-local runner of this
+- **Local process daemon.** After binding its control socket, its independently owned local probe
+  dials the home-local runner of this
   protocol, binds journaled to `host/runner/v<N>/calls/<state key>`, and
   selects `LocalDaemonBackend` through its services for every root and child.
   It retries connect, start and connect under one 10 s bound, including an EOF
@@ -4718,7 +4718,9 @@ background hash is pending; welcome never waits for that hash.
   It then sweeps the runner's lines known to its runtime store,
   under each head's lease, transferring owners and recording ended jobs;
   recovers the journal after those transfers; and finishes recorded stops
-  before serving. A live embedded holder refuses the head lease and is
+  before marking the local row ready. Until then local sessions defer, while
+  other ready placements and non-runtime product reads remain available. A live
+  embedded holder refuses the head lease and is
   skipped. Other state keys' lines are never transferred or stopped.
   Protocol 3 transfers first stop unpromoted processes and log diagnostic
   reports only; their unanswered tool calls follow existing recovery on the
@@ -4736,11 +4738,11 @@ background hash is pending; welcome never waits for that hash.
   timeout or other ambiguous manager answers never authorize a detached
   fallback. Only a proven unreachable manager does. Detached children are
   reaped by a waiter. A closed daemon link is redialed under the same bound,
-  reconnecting the existing client and recovering its journal; lines transfer
-  on their next call. Exhausting the bound ends the host non-zero for restart.
-  A refused owner floors file is a permanent start failure: startup and
-  redial name the file and cause on stderr and exit 8, which the service unit
-  excludes from restart until an operator repairs the cause.
+  reconnecting the existing client and repeating sweep, recovery, recorded stops
+  and settled-foreground cleanup before readiness. Failures block that runner row,
+  not the host. Needed connections retry with 1, 2, 5 and then 15 second backoff;
+  idle remote picker rows do not keep an SSH connection alive. A refused owner
+  floors file remains unavailable until the operator repairs its cause.
   Inspection, sweep and recorded-stop failures are structured `plak.runner`
   diagnostics scoped to their protocol, line or session. The next item still
   runs; live child stops collect failures after attempting every child.

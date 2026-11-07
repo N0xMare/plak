@@ -627,7 +627,9 @@ requests; that exfiltration path is residual risk (section 9).
 
 Runner placement uses pin-backed stable machine identity and effective canonical
 roots even while a runner is offline. Same-machine pin/root admission and local
-workspace admission share a guard through the local product commit. All non-deleted
+workspace admission share a home-local cross-process file lock through the local
+product commit or atomic pairing-pin write. Each admission refreshes durable local
+occupancy and configured pins under that lock, including standalone pair commands. All non-deleted
 local session roots and minted copies count, not only resident sessions; containment
 in either direction is overlap. Missing/unverifiable machine evidence refuses a
 remote bind with a re-pair remedy, never a local open. Remote canonical paths and

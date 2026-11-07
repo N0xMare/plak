@@ -101,23 +101,37 @@ async fn queue_time_does_not_consume_budget_and_reconcile_outlives_the_picker() 
     });
     until(|| started.load(Ordering::SeqCst) == 4).await;
     tokio::time::advance(Duration::from_secs(25)).await;
-    until(|| started.load(Ordering::SeqCst) == 6).await;
+    assert_eq!(
+        started.load(Ordering::SeqCst),
+        4,
+        "continuing reconcile retains its probe permit"
+    );
     assert!(
         !request.is_finished(),
         "queued probes get their own budget after admission"
     );
     tokio::time::advance(Duration::from_secs(24)).await;
     assert!(!request.is_finished());
+    release.notify_waiters();
+    until(|| started.load(Ordering::SeqCst) == 6).await;
+    assert_eq!(completed.load(Ordering::SeqCst), 4);
+    tokio::time::advance(Duration::from_secs(24)).await;
+    assert!(!request.is_finished());
     tokio::time::advance(Duration::from_secs(1)).await;
     let rows = request.await.unwrap().unwrap();
-    assert!(rows.iter().all(|row| matches!(
-        row.status,
-        RunnerStatus::Blocked(PlacementFailure::RunnerUnreachable {
-            phase: ProbePhase::Reconcile,
-            timed_out: true
-        })
-    )));
-    assert_eq!(completed.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        rows.iter()
+            .filter(|row| matches!(
+                row.status,
+                RunnerStatus::Blocked(PlacementFailure::RunnerUnreachable {
+                    phase: ProbePhase::Reconcile,
+                    timed_out: true
+                })
+            ))
+            .count(),
+        2
+    );
+    assert_eq!(completed.load(Ordering::SeqCst), 4);
     release.notify_waiters();
     until(|| completed.load(Ordering::SeqCst) == 6).await;
     assert!(

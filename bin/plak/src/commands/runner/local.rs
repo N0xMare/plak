@@ -135,7 +135,6 @@ pub(crate) async fn reconnect(paths: &PlakPaths, client: &RunnerClient) -> CliRe
             if let Ok(stream) = tokio::net::UnixStream::connect(home.socket_path()).await {
                 match client.reconnect(stream).await {
                     Ok(_) => {
-                        let _ = client.recover().await;
                         return Ok(());
                     }
                     Err(ConnectError::Closed) => {}

@@ -76,7 +76,7 @@ pub(crate) fn run_host_command(
     let entered = runtime.enter();
     let bound = socket::Bound::bind(&paths.host_socket(), &lock)?;
     drop(entered);
-    let (services, runner_client) = runner::prepare(services, &environment, &runtime)?;
+    let services = runner::prepare(services, &environment, &runtime)?;
     let sessions = sessions::ProductSessions::new(&services, command.idle_release)?;
     // Read before the host serves, so nothing this host does is mistaken
     // for what the last one left.
@@ -121,10 +121,8 @@ pub(crate) fn run_host_command(
     // The web endpoint serves beside the control socket and stops with it.
     let web = web.map(|web| runtime.spawn(web.serve()));
     let served = runtime.block_on(async {
-        tokio::select! {
-            () = bound.serve(&host, move || stop.stopped()) => Ok(()),
-            result = runner::supervise(paths, &runner_client) => result,
-        }
+        bound.serve(&host, move || stop.stopped()).await;
+        Ok(())
     });
     if let Some(web) = web {
         if served.is_err() {
@@ -238,6 +236,7 @@ fn placement_ready(services: &Services, session: &str) -> bool {
         .runner
         .as_ref()
         .map_or("local", |runner| runner.runner_id.as_str());
+    services.runners().require_connection(runner, true);
     services.runners().rows().iter().any(|row| {
         row.runner.runner_id == runner && row.status == plakous::runner::RunnerStatus::Ready
     })

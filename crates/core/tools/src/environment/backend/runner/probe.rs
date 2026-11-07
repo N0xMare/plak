@@ -23,6 +23,31 @@ enum ProbeWire {
     TreeBytes { path: String },
 }
 
+#[cfg(test)]
+#[test]
+#[allow(clippy::unwrap_used, reason = "protocol payload pin")]
+fn protocol_four_probe_payloads_are_pinned() {
+    assert_eq!(plakous_runner_protocol::PROTOCOL_VERSION, 4);
+    let path = "/workspace".to_owned();
+    let identity: crate::HostFilesystemObjectIdentity =
+        serde_json::from_value(json!({"device": 1, "inode": 2})).unwrap();
+    let actual = [
+        to_value(&ProbeWire::FilesystemIdentity { path: path.clone() }).unwrap(),
+        to_value(&ProbeWire::Canonicalize { path: path.clone() }).unwrap(),
+        to_value(&ProbeWire::IsFile { path: path.clone() }).unwrap(),
+        to_value(&ProbeWire::TreeBytes { path }).unwrap(),
+        to_value(&identity).unwrap(),
+        json!({"path": "/workspace"}),
+        json!({"file": true}),
+        json!({"bytes": 42}),
+    ];
+    let pinned = include_str!("probe/pinned/v4.jsonl")
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(actual.as_slice(), pinned);
+}
+
 /// A [`WorkspaceProbe`] whose answers come from the runner behind a link.
 /// Each question is one request, waited for on a thread of its own: callers
 /// of this synchronous port run off the async workers (spec 01 §8.5). Any

@@ -6126,9 +6126,16 @@ No production process-global runner selector exists.
   job on the runner, which the sweep discovers. A crash after termination
   but before the transfer answer leaves its diagnostic report for the next
   transfer; it creates no session record.
-  Explicit and implicit accepted transfers both drain diagnostic reports into
-  the product log. A newer accepted owner retires reports already delivered to
-  its predecessor; a reconnecting client suppresses repeats for the same owner.
+  Explicit and implicit accepted transfers both report diagnostics to the product
+  log. Protocol 4 retains each report until its consuming host instance acknowledges
+  the stable `foreground-report:` receipt (line, call key and PID), using the
+  existing Ack envelope. A newer owner does not retire an unacknowledged report;
+  reconnect suppresses repeated presentation while retrying lost acknowledgments.
+  After recovery, only a committed terminal driver operation (Completed,
+  OutcomeUnknown or Finalized) authorizes same-owner keyed foreground cleanup.
+  An answered/Acked start with a live driver operation remains running. Cleanup
+  serializes with settlement and finishes before the next non-read operation.
+  Promoted jobs and their durable terminal records are unchanged.
   Gates without a live operation are pruned rather than retained per old line.
 - **Owner leases.** Leases are per host instance. An instance holds the lines
   it is the holder of while it has a connection and for the owner lease

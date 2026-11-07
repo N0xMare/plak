@@ -41,11 +41,11 @@ use crate::views::transcript::{TranscriptItem, TranscriptScope};
 
 mod directory;
 mod runner_label;
-pub use runner_label::RunnerLabel;
 pub use directory::{
     HostedElsewhere, LiveWork, ResidentReason, SessionActivity, SessionEnvironment,
     SessionResidency, SessionRow,
 };
+pub use runner_label::RunnerLabel;
 
 /// The wire protocol version; a peer with another is refused. 3 dropped
 /// `hello`'s locality; 4 lets a welcome name no session and adds the

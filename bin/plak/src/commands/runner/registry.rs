@@ -40,14 +40,33 @@ pub(crate) async fn dial(
     .await
 }
 
-/// Restores offline pin evidence before any bind or local workspace admission.
-pub(crate) fn prepare(services: &Services) -> CliResult<Prepared> {
-    let paths = services.paths()?;
-    let config = crate::product_config::ProductConfig::load(paths).map_err(CliFailure::new)?;
+/// The shared lock covers the durable snapshot read and admission commit,
+/// including standalone pairing while the host admits a local workspace.
+pub(crate) fn overlap_guard(
+    paths: &crate::home::paths::PlakPaths,
+) -> CliResult<MachineOverlapGuard> {
+    let directory = paths.home().join("runners");
+    super::private_directory(&directory)?;
+    let saved = paths.clone();
+    Ok(
+        MachineOverlapGuard::new(plakous::runner::machine_id().ok(), []).with_admission_store(
+            directory.join("admission.lock"),
+            move || {
+                admission_snapshot(&saved).map_err(|_| PlacementFailure::RunnerUnreachable {
+                    phase: plakous::runner::ProbePhase::Reconcile,
+                    timed_out: false,
+                })
+            },
+        ),
+    )
+}
+
+fn admission_snapshot(
+    paths: &crate::home::paths::PlakPaths,
+) -> CliResult<plakous::runner::AdmissionSnapshot> {
     let mut product = crate::store::ProductStore::open(paths)
         .map_err(|error| CliFailure::new(error.to_string()))?;
-    let mut guarded = BTreeSet::new();
-    let mut recents = Vec::new();
+    let mut local = BTreeSet::new();
     for id in product.session_ids().map_err(CliFailure::new)? {
         let record = product.load(&id).map_err(CliFailure::new)?;
         if record
@@ -55,8 +74,7 @@ pub(crate) fn prepare(services: &Services) -> CliResult<Prepared> {
             .as_ref()
             .is_none_or(|runner| runner.runner_id == "local")
         {
-            guarded.insert(record.workspace_root.clone());
-            recents.push((record.updated_at_unix, record.workspace_root));
+            local.insert(record.workspace_root);
         }
         if let Some(tree) =
             crate::store::tree::load_tree(paths, &record.node.tree_id).map_err(CliFailure::new)?
@@ -68,8 +86,82 @@ pub(crate) fn prepare(services: &Services) -> CliResult<Prepared> {
                         .as_deref()
                         .is_none_or(|id| id == "local")
                 }) {
-                    guarded.insert(workspace.path.clone());
+                    local.insert(workspace.path.clone());
                 }
+            }
+        }
+    }
+    let config = crate::product_config::ProductConfig::load(paths).map_err(CliFailure::new)?;
+    let mut pins = BTreeMap::<String, RunnerPin>::new();
+    for name in config.runners.keys() {
+        let path = paths.home().join("runners").join(name).join("runner.json");
+        if let Some(pin) = std::fs::read(path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<super::PairedRunner>(&bytes).ok())
+            .filter(|pin| !pin.machine_id.is_empty() && !pin.runner_id.is_empty())
+        {
+            let saved = pins
+                .entry(pin.runner_id.clone())
+                .or_insert_with(|| RunnerPin {
+                    runner_id: pin.runner_id.clone(),
+                    machine_id: pin.machine_id.clone(),
+                    roots: Vec::new(),
+                });
+            if saved.machine_id != pin.machine_id {
+                return Err(CliFailure::new(
+                    "runner aliases disagree on machine identity; re-pair the aliases",
+                ));
+            }
+            saved.roots.extend(pin.roots);
+            saved.roots.sort();
+            saved.roots.dedup();
+        }
+    }
+    Ok(plakous::runner::AdmissionSnapshot {
+        local,
+        pins: pins.into_values().collect(),
+    })
+}
+
+/// Restores offline pin evidence before any bind or local workspace admission.
+pub(crate) fn prepare(services: &Services) -> CliResult<Prepared> {
+    let paths = services.paths()?;
+    let config = crate::product_config::ProductConfig::load(paths).map_err(CliFailure::new)?;
+    let mut product = crate::store::ProductStore::open(paths)
+        .map_err(|error| CliFailure::new(error.to_string()))?;
+    let mut recents = Vec::new();
+    let mut required = BTreeSet::new();
+    for id in product.session_ids().map_err(CliFailure::new)? {
+        let record = product.load(&id).map_err(CliFailure::new)?;
+        let runner_id = record
+            .runner
+            .as_ref()
+            .map_or("local", |runner| runner.runner_id.as_str())
+            .to_owned();
+        if product
+            .load_intents(&id)
+            .map_err(CliFailure::new)?
+            .root_interrupts
+            .iter()
+            .any(|intent| {
+                intent.value.cause
+                    == plakous_hosted::sessions::projector::RootInterruptCause::Stopped
+            })
+        {
+            required.insert(runner_id.clone());
+        }
+        if record
+            .runner
+            .as_ref()
+            .is_none_or(|runner| runner.runner_id == "local")
+        {
+            recents.push((record.updated_at_unix, record.workspace_root));
+        }
+        if let Some(tree) =
+            crate::store::tree::load_tree(paths, &record.node.tree_id).map_err(CliFailure::new)?
+        {
+            if !tree.recorded_process_stops().is_empty() {
+                required.insert(runner_id);
             }
         }
     }
@@ -86,10 +178,7 @@ pub(crate) fn prepare(services: &Services) -> CliResult<Prepared> {
         paths.home(),
     )
     .map_err(|error| CliFailure::new(format!("local workspace options: {error:?}")))?;
-    let services = services.with_runner_overlap(MachineOverlapGuard::new(
-        plakous::runner::machine_id().ok(),
-        guarded,
-    ));
+    let services = services.with_runner_overlap(overlap_guard(paths)?);
     services.runners().configure(ConfiguredRunner {
         runner_id: "local".into(),
         names: vec!["local".into()],
@@ -145,6 +234,9 @@ pub(crate) fn prepare(services: &Services) -> CliResult<Prepared> {
                 .blocked(&id, failure, services.now_unix_seconds()),
         }
     }
+    for id in required {
+        services.runners().require_connection(&id, true);
+    }
     Ok(Prepared {
         services,
         remote: admitted,
@@ -173,24 +265,29 @@ pub(crate) fn confirm(
         .roots
         .clone()
         .ok_or(PlacementFailure::RunnerNotPaired)?;
-    services.runner_overlap().admit_pin(RunnerPin {
-        runner_id: remote.id.clone(),
-        machine_id: remote.pin.machine_id.clone(),
-        roots: roots.clone(),
-    })?;
-    if roots != remote.pin.roots {
-        let mut pin = remote.pin.clone();
-        pin.roots = roots;
-        let path = services
-            .paths()
-            .map_err(|_| PlacementFailure::RunnerNotPaired)?
-            .home()
-            .join("runners")
-            .join(&remote.name)
-            .join("runner.json");
-        let bytes =
-            serde_json::to_vec_pretty(&pin).map_err(|_| PlacementFailure::RunnerNotPaired)?;
-        super::home::write_private(&path, &bytes).map_err(|_| PlacementFailure::RunnerNotPaired)?;
-    }
-    Ok(())
+    services.runner_overlap().with_pin_admission(
+        RunnerPin {
+            runner_id: remote.id.clone(),
+            machine_id: remote.pin.machine_id.clone(),
+            roots: roots.clone(),
+        },
+        || {
+            if roots != remote.pin.roots {
+                let mut pin = remote.pin.clone();
+                pin.roots = roots;
+                let path = services
+                    .paths()
+                    .map_err(|_| PlacementFailure::RunnerNotPaired)?
+                    .home()
+                    .join("runners")
+                    .join(&remote.name)
+                    .join("runner.json");
+                let bytes = serde_json::to_vec_pretty(&pin)
+                    .map_err(|_| PlacementFailure::RunnerNotPaired)?;
+                super::home::write_private(&path, &bytes)
+                    .map_err(|_| PlacementFailure::RunnerNotPaired)?;
+            }
+            Ok(())
+        },
+    )
 }

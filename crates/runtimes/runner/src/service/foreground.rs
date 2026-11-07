@@ -24,7 +24,7 @@ pub(super) struct Authority {
 #[derive(Default)]
 struct Reports {
     stopped: Vec<StoppedForeground>,
-    delivered: Option<(LineOwner, usize)>,
+    delivered: HashSet<String>,
 }
 
 impl Authority {
@@ -45,7 +45,18 @@ impl Authority {
     }
 
     pub(super) fn pending(&self) -> bool {
-        !lock(&self.expiring).is_empty()
+        !lock(&self.expiring).is_empty() || !lock(&self.reports).is_empty()
+    }
+
+    pub(super) fn acknowledge(&self, host: &str, instance: &str, receipt: &str) {
+        lock(&self.reports).retain(|(report_host, line), reports| {
+            if report_host == host && reports.delivered.contains(instance) {
+                reports.stopped.retain(|report| {
+                    plakous_runner_protocol::foreground_report_id(line, report) != receipt
+                });
+            }
+            !reports.stopped.is_empty()
+        });
     }
 }
 
@@ -85,7 +96,7 @@ impl RunnerService {
             }
             if verb == RunnerVerb::ForegroundStop {
                 return service
-                    .stop_matching_foreground(&host, &owner.line, payload)
+                    .stop_matching_foreground(&host, &instance, &owner.line, payload)
                     .await;
             }
             service
@@ -97,6 +108,7 @@ impl RunnerService {
     async fn stop_matching_foreground(
         &self,
         host: &str,
+        instance: &str,
         line: &str,
         payload: Value,
     ) -> Result<Value, plakous_tools::internal::runner::ServeFailure> {
@@ -114,11 +126,40 @@ impl RunnerService {
         let Some(sessions) = sessions else {
             return Ok(serde_json::json!({"stopped": []}));
         };
+        let service = self.clone();
+        let (host, instance, line) = (host.to_owned(), instance.to_owned(), line.to_owned());
         tokio::task::spawn_blocking(move || {
-            let stopped = plakous_tools::internal::stop_matching_foreground(&sessions, &stop.call_key, stop.pid);
-            if let Some(error) = stopped.failure { return Err(plakous_tools::internal::runner::serve_failure(&error)); }
-            Ok(serde_json::json!({"stopped": stopped.stopped.into_iter().map(|process| StoppedForeground {call_key: process.call_key, pid: process.pid, ended: format!("{:?}",process.status)}).collect::<Vec<_>>()}))
-        }).await.unwrap_or(Err(ServeFailure::Unsupported))
+            let stopped = plakous_tools::internal::stop_matching_foreground(
+                &sessions,
+                &stop.call_key,
+                stop.pid,
+            );
+            let reports = stopped
+                .stopped
+                .into_iter()
+                .map(|process| StoppedForeground {
+                    call_key: process.call_key,
+                    pid: process.pid,
+                    ended: format!("{:?}", process.status),
+                })
+                .collect::<Vec<_>>();
+            if !reports.is_empty() {
+                let mut stored = lock(&service.inner.foreground.reports);
+                let stored = stored.entry((host, line)).or_default();
+                stored.delivered.insert(instance);
+                for report in &reports {
+                    if !stored.stopped.contains(report) {
+                        stored.stopped.push(report.clone());
+                    }
+                }
+            }
+            if let Some(error) = stopped.failure {
+                return Err(plakous_tools::internal::runner::serve_failure(&error));
+            }
+            Ok(serde_json::json!({"stopped": reports}))
+        })
+        .await
+        .unwrap_or(Err(ServeFailure::Unsupported))
     }
 
     fn instance_authority(&self, host: &str, instance: &str) -> bool {
@@ -166,22 +207,22 @@ impl RunnerService {
         Ok(())
     }
 
-    fn foreground_report(&self, host: &str, owner: &LineOwner) -> Vec<StoppedForeground> {
+    fn foreground_report(
+        &self,
+        host: &str,
+        instance: &str,
+        owner: &LineOwner,
+    ) -> Vec<StoppedForeground> {
         let mut reports = lock(&self.inner.foreground.reports);
         let key = (host.to_owned(), owner.line.clone());
         let Some(report) = reports.get_mut(&key) else {
             return Vec::new();
         };
-        if let Some((delivered, count)) = &report.delivered
-            && owner.is_newer_than(delivered)
-        {
-            report.stopped.drain(..*count);
-        }
         if report.stopped.is_empty() {
             reports.remove(&key);
             return Vec::new();
         }
-        report.delivered = Some((owner.clone(), report.stopped.len()));
+        report.delivered.insert(instance.to_owned());
         report.stopped.clone()
     }
 
@@ -225,7 +266,7 @@ impl RunnerService {
             ..
         } = &mut answer
         {
-            *report = self.foreground_report(host, &owner);
+            *report = self.foreground_report(host, instance, &owner);
             if let Some((sessions, _)) =
                 lock(&self.inner.lines).get(&(host.to_owned(), owner.line.clone()))
             {

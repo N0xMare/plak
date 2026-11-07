@@ -14,57 +14,25 @@ pub(super) fn prepare(
     services: &Services,
     environment: &super::environment::HostEnvironment,
     runtime: &tokio::runtime::Runtime,
-) -> CliResult<(Services, RunnerClient)> {
+) -> CliResult<Services> {
     let prepared = crate::commands::runner::registry::prepare(services)?;
-    let services = &prepared.services;
-    let client = runtime.block_on(crate::commands::runner::local::dial(services.paths()?))?;
-    client.report_foreground_with(|line, process| {
-        tracing::info!(target: "plak.runner", line, call_key = %process.call_key, pid = process.pid, ended = %process.ended, "stopped_foreground");
-    });
-    let services = services.with_local_daemon(
-        environment.backend(client.clone(), runtime.handle().clone()),
-        client.clone(),
-    );
-    let roots = services.state_roots()?;
-    let runtime_sessions = roots.runtime_sessions()?;
-    let obsolete = runtime.block_on(crate::commands::runner::local::older(services.paths()?))?;
-    runtime.block_on(plakous_hosted::runner_adoption::report_obsolete_lines(
-        &runtime_sessions,
-        obsolete,
-    ));
-    let (readopted, failed) = runtime
-        .block_on(plakous_hosted::runner_adoption::readopt_lines(
-            &client,
-            &runtime_sessions,
-            "plak:host:readopt",
-        ))
-        .unwrap_or_else(|error| {
-            tracing::warn!(target: "plak.runner", phase = "sweep", error = ?error, "runner_recovery_failed");
-            (Vec::new(), Vec::new())
-        });
-    for failure in failed {
-        tracing::warn!(target: "plak.runner", phase = "sweep", line = %failure.line, error = %failure.reason, "runner_recovery_failed");
-    }
-    let _ = runtime.block_on(client.recover());
-    if let Err(error) = runtime.block_on(finish_stops(
+    let services = prepared.services;
+    services.runners().require_connection("local", true);
+    start_remotes(
         &services,
-        &client,
-        &runtime_sessions,
-        &readopted,
-    )) {
-        tracing::warn!(target: "plak.runner", phase = "finish_stops", error = %error, "runner_recovery_failed");
-    }
-    services
-        .runners()
-        .ready_local(prepared.local, services.now_unix_seconds())
-        .map_err(|failure| CliFailure::new(format!("local runner placement: {failure:?}")))?;
-    start_remotes(&services, prepared.remote, runtime.handle());
-    Ok((services, client))
+        prepared.remote,
+        prepared.local,
+        environment.clone(),
+        runtime.handle(),
+    );
+    Ok(services)
 }
 
 fn start_remotes(
     services: &Services,
     remote: Vec<crate::commands::runner::registry::Remote>,
+    local: std::sync::Arc<plakous::runner::WorkspaceCatalog>,
+    environment: super::environment::HostEnvironment,
     runtime: &tokio::runtime::Handle,
 ) {
     let remote = std::sync::Arc::new(
@@ -79,7 +47,6 @@ fn start_remotes(
     >::new()));
     let retries = std::sync::Arc::new(std::sync::Mutex::new(BTreeMap::new()));
     let context = services.runner_probe_context();
-    let local = services.runners().local_catalog();
     let handle = runtime.clone();
     services
         .runners()
@@ -89,25 +56,51 @@ fn start_remotes(
             let transports = transports.clone();
             let retries = retries.clone();
             let local = local.clone();
+            let environment = environment.clone();
             let handle = handle.clone();
             Box::pin(async move {
                 if id == "local" {
-                    let catalog =
-                        local.ok_or(plakous::runner::PlacementFailure::RunnerNotPaired)?;
-                    return tokio::task::spawn_blocking(move || {
-                        registry.ready_local(catalog, services.now_unix_seconds())
-                    })
-                    .await
-                    .map_err(|_| {
-                        plakous::runner::PlacementFailure::RunnerUnreachable {
-                            phase: plakous::runner::ProbePhase::Discovery,
-                            timed_out: false,
-                        }
-                    })?;
+                    if services
+                        .local_runner_client()
+                        .is_some_and(|client| client.is_connected())
+                        && registry.rows().iter().any(|row| {
+                            row.runner.runner_id == "local"
+                                && row.status == plakous::runner::RunnerStatus::Ready
+                        })
+                    {
+                        return tokio::task::spawn_blocking(move || {
+                            registry.ready_local(local, services.now_unix_seconds())
+                        })
+                        .await
+                        .map_err(|_| {
+                            plakous::runner::PlacementFailure::RunnerUnreachable {
+                                phase: plakous::runner::ProbePhase::Discovery,
+                                timed_out: false,
+                            }
+                        })?;
+                    }
+                    let result = bind_local(&services, local, &environment, &handle).await;
+                    match &result {
+                        Ok(client) => watch_remote(registry, id, client.clone(), retries),
+                        Err(_) => retry_remote(registry, id, retries),
+                    }
+                    return result.map(|_| ());
                 }
-                let remote = remote
-                    .get(&id)
-                    .ok_or(plakous::runner::PlacementFailure::RunnerNotPaired)?;
+                let remote = remote.get(&id).ok_or_else(|| {
+                    registry
+                        .rows()
+                        .into_iter()
+                        .find_map(|row| {
+                            if row.runner.runner_id == id
+                                && let plakous::runner::RunnerStatus::Blocked(failure) = row.status
+                            {
+                                Some(failure)
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(plakous::runner::PlacementFailure::RunnerNotPaired)
+                })?;
                 let connected = transports
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -264,6 +257,76 @@ fn unix_now() -> u64 {
         .map_or(0, |elapsed| elapsed.as_secs())
 }
 
+fn install_reporter(client: &RunnerClient) {
+    client.report_foreground_with(|line, process| {
+        tracing::info!(target: "plak.runner", line, call_key = %process.call_key, pid = process.pid, ended = %process.ended, "stopped_foreground");
+    });
+}
+
+async fn bind_local(
+    services: &Services,
+    catalog: std::sync::Arc<plakous::runner::WorkspaceCatalog>,
+    environment: &super::environment::HostEnvironment,
+    runtime: &tokio::runtime::Handle,
+) -> Result<RunnerClient, plakous::runner::PlacementFailure> {
+    use plakous::runner::{PlacementFailure, ProbePhase};
+    let unavailable = |phase| PlacementFailure::RunnerUnreachable {
+        phase,
+        timed_out: false,
+    };
+    let paths = services
+        .paths()
+        .map_err(|_| unavailable(ProbePhase::Daemon))?;
+    services.runners().progress("local", ProbePhase::Daemon);
+    let client = if let Some(client) = services.local_runner_client() {
+        if !client.is_connected() {
+            crate::commands::runner::local::reconnect(paths, &client)
+                .await
+                .map_err(|_| unavailable(ProbePhase::Daemon))?;
+        }
+        client
+    } else {
+        crate::commands::runner::local::dial(paths)
+            .await
+            .map_err(|_| unavailable(ProbePhase::Daemon))?
+    };
+    install_reporter(&client);
+    let _ = services.with_local_daemon(
+        environment.backend(client.clone(), runtime.clone()),
+        client.clone(),
+    );
+    services.runners().progress("local", ProbePhase::Reconcile);
+    let sessions = services
+        .state_roots()
+        .and_then(|roots| roots.runtime_sessions())
+        .map_err(|_| unavailable(ProbePhase::Reconcile))?;
+    let obsolete = crate::commands::runner::local::older(paths)
+        .await
+        .map_err(|_| unavailable(ProbePhase::Reconcile))?;
+    plakous_hosted::runner_adoption::report_obsolete_lines(&sessions, obsolete).await;
+    let (readopted, failures) =
+        plakous_hosted::runner_adoption::readopt_lines(&client, &sessions, "plak:host:readopt")
+            .await
+            .map_err(|_| unavailable(ProbePhase::Reconcile))?;
+    if !failures.is_empty() {
+        return Err(unavailable(ProbePhase::Reconcile));
+    }
+    let _ = client.recover().await;
+    finish_stops(services, &client, &sessions, &readopted)
+        .await
+        .map_err(|_| unavailable(ProbePhase::Reconcile))?;
+    client
+        .reconcile_settled_foreground()
+        .await
+        .map_err(|_| unavailable(ProbePhase::Reconcile))?;
+    let registry = services.runners().clone();
+    let now = services.now_unix_seconds();
+    tokio::task::spawn_blocking(move || registry.ready_local(catalog, now))
+        .await
+        .map_err(|_| unavailable(ProbePhase::Discovery))??;
+    Ok(client)
+}
+
 async fn bind_remote(
     services: &Services,
     remote: &crate::commands::runner::registry::Remote,
@@ -306,6 +369,7 @@ async fn bind_remote(
     })
     .await
     .map_err(|_| unavailable(ProbePhase::Daemon, true))??;
+    install_reporter(&dialed.client);
     services.runners().progress(&remote.id, ProbePhase::Bind);
     tokio::time::timeout_at(deadline, dialed.client.lines())
         .await
@@ -353,9 +417,15 @@ async fn bind_remote(
     .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
     for failure in failures {
         tracing::warn!(target: "plak.runner", phase = "sweep", line = %failure.line, error = %failure.reason, "runner_recovery_failed");
+        return Err(unavailable(ProbePhase::Reconcile, false));
     }
     let _ = dialed.client.recover().await;
     finish_stops(services, &dialed.client, &sessions, &readopted)
+        .await
+        .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
+    dialed
+        .client
+        .reconcile_settled_foreground()
         .await
         .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
     let backend = plakous::tools::runner::RunnerBackend::new(
@@ -374,16 +444,6 @@ async fn bind_remote(
     Ok(dialed)
 }
 
-pub(super) async fn supervise(
-    paths: &crate::home::paths::PlakPaths,
-    client: &RunnerClient,
-) -> CliResult<()> {
-    loop {
-        client.closed().await;
-        crate::commands::runner::local::reconnect(paths, client).await?;
-    }
-}
-
 /// A stop is durable before the host can die; finish it under a new head lease.
 pub(super) async fn finish_stops(
     services: &Services,
@@ -396,9 +456,7 @@ pub(super) async fn finish_stops(
         .map_err(|error| CliFailure::new(error.to_string()))?;
     let mut stops = BTreeMap::<LineId, String>::new();
     for id in product.session_ids().map_err(CliFailure::new)? {
-        if let Err(error) = collect_stops(&mut product, paths, sessions, &id, &mut stops).await {
-            tracing::warn!(target: "plak.runner", phase = "finish_stops", session = %id, error = %error, "runner_recovery_failed");
-        }
+        collect_stops(&mut product, paths, sessions, &id, &mut stops).await?;
     }
     let held = client.lines().await.map_err(|error| {
         CliFailure::new(format!(
@@ -417,13 +475,11 @@ pub(super) async fn finish_stops(
             if !readopted.iter().any(|adopted| adopted.line == line) {
                 continue;
             }
-            if let Err(error) = plakous_hosted::runner_adoption::finish_recorded_stop(
-                client, sessions, line, intent,
-            )
-            .await
-            {
-                tracing::warn!(target: "plak.runner", phase = "finish_stops", line = %line, error = %error, "runner_recovery_failed");
-            }
+            plakous_hosted::runner_adoption::finish_recorded_stop(client, sessions, line, intent)
+                .await
+                .map_err(|error| {
+                    CliFailure::new(format!("recorded stop on {line} remains pending: {error}"))
+                })?;
         }
     }
     Ok(())

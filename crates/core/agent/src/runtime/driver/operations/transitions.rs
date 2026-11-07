@@ -29,6 +29,7 @@ impl Driver {
         state: DurableOperationState,
     ) -> Result<Arc<RuntimeCheckpoint>, AgentError> {
         let checkpoint_id = self.checkpoint_id()?;
+        let runner_terminal = self.runner_terminal_call(operation_id, &state);
         let (history, ledger, context, family) = {
             let authority = self.authority.checkpoint();
             let manifest = authority.manifest();
@@ -64,16 +65,23 @@ impl Driver {
             )
         };
         let lifecycle = working_lifecycle(turn_id, &ledger)?;
-        self.publish_checkpoint(
-            admission,
-            checkpoint_id,
-            lifecycle,
-            history,
-            ledger,
-            context,
-            family,
-        )
-        .await
+        let published = self
+            .publish_checkpoint(
+                admission,
+                checkpoint_id,
+                lifecycle,
+                history,
+                ledger,
+                context,
+                family,
+            )
+            .await?;
+        if let Some((call, attempt)) = runner_terminal {
+            self.tools
+                .environment()
+                .driver_operation_settled(call, attempt);
+        }
+        Ok(published)
     }
 
     /// Transitions several operations atomically; the commit is ordinary
@@ -105,6 +113,10 @@ impl Driver {
             return Ok(self.authority.checkpoint());
         }
         let checkpoint_id = self.checkpoint_id()?;
+        let runner_terminals = transitions
+            .iter()
+            .filter_map(|(id, state)| self.runner_terminal_call(*id, state))
+            .collect::<Vec<_>>();
         let (history, ledger, context, family) = {
             let authority = self.authority.checkpoint();
             let manifest = authority.manifest();
@@ -125,16 +137,53 @@ impl Driver {
             )
         };
         let lifecycle = working_lifecycle(turn_id, &ledger)?;
-        self.publish_checkpoint(
-            admission,
-            checkpoint_id,
-            lifecycle,
-            history,
-            ledger,
-            context,
-            family,
-        )
-        .await
+        let published = self
+            .publish_checkpoint(
+                admission,
+                checkpoint_id,
+                lifecycle,
+                history,
+                ledger,
+                context,
+                family,
+            )
+            .await?;
+        for (call, attempt) in runner_terminals {
+            self.tools
+                .environment()
+                .driver_operation_settled(call, attempt);
+        }
+        Ok(published)
+    }
+
+    fn runner_terminal_call(
+        &self,
+        id: OperationId,
+        state: &DurableOperationState,
+    ) -> Option<(plakous_model::CallId, plakous_model::AttemptId)> {
+        if !matches!(
+            state,
+            DurableOperationState::Completed(_)
+                | DurableOperationState::OutcomeUnknown(_)
+                | DurableOperationState::Finalized(_)
+        ) {
+            return None;
+        }
+        let checkpoint = self.authority.checkpoint();
+        let record = checkpoint.manifest().ledger().operation(id.0)?;
+        match record.kind() {
+            crate::DurableOperationKind::Effect {
+                call_id,
+                attempt_id,
+                ..
+            }
+            | crate::DurableOperationKind::CompositionChild {
+                call_id,
+                attempt_id,
+                ..
+            } => Some((*call_id, *attempt_id)),
+            _ => None,
+        }
     }
 
     pub(in crate::runtime::driver) async fn finalize_operation(

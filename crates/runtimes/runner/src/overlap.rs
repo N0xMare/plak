@@ -33,6 +33,20 @@ struct Guarded {
 pub struct MachineOverlapGuard {
     machine_id: Option<String>,
     guarded: Mutex<Guarded>,
+    durable: Option<DurableAdmission>,
+}
+
+/// Fresh durable occupancy and pairing evidence, read under the shared lock.
+pub struct AdmissionSnapshot {
+    /// Every non-deleted local root and minted local copy.
+    pub local: BTreeSet<PathBuf>,
+    /// Configured pairing pins, including offline runners.
+    pub pins: Vec<RunnerPin>,
+}
+
+struct DurableAdmission {
+    lock: PathBuf,
+    read: Box<dyn Fn() -> Result<AdmissionSnapshot, PlacementFailure> + Send + Sync>,
 }
 
 impl MachineOverlapGuard {
@@ -46,7 +60,51 @@ impl MachineOverlapGuard {
                 local: local.into_iter().collect(),
                 pins: BTreeMap::new(),
             }),
+            durable: None,
         }
+    }
+
+    /// Shares pair/bind and local-create serialization across home processes.
+    /// The snapshot reader must not acquire this lock or perform effects.
+    #[must_use]
+    pub fn with_admission_store(
+        mut self,
+        lock: PathBuf,
+        read: impl Fn() -> Result<AdmissionSnapshot, PlacementFailure> + Send + Sync + 'static,
+    ) -> Self {
+        self.durable = Some(DurableAdmission {
+            lock,
+            read: Box::new(read),
+        });
+        self
+    }
+
+    fn refresh(&self, guarded: &mut Guarded) -> Result<Option<std::fs::File>, PlacementFailure> {
+        let Some(durable) = &self.durable else {
+            return Ok(None);
+        };
+        use std::os::unix::fs::OpenOptionsExt;
+        let failure = || PlacementFailure::RunnerUnreachable {
+            phase: crate::ProbePhase::Reconcile,
+            timed_out: false,
+        };
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(0o600)
+            .open(&durable.lock)
+            .map_err(|_| failure())?;
+        file.lock().map_err(|_| failure())?;
+        let snapshot = (durable.read)()?;
+        guarded.local = snapshot.local;
+        guarded.pins = snapshot
+            .pins
+            .into_iter()
+            .map(|pin| (pin.runner_id.clone(), pin))
+            .collect();
+        Ok(Some(file))
     }
 
     /// Restores/reconfirms a pin. Same-machine roots cannot intersect another
@@ -55,6 +113,19 @@ impl MachineOverlapGuard {
     /// # Errors
     /// Unknown identity or overlapping roots; no pin changes on refusal.
     pub fn admit_pin(&self, pin: RunnerPin) -> Result<(), PlacementFailure> {
+        self.with_pin_admission(pin, || Ok(()))
+    }
+
+    /// Checks a pin and holds cross-process admission ownership through its
+    /// durable commit. A failed commit does not publish new pin evidence.
+    ///
+    /// # Errors
+    /// Unknown machine evidence, overlap, storage failure or commit refusal.
+    pub fn with_pin_admission(
+        &self,
+        pin: RunnerPin,
+        commit: impl FnOnce() -> Result<(), PlacementFailure>,
+    ) -> Result<(), PlacementFailure> {
         if pin.machine_id.is_empty()
             || pin.runner_id.is_empty()
             || self.machine_id.is_none()
@@ -71,6 +142,7 @@ impl MachineOverlapGuard {
             return Err(PlacementFailure::RunnerNotPaired);
         }
         let mut guarded = self.guarded.lock().unwrap_or_else(PoisonError::into_inner);
+        let _admission = self.refresh(&mut guarded)?;
         for root in &pin.roots {
             if self.machine_id.as_ref() == Some(&pin.machine_id) {
                 for local in &guarded.local {
@@ -91,6 +163,7 @@ impl MachineOverlapGuard {
                 }
             }
         }
+        commit()?;
         guarded.pins.insert(pin.runner_id.clone(), pin);
         Ok(())
     }
@@ -107,6 +180,7 @@ impl MachineOverlapGuard {
         commit: impl FnOnce() -> Result<T, E>,
     ) -> Result<Result<T, E>, PlacementFailure> {
         let mut guarded = self.guarded.lock().unwrap_or_else(PoisonError::into_inner);
+        let _admission = self.refresh(&mut guarded)?;
         if let Some(machine) = &self.machine_id {
             for pin in guarded
                 .pins
@@ -144,6 +218,62 @@ fn conflict(machine: &str, runner: &str, path: &str) -> PlacementFailure {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn independent_home_process_guards_serialize_snapshot_and_commit() {
+        let directory = tempfile::tempdir().unwrap();
+        let lock_path = directory.path().join("admission.lock");
+        let snapshot = std::sync::Arc::new(Mutex::new(BTreeSet::<PathBuf>::new()));
+        let guard = || {
+            let snapshot = snapshot.clone();
+            MachineOverlapGuard::new(Some("machine".into()), []).with_admission_store(
+                lock_path.clone(),
+                move || {
+                    Ok(AdmissionSnapshot {
+                        local: snapshot.lock().unwrap().clone(),
+                        pins: Vec::new(),
+                    })
+                },
+            )
+        };
+        let first = guard();
+        let second = guard();
+        let (entered, waiting) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel();
+        let commit = std::thread::spawn(move || {
+            first
+                .with_local_admission(PathBuf::from("/workspace"), || {
+                    entered.send(()).unwrap();
+                    released.recv().unwrap();
+                    snapshot.lock().unwrap().insert(PathBuf::from("/workspace"));
+                    Ok::<_, ()>(())
+                })
+                .unwrap()
+                .unwrap()
+        });
+        waiting.recv().unwrap();
+        let competing = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .unwrap();
+        assert!(
+            competing.try_lock().is_err(),
+            "the product commit must retain cross-process admission ownership"
+        );
+        let pair = std::thread::spawn(move || {
+            second.admit_pin(pin("machine", "remote", "/workspace/sub"))
+        });
+        release.send(()).unwrap();
+        commit.join().unwrap();
+        assert!(
+            matches!(
+                pair.join().unwrap(),
+                Err(PlacementFailure::RunnerRootsOverlap { .. })
+            ),
+            "the later pair must re-read the newly committed durable occupancy"
+        );
+    }
 
     fn pin(machine: &str, runner: &str, root: &str) -> RunnerPin {
         RunnerPin {

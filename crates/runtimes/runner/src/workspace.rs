@@ -213,7 +213,9 @@ impl WorkspaceCatalog {
         if !self.in_roots(path) {
             return Err(WorkspaceRefusal::OutsideRoots);
         }
-        let resolved = resolve_missing(path, 0)?;
+        let resolved = resolve_missing(path, 0, &|target| {
+            self.in_roots(target) && !overlaps(target, &self.excluded)
+        })?;
         if !self.in_roots(&resolved) {
             return Err(WorkspaceRefusal::OutsideRoots);
         }
@@ -224,7 +226,14 @@ impl WorkspaceCatalog {
         if !metadata.is_dir() {
             return Err(WorkspaceRefusal::NotDirectory);
         }
-        let resolved = utf8(&canonical(&resolved)?)?;
+        let resolved = canonical(&resolved)?;
+        if !self.in_roots(&resolved) {
+            return Err(WorkspaceRefusal::OutsideRoots);
+        }
+        if overlaps(&resolved, &self.excluded) {
+            return Err(WorkspaceRefusal::ProductHome);
+        }
+        let resolved = utf8(&resolved)?;
         if require_canonical && path.as_os_str() != std::ffi::OsStr::new(&resolved) {
             return Err(WorkspaceRefusal::NotCanonical {
                 canonical: resolved,
@@ -240,10 +249,24 @@ impl WorkspaceCatalog {
     }
 
     fn metadata_path(&self, path: &Path) -> Option<PathBuf> {
-        let resolved = canonical(path).ok()?;
+        let candidate = self.metadata_candidate(path)?;
+        let resolved = canonical(&candidate).ok()?;
         (self.bases.iter().any(|base| resolved.starts_with(base))
             && !overlaps(&resolved, &self.excluded))
         .then_some(resolved)
+    }
+
+    fn metadata_candidate(&self, path: &Path) -> Option<PathBuf> {
+        let admits = |target: &Path| {
+            self.bases.iter().any(|base| target.starts_with(base))
+                && !overlaps(target, &self.excluded)
+        };
+        let path = lexical(path);
+        if !admits(&path) {
+            return None;
+        }
+        let resolved = resolve_missing(&path, 0, &admits).ok()?;
+        admits(&resolved).then_some(resolved)
     }
 
     /// Depth two, 200 checkouts, bounded directory entries and a five-second
@@ -361,7 +384,9 @@ impl WorkspaceCatalog {
             } else {
                 git.clone()
             };
-            let loose = common.join(&full);
+            let Some(loose) = self.metadata_candidate(&common.join(&full)) else {
+                return repo;
+            };
             let commit = if loose.symlink_metadata().is_ok() {
                 let Some(commit) = self
                     .read_metadata(&loose)
@@ -373,15 +398,33 @@ impl WorkspaceCatalog {
             } else {
                 None
             };
-            let commit = commit.or_else(|| {
-                self.read_metadata(&common.join("packed-refs"))
-                    .and_then(|text| {
-                        text.lines().find_map(|line| {
-                            let (hash, name) = line.split_once(' ')?;
-                            (name == full).then(|| sha(hash)).flatten()
-                        })
-                    })
-            });
+            let commit = if commit.is_some() {
+                commit
+            } else {
+                let Some(packed) = self.metadata_candidate(&common.join("packed-refs")) else {
+                    return repo;
+                };
+                if packed.symlink_metadata().is_ok() {
+                    let Some(text) = self.read_metadata(&packed) else {
+                        return repo;
+                    };
+                    match text
+                        .lines()
+                        .filter_map(|line| line.split_once(' '))
+                        .find(|(_, name)| *name == full)
+                    {
+                        Some((hash, _)) => {
+                            let Some(hash) = sha(hash) else {
+                                return repo;
+                            };
+                            Some(hash)
+                        }
+                        None => None,
+                    }
+                } else {
+                    None
+                }
+            };
             repo.head = if commit.is_some() {
                 RepositoryHead::Branch {
                     name: reference.to_owned(),
@@ -416,9 +459,17 @@ impl WorkspaceCatalog {
 
 fn valid_ref(name: &str) -> bool {
     !name.is_empty()
+        && name != "@"
+        && name != "HEAD"
+        && !name.starts_with('-')
         && !name.contains("..")
+        && !name.contains("@{")
+        && !name.contains("//")
         && !name.contains(['\\', ':', '~', '^', '?', '*', '['])
-        && !name.chars().any(char::is_control)
+        && !name.chars().any(|ch| ch.is_control() || ch.is_whitespace())
+        && name
+            .split('/')
+            .all(|part| !part.starts_with('.') && !part.ends_with('.') && !part.ends_with(".lock"))
         && Path::new(name)
             .components()
             .all(|part| matches!(part, Component::Normal(_)))
@@ -448,12 +499,17 @@ fn io_refusal(error: io::Error) -> WorkspaceRefusal {
     }
 }
 
-fn resolve_missing(path: &Path, depth: usize) -> Result<PathBuf, WorkspaceRefusal> {
+fn resolve_missing(
+    path: &Path,
+    depth: usize,
+    admits: &dyn Fn(&Path) -> bool,
+) -> Result<PathBuf, WorkspaceRefusal> {
     if depth > 40 {
         return Err(WorkspaceRefusal::InvalidPath);
     }
     let mut resolved = PathBuf::new();
-    for component in path.components() {
+    let components = path.components().collect::<Vec<_>>();
+    for (index, component) in components.iter().enumerate() {
         match component {
             Component::ParentDir => {
                 resolved.pop();
@@ -469,7 +525,12 @@ fn resolve_missing(path: &Path, depth: usize) -> Result<PathBuf, WorkspaceRefusa
                 } else {
                     resolved.parent().unwrap_or(Path::new("/")).join(target)
                 };
-                resolved = resolve_missing(&target, depth + 1)?;
+                let target =
+                    lexical(&target.join(components[index + 1..].iter().collect::<PathBuf>()));
+                if !admits(&target) {
+                    return Ok(target);
+                }
+                return resolve_missing(&target, depth + 1, admits);
             }
             Ok(_) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
@@ -477,6 +538,20 @@ fn resolve_missing(path: &Path, depth: usize) -> Result<PathBuf, WorkspaceRefusa
         }
     }
     Ok(resolved)
+}
+
+fn lexical(path: &Path) -> PathBuf {
+    let mut result = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::ParentDir => {
+                result.pop();
+            }
+            Component::CurDir => {}
+            _ => result.push(component.as_os_str()),
+        }
+    }
+    result
 }
 
 #[derive(Deserialize, Serialize)]

@@ -30,6 +30,16 @@ pub use owner::LineOwner;
 /// are pinned by a test.
 pub const PROTOCOL_VERSION: u32 = 4;
 
+/// Stable stopped-foreground receipt identity, independent of the connection
+/// and owner generation. Another call reusing the PID cannot match it.
+#[must_use]
+pub fn foreground_report_id(line: &str, report: &StoppedForeground) -> String {
+    format!(
+        "foreground-report:{}",
+        serde_json::json!([line, report.call_key, report.pid])
+    )
+}
+
 /// The exact identity two ends compare before any request: the protocol
 /// version, the source revision and the build flavor. A binary id is
 /// evidence only (spec 01 §8.4).
