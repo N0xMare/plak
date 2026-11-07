@@ -7,6 +7,9 @@
 //! lives in the host.
 
 pub(crate) use crate::config::TuiPreferences;
+
+/// Local receipt of a confirmed stop, retained across idle transcript refreshes.
+pub(crate) const SESSION_STOPPED_ACK: &str = "session work stopped";
 use std::fmt;
 use std::path::PathBuf;
 

@@ -56,7 +56,9 @@ impl App {
         let mut locals = Vec::new();
         let mut notes = Vec::new();
         for (at, block) in old.iter_mut().enumerate() {
-            if keep_local
+            let stop_ack = matches!(&*block, ScrollBlock::System(text)
+                if text == crate::tui::SESSION_STOPPED_ACK);
+            if (keep_local || (same_session && stop_ack))
                 && self.pane.keyed.is_local(at)
                 && !matches!(&*block, ScrollBlock::System(text) if Some(text) == self.opening_note.as_ref())
                 && !matches!(&*block, ScrollBlock::Error(text)

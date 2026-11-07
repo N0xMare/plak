@@ -1553,6 +1553,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
     "plakous-recursive-subagents-store": _SHARED_PLAKOUS_SYMBOLS,
 }
 ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
+    ("plakous-hosted", "src/jobs.rs"): {"tools": {"LineOwner"}},
     # The tree's VCS port over the runner link, and the runner extension
     # that answers it (spec 01 §8.5).
     ("plakous-recursive-subagents", "src/remote_vcs.rs"): {

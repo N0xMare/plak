@@ -338,7 +338,7 @@ impl SocketFace {
             };
             let Some(action) = action else {
                 let text = match outcome {
-                    Outcome::Ok(Answer::Stopped) => "session work stopped".to_owned(),
+                    Outcome::Ok(Answer::Stopped) => crate::tui::SESSION_STOPPED_ACK.to_owned(),
                     other => format!("stop refused: {other:?}"),
                 };
                 self.state()

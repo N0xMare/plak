@@ -341,7 +341,8 @@ impl App {
                 {
                     return;
                 }
-                let keep_local = self.pane.presentation_ready
+                let keep_local = self.busy
+                    && self.pane.presentation_ready
                     && self.pane.presentation.scope() == &snapshot.scope;
                 let scope = snapshot.scope.clone();
                 if let Err(error) = self.pane.presentation.replace(&snapshot) {
