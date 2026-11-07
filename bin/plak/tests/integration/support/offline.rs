@@ -687,7 +687,7 @@ fn daemon_exit_wait_ignores_a_successor_and_a_startup_probe() {
     wait_for_daemons(&lock, &[old]);
     assert_eq!(daemon_openers(&lock), [successor]);
     runner.kill();
-    assert!(daemon_openers(&lock).is_empty());
+    assert_eq!(daemon_openers(&lock), []);
     drop(probe);
 }
 
