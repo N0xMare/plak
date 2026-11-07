@@ -13,9 +13,7 @@ use crate::shell::services::Services;
 pub(crate) use super::ownership::StandaloneRunnerError;
 
 #[cfg(feature = "web")]
-mod host;
-#[cfg(feature = "web")]
-pub(crate) use host::prepare;
+pub(crate) mod host;
 
 type LocalDial = dyn Fn(
         Services,

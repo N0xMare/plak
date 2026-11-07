@@ -75,7 +75,7 @@ pub(crate) fn run_host_command(
     let entered = runtime.enter();
     let bound = socket::Bound::bind(&paths.host_socket(), &lock)?;
     drop(entered);
-    let services = runner::prepare(services, &environment, &runtime)?;
+    let services = runner::host::prepare(services, &environment, &runtime)?;
     let sessions = sessions::ProductSessions::new(
         &services,
         command.idle_release,
