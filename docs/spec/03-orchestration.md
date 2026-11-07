@@ -3282,11 +3282,11 @@ It first proves the writer's custody claim against the tree's custody record
 header with `UPDATE ... WHERE revision = ?` on the revision the handle last
 had acknowledged, requiring
 exactly one changed row, and then writes only the rows that differ from the
-tree the same connection last committed: in-place upserts for new or changed
+persisted tree at this revision and grant: in-place upserts for new or changed
 keys, nodes first, and keyed deletes for removed keys, nodes last. The image
 is keyed by this tree's persisted revision and full custody grant, both
 checked inside the `Immediate` transaction. Database-wide `data_version` is
-only a hint: another tree's write does not invalidate this tree. A fresh
+diagnostic only: another tree's write does not invalidate this tree. A fresh
 grant invalidates the image even at the same revision, preserving the
 same-revision receipt contract.
 

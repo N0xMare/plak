@@ -1,8 +1,8 @@
 //! Row-level saves: the rows this connection last committed for a tree, and
 //! the diff that writes only what changed since.
 //!
-//! An image is the exact input of the last acknowledged save, so a record
-//! equal to its image entry encodes to the row the file already holds. It is
+//! An image describes the persisted tree at this revision and grant, so a
+//! record equal to its image entry encodes to the row the file already holds. It is
 //! scoped to the tree's revision and custody grant. A commit to another
 //! tree does not invalidate it.
 
@@ -20,6 +20,7 @@ use crate::rows::{Row, delete_row, write_row};
 
 /// One tree's persisted maps as this connection last committed them.
 pub(crate) struct TreeImage {
+    /// Diagnostic only; validity always comes from the revision and grant.
     data_version: i64,
     revision: u64,
     grant: CustodyClaim,
@@ -37,7 +38,8 @@ pub(crate) struct TreeImage {
 }
 
 impl TreeImage {
-    /// The image of persisted `tree`, read or written inside the transaction.
+    /// The persisted tree at this revision and grant, read or written inside
+    /// the transaction. `data_version` is diagnostic only.
     pub(crate) fn of(tree: &ProductAgentTree, data_version: i64, grant: &CustodyClaim) -> Self {
         Self {
             data_version,

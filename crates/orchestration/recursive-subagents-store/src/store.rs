@@ -202,8 +202,8 @@ impl Writer {
             if swapped != 1 {
                 let stored = stored_revision(&tx, tree_id)?;
                 fence_revision(stored, tree.stored_revision, tree.revision)?;
-                // Unreachable while the image is current: an image means
-                // this connection committed the row and nothing removed it.
+                // Unreachable: the image describes the persisted tree at
+                // this revision and grant, under the same write transaction.
                 return Err(TreeStoreError::stale(stored.unwrap_or(0), tree.revision));
             }
             let delta = image.write_changes(&tx, tree)?;
