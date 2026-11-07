@@ -110,11 +110,22 @@ async fn a_process_stop_skips_only_the_child_line_owned_by_recovery() {
         .unwrap();
     let published = roots.tree_store().unwrap().save_in_custody(&tree).unwrap();
     tree.acknowledge_revision(published);
-    tree.advance_session_locator(&ids[0], "recovery-advanced-locator")
-        .unwrap();
-    let runtime = crate::topology_runtime::insert_root(tree_id.clone(), tree, None)
+    let runtime = crate::topology_runtime::insert_root_with(
+        tree_id.clone(),
+        tree,
+        roots.tree_store().unwrap(),
+        None,
+    )
+    .await
+    .unwrap();
+    let (advanced, _) = runtime
+        .driver()
+        .mutate_borrowed_for_test(|tree| {
+            tree.advance_session_locator(&ids[0], "recovery-advanced-locator")
+        })
         .await
         .unwrap();
+    advanced.unwrap();
     let claim = runtime.claim_recovery(&ids[0]).unwrap();
     let (release, waiting) = tokio::sync::oneshot::channel();
     assert!(
