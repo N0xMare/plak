@@ -132,6 +132,103 @@ fn usage_refresh_follows_default_named_and_default_rebind_requests() {
         assert_eq!(view.verticals.len(), if account == "codex" { 4 } else { 1 });
     }
 }
+fn ready_usage_for_account(
+    account: &str,
+) -> plakous_host_protocol::views::presentation::UsageLimitsView {
+    let native = NativeSubscriptionRefresh::Read(Box::new((
+        Some(native_usage_fixture("codex", 12.5)),
+        None,
+        None,
+    )));
+    if account == "codex" {
+        native_usage_limits(native)
+    } else {
+        project_named_usage_limits(native, &NoCredentialReads, &account.parse().unwrap())
+    }
+}
+
+#[test]
+fn cached_usage_switches_accounts_without_serving_the_held_projection() {
+    for (previous, current) in [("codex", "codex/work"), ("codex/work", "codex")] {
+        let held = HeldUsage::default();
+        held.store(&ready_usage_for_account(previous));
+        assert!(held.fresh().is_some());
+        let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
+        let sender = Sender::over(wire);
+        let (reads, observed) = std::sync::mpsc::sync_channel(1);
+        let refresh = SubscriptionUsageRefresh::new_with_projector(&sender, move |(_, account)| {
+            reads.send(account).unwrap();
+            (
+                plakous_host_protocol::views::presentation::SubscriptionUsageView::Read,
+                None,
+            )
+        });
+        request_subscription_usage_cached(
+            &held,
+            &SessionLedger::default(),
+            &sender,
+            &refresh,
+            None,
+            Some(current.parse().unwrap()),
+        );
+        assert!(
+            !events
+                .try_iter()
+                .any(|event| matches!(event, HostEvent::UsageLimits(_))),
+            "served {previous} while requesting {current}"
+        );
+        assert_eq!(
+            observed.recv_timeout(Duration::from_secs(30)).unwrap(),
+            Some(current.parse().unwrap())
+        );
+    }
+}
+
+#[test]
+fn named_usage_reads_its_own_busy_compatibility_lock() {
+    let root = tempfile::tempdir().unwrap();
+    let (subscriptions, default_lock) = default_ready_usage_fixture(root.path());
+    drop(default_lock);
+    let executor = ApplicationExecutor::new().unwrap();
+    let selected = subscriptions
+        .for_named_account(NativeProvider::Codex, "work")
+        .unwrap();
+    let _creator = executor
+        .block_on(selected.create_account_for_login(NativeProvider::Codex))
+        .unwrap()
+        .unwrap();
+    let named_lock = std::fs::OpenOptions::new()
+        .write(true)
+        .open(
+            root.path()
+                .join("state/plak/subscriptions/accounts/codex/work/compatibility/.codex.lock"),
+        )
+        .unwrap();
+    named_lock.lock().unwrap();
+    let (config, _) = fresh_injected_attached_host(root.path());
+    let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let refresh = SubscriptionUsageRefresh::new(
+        &Sender::over(wire),
+        config.state_roots.openrouter_credentials(),
+        HeldUsage::default(),
+        SessionLedger::default(),
+    );
+    for account in ["codex", "codex/work"] {
+        refresh.request_fresh(Some(subscriptions.clone()), Some(account.parse().unwrap()));
+        let view = receive_usage(&events);
+        let row = view
+            .verticals
+            .iter()
+            .find(|row| row.vertical.account() == account)
+            .unwrap();
+        assert_eq!(
+            format!("{:?}", row.state).contains(crate::subscription_usage::USAGE_BUSY_REASON),
+            account == "codex/work",
+            "{row:?}"
+        );
+    }
+}
+
 impl crate::openrouter::OpenRouterCredentials for NoCredentialReads {
     fn preflight(&self, _: &crate::account::AccountRef) -> CliResult<()> {
         panic!("named native usage must not probe any gateway key")
