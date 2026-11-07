@@ -12,6 +12,30 @@ use super::{ProductStore, decode_node, decode_root_profile, from_i64, sessions};
 /// The most rows one directory read returns.
 pub const MAX_DIRECTORY_ROWS: i64 = 256;
 
+const CARRIED_FORWARD_SQL: &str = "SELECT id FROM sessions WHERE source_session_id=?1 AND source_operation_id=?2 AND (CASE WHEN ?5 THEN workspace_root ELSE workspace_identity END)=?3 AND COALESCE(json_extract(runner_display,'$.runner_id'),'local')=?4 ORDER BY updated_at DESC,id ASC";
+
+fn workspace_filter(
+    workspace: Option<&Path>,
+    runner_id: Option<&str>,
+) -> Result<(Option<String>, bool), String> {
+    let nonlocal = runner_id.is_some_and(|runner| runner != "local");
+    let identity = workspace
+        .map(|workspace| {
+            if nonlocal {
+                workspace
+                    .to_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| "remote workspace filter is not UTF-8".to_owned())
+            } else {
+                Ok(sessions::workspace_identity(workspace)
+                    .to_string_lossy()
+                    .into_owned())
+            }
+        })
+        .transpose()?;
+    Ok((identity, nonlocal))
+}
+
 /// One session as the directory reads it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DirectoryEntry {
@@ -29,8 +53,49 @@ pub struct DirectoryEntry {
 }
 
 impl ProductStore {
+    /// The committed carry of one source on one runner/workspace, including archives.
+    /// Uses the source index rather than a capped presentation listing.
+    ///
+    /// # Errors
+    /// The read failed, the remote path is not UTF-8, or the record is invalid.
+    pub fn carried_forward(
+        &mut self,
+        workspace: &Path,
+        runner_id: &str,
+        source_id: &str,
+        source_key: &str,
+    ) -> Result<Option<sessions::SessionRecord>, String> {
+        let (identity, nonlocal) = workspace_filter(Some(workspace), Some(runner_id))?;
+        let operation = format!("{}{source_key}", sessions::CARRY_FORWARD_OPERATION_PREFIX);
+        let transaction = self
+            .connection
+            .unchecked_transaction()
+            .map_err(|_| "could not start carry lookup".to_owned())?;
+        let id = transaction
+            .query_row(
+                CARRIED_FORWARD_SQL,
+                (source_id, operation, identity, runner_id, nonlocal),
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|_| "could not find carried session".to_owned())?;
+        let record = id
+            .map(|id| super::load_record(&transaction, &mut self.verified_submissions, &id))
+            .transpose()?;
+        transaction
+            .commit()
+            .map_err(|_| "could not finish carry lookup".to_owned())?;
+        if let Some(record) = &record {
+            self.remember(record);
+        }
+        Ok(record)
+    }
+
     /// Distinct committed workspaces of one runner, including archived records.
     /// Group saved path bytes before limiting so busy workspaces cannot hide recents.
+    ///
+    /// # Errors
+    /// The read failed or a stored timestamp does not decode.
     pub fn recent_workspaces(&self, runner_id: &str) -> Result<Vec<(String, u64)>, String> {
         let mut statement = self.connection.prepare(
             "SELECT workspace_root,MAX(updated_at) AS newest FROM sessions WHERE COALESCE(json_extract(runner_display,'$.runner_id'),'local')=?1 GROUP BY workspace_root COLLATE BINARY ORDER BY newest DESC,workspace_root ASC LIMIT 20",
@@ -64,6 +129,9 @@ impl ProductStore {
     }
 
     /// Include archived records only when explicitly requested, before limiting rows.
+    ///
+    /// # Errors
+    /// The read failed or a directory row does not decode.
     pub fn directory_with_archived(
         &mut self,
         workspace: Option<&Path>,
@@ -73,27 +141,16 @@ impl ProductStore {
     }
 
     /// Runner ids, workspace and archived visibility all filter before the limit.
+    ///
+    /// # Errors
+    /// The read failed, a remote path is not UTF-8, or a row does not decode.
     pub fn directory_filtered(
         &mut self,
         workspace: Option<&Path>,
         runner_id: Option<&str>,
         include_archived: bool,
     ) -> Result<Vec<DirectoryEntry>, String> {
-        let nonlocal = runner_id.is_some_and(|runner| runner != "local");
-        let identity = workspace
-            .map(|workspace| {
-                if nonlocal {
-                    workspace
-                        .to_str()
-                        .map(str::to_owned)
-                        .ok_or_else(|| "remote workspace filter is not UTF-8".to_owned())
-                } else {
-                    Ok(sessions::workspace_identity(workspace)
-                        .to_string_lossy()
-                        .into_owned())
-                }
-            })
-            .transpose()?;
+        let (identity, nonlocal) = workspace_filter(workspace, runner_id)?;
         let mut statement = self
             .connection
             .prepare(
@@ -154,6 +211,116 @@ impl ProductStore {
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn carried_forward_uses_source_index_beyond_row_caps_and_separates_runners() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::home::paths::PlakPaths::explicit(root.path().join("home"));
+        let actual = root.path().join("actual");
+        let alias = root.path().join("alias");
+        std::fs::create_dir_all(&actual).unwrap();
+        std::os::unix::fs::symlink(&actual, &alias).unwrap();
+        let source = uuid::Uuid::new_v4().to_string();
+        let key = "r1.e1.p1.t1";
+        let mut carried = sessions::SessionRecord::new(alias.clone());
+        carried.link_carried_forward(&source, key);
+        carried.updated_at_unix = 10;
+        carried.archived = true;
+        carried.runner = Some(plakous_hosted::sessions::RunnerDisplay {
+            name: "peer".into(),
+            runner_id: "runner-a".into(),
+            workspace_root: alias.clone(),
+            workspace_cwd: alias.clone(),
+        });
+        let mut other = sessions::SessionRecord::new(alias.clone());
+        other.link_carried_forward(&source, key);
+        other.updated_at_unix = 20;
+        other.runner = carried.runner.clone();
+        other.runner.as_mut().unwrap().runner_id = "runner-b".into();
+        let mut local = sessions::SessionRecord::new(alias.clone());
+        local.link_carried_forward(&source, key);
+        local.updated_at_unix = 30;
+        let mut store = ProductStore::open(&paths).unwrap();
+        for record in [&mut carried, &mut other, &mut local] {
+            store.commit(record).unwrap();
+        }
+        for timestamp in 1000..1520 {
+            let mut newer = sessions::SessionRecord::new(alias.clone());
+            newer.updated_at_unix = timestamp;
+            newer.runner = carried.runner.clone();
+            store.commit(&mut newer).unwrap();
+        }
+        assert!(
+            !store
+                .directory_filtered(Some(&alias), Some("runner-a"), true)
+                .unwrap()
+                .iter()
+                .any(|row| row.id == carried.id)
+        );
+        let found = store
+            .carried_forward(&alias, "runner-a", &source, key)
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.id, carried.id);
+        assert!(found.archived);
+        assert_eq!(
+            store
+                .carried_forward(&alias, "runner-b", &source, key)
+                .unwrap()
+                .unwrap()
+                .id,
+            other.id
+        );
+        assert_eq!(
+            store
+                .carried_forward(&actual, "local", &source, key)
+                .unwrap()
+                .unwrap()
+                .id,
+            local.id
+        );
+        assert!(
+            store
+                .carried_forward(&actual, "runner-a", &source, key)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            store
+                .carried_forward(&alias, "runner-a", &source, "other-key")
+                .unwrap()
+                .is_none()
+        );
+        std::fs::remove_file(&alias).unwrap();
+        assert_eq!(
+            store
+                .carried_forward(&alias, "runner-a", &source, key)
+                .unwrap()
+                .unwrap()
+                .id,
+            carried.id
+        );
+        let operation = format!("{}{key}", sessions::CARRY_FORWARD_OPERATION_PREFIX);
+        let mut plan = store
+            .connection
+            .prepare(&format!("EXPLAIN QUERY PLAN {CARRIED_FORWARD_SQL}"))
+            .unwrap();
+        let steps = plan
+            .query_map(
+                (&source, operation, alias.to_str(), "runner-a", true),
+                |row| row.get::<_, String>(3),
+            )
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(
+            steps
+                .iter()
+                .any(|step| step.contains("USING INDEX sessions_carry_source")),
+            "{steps:?}"
+        );
+    }
 
     #[test]
     fn recent_workspaces_group_before_limit_and_keep_archived_runner_scoped_paths() {
@@ -241,6 +408,25 @@ mod tests {
             );
         }
         std::os::unix::fs::symlink(&actual, &alias).unwrap();
+        let mut remote_target = sessions::SessionRecord::new(actual.clone());
+        remote_target.updated_at_unix = remote.updated_at_unix + 1;
+        remote_target.runner = Some(plakous_hosted::sessions::RunnerDisplay {
+            name: "peer".into(),
+            runner_id: "runner-a".into(),
+            workspace_root: actual.clone(),
+            workspace_cwd: actual.clone(),
+        });
+        store.commit(&mut remote_target).unwrap();
+        assert_eq!(
+            store.recent_workspaces("runner-a").unwrap(),
+            [
+                (
+                    actual.to_string_lossy().into_owned(),
+                    remote_target.updated_at_unix
+                ),
+                (alias.to_string_lossy().into_owned(), remote.updated_at_unix),
+            ]
+        );
         assert_eq!(
             store
                 .directory_filtered(Some(&alias), Some("local"), false)

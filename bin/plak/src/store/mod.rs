@@ -1359,6 +1359,10 @@ const SCHEMA_OBJECTS: &[(&str, &str)] = &[
         "CREATE INDEX sessions_workspace_updated ON sessions(workspace_identity,updated_at DESC,id)",
     ),
     (
+        "sessions_carry_source",
+        "CREATE INDEX sessions_carry_source ON sessions(source_session_id,source_operation_id)",
+    ),
+    (
         "identity_bindings",
         "CREATE TABLE identity_bindings(identity TEXT PRIMARY KEY,kind TEXT NOT NULL CHECK(kind IN('create','queue','delivery','command','workflow')),owner_session_id TEXT NOT NULL,binding_digest TEXT NOT NULL,terminal_disposition TEXT,terminal_outcome TEXT,CHECK((kind='create' AND terminal_disposition IS NULL AND terminal_outcome IS NULL) OR (kind='queue' AND ((terminal_disposition IS NULL AND terminal_outcome IS NULL) OR (terminal_disposition='consumed' AND terminal_outcome IS NOT NULL) OR (terminal_disposition='deleted' AND terminal_outcome IS NULL))) OR (kind IN('delivery','command') AND terminal_disposition IN('rejected','product_committed') AND terminal_outcome IS NULL) OR (kind='workflow' AND ((terminal_disposition IS NULL AND terminal_outcome IS NULL) OR (terminal_disposition='product_committed' AND terminal_outcome IS NOT NULL) OR (terminal_disposition IN('terminal_no_change','discarded') AND terminal_outcome IS NULL)))))",
     ),

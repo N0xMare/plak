@@ -1691,6 +1691,9 @@ Directory workspace filters use the local canonical identity only for the
 local runner. A pinned non-local runner filters by its id and the exact saved
 UTF-8 `workspace_root` spelling, without consulting the host filesystem.
 Workspace, runner and archived filters all precede the directory row limit.
+Carry deduplication reads the `(source_session_id, source_operation_id)` index
+directly, qualified by that runner and workspace; it includes archived carries
+and is never limited by directory or workspace-list row bounds.
 
 Projector reads are planned only for records on the product session's followed
 lineage (or its initial creation record); sibling-branch facts advance the

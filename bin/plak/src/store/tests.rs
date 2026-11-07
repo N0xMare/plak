@@ -426,7 +426,7 @@ fn append_settled_submission(
 fn exact_schema_wal_and_cas() {
     assert_eq!(
         SCHEMA.fingerprint(),
-        "c6fce4d652cfbaff057046483e98cbf4b3211cd7aa341c72bdf6e257f1b1d31d"
+        "8a46ae74a69288cc6cbc644636f5c802354b964689aa97a7c07cd27adbeb3da7"
     );
     let root = tempdir().unwrap();
     let paths = PlakPaths::explicit(root.path().join("p"));
