@@ -35,6 +35,24 @@ impl ConfigLock {
 }
 
 impl ProductConfig {
+    /// User-scope save. When project sources contributed to this merged
+    /// config, the global file still receives only global content: each
+    /// project-origin key keeps its baseline value and project templates are
+    /// not written into `~/.plak/agents`.
+    pub fn save_publication_aware(&self, paths: &PlakPaths) -> Result<(), ConfigSaveError> {
+        let _lock = ConfigLock::take(paths)?;
+        self.save_user_unlocked(paths)
+    }
+
+    /// Project-scope save: `<project>/.plak/config.toml` carries only the
+    /// keys whose effective value differs from the global baseline, and
+    /// `.plak/agents/` gains only the templates that differ from (or are
+    /// absent from) the user directory. Requires a trusted project.
+    pub fn save_project_publication_aware(&self, paths: &PlakPaths) -> Result<(), ConfigSaveError> {
+        let _lock = ConfigLock::take(paths)?;
+        self.save_project_with_fault(paths, &mut |_, _| Ok(()))
+    }
+
     /// Changes home-only preferences against a fresh baseline under the lock.
     pub(crate) fn update_user(
         paths: &PlakPaths,

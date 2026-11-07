@@ -1061,15 +1061,6 @@ impl ProductConfig {
         }
     }
 
-    /// User-scope save. When project sources contributed to this merged
-    /// config, the global file still receives only global content: each
-    /// project-origin key keeps its baseline value and project templates are
-    /// not written into `~/.plak/agents`.
-    pub fn save_publication_aware(&self, paths: &PlakPaths) -> Result<(), ConfigSaveError> {
-        let _lock = super::publication::ConfigLock::take(paths)?;
-        self.save_user_unlocked(paths)
-    }
-
     pub(super) fn save_user_unlocked(&self, paths: &PlakPaths) -> Result<(), ConfigSaveError> {
         let mut user_view = self.clone();
         if self
@@ -1092,15 +1083,6 @@ impl ProductConfig {
                 .retain(|_, origin| *origin != ConfigValueOrigin::Project);
         }
         user_view.save_with_fault(paths, &mut |_, _| Ok(()))
-    }
-
-    /// Project-scope save: `<project>/.plak/config.toml` carries only the
-    /// keys whose effective value differs from the global baseline, and
-    /// `.plak/agents/` gains only the templates that differ from (or are
-    /// absent from) the user directory. Requires a trusted project.
-    pub fn save_project_publication_aware(&self, paths: &PlakPaths) -> Result<(), ConfigSaveError> {
-        let _lock = super::publication::ConfigLock::take(paths)?;
-        self.save_project_with_fault(paths, &mut |_, _| Ok(()))
     }
 
     #[allow(
