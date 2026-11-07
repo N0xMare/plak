@@ -4901,6 +4901,8 @@ an attachment or returning from the config editor preserves it. An accepted crea
 it, so successive `/new` acts create distinct sessions. `/stop` is host-mode only and
 hidden from the embedded palette. Config-editor return reloads terminal
 preferences before opening the terminal again.
+Every hosted-client UI loop iteration re-reads local preferences, including
+relaunches after session resume and rebind as well as retry and config editing.
 Declining the launch resume picker explicitly creates and attaches a fresh
 session; reconnecting with an unknown creation instead lists sessions and
 waits for the operator's next act.

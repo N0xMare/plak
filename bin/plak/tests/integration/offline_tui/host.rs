@@ -519,3 +519,36 @@ fn a_host_tui_reports_rebind_refusal_without_changing_its_attachment() {
     terminal.wait_screen("the rebound session");
     terminal.quit();
 }
+
+#[test]
+fn a_host_tui_reloads_preferences_on_every_rebind() {
+    for theme in ["catppuccin-latte", "catppuccin-frappe"] {
+        rebind_preferences(theme);
+    }
+}
+
+fn rebind_preferences(theme: &str) {
+    let fixture = Fixture::with_mode(&tool_then_answer("resident preferences"), Mode::Host);
+    let mut terminal = Terminal::spawn_ready(&fixture);
+    terminal.send(b"keep the hosted session\r");
+    terminal.wait_screen("resident preferences");
+    terminal.wait_absent("Esc stop");
+    let path = fixture.home().join("config.toml");
+    let original = std::fs::read_to_string(&path).unwrap();
+    write_private(
+        &path,
+        &format!("{original}\n[tui]\ntheme = \"{theme}\"\nmouse = false\n"),
+    );
+    terminal.send(b"/rebind\r");
+    terminal.wait_screen("rebind refused:");
+    terminal.wait_screen("/ commands");
+    terminal.send(b"/settings\r");
+    terminal.wait_where("fresh local preferences on the hosted relaunch", |frame| {
+        frame.contains("/ search settings") && frame.contains(theme)
+    });
+    terminal.focus_control_row("Mouse capture");
+    terminal.wait_screen("now off · default on");
+    terminal.send(b"\x1b");
+    terminal.wait_screen("/ commands");
+    terminal.quit();
+}

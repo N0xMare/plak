@@ -37,13 +37,14 @@ pub(super) fn run(
     } else {
         face.list_sessions()?;
     }
-    let mut cfg = load_config(paths)?;
+    let cfg = load_config(paths)?;
     crate::build_identity::prepare_binary_id(None);
     tui::warm_highlighting();
     let mut terminal = tui::PersistentTerminal::open(cfg.tui_mouse)
         .map_err(|error| CliFailure::new(error.to_string()))?;
     let mut picker = picker;
     loop {
+        let cfg = load_config(paths)?;
         let launch = launch(paths, &cfg, &face, std::mem::take(&mut picker), note.take())?;
         let result = terminal.run(
             launch,
@@ -83,7 +84,6 @@ pub(super) fn run(
                     let selected = face.session();
                     face = reconnect(paths, &face)?;
                     picker = retry_selection(&face, selected.as_deref(), declined_resume_picker)?;
-                    cfg = load_config(paths)?;
                 }
                 tui::SessionRequest::EditConfig => {
                     let errors = terminal.close();
@@ -91,7 +91,7 @@ pub(super) fn run(
                         return Err(CliFailure::new(errors.join("; ")));
                     }
                     crate::commands::support::edit_config_file(paths)?;
-                    cfg = load_config(paths)?;
+                    let cfg = load_config(paths)?;
                     let selected = face.session();
                     face = reconnect(paths, &face)?;
                     picker = select_or_list(&face, selected.as_deref())?;

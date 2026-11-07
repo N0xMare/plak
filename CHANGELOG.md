@@ -7,6 +7,9 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ## Unreleased
 
+- Refresh hosted-terminal preferences on every UI relaunch, including resume
+  and rebind.
+
 - Persist terminal preference resets locally and serialize configuration
   publication so independent terminal and host settings edits are merged.
 
