@@ -44,6 +44,125 @@ enum CellLanguage {
     Python,
 }
 
+#[test]
+fn finalized_cell_with_completed_nested_effect_closes_without_replay() -> TestResult {
+    run_cancel_cell_scenario(|| async {
+        let directory = tempfile::tempdir()?;
+        let evidence = crash_evidence(CrashPoint::NestedToolReturned, CellLanguage::Native);
+        let store = Arc::new(TestCreateStore::default());
+        let sessions = DurableSessionRuntime::current(
+            store.clone(),
+            RuntimeDurability::Required,
+            NonZeroU64::new(30).ok_or("nonzero lease")?,
+        )?;
+        let (builder, _) = cancel_cell_builder(
+            CancelCellMode::ExecInFlight,
+            Arc::clone(&evidence),
+            directory.path(),
+        )?;
+        let agent = sessions
+            .create("create:cell-finalization-cut", builder)
+            .await?;
+        let mut turn = agent.prompt("open a cell").await?;
+        let turn_id = turn.id();
+        let mut events = turn.take_events()?;
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            reach(CrashPoint::NestedToolReturned, &evidence, &mut events),
+        )
+        .await??;
+        turn.control().cancel().await?;
+        turn.result().await?;
+        let source = lock_mutex(&store.accepted_commits)
+            .iter()
+            .map(|(head, _)| Arc::clone(head))
+            .find(|head| {
+                let records = head.manifest().ledger().operations();
+                records.iter().any(|record| {
+                    matches!(record.kind(), DurableOperationKind::Command { .. })
+                        && matches!(record.state(), DurableOperationState::Dispatched)
+                }) && records.iter().any(|record| {
+                    matches!(
+                        record.kind(),
+                        DurableOperationKind::CompositionEvaluation { .. }
+                    ) && matches!(record.state(), DurableOperationState::Finalized(_))
+                }) && records.iter().any(|record| {
+                    matches!(record.kind(), DurableOperationKind::CompositionChild { .. })
+                        && matches!(record.state(), DurableOperationState::Finalized(_))
+                })
+            })
+            .ok_or("no finalized cell before the root terminal")?;
+        let effect = source
+            .manifest()
+            .ledger()
+            .operations()
+            .into_iter()
+            .find(|record| {
+                matches!(record.kind(), DurableOperationKind::Effect { .. })
+                    && matches!(
+                        record.state(),
+                        DurableOperationState::Completed(_) | DurableOperationState::Finalized(_)
+                    )
+            })
+            .ok_or("no settled nested effect")?;
+        let end = effect
+            .transitions()
+            .iter()
+            .position(|transition| {
+                matches!(transition.state(), DurableOperationState::Completed(_))
+            })
+            .ok_or("no completed effect evidence")?;
+        let completed = effect.transitions()[end].state().clone();
+        // Root-boundary cleanup can finalize the cell and its child before
+        // the nested effect's finalization lands. Preserve that exact prefix.
+        let records = source
+            .manifest()
+            .ledger()
+            .operations()
+            .into_iter()
+            .map(|record| {
+                if record.operation_id() == effect.operation_id() {
+                    DurableOperationRecord::new(
+                        record.operation_id(),
+                        record.kind().clone(),
+                        record.request().clone(),
+                        record.transitions()[..=end].to_vec(),
+                    )
+                } else {
+                    Ok(record.clone())
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let cut = checkpoint_with_code_cell_records(&source, turn_id, records)?;
+        assert!(
+            crate::runtime::checkpoint_closes_on_reopen(&cut),
+            "{}",
+            describe_obligations(&cut)
+        );
+        let (_, report) = crate::runtime::durable::turn_recovery::closure_for_test(&cut)?;
+        assert_eq!(
+            report.ok_or("abandonment report")?.claim(),
+            crate::runtime::AbandonedTurnClaim::ToolRoundCompleted
+        );
+        let (_, closed) = crate::runtime::durable::turn_recovery::close_root_turn_for_test(&cut)?;
+        let closed_effect = closed
+            .operation(effect.operation_id())
+            .ok_or("closed effect")?;
+        assert!(matches!(
+            closed_effect.state(),
+            DurableOperationState::Finalized(_)
+        ));
+        assert!(
+            closed_effect
+                .transitions()
+                .iter()
+                .any(|transition| transition.state() == &completed)
+        );
+        agent.shutdown().await?;
+        Ok(())
+    })
+}
+
 impl CrashPoint {
     const fn mode(self) -> CancelCellMode {
         match self {

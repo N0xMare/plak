@@ -188,6 +188,11 @@ fn effect_row(
             DurableOperationState::Completed(_) | DurableOperationState::ProvenNotDispatched(_),
         ) if facts.code_cell => Some(TurnRow::Settled),
         (RecoveryAction::FinalizationRequired, DurableOperationState::Completed(_))
+            if facts.root_dispatched && replay::settled_nested_effect(facts.ledger, record) =>
+        {
+            Some(TurnRow::Settled)
+        }
+        (RecoveryAction::FinalizationRequired, DurableOperationState::Completed(_))
             if facts.root_dispatched && asking_round_completed(facts, record) =>
         {
             Some(TurnRow::CompletedUnadded)

@@ -129,6 +129,9 @@ pub(in crate::runtime) fn closing_round_boundary(
             || controls::same_turn_control(ledger, record, turn_id)
             || (boundary == RoundBoundary::Tool
                 && operation_turn_id(record) == Some(turn_id)
+                && settled_nested_effect(ledger, record))
+            || (boundary == RoundBoundary::Tool
+                && operation_turn_id(record) == Some(turn_id)
                 && matches!(record.kind(), DurableOperationKind::ProcessSession { .. })
                 && matches!(
                     record.state(),
@@ -136,6 +139,39 @@ pub(in crate::runtime) fn closing_round_boundary(
                 ))
     });
     Ok(closed.then_some(boundary))
+}
+
+/// A finalized cell and child have already consumed this nested outcome;
+/// only the effect's own finalization was left behind by root cleanup.
+pub(super) fn settled_nested_effect(
+    ledger: &RuntimeOperationLedger,
+    effect: &DurableOperationRecord,
+) -> bool {
+    let DurableOperationKind::Effect {
+        turn_id,
+        attempt_id,
+        call_id,
+        ..
+    } = effect.kind()
+    else {
+        return false;
+    };
+    if !matches!(effect.state(), DurableOperationState::Completed(_)) {
+        return false;
+    }
+    ledger.operations().into_iter().any(|child| {
+        let DurableOperationKind::CompositionChild {
+            turn_id: child_turn, attempt_id: child_attempt, call_id: child_call,
+            evaluation_operation_id, ..
+        } = child.kind() else { return false; };
+        child_turn == turn_id && child_attempt == attempt_id && child_call == call_id
+            && matches!(child.state(), DurableOperationState::Finalized(_))
+            && ledger.operation(*evaluation_operation_id).is_some_and(|parent| {
+                matches!(parent.kind(), DurableOperationKind::CompositionEvaluation { turn_id: parent_turn, .. }
+                    if parent_turn == turn_id)
+                    && matches!(parent.state(), DurableOperationState::Finalized(_))
+            })
+    })
 }
 
 /// A retained earlier round, for a note that says so: a same-turn provider
