@@ -255,6 +255,94 @@ fn directory_new_resume_stop_and_leaving_use_the_host_socket() {
 }
 
 #[test]
+fn save_settings_over_the_socket_preserves_terminal_preferences() {
+    use crate::shell::settings::{ProductSurface, settings_view};
+    use crate::surface_protocol::{SurfaceIntent, SurfaceObservation};
+    use plakous_hosted::runtime::{Sender, SurfaceFacts, SurfaceHandler, SurfacePhase, UsageReads};
+
+    let (_root, paths) = paths();
+    let mut config = crate::product_config::ProductConfig::default_product();
+    config.theme = crate::product_config::ProductTheme::CatppuccinLatte;
+    config.tui_mouse = false;
+    config.scroll_lines = 9;
+    config.show_thinking = false;
+    config.group_tool_calls = false;
+    config.reduced_motion = true;
+    config.save(&paths).unwrap();
+    let expected = settings_view(&config).tui;
+    let mut update = settings_view(&config);
+    update.product.compaction = !config.compaction_enabled;
+    let listener = UnixListener::bind(paths.host_socket()).unwrap();
+    let server_paths = paths.clone();
+    let host = thread::spawn(move || {
+        let mut peer = Peer::accept(&listener);
+        peer.send(HostFrame::Welcome(welcome()));
+        let (id, _) = peer.request();
+        peer.answer(id, Answer::Sessions { rows: vec![row()] });
+        peer.attach(SESSION, false);
+        let (
+            _,
+            Op::Intent {
+                attachment,
+                intent: UserAction::Extension(SurfaceIntent::SaveSettings(decoded)),
+                ..
+            },
+        ) = peer.request()
+        else {
+            panic!("not save_settings")
+        };
+        assert_eq!(
+            decoded.tui,
+            crate::tui_preferences::TuiPreferences::default()
+        );
+        let (events, observed) = crate::surface_protocol::host_event_channel();
+        ProductSurface::new(server_paths.clone()).dispatch(
+            SurfaceIntent::SaveSettings(decoded),
+            SurfaceFacts {
+                phase: SurfacePhase::Idle,
+                attached_one_shot: false,
+                catalog: &[],
+                queue_len: 0,
+                session: None,
+                usage_reads: UsageReads::default(),
+            },
+            &Sender::over(events),
+        );
+        let saved = crate::product_config::ProductConfig::load(&server_paths).unwrap();
+        assert_eq!(settings_view(&saved).tui, expected);
+        assert_ne!(saved.compaction_enabled, config.compaction_enabled);
+        let applied = observed
+            .try_iter()
+            .find(|event| {
+                matches!(
+                    event,
+                    HostEvent::Extension(SurfaceObservation::SettingsViewApplied(_))
+                )
+            })
+            .unwrap();
+        peer.send(HostFrame::Event {
+            attachment,
+            seq: 2,
+            class: plakous_host_protocol::observation::ObservationClass::Addressed,
+            observation: applied,
+            blobs: Vec::new(),
+        });
+        assert!(matches!(peer.read(), ClientFrame::Bye));
+    });
+    let face = SocketFace::discover(&paths).unwrap().unwrap();
+    face.select(Some(SESSION)).unwrap();
+    assert_eq!(event(&face), HostEvent::SetBusy(false));
+    face.send(UserAction::Extension(SurfaceIntent::SaveSettings(update)))
+        .unwrap();
+    assert!(matches!(
+        event(&face),
+        HostEvent::Extension(SurfaceObservation::SettingsViewApplied(_))
+    ));
+    drop(face);
+    host.join().unwrap();
+}
+
+#[test]
 fn requested_reload_is_settled_locally_with_the_known_host_build_or_no_parenthetical() {
     use std::os::unix::fs::PermissionsExt as _;
     for binary in ["abcdef012345", "unknown", ""] {

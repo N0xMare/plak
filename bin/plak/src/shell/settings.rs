@@ -698,7 +698,7 @@ pub(super) fn save_settings(
         plakous_host_protocol::ProtocolSelection::Responses => ProtocolSelection::Responses,
         plakous_host_protocol::ProtocolSelection::Messages => ProtocolSelection::Messages,
     };
-    // Settings edits the root template body and the TUI/compaction rows only.
+    // Wire settings edit the root template body and compaction only.
     // Roster and orchestration policy move through the successor-epoch apply.
     let mut config = current.clone();
     // Settings edits the tuple only; the template's authority fields
@@ -760,32 +760,7 @@ pub(super) fn save_settings(
             return None;
         }
     }
-    config.tui_mouse = update.tui.mouse;
     config.compaction_enabled = update.product.compaction;
-    config.scroll_lines = update.tui.scroll_lines;
-    config.show_thinking = update.tui.show_thinking;
-    config.group_tool_calls = update.tui.group_tool_calls;
-    config.reduced_motion = update.tui.reduced_motion;
-    config.theme = match update.tui.theme {
-        crate::surface_protocol::SettingsTheme::DefaultDark => {
-            crate::product_config::ProductTheme::DefaultDark
-        }
-        crate::surface_protocol::SettingsTheme::DefaultLight => {
-            crate::product_config::ProductTheme::DefaultLight
-        }
-        crate::surface_protocol::SettingsTheme::CatppuccinLatte => {
-            crate::product_config::ProductTheme::CatppuccinLatte
-        }
-        crate::surface_protocol::SettingsTheme::CatppuccinFrappe => {
-            crate::product_config::ProductTheme::CatppuccinFrappe
-        }
-        crate::surface_protocol::SettingsTheme::CatppuccinMacchiato => {
-            crate::product_config::ProductTheme::CatppuccinMacchiato
-        }
-        crate::surface_protocol::SettingsTheme::CatppuccinMocha => {
-            crate::product_config::ProductTheme::CatppuccinMocha
-        }
-    };
     // Inside a trusted project, a settings save publishes the project
     // override — the active context owns the defaults. Outside one it writes
     // the global home. Neither path silently flattens the other's values.

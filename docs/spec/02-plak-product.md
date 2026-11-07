@@ -3846,7 +3846,12 @@ stdio through the session's host service: one attachment at a time, on the
 session's root node or a child of its tree, every observation sent to it
 with its class, the attach's baseline asked for as a resync of its scope. Plak's
 extension traffic travels as the `extension` kind; the settings view never
-carries the terminal preferences, which stay client-local, and the views a
+carries the terminal preferences, which stay client-local. A settings save
+on the host preserves its current `[tui]` values and never copies terminal
+preferences from a wire update. The TUI applies preference edits locally and
+publishes its own home's `[tui]` section; received settings views and save
+acknowledgements update product settings only, never theme or render preferences.
+The views a
 surface opens (settings, usage, profiles, MCP, acknowledgements, profile
 verdicts) are addressed, the session profile and workspace chrome states.
 

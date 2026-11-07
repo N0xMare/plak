@@ -1,5 +1,75 @@
 //! Settings tab and theme tests.
 
+#[test]
+fn wire_settings_views_never_replace_local_preferences_and_edits_persist_locally() {
+    use super::theme_for;
+    use crate::tui::SettingsTheme;
+
+    let (_root, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+    let mut launch = launch_basic();
+    launch.reload_home = Some(paths.clone());
+    launch.theme = SettingsTheme::CatppuccinLatte;
+    launch.mouse_enabled = false;
+    let mut app = App::new(launch, true);
+    for applied in [false, true] {
+        app.pending_open_settings = true;
+        let received = SettingsView::default();
+        app.apply_host_event(HostEvent::Extension(if applied {
+            SurfaceObservation::SettingsViewApplied(received)
+        } else {
+            SurfaceObservation::SettingsView(received)
+        }));
+        assert_eq!(app.persisted_theme, SettingsTheme::CatppuccinLatte);
+        assert_eq!(app.theme.id, theme_for(SettingsTheme::CatppuccinLatte).id);
+        assert!(!app.settings_menu.as_ref().unwrap().draft.tui.mouse);
+    }
+    app.settings_menu.as_mut().unwrap().draft.tui.scroll_lines = 8;
+    app.settings_menu.as_mut().unwrap().draft.tui.theme = SettingsTheme::CatppuccinMocha;
+    assert!(app.persist_settings().is_some());
+    app.apply_host_event(HostEvent::Extension(
+        SurfaceObservation::SettingsViewApplied(SettingsView::default()),
+    ));
+    assert_eq!(app.persisted_theme, SettingsTheme::CatppuccinMocha);
+    assert_eq!(
+        app.settings_menu.as_ref().unwrap().draft.tui.scroll_lines,
+        8
+    );
+    let config = crate::product_config::ProductConfig::load(&paths).unwrap();
+    assert_eq!(config.scroll_lines, 8);
+    assert!(!config.tui_mouse);
+    assert_eq!(config.theme.as_str(), "catppuccin-mocha");
+}
+
+#[test]
+fn a_failed_local_preference_save_is_inline_and_never_sent_to_the_host() {
+    let (_root, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+    paths.ensure_layout().unwrap();
+    std::fs::write(paths.config_file(), "invalid = [").unwrap();
+    let mut launch = launch_basic();
+    launch.reload_home = Some(paths.clone());
+    let mut app = App::new(launch, true);
+    app.pending_open_settings = true;
+    app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
+        SettingsView::default(),
+    )));
+    app.settings_menu.as_mut().unwrap().draft.tui.mouse = false;
+    assert!(app.persist_settings().is_none());
+    assert!(
+        app.settings_error
+            .as_ref()
+            .unwrap()
+            .contains("terminal preferences")
+    );
+    assert!(
+        app.preferences.mouse,
+        "the failed edit was not acknowledged"
+    );
+    assert_eq!(
+        std::fs::read_to_string(paths.config_file()).unwrap(),
+        "invalid = ["
+    );
+}
+
 use super::App;
 use super::terminal::dispatch_action;
 use super::test_support::{
@@ -399,10 +469,20 @@ fn cancelled_theme_preview_restores_persisted_theme() {
 }
 
 /// The §5.5 rendering rows reach the renderer, on the persisted
-/// snapshot and on live preview, and closing reverts the preview.
+/// snapshot and on local edits; applied edits survive closing the tab.
 #[test]
 fn settings_rendering_rows_drive_the_renderer() {
-    let mut app = App::new(launch_basic(), true);
+    let mut launch = launch_basic();
+    launch.settings = Some(SettingsView {
+        tui: crate::tui_preferences::TuiPreferences {
+            show_thinking: false,
+            group_tool_calls: false,
+            reduced_motion: true,
+            ..(SettingsView::default()).tui
+        },
+        ..SettingsView::default()
+    });
+    let mut app = App::new(launch, true);
     assert_eq!(
         RenderPrefs::default(),
         RenderPrefs::from(&SettingsView::default().tui)
@@ -430,7 +510,10 @@ fn settings_rendering_rows_drive_the_renderer() {
     app.handle_settings_key(key(KeyCode::Char(' ')));
     assert!(!app.render_prefs.reduced_motion, "preview applies");
     app.close_control_center();
-    assert!(app.render_prefs.reduced_motion, "close reverts the preview");
+    assert!(
+        !app.render_prefs.reduced_motion,
+        "an applied local edit survives close"
+    );
 }
 
 /// Opening an Enum chooser or an Int stepper must paint
@@ -587,8 +670,8 @@ fn every_settings_row_applies_on_change_and_persists_immediately() {
     );
 }
 
-/// Spec 02 §5.5: the host is the only authority that can refuse a change, and
-/// its refusal is painted inline over a tab that stays open.
+/// Spec 02 §5.5: a product-settings refusal is painted inline over a tab
+/// that stays open, and its acknowledgement cannot overwrite terminal preferences.
 #[test]
 fn a_refused_settings_change_is_stated_inline_and_keeps_the_tab_open() {
     let mut app = App::new(launch_basic(), true);
@@ -626,7 +709,8 @@ fn a_refused_settings_change_is_stated_inline_and_keeps_the_tab_open() {
             .draft
             .tui
             .scroll_lines,
-        6
+        3,
+        "the host cannot replace terminal-local scroll preferences"
     );
 }
 
@@ -650,8 +734,8 @@ fn late_settings_acknowledgement_stays_inert_after_control_center_closes() {
     ));
     assert!(app.settings_menu.is_none(), "closed Settings stays inert");
     assert!(
-        app.render_prefs.reduced_motion,
-        "authoritative value still applies"
+        !app.render_prefs.reduced_motion,
+        "a late host acknowledgement cannot replace terminal preferences"
     );
 
     let newer = SettingsView {

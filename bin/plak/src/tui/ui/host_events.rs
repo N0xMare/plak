@@ -2,7 +2,7 @@
 
 use super::{
     App, ControlTab, DisplayMode, Duration, HostEvent, PROMPT_HISTORY_LIMIT, ResumeMenu,
-    ScrollBlock, SettingsMenu, UserAction, blocks, terminal_state_keeping_duration, theme_for,
+    ScrollBlock, SettingsMenu, UserAction, blocks, terminal_state_keeping_duration,
     tool_is_running, unix_now, unknown_context_usage,
 };
 use crate::tui::SurfaceObservation;
@@ -1156,10 +1156,9 @@ impl App {
                 self.templates = rows;
                 self.mark_dirty();
             }
-            HostEvent::Extension(SurfaceObservation::SettingsView(snapshot)) => {
+            HostEvent::Extension(SurfaceObservation::SettingsView(mut snapshot)) => {
                 self.settings_error = None;
-                self.persisted_theme = snapshot.tui.theme;
-                self.theme = theme_for(snapshot.tui.theme);
+                snapshot.tui = self.preferences.clone();
                 self.settings_snapshot = Some(snapshot.clone());
                 if let Some(menu) = self.settings_menu.as_mut() {
                     menu.draft = snapshot.clone();
@@ -1177,13 +1176,12 @@ impl App {
                 self.slash_open = false;
                 self.mark_dirty();
             }
-            HostEvent::Extension(SurfaceObservation::SettingsViewApplied(snapshot)) => {
+            HostEvent::Extension(SurfaceObservation::SettingsViewApplied(mut snapshot)) => {
                 // Every row applies on change, so a confirmed write is
                 // not an exit. The tab stays exactly where the operator left
                 // it and only the persisted value moves under it.
                 self.settings_error = None;
-                self.persisted_theme = snapshot.tui.theme;
-                self.theme = theme_for(snapshot.tui.theme);
+                snapshot.tui = self.preferences.clone();
                 self.settings_snapshot = Some(snapshot.clone());
                 if let Some(menu) = self.settings_menu.as_mut() {
                     menu.draft = snapshot;

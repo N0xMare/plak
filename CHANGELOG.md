@@ -7,6 +7,10 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ## Unreleased
 
+- Preserve terminal-local theme and reading preferences across wire settings
+  saves and reconnects. Automatic reattachment also keeps an unresolved
+  new-session request's identity until the operator retries or selects a session.
+
 - Add the portable internal runner dial core: Noise IK, pairing proofs, offers,
   fingerprint confirmation and bounded encrypted transport framing, without a product caller.
 

@@ -2408,6 +2408,48 @@ fn control_center_chords_switch_tabs_edit_rows_search_scroll_and_copy() {
     terminal.quit();
 }
 
+#[test]
+fn settings_save_keeps_local_theme_and_mouse_across_reconnect() {
+    let fixture = Fixture::new(&tool_then_answer("unused"));
+    let path = fixture.home().join("config.toml");
+    let config = std::fs::read_to_string(&path).unwrap();
+    write_private(
+        &path,
+        &format!("{config}\n[tui]\ntheme = \"catppuccin-frappe\"\nmouse = false\n"),
+    );
+    let mut terminal = Terminal::spawn_ready(&fixture);
+    terminal.send(b"/settings\r");
+    terminal.wait_screen("/ search settings");
+    terminal.focus_control_row("Theme");
+    terminal.send(b"\r");
+    terminal.wait_screen("Catppuccin Frappe");
+    terminal.send(b"\x1b[B\r");
+    terminal.wait_where("the local theme changed", |frame| {
+        frame.contains("/ search settings") && frame.contains("catppuccin-macchiato")
+    });
+    terminal.focus_control_row("Auto compaction");
+    terminal.send(b" ");
+    terminal.wait_screen("now off · default on");
+    terminal.send(b"\x1b");
+    terminal.wait_screen("/ commands");
+    terminal.send(b"/attach\r");
+    terminal.wait_screen("/ commands");
+    terminal.send(b"/settings\r");
+    terminal.wait_where("the local theme survived reconnect", |frame| {
+        frame.contains("/ search settings") && frame.contains("catppuccin-macchiato")
+    });
+    terminal.focus_control_row("Mouse capture");
+    terminal.wait_screen("now off · default on");
+    let saved = std::fs::read_to_string(path).unwrap();
+    assert!(
+        saved.contains("theme = \"catppuccin-macchiato\""),
+        "{saved}"
+    );
+    assert!(saved.contains("mouse = false"), "{saved}");
+    terminal.send(b"\x1b");
+    terminal.quit();
+}
+
 /// Help-overlay chords: ↑/↓, PageUp/PageDown, Home/End, and `q`, Enter and
 /// Esc to close. A 20-row pane makes the overlay scroll.
 /// The Agents tab through the real binary: the product lists the profiles

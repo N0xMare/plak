@@ -25,8 +25,8 @@ impl App {
         self.mark_dirty();
         let Some(action) = action else {
             // A Bool row flipped in place, so it persists immediately;
-            // the host is the only authority that can refuse it and the
-            // refusal lands inline as `SettingsSaveFailed`. An Enum or Int row
+            // terminal preferences save locally and product changes go to the
+            // host; either failure stays inline. An Enum or Int row
             // only *opened* its sub-pane and has changed nothing yet — its own
             // commit is what applies.
             return matches!(
@@ -68,10 +68,24 @@ impl App {
     /// Persists the current draft. Every row applies on change (spec 02 §5.5), so
     /// this runs on the mutation itself, never on a Save row.
     ///
-    /// The TUI never validates the value: the draft always goes to the host,
-    /// which answers with `SettingsApplied` or a refusal the tab paints inline.
+    /// Terminal preferences are saved locally; product settings go to the host.
     pub(super) fn persist_settings(&mut self) -> Option<UserAction> {
         let update = self.settings_menu.as_ref()?.draft.clone();
+        if update.tui != self.preferences {
+            if let Some(paths) = &self.preferences_home
+                && let Err(message) = update.tui.save(paths)
+            {
+                self.settings_error = Some(format!("terminal preferences: {message}"));
+                self.mark_dirty();
+                return None;
+            }
+            self.preferences = update.tui.clone();
+            self.persisted_theme = update.tui.theme;
+            self.theme = theme_for(update.tui.theme);
+            if let Some(snapshot) = self.settings_snapshot.as_mut() {
+                snapshot.tui = update.tui.clone();
+            }
+        }
         self.mark_dirty();
         Some(UserAction::Extension(SurfaceIntent::SaveSettings(update)))
     }

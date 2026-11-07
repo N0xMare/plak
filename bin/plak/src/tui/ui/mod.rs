@@ -537,6 +537,8 @@ pub(crate) struct App {
     pub(crate) slash_selected: usize,
     theme: Theme,
     persisted_theme: SettingsTheme,
+    preferences: crate::tui::TuiPreferences,
+    preferences_home: Option<crate::home::paths::PlakPaths>,
     /// Dirty-redraw flag; host events and input set this.
     dirty: bool,
     /// When quitting, ask the app to re-resolve OAuth and re-attach the agent.
@@ -937,6 +939,16 @@ impl App {
             slash_selected: 0,
             theme: theme_for(launch.theme),
             persisted_theme: launch.theme,
+            preferences: crate::tui::TuiPreferences {
+                theme: launch.theme,
+                mouse: launch.mouse_enabled,
+                ..launch
+                    .settings
+                    .as_ref()
+                    .map(|view| view.tui.clone())
+                    .unwrap_or_default()
+            },
+            preferences_home: launch.reload_home.clone(),
             dirty: true,
             request_reattach: false,
             host_disconnected: false,
