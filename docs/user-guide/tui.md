@@ -247,8 +247,14 @@ keybinds`, plus a red `Esc stop` while a turn runs. When a newer `plak` is
 installed on `PATH` it says `new build installed · /reload`.
 In host mode, `/reload` replaces only this client and reattaches the same
 resident session. It never exports, carries or hands off the session; a
-different or unknown destination state key refuses. Background processes
-still refuse reload. A requested `plak session reload --expect-binary`
+different or unknown destination state key refuses. Running processes stay
+with the host or its daemon and do not refuse a hand reload. If the host
+stops before the replacement client connects, reload refuses with a
+start-host-and-resume remedy; it never silently embeds and takes custody.
+A persistent, non-blocking notice names the host and installed builds when
+their binary identities differ. Restart the host unit, or run `plak host stop`
+and start it again, to move the host onto the installed build. The TUI never
+restarts the host itself. A requested `plak session reload --expect-binary`
 receives an immediate local refusal explaining that this session runs in
 `plak host`: restart the host to move its sessions to another build. This
 also applies if an embedded requested reload lands in a running host.
