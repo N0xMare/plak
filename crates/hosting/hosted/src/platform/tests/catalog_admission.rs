@@ -789,3 +789,18 @@ fn unified_api_keys_keep_existing_owner_only_listing_cache_paths() {
         );
     }
 }
+
+#[test]
+fn named_model_cache_references_are_single_filename_components() {
+    let home = std::path::Path::new("/synthetic-home");
+    for vertical in ["openai", "anthropic", "xai-api", "openrouter"] {
+        assert_eq!(
+            cache_path(home, &vertical.parse().unwrap(), "fp"),
+            home.join(format!("cache/api-models/{vertical}-fp.json"))
+        );
+        assert_eq!(
+            cache_path(home, &format!("{vertical}/work").parse().unwrap(), "fp"),
+            home.join(format!("cache/api-models/{vertical}~work-fp.json"))
+        );
+    }
+}

@@ -693,6 +693,8 @@ model list, fetched with the same API key from the exact origin (Anthropic
 `GET /v1/models`, paginated; OpenAI `GET /v1/models`, ids only; xAI
 `GET /v1/models`), cached for six
 hours under `<product home>/cache/api-models/<account>-<key fingerprint>.json`
+(the slash in a named account reference is encoded as `~`, for example
+`openai~work-<key fingerprint>.json`; bare-account filenames are unchanged)
 (keyed by account and a non-secret 16-hex-digit key fingerprint; the cache
 file tags the provider's rows; mode `0600` in directories created `0700`,
 written through a unique temporary file and an atomic rename, read without

@@ -51,9 +51,10 @@ pub(crate) fn cache_path(
     account: &crate::account::AccountRef,
     fingerprint: &str,
 ) -> PathBuf {
-    home.join("cache")
-        .join("api-models")
-        .join(format!("{account}-{fingerprint}.json"))
+    home.join("cache").join("api-models").join(format!(
+        "{}-{fingerprint}.json",
+        account.as_str().replace('/', "~")
+    ))
 }
 
 pub(crate) fn read_cache(
