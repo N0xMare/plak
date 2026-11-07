@@ -768,10 +768,14 @@ an attachment, so it is bounded: a host stops only a session it serves (any
 other is `unknown_session`, and a session another live host holds is that
 host's to stop), one at a time per connection, and it logs each with the
 connection's face and login, since it acts without an attachment. `plak
-host`, a host of many sessions, serves it only for the session the
-connection's node attachment is in, through that attachment's own session
-connection, and refuses another of its sessions `unsupported` (attach it
-first). The stop is answered even when that attachment ends before it
+host`, a host of many sessions, accepts any session in its directory,
+without changing or requiring the connection's node attachment. It never
+opens a dormant session to stop it: tree custody and a lease-only root head
+fence durable stop records and runner effects. A live holder is refused,
+not taken over merely because the requester has no attachment. A resident
+session uses its existing actor and retains a residency hold. `stopped`
+is not returned while runner termination remains unsettled. A waiting stop
+never retargets itself when the slot moves to a successor. The stop is answered even when that attachment ends before it
 settles (a detach, an attach of another session, a `release_session`): the
 session connection, and with it its hold on the session's residency, stays
 until the stop is answered, at most 90 s, so the session is not released

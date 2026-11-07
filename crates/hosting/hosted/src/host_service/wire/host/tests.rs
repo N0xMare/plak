@@ -305,6 +305,15 @@ impl HostSessions<Core> for Fake {
             environment: SessionEnvironment::Host,
         })
     }
+
+    fn stop_dormant(&self, session: &str) -> CliResult<()> {
+        let mut rows = self.0.rows.lock().unwrap();
+        rows.iter_mut()
+            .find(|row| row.session == session)
+            .unwrap()
+            .activity = SessionActivity::Stopped;
+        Ok(())
+    }
 }
 
 #[test]
@@ -331,6 +340,7 @@ fn host_requests_reopen_only_after_actor_release_and_move_every_viewer() {
                 request_id: "repair".into(),
             }
         };
+        let source_slot = host.slot("s1");
         request(&mut connection, 2, op);
         assert_eq!(
             outcome(&out.take(), 2),
@@ -342,6 +352,13 @@ fn host_requests_reopen_only_after_actor_release_and_move_every_viewer() {
         attached(&out.take(), 3);
         assert_eq!(fake.0.opens.load(Ordering::SeqCst), 2);
         assert_eq!(host.slots().len(), 1, "a reattach created a competing slot");
+        if rebind {
+            assert!(
+                source_slot
+                    .stop_target("s1", |_| panic!("a moved stop reached the successor"))
+                    .is_err()
+            );
+        }
         connection.leave();
         other.leave();
         handed_off(&host);
@@ -1158,26 +1175,19 @@ fn a_session_awaiting_an_approval_reads_awaiting_operator() {
     handed_off(&host);
 }
 
-/// `stop_session` of the attached session is its own connection's, answered
-/// once the stop is durable; one this connection is not attached to is
-/// refused, and one the host does not know is `unknown_session`.
+/// Directory stops never attach or open dormant work; resident stops use
+/// the same actor even when this connection views another session.
 #[test]
 fn stop_session_stops_the_attached_session() {
-    let (host, _fake) = host(&["s1", "s2"]);
+    let (host, fake) = host(&["s1", "s2"]);
     let out = Out::default();
     let mut connection = host.connect(out.clone(), Face::Remote, || false);
     let stop = |session: &str| Op::StopSession {
         session: session.into(),
     };
     request(&mut connection, 1, stop("s1"));
-    assert_eq!(
-        outcome(&out.take(), 1),
-        Outcome::Refused(RequestRefusal::Unsupported {
-            detail: "stop_session stops the session this connection is attached to; attach it \
-                     first"
-                .into()
-        })
-    );
+    assert_eq!(outcome(&out.take(), 1), Outcome::Ok(Answer::Stopped));
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 0);
     request(&mut connection, 2, stop("nope"));
     assert_eq!(
         outcome(&out.take(), 2),
@@ -1185,12 +1195,9 @@ fn stop_session_stops_the_attached_session() {
     );
     request(&mut connection, 3, Op::Attach { node: node("s1") });
     attached(&out.take(), 3);
-    // Attached to s1, a stop of s2 is not this connection's.
+    // Attached to s1, a stop of dormant s2 leaves that attachment alone.
     request(&mut connection, 4, stop("s2"));
-    assert!(matches!(
-        outcome(&out.take(), 4),
-        Outcome::Refused(RequestRefusal::Unsupported { .. })
-    ));
+    assert_eq!(outcome(&out.take(), 4), Outcome::Ok(Answer::Stopped));
     request(&mut connection, 5, stop("s1"));
     assert_eq!(
         answer(&mut connection, &out, 5),

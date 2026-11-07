@@ -859,6 +859,49 @@ fn host_crash_mid_child_stop_finishes_the_recorded_intent_once() {
 }
 
 #[test]
+fn an_unattached_stop_stops_a_busy_root_and_live_children() {
+    let Some(fixture) = fixture() else { return };
+    let (mut host, session, _) = start_child_job_variant(&fixture, true, &[]);
+    let (pid, _) = job(&fixture);
+    let mut client = Client::connect(&host);
+    let row = client
+        .rows(1)
+        .into_iter()
+        .find(|row| row.session == session)
+        .unwrap();
+    assert_eq!(row.activity, SessionActivity::Busy);
+    assert!(row.live_work.children > 0, "the live child was not counted");
+    assert_eq!(
+        client.request(
+            2,
+            Op::StopSession {
+                session: session.clone()
+            }
+        ),
+        Outcome::Ok(Answer::Stopped)
+    );
+    stopped(pid);
+    let row = client
+        .rows(3)
+        .into_iter()
+        .find(|row| row.session == session)
+        .unwrap();
+    assert_eq!(row.live_work.children, 0);
+    assert_eq!(row.live_work.held_children, 0);
+    assert!(
+        root_record(&fixture, &session)
+            .0
+            .contains(&RootInterruptCause::Stopped)
+    );
+    assert_eq!(
+        client.request(4, Op::StopSession { session }),
+        Outcome::Ok(Answer::Stopped)
+    );
+    drop(client);
+    stop(&mut host);
+}
+
+#[test]
 fn host_start_requests_use_each_hosts_captured_login_path() {
     use std::os::unix::fs::PermissionsExt as _;
     let Some(fixture) = fixture() else { return };

@@ -262,6 +262,48 @@ where
         }
     }
 
+    pub(super) fn stop_target(
+        &self,
+        expected: &str,
+        stop_dormant: impl FnOnce(&str) -> CliResult<()> + Send,
+    ) -> CliResult<Option<HeldSession<P>>> {
+        let mut slot = self.lock();
+        let serves = match &*slot {
+            Slot::Resident { session, .. } => session.session_id() == expected,
+            Slot::Dormant { session_id } => session_id == expected,
+        };
+        if !serves {
+            return Err(CliFailure::new(
+                "the named session moved; stop its current session explicitly",
+            ));
+        }
+        if let Slot::Resident {
+            session,
+            attachments,
+            ..
+        } = &*slot
+            && !session.ended()
+            && let Some(hold) = attachments.hold()
+        {
+            return Ok(Some((Arc::clone(session), hold, session.releases())));
+        }
+        let source = match &*slot {
+            Slot::Resident { session, .. } => session.session_id(),
+            Slot::Dormant { session_id } => session_id.clone(),
+        };
+        if let Slot::Resident { worker, .. } = std::mem::replace(
+            &mut *slot,
+            Slot::Dormant {
+                session_id: source.clone(),
+            },
+        ) {
+            join(worker, self.release_join)?;
+        }
+        std::thread::scope(|scope| scope.spawn(|| stop_dormant(&source)).join())
+            .map_err(|_| CliFailure::new("the dormant stop panicked"))??;
+        Ok(None)
+    }
+
     /// Quits a resident session and joins its worker within `deadline`; a
     /// dormant one has nothing to quit.
     ///

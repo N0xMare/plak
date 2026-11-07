@@ -96,10 +96,13 @@ slow-timeout = { period = "300s", terminate-after = 2 }
 [profile.offline]
 default-filter = '''
 not (
+  test(an_unattached_stop_stops_a_busy_root_and_live_children)
+  |
   test(host_binding_requests_preserve_history_without_another_paid_turn)
   | test(host_binding_request_crash_cuts_keep_one_owner_and_never_redispatch)
   |
-  test(ui_reload_preserves_a_live_session_socket_and_rejects_an_invalid_replacement)
+  test(a_dormant_directory_stop_never_opens_or_dispatches_its_continuation)
+  | test(ui_reload_preserves_a_live_session_socket_and_rejects_an_invalid_replacement)
   |
   test(=foreground_owner_lease_expiry_stops_without_a_successor)
   | test(ledger_retirement_5000_real_leaf_calls_in_closed_cells_memory)
@@ -323,9 +326,12 @@ not (
 test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
+  test(an_unattached_stop_stops_a_busy_root_and_live_children)
+  |
   test(host_binding_requests_preserve_history_without_another_paid_turn)
   |
-  test(ui_reload_preserves_a_live_session_socket_and_rejects_an_invalid_replacement)
+  test(a_dormant_directory_stop_never_opens_or_dispatches_its_continuation)
+  | test(ui_reload_preserves_a_live_session_socket_and_rejects_an_invalid_replacement)
   |
   test(=foreground_owner_lease_expiry_stops_without_a_successor)
   | test(ledger_retirement_5000_real_leaf_calls_in_closed_cells_memory)

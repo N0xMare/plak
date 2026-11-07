@@ -102,6 +102,51 @@ fn a_stale_launcher_fence_never_releases_a_successor_session() {
     host.join().unwrap().unwrap();
 }
 
+#[test]
+fn a_dormant_directory_stop_never_opens_or_dispatches_its_continuation() {
+    for release in [Release::Lost, Release::Handoff] {
+        let root = tempfile::tempdir().unwrap();
+        let lost = release_a_running_root_turn(root.path(), release, Cancel::Deaf, |config| config);
+        let before = dispatches(&lost.evidence);
+        let mut config = next_host(
+            root.path(),
+            &lost,
+            serde_json::json!([]),
+            Arc::clone(&lost.store),
+        );
+        let mut record = lost.store.load(&lost.id).unwrap();
+        super::stop_dormant_session(&config.state_roots, lost.store.as_ref(), &mut record)
+            .block()
+            .unwrap();
+        let causes = root_causes(&lost);
+        let revision = lost.store.load(&lost.id).unwrap().store_revision;
+        assert_eq!(causes.last(), Some(&RootInterruptCause::Stopped));
+        super::stop_dormant_session(&config.state_roots, lost.store.as_ref(), &mut record)
+            .block()
+            .unwrap();
+        assert_eq!(
+            root_causes(&lost),
+            causes,
+            "repeat stop changed the durable verdict"
+        );
+        assert_eq!(lost.store.load(&lost.id).unwrap().store_revision, revision);
+        assert_eq!(
+            dispatches(&lost.evidence),
+            before,
+            "a stop opened a paid continuation"
+        );
+        config.session = lost.store.load(&lost.id).unwrap();
+        config.resume_after_loss = ResumeAfterLoss::Continue;
+        let seen = open_and_quit(config);
+        assert!(!seen.iter().any(held_notice), "{seen:#?}");
+        assert_eq!(
+            dispatches(&lost.evidence),
+            before,
+            "a stopped root was redispatched"
+        );
+    }
+}
+
 /// A stop of a root that holds its continuation after a loss records
 /// `stopped` on the loss's turn before it is settled, and a repeated stop
 /// records nothing more. The next open, under `continue`, holds nothing and

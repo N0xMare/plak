@@ -96,6 +96,14 @@ pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
         ))
     }
 
+    /// Stops durable work without opening a dormant session.
+    ///
+    /// # Errors
+    /// Authority, storage or unsettled runner effects refused the stop.
+    fn stop_dormant(&self, _session: &str) -> CliResult<()> {
+        Err(CliFailure::new("this launcher cannot stop dormant work"))
+    }
+
     /// The refusal of an attach whose session did not open with `failure`:
     /// `tree_hosted_elsewhere` while another live host process holds its
     /// tree, `session_unavailable` with why otherwise.
@@ -572,31 +580,7 @@ where
                 Err(refusal) => refused(refusal),
             },
             Op::ReleaseSession { session } => answered(self.release(&session)?),
-            Op::StopSession { session } => {
-                // The attached session's own connection stops it, as a
-                // connection that serves one session does.
-                if self
-                    .node
-                    .as_ref()
-                    .is_some_and(|link| link.session.session_id() == session)
-                {
-                    // One stop in flight per connection, the ended
-                    // attachment's included.
-                    if self.draining.is_some() {
-                        return refused(RequestRefusal::OneInFlight);
-                    }
-                    return self.forward(text.to_owned()).map(Forwarded::Reading);
-                }
-                refused(if self.knows(&session) {
-                    RequestRefusal::Unsupported {
-                        detail: "stop_session stops the session this connection is attached \
-                                 to; attach it first"
-                            .to_owned(),
-                    }
-                } else {
-                    RequestRefusal::UnknownSession
-                })
-            }
+            Op::StopSession { session } => self.stop(&session, text),
             Op::Attach { node } => self.attach(&node, text),
             Op::RetryAttach {
                 attachment,
@@ -671,6 +655,55 @@ where
         match result {
             Ok(node) => Outcome::Ok(Answer::Moved { node }),
             Err(failure) => Outcome::Refused(self.host.sessions.refusal(&session, &failure)),
+        }
+    }
+
+    fn stop(&mut self, session: &str, text: &str) -> CliResult<Forwarded> {
+        let refused = |refusal| Ok(Forwarded::Answered(Outcome::Refused(refusal)));
+        if self.draining.is_some()
+            || self
+                .node
+                .as_ref()
+                .is_some_and(|link| link.connection.stopping())
+        {
+            return refused(RequestRefusal::OneInFlight);
+        }
+        if self
+            .node
+            .as_ref()
+            .is_some_and(|link| link.session.session_id() == session)
+        {
+            return self.forward(text.to_owned()).map(Forwarded::Reading);
+        }
+        if !self.knows(session) {
+            return refused(RequestRefusal::UnknownSession);
+        }
+        tracing::info!(target: "plak::host", face = ?self.face, login = self.login.as_deref().unwrap_or("-"), session, "stop_session without attachment");
+        let slot = self.host.slot(session);
+        let sessions = Arc::clone(&self.host.sessions);
+        match slot.stop_target(session, |id| sessions.stop_dormant(id)) {
+            Ok(None) => {
+                self.host.changed();
+                Ok(Forwarded::Answered(Outcome::Ok(Answer::Stopped)))
+            }
+            Ok(Some((session, hold, releases))) => {
+                let stopped = Arc::clone(&self.stopped);
+                let mut connection =
+                    session.connect(self.out.clone(), self.face, move || stopped());
+                if let Some(login) = &self.login {
+                    connection = connection.identified(login.clone());
+                }
+                let reading = connection.frame(Ok(text.to_owned()))?;
+                self.draining = Some(NodeLink {
+                    changes: session.changes(),
+                    releases,
+                    session,
+                    connection,
+                    _hold: hold,
+                });
+                Ok(Forwarded::Reading(reading))
+            }
+            Err(failure) => refused(self.host.sessions.refusal(session, &failure)),
         }
     }
 

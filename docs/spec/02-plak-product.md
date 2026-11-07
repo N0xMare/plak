@@ -4020,10 +4020,18 @@ verdicts) are addressed, the session profile and workspace chrome states.
   A host serves it only for a session it serves (any other is refused
   `unknown_session`), one in flight per connection (`one_in_flight`), and
   logs each with the connection's face and login. A host of many sessions
-  serves it for the session the connection's node attachment is in, through
-  that attachment's own session connection; one of its other sessions is
-  refused `unsupported` (attach it first), and one it does not know is
-  `unknown_session`. Its answer comes even when the node attachment ends
+  accepts any named directory session without requiring an attachment.
+  A resident target uses its existing actor and retains a residency hold
+  until settlement, without moving the requester's current attachment.
+  A dormant target is stopped under tree custody and a lease-only root head,
+  without opening a driver, attaching a node or admitting a continuation.
+  A stop waiting on a slot that changes session is refused rather than
+  silently redirected to its successor.
+  Dormant async stop effects are bounded to half the negotiated root lease
+  period; an unfinished recorded stop is `session_unavailable`, not
+  `stopped`, and can be retried under a fresh fence.
+  Another live holder is refused under the same authority checks as an open;
+  an unknown session is `unknown_session`. Its answer comes even when the node attachment ends
   first: the session connection, and its hold on the session's residency,
   stay until the stop is answered (at most 90 s), and only then let the
   session go; a pending session request of the ended attachment is
@@ -4774,6 +4782,7 @@ period. Embedded mode keeps direct process calls and exit = stop.
 ```ini
 [Service]
 ExecStart=%h/.local/bin/plak host --web unix:%h/.plak/host/web/web.sock --ui %h/.plak/web-ui
+ExecReload=/bin/kill -USR1 $MAINPID
 KillMode=mixed
 KillSignal=SIGTERM
 TimeoutStopSec=90

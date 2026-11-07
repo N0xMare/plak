@@ -441,6 +441,19 @@ impl ProductStateRoots {
         }
     }
 
+    pub(crate) async fn finish_dormant_root_stop(
+        &self,
+        head: &plakous::sessions::LeaseOnlyHead,
+        intent: &str,
+    ) -> CliResult<()> {
+        if let Some(client) = &self.daemon_client {
+            crate::runner_adoption::readopt_held(client, head, Some(intent))
+                .await
+                .map_err(CliFailure::new)?;
+        }
+        Ok(())
+    }
+
     /// Applies this host's transport without changing a session's binding.
     #[must_use]
     pub fn bind_process_transport(

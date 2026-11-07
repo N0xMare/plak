@@ -1308,6 +1308,11 @@ exempt. Load probes run at most `nproc / 2` hogs, each under `timeout` and
 
 ### 2.1 Placement
 
+Protocol-4 host row attention/counts and launcher fencing are hosted tests;
+static UI validation and atomic build snapshots are product unit tests.
+Directory stop tests distinguish resident actors from lease-only dormant
+stops: neither an attachment nor a paid continuation is created by a stop.
+
 Test code has one home per kind, and production behavior is never moved into
 test code to change density accounting.
 
@@ -1433,6 +1438,10 @@ modules, and the all-features gate includes every module. Relative fixture
 includes follow the module location; manifest-root fixture paths do not move.
 
 ### 2.3 Serial groups and the budget lane
+
+Dormant-stop recovery and real-process UI signal reload scenarios belong
+to the serial lane, excluded from offline parallel execution. Their waits
+are for explicit observations, log acknowledgements or process settlement.
 
 Three mechanisms keep wall-clock and resource assumptions honest, and none of
 them relaxes an assertion to buy parallelism.
@@ -3437,6 +3446,11 @@ offline contract. §3.4 is the pre-release bar for those live runs. It does
 not move library evidence out of §3.1.
 
 ### 3.1 Offline fixture evidence
+
+Protocol-4 attention is tested while busy; clients keep queueing with
+`follow_up`. Child counts exercise live, parked, completed and held-loss
+transitions. Dormant stops are replayed and reopened under `continue`,
+with unchanged provider-dispatch evidence.
 
 | Selection and carry contract | Offline evidence |
 | --- | --- |

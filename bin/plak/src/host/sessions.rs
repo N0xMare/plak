@@ -251,6 +251,30 @@ impl HostSessions<PlakExtension> for ProductSessions {
         })
     }
 
+    fn stop_dormant(&self, session: &str) -> CliResult<()> {
+        let store = self.services.session_records()?;
+        let mut record = store.load(session).map_err(CliFailure::new)?;
+        if let Some(holder) = self
+            .elsewhere(&record.node.tree_id, record.plakous_locator)
+            .map_err(CliFailure::new)?
+        {
+            return Err(CliFailure::hosted_elsewhere(format!(
+                "another live process holds this session (pid {})",
+                holder.pid
+            )));
+        }
+        let roots = self.services.state_roots()?;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| CliFailure::new(error.to_string()))?;
+        runtime.block_on(plakous_hosted::runtime::stop_dormant_session(
+            &roots,
+            store.as_ref(),
+            &mut record,
+        ))
+    }
+
     fn refusal(&self, session: &str, failure: &CliFailure) -> RequestRefusal {
         let held = (failure.code() == Some("tree_hosted_elsewhere"))
             .then(|| {

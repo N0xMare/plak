@@ -161,13 +161,29 @@ async fn readopt_line(
         .await
         .map_err(|error| format!("the line's head could not be held: {error}"))?;
     cut("lease");
+    let adopted = readopt_held(client, &head, stop).await;
+    let released = head
+        .release()
+        .await
+        .map_err(|error| format!("the line's head lease could not be released: {error}"));
+    let adopted = adopted?;
+    released?;
+    Ok(adopted)
+}
+
+pub(crate) async fn readopt_held(
+    client: &RunnerClient,
+    head: &plakous::sessions::LeaseOnlyHead,
+    stop: Option<&str>,
+) -> Result<Readopted, String> {
+    let line = head.line();
     let owner = LineOwner::new(
         line,
         head.generation(),
         head.locator().branch_id(),
         head.fence(),
     );
-    let adopted = async {
+    let (recorded, running) = async {
         let _ = client
             .transfer_owner(&owner)
             .await
@@ -219,13 +235,7 @@ async fn readopt_line(
         }
         Ok::<_, String>((recorded, running))
     }
-    .await;
-    let released = head
-        .release()
-        .await
-        .map_err(|error| format!("the line's head lease could not be released: {error}"));
-    let (recorded, running) = adopted?;
-    released?;
+    .await?;
     Ok(Readopted {
         line,
         owner,
