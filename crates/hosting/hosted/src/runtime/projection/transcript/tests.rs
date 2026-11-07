@@ -498,6 +498,7 @@ fn busy_resync_preserves_running_tool_and_reasoning_identity() {
         publisher.snapshot(snapshot(scope.clone(), &[]), &sink);
         let _ = receiver.try_recv().unwrap();
         let tool = HostEvent::<Core>::Row(TranscriptRow::Tool(crate::sessions::ToolItem {
+            wire_operation: None,
             call_id: "call".into(),
             name: "read_file".into(),
             exposed_name: None,
@@ -669,6 +670,7 @@ fn kept_answer_survives_scheduled_compaction() {
     ));
     assert!(publisher.observe(scope.clone(), &HostEvent::<Core>::AssistantDone, &sink));
     let compact = HostEvent::<Core>::Row(TranscriptRow::Tool(crate::sessions::ToolItem {
+        wire_operation: None,
         call_id: "compact-1".into(),
         name: "compact".into(),
         exposed_name: None,
@@ -716,6 +718,7 @@ fn e2probe_retry_keeps_text_of_an_earlier_model_call_in_the_turn() {
         &sink,
     ));
     let tool = HostEvent::<Core>::Row(TranscriptRow::Tool(crate::sessions::ToolItem {
+        wire_operation: None,
         call_id: "call".into(),
         name: "read_file".into(),
         exposed_name: None,
@@ -797,6 +800,7 @@ fn retry_and_refusal_drop_assistant_text_that_preceded_the_tool() {
             &sink,
         ));
         let tool = HostEvent::<Core>::Row(TranscriptRow::Tool(crate::sessions::ToolItem {
+            wire_operation: None,
             call_id: "call".into(),
             name: "read_file".into(),
             exposed_name: None,
@@ -886,6 +890,7 @@ fn live_rows_update_runtime_rows_by_call_id_but_never_a_committed_notice() {
     let mut publisher = Presentations::default();
     let tool = |call_id: &str, subject: &str| {
         TranscriptRow::Tool(plakous_host_protocol::views::transcript::ToolItem {
+            wire_operation: None,
             call_id: call_id.into(),
             name: "child_result".into(),
             exposed_name: None,

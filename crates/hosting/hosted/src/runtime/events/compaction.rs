@@ -114,6 +114,7 @@ pub(in crate::runtime) fn publish_compact_activity<P: plakous_host_protocol::Pro
     observe_tool_activity(
         session,
         sessions::ToolItem {
+            wire_operation: None,
             call_id: call_id.to_owned(),
             name: "compact".into(),
             exposed_name: None,

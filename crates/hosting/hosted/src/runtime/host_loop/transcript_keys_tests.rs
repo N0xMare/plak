@@ -16,6 +16,7 @@ use plakous_host_protocol::views::transcript::TranscriptState;
 /// call id an imported row already uses.
 pub(in crate::runtime) fn child_result(subject: &str) -> TranscriptRow {
     TranscriptRow::Tool(ToolItem {
+        wire_operation: None,
         call_id: "child-result:m1".into(),
         name: "child_result".into(),
         exposed_name: None,

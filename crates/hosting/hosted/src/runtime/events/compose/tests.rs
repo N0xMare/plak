@@ -163,6 +163,7 @@ fn a_compose_update_carries_the_cell_stamps() {
     let root = tempfile::tempdir().unwrap();
     let mut session = SessionRecord::new(root.path().to_path_buf());
     session.upsert_tool_activity(sessions::ToolItem {
+        wire_operation: None,
         call_id: "exec-1".into(),
         name: "exec".into(),
         exposed_name: None,
@@ -223,6 +224,7 @@ fn a_reopened_compose_marker_re_terminalises_and_the_completed_sweep_skips_it() 
     observe_tool_activity(
         &mut session,
         sessions::ToolItem {
+            wire_operation: None,
             call_id: "exec-1".into(),
             name: "exec".into(),
             exposed_name: None,
@@ -319,6 +321,7 @@ fn a_cancel_in_the_yield_window_sweeps_the_marker_and_states_the_remainder() {
     observe_tool_activity(
         &mut session,
         sessions::ToolItem {
+            wire_operation: None,
             call_id: "exec-1".into(),
             name: "exec".into(),
             exposed_name: None,
@@ -357,6 +360,7 @@ fn compose_counts_moved_by_wait_children_survive_resume() {
     observe_tool_activity(
         &mut session,
         sessions::ToolItem {
+            wire_operation: None,
             call_id: "exec-1".into(),
             name: "exec".into(),
             exposed_name: None,

@@ -494,6 +494,7 @@ pub(super) fn emit_tree_snapshot_if_revision_advanced<
         // A tree row is a product notice intent (spec 02 §2.6), recorded
         // once per mail: a restored transcript already holds it.
         let row = crate::sessions::ToolItem {
+            wire_operation: None,
             call_id: call_id.clone(),
             name: "child_result".into(),
             exposed_name: None,

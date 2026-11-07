@@ -366,6 +366,7 @@ impl LiveRows {
             (
                 key,
                 TranscriptRow::Tool(ToolItem {
+                    wire_operation: None,
                     call_id: id.to_owned(),
                     name: name.clone(),
                     exposed_name: None,

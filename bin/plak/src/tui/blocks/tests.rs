@@ -242,6 +242,7 @@ fn a_prompt_copy_leaves_out_the_send_time_and_the_steer_tag() {
 fn a_tool_row_is_labelled_by_its_exposed_name() {
     let row = |exposed: Option<&str>| {
         ScrollBlock::from_row(TranscriptRow::Tool(ToolItem {
+            wire_operation: None,
             call_id: "c1".into(),
             name: "apply_patch".into(),
             exposed_name: exposed.map(str::to_owned),
@@ -1579,6 +1580,7 @@ fn web_and_mcp_rows_read_as_their_actions() {
 fn stored_web_and_mcp_rows_render_from_their_stored_subjects() {
     let row = |name: &str, subject: &str| {
         ScrollBlock::from_row(TranscriptRow::Tool(ToolItem {
+            wire_operation: None,
             call_id: format!("{name}-1"),
             name: name.to_owned(),
             exposed_name: None,

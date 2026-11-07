@@ -37,6 +37,7 @@ fn skipped_stored_rows_do_not_leak_keys_and_pending_notice_identity_survives_rel
 fn stored_transcript_keeps_projector_keys_through_tool_updates_and_live_notices() {
     use super::projector::{Lane, RowKey};
     let mut tool = ToolItem {
+        wire_operation: None,
         call_id: "call".into(),
         name: "read_file".into(),
         exposed_name: None,
@@ -73,6 +74,7 @@ fn stored_transcript_keeps_projector_keys_through_tool_updates_and_live_notices(
 
 fn child_result(subject: &str) -> TranscriptRow {
     TranscriptRow::Tool(ToolItem {
+        wire_operation: None,
         call_id: "child-result:m1".into(),
         name: "child_result".into(),
         exposed_name: None,
@@ -346,6 +348,7 @@ fn the_root_turn_count_advances_per_admitted_turn() {
 
 fn running_activity(call_id: &str) -> ToolItem {
     ToolItem {
+        wire_operation: None,
         parent_call_id: None,
         cell_id: None,
         call_id: call_id.to_owned(),
@@ -398,6 +401,7 @@ fn written_subject_is_single_line_and_byte_bounded() {
 
 fn tool_row(subject: String, detail: String) -> TranscriptRow {
     TranscriptRow::Tool(ToolItem {
+        wire_operation: None,
         subject: Some(subject),
         detail: Some(detail),
         ..running_activity("bounded")

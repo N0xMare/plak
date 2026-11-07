@@ -575,6 +575,7 @@ fn rows_past_the_bound_keep_the_newest_behind_one_truncated_row() {
     marked.extend(rows.iter().cloned());
     assert_eq!(bound_rows(rows.clone(), true, 64, usize::MAX), marked);
     let big = vec![TranscriptRow::Tool(crate::sessions::ToolItem {
+        wire_operation: None,
         call_id: CALL.to_owned(),
         name: "exec_command".to_owned(),
         exposed_name: None,

@@ -314,6 +314,7 @@ fn a_settled_cancel_defers_interrupted_behind_an_open_tool_row() {
     let root = tempfile::tempdir().unwrap();
     let (mut config, _) = fresh_injected_attached_host(root.path());
     config.session.upsert_tool_activity(sessions::ToolItem {
+        wire_operation: None,
         call_id: "call-1".into(),
         name: "loopback_effect".into(),
         exposed_name: None,
@@ -358,6 +359,7 @@ fn a_settled_cancel_defers_interrupted_behind_an_open_tool_row() {
 
     // Terminalising it releases the status, exactly once.
     config.session.upsert_tool_activity(sessions::ToolItem {
+        wire_operation: None,
         call_id: "call-1".into(),
         name: "loopback_effect".into(),
         exposed_name: None,

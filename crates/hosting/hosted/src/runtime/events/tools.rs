@@ -407,6 +407,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
             observe_tool_activity(
                 session,
                 sessions::ToolItem {
+                    wire_operation: None,
                     call_id: call_id.clone(),
                     name: name.clone(),
                     exposed_name: row_exposed_name(
@@ -814,6 +815,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
             observe_tool_activity(
                 session,
                 sessions::ToolItem {
+                    wire_operation: None,
                     call_id: call_id.clone(),
                     name: name.clone(),
                     exposed_name: row_exposed_name(
@@ -1038,6 +1040,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
         observe_tool_activity(
             session,
             sessions::ToolItem {
+                wire_operation: None,
                 call_id: call_id.clone(),
                 name: name.clone(),
                 exposed_name: None,

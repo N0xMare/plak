@@ -309,6 +309,7 @@ fn a_compose_cell_keeps_its_outline_live_and_after_resume() {
     );
     let item = |id: &str, parent: Option<&str>, name: &str, subject: &str, detail: &str| {
         TranscriptRow::Tool(ToolItem {
+            wire_operation: None,
             parent_call_id: parent.map(str::to_owned),
             cell_id: Some("cell".into()),
             subject: Some(subject.into()),
@@ -713,6 +714,7 @@ fn a_yield_and_wait_cell_reports_one_duration_live_and_resumed() {
 #[test]
 fn a_sealed_group_meta_is_its_elapsed_span() {
     let command = |id: &str, subject: &str, started: Option<u64>| ToolItem {
+        wire_operation: None,
         subject: Some(subject.into()),
         started_at_ms: started,
         finished_at_ms: started.map(|started| started + 2_000),
@@ -1029,6 +1031,7 @@ fn every_row_type_paints_the_same_live_and_restored() {
         settled_agent: Some("c39".into()),
     };
     let waited = ToolItem {
+        wire_operation: None,
         subject: Some("c39".into()),
         started_at_ms: Some(1_000),
         finished_at_ms: Some(721_000),
@@ -1036,6 +1039,7 @@ fn every_row_type_paints_the_same_live_and_restored() {
         ..tool_item("wait-1", "wait_agent")
     };
     let shell = ToolItem {
+        wire_operation: None,
         subject: Some("cargo test".into()),
         started_at_ms: Some(2_000),
         finished_at_ms: Some(3_200),

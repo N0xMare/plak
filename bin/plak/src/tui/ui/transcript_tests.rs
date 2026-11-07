@@ -463,6 +463,7 @@ fn restored_activity_groups_match_live_collapsed_and_expanded_frames() {
         say(&mut live, "Finished.");
         let item = |id: &str, name: &str, subject: &str, state: &str| {
             TranscriptRow::Tool(ToolItem {
+                wire_operation: None,
                 subject: Some(subject.into()),
                 detail: Some("RAW RESULT".into()),
                 state: state.into(),
@@ -591,6 +592,7 @@ fn process_activity_stories_match_live_and_restored() {
                 Some(subject),
             ));
             activity.push(TranscriptRow::Tool(ToolItem {
+                wire_operation: None,
                 subject: Some(subject.into()),
                 state: if state == ActivityState::Running {
                     "running"
@@ -654,6 +656,7 @@ fn interrupted_activity_stories_match_live_and_restored() {
                 1,
                 vec![
                     TranscriptRow::Tool(ToolItem {
+                        wire_operation: None,
                         subject: Some("sleep 60".into()),
                         state: "cancelled".into(),
                         ..tool_item("run", "exec_command")
@@ -1954,6 +1957,7 @@ fn restored_typed_tool_activity_renders_correlated_detail_and_duration() {
     app.apply_host_event(restore_snapshot(
         1,
         vec![TranscriptRow::Tool(ToolItem {
+            wire_operation: None,
             subject: Some("cargo test".into()),
             detail: Some("Arguments:\n{}\n\nResult:\nok".into()),
             started_at_ms: Some(1_000),
@@ -3278,6 +3282,7 @@ fn live_tips_and_thinking_match_restored_at_every_width() {
         );
         let running = |id: &str, name: &str, subject: &str| {
             TranscriptRow::Tool(ToolItem {
+                wire_operation: None,
                 subject: Some(subject.into()),
                 state: "running".into(),
                 ..tool_item(id, name)
@@ -3296,10 +3301,12 @@ fn live_tips_and_thinking_match_restored_at_every_width() {
                     elapsed_ms: Some(2_100),
                 }),
                 TranscriptRow::Tool(ToolItem {
+                    wire_operation: None,
                     subject: Some("src/lib.rs".into()),
                     ..tool_item("read", "read_file")
                 }),
                 TranscriptRow::Tool(ToolItem {
+                    wire_operation: None,
                     subject: Some("needle".into()),
                     ..tool_item("grep", "grep")
                 }),
@@ -3310,6 +3317,7 @@ fn live_tips_and_thinking_match_restored_at_every_width() {
                     "cargo build --release && echo \"built ok\"",
                 ),
                 TranscriptRow::Tool(ToolItem {
+                    wire_operation: None,
                     subject: Some("1 tools".into()),
                     detail: Some("await tools.exec_command({cmd: 'pwd'});".into()),
                     state: "running".into(),
@@ -3317,6 +3325,7 @@ fn live_tips_and_thinking_match_restored_at_every_width() {
                     ..tool_item("cell", "exec_js")
                 }),
                 TranscriptRow::Tool(ToolItem {
+                    wire_operation: None,
                     subject: Some("pwd".into()),
                     state: "running".into(),
                     parent_call_id: Some("cell".into()),
@@ -3627,6 +3636,7 @@ fn a_restored_running_tip_shows_its_elapsed_like_live() {
         vec![
             TranscriptRow::user("Test."),
             TranscriptRow::Tool(ToolItem {
+                wire_operation: None,
                 subject: Some("cargo test".into()),
                 state: "running".into(),
                 started_at_ms: Some(PINNED_UNIX_MS - 5_000),

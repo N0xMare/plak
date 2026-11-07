@@ -422,6 +422,7 @@ fn rows_sharing_a_call_id_survive_a_document_round_trip() {
     // under the same call id: rows are identified by position, not call id.
     let result = |subject: &str| {
         TranscriptRow::Tool(plakous_hosted::sessions::ToolItem {
+            wire_operation: None,
             call_id: "child-result:m1".into(),
             name: "child_result".into(),
             exposed_name: None,

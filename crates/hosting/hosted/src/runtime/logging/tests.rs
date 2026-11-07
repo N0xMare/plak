@@ -32,6 +32,7 @@ fn snapshot_rows(transcript: &[TranscriptRow]) -> Vec<TranscriptRow> {
 
 fn tool(index: usize) -> sessions::ToolItem {
     sessions::ToolItem {
+        wire_operation: None,
         call_id: format!("call-{index}"),
         name: "exec".into(),
         exposed_name: None,

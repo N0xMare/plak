@@ -29,6 +29,7 @@ fn notice_classification_table_is_pinned() {
 #[test]
 fn tool_item_exposed_name_round_trips_and_is_omitted_when_absent() {
     let item = |exposed_name: Option<&str>| ToolItem {
+        wire_operation: None,
         call_id: "c1".into(),
         name: "apply_patch".into(),
         exposed_name: exposed_name.map(str::to_owned),

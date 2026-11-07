@@ -19,6 +19,7 @@ pub(super) fn canonical_tool_row(
     text: CanonicalToolText,
 ) -> ToolItem {
     ToolItem {
+        wire_operation: None,
         call_id: call_id.to_owned(),
         name: canonical.to_owned(),
         exposed_name: (exposed != canonical).then(|| exposed.to_owned()),

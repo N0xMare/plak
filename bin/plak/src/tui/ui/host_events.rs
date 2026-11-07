@@ -683,6 +683,7 @@ impl App {
                 let optional_id = call_id.clone();
                 let mut block = ScrollBlock::from_tool_item(
                     plakous_host_protocol::views::transcript::ToolItem {
+                        wire_operation: None,
                         call_id: call_id.unwrap_or_default(),
                         parent_call_id,
                         cell_id,

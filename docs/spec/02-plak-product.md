@@ -5761,7 +5761,10 @@ one leaves them for the next.
 
 Host-protocol derives `ToolOperation` from each tool's canonical name and
 host-populated activity kind. `ToolItem::operation()` uses that classifier;
-the operation is not a field in the persisted or exported row. Plak maps the
+the operation is not a field in the persisted or exported row. A process-local
+`wire_operation` overlay may retain the host-supplied operation after decoding;
+it is excluded from serde, JSON Schema and row equality. Without that overlay,
+`operation()` uses the classifier. Plak maps the
 semantic operation to terminal labels and keeps no separate canonical-name
 classification table. Plan detail carries neutral status labels; terminal
 plan bullets and Activity status glyphs belong to the TUI, not a host library.

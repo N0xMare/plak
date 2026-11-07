@@ -181,6 +181,7 @@ fn canonical_answers_are_cached_per_session_and_survive_a_rebuild() {
     app.apply_host_event(restore_snapshot(
         2,
         vec![TranscriptRow::Tool(ToolItem {
+            wire_operation: None,
             subject: Some("cargo test --workspace".into()),
             ..tool_item("run", "exec_command")
         })],
@@ -376,6 +377,7 @@ fn wait_row(state: &str) -> (HostEvent, TranscriptRow) {
         wait: Some(facts.clone()),
     };
     let row = TranscriptRow::Tool(ToolItem {
+        wire_operation: None,
         state,
         subject,
         wait: Some(facts),

@@ -3250,12 +3250,14 @@ fn bounded_stored_rows_restore_as_rebuilt_and_product_rows_are_bounded() {
         },
     );
     let imported = crate::sessions::ToolItem {
+        wire_operation: None,
         detail: Some(format!("imported {secret}")),
         ..only_tool(&project_all(&feed).views).clone()
     };
     feed.intents.notices.push(OperatorNotice::imported(
         0,
         TranscriptRow::Tool(crate::sessions::ToolItem {
+            wire_operation: None,
             call_id: "imported-call".to_owned(),
             ..imported
         }),

@@ -148,6 +148,7 @@ fn full_screen_activity_says_when_the_root_needs_approval() {
 fn thoughtful_rows() -> Vec<TranscriptRow> {
     vec![
         TranscriptRow::Tool(ToolItem {
+            wire_operation: None,
             subject: Some("a.rs".into()),
             ..tool_item("call-r1", "read_file")
         }),
@@ -157,6 +158,7 @@ fn thoughtful_rows() -> Vec<TranscriptRow> {
             elapsed_ms: Some(1_200),
         }),
         TranscriptRow::Tool(ToolItem {
+            wire_operation: None,
             subject: Some("b.rs".into()),
             ..tool_item("call-r2", "read_file")
         }),
@@ -380,6 +382,7 @@ fn tool_row_metas_use_the_long_format_past_a_minute() {
         restored.apply_host_event(restore_snapshot(
             7,
             vec![TranscriptRow::Tool(ToolItem {
+                wire_operation: None,
                 subject: Some("a.rs".into()),
                 started_at_ms: Some(1_000),
                 finished_at_ms: Some(1_000 + ms),
@@ -435,6 +438,7 @@ fn tool_row_metas_use_the_long_format_past_a_minute() {
     restored.apply_host_event(restore_snapshot(
         7,
         vec![TranscriptRow::Tool(ToolItem {
+            wire_operation: None,
             subject: Some("a.rs".into()),
             started_at_ms: Some(1_000),
             finished_at_ms: Some(13_300),

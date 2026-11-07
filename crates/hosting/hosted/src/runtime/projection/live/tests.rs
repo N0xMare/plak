@@ -324,6 +324,7 @@ fn changed_keys_emit_the_same_settled_rows_as_a_full_scan() {
     use std::cell::RefCell;
     let tool = |call: &str, state: &str| {
         TranscriptRow::Tool(ToolItem {
+            wire_operation: None,
             call_id: call.into(),
             name: "bash".into(),
             exposed_name: None,

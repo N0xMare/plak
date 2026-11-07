@@ -34,6 +34,7 @@ fn agent_rows() -> Vec<TranscriptRow> {
     vec![
         TranscriptRow::user("review the parser"),
         TranscriptRow::Tool(ToolItem {
+            wire_operation: None,
             subject: Some("cargo test -p parser".into()),
             ..tool_item("call-a1", "exec_command")
         }),
@@ -75,6 +76,7 @@ fn open_served(app: &mut App, agent: &str, live: Option<&str>) {
 
 fn tool_op(call_id: &str, state: &str) -> TranscriptRow {
     TranscriptRow::Tool(ToolItem {
+        wire_operation: None,
         state: state.into(),
         subject: Some("cargo clippy".into()),
         kind: ActivityKind::Process,

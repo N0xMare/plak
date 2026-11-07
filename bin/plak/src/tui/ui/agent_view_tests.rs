@@ -33,6 +33,7 @@ fn agent_rows() -> Vec<TranscriptRow> {
     vec![
         TranscriptRow::user("review the parser"),
         TranscriptRow::Tool(ToolItem {
+            wire_operation: None,
             subject: Some("cargo test -p parser".into()),
             ..tool_item("call-a1", "exec_command")
         }),
@@ -172,17 +173,20 @@ fn a_finished_agents_transcript_renders_through_the_root_renderer() {
 fn cells_have_identical_outlines_in_root_and_agent_transcripts() {
     let rows = vec![
         TranscriptRow::Tool(ToolItem {
+            wire_operation: None,
             subject: Some("2 tools · 1 failed".into()),
             detail: Some("print('hello')".into()),
             ..tool_item("cell", "exec_py")
         }),
         TranscriptRow::Tool(ToolItem {
+            wire_operation: None,
             parent_call_id: Some("cell".into()),
             cell_id: Some("cell".into()),
             subject: Some("pwd".into()),
             ..tool_item("child1", "exec_command")
         }),
         TranscriptRow::Tool(ToolItem {
+            wire_operation: None,
             parent_call_id: Some("cell".into()),
             cell_id: Some("cell".into()),
             subject: Some("missing.rs".into()),
@@ -392,6 +396,7 @@ fn back_follows_the_root_tail_when_it_was_at_the_bottom() {
 
 fn running_tool(call_id: &str, subject: &str) -> TranscriptRow {
     TranscriptRow::Tool(ToolItem {
+        wire_operation: None,
         state: "running".into(),
         subject: Some(subject.into()),
         kind: ActivityKind::Process,
@@ -753,6 +758,7 @@ fn the_key_guide_says_when_the_root_needs_approval() {
 fn thoughtful_rows() -> Vec<TranscriptRow> {
     vec![
         TranscriptRow::Tool(ToolItem {
+            wire_operation: None,
             subject: Some("a.rs".into()),
             ..tool_item("call-r1", "read_file")
         }),
@@ -762,6 +768,7 @@ fn thoughtful_rows() -> Vec<TranscriptRow> {
             elapsed_ms: Some(1_200),
         }),
         TranscriptRow::Tool(ToolItem {
+            wire_operation: None,
             subject: Some("b.rs".into()),
             ..tool_item("call-r2", "read_file")
         }),

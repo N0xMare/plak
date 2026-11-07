@@ -253,6 +253,7 @@ fn live_tool_observations_never_commit_product_records_or_views() {
     observe_tool_activity(
         &mut session,
         sessions::ToolItem {
+            wire_operation: None,
             call_id: "live-call".into(),
             name: "read_file".into(),
             exposed_name: None,

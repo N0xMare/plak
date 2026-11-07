@@ -1431,6 +1431,7 @@ pub(super) fn tool_item(call_id: &str, name: &str) -> ToolItem {
         _ => ActivityKind::Tool,
     };
     ToolItem {
+        wire_operation: None,
         call_id: call_id.to_owned(),
         name: name.to_owned(),
         exposed_name: None,

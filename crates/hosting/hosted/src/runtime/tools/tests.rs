@@ -223,6 +223,7 @@ fn process_subject_uses_the_scoped_registry_and_survives_restore() {
         assert_eq!(subject, expected);
         let subject = process_action_subject("process_session_wait", &subject, true);
         let encoded = crate::sessions::ToolItem {
+            wire_operation: None,
             call_id: "wait-7".into(),
             name: "process_session_poll".into(),
             exposed_name: None,

@@ -136,6 +136,7 @@ fn an_import_bounds_rows_the_way_live_rows_are_bounded() {
         TranscriptRow::user("kept"),
         TranscriptRow::Truncated,
         TranscriptRow::Tool(ToolItem {
+            wire_operation: None,
             call_id: "call-big".into(),
             name: "exec_command".into(),
             exposed_name: None,

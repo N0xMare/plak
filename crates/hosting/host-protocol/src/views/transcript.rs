@@ -248,9 +248,13 @@ pub struct ThinkingRow {
 /// One tool call as the transcript shows it. Written in place by call id as
 /// the call progresses; the host sets its activity kind, which the renderer
 /// never re-derives from `name`.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ToolItem {
+    /// Host-supplied operation on a decoded wire row; never stored or exported.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub wire_operation: Option<super::ToolOperation>,
     /// Stable call id.
     pub call_id: String,
     /// Canonical tool name; the activity kind derives from it.
@@ -289,11 +293,31 @@ pub struct ToolItem {
     pub wait: Option<WaitFacts>,
 }
 
+impl PartialEq for ToolItem {
+    fn eq(&self, other: &Self) -> bool {
+        self.call_id == other.call_id
+            && self.name == other.name
+            && self.exposed_name == other.exposed_name
+            && self.kind == other.kind
+            && self.state == other.state
+            && self.subject == other.subject
+            && self.detail == other.detail
+            && self.started_at_ms == other.started_at_ms
+            && self.finished_at_ms == other.finished_at_ms
+            && self.parent_call_id == other.parent_call_id
+            && self.cell_id == other.cell_id
+            && self.wait == other.wait
+    }
+}
+
+impl Eq for ToolItem {}
+
 impl ToolItem {
     /// Semantic operation, derived without adding a persisted discriminator.
     #[must_use]
     pub fn operation(&self) -> super::ToolOperation {
-        super::ToolOperation::classify(&self.name, self.kind)
+        self.wire_operation
+            .unwrap_or_else(|| super::ToolOperation::classify(&self.name, self.kind))
     }
 
     /// The name the row is labelled by: the exposed name when the model
@@ -588,3 +612,7 @@ pub enum NoticeTone {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests;
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "unit tests")]
+mod operation_tests;

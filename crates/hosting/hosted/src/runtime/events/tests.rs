@@ -502,6 +502,7 @@ fn live_and_restored_subjects_match_at_the_byte_bound() {
     ] {
         let subject = live_tool_subject(&raw);
         let encoded = sessions::ToolItem {
+            wire_operation: None,
             call_id: "call-1".into(),
             parent_call_id: None,
             cell_id: None,
