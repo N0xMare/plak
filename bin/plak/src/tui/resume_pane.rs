@@ -167,10 +167,10 @@ impl ResumeRow for ResumeSessionEntry {
 }
 
 fn unavailable_route(entry: &ResumeSessionEntry) -> bool {
-    entry
-        .account
-        .as_deref()
-        .is_some_and(|account| crate::build_features::require_account(account).is_err())
+    entry.account.as_deref().is_some_and(|account| {
+        crate::build_features::require_account(account)
+            .is_err_and(|failure| failure.is_capability_unavailable())
+    })
 }
 
 /// How long ago `then_unix` was, as the picker says it.

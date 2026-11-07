@@ -203,12 +203,14 @@ impl From<crate::session_store::RecordStoreError> for CliFailure {
 enum LookupFailure {
     Recovery(plakous::sessions::AgentSessionsError),
     Capability(crate::capabilities::CapabilityUnavailable),
+    Account(crate::capabilities::AccountAdmissionError),
 }
 impl std::error::Error for CliFailure {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self.source.as_deref()? {
             LookupFailure::Recovery(error) => Some(error),
             LookupFailure::Capability(error) => Some(error),
+            LookupFailure::Account(error) => Some(error),
         }
     }
 }
@@ -266,6 +268,17 @@ impl From<crate::capabilities::CapabilityUnavailable> for CliFailure {
     }
 }
 
+impl From<crate::capabilities::AccountAdmissionError> for CliFailure {
+    fn from(error: crate::capabilities::AccountAdmissionError) -> Self {
+        if let crate::capabilities::AccountAdmissionError::CapabilityUnavailable(error) = error {
+            return Self::from(error);
+        }
+        let mut failure = Self::classified(CliFailureKind::Usage, error.to_string());
+        failure.source = Some(Box::new(LookupFailure::Account(error)));
+        failure
+    }
+}
+
 impl From<crate::runtime::TreeWriteError> for CliFailure {
     fn from(error: crate::runtime::TreeWriteError) -> Self {
         match error {
@@ -297,6 +310,12 @@ impl From<crate::agent_tree::TreeRuntimeError> for CliFailure {
 }
 
 impl CliFailure {
+    /// Whether a known capability is omitted, rather than an unknown account.
+    #[must_use]
+    pub fn is_capability_unavailable(&self) -> bool {
+        matches!(self.source.as_deref(), Some(LookupFailure::Capability(_)))
+    }
+
     /// A read/preflight refusal, retaining its typed source and retry class.
     pub(crate) fn session_read(
         context: &str,

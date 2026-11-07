@@ -122,7 +122,9 @@ pub const BUILD_CAPABILITIES: &[BuildCapability] = &[
 ];
 
 pub fn require_feature(feature: &str) -> Result<(), CapabilityUnavailable> {
-    super::require(feature)?;
+    if let Some(route) = super::for_account(feature) {
+        super::require_route(route)?;
+    }
     if let Some(capability) = BUILD_CAPABILITIES
         .iter()
         .find(|entry| entry.feature == feature && !entry.compiled)

@@ -7,6 +7,39 @@ use plakous_hosted::sessions::{MAX_TRANSCRIPT_LINES, ThinkingRow, ToolItem, Tran
 use std::fs;
 
 #[test]
+fn named_api_v12_import_refuses_even_with_a_default_key_present() {
+    let root = tempfile::tempdir().unwrap();
+    let paths = PlakPaths::explicit(root.path().join("home")).for_workspace(root.path());
+    paths.ensure_layout().unwrap();
+    fs::write(
+        paths.home().join("secrets/openai.key"),
+        "unused-default-key",
+    )
+    .unwrap();
+    let services = crate::shell::services::Services::for_home(paths);
+    for account in ["openai/work", "unknown"] {
+        let mut document = sample_document();
+        document.binding.account = Some(account.into());
+        document.binding.target_selection =
+            crate::product_config::ProductTargetSelection::Platform {
+                provider: plakous_hosted::binding::PlatformProvider::OpenAi,
+            };
+        let path = root.path().join("export.json");
+        fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
+        let failure =
+            crate::commands::session::import_export::import_session(&services, &path).unwrap_err();
+        assert_eq!(failure.exit_code(), 2);
+        assert!(matches!(
+            std::error::Error::source(&failure).unwrap()
+                .downcast_ref::<plakous_hosted::capabilities::AccountAdmissionError>(),
+            Some(plakous_hosted::capabilities::AccountAdmissionError::UnknownAccount { account: refused })
+                if refused == account
+        ));
+        assert_eq!(services.product_store_opens(), 0);
+    }
+}
+
+#[test]
 fn another_version_or_format_is_refused_by_name() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("doc.json");

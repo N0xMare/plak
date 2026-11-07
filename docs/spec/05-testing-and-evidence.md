@@ -1193,6 +1193,14 @@ The gated ratchet on long-function and wide-signature allows and on files over
 
 ## 2. Offline test conventions
 
+Account-admission regressions require typed `unknown_account` on run/agent
+selection and resumed records, while preserving known aliases and unbound
+empty shells. A v12 named-API import with a synthetic default key present in
+an isolated home must refuse before product-store publication, not construct
+a default credential source. Mutants accepting unknown routes or bypassing
+session account admission must fail committed assertions. Read-only account
+labels remain distinct from admission and known-feature omission.
+
 Repository tooling tests live in `tests/tooling/`; opt-in live scenarios and
 their status page live in `tests/live/`. Build helpers
 and their authenticated inputs live in `tools/build/`, repository policy in

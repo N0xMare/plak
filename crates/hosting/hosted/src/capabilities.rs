@@ -204,11 +204,40 @@ pub fn require_tools(
     Ok(())
 }
 
-/// Refuses an omitted known account without choosing another route.
-pub fn require(account: &str) -> Result<(), CapabilityUnavailable> {
-    let Some(route) = for_account(account) else {
-        return Ok(());
-    };
+/// An account selection that cannot be admitted by this build.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AccountAdmissionError {
+    UnknownAccount { account: String },
+    CapabilityUnavailable(CapabilityUnavailable),
+}
+
+impl std::fmt::Display for AccountAdmissionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownAccount { account } => write!(formatter, "unknown_account: `{account}`"),
+            Self::CapabilityUnavailable(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for AccountAdmissionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::UnknownAccount { .. } => None,
+            Self::CapabilityUnavailable(error) => Some(error),
+        }
+    }
+}
+
+/// Refuses unknown or omitted accounts without choosing another route.
+pub fn require(account: &str) -> Result<(), AccountAdmissionError> {
+    let route = for_account(account).ok_or_else(|| AccountAdmissionError::UnknownAccount {
+        account: account.to_owned(),
+    })?;
+    require_route(route).map_err(AccountAdmissionError::CapabilityUnavailable)
+}
+
+fn require_route(route: &RouteCapability) -> Result<(), CapabilityUnavailable> {
     if route.compiled {
         return Ok(());
     }
@@ -221,7 +250,7 @@ pub fn require(account: &str) -> Result<(), CapabilityUnavailable> {
 
 pub fn require_native(provider: NativeProvider) -> Result<(), CapabilityUnavailable> {
     if let Some(route) = for_native(provider) {
-        return require(route.account);
+        return require_route(route);
     }
     Err(CapabilityUnavailable {
         id: provider.as_str(),
@@ -233,6 +262,24 @@ pub fn require_native(provider: NativeProvider) -> Result<(), CapabilityUnavaila
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unknown_accounts_never_acquire_a_route() {
+        for account in ["openai/work", "unknown", "", "xai", "codex/", "OPENAI"] {
+            assert_eq!(
+                require(account),
+                Err(AccountAdmissionError::UnknownAccount {
+                    account: account.into()
+                })
+            );
+        }
+        for account in account_ids() {
+            assert_eq!(
+                require(account).is_ok(),
+                for_account(account).unwrap().compiled
+            );
+        }
+    }
 
     #[test]
     fn registered_accounts_and_aliases_are_unique_and_exact() {

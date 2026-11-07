@@ -477,7 +477,7 @@ mod rebind_tests {
     }
 
     #[test]
-    fn rebind_root_fallback_is_limited_to_an_unresolvable_source_selection() {
+    fn rebind_root_fallback_never_replaces_an_unknown_account() {
         for invalid_policy in [false, true] {
             let root = tempfile::tempdir().unwrap();
             let paths = crate::home::paths::PlakPaths::explicit(root.path().join("home"))
@@ -512,18 +512,10 @@ mod rebind_tests {
             let error = result
                 .err()
                 .expect("unconfigured root or invalid policy refuses before creation");
-            if invalid_policy {
-                assert!(!note.contains("using the configured root"), "{note}");
-                assert_eq!(history.replay_account(), "source-replay");
-                assert!(!error.message().contains("removed-account"), "{error}");
-            } else {
-                assert!(
-                    note.contains("account `removed-account` is no longer available"),
-                    "{note}"
-                );
-                assert!(note.contains("using the configured root binding"), "{note}");
-                assert_eq!(history.replay_account(), "");
-            }
+            assert!(error.message().contains("unknown_account"), "{error}");
+            assert!(error.message().contains("removed-account"), "{error}");
+            assert!(!note.contains("using the configured root"), "{note}");
+            assert_eq!(history.replay_account(), "source-replay");
             assert_eq!(source.account.as_deref(), Some("removed-account"));
             assert_eq!(services.product_store_opens(), 0);
         }

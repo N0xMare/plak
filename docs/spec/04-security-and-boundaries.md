@@ -1126,6 +1126,13 @@ Codex device flow arm only after the code or approval has arrived.
 
 ### 3.4 Isolation between accounts and routes
 
+Account admission is closed to the product's supported vertical vocabulary
+(chapter 02 §8.2). Unknown account strings are typed refusals on fresh selection,
+resume and import before credential-source construction. In particular, a
+named API account in a v12 export cannot select a default API key merely
+because its target names that provider. Inspecting historical account metadata
+confers no admission or credential authority.
+
 API-key sources share the `plakous-auth::api_key` secret and grant types, not
 admission authority. Metadata lookup takes `ApiKeyRequest` data; bearer
 resolution requires the owning integration's privately constructed concrete

@@ -67,6 +67,19 @@ the selected composition as the refusal id. Without `mcp`,
 `plak mcp` commands refuse, `/mcp` is omitted, and MCP-selecting templates
 refuse session admission (server definitions alone enable nothing). Read-only session
 show/log/export and carry export do not require the bound evaluator.
+
+Account admission is closed to `claude`, `codex`, `grok`, `anthropic`,
+`openai`, `xai-api`, and `openrouter`, including their existing unambiguous
+aliases. Any supplied account outside that set returns typed
+`AccountAdmissionError::UnknownAccount` (`unknown_account`, exit **2**)
+before credential-source construction. This applies to run/agent selection,
+resume, and imported documents, including v12 documents with named account
+strings. An unbound empty shell remains valid. An unknown account never
+inherits the target provider's default credentials. Export stays v12 with its
+v11 importer; no binding inputs or document encodings change.
+Read-only session labels retain unknown account metadata; unknown does not
+mean a known route omitted from this build, and displaying it admits no work.
+
 The binary ID is read from the snapshot's install-time `binary-id` manifest
 when its device, inode, size and nanosecond modification time all match the
 running executable. Manifests are considered only beside executables in the
@@ -1123,6 +1136,13 @@ command, followed by `plak session import <file>`. The library refusal stays
 product-neutral; the hosted product renderer supplies the recovery commands.
 
 #### 2.5.1 Carry-forward
+
+Import and exact resume admit the recorded account through the same closed
+vocabulary as fresh selection (§8.2). An unknown account, including a named
+API account string in a v12 document, returns typed `unknown_account` before
+credential-source construction or successor publication. It never inherits
+the target provider's default key. Valid unbound empty shells remain valid.
+Export remains v12, importing v12 and v11; this refusal changes no encoding.
 
 Before leaving a resumable session, `/reload` asks the destination build for
 its state key, importable export versions, and a strict configuration verdict
@@ -9078,6 +9098,13 @@ detail carries its own repair — including the two engine-locating environment
 variables, spelled the same way `plak doctor` spells them.
 
 ### 8.2 The two credential routes
+
+The account vocabulary is closed to the seven verticals `claude`, `codex`,
+`grok`, `anthropic`, `openai`, `xai-api`, and `openrouter`, with their existing
+unambiguous aliases. A supplied string outside that set, including a named
+reference, is typed `AccountAdmissionError::UnknownAccount`, rendered as
+`unknown_account` with exit 2. Run/agent selection, resume and import refuse
+it before selecting credentials; this build does not support named accounts.
 
 **Auth selects one exact URL and API profile, and API-key and OAuth routes
 never cross or fall back.** A vertical is either a subscription (OAuth) or a
