@@ -4,12 +4,27 @@ use crate::store::sessions as product_sessions;
 use plakous_hosted::error::{CliFailure, CliFailureKind, CliResult};
 use std::path::Path;
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum LookupMode {
+    Runtime,
+    Work,
+    Metadata,
+}
+
+pub(super) fn load_metadata_product_session(
+    paths: &crate::home::paths::PlakPaths,
+    store: &dyn crate::store::session_records::SessionRecordStore,
+    session_id: &str,
+) -> CliResult<product_sessions::SessionRecord> {
+    load_product_session(paths, store, session_id, |_| Ok(()), LookupMode::Metadata)
+}
+
 pub fn load_exact_product_session(
     paths: &crate::home::paths::PlakPaths,
     store: &dyn crate::store::session_records::SessionRecordStore,
     session_id: &str,
 ) -> CliResult<product_sessions::SessionRecord> {
-    load_product_session(paths, store, session_id, |_| Ok(()), false)
+    load_product_session(paths, store, session_id, |_| Ok(()), LookupMode::Runtime)
 }
 
 pub(crate) fn load_admitted_product_session(
@@ -22,7 +37,7 @@ pub(crate) fn load_admitted_product_session(
         store,
         session_id,
         crate::build_features::admit_session,
-        true,
+        LookupMode::Work,
     )
 }
 
@@ -31,7 +46,7 @@ fn load_product_session(
     store: &dyn crate::store::session_records::SessionRecordStore,
     session_id: &str,
     admit: impl FnOnce(&product_sessions::SessionRecord) -> CliResult<()>,
-    for_work: bool,
+    mode: LookupMode,
 ) -> CliResult<product_sessions::SessionRecord> {
     let cwd = paths.workspace().map_err(CliFailure::new)?.to_path_buf();
     let record = (|| {
@@ -47,7 +62,10 @@ fn load_product_session(
         }
     })?;
     admit(&record)?;
-    if for_work && record.archived {
+    if mode == LookupMode::Metadata {
+        return Ok(record);
+    }
+    if mode == LookupMode::Work && record.archived {
         return Err(CliFailure::new(
             "session_archived: unarchive this session before admitting work",
         ));
@@ -65,7 +83,7 @@ fn load_product_session(
     // record first (spec 02 §2.6), and creates the runtime session of one
     // no face has opened yet (`plak host`'s `new_session`); a read names
     // the exact record only.
-    if record.plakous_locator.is_none() && !for_work {
+    if record.plakous_locator.is_none() && mode == LookupMode::Runtime {
         return Err(CliFailure::new(
             "session has no exact canonical Plakous locator",
         ));

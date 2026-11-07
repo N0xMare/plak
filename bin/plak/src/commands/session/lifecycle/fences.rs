@@ -30,7 +30,11 @@ impl Fences {
     pub(in crate::commands::session) fn verify(&self) -> Result<(), LifecycleError> {
         self.keepalive.verify(&self.executor)
     }
-    fn acquire(&mut self, recorded: SessionLocator) -> Result<SessionLocator, LifecycleError> {
+    fn acquire(
+        &mut self,
+        recorded: SessionLocator,
+        deleting: bool,
+    ) -> Result<SessionLocator, LifecycleError> {
         let operation = SessionOperationId::new(format!("plak:archive:{}", uuid::Uuid::new_v4()))
             .map_err(|error| CliFailure::new(error.to_string()))?;
         let mut head = recorded;
@@ -46,6 +50,11 @@ impl Fences {
                 }
                 Err(error) if error.kind() == AgentSessionsErrorKind::Ownership => {
                     return Err(LifecycleError::Refused(LifecycleRefusal::Open));
+                }
+                Err(error) if deleting && error.kind() == AgentSessionsErrorKind::NotFound => {
+                    // An earlier delete already archived or removed this branch.
+                    // Its irreversible fence replaces a lease during retry cleanup.
+                    return Ok(recorded);
                 }
                 Err(error)
                     if error.kind() == AgentSessionsErrorKind::StaleLocator && attempt == 0 =>
@@ -100,9 +109,9 @@ pub(in crate::commands::session) fn for_delete(
     children: &[(String, SessionLocator)],
 ) -> Result<Fences, LifecycleError> {
     let mut fences = Fences::new(services)?;
-    fences.acquire(root)?;
+    fences.acquire(root, true)?;
     for (_, locator) in children {
-        fences.acquire(*locator)?;
+        fences.acquire(*locator, true)?;
     }
     fences.verify()?;
     Ok(fences)
@@ -137,7 +146,7 @@ pub(super) fn archive(
         return activity.refuse_running();
     };
     let mut fences = Fences::new(services)?;
-    let head = fences.acquire(locator)?;
+    let head = fences.acquire(locator, false)?;
     fences.inspect(head, paths, &mut activity)?;
     let (_, inspected) = crate::topology_product::inspect_session_tree(paths, &record)?;
     if let TreeInspection::Tree(tree) = inspected {
@@ -147,7 +156,9 @@ pub(super) fn archive(
             .values()
             .filter(|node| node.parent_agent_id.is_some())
         {
-            if !node.status.is_finished() {
+            if node.status == plakous_host_protocol::topology::NodeStatus::RecoveryRequired
+                || !node.status.is_finished()
+            {
                 activity.children.push(node.agent_id.clone());
                 continue;
             }
@@ -155,7 +166,7 @@ pub(super) fn archive(
                 let locator = locator
                     .parse::<SessionLocator>()
                     .map_err(|error| CliFailure::new(error.to_string()))?;
-                let head = fences.acquire(locator)?;
+                let head = fences.acquire(locator, false)?;
                 let mut child_activity = SessionActivity {
                     turn: false,
                     children: Vec::new(),

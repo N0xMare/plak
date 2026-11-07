@@ -77,7 +77,7 @@ fn settled_export_matches_the_writable_projector_path() {
         serde_json::to_vec(&export_session(&paths, &renamed).unwrap()).unwrap(),
         original_bytes
     );
-    assert_eq!(crate::carry::VERSION, 12);
+    assert_eq!(VERSION, 12);
     let imported = export_session(&paths, &renamed)
         .unwrap()
         .into_import()

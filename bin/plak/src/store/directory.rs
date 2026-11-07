@@ -292,6 +292,12 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+        assert!(
+            store
+                .carried_forward(&alias, "runner-a", &uuid::Uuid::new_v4().to_string(), key)
+                .unwrap()
+                .is_none()
+        );
         std::fs::remove_file(&alias).unwrap();
         assert_eq!(
             store
@@ -318,6 +324,12 @@ mod tests {
             steps
                 .iter()
                 .any(|step| step.contains("USING INDEX sessions_carry_source")),
+            "{steps:?}"
+        );
+        assert!(
+            steps
+                .iter()
+                .any(|step| step.contains("source_session_id=? AND source_operation_id=?")),
             "{steps:?}"
         );
     }

@@ -147,7 +147,7 @@ mod tests {
         record.title_override = Some("operator".into());
         record
             .pending_queue
-            .push(crate::store::sessions::QueueItem::new("do not run".into()));
+            .push(crate::store::sessions::QueueItem::new("do not run"));
         store.commit(&mut record).unwrap();
         let revision = record.store_revision;
         std::fs::write(paths.runtime_database(), b"deliberately unreadable runtime").unwrap();

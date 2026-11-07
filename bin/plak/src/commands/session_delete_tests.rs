@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, reason = "offline deletion assertions")]
 
 use super::*;
+use crate::commands::session::lifecycle;
 use std::sync::Arc;
 
 use plakous::sessions::{
@@ -33,7 +34,7 @@ fn lifecycle_keepalive_worker() {
             .lease_period_seconds(),
         1
     );
-    let result = super::lifecycle::archive_offline(&services, &id);
+    let result = lifecycle::archive_offline(&services, &id);
     let failure = std::env::var("PLAK_LIFECYCLE_FAIL_RENEWAL").as_deref() == Ok("1");
     if failure {
         assert!(matches!(result, Err(LifecycleError::Failure(_))));
@@ -100,17 +101,17 @@ fn offline_archive_fences_owners_and_live_children_without_archiving_runtime() -
         .run(f.runtime.sessions.hold_branch(&operation, locator))
         .checked()??;
     assert!(matches!(
-        super::lifecycle::archive_offline(&services, &f.record.id),
+        lifecycle::archive_offline(&services, &f.record.id),
         Err(LifecycleError::Refused(LifecycleRefusal::Open))
     ));
     f.runtime.run(held.release()).checked()??;
     assert!(
-        matches!(super::lifecycle::archive_offline(&services,&f.record.id),Err(LifecycleError::Refused(LifecycleRefusal::Busy{children,..})) if children.contains(&f.child_id))
+        matches!(lifecycle::archive_offline(&services,&f.record.id),Err(LifecycleError::Refused(LifecycleRefusal::Busy{children,..})) if children.contains(&f.child_id))
     );
     assert!(!f.product.load(&f.record.id).checked()?.archived);
     f.tree.abandon_recovery_for_delete(&f.child_id).checked()?;
     crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
-    super::lifecycle::archive_offline(&services, &f.record.id).checked()?;
+    lifecycle::archive_offline(&services, &f.record.id).checked()?;
     assert!(f.product.load(&f.record.id).checked()?.archived);
     AgentSessions::export_history_sqlite(f.paths.runtime_database(), locator).checked()?;
     // Metadata archival releases every fence; unarchive can reopen the same runtime.
@@ -130,7 +131,7 @@ fn deletion_lifecycle_crash_worker() {
     let paths = crate::home::paths::PlakPaths::explicit(home.into());
     let id = std::env::var("PLAK_LIFECYCLE_CRASH_SESSION").unwrap();
     let services = crate::shell::services::Services::for_home(paths);
-    super::lifecycle::delete_confirmed(&services, &id, true).unwrap();
+    lifecycle::delete_confirmed(&services, &id, true).unwrap();
     panic!("deletion did not reach crash cut");
 }
 
@@ -169,11 +170,11 @@ fn lifecycle_deletion_crash_cuts_finish_without_recovery_or_cascade() -> TestRes
         let services = crate::shell::services::Services::for_home(f.paths.clone());
         if cut == "delete_after_commit" {
             assert!(matches!(
-                super::lifecycle::delete_confirmed(&services, &f.record.id, true),
+                lifecycle::delete_confirmed(&services, &f.record.id, true),
                 Err(LifecycleError::Refused(LifecycleRefusal::NotFound))
             ));
         } else {
-            super::lifecycle::delete_confirmed(&services, &f.record.id, true).checked()?;
+            lifecycle::delete_confirmed(&services, &f.record.id, true).checked()?;
         }
         assert!(f.product.load(&f.record.id).is_err());
         assert!(f.product.load(&unrelated.id).is_ok());
@@ -223,6 +224,27 @@ fn create(
         return Err("offline create did not return a session".into());
     };
     Ok(session)
+}
+
+#[test]
+fn deletion_reconciles_creation_before_locator_publication() -> TestResult {
+    let mut f = fixture(false)?;
+    let mut record = product_sessions::SessionRecord::new(f.paths.home().to_path_buf());
+    f.product.commit(&mut record).checked()?;
+    let created = create(&f.runtime, &f.paths, &record.create_operation_id)?;
+    let locator = f.runtime.run(created.release()).checked()??;
+    assert!(record.plakous_locator.is_none());
+    let services = crate::shell::services::Services::for_home(f.paths.clone());
+    lifecycle::delete_confirmed(&services, &record.id, false)?;
+    assert!(f.product.load(&record.id).checked()?.is_none());
+    assert!(
+        f.runtime
+            .run(f.runtime.sessions.head_is_quiescent(locator))
+            .checked()?
+            .is_err()
+    );
+    assert!(f.product.load(&f.record.id).checked()?.is_some());
+    Ok(())
 }
 
 fn fixture(leased: bool) -> TestResult<Fixture> {

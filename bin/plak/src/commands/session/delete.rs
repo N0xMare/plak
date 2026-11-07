@@ -1,7 +1,7 @@
 //! Session deletion and garbage collection.
 
 use super::lifecycle::{LifecycleError, LifecycleRefusal};
-use super::lookup::load_exact_product_session;
+use super::lookup::{load_exact_product_session, load_metadata_product_session};
 use crate::store::sessions as product_sessions;
 use plakous::sessions::{AgentSessions, AgentSessionsErrorKind, SessionLocator};
 use plakous_hosted::error::{CliFailure, CliFailureKind, CliResult};
@@ -89,42 +89,69 @@ pub(super) fn delete_confirmed(
         .session_records()?
         .load(id)
         .map_err(CliFailure::new)?;
-    if let Some(successor) = crate::carry::pending_successor(services, &record)? {
+    let runner_id = record
+        .runner
+        .as_ref()
+        .map_or("local", |runner| runner.runner_id.as_str());
+    if let Some(successor) = product
+        .carried_forward(
+            &record.workspace_root,
+            runner_id,
+            &record.id,
+            &crate::home::state::state_key(),
+        )
+        .map_err(CliFailure::new)?
+        .filter(|successor| successor.carry_intent.is_some() && successor.plakous_locator.is_none())
+    {
         return Err(delete_refused(
             id,
             &SessionDeleteRefusal::fork_dependency(vec![successor.id]),
         ));
     }
-    if let Some(locator) = record.plakous_locator {
-        let runtime = RuntimeDeletion::new(services)?;
-        let plan = deletion_plan(paths, &mut product, &record, locator, abandon_children)?;
-        let fences = super::lifecycle::fence_for_delete(services, locator, &plan.children)?;
-        let settled = plan
-            .children
-            .iter()
-            .filter(|(id, _)| !plan.abandon.contains(id))
-            .cloned()
-            .collect::<Vec<_>>();
-        runtime.refuse_unsettled_children(id, &settled)?;
-        fences.verify()?;
-        // Runtime archival takes over with its own irreversible admission
-        // fence. It rechecks after release and refuses a racing owner before
-        // any deletion; later cleanup is protected by archived revisions.
-        drop(fences);
-        delete_confirmed_session(
-            paths,
-            &mut product,
-            &runtime,
-            &record,
-            locator,
-            abandon_children,
-        )?;
-    } else {
-        // A never-opened reservation owns no runtime history or tree.
-        product
-            .delete_session(id, record.store_revision)
-            .map_err(CliFailure::new)?;
+    if record.plakous_locator.is_none() && record.carry_intent.is_some() {
+        return Err(LifecycleError::Refused(LifecycleRefusal::Busy {
+            turn: false,
+            children: Vec::new(),
+            children_truncated: false,
+            processes: Vec::new(),
+            processes_truncated: false,
+            state_unknown: true,
+        }));
     }
+    let locator = match record.plakous_locator {
+        Some(locator) => locator,
+        None => {
+            let operation = plakous::sessions::SessionOperationId::new(&record.create_operation_id)
+                .map_err(|error| CliFailure::new(error.to_string()))?;
+            // Creation may have committed before its product locator save failed.
+            // The immutable create intent names that runtime even then.
+            AgentSessions::genesis_locator_for(&operation)
+                .map_err(|error| CliFailure::new(error.to_string()))?
+        }
+    };
+    let runtime = RuntimeDeletion::new(services)?;
+    let plan = deletion_plan(paths, &mut product, &record, locator, abandon_children)?;
+    let fences = super::lifecycle::fence_for_delete(services, locator, &plan.children)?;
+    let settled = plan
+        .children
+        .iter()
+        .filter(|(id, _)| !plan.abandon.contains(id))
+        .cloned()
+        .collect::<Vec<_>>();
+    runtime.refuse_unsettled_children(id, &settled)?;
+    fences.verify()?;
+    // Runtime archival takes over with its own irreversible admission
+    // fence. It rechecks after release and refuses a racing owner before
+    // any deletion; later cleanup is protected by archived revisions.
+    drop(fences);
+    delete_confirmed_session(
+        paths,
+        &mut product,
+        &runtime,
+        &record,
+        locator,
+        abandon_children,
+    )?;
     Ok(())
 }
 
@@ -156,18 +183,32 @@ pub(crate) fn delete_session(
     stdout: &mut dyn io::Write,
 ) -> CliResult<()> {
     let paths = services.paths()?;
-    let record = load_exact_product_session(paths, services.session_records()?.as_ref(), id)?;
+    let record = load_metadata_product_session(paths, services.session_records()?.as_ref(), id)?;
     refuse_stranding_a_carry(services, &record)?;
-    let locator = record
-        .plakous_locator
-        .ok_or_else(|| CliFailure::new("session has no exact canonical Plakous locator"))?;
     let mut product = crate::store::ProductStore::open(paths)
         .map_err(|error| CliFailure::new(error.to_string()))?;
-    deletion_plan(paths, &mut product, &record, locator, abandon_children)
-        .map_err(|error| cli_delete_error(&record.id, error))?;
+    if let Some(locator) = record.plakous_locator {
+        deletion_plan(paths, &mut product, &record, locator, abandon_children)
+            .map_err(|error| cli_delete_error(&record.id, error))?;
+    }
     confirm_deletion(&record.id, confirmed, stdin, stderr)?;
-    super::lifecycle::delete_confirmed(services, &record.id, abandon_children)
-        .map_err(|error| cli_delete_error(&record.id, error))?;
+    if !super::lifecycle::forward_delete(services, &record.id, abandon_children)? {
+        if record.plakous_locator.is_none() {
+            return Err(cli_delete_error(
+                &record.id,
+                LifecycleError::Refused(LifecycleRefusal::Busy {
+                    turn: false,
+                    children: Vec::new(),
+                    children_truncated: false,
+                    processes: Vec::new(),
+                    processes_truncated: false,
+                    state_unknown: true,
+                }),
+            ));
+        }
+        super::lifecycle::delete_confirmed(services, &record.id, abandon_children)
+            .map_err(|error| cli_delete_error(&record.id, error))?;
+    }
     writeln!(stdout, "deleted session {}", record.id).map_err(|_| CliFailure::new("stdout failed"))
 }
 
@@ -176,7 +217,22 @@ pub(crate) fn refuse_stranding_a_carry(
     services: &crate::shell::services::Services,
     record: &product_sessions::SessionRecord,
 ) -> CliResult<()> {
-    match crate::carry::pending_successor(services, record)? {
+    let mut product = crate::store::ProductStore::open(services.paths()?)
+        .map_err(|error| CliFailure::new(error.to_string()))?;
+    let runner_id = record
+        .runner
+        .as_ref()
+        .map_or("local", |runner| runner.runner_id.as_str());
+    match product
+        .carried_forward(
+            &record.workspace_root,
+            runner_id,
+            &record.id,
+            &crate::home::state::state_key(),
+        )
+        .map_err(CliFailure::new)?
+        .filter(|successor| successor.carry_intent.is_some() && successor.plakous_locator.is_none())
+    {
         Some(successor) => Err(CliFailure::new(format!(
             "session {} has an interrupted carry into session {}; resume either one to settle it, then delete",
             record.id, successor.id

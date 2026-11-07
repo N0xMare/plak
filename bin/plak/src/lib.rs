@@ -1124,26 +1124,20 @@ fn execute_command(
             dispatch::execute_session_list(services, stdout, include_archived)
         }
         Command::SessionRename { id, title } => {
-            commands::session::lifecycle::rename_session(services, &id, title.as_deref())?;
+            commands::session::lifecycle::rename_cli(services, &id, title.as_deref())?;
             writeln!(stdout, "renamed session {id}")
                 .map_err(|_| CliFailure::new("stdout failed"))?;
             Ok(ProcessOutcome::Success)
         }
         Command::SessionUnarchive { id } => {
-            commands::session::lifecycle::set_archived(services, &id, false)?;
+            commands::session::lifecycle::archive_cli(services, &id, false)?;
             writeln!(stdout, "unarchived session {id}")
                 .map_err(|_| CliFailure::new("stdout failed"))?;
             Ok(ProcessOutcome::Success)
         }
         Command::SessionArchive { id, yes } => {
-            commands::session::confirm_session_mutation(
-                "session archive",
-                &id,
-                yes,
-                stdin,
-                stderr,
-            )?;
-            commands::session::lifecycle::archive_offline(services, &id)?;
+            confirm_session_mutation("session archive", &id, yes, stdin, stderr)?;
+            commands::session::lifecycle::archive_cli(services, &id, true)?;
             writeln!(stdout, "archived session {id}")
                 .map_err(|_| CliFailure::new("stdout failed"))?;
             Ok(ProcessOutcome::Success)

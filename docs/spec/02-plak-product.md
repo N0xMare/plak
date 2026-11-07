@@ -1532,6 +1532,11 @@ The CLI exposes `plak session rename <full-id> <title>` and
 `plak session rename <full-id> --clear`. `plak session unarchive <full-id>`
 clears only the archive flag and starts no work.
 `plak session archive <full-id> [--yes]` confirms before hiding the session.
+Lifecycle commands accept full ids home-wide without interpreting a remote
+workspace path on the host; short ids remain workspace-qualified. If a live
+host answers, the CLI forwards lifecycle requests to it. Only confirmed host
+absence permits offline mutation; an uncertain connection or refusal never
+falls back.
 
 Archive is reversible and hides a session from default lists and pickers.
 Explicit archived-inclusive lists filter before applying row limits. An archived
@@ -1686,6 +1691,10 @@ that never had a runtime branch also refuses `Busy {state_unknown: true}`
 offline: no existing branch can fence a concurrent first creation. A running
 host can serialize that reservation and archive it. Reversible product archive
 never uses deletion's irreversible runtime archive operation.
+Offline deletion likewise refuses an unbound reservation as unknown. Confirmed
+host deletion uses its immutable creation operation to find and remove runtime
+history even if creation committed before the product locator was saved. An
+unbound pending carry refuses unknown state until its creation is reconciled.
 
 Directory workspace filters use the local canonical identity only for the
 local runner. A pinned non-local runner filters by its id and the exact saved

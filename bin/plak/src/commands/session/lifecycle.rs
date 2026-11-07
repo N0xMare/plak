@@ -5,11 +5,46 @@ use plakous_hosted::error::CliFailure;
 use crate::shell::services::Services;
 
 mod fences;
+mod forward;
 mod keepalive;
 pub(super) use fences::for_delete as fence_for_delete;
 
 pub(crate) fn archive_offline(services: &Services, id: &str) -> Result<(), LifecycleError> {
     fences::archive(services, id, false)
+}
+
+pub(crate) fn rename_cli(
+    services: &Services,
+    id: &str,
+    title: Option<&str>,
+) -> Result<(), CliFailure> {
+    if !forward::request(
+        services,
+        id,
+        forward::Change::Rename(title.map(str::to_owned)),
+    )? {
+        rename_session(services, id, title)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn archive_cli(services: &Services, id: &str, archived: bool) -> Result<(), CliFailure> {
+    if !forward::request(services, id, forward::Change::Archive(archived))? {
+        if archived {
+            archive_offline(services, id)?;
+        } else {
+            set_archived(services, id, false)?;
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn forward_delete(
+    services: &Services,
+    id: &str,
+    abandon_children: bool,
+) -> Result<bool, CliFailure> {
+    forward::request(services, id, forward::Change::Delete(abandon_children))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -169,11 +204,11 @@ pub(crate) fn validate_title(title: Option<&str>) -> Result<(), LifecycleError> 
 /// Evidence sampled while the caller holds the entire tree's admission barrier.
 /// An incomplete probe must set `state_unknown`; it never proves quiescence.
 #[derive(Debug)]
-pub(crate) struct SessionActivity {
-    pub turn: bool,
-    pub children: Vec<String>,
-    pub processes: Vec<String>,
-    pub state_unknown: bool,
+struct SessionActivity {
+    turn: bool,
+    children: Vec<String>,
+    processes: Vec<String>,
+    state_unknown: bool,
 }
 
 impl SessionActivity {
@@ -251,6 +286,32 @@ pub(crate) fn delete_confirmed(
 #[allow(clippy::unwrap_used, reason = "lifecycle contract tests")]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_sessions_refuse_every_lifecycle_operation_without_creating_a_record() {
+        let (_home, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+        let services = Services::for_home(paths.clone());
+        let id = uuid::Uuid::new_v4().to_string();
+        for result in [
+            rename_session(&services, &id, None).map(|_| ()),
+            set_archived(&services, &id, true),
+            set_archived(&services, &id, false),
+            delete_confirmed(&services, &id, false),
+        ] {
+            assert!(matches!(
+                result,
+                Err(LifecycleError::Refused(LifecycleRefusal::NotFound))
+            ));
+        }
+        assert!(
+            crate::store::ProductStore::open(&paths)
+                .unwrap()
+                .directory(None)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(!paths.runtime_database().exists());
+    }
 
     #[test]
     fn titles_are_validated_without_normalizing_and_null_clears() {

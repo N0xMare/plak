@@ -11,7 +11,7 @@ use plakous_host_protocol::status::{HostStatusDetail, SteerSource};
 fn archived_resident_never_admits_a_prompt_from_its_stale_record() {
     let root = tempfile::tempdir().unwrap();
     let (mut config, _) = fresh_injected_attached_host(root.path());
-    let store = std::sync::Arc::new(crate::session_store::MemoryStore::new());
+    let store = Arc::new(crate::session_store::MemoryStore::new());
     config.store = store.clone();
     let (action_tx, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
@@ -19,7 +19,9 @@ fn archived_resident_never_admits_a_prompt_from_its_stale_record() {
         RootActor::open_blocking(config, &actions, crate::runtime::Sender::over(wire), None)
             .unwrap();
     action_tx
-        .send(UserAction::Prompt("must not run".into()))
+        .send(crate::surface_protocol::UserAction::Prompt(
+            "must not run".into(),
+        ))
         .unwrap();
     let HostStep::Prompt {
         text,
@@ -31,6 +33,8 @@ fn archived_resident_never_admits_a_prompt_from_its_stale_record() {
     else {
         panic!("prompt")
     };
+    // Preparation preceded archival; only later events can claim new work.
+    for _ in events.try_iter() {}
     store.archive_for_test(&host.role.config.session.id);
     host.block(async |host| {
         host.run_prompt(text, queued_delivery, user_echoed, None)
