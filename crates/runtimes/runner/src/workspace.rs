@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "isolated workspace fixtures")]
 mod tests;
 
 /// Effective workspace consent advertised by the serving daemon.
@@ -444,12 +445,25 @@ impl WorkspaceCatalog {
 
     fn read_metadata(&self, path: &Path) -> Option<String> {
         let path = self.metadata_path(path)?;
+        #[cfg(unix)]
+        let file = std::fs::File::from(
+            rustix::fs::open(
+                &path,
+                rustix::fs::OFlags::RDONLY
+                    | rustix::fs::OFlags::NONBLOCK
+                    | rustix::fs::OFlags::NOFOLLOW
+                    | rustix::fs::OFlags::CLOEXEC,
+                rustix::fs::Mode::empty(),
+            )
+            .ok()?,
+        );
+        #[cfg(not(unix))]
+        let file = std::fs::File::open(&path).ok()?;
+        if !file.metadata().ok()?.is_file() {
+            return None;
+        }
         let mut bytes = Vec::new();
-        std::fs::File::open(path)
-            .ok()?
-            .take(65_537)
-            .read_to_end(&mut bytes)
-            .ok()?;
+        file.take(65_537).read_to_end(&mut bytes).ok()?;
         if bytes.len() > 65_536 {
             return None;
         }

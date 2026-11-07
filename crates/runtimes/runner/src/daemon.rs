@@ -81,6 +81,7 @@ pub fn triple_key(version: &VersionTriple) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "isolated daemon-state fixtures")]
 mod triple_tests {
     use super::*;
     use crate::{FileOwnerFloors, Floor, OwnerFloors};

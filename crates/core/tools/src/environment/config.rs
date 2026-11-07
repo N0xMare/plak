@@ -802,7 +802,7 @@ impl ExecutionEnvironment {
         workspace: WorkspacePolicy,
         config: ExecutionEnvironmentConfig,
         operation_backend: Arc<dyn ExecutionBackend>,
-        root_object: Option<super::HostFilesystemObjectIdentity>,
+        root_object: Option<HostFilesystemObjectIdentity>,
     ) -> Result<Self, ExecutionEnvironmentError> {
         let relative_cwd = workspace
             .cwd()
@@ -1022,7 +1022,7 @@ impl ExecutionEnvironment {
 
     fn live_root_identity(
         &self,
-    ) -> Result<super::HostFilesystemObjectIdentity, ExecutionEnvironmentError> {
+    ) -> Result<HostFilesystemObjectIdentity, ExecutionEnvironmentError> {
         if let (Some(link), Some(runtime)) = (&self.runner_link, &self.runner_runtime) {
             use crate::WorkspaceProbe as _;
             return super::runner::RunnerWorkspaceProbe::new(Arc::clone(link), runtime.clone())

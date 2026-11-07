@@ -10,6 +10,7 @@ use tokio::time::Instant;
 use super::{Connection, PlacementFailure, ProbePhase, RunnerRegistry, RunnerRow};
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "deterministic probe fixtures")]
 mod tests;
 
 /// One separately owned transport/options/reconciliation probe.
@@ -36,6 +37,12 @@ impl Default for ProbeState {
     }
 }
 
+impl ProbeState {
+    pub(super) fn invalidate_cache(&mut self) {
+        self.completed = None;
+    }
+}
+
 impl RunnerRegistry {
     /// Installs the process-owned probe, not a request-owned dialer. It must
     /// publish ready only after sweep, recover, recorded stops and cleanup.
@@ -54,6 +61,7 @@ impl RunnerRegistry {
         &self,
         ids: Option<&[String]>,
     ) -> Result<Vec<RunnerRow>, PlacementFailure> {
+        self.refresh_configuration()?;
         let ids = {
             let entries = self.entries.read().unwrap_or_else(PoisonError::into_inner);
             let ids = ids.map_or_else(

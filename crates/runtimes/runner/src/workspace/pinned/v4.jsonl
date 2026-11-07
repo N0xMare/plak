@@ -1,0 +1,15 @@
+{"roots":["/workspace"],"default_workspace":"/workspace","copies":true}
+{"roots":null,"default_workspace":"/startup","copies":false}
+{"path":"/workspace","require_canonical":true}
+{"Ok":"/workspace"}
+{"workspaces":[{"path":"/workspace/repo","repo":{"name":"repo","head":{"kind":"branch","name":"topic"},"commit":"0123456789abcdef0123456789abcdef01234567"}}],"truncated":false}
+{"workspaces":[{"path":"/workspace/repo","repo":{"name":"repo","head":{"kind":"detached"},"commit":"0123456789abcdef0123456789abcdef01234567"}}],"truncated":false}
+{"workspaces":[{"path":"/workspace/repo","repo":{"name":"repo","head":{"kind":"unborn","name":"new"},"commit":null}}],"truncated":false}
+{"workspaces":[{"path":"/workspace/repo","repo":{"name":"repo","head":{"kind":"unavailable"},"commit":null}}],"truncated":false}
+{"Err":{"kind":"invalid_path"}}
+{"Err":{"kind":"not_canonical","canonical":"/workspace"}}
+{"Err":{"kind":"not_found"}}
+{"Err":{"kind":"not_directory"}}
+{"Err":{"kind":"outside_roots"}}
+{"Err":{"kind":"product_home"}}
+{"Err":{"kind":"permission_denied"}}

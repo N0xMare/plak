@@ -26,8 +26,8 @@ pub use overlap::{AdmissionSnapshot, MachineOverlapGuard, RunnerPin};
 
 pub use plakous_tools::internal::runner::RunnerServices;
 pub use registry::{
-    BoundWorkspace, ConfiguredRunner, PlacementFailure, ProbePhase, RunnerProgress, RunnerRegistry,
-    RunnerRow, RunnerStatus,
+    BoundWorkspace, ConfiguredRunner, PlacementFailure, ProbePhase, RunnerCatalog, RunnerProbe,
+    RunnerProbeFuture, RunnerProgress, RunnerRegistry, RunnerRow, RunnerStatus,
 };
 mod service;
 mod state;

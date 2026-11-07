@@ -136,9 +136,9 @@ pub mod internal {
     /// Explicit per-node runner backend and link executor.
     #[must_use]
     pub fn select_runner_services(
-        builder: crate::AgentBuilder,
+        builder: AgentBuilder,
         services: plakous_tools::internal::runner::RunnerServices,
-    ) -> crate::AgentBuilder {
+    ) -> AgentBuilder {
         builder.with_runner_services(services)
     }
     pub use crate::binding_change::BindingChange;

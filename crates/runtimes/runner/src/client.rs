@@ -1010,8 +1010,20 @@ impl Inner {
         }
         let request_id = request.request_id.clone();
         let (answer, mut answered) = oneshot::channel();
-        self.foreground.register(&call);
-        self.dispatch(request, frame, answer)?;
+        let mut answer = Some(answer);
+        loop {
+            if self.foreground.dispatch_if_clean(&call, || {
+                let sender = answer.take().ok_or_else(|| {
+                    RunnerFailure::Unavailable("runner dispatch answer was already consumed".into())
+                })?;
+                self.dispatch(request.clone(), frame.clone(), sender)
+            })? {
+                break;
+            }
+            if let Some(owner) = call.owner() {
+                self.cleanup_foreground(*owner).await?;
+            }
+        }
         drop(foreground_guard);
         let expiry = tokio::time::sleep(window);
         tokio::pin!(expiry);

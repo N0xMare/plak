@@ -133,9 +133,40 @@ async fn an_answered_start_survives_live_reconnect_but_terminal_driver_cleanup_p
         service.lines(Some("home")).await[0].foreground,
         "answer/Ack and a reconnect inside the effect window do not settle a driver operation"
     );
+    let pid = lock(&service.inner.lines)
+        .get(&("home".into(), owner.line().to_string()))
+        .map(|(sessions, _)| plakous_tools::internal::live_foreground(sessions)[0].1)
+        .unwrap();
+    link.reconnect().await.unwrap();
+    let gate = service
+        .inner
+        .foreground
+        .gate("home", &owner.line().to_string());
+    let transfer = gate.lock().await;
+    let next_control =
+        control("00000000-0000-0000-0000-000000000004".parse().unwrap()).with_owner(owner);
+    let next_environment = environment.clone();
+    let following = tokio::spawn(async move {
+        next_environment.execute_literal_process(plakous_tools::LiteralProcessRequest::new(
+            "/bin/sh", ["-c".to_owned(), format!("if kill -0 {pid} 2>/dev/null; then printf escaped > effect-before-cleanup; fi")],
+            ".", Vec::new(), plakous_tools::LiteralProcessIntent::default(),
+        ).unwrap(), next_control).await
+    });
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while Arc::strong_count(&gate) < 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    // The next effect already passed its first cleanup snapshot and is now
+    // awaiting transfer. Settlement must still close its dispatch fence.
     backend
         .link()
         .driver_operation_settled(owner, second, attempt);
+    drop(transfer);
+    following.await.unwrap().unwrap();
+    assert!(!root.path().join("effect-before-cleanup").exists());
     tokio::time::timeout(Duration::from_secs(5), async {
         while service.lines(Some("home")).await[0].foreground {
             tokio::task::yield_now().await;

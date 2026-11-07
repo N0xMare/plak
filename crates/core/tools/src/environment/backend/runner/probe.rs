@@ -45,7 +45,7 @@ fn protocol_four_probe_payloads_are_pinned() {
         .lines()
         .map(|line| serde_json::from_str::<Value>(line).unwrap())
         .collect::<Vec<_>>();
-    assert_eq!(actual.as_slice(), pinned);
+    assert_eq!(actual.as_slice(), pinned.as_slice());
 }
 
 /// A [`WorkspaceProbe`] whose answers come from the runner behind a link.

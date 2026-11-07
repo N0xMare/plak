@@ -216,6 +216,7 @@ fn conflict(machine: &str, runner: &str, path: &str) -> PlacementFailure {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "isolated admission fixtures")]
 mod tests {
     use super::*;
 

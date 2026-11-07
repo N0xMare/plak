@@ -20,8 +20,62 @@ pub(crate) struct Remote {
 
 pub(crate) struct Prepared {
     pub(crate) services: Services,
-    pub(crate) remote: Vec<Remote>,
     pub(crate) local: Arc<WorkspaceCatalog>,
+}
+
+fn configured_runners(paths: &crate::home::paths::PlakPaths) -> CliResult<Vec<ConfiguredRunner>> {
+    let config = crate::product_config::ProductConfig::load(paths).map_err(CliFailure::new)?;
+    let mut aliases = BTreeMap::<String, Vec<String>>::new();
+    aliases.insert("local".into(), vec!["local".into()]);
+    for name in config.runners.keys() {
+        let id =
+            read_pin(paths, name).map_or_else(|| format!("unpaired-{name}"), |pin| pin.runner_id);
+        aliases.entry(id).or_default().push(name.clone());
+    }
+    Ok(aliases
+        .into_iter()
+        .map(|(runner_id, names)| ConfiguredRunner { runner_id, names })
+        .collect())
+}
+
+fn read_pin(paths: &crate::home::paths::PlakPaths, name: &str) -> Option<super::PairedRunner> {
+    let path = paths.home().join("runners").join(name).join("runner.json");
+    std::fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<super::PairedRunner>(&bytes).ok())
+        .filter(|pin| !pin.machine_id.is_empty() && !pin.runner_id.is_empty())
+}
+
+pub(crate) fn remote(services: &Services, id: &str) -> Result<Remote, PlacementFailure> {
+    let paths = services
+        .paths()
+        .map_err(|_| PlacementFailure::RunnerNotPaired)?;
+    let config = crate::product_config::ProductConfig::load(paths)
+        .map_err(|_| PlacementFailure::RunnerNotPaired)?;
+    for (name, config) in config.runners {
+        if let Some(pin) = read_pin(paths, &name)
+            && pin.runner_id == id
+        {
+            services.runner_overlap().admit_pin(RunnerPin {
+                runner_id: id.into(),
+                machine_id: pin.machine_id.clone(),
+                roots: pin.roots.clone(),
+            })?;
+            return Ok(Remote {
+                id: id.into(),
+                name,
+                config,
+                pin,
+            });
+        }
+    }
+    if id.starts_with("unpaired-") {
+        Err(PlacementFailure::RunnerNotPaired)
+    } else {
+        Err(PlacementFailure::RunnerNotConfigured {
+            saved_id: id.into(),
+        })
+    }
 }
 
 pub(crate) async fn dial(
@@ -126,7 +180,6 @@ fn admission_snapshot(
 /// Restores offline pin evidence before any bind or local workspace admission.
 pub(crate) fn prepare(services: &Services) -> CliResult<Prepared> {
     let paths = services.paths()?;
-    let config = crate::product_config::ProductConfig::load(paths).map_err(CliFailure::new)?;
     let mut product = crate::store::ProductStore::open(paths)
         .map_err(|error| CliFailure::new(error.to_string()))?;
     let mut recents = Vec::new();
@@ -179,67 +232,21 @@ pub(crate) fn prepare(services: &Services) -> CliResult<Prepared> {
     )
     .map_err(|error| CliFailure::new(format!("local workspace options: {error:?}")))?;
     let services = services.with_runner_overlap(overlap_guard(paths)?);
-    services.runners().configure(ConfiguredRunner {
-        runner_id: "local".into(),
-        names: vec!["local".into()],
-    });
-    let mut remote = BTreeMap::<String, Remote>::new();
-    let mut names = BTreeMap::<String, Vec<String>>::new();
-    for (name, config) in config.runners {
-        let path = paths.home().join("runners").join(&name).join("runner.json");
-        let pin = std::fs::read(path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<super::PairedRunner>(&bytes).ok());
-        let Some(pin) = pin.filter(|pin| !pin.machine_id.is_empty() && !pin.runner_id.is_empty())
-        else {
-            let id = format!("unpaired-{name}");
-            services.runners().configure(ConfiguredRunner {
-                runner_id: id.clone(),
-                names: vec![name],
-            });
-            services.runners().blocked(
-                &id,
-                PlacementFailure::RunnerNotPaired,
-                services.now_unix_seconds(),
-            );
-            continue;
-        };
-        names
-            .entry(pin.runner_id.clone())
-            .or_default()
-            .push(name.clone());
-        remote
-            .entry(pin.runner_id.clone())
-            .or_insert_with(|| Remote {
-                id: pin.runner_id.clone(),
-                name,
-                config,
-                pin,
-            });
+    for runner in configured_runners(paths)? {
+        services.runners().configure(runner);
     }
-    let mut admitted = Vec::new();
-    for (id, runner) in remote {
-        services.runners().configure(ConfiguredRunner {
-            runner_id: id.clone(),
-            names: names.remove(&id).unwrap_or_default(),
-        });
-        match services.runner_overlap().admit_pin(RunnerPin {
-            runner_id: id.clone(),
-            machine_id: runner.pin.machine_id.clone(),
-            roots: runner.pin.roots.clone(),
-        }) {
-            Ok(()) => admitted.push(runner),
-            Err(failure) => services
-                .runners()
-                .blocked(&id, failure, services.now_unix_seconds()),
-        }
-    }
+    let configured_paths = paths.clone();
+    services.runners().configured_with(Arc::new(move || {
+        configured_runners(&configured_paths).map_err(|_| PlacementFailure::RunnerUnreachable {
+            phase: plakous::runner::ProbePhase::Options,
+            timed_out: false,
+        })
+    }));
     for id in required {
         services.runners().require_connection(&id, true);
     }
     Ok(Prepared {
         services,
-        remote: admitted,
         local: Arc::new(local),
     })
 }

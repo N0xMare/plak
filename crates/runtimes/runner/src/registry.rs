@@ -154,7 +154,11 @@ pub struct RunnerRegistry {
     progress: Arc<tokio::sync::broadcast::Sender<RunnerProgress>>,
     probe: Arc<RwLock<Option<Arc<RunnerProbe>>>>,
     probe_pool: Arc<tokio::sync::Semaphore>,
+    configured: Arc<RwLock<Option<Arc<RunnerCatalog>>>>,
 }
+
+/// Home composition reads current aliases/pins; saved ids remain authority.
+pub type RunnerCatalog = dyn Fn() -> Result<Vec<ConfiguredRunner>, PlacementFailure> + Send + Sync;
 
 impl Default for RunnerRegistry {
     fn default() -> Self {
@@ -164,6 +168,7 @@ impl Default for RunnerRegistry {
             progress: Arc::new(tokio::sync::broadcast::channel(64).0),
             probe: Arc::default(),
             probe_pool: Arc::new(tokio::sync::Semaphore::new(4)),
+            configured: Arc::default(),
         }
     }
 }
@@ -181,6 +186,44 @@ pub struct BoundWorkspace {
 }
 
 impl RunnerRegistry {
+    /// Installs a fresh configured-catalog reader, independent of picker requests.
+    pub fn configured_with(&self, catalog: Arc<RunnerCatalog>) {
+        *self
+            .configured
+            .write()
+            .unwrap_or_else(PoisonError::into_inner) = Some(catalog);
+    }
+
+    fn refresh_configuration(&self) -> Result<(), PlacementFailure> {
+        let catalog = self
+            .configured
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let Some(catalog) = catalog else {
+            return Ok(());
+        };
+        let configured = catalog()?;
+        let ids = configured
+            .iter()
+            .map(|runner| runner.runner_id.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        let removed = self
+            .entries
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .keys()
+            .filter(|id| !ids.contains(id.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        for id in removed {
+            self.remove(&id);
+        }
+        for runner in configured {
+            self.configure(runner);
+        }
+        Ok(())
+    }
     /// Observes shared probes without opening another connection. Lagging
     /// readers use final cached rows.
     #[must_use]
@@ -216,6 +259,9 @@ impl RunnerRegistry {
         runner.names.dedup();
         let mut entries = self.entries.write().unwrap_or_else(PoisonError::into_inner);
         if let Some(entry) = entries.get_mut(&runner.runner_id) {
+            if entry.row.runner != runner {
+                entry.refresh.invalidate_cache();
+            }
             entry.row.runner = runner;
         } else {
             entries.insert(
@@ -337,11 +383,17 @@ impl RunnerRegistry {
             .unwrap_or_else(PoisonError::into_inner)
             .get_mut(id)
         {
+            if entry.row.runner.names.is_empty() {
+                return;
+            }
             entry.row.runner.names.clear();
+            entry.refresh.invalidate_cache();
             if let Some(Connection::Remote(_, services)) = &entry.connection {
                 services.set_available(false);
             }
             entry.row.status = RunnerStatus::Blocked(missing(id));
+            self.changed
+                .send_modify(|sequence| *sequence = sequence.wrapping_add(1));
         }
     }
 
@@ -400,6 +452,7 @@ impl RunnerRegistry {
     /// # Errors
     /// Placement is not configured or reconciled.
     pub fn services(&self, id: &str) -> Result<Option<RunnerServices>, PlacementFailure> {
+        self.refresh_configuration()?;
         Ok(match self.connection(id)? {
             Connection::Remote(_, services) => Some(services),
             Connection::Local(_) => None,

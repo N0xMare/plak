@@ -29,7 +29,7 @@ tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "r
 uuid = { workspace = true, features = ["v4"] }
 
 [target.'cfg(unix)'.dependencies]
-rustix = { workspace = true, features = ["process"] }
+rustix = { workspace = true, features = ["fs", "process"] }
 
 [dev-dependencies]
 tempfile.workspace = true

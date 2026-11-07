@@ -1340,8 +1340,8 @@ pub mod tools {
     /// Unsupported preview-minimization seam for official observation and hosting.
     #[doc(hidden)]
     pub use plakous_tools::internal::preview as preview_redaction;
-    /// Unsupported runner seam for official hosting (spec 01 §8.5): nothing
-    /// selects a runner for a session but a test route.
+    /// Unsupported runner seam for official hosting (spec 01 §8.5): each
+    /// node receives explicit services; no process-wide runner is selected.
     #[doc(hidden)]
     pub use plakous_tools::internal::runner;
     pub use plakous_tools::{

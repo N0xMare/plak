@@ -687,7 +687,7 @@ impl ExecutionEnvironment {
     /// the product home and the user's home. This live policy is not identity
     /// material and must only be used for host services of nonlocal nodes.
     #[must_use]
-    pub fn with_private_service_cwd(mut self, product_home: std::path::PathBuf) -> Self {
+    pub fn with_private_service_cwd(mut self, product_home: PathBuf) -> Self {
         self.private_service_home = Some(Arc::new(product_home));
         self
     }

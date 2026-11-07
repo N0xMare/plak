@@ -37,7 +37,7 @@ impl Calls {
         fresh
     }
 
-    pub(super) fn register(&self, call: &RunnerCall) {
+    fn register(calls: &mut HashMap<(String, String), Tracked>, call: &RunnerCall) {
         if call.verb() != RunnerVerb::ProcessStart {
             return;
         }
@@ -52,13 +52,36 @@ impl Calls {
             return;
         };
         let call_key = format!("{call_id}:{attempt_id}");
-        lock(&self.calls)
+        calls
             .entry((owner.line().to_string(), call_key.clone()))
             .or_insert(Tracked {
                 owner: *owner,
                 call_key,
                 settled: false,
             });
+    }
+
+    /// Rechecks settlement after transfer/journal waits, then serializes the
+    /// synchronous dispatch fence with terminal notifications. An earlier
+    /// asynchronous cleanup snapshot alone cannot authorize a later effect.
+    pub(super) fn dispatch_if_clean(
+        &self,
+        call: &RunnerCall,
+        dispatch: impl FnOnce() -> Result<(), RunnerFailure>,
+    ) -> Result<bool, RunnerFailure> {
+        let mut calls = lock(&self.calls);
+        if !call.verb().is_read()
+            && call.verb() != RunnerVerb::ForegroundStop
+            && let Some(owner) = call.owner()
+            && calls
+                .values()
+                .any(|tracked| tracked.owner == *owner && tracked.settled)
+        {
+            return Ok(false);
+        }
+        Self::register(&mut calls, call);
+        dispatch()?;
+        Ok(true)
     }
 
     pub(super) fn settled(&self, owner: LineOwner, call: CallId, attempt: AttemptId) -> bool {

@@ -222,5 +222,39 @@ async fn aliases_and_concurrent_picker_refreshes_keep_the_original_same_instance
     );
     assert_eq!(client.instance(), instance);
     client.lines().await.unwrap();
+    let selected = registry.services("picker").unwrap().unwrap();
+    let configured = Arc::new(std::sync::Mutex::new(vec![ConfiguredRunner {
+        runner_id: "picker".into(),
+        names: vec!["renamed".into()],
+    }]));
+    registry.configured_with(Arc::new({
+        let configured = configured.clone();
+        move || Ok(configured.lock().unwrap().clone())
+    }));
+    registry.services("picker").unwrap();
+    assert_eq!(registry.rows()[0].runner.names, ["renamed"]);
+    assert!(
+        selected.is_available(),
+        "alias rename preserves the pinned identity"
+    );
+    *configured.lock().unwrap() = vec![ConfiguredRunner {
+        runner_id: "replacement".into(),
+        names: vec!["renamed".into()],
+    }];
+    assert_eq!(
+        registry.refresh(Some(&["picker".into()])).await,
+        Err(PlacementFailure::RunnerNotConfigured {
+            saved_id: "picker".into()
+        })
+    );
+    assert_eq!(registry.rows()[0].runner.runner_id, "replacement");
+    assert!(
+        !selected.is_available(),
+        "re-pair cannot silently retarget saved services"
+    );
+    assert!(
+        client.is_connected(),
+        "admitted calls retain their reconciliation client"
+    );
     serving.abort();
 }

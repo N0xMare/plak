@@ -5946,7 +5946,12 @@ loopback (both published internal, chapter 06 §3, and reached from the facade
 only through its hidden `plakous::runner` module). It also holds the runner
 daemon, which serves one runner on a private socket, and the stdio bridge a
 host reaches it through (`plak runner`, chapter 02 §3.1). Runner authority is supplied explicitly to each node and facade binding.
-No production process-global runner selector exists.
+No production process-global runner selector exists. The registry refreshes home
+configuration and pairing identities before picker refresh or saved-id services
+lookup; an alias rename preserves an id, while removal/re-pair cannot retarget an
+existing record or its retained reconciliation client. Every final non-read dispatch
+rechecks terminal foreground cleanup under the settlement fence, including when
+settlement occurs while that dispatch awaits an owner transfer.
 
 - **Frames.** A big-endian `u32` length, then one JSON value. Neither end
   reads or writes a frame over 16 MiB; an answer that would exceed it is

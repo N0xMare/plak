@@ -18,9 +18,8 @@ pub(super) fn prepare(
     let prepared = crate::commands::runner::registry::prepare(services)?;
     let services = prepared.services;
     services.runners().require_connection("local", true);
-    start_remotes(
+    start_probes(
         &services,
-        prepared.remote,
         prepared.local,
         environment.clone(),
         runtime.handle(),
@@ -28,19 +27,12 @@ pub(super) fn prepare(
     Ok(services)
 }
 
-fn start_remotes(
+fn start_probes(
     services: &Services,
-    remote: Vec<crate::commands::runner::registry::Remote>,
     local: std::sync::Arc<plakous::runner::WorkspaceCatalog>,
     environment: super::environment::HostEnvironment,
     runtime: &tokio::runtime::Handle,
 ) {
-    let remote = std::sync::Arc::new(
-        remote
-            .into_iter()
-            .map(|remote| (remote.id.clone(), remote))
-            .collect::<BTreeMap<_, _>>(),
-    );
     let transports = std::sync::Arc::new(std::sync::Mutex::new(BTreeMap::<
         String,
         crate::commands::runner::dial::Dialed,
@@ -52,7 +44,6 @@ fn start_remotes(
         .runners()
         .probe_with(std::sync::Arc::new(move |registry, id| {
             let services = context.with_runner_registry(registry.clone());
-            let remote = remote.clone();
             let transports = transports.clone();
             let retries = retries.clone();
             let local = local.clone();
@@ -86,21 +77,7 @@ fn start_remotes(
                     }
                     return result.map(|_| ());
                 }
-                let remote = remote.get(&id).ok_or_else(|| {
-                    registry
-                        .rows()
-                        .into_iter()
-                        .find_map(|row| {
-                            if row.runner.runner_id == id
-                                && let plakous::runner::RunnerStatus::Blocked(failure) = row.status
-                            {
-                                Some(failure)
-                            } else {
-                                None
-                            }
-                        })
-                        .unwrap_or(plakous::runner::PlacementFailure::RunnerNotPaired)
-                })?;
+                let remote = crate::commands::runner::registry::remote(&services, &id)?;
                 let connected = transports
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -108,10 +85,10 @@ fn start_remotes(
                     .filter(|dialed| dialed.client.is_connected())
                     .map(|dialed| (dialed.client.clone(), dialed.hello.clone()));
                 if let Some((client, hello)) = connected {
-                    return refresh_existing(&services, remote, client, hello).await;
+                    return refresh_existing(&services, &remote, client, hello).await;
                 }
                 let client = registry.client(&id);
-                match bind_remote(&services, remote, &handle, client.as_ref()).await {
+                match bind_remote(&services, &remote, &handle, client.as_ref()).await {
                     Ok(dialed) => {
                         let client = dialed.client.clone();
                         transports

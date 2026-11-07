@@ -2,6 +2,80 @@ use super::*;
 
 const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 
+#[test]
+fn protocol_four_workspace_payloads_are_pinned() {
+    assert_eq!(plakous_runner_protocol::PROTOCOL_VERSION, 4);
+    let mut samples = vec![
+        serde_json::to_value(WorkspaceOptions {
+            roots: Some(vec!["/workspace".into()]),
+            default_workspace: Some("/workspace".into()),
+            copies: true,
+        })
+        .unwrap(),
+        serde_json::to_value(WorkspaceOptions {
+            roots: None,
+            default_workspace: Some("/startup".into()),
+            copies: false,
+        })
+        .unwrap(),
+        serde_json::to_value(ValidationRequest {
+            path: "/workspace".into(),
+            require_canonical: true,
+        })
+        .unwrap(),
+        serde_json::to_value(Ok::<_, WorkspaceRefusal>("/workspace")).unwrap(),
+    ];
+    for head in [
+        RepositoryHead::Branch {
+            name: "topic".into(),
+        },
+        RepositoryHead::Detached,
+        RepositoryHead::Unborn { name: "new".into() },
+        RepositoryHead::Unavailable,
+    ] {
+        let commit = matches!(
+            head,
+            RepositoryHead::Branch { .. } | RepositoryHead::Detached
+        )
+        .then(|| COMMIT.into());
+        samples.push(
+            serde_json::to_value(WorkspaceDiscovery {
+                workspaces: vec![DiscoveredWorkspace {
+                    path: "/workspace/repo".into(),
+                    repo: Some(RepositoryMetadata {
+                        name: "repo".into(),
+                        head,
+                        commit,
+                    }),
+                }],
+                truncated: false,
+            })
+            .unwrap(),
+        );
+    }
+    for refusal in [
+        WorkspaceRefusal::InvalidPath,
+        WorkspaceRefusal::NotCanonical {
+            canonical: "/workspace".into(),
+        },
+        WorkspaceRefusal::NotFound,
+        WorkspaceRefusal::NotDirectory,
+        WorkspaceRefusal::OutsideRoots,
+        WorkspaceRefusal::ProductHome,
+        WorkspaceRefusal::PermissionDenied,
+    ] {
+        samples.push(serde_json::to_value(Err::<String, _>(refusal)).unwrap());
+    }
+    let pinned = include_str!("pinned/v4.jsonl")
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        samples, pinned,
+        "workspace payload changes require a runner protocol bump, never editing an existing version pin"
+    );
+}
+
 fn directory(parent: &Path, name: &str) -> PathBuf {
     let path = parent.join(name);
     std::fs::create_dir_all(&path).unwrap();
@@ -85,6 +159,24 @@ fn discovery_gitdir_and_commondir_cannot_escape_roots() {
     let catalog = WorkspaceCatalog::machine(vec![root], &protected, false).unwrap();
     assert_eq!(
         catalog.discover().workspaces[0].repo.as_ref().unwrap().head,
+        RepositoryHead::Unavailable
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn discovery_never_waits_for_a_writer_of_special_git_metadata() {
+    let home = tempfile::tempdir().unwrap();
+    let protected = directory(home.path(), "protected");
+    let root = directory(home.path(), "root");
+    let repository = checkout(&root, "fifo", "unused");
+    let head = repository.join(".git/HEAD");
+    std::fs::remove_file(&head).unwrap();
+    rustix::fs::mkfifo(&head, rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR).unwrap();
+    let catalog = WorkspaceCatalog::machine(vec![root], &protected, false).unwrap();
+    let discovery = catalog.discover();
+    assert_eq!(
+        discovery.workspaces[0].repo.as_ref().unwrap().head,
         RepositoryHead::Unavailable
     );
 }
