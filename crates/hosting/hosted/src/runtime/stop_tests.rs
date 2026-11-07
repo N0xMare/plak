@@ -444,6 +444,7 @@ fn released_at_once(
     let session_id = config.session.id.clone();
     let (actions, events, worker) = spawn_host_worker(config)?;
     Ok(OpenedSession {
+        runner_pending: None,
         root: NodeAddress {
             tree_id: session_id.clone(),
             agent_id: session_id.clone(),
@@ -503,7 +504,7 @@ fn a_stop_never_races_the_idle_release_and_reaches_a_woken_session() {
     let (session, hold) = slot.resident().unwrap();
     assert_eq!(
         stop_over_the_wire(&session),
-        serde_json::json!({"ok": {"answer": "stopped"}})
+        serde_json::json!({"ok": {"answer": "stopped", "runner_pending": false}})
     );
     assert!(!slot.dormant(), "the session released under its holder");
     drop(hold);
@@ -513,7 +514,7 @@ fn a_stop_never_races_the_idle_release_and_reaches_a_woken_session() {
     assert_eq!(woken.session_id(), id);
     assert_eq!(
         stop_over_the_wire(&woken),
-        serde_json::json!({"ok": {"answer": "stopped"}})
+        serde_json::json!({"ok": {"answer": "stopped", "runner_pending": false}})
     );
     drop(hold);
     drop(woken);
@@ -555,7 +556,7 @@ fn a_stop_of_a_dormant_session_ends_its_held_continuation() {
     let (woken, hold) = slot.resident().unwrap();
     assert_eq!(
         stop_over_the_wire(&woken),
-        serde_json::json!({"ok": {"answer": "stopped"}})
+        serde_json::json!({"ok": {"answer": "stopped", "runner_pending": false}})
     );
     assert_eq!(
         root_causes(&lost),
@@ -1579,7 +1580,10 @@ fn a_delayed_settle_still_wakes_the_waiting_connection() {
             saw_a_wake_without_the_answer = true;
         }
     });
-    assert_eq!(answer, serde_json::json!({"ok": {"answer": "stopped"}}));
+    assert_eq!(
+        answer,
+        serde_json::json!({"ok": {"answer": "stopped", "runner_pending": false}})
+    );
     connection.leave();
     send_attached_action(&actions, UserAction::Quit);
     host.join().unwrap().unwrap();

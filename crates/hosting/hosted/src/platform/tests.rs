@@ -181,6 +181,7 @@ async fn resumed_js_session_keeps_construction_jobs_after_policy_change() {
     )
     .unwrap();
     let mut parent = ApiTopologyParent {
+        root_profile: None,
         prompt_host_facts: plakous_host_protocol::PromptHostFacts::default(),
         created_output_bound: None,
         workspace_root: directory.path().to_path_buf(),

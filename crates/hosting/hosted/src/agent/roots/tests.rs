@@ -355,6 +355,7 @@ impl super::RosterSource for UnreadableRoster {
         _: &str,
         _: &str,
         _: Option<&str>,
+        _: Option<&crate::sessions::RootProfile>,
     ) -> crate::CliResult<crate::orchestration::RosterInput> {
         Err(crate::CliFailure::new("named config error"))
     }
@@ -376,6 +377,7 @@ fn unreadable_roster_refuses_fresh_genesis_without_publishing_a_tree() {
     roots.roster_source = Arc::new(UnreadableRoster);
     let tree_id = uuid::Uuid::new_v4().to_string();
     let parent = crate::agent::SpawnParent::Api(crate::agent::ApiTopologyParent {
+        root_profile: None,
         prompt_host_facts: plakous_host_protocol::PromptHostFacts::default(),
         created_output_bound: None,
         workspace_root: home.path().to_path_buf(),
@@ -442,6 +444,7 @@ fn inspecting_a_persisted_tree_compiles_its_tools_without_attaching_or_saving() 
         .unwrap();
     let before = stored_tree_facts(store.as_ref(), &tree_id);
     let parent = crate::agent::SpawnParent::Api(crate::agent::ApiTopologyParent {
+        root_profile: None,
         prompt_host_facts: plakous_host_protocol::PromptHostFacts::default(),
         created_output_bound: None,
         workspace_root: home.path().to_path_buf(),
@@ -593,6 +596,7 @@ async fn a_root_attach_keeps_the_trees_tasks_apart_from_the_session() {
         ))
         .unwrap();
     let parent = crate::agent::SpawnParent::Api(crate::agent::ApiTopologyParent {
+        root_profile: None,
         prompt_host_facts: plakous_host_protocol::PromptHostFacts::default(),
         created_output_bound: None,
         workspace_root: home.path().to_path_buf(),

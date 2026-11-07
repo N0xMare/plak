@@ -272,6 +272,7 @@ fn driver_over(tree: &Arc<Mutex<crate::agent_tree::ProductAgentTree>>) -> TreeDr
 
 pub(super) fn openrouter_test_parent() -> ApiTopologyParent {
     ApiTopologyParent {
+        root_profile: None,
         created_output_bound: None,
         prompt_host_facts: plakous_host_protocol::PromptHostFacts::default(),
         product_home: None,

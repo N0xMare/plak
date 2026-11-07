@@ -1092,6 +1092,7 @@ pub async fn scripted_root_topology(
     // An `OpenRouter` hub root: its tools use that pack's spelling, and a
     // child bound to `openrouter` reads no native login.
     let parent = crate::agent::SpawnParent::Api(crate::agent::ApiTopologyParent {
+        root_profile: None,
         prompt_host_facts: plakous_host_protocol::PromptHostFacts::default(),
         created_output_bound: None,
         product_home: None,
@@ -1146,6 +1147,7 @@ pub fn scripted_caller_topology_tools(
         .read(|tree| tree.tree_id.clone())
         .map_err(|error| CliFailure::new(error.message))?;
     let parent = crate::agent::SpawnParent::Api(crate::agent::ApiTopologyParent {
+        root_profile: None,
         prompt_host_facts: plakous_host_protocol::PromptHostFacts::default(),
         created_output_bound: None,
         product_home: None,

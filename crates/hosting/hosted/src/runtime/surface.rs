@@ -111,6 +111,8 @@ pub type ReadinessRead =
 
 /// Frozen session facts for product-owned identity and workspace presentation.
 pub struct SurfaceSession {
+    /// Saved execution placement; absence denotes the host-local runner.
+    pub runner: Option<crate::sessions::RunnerDisplay>,
     /// The product session this host serves.
     pub id: String,
     /// Exact root account.
@@ -227,6 +229,7 @@ pub(super) fn session_facts(
             .unwrap_or(false)
     });
     SurfaceSession {
+        runner: session.runner.clone(),
         id: session.id.clone(),
         account: session.account.clone(),
         model: session.model.clone(),

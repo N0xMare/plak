@@ -95,7 +95,7 @@ fn profile_differences(
     differences
 }
 
-fn session_profile(
+pub(crate) fn session_profile(
     config: &ProductConfig,
     home: &std::path::Path,
     session: &plakous_hosted::runtime::SurfaceSession,
@@ -1192,7 +1192,7 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
                     let events = events.clone();
                     self.chrome_refresh.request(move || {
                         let row = session_profile_for(&paths, &session);
-                        let label = crate::shell::workspace::read(&session.workspace);
+                        let label = crate::shell::workspace::read_session(&session);
                         publish_composer_chrome(&generation, expected, row, label, &events);
                     });
                 }

@@ -18,7 +18,7 @@ use super::logging::{log_ev, project_session_snapshot};
 use super::models::native_compact_facet;
 use super::reconcile::persist;
 use super::source_release::{Settlement, SourceRelease, release_source_attachment};
-use super::startup::{cached_api_runtime_for_record, observe_phase, open_session_for_host};
+use super::startup::{clear_api_runtime_for_record, observe_phase, open_session_for_host};
 use super::usage::report_context;
 use super::{HostConfig, HostLifecyclePhase, HostTargetAuthority, RuntimeRole, Sender};
 use crate::sessions::{NoticeScope, TranscriptRow};
@@ -198,16 +198,23 @@ pub(super) async fn production_build_clear_candidate<
     Option<std::sync::Arc<ResolvedProvider>>,
 )> {
     let topology_enabled = config.live_topology_enabled()?;
+    let reserved = config
+        .store
+        .load(target_product_session_id)
+        .map_err(CliFailure::new)?;
+    let target_profile = reserved.root_profile;
 
     if config.target.is_api() {
         let mut target = config.session.clone();
+        target.root_profile = target_profile;
+        target.node = reserved.node;
         target_product_session_id.clone_into(&mut target.id);
         create_operation_id.clone_into(&mut target.create_operation_id);
         target.plakous_locator = None;
         target.transcript.clear();
         target.prompt_history.clear();
         target.pending_queue.clear();
-        let runtime = cached_api_runtime_for_record(config, &target, false).await?;
+        let runtime = clear_api_runtime_for_record(config, &target).await?;
         observe_phase(
             events,
             HostLifecyclePhase::ClearResolveAuthority,
@@ -243,6 +250,7 @@ pub(super) async fn production_build_clear_candidate<
     // an authoritative outcome rather than being dropped across commit.
     let runtime = crate::agent::coding_session_runtime_binding_attaching_root(
         ProductAgentSpec {
+            root_profile: target_profile,
             account: config.session.account_ref()?,
             prompt_host_facts: config.prompt_host_facts(),
             product_home: Some(config.product_home.clone()),

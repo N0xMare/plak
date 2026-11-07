@@ -549,6 +549,7 @@ pub(super) fn native_spec<P: plakous_host_protocol::ProtocolExtension>(
         .native_resolved()
         .ok_or_else(|| CliFailure::new("resolved provider authority is missing"))?;
     Ok(ProductAgentSpec {
+        root_profile: config.session.root_profile.clone(),
         account: config.session.account_ref()?,
         prompt_host_facts: config.prompt_host_facts(),
         product_home: Some(config.product_home.clone()),
@@ -936,9 +937,12 @@ pub(super) fn genesis_root_profile(
     else {
         return Ok(None);
     };
-    let roster = roots
-        .roster_source()
-        .roster(account, model, session.effort.as_deref())?;
+    let roster = roots.roster_source().roster(
+        account,
+        model,
+        session.effort.as_deref(),
+        session.root_profile.as_ref(),
+    )?;
     Ok(Some(crate::sessions::RootProfile::from_roster(&roster)))
 }
 
@@ -1079,10 +1083,9 @@ pub(super) async fn api_compaction_runtime_binding<P: plakous_host_protocol::Pro
         .map_err(|_| CliFailure::new("compaction generation policy is invalid"))
 }
 
-pub(super) async fn cached_api_runtime_for_record<P: plakous_host_protocol::ProtocolExtension>(
+pub(super) async fn clear_api_runtime_for_record<P: plakous_host_protocol::ProtocolExtension>(
     config: &mut HostConfig<P>,
     record: &SessionRecord,
-    opening_durable_session: bool,
 ) -> CliResult<SessionRuntimeBinding> {
     let target = record
         .target_selection
@@ -1102,7 +1105,7 @@ pub(super) async fn cached_api_runtime_for_record<P: plakous_host_protocol::Prot
     let effort = effort_from_record(record.effort.as_deref())?;
     let mut parent = api_topology_parent(
         config.product_home.clone(),
-        durable_tree_id(&config.topology_rows(), record),
+        record.node.tree_id.clone(),
         record,
         config.cwd.clone(),
         config.state_roots.clone(),
@@ -1117,11 +1120,13 @@ pub(super) async fn cached_api_runtime_for_record<P: plakous_host_protocol::Prot
     parent.continue_after_loss =
         config.resume_after_loss == crate::runtime::ResumeAfterLoss::Continue;
     parent.tool_selection = root_tool_selection(record);
-    let prepared = Box::pin(api_session_runtime_binding(
+    let prepared = Box::pin(crate::agent::build::api_session_runtime_binding_with_owner(
         &parent,
-        opening_durable_session,
+        false,
         SessionToolFence::Full,
+        crate::topology_runtime::TopologyHubAttach::AttachRoot,
         cached_evidence,
+        &mut None,
     ))
     .await?;
     if let HostTargetAuthority::OpenRouter { evidence, .. } = &mut config.target {
@@ -1152,6 +1157,7 @@ pub(super) async fn production_host_runtime_binding<P: plakous_host_protocol::Pr
         .native_resolved()
         .ok_or_else(|| CliFailure::new("resolved provider authority is missing"))?;
     let spec = ProductAgentSpec {
+        root_profile: config.session.root_profile.clone(),
         account: config.session.account_ref()?,
         prompt_host_facts: config.prompt_host_facts(),
         product_home: Some(config.product_home.clone()),
@@ -1226,6 +1232,7 @@ pub(super) async fn production_open_session_for_host<
         .native_resolved()
         .ok_or_else(|| CliFailure::new("resolved provider authority is missing"))?;
     let spec = ProductAgentSpec {
+        root_profile: session.root_profile.clone(),
         account: session.account_ref().map_err(CliFailure::from)?,
         prompt_host_facts: config.prompt_host_facts(),
         product_home: Some(config.product_home.clone()),

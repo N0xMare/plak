@@ -22,6 +22,84 @@ use plakous::sessions::SessionOperationId;
 use std::time::Instant;
 
 #[test]
+fn embedded_new_uses_the_reserved_home_profile_not_the_sources_saved_selection() {
+    struct Capture(Arc<std::sync::Mutex<Vec<Option<sessions::RootProfile>>>>);
+    impl crate::agent::RosterSource for Capture {
+        fn roster(
+            &self,
+            _: &str,
+            _: &str,
+            _: Option<&str>,
+            profile: Option<&sessions::RootProfile>,
+        ) -> CliResult<crate::orchestration::RosterInput> {
+            self.0.lock().unwrap().push(profile.cloned());
+            Err(CliFailure::new(
+                "captured target profile before runtime creation",
+            ))
+        }
+        fn account_name(&self, _: NativeProvider) -> &'static str {
+            "fixture"
+        }
+        fn topology_admitted(&self) -> CliResult<bool> {
+            Ok(true)
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let (mut config, _) = fresh_injected_attached_host(root.path());
+    let provider = crate::binding::PlatformProvider::Anthropic;
+    config.session.account = Some(provider.account().into());
+    config.session.model = Some("claude-opus-5-5".into());
+    config.session.target_selection = crate::binding::TargetSelection::Platform { provider };
+    config.session.composition = crate::binding::CompositionSelection::Direct;
+    config.target = HostTargetAuthority::Platform {
+        provider,
+        subscriptions: NativeSubscriptions::new(
+            plakous::subscriptions::SubscriptionPaths::from_xdg_state_home(root.path().join("xdg"))
+                .unwrap(),
+        ),
+    };
+    let source = sessions::RootProfile {
+        root_template: Some("source-root".into()),
+        working_set: vec!["source-worker".into()],
+    };
+    let home = sessions::RootProfile {
+        root_template: Some("home-root".into()),
+        working_set: vec!["home-worker".into()],
+    };
+    config.session.root_profile = Some(source.clone());
+    let mut target = SessionRecord::new(config.cwd.clone());
+    target.root_profile = Some(home.clone());
+    config.store.save(&mut target).unwrap();
+    let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
+    config.state_roots = config
+        .state_roots
+        .with_test_platform_credentials(Arc::new(TopologyApiCredentials))
+        .with_roster_source(Arc::new(Capture(captured.clone())));
+    let (events, _) = host_event_sink();
+    let result = ApplicationExecutor::new()
+        .unwrap()
+        .block_on(production_build_clear_candidate(
+            &mut config,
+            &memory_attached_stub(),
+            &target.id,
+            &target.create_operation_id,
+            &mut Vec::new(),
+            &events,
+            Instant::now(),
+        ))
+        .unwrap();
+    let failure = result
+        .err()
+        .expect("the injected roster refuses before runtime creation");
+    assert!(
+        failure.message().contains("captured target profile"),
+        "{failure}"
+    );
+    assert_eq!(*captured.lock().unwrap(), vec![Some(home)]);
+    assert_eq!(config.session.root_profile, Some(source));
+}
+
+#[test]
 fn unreadable_topology_refuses_even_an_injected_clear_candidate() {
     let root = tempfile::tempdir().unwrap();
     let (mut config, _) = fresh_injected_attached_host(root.path());

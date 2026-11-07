@@ -24,6 +24,80 @@ fn name(value: &str) -> TemplateName {
 }
 
 #[test]
+fn one_shared_source_resolves_each_saved_profile_without_selector_leakage() {
+    use plakous_hosted::agent::RosterSource as _;
+    use plakous_hosted::sessions::RootProfile;
+
+    let source = ProductRosterSource::new(None);
+    let first = RootProfile {
+        root_template: Some("claude-default-root".into()),
+        working_set: vec!["claude-default-worker".into()],
+    };
+    let second = RootProfile {
+        root_template: Some("codex-default-root".into()),
+        working_set: vec!["codex-default-reviewer".into()],
+    };
+    let home = source.roster("claude", "frozen-model", None, None).unwrap();
+    for selected in [&first, &second, &first] {
+        let roster = source
+            .roster("claude/work", "frozen-model", Some("high"), Some(selected))
+            .unwrap();
+        assert_eq!(
+            roster.root.template.as_deref(),
+            selected.root_template.as_deref()
+        );
+        assert_eq!(roster.root.account, "claude/work");
+        assert_eq!(roster.root.tuple_id, "frozen-model");
+        assert_eq!(
+            roster
+                .working_set
+                .iter()
+                .map(|name| name.as_str())
+                .collect::<Vec<_>>(),
+            selected
+                .working_set
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+        );
+    }
+    assert_eq!(
+        source.roster("claude", "frozen-model", None, None).unwrap(),
+        home
+    );
+    let removed = RootProfile {
+        root_template: Some("removed-root".into()),
+        working_set: first.working_set,
+    };
+    assert!(
+        source
+            .roster("claude", "frozen-model", None, Some(&removed))
+            .is_err()
+    );
+}
+
+#[test]
+fn frozen_root_overrides_do_not_change_a_child_card_with_the_same_template_name() {
+    use plakous_hosted::agent::RosterSource as _;
+    let source = ProductRosterSource::new(None);
+    let selection = plakous_hosted::sessions::RootProfile {
+        root_template: Some("claude-default-root".into()),
+        working_set: vec!["claude-default-root".into()],
+    };
+    let ordinary = source
+        .roster("claude", "ordinary-root", None, Some(&selection))
+        .unwrap();
+    let frozen = source
+        .roster("claude/work", "frozen-root", Some("high"), Some(&selection))
+        .unwrap();
+    assert_eq!(frozen.templates, ordinary.templates);
+    assert_eq!(frozen.working_set, ordinary.working_set);
+    assert_eq!(frozen.root.template.as_deref(), Some("claude-default-root"));
+    assert_eq!(frozen.root.account, "claude/work");
+    assert_eq!(frozen.root.tuple_id, "frozen-root");
+}
+
+#[test]
 fn named_epoch_membership_is_explicit_and_preserves_vertical_protocol_rules() {
     let mut config = ProductConfig::default_product();
     let mut expected = Vec::new();

@@ -139,7 +139,8 @@ fn refusal(provider: NativeProvider, kind: NativeSubscriptionError) -> ModelRere
     if let NativeSubscriptionError::CompatibilityDrift { .. } = &kind {
         return ModelReresolutionError::new(kind.to_string());
     }
-    let (label, account) = match crate::binding::account_target(provider) {
+    let target = crate::binding::account_target(provider);
+    let (label, account) = match &target {
         plakous_host_protocol::notice_remedy::AccountTarget::Codex => ("Codex", "codex"),
         plakous_host_protocol::notice_remedy::AccountTarget::Grok => ("xAI", "grok"),
         plakous_host_protocol::notice_remedy::AccountTarget::Claude => ("Claude", "claude"),
@@ -148,6 +149,9 @@ fn refusal(provider: NativeProvider, kind: NativeSubscriptionError) -> ModelRere
         }
         plakous_host_protocol::notice_remedy::AccountTarget::Unspecified => {
             ("subscription", "unspecified")
+        }
+        plakous_host_protocol::notice_remedy::AccountTarget::Named(account) => {
+            (account.as_str(), account.as_str())
         }
     };
     let reason = match &kind {

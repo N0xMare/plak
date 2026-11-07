@@ -861,6 +861,7 @@ pub(in crate::agent) async fn openrouter_child_runtime_binding(
     )?;
     let selected_effort = crate::runtime::effort_from_record(effort)?;
     let child = ApiTopologyParent {
+        root_profile: None,
         created_output_bound,
         // The tree host wakes every child on its tracked work (spec 03 §5.2).
         prompt_host_facts: plakous_host_protocol::PromptHostFacts { host_wakes: true },
@@ -1109,6 +1110,7 @@ pub async fn spawned_child_spec(
     }
 
     Ok(ProductAgentSpec {
+        root_profile: None,
         // The tree host wakes every child on its tracked work (spec 03 §5.2).
         prompt_host_facts: plakous_host_protocol::PromptHostFacts { host_wakes: true },
         product_home: inputs.product_home.map(Path::to_path_buf),

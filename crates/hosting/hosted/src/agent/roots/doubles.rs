@@ -24,6 +24,7 @@ impl RosterSource for UnpinnedRosterSource {
         root_account: &str,
         root_tuple: &str,
         root_effort: Option<&str>,
+        _root_profile: Option<&crate::sessions::RootProfile>,
     ) -> CliResult<crate::orchestration::RosterInput> {
         let mut input = crate::orchestration::RosterInput::unpinned(root_tuple);
         input.root.account = root_account.to_owned();

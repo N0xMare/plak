@@ -89,6 +89,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     .unwrap_or_default(),
                 &self.role.config.model_id,
                 self.role.config.session.effort.as_deref(),
+                self.role.config.session.root_profile.as_ref(),
             )
             .map_or(0, |roster| roster.transient_resumes.min(2));
         let Some(plan) = transient::plan(

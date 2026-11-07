@@ -15,6 +15,7 @@ use plakous_offline_crash_harness::{
     BoundaryController, overflow_runtime_binding, runtime_binding,
 };
 
+use crate::CliFailure;
 use crate::agent::{AttachedCodingSession, ProductStateRoots};
 use crate::binding::CompositionSelection as ProductComposition;
 use crate::binding::{OpenRouterRoutingSelection, ProtocolSelection, TargetSelection, WireBinding};
@@ -23,6 +24,67 @@ use crate::sessions::{self, SessionRecord};
 use super::*;
 use crate::runtime::rebind::*;
 use crate::runtime::startup::*;
+
+pub(super) struct TopologyApiCredentials;
+struct NoInferenceSource(plakous::openai::StaticOpenAiKeySource);
+impl
+    plakous::api_key::ApiKeySource<
+        plakous::openai::OpenAiApiKeyRequest<'_>,
+        plakous::openai::CredentialAuthorityId,
+    > for NoInferenceSource
+{
+    fn authority(&self) -> &plakous::openai::CredentialAuthorityId {
+        self.0.authority()
+    }
+    fn api_key(
+        &self,
+        _: &plakous::openai::OpenAiApiKeyRequest<'_>,
+        _: &plakous::openai::OpenAiKeyGeneration,
+    ) -> Result<plakous::openai::ApiKey, plakous::api_key::ApiKeyError> {
+        panic!("topology lifecycle must not request inference credentials")
+    }
+    fn generation_grant(
+        &self,
+        request: &dyn plakous::api_key::ApiKeyRequest,
+    ) -> Result<plakous::openai::OpenAiKeyGeneration, plakous::api_key::ApiKeyError> {
+        self.0.generation_grant(request)
+    }
+}
+impl crate::platform::OpenAiCredentials for TopologyApiCredentials {
+    fn openai(
+        &self,
+        _account: &crate::account::AccountRef,
+    ) -> CliResult<Arc<plakous::openai::OpenAiKeySource>> {
+        use plakous::openai::*;
+        Ok(Arc::new(NoInferenceSource(static_openai_api_key_source(
+            ApiKey::new("synthetic-topology-lifecycle-key").unwrap(),
+            CredentialReference::application("plak/openai").unwrap(),
+            CredentialAuthorityId::new("offline/topology-lifecycle").unwrap(),
+        ))))
+    }
+}
+impl crate::platform::AnthropicCredentials for TopologyApiCredentials {
+    fn anthropic(
+        &self,
+        _account: &crate::account::AccountRef,
+    ) -> CliResult<Arc<plakous::anthropic::AnthropicKeySource>> {
+        Ok(Arc::new(plakous::api_key::StaticApiKeySource::for_key(
+            plakous::api_key::ApiKey::new("synthetic-topology-lifecycle-key").unwrap(),
+            plakous::api_key::CredentialProviderTag::AnthropicPlatform,
+            plakous::anthropic::ANTHROPIC_PLATFORM_ORIGIN,
+            None,
+            (),
+        )))
+    }
+}
+impl crate::platform::XaiCredentials for TopologyApiCredentials {
+    fn xai(
+        &self,
+        _account: &crate::account::AccountRef,
+    ) -> CliResult<Arc<plakous::xai::XaiPlatformKeySource>> {
+        Err(CliFailure::new("unselected provider"))
+    }
+}
 
 pub(super) fn direct_transcript_lineage() -> &'static plakous::agent::ToolCallerLineageView {
     static DIRECT: std::sync::OnceLock<plakous::agent::ToolCallerLineageView> =

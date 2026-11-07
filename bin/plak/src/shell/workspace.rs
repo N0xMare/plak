@@ -12,8 +12,79 @@ pub(super) fn read(workspace: &Path) -> WorkspaceChrome {
     }
 }
 
+pub(super) fn read_session(session: &plakous_hosted::runtime::SurfaceSession) -> WorkspaceChrome {
+    if session.runner.is_none() {
+        return read(&session.workspace);
+    }
+    WorkspaceChrome {
+        path: session.workspace.clone(),
+        home: None,
+        branch: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_remote_path_present_on_the_host_never_reads_host_vcs_or_home() {
+        if !cfg!(feature = "git-cli") {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        assert!(
+            std::process::Command::new("git")
+                .args(["init", "-b", "host-only"])
+                .current_dir(root.path())
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+        assert!(
+            std::process::Command::new("git")
+                .args([
+                    "-c",
+                    "user.name=Fixture",
+                    "-c",
+                    "user.email=fixture@example.test",
+                    "commit",
+                    "--allow-empty",
+                    "-m",
+                    "fixture"
+                ])
+                .current_dir(root.path())
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+        assert_eq!(
+            super::read(root.path()).branch.as_deref(),
+            Some("host-only")
+        );
+        let session = plakous_hosted::runtime::SurfaceSession {
+            runner: Some(plakous_hosted::sessions::RunnerDisplay {
+                name: "peer".into(),
+                runner_id: "peer-id".into(),
+                workspace_root: root.path().display().to_string(),
+                workspace_cwd: root.path().display().to_string(),
+            }),
+            id: "fixture".into(),
+            account: None,
+            model: None,
+            effort: None,
+            fast: false,
+            workspace: root.path().to_owned(),
+            roster: None,
+            live_children: false,
+            mcp: None,
+        };
+        let shown = super::read_session(&session);
+        assert_eq!(shown.path, root.path());
+        assert_eq!(shown.branch, None);
+        assert_eq!(shown.home, None);
+    }
+
     #[test]
     fn refreshed_chrome_observes_branch_changes_from_a_launch_subdirectory() {
         if !cfg!(feature = "git-cli") {

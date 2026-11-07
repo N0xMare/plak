@@ -232,6 +232,7 @@ pub(super) async fn resolve_rebind_target<P: plakous_host_protocol::ProtocolExte
     let resolved = std::sync::Arc::new(resolved);
     let binding = coding_session_target_binding(resolved.as_ref());
     let spec = ProductAgentSpec {
+        root_profile: config.session.root_profile.clone(),
         account: account.parse()?,
         prompt_host_facts: config.prompt_host_facts(),
         product_home: Some(config.product_home.clone()),

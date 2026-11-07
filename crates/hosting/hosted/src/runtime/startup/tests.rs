@@ -258,6 +258,7 @@ fn creation_freezes_the_genesis_profile_into_the_record() {
                 config.session.account.as_deref().unwrap(),
                 config.session.model.as_deref().unwrap(),
                 config.session.effort.as_deref(),
+                config.session.root_profile.as_ref(),
             )
             .unwrap(),
     );

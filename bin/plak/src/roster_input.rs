@@ -84,6 +84,16 @@ pub fn roster_input_from_config(
     root_tuple: impl Into<String>,
     root_effort: Option<String>,
 ) -> RosterInput {
+    roster_input_with_root(config, root_account, root_tuple, root_effort, None)
+}
+
+fn roster_input_with_root(
+    config: &ProductConfig,
+    root_account: impl Into<String>,
+    root_tuple: impl Into<String>,
+    root_effort: Option<String>,
+    saved_root_template: Option<&str>,
+) -> RosterInput {
     let root_account = root_account.into();
     let root_tuple = root_tuple.into();
     let mut templates = BTreeMap::new();
@@ -96,12 +106,14 @@ pub fn roster_input_from_config(
             roster_binding_from_template(name.as_str(), template),
         );
     }
-    // The root template names this bind only when the configured template
-    // is the tuple actually bound; an explicit --account/--model root has
-    // no template name.
-    let root_template = config.root_agent.clone().filter(|_| {
-        config.root_template().is_some_and(|template| {
-            template.account == root_account && template.model == root_tuple
+    // A saved selection keeps its root name even when its frozen binding
+    // differs from today's template. Never rewrite that template's card body:
+    // it may also be reachable as a child with a different binding.
+    let root_template = saved_root_template.map(str::to_owned).or_else(|| {
+        config.root_agent.clone().filter(|_| {
+            config.root_template().is_some_and(|template| {
+                template.account == root_account && template.model == root_tuple
+            })
         })
     });
     let tool_sections = reached_tool_sections(
@@ -337,28 +349,11 @@ pub fn genesis_orchestration_config(paths: Option<&PlakPaths>) -> CliResult<Prod
 /// nothing configured, and the topology gate is closed.
 pub(crate) struct ProductRosterSource {
     paths: Option<PlakPaths>,
-    selection: Option<crate::profiles::SessionSelection>,
 }
 
 impl ProductRosterSource {
     pub(crate) const fn new(paths: Option<PlakPaths>) -> Self {
-        Self {
-            paths,
-            selection: None,
-        }
-    }
-
-    /// A genesis for one carried session freezes that session's own profile,
-    /// resolved against the current template files; the home's
-    /// `[orchestration]` controls still apply.
-    pub(crate) const fn for_selection(
-        paths: PlakPaths,
-        selection: crate::profiles::SessionSelection,
-    ) -> Self {
-        Self {
-            paths: Some(paths),
-            selection: Some(selection),
-        }
+        Self { paths }
     }
 }
 
@@ -368,17 +363,25 @@ impl plakous_hosted::agent::RosterSource for ProductRosterSource {
         root_account: &str,
         root_tuple: &str,
         root_effort: Option<&str>,
+        root_profile: Option<&plakous_hosted::sessions::RootProfile>,
     ) -> CliResult<RosterInput> {
         let mut config = genesis_orchestration_config(self.paths.as_ref())?;
-        if let Some(selection) = &self.selection {
+        let saved = root_profile.map(|profile| crate::profiles::SessionSelection {
+            root: profile.root_template.clone(),
+            working_set: profile.working_set.clone(),
+        });
+        if let Some(selection) = saved.as_ref() {
             config =
                 crate::profiles::selection_config(&config, selection).map_err(CliFailure::new)?;
         }
-        Ok(roster_input_from_config(
+        Ok(roster_input_with_root(
             &config,
             root_account,
             root_tuple,
             root_effort.map(str::to_owned),
+            saved
+                .as_ref()
+                .and_then(|selection| selection.root.as_deref()),
         ))
     }
 

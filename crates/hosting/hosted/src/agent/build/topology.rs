@@ -17,6 +17,8 @@ use std::sync::Arc;
 /// Inputs for building the product coding agent (run + TUI host).
 #[derive(Clone)]
 pub struct ProductAgentSpec {
+    /// Saved creation selection; names freeze before card bodies and tools.
+    pub root_profile: Option<crate::sessions::RootProfile>,
     /// Attached host completion channel used by the prompt compiler.
     pub prompt_host_facts: plakous_host_protocol::PromptHostFacts,
     pub provider: NativeProvider,
@@ -60,6 +62,8 @@ pub struct ProductAgentSpec {
 /// Product topology parent for an API-key hub root.
 #[derive(Clone)]
 pub struct ApiTopologyParent {
+    /// Saved creation selection, resolved session-by-session by the shared source.
+    pub root_profile: Option<crate::sessions::RootProfile>,
     /// The per-request output bound a session being reopened was created with.
     ///
     /// `None` for a new session. See `ProductOpenRouterSpec::created_output_bound`.
@@ -500,6 +504,10 @@ async fn topology_extensions_from_hub_with_owner(
     let selected_tuple = selected_tuple.to_owned();
     let root_account = spawn_parent_root_account(parent);
     let root_effort = spawn_parent_root_effort(parent);
+    let root_profile = match parent {
+        SpawnParent::Native(spec) => spec.root_profile.clone(),
+        SpawnParent::Api(parent) => parent.root_profile.clone(),
+    };
     let roots = parent.state_roots();
     let runner = roots.runner_services().cloned();
     let roster_source = Arc::clone(roots.roster_source());
@@ -523,6 +531,7 @@ async fn topology_extensions_from_hub_with_owner(
                 root_effort.as_deref(),
                 must_exist,
                 roster_source.as_ref(),
+                root_profile.as_ref(),
                 runner.as_ref(),
             )
             .await
@@ -583,9 +592,10 @@ pub(in crate::agent) async fn load_or_bootstrap_topology_tree(
     root_effort: Option<&str>,
     must_exist: bool,
     roster_source: &dyn crate::agent::RosterSource,
+    root_profile: Option<&crate::sessions::RootProfile>,
     runner: Option<&plakous::runner::RunnerServices>,
 ) -> CliResult<crate::agent_tree::ProductAgentTree> {
-    let roster = roster_source.roster(root_account, selected_tuple, root_effort)?;
+    let roster = roster_source.roster(root_account, selected_tuple, root_effort, root_profile)?;
     let persisted = store.load(tree_id).map_err(|error| {
         if must_exist {
             CliFailure::recovery_required(format!(
@@ -991,6 +1001,7 @@ pub fn api_topology_parent(
     topology_enabled: bool,
 ) -> ApiTopologyParent {
     ApiTopologyParent {
+        root_profile: record.root_profile.clone(),
         // The caller already hands the home in; the parent states it rather
         // than letting the binder rediscover it.
         prompt_host_facts: plakous_host_protocol::PromptHostFacts::default(),

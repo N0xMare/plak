@@ -56,6 +56,7 @@ pub trait RosterSource: Send + Sync {
         root_account: &str,
         root_tuple: &str,
         root_effort: Option<&str>,
+        root_profile: Option<&crate::sessions::RootProfile>,
     ) -> CliResult<crate::orchestration::RosterInput>;
 
     /// The product's own spelling of one provider's account.

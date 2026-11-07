@@ -338,7 +338,7 @@ pub(crate) async fn api_session_runtime_binding_for(
     clippy::too_many_lines,
     reason = "API session construction preserves the supplied tool owner, frozen route evidence, and topology lease through runtime preparation."
 )]
-pub(super) async fn api_session_runtime_binding_with_owner(
+pub(crate) async fn api_session_runtime_binding_with_owner(
     parent: &ApiTopologyParent,
     opening_durable_session: bool,
     tool_fence: SessionToolFence,
@@ -553,6 +553,7 @@ pub(in crate::agent) async fn coding_session_runtime_binding_for(
         .admit_role(spec.topology_caller_id.is_some())?;
     spec.tool_selection.admit_composition(spec.composition)?;
     let ProductAgentSpec {
+        root_profile: _,
         product_home,
         prompt_host_facts: _,
         provider,

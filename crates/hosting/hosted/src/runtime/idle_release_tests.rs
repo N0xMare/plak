@@ -195,6 +195,7 @@ fn a_slot_wakes_a_released_session_by_its_id() {
             };
             let (actions, events, worker) = spawn_host_worker(config)?;
             Ok(OpenedSession {
+                runner_pending: None,
                 root: node,
                 session_id,
                 actions,
@@ -249,6 +250,7 @@ fn slot_session(
     };
     let (actions, events, worker) = spawn_host_worker(config)?;
     Ok(crate::host_service::wire::OpenedSession {
+        runner_pending: None,
         root: node,
         session_id,
         actions,
@@ -589,6 +591,7 @@ fn a_release_that_does_not_join_in_time_leaves_no_second_session() {
     let slot = Arc::new(
         SessionSlot::new(
             OpenedSession {
+                runner_pending: None,
                 root: root_node,
                 session_id: session_id.clone(),
                 actions: actions.clone(),
@@ -671,6 +674,7 @@ pub(super) fn reopener(
         };
         let (actions, events, worker) = spawn_host_worker(config)?;
         Ok(crate::host_service::wire::OpenedSession {
+            runner_pending: None,
             root,
             session_id: id.to_owned(),
             actions,

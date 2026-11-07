@@ -242,6 +242,7 @@ impl Fixture {
             .block()
             .unwrap();
         let parent = SpawnParent::Api(ApiTopologyParent {
+            root_profile: None,
             created_output_bound: None,
             prompt_host_facts: plakous_host_protocol::PromptHostFacts::default(),
             product_home: None,

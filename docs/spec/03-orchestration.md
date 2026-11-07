@@ -134,13 +134,30 @@ snapshot freezes the canonical rendering of every `[tools.<name>]` and
 reach (`tool_sections`), inside the digest; a child binds the frozen tables,
 never the live file. A table no frozen list reaches is not epoch state, so
 editing it changes no digest (chapter 07 §6).
+Profile creation and genesis have distinct freeze boundaries. Protocol-5
+creation records write-once root_profile root-template/working-set names and
+the selected root account/model/effort. It does not freeze card/tool bodies.
+The process-wide roster source receives that session's optional root_profile
+alongside its root binding; saved names resolve through selection_config for
+roster, root tools and genesis, never through a mutable global profile choice.
+Home default/profile-file edits cannot replace saved names. Template-body
+edits before genesis still apply; a missing saved name refuses open. None
+retains the home-default genesis path and fills root_profile once. Embedded
+NewSession stays payload-free and selects the home default.
+Fresh API and native `/new` roots acquire their reserved target topology and
+profile; neither borrows the source's attached hub for the new conversation.
+An explicit frozen root name and binding do not rewrite a reachable child
+card of that same template name; child cards retain their own configured
+account/model until their normal genesis freeze.
+
 The roster a genesis freezes is read from the session's own workspace
 context: the home's templates and `[roster]`, and a trusted project's
 `.plak/config.toml` and `.plak/agents/` over them (a project template wins
 on a name collision), so a trusted project's template in the working set is
-on the root's menu; an untrusted project contributes nothing. A session's
-host builds its state roots, and their roster source, once for that context
-and keeps them for the session's life.
+on the root's menu; an untrusted project contributes nothing. A remote
+workspace never causes host-side project discovery using its path spelling:
+remote choices come from home configuration and the saved session selection.
+The shared roster service resolves each session's context independently.
 All `[orchestration]` controls come from the operator home, including in a
 trusted project. Project overrides are ignored with a warning and project
 writes to these controls are refused (chapter 07).
