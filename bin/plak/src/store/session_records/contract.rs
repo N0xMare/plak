@@ -898,6 +898,7 @@ fn project_delivery(store: &dyn SessionRecordStore, id: &str, command: &str, del
 
 fn activity(call_id: &str, state: &str) -> crate::store::sessions::ToolItem {
     crate::store::sessions::ToolItem {
+        wire_operation: None,
         call_id: call_id.into(),
         name: "read_file".into(),
         exposed_name: None,

@@ -141,6 +141,7 @@ pub(crate) fn run(directory: Option<&Path>) -> String {
 
 fn activity(call_id: &str, state: &str) -> ToolItem {
     ToolItem {
+        wire_operation: None,
         call_id: call_id.to_owned(),
         name: "read_file".to_owned(),
         exposed_name: None,

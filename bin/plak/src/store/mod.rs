@@ -1503,6 +1503,7 @@ pub(crate) fn every_stored_row_type() -> Vec<TranscriptRow> {
             elapsed_ms: Some(2_100),
         }),
         TranscriptRow::Tool(ToolItem {
+            wire_operation: None,
             call_id: "call-wait".into(),
             name: "wait_agent".into(),
             exposed_name: Some("wait".into()),
