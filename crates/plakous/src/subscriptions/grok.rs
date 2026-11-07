@@ -5,7 +5,7 @@ use super::{
     Arc, CompatibilityNotice, CompiledProviderConfiguration, LoadedAcceptance, ModelId,
     NativeAuthStatus, NativeLoginCompletion, NativeLoginInstructions, NativeLoginMode,
     NativeModelResolutionError, NativeModelSelector, NativeModelSummary, NativeModelVisibility,
-    NativeProvider, NativeSubscriptionError, NativeSubscriptions, NativeToolMode, PRIMARY_SLOT,
+    NativeProvider, NativeSubscriptionError, NativeSubscriptions, NativeToolMode,
     PendingNativeLogin, ResolvedModelDescriptor, ResolvedNativeModel, RuntimeModelAuthority,
     SelectedProviderConfiguration, SessionLineage, SubscriptionRequestGate,
     SubscriptionResolutionEvidence, SubscriptionUsageRead, Timestamp, credential_refresh_observer,
@@ -68,9 +68,10 @@ impl NativeSubscriptions {
         let accepted_at = loaded_acceptance.accepted_at;
         let path = self.state.provider_record(NativeProvider::Xai);
         let status_path = path.clone();
+        let slot = self.state.slot_id()?;
+        let status_slot = slot.clone();
         let local_status = run_blocking(move || {
-            let slot = plakous_auth::CredentialSlotId::new(PRIMARY_SLOT)
-                .map_err(|_| NativeSubscriptionError::Internal)?;
+            let slot = status_slot;
             let admin = plakous_xai::XaiOfflineSelectedSlot::open_explicit(status_path, slot)
                 .map_err(map_xai_error)?;
             admin
@@ -96,6 +97,7 @@ impl NativeSubscriptions {
         }
         let catalog_observer = self.exchange_observer.clone();
         let catalog_retries = self.catalog_retries;
+        let source_scope = self.state.source_scope();
         run_blocking(move || {
             let timestamp =
                 Timestamp::new(accepted_at, 0).map_err(|_| NativeSubscriptionError::Internal)?;
@@ -115,8 +117,7 @@ impl NativeSubscriptions {
             // its own H1 client with the model's longer response-head budget.
             let client = plakous_http::Client::new_http1(plakous_http::Limits::default())
                 .map_err(|_| NativeSubscriptionError::Internal)?;
-            let slot = plakous_auth::CredentialSlotId::new(PRIMARY_SLOT)
-                .map_err(|_| NativeSubscriptionError::Internal)?;
+
             let mut manager = plakous_xai::XaiNativeAuthManager::open_selected_slot(
                 path,
                 slot,
@@ -124,6 +125,11 @@ impl NativeSubscriptions {
                 provider_acceptance,
             )
             .map_err(map_xai_error)?;
+            if let Some(scope) = source_scope {
+                manager = manager
+                    .with_credential_source_scope(scope)
+                    .map_err(map_xai_error)?;
+            }
             manager = manager
                 .with_catalog_observer(catalog_observer)
                 .map_err(map_xai_error)?;
@@ -443,9 +449,8 @@ impl NativeVertical for Vertical {
             let provider = NativeProvider::Xai;
             Ok({
                 let path = subscriptions.state.provider_record(provider);
+                let slot = subscriptions.state.slot_id()?;
                 run_blocking(move || {
-                    let slot = plakous_auth::CredentialSlotId::new(PRIMARY_SLOT)
-                        .map_err(|_| NativeSubscriptionError::Internal)?;
                     let admin = plakous_xai::XaiOfflineSelectedSlot::open_explicit(path, slot)
                         .map_err(map_xai_error)?;
                     admin
@@ -527,9 +532,8 @@ impl NativeVertical for Vertical {
             let provider = NativeProvider::Xai;
             {
                 let path = subscriptions.state.provider_record(provider);
+                let slot = subscriptions.state.slot_id()?;
                 run_blocking(move || {
-                    let slot = plakous_auth::CredentialSlotId::new(PRIMARY_SLOT)
-                        .map_err(|_| NativeSubscriptionError::Internal)?;
                     plakous_xai::XaiOfflineSelectedSlot::open_explicit(path, slot)
                         .map_err(map_xai_error)?
                         .logout_local()

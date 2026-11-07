@@ -62,13 +62,15 @@ impl NativeSubscriptions {
         };
         let accepted_at = loaded_acceptance.accepted_at;
         let path = self.state.provider_record(NativeProvider::Codex);
-        let local_status = plakous_openai::CodexSubscriptionLocalAdmin::open(path.clone())
-            .await
-            .map_err(map_codex_error)?
-            .status()
-            .await
-            .map(map_codex_status)
-            .map_err(map_codex_error)?;
+        let slot = self.state.slot_id()?;
+        let local_status =
+            plakous_openai::CodexSubscriptionLocalAdmin::open(path.clone(), self.state.slot_id()?)
+                .await
+                .map_err(map_codex_error)?
+                .status()
+                .await
+                .map(map_codex_status)
+                .map_err(map_codex_error)?;
         if enforce_login_recovery {
             let paths = self.state.clone();
             let consent_generation = loaded_acceptance.generation.clone();
@@ -110,6 +112,7 @@ impl NativeSubscriptions {
             #[cfg(any(test, feature = "test-clock"))]
             let manager = plakous_openai::CodexSubscriptionCredentialManager::new_with_clock(
                 path,
+                slot,
                 client.clone(),
                 provider_acceptance,
                 clock,
@@ -118,6 +121,7 @@ impl NativeSubscriptions {
             #[cfg(not(any(test, feature = "test-clock")))]
             let manager = plakous_openai::CodexSubscriptionCredentialManager::new(
                 path,
+                slot,
                 client.clone(),
                 provider_acceptance,
             )
@@ -550,6 +554,7 @@ impl NativeVertical for Vertical {
             let provider = NativeProvider::Codex;
             plakous_openai::CodexSubscriptionLocalAdmin::open(
                 subscriptions.state.provider_record(provider),
+                subscriptions.state.slot_id()?,
             )
             .await
             .map_err(map_codex_error)?
@@ -623,6 +628,7 @@ impl NativeVertical for Vertical {
             let provider = NativeProvider::Codex;
             plakous_openai::CodexSubscriptionLocalAdmin::open(
                 subscriptions.state.provider_record(provider),
+                subscriptions.state.slot_id()?,
             )
             .await
             .map_err(map_codex_error)?

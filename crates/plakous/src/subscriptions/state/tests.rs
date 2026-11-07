@@ -176,6 +176,7 @@ use crate::subscriptions::model_catalog::run_classified_model_catalog;
 use crate::subscriptions::responses_budget::NATIVE_INFERENCE_OPERATION_TIMEOUT;
 
 mod child_catalog;
+mod named;
 #[cfg(unix)]
 use std::fs;
 #[cfg(unix)]

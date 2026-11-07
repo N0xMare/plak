@@ -899,6 +899,27 @@ per-provider lock files. `XDG_STATE_HOME` must be
 absolute; otherwise `$HOME/.local/state` is used, and `HOME` must be absolute
 too.
 
+Named subscription slots instead use
+`$XDG_STATE_HOME/plak/subscriptions/accounts/<claude|codex|grok>/<name>/`.
+The directory is the account's lifecycle identity; no registry or tombstone is
+added. Its `credential.json`, `login-host`, `compatibility/` and `catalog/` stay
+inside that private directory. The compatibility lock is the sole account writer
+exclusion and its parent is distinct from the credential-store directory:
+compatibility → credential-store directory → execution → record. No lifecycle
+lock or recursive compatibility acquisition is added; default paths and their
+shared compatibility serialization are unchanged.
+
+Explicit login creates a missing named directory before capturing pending
+authority. Abandoned creation cleanup checks the original directory device/inode,
+absence of a record/recovery operation, and unchanged owned consent under the
+compatibility lock. A later writer, pre-existing or recreated directory is not
+deleted. Removing a signed-out named slot uses the same authority, verifies its
+token-free state, renames it to a unique hidden trash sibling, syncs the parent,
+then deletes trash. Busy writers and credential-bearing slots refuse. Old pending
+writers verify their retained path authority and cannot publish after this rename.
+Bare defaults cannot be removed. Named credential slot tokens derive from the
+validated name, so copying a record between names refuses as foreign.
+
 A successful Plak product login also attempts to write `login-host` in that
 provider's credential directory, as private product metadata. Its
 versioned text contains the SHA-256 of `plak-login-host-v1`, NUL, and the

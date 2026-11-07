@@ -69,6 +69,7 @@ impl NativeSubscriptions {
         &self,
         provider: NativeProvider,
     ) -> Result<NativeSubscriptionStatus, NativeSubscriptionError> {
+        self.state.require_provider(provider)?;
         super::vertical::require_vertical(provider)?;
         let paths = self.state.clone();
         if !run_blocking(move || paths.layout_exists()).await?? {

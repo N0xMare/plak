@@ -17,6 +17,39 @@ pub struct NativeSubscriptions {
     reason = "disabled routes retain the compiled async API contract"
 )]
 impl NativeSubscriptions {
+    /// Refuses selection of an omitted native route before I/O.
+    ///
+    /// # Errors
+    /// Returns the exact omitted route.
+    pub fn for_named_account(
+        &self,
+        provider: NativeProvider,
+        _name: &str,
+    ) -> Result<Self, NativeSubscriptionError> {
+        Err(NativeSubscriptionError::NotCompiled(provider))
+    }
+
+    /// Refuses creation of an omitted native route before I/O.
+    ///
+    /// # Errors
+    /// Returns the exact omitted route.
+    pub async fn create_account_for_login(
+        &self,
+        provider: NativeProvider,
+    ) -> Result<Self, NativeSubscriptionError> {
+        Err(NativeSubscriptionError::NotCompiled(provider))
+    }
+
+    /// Refuses removal of an omitted native route before I/O.
+    ///
+    /// # Errors
+    /// Returns the exact omitted route.
+    pub async fn remove_signed_out_account(
+        &self,
+        provider: NativeProvider,
+    ) -> Result<(), NativeSubscriptionError> {
+        Err(NativeSubscriptionError::NotCompiled(provider))
+    }
     /// Refuses a login to an omitted native route before I/O.
     ///
     /// # Errors
@@ -31,7 +64,10 @@ impl NativeSubscriptions {
     /// Creates a subscription facade without I/O.
     #[must_use]
     pub fn new(paths: SubscriptionPaths) -> Self {
-        let SubscriptionPaths { state_root } = paths;
+        let SubscriptionPaths { state_root, named } = paths;
+        if let Some(slot) = named {
+            let _ = (slot.provider, slot.vertical, slot.name);
+        }
         Self {
             _state_root: state_root,
         }

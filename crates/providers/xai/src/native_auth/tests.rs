@@ -45,6 +45,35 @@ mod drift;
 use plakous_auth::oauth_workflow::parse_absolute_redirect_query;
 
 #[test]
+fn named_grok_sources_keep_default_authority_bytes_and_scope_only_named_sources() -> TestResult {
+    use sha2::{Digest as _, Sha256};
+    use std::fmt::Write as _;
+    let temporary = tempdir()?;
+    let directory = temporary.path().join("credentials");
+    fs::create_dir(&directory)?;
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
+    let store = PrivateCredentialStore::open_slot(
+        directory.join("credential.json"),
+        auth_profile_id()?,
+        CredentialSlotId::new("primary")?,
+    )?;
+    let mut original = Sha256::new();
+    original.update(store.path().as_os_str().as_encoded_bytes());
+    original.update(b"\0xai-route-credential-authority-v2\0");
+    original.update(b"primary");
+    let mut expected = String::from("plak-native-xai-route:");
+    for byte in original.finalize() {
+        write!(&mut expected, "{byte:02x}")?;
+    }
+    assert_eq!(route_credential_authority_id(&store, None), expected);
+    let work = route_credential_authority_id(&store, Some("grok/work"));
+    let other = route_credential_authority_id(&store, Some("grok/other"));
+    assert_ne!(expected, work);
+    assert_ne!(work, other);
+    Ok(())
+}
+
+#[test]
 fn supergrok_dispatch_generation_binds_rotation_and_login_selection() {
     let baseline = supergrok_generation_fingerprint(7, "selection-a");
     assert_ne!(baseline, supergrok_generation_fingerprint(8, "selection-a"));

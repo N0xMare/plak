@@ -22,6 +22,7 @@ pub struct ClaudeNativeAuthManager {
     pub(super) core: Arc<ManagerCore>,
     pub(super) request_gate: Option<Arc<dyn SubscriptionRequestGate>>,
     pub(super) refresh_observer: Option<Arc<dyn CredentialRefreshObserver>>,
+    source_scope: Option<String>,
 }
 
 impl ClaudeNativeAuthManager {
@@ -68,7 +69,20 @@ impl ClaudeNativeAuthManager {
             }),
             request_gate: None,
             refresh_observer: None,
+            source_scope: None,
         })
+    }
+
+    /// Scopes this source independently of its provider-defined upstream account.
+    /// Unscoped callers retain their existing credential-authority bytes.
+    #[must_use]
+    pub fn with_credential_source_scope(mut self, scope: String) -> Self {
+        self.source_scope = Some(scope);
+        self
+    }
+
+    pub(crate) fn credential_source_scope(&self) -> Option<&str> {
+        self.source_scope.as_deref()
     }
 
     /// Attaches the classified physical-request gate required for inference.

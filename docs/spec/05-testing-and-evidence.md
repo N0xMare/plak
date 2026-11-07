@@ -1228,6 +1228,16 @@ Explicit rebind tests separately preserve its configured-root remedy for an
 unresolvable source: valid policy yields the fallback notice and strips replay,
 while invalid policy refuses without choosing a root or changing replay.
 
+Named-native storage tests cover all three subscription verticals: unchanged
+default paths/tokens, no creation on absent reads/refresh, creating-attempt
+cleanup, preservation of a later receipt or recreated directory, refusal of
+default/live/busy removal, and same-process login/refresh record commits while
+compatibility is held. A nonblocking probe proves that the nested credential
+directory is not the compatibility-lock parent before committing a record.
+Codex online/offline constructors reject the same record under a different slot
+token. Native source-scope tests preserve default authority bytes while requiring
+sibling names to differ without changing authenticated upstream identity.
+
 Repository tooling tests live in `tests/tooling/`; opt-in live scenarios and
 their status page live in `tests/live/`. Build helpers
 and their authenticated inputs live in `tools/build/`, repository policy in

@@ -4614,6 +4614,26 @@ closed when evidence or an authoritative reservation is absent.
 
 ### 7.1 Credentials
 
+`SubscriptionPaths::for_named_account` and `NativeSubscriptions::for_named_account`
+select one validated local subscription name without I/O. The selected facade
+refuses operations on another vertical. `create_account_for_login` alone creates
+a missing named directory and retains its captured directory identity through
+pending authority. Dropping an abandoned creating attempt cleans up only its
+unchanged empty slot under compatibility; a pre-existing directory, later receipt,
+credential publication or replacement directory is never removed by it.
+`remove_signed_out_account` uses that same lock and path authority, refuses
+credentials or busy writers, and refuses bare defaults.
+
+Codex online credential-manager constructors, including clock/test variants,
+and the offline local-admin constructor take an explicit `CredentialSlotId`.
+Default callers pass `primary`; named callers derive `named-<name>`. Claude and
+Grok facade entries use the selected token for online and offline maintenance.
+Foreign-slot records refuse before use. Claude/Grok managers accept an explicit
+credential-source scope; the facade sets the full named reference only for named
+slots. Default authority bytes remain unchanged, and this scope never changes
+provider-defined upstream account or replay identity. Codex's existing path-bound
+source authority remains unchanged.
+
 Credentials are secret values owned by credential managers. Public values,
 logs, snapshots, errors, events, and debug output contain only redacted
 identities or references. Credentials bind to an exact origin, route, account,

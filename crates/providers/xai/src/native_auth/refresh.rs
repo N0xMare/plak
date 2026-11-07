@@ -117,7 +117,13 @@ impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
         if let Some(expected_epoch) = self.expected_selection_epoch
             && (old.selection_epoch != expected_epoch
                 || self.expected_authority
-                    != Some(route_credential_authority_id(&self.core.store).as_str()))
+                    != Some(
+                        route_credential_authority_id(
+                            &self.core.store,
+                            self.core.source_scope.as_deref(),
+                        )
+                        .as_str(),
+                    ))
         {
             return Err(BuildRequestFailure::LeaveQuarantined(
                 XaiNativeAuthError::SelectionChanged,

@@ -20,7 +20,7 @@ pub struct CodexSubscriptionLocalAdmin {
 }
 
 impl CodexSubscriptionLocalAdmin {
-    /// Opens the exact application-selected `primary` slot for the pinned
+    /// Opens the exact application-selected slot for the pinned
     /// native Codex profile without consulting ambient state or the network.
     ///
     /// Existing state is reloaded during open. A record written by a newer
@@ -35,13 +35,14 @@ impl CodexSubscriptionLocalAdmin {
     ///
     /// Rejects relative or unsafe paths and any malformed or foreign-slot
     /// record.
-    pub async fn open(slot_path: impl Into<PathBuf>) -> Result<Self, NativeCodexAuthError> {
+    pub async fn open(
+        slot_path: impl Into<PathBuf>,
+        slot: CredentialSlotId,
+    ) -> Result<Self, NativeCodexAuthError> {
         let slot_path = slot_path.into();
         let store = run_blocking(move || {
             let profile = AuthProfileId::new(OPENAI_CODEX_COMPATIBILITY_PROFILE_ID)
                 .map_err(|_| NativeCodexAuthError::Validation)?;
-            let slot =
-                CredentialSlotId::new("primary").map_err(|_| NativeCodexAuthError::Validation)?;
             let store = Arc::new(
                 PrivateCredentialStore::open_slot(&slot_path, profile, slot)
                     .map_err(|_| NativeCodexAuthError::Store)?,

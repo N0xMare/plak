@@ -385,6 +385,7 @@ struct ResolutionPause {
 }
 
 struct ManagerCore {
+    source_scope: Option<String>,
     catalog_retries: bool,
     store: PrivateCredentialStore,
     client: Client,
@@ -764,12 +765,19 @@ fn auth_profile_id() -> Result<plakous_auth::SubscriptionIntegrationProfileId, X
         .map_err(Into::into)
 }
 
-fn route_credential_authority_id(store: &PrivateCredentialStore) -> String {
+fn route_credential_authority_id(
+    store: &PrivateCredentialStore,
+    source_scope: Option<&str>,
+) -> String {
     use sha2::{Digest as _, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(store.path().as_os_str().as_encoded_bytes());
     hasher.update(b"\0xai-route-credential-authority-v2\0");
     hasher.update(store.slot_id().as_str().as_bytes());
+    if let Some(scope) = source_scope {
+        hasher.update(b"\0plak.account-scope.v1\0");
+        hasher.update(scope.as_bytes());
+    }
     let mut encoded = String::from("plak-native-xai-route:");
     for byte in hasher.finalize() {
         use std::fmt::Write as _;

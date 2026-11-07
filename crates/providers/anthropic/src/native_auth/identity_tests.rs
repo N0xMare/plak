@@ -5,6 +5,56 @@ const ACCOUNT: &str = "12345678-1234-4234-8234-123456789abc";
 const OTHER_ACCOUNT: &str = "87654321-4321-4321-8321-cba987654321";
 
 #[tokio::test]
+async fn named_claude_sources_change_only_credential_authority() {
+    let temporary = tempfile::tempdir().unwrap();
+    let default = tests::manager(tests::private_store(&temporary));
+    default
+        .persist_test_grant("fixture-access", "fixture-refresh", 3600, "user:inference")
+        .unwrap();
+    let resolve = |manager: ClaudeNativeAuthManager| async move {
+        manager
+            .resolve_model(
+                "claude-sonnet-5",
+                manager.core.client.clone(),
+                plakous_model::SessionLineage::Root,
+            )
+            .await
+            .unwrap()
+            .1
+    };
+    let original = resolve(default.clone()).await;
+    let work = resolve(
+        default
+            .clone()
+            .with_credential_source_scope("claude/work".into()),
+    )
+    .await;
+    let other = resolve(default.with_credential_source_scope("claude/other".into())).await;
+    assert_eq!(original.account_binding(), work.account_binding());
+    assert_eq!(work.account_binding(), other.account_binding());
+    assert_ne!(
+        original.credential_authority_binding(),
+        work.credential_authority_binding()
+    );
+    assert_ne!(
+        work.credential_authority_binding(),
+        other.credential_authority_binding()
+    );
+    assert_eq!(
+        original.credential_authority_binding(),
+        Digest::sha256(
+            DigestDomain::ModelBinding,
+            1,
+            &[
+                b"claude-oauth-provider-account-credential",
+                ACCOUNT.as_bytes()
+            ]
+        )
+        .unwrap()
+    );
+}
+
+#[tokio::test]
 async fn login_rejects_missing_required_scope_without_installing_credentials() {
     let (_temp, manager, peer) = fixture(serde_json::json!({"access_token":"fixture-access","refresh_token":"fixture-refresh","expires_in":3600,"scope":"user:profile"})).await;
     let login = manager.begin_login().unwrap();

@@ -165,6 +165,35 @@ pub(super) fn open_or_create_private_child(
     Ok(directory)
 }
 
+#[cfg(unix)]
+pub(super) fn existing_named_layout(
+    state_root: &Path,
+    vertical: &str,
+    name: &str,
+) -> Result<bool, NativeSubscriptionError> {
+    if !existing_layout(state_root)? {
+        return Ok(false);
+    }
+    let mut directory = open_absolute_directory(&state_root.join("plak/subscriptions"))?;
+    for name in ["accounts", vertical, name] {
+        let Some(child) = open_existing_child(&directory, OsStr::new(name))? else {
+            return Ok(false);
+        };
+        validate_private_directory(&child)?;
+        directory = child;
+    }
+    Ok(true)
+}
+
+#[cfg(not(unix))]
+pub(super) fn existing_named_layout(
+    _state_root: &Path,
+    _vertical: &str,
+    _name: &str,
+) -> Result<bool, NativeSubscriptionError> {
+    Err(NativeSubscriptionError::UnsupportedPlatform)
+}
+
 #[cfg(not(unix))]
 pub(super) fn open_or_create_private_child(
     _parent: &File,

@@ -5,7 +5,7 @@ use super::{
     Arc, CompatibilityNotice, CompiledProviderConfiguration, LoadedAcceptance, NativeAuthStatus,
     NativeLoginCompletion, NativeLoginInstructions, NativeLoginMode, NativeModelResolutionError,
     NativeModelSelector, NativeModelSummary, NativeModelVisibility, NativeProvider,
-    NativeSubscriptionError, NativeSubscriptions, NativeToolMode, PRIMARY_SLOT, PendingNativeLogin,
+    NativeSubscriptionError, NativeSubscriptions, NativeToolMode, PendingNativeLogin,
     ResolvedNativeModel, RuntimeModelAuthority, SelectedProviderConfiguration, SessionLineage,
     SubscriptionRequestClass, SubscriptionRequestGate, SubscriptionResolutionEvidence,
     SubscriptionUsageRead, Timestamp, credential_refresh_observer, detached, run_blocking,
@@ -53,9 +53,10 @@ impl NativeSubscriptions {
         let accepted_at = loaded_acceptance.accepted_at;
         let path = self.state.provider_record(NativeProvider::Claude);
         let status_path = path.clone();
+        let slot = self.state.slot_id()?;
+        let status_slot = slot.clone();
         let local_status = run_blocking(move || {
-            let slot = plakous_auth::CredentialSlotId::new(PRIMARY_SLOT)
-                .map_err(|_| NativeSubscriptionError::Internal)?;
+            let slot = status_slot;
             let admin =
                 plakous_anthropic::ClaudeOfflineSelectedSlot::open_explicit(status_path, slot)
                     .map_err(map_claude_error)?;
@@ -95,8 +96,7 @@ impl NativeSubscriptions {
                 .map_err(map_claude_error)?;
             let client = plakous_http::Client::new_http1(plakous_http::Limits::default())
                 .map_err(|_| NativeSubscriptionError::Internal)?;
-            let slot = plakous_auth::CredentialSlotId::new(PRIMARY_SLOT)
-                .map_err(|_| NativeSubscriptionError::Internal)?;
+
             let mut manager = plakous_anthropic::ClaudeNativeAuthManager::open_selected_slot(
                 path,
                 slot,
@@ -105,6 +105,9 @@ impl NativeSubscriptions {
                 identity_paths.claude_client_device_id()?,
             )
             .map_err(map_claude_error)?;
+            if let Some(scope) = identity_paths.source_scope() {
+                manager = manager.with_credential_source_scope(scope);
+            }
             if let Some(gate) = request_gate {
                 manager = manager.with_subscription_request_gate(gate);
             }
@@ -360,9 +363,8 @@ impl NativeVertical for Vertical {
             let provider = NativeProvider::Claude;
             Ok({
                 let path = subscriptions.state.provider_record(provider);
+                let slot = subscriptions.state.slot_id()?;
                 run_blocking(move || {
-                    let slot = plakous_auth::CredentialSlotId::new(PRIMARY_SLOT)
-                        .map_err(|_| NativeSubscriptionError::Internal)?;
                     let admin =
                         plakous_anthropic::ClaudeOfflineSelectedSlot::open_explicit(path, slot)
                             .map_err(map_claude_error)?;
@@ -444,9 +446,8 @@ impl NativeVertical for Vertical {
             let provider = NativeProvider::Claude;
             {
                 let path = subscriptions.state.provider_record(provider);
+                let slot = subscriptions.state.slot_id()?;
                 run_blocking(move || {
-                    let slot = plakous_auth::CredentialSlotId::new(PRIMARY_SLOT)
-                        .map_err(|_| NativeSubscriptionError::Internal)?;
                     plakous_anthropic::ClaudeOfflineSelectedSlot::open_explicit(path, slot)
                         .map_err(map_claude_error)?
                         .logout_local()
@@ -571,7 +572,17 @@ impl NativeVertical for Vertical {
                         .credential_authority_binding()
                         .to_string(),
                     credential_generation: authority.credential_generation(),
-                    credential_selection_epoch: "primary".to_owned(),
+                    credential_selection_epoch: subscriptions
+                        .state
+                        .slot_id()
+                        .map_err(|error| {
+                            NativeModelResolutionError::after_selection(
+                                selected_model.clone(),
+                                error,
+                            )
+                        })?
+                        .as_str()
+                        .to_owned(),
                     route_fingerprint: plakous_anthropic::CLAUDE_OAUTH_ROUTE_ID.to_owned(),
                     descriptor_digest: descriptor.binding_digest().map_or_else(
                         |_| "claude-oauth-descriptor".to_owned(),

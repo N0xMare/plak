@@ -906,6 +906,7 @@ fn manager_for_endpoint(
     Ok(Arc::new(
         CodexSubscriptionCredentialManager::new_with_endpoints(
             slot,
+            CredentialSlotId::new("primary").map_err(|_| NativeCodexAuthError::Validation)?,
             endpoint.client.clone(),
             acceptance()?,
             ProfileEndpoints {
@@ -926,6 +927,7 @@ fn manager_for_endpoint_with_gate(
     Ok(Arc::new(
         CodexSubscriptionCredentialManager::new_with_endpoints(
             slot,
+            CredentialSlotId::new("primary").map_err(|_| NativeCodexAuthError::Validation)?,
             endpoint.client.clone(),
             acceptance()?,
             ProfileEndpoints {
@@ -967,11 +969,27 @@ fn seed_ready_credential(
     subject: &str,
     access_expires_at: u64,
 ) -> Result<(), NativeCodexAuthError> {
+    seed_ready_credential_for_slot(
+        slot,
+        CredentialSlotId::new("primary").map_err(|_| NativeCodexAuthError::Validation)?,
+        account,
+        subject,
+        access_expires_at,
+    )
+}
+
+fn seed_ready_credential_for_slot(
+    slot: &Path,
+    slot_id: CredentialSlotId,
+    account: &str,
+    subject: &str,
+    access_expires_at: u64,
+) -> Result<(), NativeCodexAuthError> {
     let store = PrivateCredentialStore::open_slot(
         slot,
         AuthProfileId::new(OPENAI_CODEX_COMPATIBILITY_PROFILE_ID)
             .map_err(|_| NativeCodexAuthError::Validation)?,
-        CredentialSlotId::new("primary").map_err(|_| NativeCodexAuthError::Validation)?,
+        slot_id,
     )
     .map_err(|_| NativeCodexAuthError::Store)?;
     let credential = StoredCredential {
@@ -991,6 +1009,47 @@ fn seed_ready_credential(
     store
         .initialize_selected(&record)
         .map_err(|_| NativeCodexAuthError::Store)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn explicit_codex_slot_ids_refuse_foreign_records_online_and_offline() -> TestResult {
+    let endpoint = test_endpoint().await?;
+    let (_directory, path) = private_slot()?;
+    seed_ready_credential_for_slot(
+        &path,
+        CredentialSlotId::new("named-work")?,
+        "account",
+        "subject",
+        now_unix_secs() + 3_600,
+    )?;
+    let open = |slot| {
+        CodexSubscriptionCredentialManager::new_with_endpoints(
+            &path,
+            CredentialSlotId::new(slot).map_err(|_| NativeCodexAuthError::Validation)?,
+            endpoint.client.clone(),
+            acceptance()?,
+            ProfileEndpoints {
+                auth_origin: endpoint.origin.clone(),
+                chatgpt_origin: endpoint.origin.clone(),
+                loopback_ports: TEST_LOOPBACK_PORTS,
+            },
+            Arc::new(ReviewClock::<PROFILE_REVIEWED_AT>),
+        )
+    };
+    assert_eq!(open("named-work")?.status()?, CodexCredentialStatus::Ready);
+    let admin =
+        CodexSubscriptionLocalAdmin::open(&path, CredentialSlotId::new("named-work")?).await?;
+    assert_eq!(admin.status().await?, OfflineCredentialLifecycle::Ready);
+    for foreign in ["primary", "named-other"] {
+        assert!(open(foreign).is_err());
+        assert!(
+            CodexSubscriptionLocalAdmin::open(&path, CredentialSlotId::new(foreign)?)
+                .await
+                .is_err()
+        );
+    }
+    assert_eq!(admin.status().await?, OfflineCredentialLifecycle::Ready);
     Ok(())
 }
 
@@ -5793,6 +5852,7 @@ async fn offline_admin_survives_expiry_and_kill_without_network() -> TestResult 
     assert!(matches!(
         CodexSubscriptionCredentialManager::new_with_endpoints_and_policy(
             &slot_path,
+            CredentialSlotId::new("primary")?,
             endpoint.client.clone(),
             acceptance()?,
             endpoints.clone(),
@@ -5804,6 +5864,7 @@ async fn offline_admin_survives_expiry_and_kill_without_network() -> TestResult 
     assert!(matches!(
         CodexSubscriptionCredentialManager::new_with_endpoints_and_policy(
             &slot_path,
+            CredentialSlotId::new("primary")?,
             endpoint.client.clone(),
             acceptance()?,
             endpoints,
@@ -5813,7 +5874,8 @@ async fn offline_admin_survives_expiry_and_kill_without_network() -> TestResult 
         Err(NativeCodexAuthError::ProfileNotCurrent)
     ));
 
-    let admin = CodexSubscriptionLocalAdmin::open(&slot_path).await?;
+    let admin =
+        CodexSubscriptionLocalAdmin::open(&slot_path, CredentialSlotId::new("primary")?).await?;
     assert_eq!(admin.status().await?, CodexCredentialStatus::Ready);
     assert_eq!(
         admin.profile().notice_revision(),
@@ -5856,7 +5918,8 @@ async fn offline_admin_names_a_foreign_profile_and_rejects_an_unsafe_path() -> T
 
     // A login under another compatibility profile is named, never used, and
     // local logout retires it so a new login can replace it.
-    let admin = CodexSubscriptionLocalAdmin::open(&slot_path).await?;
+    let admin =
+        CodexSubscriptionLocalAdmin::open(&slot_path, CredentialSlotId::new("primary")?).await?;
     assert!(matches!(
         admin.status().await,
         Err(NativeCodexAuthError::ProfileChanged)
@@ -5867,7 +5930,11 @@ async fn offline_admin_names_a_foreign_profile_and_rejects_an_unsafe_path() -> T
     );
     assert_eq!(admin.status().await?, OfflineCredentialLifecycle::Revoked);
     assert!(matches!(
-        CodexSubscriptionLocalAdmin::open(PathBuf::from("relative-slot.json")).await,
+        CodexSubscriptionLocalAdmin::open(
+            PathBuf::from("relative-slot.json"),
+            CredentialSlotId::new("primary")?
+        )
+        .await,
         Err(NativeCodexAuthError::Store)
     ));
     Ok(())
@@ -7523,7 +7590,8 @@ async fn status_and_usage_name_an_earlier_build_login_as_login_required() -> Tes
     let manager = manager_for_endpoint(&slot, &endpoint)?;
     let server = spawn_sequence_then_probe(endpoint, Vec::new());
     assert_eq!(manager.status()?, CodexCredentialStatus::LoginRequired);
-    let admin = CodexSubscriptionLocalAdmin::open(slot.clone()).await?;
+    let admin =
+        CodexSubscriptionLocalAdmin::open(slot.clone(), CredentialSlotId::new("primary")?).await?;
     assert_eq!(admin.status().await?, CodexCredentialStatus::LoginRequired);
     assert!(matches!(
         manager.subscription_usage().await,

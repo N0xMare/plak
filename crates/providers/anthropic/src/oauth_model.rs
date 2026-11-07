@@ -693,6 +693,20 @@ impl ClaudeNativeAuthManager {
             b"claude-oauth-provider-account-credential",
             identity.account_uuid().as_str().as_bytes(),
         )?;
+        let credential_authority_binding = if let Some(scope) = self.credential_source_scope() {
+            Digest::sha256(
+                DigestDomain::ModelBinding,
+                1,
+                &[
+                    credential_authority_binding.bytes(),
+                    b"plak.account-scope.v1",
+                    scope.as_bytes(),
+                ],
+            )
+            .map_err(|_| ClaudeNativeAuthError::InvalidStoredCredential)?
+        } else {
+            credential_authority_binding
+        };
         let context_authority_binding = RuntimeModelAuthority::authority_class_for(
             account_binding,
             credential_authority_binding,

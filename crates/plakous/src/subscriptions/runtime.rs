@@ -24,6 +24,63 @@ pub struct NativeSubscriptions {
 }
 
 impl NativeSubscriptions {
+    /// Selects one named account without creating its directory or reading credentials.
+    ///
+    /// # Errors
+    /// Rejects invalid names and mismatched subscription selections.
+    pub fn for_named_account(
+        &self,
+        provider: super::NativeProvider,
+        name: &str,
+    ) -> Result<Self, NativeSubscriptionError> {
+        let mut selected = self.clone();
+        selected.state = self.state.for_named_account(provider, name)?;
+        Ok(selected)
+    }
+
+    /// Creates a missing named directory for an explicit login attempt.
+    /// An abandoned new directory is removed after its last pending authority
+    /// is dropped, unless a later writer or credential publication won.
+    /// Defaults and pre-existing directories are never removed by this attempt.
+    ///
+    /// # Errors
+    /// Refuses unsafe paths or a different selected vertical.
+    pub async fn create_account_for_login(
+        &self,
+        provider: super::NativeProvider,
+    ) -> Result<Self, NativeSubscriptionError> {
+        super::vertical::require_vertical(provider)?;
+        self.state.require_provider(provider)?;
+        let mut selected = self.clone();
+        let state = self.state.clone();
+        selected.state = run_blocking(move || state.create_account_for_login()).await??;
+        Ok(selected)
+    }
+
+    /// Removes only a named slot proved signed out, under its compatibility lock.
+    ///
+    /// # Errors
+    /// Defaults, credential-bearing slots, unsafe paths and busy writers refuse.
+    pub async fn remove_signed_out_account(
+        &self,
+        provider: super::NativeProvider,
+    ) -> Result<(), NativeSubscriptionError> {
+        self.state.require_named()?;
+        let lock = self
+            .try_acquire_compatibility_lock(provider)
+            .await?
+            .ok_or(NativeSubscriptionError::AccountBusy)?;
+        let status = self.status_unlocked(provider).await?;
+        if !matches!(
+            status.credential(),
+            super::NativeAuthStatus::SignedOut | super::NativeAuthStatus::Revoked
+        ) {
+            return Err(NativeSubscriptionError::CredentialUnavailable);
+        }
+        let state = self.state.clone();
+        run_blocking(move || state.remove_named_directory(&lock)).await?
+    }
+
     pub(super) fn from_state(state: SubscriptionState) -> Self {
         Self {
             #[cfg(test)]

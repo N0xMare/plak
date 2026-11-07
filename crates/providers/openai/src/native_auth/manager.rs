@@ -41,11 +41,13 @@ impl CodexSubscriptionCredentialManager {
     /// malformed existing record.
     pub fn new(
         slot_path: impl Into<PathBuf>,
+        slot: CredentialSlotId,
         client: Client,
         acceptance: CodexCompatibilityAcceptance,
     ) -> Result<Self, NativeCodexAuthError> {
         Self::new_with_endpoints(
             &slot_path.into(),
+            slot,
             client,
             acceptance,
             ProfileEndpoints::production(),
@@ -57,12 +59,14 @@ impl CodexSubscriptionCredentialManager {
     #[doc(hidden)]
     pub fn new_with_clock(
         slot_path: impl Into<PathBuf>,
+        slot: CredentialSlotId,
         client: Client,
         acceptance: CodexCompatibilityAcceptance,
         clock: Arc<dyn Clock>,
     ) -> Result<Self, NativeCodexAuthError> {
         Self::new_with_endpoints(
             &slot_path.into(),
+            slot,
             client,
             acceptance,
             ProfileEndpoints::production(),
@@ -72,6 +76,7 @@ impl CodexSubscriptionCredentialManager {
 
     pub(super) fn new_with_endpoints(
         slot_path: &Path,
+        slot: CredentialSlotId,
         client: Client,
         acceptance: CodexCompatibilityAcceptance,
         endpoints: ProfileEndpoints,
@@ -79,6 +84,7 @@ impl CodexSubscriptionCredentialManager {
     ) -> Result<Self, NativeCodexAuthError> {
         let mut manager = Self::new_with_endpoints_and_policy(
             slot_path,
+            slot,
             client,
             acceptance,
             endpoints,
@@ -91,6 +97,7 @@ impl CodexSubscriptionCredentialManager {
 
     pub(super) fn new_with_endpoints_and_policy(
         slot_path: &Path,
+        slot: CredentialSlotId,
         client: Client,
         acceptance: CodexCompatibilityAcceptance,
         endpoints: ProfileEndpoints,
@@ -100,8 +107,6 @@ impl CodexSubscriptionCredentialManager {
         validate_profile_policy_at(acceptance.accepted_at, now, killed)?;
         let auth_profile = AuthProfileId::new(OPENAI_CODEX_COMPATIBILITY_PROFILE_ID)
             .map_err(|_| NativeCodexAuthError::Validation)?;
-        let slot =
-            CredentialSlotId::new("primary").map_err(|_| NativeCodexAuthError::Validation)?;
         let store = Arc::new(
             PrivateCredentialStore::open_slot(slot_path, auth_profile, slot)
                 .map_err(|_| NativeCodexAuthError::Store)?,

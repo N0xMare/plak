@@ -33,6 +33,7 @@ mod quarantine;
 use quarantine::{
     LOGIN_RECOVERY_QUARANTINE, clear_quarantine, process_quarantine_key, quarantine, quarantined,
 };
+mod named;
 mod recovery;
 #[cfg(all(unix, test))]
 pub(crate) use filesystem::AtomicWriteStage;
@@ -96,9 +97,13 @@ struct LoginRecoveryEpoch {
 
 impl SubscriptionPaths {
     fn provider_record(&self, provider: NativeProvider) -> PathBuf {
-        self.layout_root()
-            .join(provider.as_str())
-            .join("credential.json")
+        if self.named.is_some() {
+            self.layout_root().join("credential.json")
+        } else {
+            self.layout_root()
+                .join(provider.as_str())
+                .join("credential.json")
+        }
     }
 
     fn receipt_path(&self, provider: NativeProvider) -> PathBuf {
@@ -132,10 +137,24 @@ impl SubscriptionPaths {
     }
 
     fn layout_root(&self) -> PathBuf {
-        self.state_root.join("plak/subscriptions")
+        let root = self.state_root.join("plak/subscriptions");
+        self.named.as_ref().map_or_else(
+            || root.clone(),
+            |slot| root.join("accounts").join(slot.vertical).join(&slot.name),
+        )
     }
 
     fn prepare(&self) -> Result<(), NativeSubscriptionError> {
+        if let Some(slot) = &self.named {
+            if !filesystem::existing_named_layout(&self.state_root, slot.vertical, &slot.name)? {
+                return Err(NativeSubscriptionError::CredentialUnavailable);
+            }
+            let (directory, _) = open_private_parent(&self.layout_root().join("credential.json"))?;
+            for name in ["catalog", "compatibility"] {
+                let _ = open_or_create_private_child(&directory, OsStr::new(name))?;
+            }
+            return Ok(());
+        }
         let state = ensure_state_root(&self.state_root)?;
         let plak = open_or_create_private_child(&state, OsStr::new("plak"))?;
         let subscriptions = open_or_create_private_child(&plak, OsStr::new("subscriptions"))?;
@@ -442,13 +461,48 @@ fn valid_generation(value: &str) -> bool {
 pub(super) struct SubscriptionState {
     clock: Option<Arc<dyn plakous_model::Clock>>,
     paths: SubscriptionPaths,
+    creation: Option<Arc<named::CreatedDirectory>>,
 }
 
 impl SubscriptionState {
+    pub(super) fn slot_id(
+        &self,
+    ) -> Result<plakous_auth::CredentialSlotId, NativeSubscriptionError> {
+        let token = self.paths.named.as_ref().map_or_else(
+            || super::PRIMARY_SLOT.to_owned(),
+            |slot| format!("named-{}", slot.name),
+        );
+        plakous_auth::CredentialSlotId::new(token)
+            .map_err(|_| NativeSubscriptionError::AuthenticationBinding)
+    }
+
+    pub(super) fn source_scope(&self) -> Option<String> {
+        self.paths
+            .named
+            .as_ref()
+            .map(|slot| format!("{}/{}", slot.vertical, slot.name))
+    }
+
+    pub(super) fn require_provider(
+        &self,
+        provider: NativeProvider,
+    ) -> Result<(), NativeSubscriptionError> {
+        if self
+            .paths
+            .named
+            .as_ref()
+            .is_some_and(|slot| slot.provider != provider)
+        {
+            return Err(NativeSubscriptionError::AuthenticationBinding);
+        }
+        Ok(())
+    }
+
     pub(in crate::subscriptions) async fn acquire_compatibility_lock(
         &self,
         provider: NativeProvider,
     ) -> Result<PrivateFilesystemLock, NativeSubscriptionError> {
+        self.require_provider(provider)?;
         let paths = self.paths.clone();
         run_blocking(move || {
             paths.prepare()?;
@@ -461,6 +515,7 @@ impl SubscriptionState {
         &self,
         provider: NativeProvider,
     ) -> Result<Option<PrivateFilesystemLock>, NativeSubscriptionError> {
+        self.require_provider(provider)?;
         let paths = self.paths.clone();
         run_blocking(move || {
             paths.prepare()?;
@@ -491,7 +546,11 @@ impl SubscriptionState {
     }
 
     pub(super) const fn new(paths: SubscriptionPaths) -> Self {
-        Self { paths, clock: None }
+        Self {
+            paths,
+            clock: None,
+            creation: None,
+        }
     }
 }
 
@@ -515,7 +574,11 @@ impl SubscriptionState {
         notice: CompatibilityNotice,
         accepted_at: u64,
     ) -> Result<String, NativeSubscriptionError> {
-        store_acceptance(&self.paths, notice, accepted_at)
+        let generation = store_acceptance(&self.paths, notice, accepted_at)?;
+        if let Some(creation) = &self.creation {
+            creation.record_consent(&generation)?;
+        }
+        Ok(generation)
     }
     pub(super) fn stored_acceptance_generation(
         &self,
@@ -597,7 +660,12 @@ impl SubscriptionState {
         self.paths.prepare()
     }
     pub(super) fn layout_exists(&self) -> Result<bool, NativeSubscriptionError> {
-        existing_layout(&self.paths.state_root)
+        self.paths.named.as_ref().map_or_else(
+            || existing_layout(&self.paths.state_root),
+            |slot| {
+                filesystem::existing_named_layout(&self.paths.state_root, slot.vertical, &slot.name)
+            },
+        )
     }
     /// Compatibility of a provider whose storage does not exist: no receipt
     /// can be current, so only the pinned profile's own window decides.

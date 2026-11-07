@@ -160,7 +160,8 @@ impl ManagerCore {
         if let Some(renewal) = renewal
             && (fence.account_binding() != renewal.account
                 || stored.selection_epoch != renewal.selection_epoch
-                || route_credential_authority_id(&self.store) != renewal.authority_id)
+                || route_credential_authority_id(&self.store, self.source_scope.as_deref())
+                    != renewal.authority_id)
         {
             return Err(XaiNativeAuthError::SelectionChanged);
         }
@@ -194,7 +195,7 @@ impl ManagerCore {
             public: public.clone(),
             fence: fence.clone(),
             selection_epoch: stored.selection_epoch.clone(),
-            authority_id: route_credential_authority_id(&self.store),
+            authority_id: route_credential_authority_id(&self.store, self.source_scope.as_deref()),
         };
         *self
             .catalog
@@ -224,7 +225,8 @@ impl ManagerCore {
             .map_err(|_| XaiNativeAuthError::InvalidStoredCredential)?;
         stored.validate(receipt.fence.account_binding())?;
         if stored.selection_epoch != receipt.selection_epoch
-            || receipt.authority_id != route_credential_authority_id(&self.store)
+            || receipt.authority_id
+                != route_credential_authority_id(&self.store, self.source_scope.as_deref())
         {
             return Err(XaiNativeAuthError::SelectionChanged);
         }
@@ -245,7 +247,8 @@ impl ManagerCore {
             || receipt.public.expires_at.seconds() <= now
             || receipt.public.expires_at.seconds() > COMPATIBILITY_EXPIRES_UNIX
             || !valid_login_selection_epoch(&receipt.selection_epoch)
-            || receipt.authority_id != route_credential_authority_id(&self.store)
+            || receipt.authority_id
+                != route_credential_authority_id(&self.store, self.source_scope.as_deref())
         {
             return Err(XaiNativeAuthError::CatalogUnavailable);
         }
@@ -282,7 +285,8 @@ impl ManagerCore {
             || receipt.public.account != *fence.account_binding()
             || receipt.fence != *fence
             || receipt.selection_epoch != stored.selection_epoch
-            || receipt.authority_id != route_credential_authority_id(&self.store)
+            || receipt.authority_id
+                != route_credential_authority_id(&self.store, self.source_scope.as_deref())
             || receipt.public.observed_at.seconds() > now
             || receipt.public.expires_at.seconds() <= now
             || receipt.public.expires_at.seconds() > COMPATIBILITY_EXPIRES_UNIX
@@ -386,7 +390,11 @@ impl ManagerCore {
         };
         let stored = self.read_stored(fence)?;
         if stored.selection_epoch != expected_epoch
-            || expected_authority != Some(route_credential_authority_id(&self.store).as_str())
+            || expected_authority
+                != Some(
+                    route_credential_authority_id(&self.store, self.source_scope.as_deref())
+                        .as_str(),
+                )
         {
             return Err(XaiNativeAuthError::SelectionChanged);
         }
@@ -552,7 +560,8 @@ impl ManagerCore {
             .validate(&expected_receipt.public.account)
             .map_err(|_| crate::XaiAuthError::CredentialSource)?;
         if stored.selection_epoch != expected_receipt.selection_epoch
-            || route_credential_authority_id(&self.store) != expected_receipt.authority_id
+            || route_credential_authority_id(&self.store, self.source_scope.as_deref())
+                != expected_receipt.authority_id
         {
             return Err(crate::XaiAuthError::BindingMismatch);
         }

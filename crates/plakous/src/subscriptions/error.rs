@@ -39,6 +39,10 @@ pub enum NativeSubscriptionError {
     InvalidReceipt,
     /// The selected credential is absent, quarantined, revoked, or otherwise unavailable.
     CredentialUnavailable,
+    /// A named account writer or pending credential operation is busy.
+    AccountBusy,
+    /// Bare default accounts can be signed out but cannot be removed.
+    DefaultAccountNotRemovable,
     /// The provider rejected or invalidated the native authentication operation.
     Authentication,
     /// Credential, route, or account binding evidence was contradictory.
@@ -169,6 +173,10 @@ impl NativeSubscriptionError {
             Self::ProfileInactive => "native compatibility profile is inactive",
             Self::InvalidReceipt => "native compatibility receipt is invalid",
             Self::CredentialUnavailable => "native subscription credential is unavailable",
+            Self::AccountBusy => "account_busy: the named subscription account is busy",
+            Self::DefaultAccountNotRemovable => {
+                "default_account_not_removable: sign out the default account instead"
+            }
             Self::Authentication => "native subscription authentication failed",
             Self::AuthenticationBinding => "native subscription authentication binding failed",
             Self::AuthenticationProviderRejected => {

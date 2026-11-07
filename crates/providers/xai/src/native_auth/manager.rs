@@ -59,6 +59,7 @@ impl XaiNativeAuthManager {
         let store = PrivateCredentialStore::open_slot(path, profile, slot)?;
         Ok(Self {
             core: Arc::new(ManagerCore {
+                source_scope: None,
                 catalog_retries: true,
                 store,
                 client,
@@ -75,6 +76,20 @@ impl XaiNativeAuthManager {
                 resolution_pause: Mutex::new(None),
             }),
         })
+    }
+
+    /// Scopes credential-source authority without changing provider-defined upstream identity.
+    /// Unscoped callers retain their existing credential-authority bytes.
+    ///
+    /// # Errors
+    /// Refuses changing a manager that has already been shared.
+    pub fn with_credential_source_scope(
+        mut self,
+        scope: String,
+    ) -> Result<Self, XaiNativeAuthError> {
+        let core = Arc::get_mut(&mut self.core).ok_or(XaiNativeAuthError::Request)?;
+        core.source_scope = Some(scope);
+        Ok(self)
     }
 
     /// Attaches the classified physical-request gate required for inference.
@@ -699,6 +714,7 @@ impl XaiNativeAuthManager {
         let store = PrivateCredentialStore::open_slot(path, profile, slot)?;
         Ok(Self {
             core: Arc::new(ManagerCore {
+                source_scope: None,
                 catalog_retries: true,
                 store,
                 client,

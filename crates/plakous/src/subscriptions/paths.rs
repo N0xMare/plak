@@ -1,6 +1,6 @@
 //! Fixed, provider-neutral subscription layout identity.
 
-use super::{NativeSubscriptionError, fmt};
+use super::{NativeProvider, NativeSubscriptionError, fmt};
 use std::path::{Component, Path, PathBuf};
 
 /// Fixed Plak-owned storage derived from one explicit XDG state root.
@@ -10,6 +10,14 @@ use std::path::{Component, Path, PathBuf};
 #[derive(Clone)]
 pub struct SubscriptionPaths {
     pub(super) state_root: PathBuf,
+    pub(super) named: Option<NamedSlot>,
+}
+
+#[derive(Clone)]
+pub(super) struct NamedSlot {
+    pub(super) provider: NativeProvider,
+    pub(super) vertical: &'static str,
+    pub(super) name: String,
 }
 
 impl SubscriptionPaths {
@@ -23,7 +31,45 @@ impl SubscriptionPaths {
     ) -> Result<Self, NativeSubscriptionError> {
         let state_root = state_root.into();
         validate_state_root(&state_root)?;
-        Ok(Self { state_root })
+        Ok(Self {
+            state_root,
+            named: None,
+        })
+    }
+
+    /// Selects one validated local name within an exact subscription vertical.
+    /// This is offline and does not create or inspect the slot.
+    ///
+    /// # Errors
+    /// Rejects an invalid or reserved name and an unknown vertical.
+    pub fn for_named_account(
+        &self,
+        provider: NativeProvider,
+        name: &str,
+    ) -> Result<Self, NativeSubscriptionError> {
+        if name.is_empty()
+            || name.len() > 32
+            || name == "default"
+            || !name.as_bytes()[0].is_ascii_lowercase()
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        {
+            return Err(NativeSubscriptionError::AuthenticationBinding);
+        }
+        let vertical = match provider {
+            NativeProvider::Codex => "codex",
+            NativeProvider::Xai => "grok",
+            NativeProvider::Claude => "claude",
+        };
+        Ok(Self {
+            state_root: self.state_root.clone(),
+            named: Some(NamedSlot {
+                provider,
+                vertical,
+                name: name.to_owned(),
+            }),
+        })
     }
 }
 
