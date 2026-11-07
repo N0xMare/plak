@@ -679,6 +679,7 @@ fn daemon_exit_wait_ignores_a_successor_and_a_startup_probe() {
     assert!(opened_by(&lock).contains(&i32::try_from(std::process::id()).unwrap()));
     assert_eq!(daemon_openers(&lock), [old]);
     runner.kill();
+    std::fs::remove_file(lock.with_extension("sock")).unwrap();
     // Force the race deterministically: the successor is already listening
     // before the old daemon's exit is observed by the waiter.
     let successor = runner.start();
