@@ -17,11 +17,11 @@ use super::{
     TRANSCRIPT_TRUNCATION_MARKER, TranscriptChange,
 };
 use crate::config::user_action_channel;
+use crate::tui::SurfaceObservation;
 use crate::tui::blocks::RenderPrefs;
 use crate::tui::blocks::ScrollBlock;
 use crate::tui::presentation::{ActivityKind, ActivityState};
 use crate::tui::{HostEvent, QueueDrainState, SettingsView, UserAction};
-use crate::tui::SurfaceObservation;
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use plakous_host_protocol::status::{DiagnosticText, HostPhase, HostStatusDetail};
 use plakous_host_protocol::views::transcript::{NoticeScope, ToolItem, TranscriptRow};
