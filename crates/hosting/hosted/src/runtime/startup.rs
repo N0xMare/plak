@@ -578,12 +578,25 @@ pub(super) async fn refresh_native_target<P: plakous_host_protocol::ProtocolExte
     let provider = *provider;
     let resolved = std::sync::Arc::clone(resolved);
     let subscriptions = subscriptions.clone();
-    let (label, account) = match provider {
-        NativeProvider::Codex => ("Codex", "codex"),
-        NativeProvider::Xai => ("xAI", "grok"),
-        NativeProvider::Claude => ("Claude", "claude"),
-        _ => return Ok(false),
+    let selection = native_refresh_account(&config.session, provider)?;
+    let label = match selection.vertical() {
+        crate::account::Vertical::Codex => "Codex",
+        crate::account::Vertical::Grok => "xAI",
+        crate::account::Vertical::Claude => "Claude",
+        crate::account::Vertical::Anthropic
+        | crate::account::Vertical::OpenAi
+        | crate::account::Vertical::XaiApi
+        | crate::account::Vertical::OpenRouter => {
+            return Err(
+                crate::capabilities::AccountAdmissionError::AccountTargetMismatch {
+                    account: selection.to_string(),
+                }
+                .into(),
+            );
+        }
     };
+    let account = selection.as_str();
+    let label = native_account_label(label, account);
     Box::pin(refresh_native_authority(
         resolved.model(),
         label,
@@ -649,6 +662,22 @@ pub(super) async fn refresh_native_authority(
     }
 }
 
+fn native_refresh_account(
+    record: &SessionRecord,
+    provider: NativeProvider,
+) -> CliResult<crate::account::AccountRef> {
+    let selection = record.account_ref()?;
+    if selection.vertical().capability().native_provider() != Some(provider) {
+        return Err(
+            crate::capabilities::AccountAdmissionError::AccountTargetMismatch {
+                account: selection.to_string(),
+            }
+            .into(),
+        );
+    }
+    Ok(selection)
+}
+
 #[cfg(test)]
 pub(in crate::runtime) mod native_refresh_tests;
 
@@ -666,6 +695,7 @@ async fn native_credential_failure(
 }
 
 fn native_account_changed(label: &str, account: &str) -> CliFailure {
+    let label = native_account_label(label, account);
     let account = plakous_host_protocol::notice_remedy::AccountTarget::from_account(account);
     CliFailure::new(format!(
         "{label} provider account changed; restore the original account for exact reopen, or \
@@ -684,6 +714,7 @@ fn native_account_changed(label: &str, account: &str) -> CliFailure {
 }
 
 fn native_credential_message(label: &str, account: &str, quarantined: bool) -> CliFailure {
+    let label = native_account_label(label, account);
     if quarantined {
         CliFailure::new(format!(
             "{label} credential was rejected at refresh; restore usable credentials"
@@ -706,6 +737,7 @@ fn native_credential_message(label: &str, account: &str, quarantined: bool) -> C
 /// A renewal that found no usable credential names the repair, as other
 /// credential failures do.
 pub(super) fn native_authority_unavailable(label: &str, account: &str) -> CliFailure {
+    let label = native_account_label(label, account);
     let account = plakous_host_protocol::notice_remedy::AccountTarget::from_account(account);
     CliFailure::new(format!(
         "{label} credential is unavailable (signed out, quarantined, or a login made by an \
@@ -721,6 +753,18 @@ pub(super) fn native_authority_unavailable(label: &str, account: &str) -> CliFai
     )
 }
 
+/// A named diagnostic identifies its slot, never the vertical's default.
+fn native_account_label<'a>(label: &'a str, account: &'a str) -> &'a str {
+    if account
+        .parse::<crate::account::AccountRef>()
+        .is_ok_and(|selection| selection.is_named())
+    {
+        account
+    } else {
+        label
+    }
+}
+
 /// The exact semantic and account axes that may not change during freshness reopen.
 #[derive(Clone, Copy)]
 pub(super) struct FreshNativeBinding {
@@ -734,6 +778,7 @@ pub(super) struct FreshNativeBinding {
 
 impl FreshNativeBinding {
     fn refusal(&self, fresh: &Self, label: &str, account: &str) -> CliFailure {
+        let label = native_account_label(label, account);
         if self.selected == fresh.selected
             && self.effective == fresh.effective
             && self.account == fresh.account
@@ -1112,7 +1157,7 @@ pub(super) async fn production_host_runtime_binding<P: plakous_host_protocol::Pr
         topology_enabled: config.topology_enabled,
         continue_after_loss: config.resume_after_loss == crate::runtime::ResumeAfterLoss::Continue,
     };
-    native_runtime_for_record(spec, role, stderr_buf).await
+    Box::pin(native_runtime_for_record(spec, role, stderr_buf)).await
 }
 
 pub(super) async fn native_runtime_for_record(

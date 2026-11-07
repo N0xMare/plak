@@ -1242,6 +1242,10 @@ Sibling refresh claims coexist under distinct compatibility locks; quarantining
 one claim cannot quarantine, renew or disclose another slot's credential.
 Named credential refusal rendering keeps the full-reference detail and the
 existing Unspecified remedy; no frontend renders a default-slot login remedy.
+Native freshness tests retain the recorded slot, refuse vertical disagreement,
+and keep full-reference human detail without expanding structured remedy values.
+Named Busy/429 tests discard previous quotas, plans and email, while default
+last-Ready retention keeps its existing regressions.
 Default API binding/configuration and v12 export bytes are pinned to pre-account
 fixtures; seven-vertical tests pair default and named profile/prompt behavior
 and capability decisions. Usage tests preserve provider email detail without

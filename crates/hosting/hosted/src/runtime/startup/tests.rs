@@ -399,6 +399,49 @@ fn unavailable_native_authority_names_its_login_remedy() {
 }
 
 #[test]
+fn named_runtime_credential_failures_keep_full_reference_and_unspecified_remedy() {
+    use plakous_host_protocol::notice_remedy::{AccountTarget, NoticeRemedy};
+    for account in ["claude/work", "codex/work", "grok/work"] {
+        for failure in [
+            native_credential_message("vertical", account, true),
+            native_authority_unavailable("vertical", account),
+            native_account_changed("vertical", account),
+        ] {
+            assert!(failure.message().contains(account), "{failure}");
+            assert!(matches!(
+                failure.remedy(),
+                Some(
+                    NoticeRemedy::Login {
+                        account: AccountTarget::Unspecified
+                    } | NoticeRemedy::RestoreAccountOrRebind {
+                        account: AccountTarget::Unspecified
+                    }
+                )
+            ));
+        }
+    }
+}
+
+#[test]
+fn native_freshness_keeps_the_recorded_slot_and_refuses_vertical_disagreement() {
+    for reference in ["claude/work", "codex/work", "grok/work"] {
+        let selected: crate::account::AccountRef = reference.parse().unwrap();
+        let provider = selected.vertical().capability().native_provider().unwrap();
+        let mut record = SessionRecord::new(std::env::temp_dir());
+        record.account = Some(reference.to_owned());
+        assert_eq!(native_refresh_account(&record, provider).unwrap(), selected);
+        record.account = Some("openai/work".to_owned());
+        let failure = native_refresh_account(&record, provider).unwrap_err();
+        assert!(matches!(
+            std::error::Error::source(&failure)
+                .unwrap()
+                .downcast_ref::<crate::capabilities::AccountAdmissionError>(),
+            Some(crate::capabilities::AccountAdmissionError::AccountTargetMismatch { .. })
+        ));
+    }
+}
+
+#[test]
 fn changed_native_account_names_both_exact_restore_and_history_carry() {
     use plakous_host_protocol::notice_remedy::{AccountTarget, NoticeRemedy};
     let failure = native_account_changed("Claude", "claude");

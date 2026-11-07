@@ -9334,6 +9334,15 @@ when a bounded local comparison finds the same authenticated upstream account
 as another readable slot of that vertical; shared upstream limits are not summed.
 Unavailable comparison evidence is unknown and does not reject login.
 
+Native freshness revalidation takes its reference from the recorded session,
+refuses vertical disagreement, and never reconstructs a default account for
+diagnostics or remedies.
+
+Named usage does not retain last Ready quotas or email across Busy/429: without
+credential/consent/login-fence-keyed retention it shows the fresh scoped state.
+Default-account retention stays unchanged. Fence-keyed named retention is a
+later increment with product-owned refresh attribution.
+
 Named credential failures retain typed refusal and full-reference detail, but
 use the existing structured remedy domain's `Unspecified` account. They must not
 render a default slot's login command. Exact named structured remedies await a

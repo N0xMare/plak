@@ -101,6 +101,16 @@ pub fn preserve_ready_across_rate_limit(
         return incoming;
     };
     for vertical in &mut incoming.verticals {
+        // Named retention needs credential/consent fences. Until those are
+        // carried here, a scoped Busy/429 is more honest than an old quota.
+        if vertical
+            .vertical
+            .account()
+            .parse::<crate::account::AccountRef>()
+            .is_ok_and(|account| account.is_named())
+        {
+            continue;
+        }
         if !matches!(
             &vertical.state,
             VerticalUsageState::Unavailable { reason }

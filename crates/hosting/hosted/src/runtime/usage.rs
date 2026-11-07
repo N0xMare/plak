@@ -760,12 +760,15 @@ impl HeldUsage {
             return incoming;
         };
         let previous = held.as_ref().map(|(view, _)| view);
-        let retained = incoming.verticals.iter().any(|vertical| matches!(
-            &vertical.state,
-            plakous_host_protocol::views::presentation::VerticalUsageState::Unavailable { reason }
-                if crate::subscription_usage::is_rate_limited_reason(reason)
-                    || crate::subscription_usage::is_busy_reason(reason)
-        ));
+        let retained = incoming.verticals.iter().any(|vertical| {
+            let named = vertical.vertical.account().parse::<crate::account::AccountRef>().is_ok_and(|account| account.is_named());
+            !named && matches!(
+                &vertical.state,
+                plakous_host_protocol::views::presentation::VerticalUsageState::Unavailable { reason }
+                    if crate::subscription_usage::is_rate_limited_reason(reason)
+                        || crate::subscription_usage::is_busy_reason(reason)
+            )
+        });
         let merged =
             crate::subscription_usage::preserve_ready_across_rate_limit(incoming, previous);
         let observed = if retained {

@@ -265,6 +265,48 @@ fn named_usage_keeps_email_detail_and_never_borrows_a_sibling_reading()
 }
 
 #[test]
+fn named_busy_and_rate_limit_never_retain_an_old_quota_or_email()
+-> Result<(), Box<dyn std::error::Error>> {
+    for account in ["claude/work", "codex/work", "grok/work", "openrouter/work"] {
+        let named = UsageVertical::new(account, account);
+        let snapshot = SubscriptionUsageSnapshot::new(
+            Timestamp::new(1_788_000_000, 0)?,
+            Some("previous plan".to_owned()),
+            Vec::new(),
+        )?
+        .with_account(Some("previous@example.com".to_owned()))?;
+        let previous = project_limits(
+            [(
+                named.clone(),
+                VerticalObservation::Native(SubscriptionUsageRead::Snapshot(snapshot)),
+            )],
+            SessionLedgerView::default(),
+        );
+        for reason in [USAGE_BUSY_REASON, USAGE_RATE_LIMITED_REASON] {
+            let incoming = project_limits(
+                [(
+                    named.clone(),
+                    VerticalObservation::Unavailable(reason.to_owned()),
+                )],
+                SessionLedgerView::default(),
+            );
+            let merged = preserve_ready_across_rate_limit(incoming, Some(&previous));
+            let row = merged
+                .verticals
+                .iter()
+                .find(|row| row.vertical == named)
+                .unwrap();
+            assert!(
+                matches!(&row.state, VerticalUsageState::Unavailable { reason: actual } if actual == reason)
+            );
+            assert_eq!(row.account_email, None);
+            assert_eq!(row.plan_label, None);
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn a_non_ready_vertical_carries_no_numbers_and_no_bar() {
     let view = project_limits(
         [(codex_vertical(), VerticalObservation::NotConnected)],
