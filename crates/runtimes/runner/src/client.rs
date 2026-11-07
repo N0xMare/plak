@@ -384,8 +384,7 @@ impl RunnerClient {
             if held_elsewhere {
                 kept.push(entry.clone());
             }
-            if entry.request.operation.verb
-                == plakous_tools::internal::runner::RunnerVerb::ForegroundStop.as_str()
+            if entry.request.operation.verb == RunnerVerb::ForegroundStop.as_str()
                 && let (Some(owner), Ok(value)) = (&entry.request.owner, &answer)
                 && let Some(reports) = value.get("stopped").cloned()
                 && let Ok(reports) = serde_json::from_value(reports)
@@ -809,21 +808,21 @@ impl Inner {
                     unpromoted,
                     ..
                 } => {
-                    if transferred.owner.as_ref() != Some(owner) {
-                        transferred.reported.clear();
-                    }
                     let reporter = lock(&self.foreground_reporter).clone();
                     if let Some(reporter) = reporter {
-                        for process in &stopped {
-                            if transferred.reported.insert(process.call_key.clone()) {
-                                reporter(&owner.line, process);
-                            }
-                            self.acknowledge_foreground(&owner.line, process);
-                        }
-                    } else {
+                        let reports = stopped.clone();
+                        transferred
+                            .reported
+                            .retain(|key| reports.iter().any(|report| &report.call_key == key));
                         stopped.retain(|process| {
                             transferred.reported.insert(process.call_key.clone())
                         });
+                        for process in &stopped {
+                            reporter(&owner.line, process);
+                        }
+                        for process in &reports {
+                            self.acknowledge_foreground(&owner.line, process);
+                        }
                     }
                     transferred.owner = Some(owner.clone());
                     transferred.unpromoted = unpromoted;

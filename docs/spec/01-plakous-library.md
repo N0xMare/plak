@@ -5945,8 +5945,12 @@ both ends over an `ExecutionEnvironment` and joins them in process as a
 loopback (both published internal, chapter 06 §3, and reached from the facade
 only through its hidden `plakous::runner` module). It also holds the runner
 daemon, which serves one runner on a private socket, and the stdio bridge a
-host reaches it through (`plak runner`, chapter 02 §3.1). Runner authority is supplied explicitly to each node and facade binding.
-No production process-global runner selector exists. The registry refreshes home
+host reaches it through (`plak runner`, chapter 02 §3.1). An unavailable remote
+root-identity probe refuses a new effect as proven-no-effect I/O unavailability,
+not identity drift, and never inspects the host filesystem. Runner authority is supplied explicitly to each node and facade binding.
+No production process-global runner selector exists. Registry composition pins
+owned probe/reconciliation tasks to its process executor; dropping a request
+executor cannot cancel them. The registry refreshes home
 configuration and pairing identities before picker refresh or saved-id services
 lookup; an alias rename preserves an id, while removal/re-pair cannot retarget an
 existing record or its retained reconciliation client. Every final non-read dispatch

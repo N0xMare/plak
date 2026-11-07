@@ -154,6 +154,7 @@ pub struct ProcessJobs(Arc<plakous::tools::JobHostCapacity>);
 #[derive(Clone)]
 pub struct ProductStateRoots {
     runner_services: Option<plakous::runner::RunnerServices>,
+    runner_readiness: Option<Arc<(plakous::runner::RunnerRegistry, String)>>,
     local_daemon: Option<plakous::tools::runner::LocalDaemonBackend>,
     daemon_client: Option<plakous::runner::RunnerClient>,
     child_runtime: Arc<dyn super::children::runtime_factory::ChildRuntimeFactory>,
@@ -305,6 +306,7 @@ impl ProductStateRoots {
             subscriptions: std::fs::canonicalize(&subscriptions).unwrap_or(subscriptions),
             local_daemon: None,
             runner_services: None,
+            runner_readiness: None,
             daemon_client: None,
             runtime_sessions: Arc::new(Mutex::new(None)),
             store_fill: Arc::default(),
@@ -375,6 +377,7 @@ impl ProductStateRoots {
     ) -> Self {
         self.local_daemon = Some(backend);
         self.runner_services = None;
+        self.runner_readiness = None;
         self.daemon_client = Some(client);
         self
     }
@@ -477,6 +480,7 @@ impl ProductStateRoots {
     #[must_use]
     pub fn with_runner_services(mut self, services: plakous::runner::RunnerServices) -> Self {
         self.runner_services = Some(services);
+        self.runner_readiness = None;
         self.local_daemon = None;
         self.daemon_client = None;
         self
@@ -500,13 +504,34 @@ impl ProductStateRoots {
     /// unavailable; this is not evidence that any remote process has ended.
     #[must_use]
     pub fn runner_pending(&self) -> bool {
-        self.runner_services
-            .as_ref()
-            .is_some_and(|services| !services.is_available())
+        self.runner_readiness
+            .as_deref()
+            .is_some_and(|(registry, id)| {
+                !registry.rows().iter().any(|row| {
+                    row.runner.runner_id == *id
+                        && row.status == plakous::runner::RunnerStatus::Ready
+                })
+            })
+            || self
+                .runner_services
+                .as_ref()
+                .is_some_and(|services| !services.is_available())
             || self
                 .daemon_client
                 .as_ref()
                 .is_some_and(|client| !client.is_connected())
+    }
+
+    /// Retains the selected placement's live first-bind/reconnect barrier.
+    /// A connected local daemon is not proof its recorded stops reconciled.
+    #[must_use]
+    pub fn with_runner_readiness(
+        mut self,
+        registry: plakous::runner::RunnerRegistry,
+        runner_id: impl Into<String>,
+    ) -> Self {
+        self.runner_readiness = Some(Arc::new((registry, runner_id.into())));
+        self
     }
 
     /// Workspace authority of this node; no process-global runner lookup.
@@ -940,6 +965,7 @@ impl ProductStateRoots {
             state_home,
             local_daemon: None,
             runner_services: None,
+            runner_readiness: None,
             daemon_client: None,
             runtime_sessions: Arc::new(Mutex::new(None)),
             store_fill: Arc::default(),

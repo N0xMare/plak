@@ -80,10 +80,10 @@ impl MachineOverlapGuard {
     }
 
     fn refresh(&self, guarded: &mut Guarded) -> Result<Option<std::fs::File>, PlacementFailure> {
+        use std::os::unix::fs::OpenOptionsExt;
         let Some(durable) = &self.durable else {
             return Ok(None);
         };
-        use std::os::unix::fs::OpenOptionsExt;
         let failure = || PlacementFailure::RunnerUnreachable {
             phase: crate::ProbePhase::Reconcile,
             timed_out: false,
@@ -250,7 +250,7 @@ mod tests {
                     Ok::<_, ()>(())
                 })
                 .unwrap()
-                .unwrap()
+                .unwrap();
         });
         waiting.recv().unwrap();
         let competing = std::fs::OpenOptions::new()

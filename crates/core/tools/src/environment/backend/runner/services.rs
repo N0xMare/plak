@@ -23,7 +23,7 @@ impl RunnerServices {
             inner: backend.link(),
             available: available.clone(),
         });
-        let mut backend = (*backend).clone().running_on(runtime.clone());
+        let mut backend = Arc::unwrap_or_clone(backend).running_on(runtime.clone());
         backend.link = link;
         Self {
             backend: Arc::new(backend),
@@ -62,6 +62,12 @@ impl RunnerServices {
     #[must_use]
     pub fn backend(&self) -> Arc<RunnerBackend> {
         Arc::clone(&self.backend)
+    }
+
+    /// Transfers the explicit live backend and executor to a facade builder.
+    #[must_use]
+    pub fn into_parts(self) -> (Arc<RunnerBackend>, tokio::runtime::Handle) {
+        (self.backend, self.runtime)
     }
 
     /// The multi-thread runtime the backend's link runs on.

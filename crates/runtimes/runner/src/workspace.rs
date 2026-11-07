@@ -223,7 +223,7 @@ impl WorkspaceCatalog {
         if overlaps(&resolved, &self.excluded) {
             return Err(WorkspaceRefusal::ProductHome);
         }
-        let metadata = std::fs::metadata(&resolved).map_err(io_refusal)?;
+        let metadata = std::fs::metadata(&resolved).map_err(|error| io_refusal(&error))?;
         if !metadata.is_dir() {
             return Err(WorkspaceRefusal::NotDirectory);
         }
@@ -471,6 +471,10 @@ impl WorkspaceCatalog {
     }
 }
 
+#[allow(
+    clippy::case_sensitive_file_extension_comparisons,
+    reason = "Git ref syntax reserves the literal lowercase .lock suffix"
+)]
 fn valid_ref(name: &str) -> bool {
     !name.is_empty()
         && name != "@"
@@ -503,9 +507,9 @@ fn utf8(path: &Path) -> Result<String, WorkspaceRefusal> {
         .ok_or(WorkspaceRefusal::InvalidPath)
 }
 fn canonical(path: &Path) -> Result<PathBuf, WorkspaceRefusal> {
-    path.canonicalize().map_err(io_refusal)
+    path.canonicalize().map_err(|error| io_refusal(&error))
 }
-fn io_refusal(error: io::Error) -> WorkspaceRefusal {
+fn io_refusal(error: &io::Error) -> WorkspaceRefusal {
     match error.kind() {
         io::ErrorKind::NotFound => WorkspaceRefusal::NotFound,
         io::ErrorKind::NotADirectory => WorkspaceRefusal::NotDirectory,
@@ -533,7 +537,7 @@ fn resolve_missing(
         }
         match std::fs::symlink_metadata(&resolved) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
-                let target = std::fs::read_link(&resolved).map_err(io_refusal)?;
+                let target = std::fs::read_link(&resolved).map_err(|error| io_refusal(&error))?;
                 let target = if target.is_absolute() {
                     target
                 } else {
@@ -548,7 +552,7 @@ fn resolve_missing(
             }
             Ok(_) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(io_refusal(error)),
+            Err(error) => return Err(io_refusal(&error)),
         }
     }
     Ok(resolved)

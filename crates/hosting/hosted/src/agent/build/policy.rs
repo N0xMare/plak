@@ -298,15 +298,12 @@ pub(crate) fn stamped_workspace_policy(
     runner: Option<&plakous::runner::RunnerServices>,
 ) -> CliResult<WorkspacePolicy> {
     let probe = runner.map_or_else(
-        || {
-            std::sync::Arc::new(plakous::tools::LocalWorkspaceProbe)
-                as std::sync::Arc<dyn plakous::tools::WorkspaceProbe>
-        },
+        || Arc::new(plakous::tools::LocalWorkspaceProbe) as Arc<dyn plakous::tools::WorkspaceProbe>,
         plakous::runner::RunnerServices::workspace_probe,
     );
     let mut policy = WorkspacePolicy::on_runner(physical_root, relative_cwd, probe.as_ref())
         .map_err(|_| CliFailure::new("workspace policy could not be initialized"))?;
-    let runner_id = runner.map(|runner| runner.backend());
+    let runner_id = runner.map(plakous::runner::RunnerServices::backend);
     let runner_id = runner_id
         .as_ref()
         .map_or("local", |backend| backend.runner_id().as_str());

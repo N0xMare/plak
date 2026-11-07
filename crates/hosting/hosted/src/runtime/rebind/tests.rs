@@ -1651,6 +1651,7 @@ fn a_rebind_keeps_the_sessions_frozen_mcp_tools_without_listing_again() {
         crate::agent::ProductStateRoots::with_doubles(root.path().join("h"), root.path().join("s"))
             .named_secrets(),
         None,
+        crate::mcp_binding::McpNodeServices::default(),
     )
     .unwrap()
     .placed_records();

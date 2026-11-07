@@ -597,7 +597,7 @@ pub(in crate::agent) async fn load_or_bootstrap_topology_tree(
     })?;
     if let Some(persisted) = persisted {
         let mut tree = crate::agent_tree::ProductAgentTree::reopen(persisted);
-        let expected = runner.map(|runner| runner.backend());
+        let expected = runner.map(plakous::runner::RunnerServices::backend);
         let expected = expected
             .as_ref()
             .map(|backend| backend.runner_id().as_str());

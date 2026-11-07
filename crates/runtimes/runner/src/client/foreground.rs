@@ -157,8 +157,7 @@ impl Inner {
     pub(super) fn cleanup_foreground(
         &self,
         owner: LineOwner,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), RunnerFailure>> + Send + '_>>
-    {
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), RunnerFailure>> + Send + '_>> {
         Box::pin(async move {
             let calls = self.foreground.settled_on(owner);
             if calls.is_empty() {

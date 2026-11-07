@@ -9,10 +9,14 @@
 //! `ps <name>` lists that runner's lines.
 
 pub(crate) mod dial;
+#[cfg(feature = "web")]
+pub(crate) mod environment;
 mod home;
 #[cfg(feature = "web")]
 pub(crate) mod local;
+pub(crate) mod ownership;
 pub(crate) mod registry;
+pub(crate) mod services;
 
 pub(crate) use home::{host_id, private_directory};
 
@@ -129,27 +133,20 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
             .map_err(|error| {
                 CliFailure::new(format!("runner root {}: {error}", first.display()))
             })?;
-    let (roots, outside) = (
-        config
-            .roots
-            .iter()
-            .chain(&config.copies)
-            .cloned()
-            .collect::<Vec<_>>(),
-        excluded.clone(),
-    );
-    let workspaces = Arc::new(move |root: &Path, cwd: &Path| {
-        if !home::admitted_workspace(&roots, &outside, root) {
-            return Err(plakous::tools::runner::workspace_refusal());
-        }
-        ExecutionEnvironment::host(scope, root, cwd, ExecutionEnvironmentConfig::default())
-    });
     let roots = config
         .roots
         .iter()
         .chain(&config.copies)
         .cloned()
         .collect::<Vec<_>>();
+    let workspace_roots = roots.clone();
+    let outside = excluded.clone();
+    let workspaces = Arc::new(move |root: &Path, cwd: &Path| {
+        if !home::admitted_workspace(&workspace_roots, &outside, root) {
+            return Err(plakous::tools::runner::workspace_refusal());
+        }
+        ExecutionEnvironment::host(scope, root, cwd, ExecutionEnvironmentConfig::default())
+    });
     let probe_excluded = excluded.clone();
     let probe_paths = Arc::new(move |candidate: &Path| {
         home::admitted_probe_path(&roots, &probe_excluded, candidate)

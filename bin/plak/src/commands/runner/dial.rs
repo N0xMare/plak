@@ -55,8 +55,6 @@ pub(crate) const STRICT_SSH_OPTIONS: [&str; 37] = [
     "ConnectTimeout=10",
 ];
 
-/// The command a host runs on its runner through ssh.
-
 /// This build's version triple: the protocol, the source revision it was
 /// built from (`unknown` when the build did not say) and its flavor.
 pub(crate) fn version() -> VersionTriple {

@@ -10,29 +10,68 @@ use plakous_hosted::sessions::projector::RootInterruptCause;
 
 use crate::shell::services::Services;
 
-pub(super) fn prepare(
+pub(crate) use super::ownership::StandaloneRunnerError;
+
+#[derive(Clone)]
+enum LocalTransport {
+    Direct,
+    #[cfg(feature = "web")]
+    Daemon(super::environment::HostEnvironment),
+}
+
+#[cfg(feature = "web")]
+pub(crate) fn prepare(
     services: &Services,
     environment: &super::environment::HostEnvironment,
     runtime: &tokio::runtime::Runtime,
 ) -> CliResult<Services> {
-    let prepared = crate::commands::runner::registry::prepare(services)?;
+    let ownership =
+        std::sync::Arc::new(super::ownership::RunnerOwnership::host(services.paths()?)?);
+    let services = services.with_runner_ownership(ownership);
+    let prepared = crate::commands::runner::registry::prepare(&services)?;
     let services = prepared.services;
     services.runners().require_connection("local", true);
     start_probes(
         &services,
         prepared.local,
-        environment.clone(),
+        LocalTransport::Daemon(environment.clone()),
         runtime.handle(),
     );
     Ok(services)
 }
 
+pub(crate) fn standalone(
+    services: &Services,
+    executor: &tokio::runtime::Handle,
+) -> Result<Services, StandaloneRunnerError> {
+    if let Some(owner) = services.runner_ownership() {
+        return if owner.is_standalone() {
+            Ok(services.clone())
+        } else {
+            Err(StandaloneRunnerError::ImportThroughRunningHost)
+        };
+    }
+    let ownership = super::ownership::RunnerOwnership::standalone(
+        services.paths().map_err(StandaloneRunnerError::Setup)?,
+    )?;
+    let services = services.with_runner_ownership(std::sync::Arc::new(ownership));
+    let prepared = super::registry::prepare(&services).map_err(StandaloneRunnerError::Setup)?;
+    start_probes(
+        &prepared.services,
+        prepared.local,
+        LocalTransport::Direct,
+        executor,
+    );
+    Ok(prepared.services)
+}
+
 fn start_probes(
     services: &Services,
     local: std::sync::Arc<plakous::runner::WorkspaceCatalog>,
-    environment: super::environment::HostEnvironment,
+    environment: LocalTransport,
     runtime: &tokio::runtime::Handle,
 ) {
+    services.runners().run_probes_on(runtime.clone());
     let transports = std::sync::Arc::new(std::sync::Mutex::new(BTreeMap::<
         String,
         crate::commands::runner::dial::Dialed,
@@ -51,31 +90,31 @@ fn start_probes(
             let handle = handle.clone();
             Box::pin(async move {
                 if id == "local" {
-                    if services
-                        .local_runner_client()
-                        .is_some_and(|client| client.is_connected())
-                        && registry.rows().iter().any(|row| {
-                            row.runner.runner_id == "local"
-                                && row.status == plakous::runner::RunnerStatus::Ready
-                        })
-                    {
-                        return tokio::task::spawn_blocking(move || {
-                            registry.ready_local(local, services.now_unix_seconds())
-                        })
-                        .await
-                        .map_err(|_| {
-                            plakous::runner::PlacementFailure::RunnerUnreachable {
-                                phase: plakous::runner::ProbePhase::Discovery,
-                                timed_out: false,
+                    match environment {
+                        LocalTransport::Direct => {
+                            return ready_local(registry, local, services.now_unix_seconds()).await;
+                        }
+                        #[cfg(feature = "web")]
+                        LocalTransport::Daemon(environment) => {
+                            if services
+                                .local_runner_client()
+                                .is_some_and(|client| client.is_connected())
+                                && registry.rows().iter().any(|row| {
+                                    row.runner.runner_id == "local"
+                                        && row.status == plakous::runner::RunnerStatus::Ready
+                                })
+                            {
+                                return ready_local(registry, local, services.now_unix_seconds())
+                                    .await;
                             }
-                        })?;
+                            let result = bind_local(&services, local, &environment, &handle).await;
+                            match &result {
+                                Ok(client) => watch_remote(registry, id, client.clone(), retries),
+                                Err(_) => retry_remote(registry, id, retries),
+                            }
+                            return result.map(|_| ());
+                        }
                     }
-                    let result = bind_local(&services, local, &environment, &handle).await;
-                    match &result {
-                        Ok(client) => watch_remote(registry, id, client.clone(), retries),
-                        Err(_) => retry_remote(registry, id, retries),
-                    }
-                    return result.map(|_| ());
                 }
                 let remote = crate::commands::runner::registry::remote(&services, &id)?;
                 let connected = transports
@@ -121,6 +160,19 @@ fn start_probes(
     runtime.spawn(async move {
         let _ = registry.refresh(None).await;
     });
+}
+
+async fn ready_local(
+    registry: plakous::runner::RunnerRegistry,
+    catalog: std::sync::Arc<plakous::runner::WorkspaceCatalog>,
+    now: u64,
+) -> Result<(), plakous::runner::PlacementFailure> {
+    tokio::task::spawn_blocking(move || registry.ready_local(catalog, now))
+        .await
+        .map_err(|_| plakous::runner::PlacementFailure::RunnerUnreachable {
+            phase: plakous::runner::ProbePhase::Discovery,
+            timed_out: false,
+        })?
 }
 
 #[derive(Default)]
@@ -240,6 +292,7 @@ fn install_reporter(client: &RunnerClient) {
     });
 }
 
+#[cfg(feature = "web")]
 async fn bind_local(
     services: &Services,
     catalog: std::sync::Arc<plakous::runner::WorkspaceCatalog>,
@@ -254,6 +307,9 @@ async fn bind_local(
     let paths = services
         .paths()
         .map_err(|_| unavailable(ProbePhase::Daemon))?;
+    services
+        .runners()
+        .begin_reconcile("local", services.now_unix_seconds());
     services.runners().progress("local", ProbePhase::Daemon);
     let client = if let Some(client) = services.local_runner_client() {
         if !client.is_connected() {
@@ -320,22 +376,7 @@ async fn bind_remote(
     let unavailable = |phase, timed_out| PlacementFailure::RunnerUnreachable { phase, timed_out };
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(25);
     services.runners().progress(&remote.id, ProbePhase::Ssh);
-    let mut transport =
-        crate::commands::runner::dial::ssh_command(&remote.config.ssh, &["/bin/true"]);
-    let transport = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        transport
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status(),
-    )
-    .await
-    .map_err(|_| unavailable(ProbePhase::Ssh, true))?
-    .map_err(|_| unavailable(ProbePhase::Ssh, false))?;
-    if !transport.success() {
-        return Err(unavailable(ProbePhase::Ssh, false));
-    }
+    check_ssh(&remote.config.ssh).await?;
     services.runners().progress(&remote.id, ProbePhase::Daemon);
     let dialed = tokio::time::timeout(std::time::Duration::from_secs(10), async {
         match client {
@@ -352,6 +393,42 @@ async fn bind_remote(
     })
     .await
     .map_err(|_| unavailable(ProbePhase::Daemon, true))??;
+    finish_remote_bind(services, remote, runtime, deadline, dialed).await
+}
+
+async fn check_ssh(destination: &str) -> Result<(), plakous::runner::PlacementFailure> {
+    use plakous::runner::{PlacementFailure, ProbePhase};
+    let unavailable = |timed_out| PlacementFailure::RunnerUnreachable {
+        phase: ProbePhase::Ssh,
+        timed_out,
+    };
+    let mut transport = crate::commands::runner::dial::ssh_command(destination, &["/bin/true"]);
+    let transport = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        transport
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status(),
+    )
+    .await
+    .map_err(|_| unavailable(true))?
+    .map_err(|_| unavailable(false))?;
+    if !transport.success() {
+        return Err(unavailable(false));
+    }
+    Ok(())
+}
+
+async fn finish_remote_bind(
+    services: &Services,
+    remote: &super::registry::Remote,
+    runtime: &tokio::runtime::Handle,
+    deadline: tokio::time::Instant,
+    dialed: super::dial::Dialed,
+) -> Result<super::dial::Dialed, plakous::runner::PlacementFailure> {
+    use plakous::runner::{PlacementFailure, ProbePhase};
+    let unavailable = |phase, timed_out| PlacementFailure::RunnerUnreachable { phase, timed_out };
     install_reporter(&dialed.client);
     services.runners().progress(&remote.id, ProbePhase::Bind);
     tokio::time::timeout_at(deadline, dialed.client.lines())
@@ -380,11 +457,9 @@ async fn bind_remote(
         .await
         .map_err(|_| unavailable(ProbePhase::Discovery, true))?
         .map_err(|_| unavailable(ProbePhase::Discovery, false))?;
-    services.runners().blocked(
-        &remote.id,
-        unavailable(ProbePhase::Reconcile, false),
-        services.now_unix_seconds(),
-    );
+    services
+        .runners()
+        .begin_reconcile(&remote.id, services.now_unix_seconds());
     let roots = services
         .state_roots()
         .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
@@ -398,7 +473,7 @@ async fn bind_remote(
     )
     .await
     .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
-    for failure in failures.iter().filter(|failure| !failure.held_elsewhere) {
+    if let Some(failure) = failures.iter().find(|failure| !failure.held_elsewhere) {
         tracing::warn!(target: "plak.runner", phase = "sweep", line = %failure.line, error = %failure.reason, "runner_recovery_failed");
         return Err(unavailable(ProbePhase::Reconcile, false));
     }
@@ -429,7 +504,7 @@ async fn bind_remote(
 }
 
 /// A stop is durable before the host can die; finish it under a new head lease.
-pub(super) async fn finish_stops(
+async fn finish_stops(
     services: &Services,
     client: &RunnerClient,
     sessions: &AgentSessions,

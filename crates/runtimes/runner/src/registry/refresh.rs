@@ -75,9 +75,9 @@ impl RunnerRegistry {
                 <[String]>::to_vec,
             );
             for id in &ids {
-                if !entries
+                if entries
                     .get(id)
-                    .is_some_and(|entry| !entry.row.runner.names.is_empty())
+                    .is_none_or(|entry| entry.row.runner.names.is_empty())
                 {
                     return Err(super::missing(id));
                 }
@@ -91,7 +91,6 @@ impl RunnerRegistry {
         loop {
             let mut remaining = None;
             let mut waiting = false;
-            let mut expired = Vec::new();
             {
                 let entries = self.entries.read().unwrap_or_else(PoisonError::into_inner);
                 for id in &ids {
@@ -104,15 +103,6 @@ impl RunnerRegistry {
                     if let Some(admitted) = entry.refresh.admitted {
                         let budget = Duration::from_secs(25).saturating_sub(admitted.elapsed());
                         if budget.is_zero() {
-                            if !matches!(
-                                entry.row.status,
-                                super::RunnerStatus::Blocked(PlacementFailure::RunnerUnreachable {
-                                    timed_out: true,
-                                    ..
-                                })
-                            ) {
-                                expired.push((id.clone(), entry.refresh.phase));
-                            }
                             continue;
                         }
                         remaining =
@@ -121,22 +111,8 @@ impl RunnerRegistry {
                     waiting = true;
                 }
             }
-            for (id, phase) in expired {
-                self.blocked(
-                    &id,
-                    PlacementFailure::RunnerUnreachable {
-                        phase,
-                        timed_out: true,
-                    },
-                    now(),
-                );
-            }
             if !waiting {
-                return Ok(self
-                    .rows()
-                    .into_iter()
-                    .filter(|row| ids.contains(&row.runner.runner_id))
-                    .collect());
+                return Ok(self.request_rows(&ids));
             }
             if let Some(remaining) = remaining {
                 tokio::select! { _ = changed.changed() => {}, () = tokio::time::sleep(remaining) => {} }
@@ -144,6 +120,37 @@ impl RunnerRegistry {
                 let _ = changed.changed().await;
             }
         }
+    }
+
+    // Readers project their own exhausted budget; they never overwrite a
+    // probe's later completed row or take ownership of its reconciliation.
+    fn request_rows(&self, ids: &[String]) -> Vec<RunnerRow> {
+        self.entries
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .values()
+            .filter(|entry| {
+                ids.contains(&entry.row.runner.runner_id) && !entry.row.runner.names.is_empty()
+            })
+            .map(|entry| {
+                let mut row = entry.row.clone();
+                if entry.refresh.active
+                    && entry
+                        .refresh
+                        .admitted
+                        .is_some_and(|at| at.elapsed() >= Duration::from_secs(25))
+                {
+                    row.status =
+                        super::RunnerStatus::Blocked(PlacementFailure::RunnerUnreachable {
+                            phase: entry.refresh.phase,
+                            timed_out: true,
+                        });
+                    row.blocked_since.get_or_insert_with(now);
+                    row.checked_at = Some(now());
+                }
+                row
+            })
+            .collect()
     }
 
     fn queue_probe(&self, id: &str) {
@@ -177,9 +184,19 @@ impl RunnerRegistry {
         let registry = self.clone();
         let id = id.to_owned();
         self.progress(&id, ProbePhase::Queued);
-        tokio::spawn(async move {
+        let work = async move {
             registry.run_probe(id).await;
-        });
+        };
+        if let Some(executor) = self
+            .executor
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+        {
+            executor.spawn(work);
+        } else {
+            tokio::spawn(work);
+        }
     }
 
     async fn run_probe(&self, id: String) {
@@ -211,13 +228,11 @@ impl RunnerRegistry {
             }
         });
         let result = tokio::select! {
-            result = &mut work => { drop(permit); result },
+            result = &mut work => result,
             () = tokio::time::sleep(Duration::from_secs(25)) => {
                 let phase = self.entries.read().unwrap_or_else(PoisonError::into_inner).get(&id).map_or(ProbePhase::Reconcile, |entry| entry.refresh.phase);
                 self.blocked(&id, PlacementFailure::RunnerUnreachable {phase, timed_out: true}, now());
-                let result = work.await;
-                drop(permit);
-                result
+                work.await
             }
         };
         match result {
@@ -233,6 +248,7 @@ impl RunnerRegistry {
             ),
         }
         self.finish_probe(&id);
+        drop(permit);
     }
 
     fn finish_probe(&self, id: &str) {

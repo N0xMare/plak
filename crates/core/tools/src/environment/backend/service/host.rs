@@ -268,7 +268,18 @@ impl Drop for PrivateCwd {
     }
 }
 
+async fn read_stderr_tail(mut stderr: tokio::process::ChildStderr, tail: Arc<ServiceStderrTail>) {
+    let mut buffer = [0_u8; 4096];
+    while let Ok(read) = stderr.read(&mut buffer).await {
+        if read == 0 {
+            break;
+        }
+        tail.push(&buffer[..read]);
+    }
+}
+
 #[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "isolated private cwd fixtures")]
 mod private_cwd_tests {
     use super::PrivateCwd;
 
@@ -291,15 +302,5 @@ mod private_cwd_tests {
         drop(first);
         assert!(!path.exists());
         assert!(second.0.is_dir());
-    }
-}
-
-async fn read_stderr_tail(mut stderr: tokio::process::ChildStderr, tail: Arc<ServiceStderrTail>) {
-    let mut buffer = [0_u8; 4096];
-    while let Ok(read) = stderr.read(&mut buffer).await {
-        if read == 0 {
-            break;
-        }
-        tail.push(&buffer[..read]);
     }
 }

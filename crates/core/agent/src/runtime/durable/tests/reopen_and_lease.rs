@@ -280,14 +280,23 @@ async fn durable_genesis_is_exact_reconstructive_and_revalidates_all_live_facts(
     Ok(())
 }
 
-/// A link that sends nothing: building a runner environment asks it nothing.
+/// A fixture that answers admission probes but executes no runtime effects.
 struct SilentLink;
 
 impl plakous_tools::internal::runner::RunnerLink for SilentLink {
     fn call(
         &self,
-        _call: plakous_tools::internal::runner::RunnerCall,
+        call: plakous_tools::internal::runner::RunnerCall,
     ) -> plakous_tools::internal::runner::RunnerCallFuture {
+        if call.verb() == plakous_tools::internal::runner::RunnerVerb::ProbeWorkspace {
+            let served =
+                plakous_tools::internal::runner::serve_probe(call.payload().clone(), &|_| true);
+            return Box::pin(async move {
+                served
+                    .await
+                    .map_err(|_| plakous_tools::internal::runner::RunnerFailure::Unsupported)
+            });
+        }
         Box::pin(std::future::ready(Err(
             plakous_tools::internal::runner::RunnerFailure::Unavailable("silent".to_owned()),
         )))

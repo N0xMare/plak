@@ -471,6 +471,11 @@ struct Recorder(Mutex<Vec<(String, Value)>>);
 
 impl RunnerLink for Recorder {
     fn call(&self, call: RunnerCall) -> RunnerCallFuture {
+        if call.verb() == plakous_tools::internal::runner::RunnerVerb::ProbeWorkspace {
+            let served =
+                plakous_tools::internal::runner::serve_probe(call.payload().clone(), &|_| true);
+            return Box::pin(async move { served.await.map_err(|_| RunnerFailure::Unsupported) });
+        }
         self.0
             .lock()
             .unwrap()
@@ -911,23 +916,19 @@ async fn an_oversized_frame_from_the_runner_loses_the_link() {
         effect: Duration::from_secs(2),
         ..ClientWindows::default()
     };
-    let (client, hello) = plakous_runner::RunnerClient::connect(host, bind("instance-1"), short)
+    let (client, _) = plakous_runner::RunnerClient::connect(host, bind("instance-1"), short)
         .await
         .unwrap();
-    let link: Arc<dyn RunnerLink> = Arc::new(client);
-    let backend = RunnerBackend::new(hello.descriptor, link).unwrap();
-    let environment =
-        runner_environment(scope(), root.path(), ".", config(), Arc::new(backend)).unwrap();
     tokio::time::sleep(Duration::from_millis(300)).await;
-    let error = environment
-        .read_workspace(
-            WorkspaceReadSliceRequest::start("a.txt", 4).unwrap(),
-            unkeyed(),
-        )
+    assert!(!client.is_connected());
+    let error = client
+        .call(RunnerCall::unkeyed(
+            plakous_tools::internal::runner::RunnerVerb::ReadWorkspace,
+            json!({}),
+        ))
         .await
         .unwrap_err();
-    assert_eq!(error.kind(), ExecutionBackendErrorKind::Io);
-    assert!(error.proven_no_effect());
+    assert!(matches!(error, RunnerFailure::Unavailable(_)));
     fake.abort();
 }
 
@@ -1053,24 +1054,19 @@ async fn a_silent_link_is_lost_at_both_ends_and_pings_keep_it() {
         while reader.read(&mut sink).await.is_ok_and(|read| read > 0) {}
         drop(writer);
     });
-    let (client, hello) =
-        plakous_runner::RunnerClient::connect(host_end, bind("instance-2"), pinging)
-            .await
-            .unwrap();
-    let link: Arc<dyn RunnerLink> = Arc::new(client);
-    let backend = RunnerBackend::new(hello.descriptor, link).unwrap();
-    let environment =
-        runner_environment(scope(), root.path(), ".", config(), Arc::new(backend)).unwrap();
+    let (client, _) = plakous_runner::RunnerClient::connect(host_end, bind("instance-2"), pinging)
+        .await
+        .unwrap();
     tokio::time::sleep(Duration::from_millis(1000)).await;
-    let error = environment
-        .read_workspace(
-            WorkspaceReadSliceRequest::start("a.txt", 4).unwrap(),
-            unkeyed(),
-        )
+    assert!(!client.is_connected());
+    let error = client
+        .call(RunnerCall::unkeyed(
+            plakous_tools::internal::runner::RunnerVerb::ReadWorkspace,
+            json!({}),
+        ))
         .await
         .unwrap_err();
-    assert_eq!(error.kind(), ExecutionBackendErrorKind::Io);
-    assert!(error.proven_no_effect());
+    assert!(matches!(error, RunnerFailure::Unavailable(_)));
     mute.abort();
 }
 
@@ -1211,24 +1207,19 @@ async fn a_runner_stream_gap_aborts_the_stream_on_the_host() {
             }
         }
     });
-    let (client, hello) =
+    let (client, _) =
         plakous_runner::RunnerClient::connect(host_end, bind("instance-1"), windows())
             .await
             .unwrap();
-    let link: Arc<dyn RunnerLink> = Arc::new(client);
-    let backend = RunnerBackend::new(hello.descriptor, link).unwrap();
-    let environment =
-        runner_environment(scope(), root.path(), ".", config(), Arc::new(backend)).unwrap();
-    let request = ServiceProcessRequest::new(
-        "/bin/cat",
-        Vec::<String>::new(),
-        Vec::new(),
-        Vec::new(),
-        1024,
-    )
-    .unwrap();
-    let service = environment.spawn_service(request, unkeyed()).await.unwrap();
-    let mut stdout = service.stdout;
+    let spawn = spawn_operation(&service(root.path()), root.path(), "/bin/cat", &[]).await;
+    let (_, streams) = client
+        .open(RunnerCall::unkeyed(
+            plakous_tools::internal::runner::RunnerVerb::ServiceSpawn,
+            spawn.payload,
+        ))
+        .await
+        .unwrap();
+    let mut stdout = streams.output;
     let mut read = Vec::new();
     // A liveness bound only: generous, so load never trips it.
     tokio::time::timeout(Duration::from_secs(30), stdout.read_to_end(&mut read))

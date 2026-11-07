@@ -705,15 +705,32 @@ impl ExecutionEnvironment {
     }
 
     fn verify_operation_backend(&self) -> Result<(), ExecutionBackendError> {
-        if self.operation_backend.identity() == self.backend()
-            && self.matches_descriptor(self.descriptor())
-        {
-            Ok(())
-        } else {
-            Err(backend_error(
+        let mismatch = || {
+            backend_error(
                 ExecutionBackendErrorKind::IdentityMismatch,
                 "execution environment backend authority no longer matches",
-            ))
+            )
+        };
+        if self.operation_backend.identity() != self.backend() {
+            return Err(mismatch());
+        }
+        let digest = self.recompute_digest().map_err(|error| {
+            if self.runner_link.is_some()
+                && error.kind() == ExecutionEnvironmentErrorKind::Workspace
+            {
+                backend_error(
+                    ExecutionBackendErrorKind::Io,
+                    "runner root identity is unavailable before dispatch",
+                )
+                .with_proven_no_effect(true)
+            } else {
+                mismatch()
+            }
+        })?;
+        if digest == self.descriptor().digest() {
+            Ok(())
+        } else {
+            Err(mismatch())
         }
     }
 }

@@ -704,6 +704,7 @@ pub(crate) mod suite {
             crate::skills::SkillsMode::New,
             root,
             presentation,
+            None,
         )
         .expect("skills discover");
         let listing = skills
@@ -912,7 +913,7 @@ pub(crate) mod suite {
         cwd: &Path,
     ) -> (HarnessProfileSpec, Vec<ResolvedContextSourceFact>) {
         let listing = fixture_skills_listing(presentation, root);
-        enroll_product_instructions(&profile, Some(home), root, cwd, Some(&listing))
+        enroll_product_instructions(&profile, Some(home), root, cwd, Some(&listing), None)
             .expect("enroll AGENTS.md and skills")
     }
 
@@ -1048,6 +1049,7 @@ pub(crate) mod suite {
             crate::skills::SkillsMode::New,
             Path::new("/nonexistent/workspace"),
             skills_presentation(spec),
+            None,
         )
         .expect("skills discover");
         occupancy_extras(spec, tools)

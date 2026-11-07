@@ -4707,6 +4707,15 @@ background hash is pending; welcome never waits for that hash.
   under an idle root, and a crashed host's turn whose loss no open has
   recorded yet, are not found by the scan: they continue, or hold, at the
   session's next open.
+Standalone remote import composes the same runner registry and recovery probes on
+a process-owned executor. It retains exclusive home runner custody through the
+operation and its admitted probes; serving hosts retain shared custody across their
+state keys. A live host therefore causes a typed import-through-the-running-host
+refusal before any standalone bind, rather than an implicit second client or a new
+import RPC. Another standalone operation is a typed home-busy refusal. The kernel
+lock at `runners/runtime-owner.lock`, not a stale socket or PID string, owns this
+exclusion. Standalone local placement remains direct and starts no local daemon.
+
 - **Local process daemon.** After binding its control socket, its independently owned local probe
   dials the home-local runner of this
   protocol, binds journaled to `host/runner/v<N>/calls/<state key>`, and

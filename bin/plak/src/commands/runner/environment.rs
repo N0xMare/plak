@@ -16,7 +16,7 @@ enum PathSource {
 
 /// The environment captured at start.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct HostEnvironment {
+pub(crate) struct HostEnvironment {
     path: String,
     home: Option<String>,
     source: PathSource,
@@ -26,7 +26,7 @@ pub(super) struct HostEnvironment {
 const MINIMAL_PATH: &str = "/usr/bin:/bin";
 
 impl HostEnvironment {
-    pub(super) fn backend(
+    pub(crate) fn backend(
         &self,
         client: plakous::runner::RunnerClient,
         runtime: tokio::runtime::Handle,
@@ -39,7 +39,7 @@ impl HostEnvironment {
         )
     }
     /// Asks the login shell once, with the runner's 5 s bound.
-    pub(super) fn capture() -> Self {
+    pub(crate) fn capture() -> Self {
         Self::from_sources(
             crate::commands::runner::login_shell_path(),
             crate::environment::inherited_path(),
@@ -61,7 +61,7 @@ impl HostEnvironment {
     }
 
     /// What the start line says about it; never the values themselves.
-    pub(super) fn describe(&self) -> String {
+    pub(crate) fn describe(&self) -> String {
         let path = match self.source {
             PathSource::LoginShell => "the login shell's PATH",
             PathSource::Inherited => "this process's PATH (no login shell answered)",

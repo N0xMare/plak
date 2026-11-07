@@ -625,6 +625,10 @@ requests; that exfiltration path is residual risk (section 9).
 
 ### 2.9 Runners
 
+Serving hosts share a home-wide runner-custody lock, while standalone runner
+composition requires it exclusively. Standalone imports refuse through the running
+host before dialing rather than racing a socket probe with a new bind.
+
 Runner placement uses pin-backed stable machine identity and effective canonical
 roots even while a runner is offline. Same-machine pin/root admission and local
 workspace admission share a home-local cross-process file lock through the local

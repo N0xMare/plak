@@ -15,6 +15,66 @@ fn registry(count: usize) -> RunnerRegistry {
     registry
 }
 
+#[test]
+fn dropping_a_request_executor_cannot_kill_the_process_owned_reconcile() {
+    let owner = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    let request = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let registry = registry(1);
+    registry.run_probes_on(owner.handle().clone());
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let (started, starting) = tokio::sync::oneshot::channel();
+    let (completed, completing) = tokio::sync::oneshot::channel();
+    let started = Arc::new(std::sync::Mutex::new(Some(started)));
+    let completed = Arc::new(std::sync::Mutex::new(Some(completed)));
+    registry.probe_with(Arc::new({
+        let release = release.clone();
+        move |registry, id| {
+            let (started, completed, release) =
+                (started.clone(), completed.clone(), release.clone());
+            Box::pin(async move {
+                registry.progress(&id, ProbePhase::Reconcile);
+                started.lock().unwrap().take().unwrap().send(()).unwrap();
+                release.acquire().await.unwrap().forget();
+                registry.blocked(&id, PlacementFailure::RunnerNotPaired, 1);
+                completed.lock().unwrap().take().unwrap().send(()).unwrap();
+                Ok(())
+            })
+        }
+    }));
+    request.block_on(async {
+        let reader = tokio::spawn({
+            let registry = registry.clone();
+            async move { registry.refresh(None).await }
+        });
+        tokio::time::timeout(Duration::from_secs(5), starting)
+            .await
+            .unwrap()
+            .unwrap();
+        reader.abort();
+        let _ = reader.await;
+    });
+    drop(request);
+    release.add_permits(1);
+    owner.block_on(async {
+        tokio::time::timeout(Duration::from_secs(5), completing)
+            .await
+            .unwrap()
+            .unwrap();
+        let rows = registry.refresh(None).await.unwrap();
+        assert_eq!(
+            rows[0].status,
+            RunnerStatus::Blocked(PlacementFailure::RunnerNotPaired)
+        );
+    });
+}
+
 async fn until(mut predicate: impl FnMut() -> bool) {
     for _ in 0..1000 {
         if predicate() {
@@ -222,6 +282,11 @@ async fn aliases_and_concurrent_picker_refreshes_keep_the_original_same_instance
     );
     assert_eq!(client.instance(), instance);
     client.lines().await.unwrap();
+    assert_catalog_repair(&registry, &client).await;
+    serving.abort();
+}
+
+async fn assert_catalog_repair(registry: &RunnerRegistry, client: &crate::RunnerClient) {
     let selected = registry.services("picker").unwrap().unwrap();
     let configured = Arc::new(std::sync::Mutex::new(vec![ConfiguredRunner {
         runner_id: "picker".into(),
@@ -256,5 +321,4 @@ async fn aliases_and_concurrent_picker_refreshes_keep_the_original_same_instance
         client.is_connected(),
         "admitted calls retain their reconciliation client"
     );
-    serving.abort();
 }

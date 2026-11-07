@@ -953,6 +953,10 @@ fn freeze_root_tools<P: plakous_host_protocol::ProtocolExtension>(
             &config.session.workspace_root,
             config.state_roots.named_secrets(),
             None,
+            crate::mcp_binding::McpNodeServices {
+                runner: config.state_roots.runner_services().cloned(),
+                product_home: Some(config.product_home.clone()),
+            },
         )?;
         frozen = frozen.with_mcp_tools(bound.placed_records());
         for notice in bound.notices {

@@ -73,11 +73,7 @@ async fn reports_survive_a_new_owner_until_the_consumers_receipt_is_acknowledged
         .inner
         .foreground
         .acknowledge("home", "second", &receipt);
-    assert!(
-        service
-            .foreground_report("home", "second", &owner)
-            .is_empty()
-    );
+    assert_eq!(service.foreground_report("home", "second", &owner), []);
     assert!(!service.inner.foreground.pending());
 }
 

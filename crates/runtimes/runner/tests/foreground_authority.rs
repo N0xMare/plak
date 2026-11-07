@@ -232,10 +232,16 @@ async fn a_new_owner_stops_and_reports_foreground_but_preserves_promoted_jobs() 
             );
             let third = Link::new(&fixture.service, "third").await;
             let repeated = third.client.transfer_owner(&owner(3)).await.unwrap();
-            assert!(
-                repeated.is_empty(),
-                "a newer accepted owner retires delivered reports"
+            assert_eq!(
+                repeated, stopped,
+                "a newer owner cannot retire an unacknowledged diagnostic"
             );
+            third
+                .client
+                .acknowledge_stopped_foreground(&owner(3).line().to_string(), &repeated[0]);
+            third.client.lines().await.unwrap();
+            let fourth = Link::new(&fixture.service, "fourth").await;
+            assert_eq!(fourth.client.transfer_owner(&owner(4)).await.unwrap(), []);
         }
     }
 }
@@ -298,6 +304,7 @@ async fn an_implicit_transfer_delivers_each_foreground_report_once() {
     assert_eq!(after.client.transfer_owner(&owner(2)).await.unwrap(), []);
     after.reconnect(&fixture.service).await;
     assert_eq!(after.client.transfer_owner(&owner(2)).await.unwrap(), []);
+    after.client.lines().await.unwrap();
     let third = Link::new(&fixture.service, "third").await;
     assert_eq!(third.client.transfer_owner(&owner(3)).await.unwrap(), []);
     assert_eq!(count.load(Ordering::Relaxed), 1);

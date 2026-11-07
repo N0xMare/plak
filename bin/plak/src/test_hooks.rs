@@ -186,7 +186,7 @@ mod child_runner {
 }
 
 pub(crate) fn runner_services() -> Option<plakous::runner::RunnerServices> {
-    child_runner::services()
+    child_runner::services().or_else(plakous_offline_crash_harness::loopback::services)
 }
 
 /// A `quit-as-handoff` file beside the evidence log makes the agent face's

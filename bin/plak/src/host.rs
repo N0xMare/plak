@@ -11,9 +11,7 @@
 //! (spec 02 §4.4). A `SIGTERM` or `SIGINT` hands every resident
 //! session off and ends the process within [`HANDOFF_DEADLINE`].
 
-mod environment;
 mod lock;
-mod runner;
 mod sessions;
 mod socket;
 
@@ -24,6 +22,7 @@ use plakous_hosted::error::{CliFailure, CliResult, ProcessOutcome};
 use plakous_hosted::host_service::wire::SessionHost;
 
 use crate::command::HostCommand;
+use crate::commands::runner::{environment, services as runner};
 use crate::shell::services::Services;
 
 /// How long a stopping host may take to hand its sessions off before the
@@ -77,7 +76,11 @@ pub(crate) fn run_host_command(
     let bound = socket::Bound::bind(&paths.host_socket(), &lock)?;
     drop(entered);
     let services = runner::prepare(services, &environment, &runtime)?;
-    let sessions = sessions::ProductSessions::new(&services, command.idle_release)?;
+    let sessions = sessions::ProductSessions::new(
+        &services,
+        command.idle_release,
+        Some(runtime.handle().clone()),
+    )?;
     // Read before the host serves, so nothing this host does is mistaken
     // for what the last one left.
     let owed = sessions.owed()?;

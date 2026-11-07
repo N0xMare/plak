@@ -315,8 +315,9 @@ impl AgentBuilder {
         mut self,
         services: plakous_tools::internal::runner::RunnerServices,
     ) -> Self {
-        self.runner_backend = Some(services.backend());
-        self.runner_runtime = Some(services.runtime().clone());
+        let (backend, runtime) = services.into_parts();
+        self.runner_backend = Some(backend);
+        self.runner_runtime = Some(runtime);
         self.local_daemon = None;
         self
     }

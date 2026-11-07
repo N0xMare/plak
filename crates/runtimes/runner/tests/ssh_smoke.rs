@@ -90,9 +90,17 @@ fn control(owner: LineOwner, call_id: CallId, attempt_id: AttemptId) -> Operatio
         })
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "explicit strict-SSH endpoint, paired host and disposable admitted root required"]
-async fn remote_root_uses_the_pinned_runner_and_keyed_effect_survives_link_rebind() {
+struct RemoteRoot {
+    destination: String,
+    command: String,
+    root: String,
+    link: tokio::process::Child,
+    client: RunnerClient,
+    selected: Arc<RunnerBackend>,
+    environment: plakous_tools::ExecutionEnvironment,
+}
+
+async fn remote_root() -> RemoteRoot {
     let destination = required("PLAK_RUNNER_SMOKE_DESTINATION");
     let command = required("PLAK_RUNNER_SMOKE_COMMAND");
     assert!(
@@ -164,15 +172,6 @@ async fn remote_root_uses_the_pinned_runner_and_keyed_effect_survives_link_rebin
         selected.clone(),
     )
     .unwrap();
-    let owner = LineOwner::new(
-        LineId::try_from(uuid::Uuid::new_v4()).unwrap(),
-        1,
-        BranchId::try_from(uuid::Uuid::new_v4()).unwrap(),
-        1,
-    );
-    let call = CallId::try_from(uuid::Uuid::new_v4()).unwrap();
-    let attempt = AttemptId::try_from(uuid::Uuid::new_v4()).unwrap();
-    let marker = format!(".runner-smoke-{}", uuid::Uuid::new_v4());
     assert_eq!(
         client
             .call(RunnerCall::unkeyed(
@@ -183,7 +182,18 @@ async fn remote_root_uses_the_pinned_runner_and_keyed_effect_survives_link_rebin
             .unwrap(),
         serde_json::json!({"Ok":true})
     );
-    let sessions = RunnerSessions::new(&selected, &environment, owner);
+    RemoteRoot {
+        destination,
+        command,
+        root,
+        link,
+        client,
+        selected,
+        environment,
+    }
+}
+
+async fn promote_job(sessions: &RunnerSessions, owner: LineOwner, attempt: AttemptId) {
     let job = sessions
         .start(
             plakous_tools::JoinedProcessStartRequest::new(
@@ -207,6 +217,31 @@ async fn remote_root_uses_the_pinned_runner_and_keyed_effect_survives_link_rebin
         .await
         .unwrap();
     sessions.promote(job).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "explicit strict-SSH endpoint, paired host and disposable admitted root required"]
+async fn remote_root_uses_the_pinned_runner_and_keyed_effect_survives_link_rebind() {
+    let RemoteRoot {
+        destination,
+        command,
+        root,
+        mut link,
+        client,
+        selected,
+        environment,
+    } = remote_root().await;
+    let owner = LineOwner::new(
+        LineId::try_from(uuid::Uuid::new_v4()).unwrap(),
+        1,
+        BranchId::try_from(uuid::Uuid::new_v4()).unwrap(),
+        1,
+    );
+    let call = CallId::try_from(uuid::Uuid::new_v4()).unwrap();
+    let attempt = AttemptId::try_from(uuid::Uuid::new_v4()).unwrap();
+    let marker = format!(".runner-smoke-{}", uuid::Uuid::new_v4());
+    let sessions = RunnerSessions::new(&selected, &environment, owner);
+    promote_job(&sessions, owner, attempt).await;
     let script = format!("printf once >> '{marker}'; pwd");
     let request = || {
         LiteralProcessRequest::new(
@@ -251,7 +286,7 @@ async fn remote_root_uses_the_pinned_runner_and_keyed_effect_survives_link_rebin
         "rebind/replay cannot dispatch the effect twice"
     );
     assert_eq!(
-        sessions.jobs().await.unwrap().1[0].status,
+        sessions.jobs().await.unwrap()[0].status,
         plakous_tools::JobStatus::Running
     );
     sessions

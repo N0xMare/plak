@@ -172,7 +172,13 @@ fn discovery_never_waits_for_a_writer_of_special_git_metadata() {
     let repository = checkout(&root, "fifo", "unused");
     let head = repository.join(".git/HEAD");
     std::fs::remove_file(&head).unwrap();
-    rustix::fs::mkfifo(&head, rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR).unwrap();
+    assert!(
+        std::process::Command::new("mkfifo")
+            .arg(&head)
+            .status()
+            .unwrap()
+            .success()
+    );
     let catalog = WorkspaceCatalog::machine(vec![root], &protected, false).unwrap();
     let discovery = catalog.discover();
     assert_eq!(

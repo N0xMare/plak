@@ -155,6 +155,7 @@ pub struct RunnerRegistry {
     probe: Arc<RwLock<Option<Arc<RunnerProbe>>>>,
     probe_pool: Arc<tokio::sync::Semaphore>,
     configured: Arc<RwLock<Option<Arc<RunnerCatalog>>>>,
+    executor: Arc<RwLock<Option<tokio::runtime::Handle>>>,
 }
 
 /// Home composition reads current aliases/pins; saved ids remain authority.
@@ -169,6 +170,7 @@ impl Default for RunnerRegistry {
             probe: Arc::default(),
             probe_pool: Arc::new(tokio::sync::Semaphore::new(4)),
             configured: Arc::default(),
+            executor: Arc::default(),
         }
     }
 }
@@ -186,6 +188,14 @@ pub struct BoundWorkspace {
 }
 
 impl RunnerRegistry {
+    /// Pins separately owned probes/reconciliation to the serving executor.
+    /// Its owner must outlive requests; request executors may then be dropped.
+    pub fn run_probes_on(&self, executor: tokio::runtime::Handle) {
+        *self
+            .executor
+            .write()
+            .unwrap_or_else(PoisonError::into_inner) = Some(executor);
+    }
     /// Installs a fresh configured-catalog reader, independent of picker requests.
     pub fn configured_with(&self, catalog: Arc<RunnerCatalog>) {
         *self
@@ -400,6 +410,24 @@ impl RunnerRegistry {
     /// Records failure without erasing committed roots or replacing the shared
     /// client needed to reconcile admitted calls. Repeated failures keep since.
     pub fn blocked(&self, id: &str, failure: PlacementFailure, now: u64) {
+        self.block(id, failure, now, true);
+    }
+
+    /// Closes new-call admission before reconciliation without claiming a
+    /// completed probe. Existing clients remain available for owned recovery.
+    pub fn begin_reconcile(&self, id: &str, now: u64) {
+        self.block(
+            id,
+            PlacementFailure::RunnerUnreachable {
+                phase: ProbePhase::Reconcile,
+                timed_out: false,
+            },
+            now,
+            false,
+        );
+    }
+
+    fn block(&self, id: &str, failure: PlacementFailure, now: u64, completed: bool) {
         if let Some(entry) = self
             .entries
             .write()
@@ -410,12 +438,15 @@ impl RunnerRegistry {
             if let Some(Connection::Remote(_, services)) = &entry.connection {
                 services.set_available(false);
             }
-            entry.row.checked_at = Some(now);
+            if completed {
+                entry.row.checked_at = Some(now);
+            }
             entry.row.status = RunnerStatus::Blocked(failure);
             let phase = match &entry.row.status {
                 RunnerStatus::Blocked(PlacementFailure::RunnerUnreachable { phase, .. }) => *phase,
                 _ => ProbePhase::Bind,
             };
+            entry.refresh.phase = phase;
             let _ = self.progress.send(RunnerProgress {
                 runner_id: id.into(),
                 phase,
@@ -559,8 +590,7 @@ impl RunnerRegistry {
         path: &str,
         require_canonical: bool,
     ) -> Result<String, PlacementFailure> {
-        self.refresh(Some(&[id.to_owned()])).await?;
-        validate(self.connection(id)?, path, require_canonical).await
+        validate(self.refresh_connection(id).await?, path, require_canonical).await
     }
 
     /// Fresh creation validation followed by an explicit immutable service
@@ -573,8 +603,7 @@ impl RunnerRegistry {
         id: &str,
         path: &str,
     ) -> Result<BoundWorkspace, PlacementFailure> {
-        self.refresh(Some(&[id.to_owned()])).await?;
-        let connection = self.connection(id)?;
+        let connection = self.refresh_connection(id).await?;
         let root = validate(connection.clone(), path, true).await?;
         let services = match connection {
             Connection::Remote(_, services) => Some(services),
@@ -586,6 +615,16 @@ impl RunnerRegistry {
             root,
             services,
         })
+    }
+
+    async fn refresh_connection(&self, id: &str) -> Result<Connection, PlacementFailure> {
+        let rows = self.refresh(Some(&[id.to_owned()])).await?;
+        match rows.into_iter().next().map(|row| row.status) {
+            Some(RunnerStatus::Ready) => self.connection(id),
+            Some(RunnerStatus::Blocked(reason)) => Err(reason),
+            Some(RunnerStatus::Unknown) => Err(reconciling()),
+            None => Err(missing(id)),
+        }
     }
 }
 

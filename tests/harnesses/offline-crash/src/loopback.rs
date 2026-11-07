@@ -6,7 +6,7 @@
 use std::sync::{Arc, OnceLock};
 
 use plakous::model::RunId;
-use plakous::tools::runner::{RunnerExtension, select_process_runner};
+use plakous::tools::runner::{RunnerExtension, RunnerServices};
 use plakous::tools::{
     ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope, RunnerId,
 };
@@ -15,11 +15,18 @@ use plakous_runner_protocol::{Bind, VersionTriple};
 
 /// The runner and the runtime its link runs on, kept for the process.
 struct Route {
+    services: RunnerServices,
     _runtime: tokio::runtime::Runtime,
     _loopback: Loopback,
 }
 
 static ROUTE: OnceLock<Route> = OnceLock::new();
+
+/// Explicit test-route services for the fixture composition root to inject.
+#[must_use]
+pub fn services() -> Option<RunnerServices> {
+    ROUTE.get().map(|route| route.services.clone())
+}
 
 /// Selects the loopback runner for every session this process constructs;
 /// `extension` answers the reads the embedding program serves, such as
@@ -72,8 +79,9 @@ pub fn select(extension: Arc<dyn RunnerExtension>) -> Result<(), String> {
     let loopback = runtime
         .block_on(Loopback::join(service, bind, ClientWindows::default()))
         .map_err(|error| error.to_string())?;
-    select_process_runner(loopback.backend(), runtime.handle().clone());
+    let services = RunnerServices::new(loopback.backend(), runtime.handle().clone());
     let _ = ROUTE.set(Route {
+        services,
         _runtime: runtime,
         _loopback: loopback,
     });

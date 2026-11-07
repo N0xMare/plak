@@ -23,6 +23,7 @@ pub(crate) type TelemetrySinkFactory = fn() -> Option<Arc<dyn ExtraTelemetrySink
 
 /// Handles every product command shares for the life of the process.
 pub(crate) struct Services {
+    runner_ownership: Option<Arc<crate::commands::runner::ownership::RunnerOwnership>>,
     runners: plakous::runner::RunnerRegistry,
     runner_overlap: Arc<OnceLock<plakous::runner::MachineOverlapGuard>>,
     local_daemon: Arc<
@@ -43,6 +44,33 @@ pub(crate) struct Services {
 }
 
 impl Services {
+    /// Composes standalone import runners on a process-owned executor.
+    /// Refuses while any host owns the home, before any runner bind.
+    #[allow(
+        dead_code,
+        reason = "standalone import is integrated by its product boundary"
+    )]
+    pub(crate) fn with_standalone_runners(
+        &self,
+        executor: &tokio::runtime::Handle,
+    ) -> Result<Self, crate::commands::runner::services::StandaloneRunnerError> {
+        crate::commands::runner::services::standalone(self, executor)
+    }
+
+    pub(crate) fn runner_ownership(
+        &self,
+    ) -> Option<&crate::commands::runner::ownership::RunnerOwnership> {
+        self.runner_ownership.as_deref()
+    }
+
+    pub(crate) fn with_runner_ownership(
+        &self,
+        ownership: Arc<crate::commands::runner::ownership::RunnerOwnership>,
+    ) -> Self {
+        let mut services = self.clone();
+        services.runner_ownership = Some(ownership);
+        services
+    }
     pub(crate) fn runner_probe_context(&self) -> Self {
         let mut services = self.clone();
         services.runners = plakous::runner::RunnerRegistry::default();
@@ -57,6 +85,7 @@ impl Services {
     #[cfg(test)]
     pub(crate) fn for_home(paths: PlakPaths) -> Self {
         Self {
+            runner_ownership: None,
             runners: plakous::runner::RunnerRegistry::default(),
             runner_overlap: Arc::default(),
             local_daemon: Arc::default(),
@@ -94,6 +123,7 @@ impl Services {
             crate::product_doctor::install_credential_state_home(state.to_path_buf());
         }
         Self {
+            runner_ownership: None,
             runners: plakous::runner::RunnerRegistry::default(),
             runner_overlap: Arc::default(),
             local_daemon: Arc::default(),
@@ -125,6 +155,7 @@ impl Clone for Services {
             let _ = extra_telemetry_sink.set(sink.clone());
         }
         Self {
+            runner_ownership: self.runner_ownership.clone(),
             runners: self.runners.clone(),
             runner_overlap: self.runner_overlap.clone(),
             local_daemon: self.local_daemon.clone(),
@@ -170,6 +201,10 @@ impl Services {
         })
     }
 
+    #[allow(
+        dead_code,
+        reason = "remote session callers are integrated with the product cut"
+    )]
     pub(crate) fn state_roots_on(
         &self,
         context: &PlakPaths,
@@ -179,18 +214,19 @@ impl Services {
         if runner_id == "local" && self.runners.rows().is_empty() {
             return Ok(roots);
         }
-        match self.runners.services(runner_id).map_err(|failure| {
+        let roots = match self.runners.services(runner_id).map_err(|failure| {
             crate::CliFailure::new(format!("runner placement refused: {failure:?}"))
         })? {
             Some(services) => {
                 let roots = roots.with_runner_services(services);
-                Ok(match self.runners.client(runner_id) {
+                match self.runners.client(runner_id) {
                     Some(client) => roots.with_runner_client(client),
                     None => roots,
-                })
+                }
             }
-            None => Ok(roots),
-        }
+            None => roots,
+        };
+        Ok(roots.with_runner_readiness(self.runners.clone(), runner_id))
     }
     #[allow(dead_code, reason = "selected only by the optional hosting product")]
     pub(crate) fn with_local_daemon(
@@ -274,6 +310,9 @@ impl Services {
         };
         let roots = match crate::test_hooks::runner_services() {
             Some(services) => roots.with_runner_services(services),
+            None if !self.runners.rows().is_empty() => {
+                roots.with_runner_readiness(self.runners.clone(), "local")
+            }
             None => roots,
         };
         Ok(roots)

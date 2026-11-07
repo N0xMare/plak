@@ -3,6 +3,37 @@ use std::sync::Arc;
 
 use super::ProductStateRoots;
 
+#[test]
+fn local_stop_stays_pending_behind_the_live_reconciliation_barrier() {
+    use plakous::runner::{ConfiguredRunner, RunnerRegistry, WorkspaceCatalog};
+    let home = tempfile::tempdir().unwrap();
+    let product = home.path().join("product");
+    let workspace = home.path().join("workspace");
+    std::fs::create_dir(&product).unwrap();
+    std::fs::create_dir(&workspace).unwrap();
+    let registry = RunnerRegistry::default();
+    registry.configure(ConfiguredRunner {
+        runner_id: "local".into(),
+        names: vec!["local".into()],
+    });
+    let roots = ProductStateRoots::with_doubles(product.clone(), home.path().join("state"))
+        .with_runner_readiness(registry.clone(), "local");
+    assert!(roots.runner_pending());
+    let catalog = Arc::new(WorkspaceCatalog::local(&workspace, &[], &product).unwrap());
+    registry.ready_local(catalog, 0).unwrap();
+    assert!(!roots.runner_pending());
+    registry.begin_reconcile("local", 1);
+    assert_eq!(
+        registry.rows()[0].checked_at,
+        Some(0),
+        "an in-progress barrier is not a completed probe"
+    );
+    assert!(
+        roots.runner_pending(),
+        "transport availability cannot imply recorded-stop completion"
+    );
+}
+
 #[tokio::test]
 async fn child_process_stop_collects_every_failure_instead_of_stopping_at_the_first() {
     use crate::agent_tree::{InterruptCause, ProductAgentTree};
