@@ -1084,6 +1084,38 @@ async fn explicit_codex_slot_ids_refuse_foreign_records_online_and_offline() -> 
     Ok(())
 }
 
+#[tokio::test]
+async fn an_exhausted_codex_callback_pool_is_typed_busy_without_ephemeral_fallback() -> TestResult {
+    let occupied_one = TcpListener::bind(("127.0.0.1", 0)).await?;
+    let occupied_two = TcpListener::bind(("127.0.0.1", 0)).await?;
+    let ports: &'static [u16] = Box::leak(
+        vec![
+            occupied_one.local_addr()?.port(),
+            occupied_two.local_addr()?.port(),
+        ]
+        .into_boxed_slice(),
+    );
+    let endpoint = test_endpoint().await?;
+    let (_directory, path) = private_slot()?;
+    let mut manager = manager_for_endpoint(&path, &endpoint)?;
+    Arc::get_mut(&mut manager)
+        .ok_or("manager unexpectedly shared")?
+        .endpoints
+        .loopback_ports = ports;
+    assert!(matches!(
+        manager.begin_browser_login().await,
+        Err(NativeCodexAuthError::LoopbackBusy)
+    ));
+    assert!(
+        manager
+            .store
+            .load()
+            .map_err(|_| NativeCodexAuthError::Store)?
+            .is_none()
+    );
+    Ok(())
+}
+
 async fn expire_ready_generation(
     manager: &Arc<CodexSubscriptionCredentialManager>,
 ) -> Result<CredentialFence, NativeCodexAuthError> {

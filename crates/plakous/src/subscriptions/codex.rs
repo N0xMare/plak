@@ -320,6 +320,7 @@ pub(super) fn map_codex_error(
         plakous_openai::NativeCodexAuthError::DeviceCodeExpired => {
             NativeSubscriptionError::DeviceCodeExpired
         }
+        plakous_openai::NativeCodexAuthError::LoopbackBusy => NativeSubscriptionError::AccountBusy,
         plakous_openai::NativeCodexAuthError::Binding => {
             NativeSubscriptionError::AuthenticationBinding
         }

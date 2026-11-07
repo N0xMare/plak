@@ -4629,6 +4629,10 @@ unchanged empty slot under compatibility; a pre-existing directory, later receip
 credential publication or replacement directory is never removed by it.
 `remove_signed_out_account` uses that same lock and path authority, refuses
 credentials or busy writers, and refuses bare defaults.
+Local Codex login binds only the compiled callback-port pool. An occupied
+pool returns typed `LoopbackBusy`, exposed by the facade as `AccountBusy`; it
+never falls back to an unpinned listener or a different login mode. Other
+binding failures retain their existing classification.
 
 Codex online credential-manager constructors, including clock/test variants,
 and the offline local-admin constructor take an explicit `CredentialSlotId`.

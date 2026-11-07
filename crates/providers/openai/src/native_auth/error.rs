@@ -24,6 +24,9 @@ pub enum NativeCodexAuthError {
     /// A peer owns the credential record's writer lock.
     #[error("native Codex credential store is busy")]
     StoreBusy,
+    /// Every pinned browser callback port is already in use.
+    #[error("native Codex login is busy: pinned browser callback ports are in use")]
+    LoopbackBusy,
     /// Secure randomness or a local login binding failed.
     #[error("native Codex login binding failed")]
     Binding,

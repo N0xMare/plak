@@ -40,6 +40,16 @@ fn named_removal_refusals_are_typed_and_never_offer_a_default_or_remote_action()
             )
         ));
     }
+    let default = app.account_failure(
+        NativeSubscriptionError::AccountBusy,
+        &"codex".parse().unwrap(),
+    );
+    assert_eq!(default.exit_code(), 3);
+    assert!(default.message().contains("account_busy"));
+    assert!(
+        default.remedy().is_none(),
+        "a full callback pool does not require another login"
+    );
 }
 
 /// Every stored-credential state (including records written by an earlier

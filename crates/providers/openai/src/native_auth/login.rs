@@ -155,7 +155,13 @@ impl CodexSubscriptionCredentialManager {
         refuse_pinned_test_loopback(self.endpoints.loopback_ports);
         let (listener, port) = bind_loopback_listener(self.endpoints.loopback_ports)
             .await
-            .map_err(|_| NativeCodexAuthError::Binding)?;
+            .map_err(|error| {
+                if error.kind() == std::io::ErrorKind::AddrInUse {
+                    NativeCodexAuthError::LoopbackBusy
+                } else {
+                    NativeCodexAuthError::Binding
+                }
+            })?;
         let redirect_uri = format!("http://localhost:{port}{BROWSER_CALLBACK_PATH}");
         Ok(CodexBrowserLogin {
             listener,

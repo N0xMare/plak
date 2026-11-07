@@ -1234,6 +1234,9 @@ cleanup, preservation of a later receipt or recreated directory, refusal of
 default/live/busy removal, and same-process login/refresh record commits while
 compatibility is held. A nonblocking probe proves that the nested credential
 directory is not the compatibility-lock parent before committing a record.
+An occupied synthetic Codex callback pool must return typed Busy without
+creating a credential or selecting an ephemeral fallback; tests never bind the
+production callback ports.
 Codex online/offline constructors reject the same record under a different slot
 token. Native source-scope tests preserve default authority bytes while requiring
 sibling names to differ without changing authenticated upstream identity.

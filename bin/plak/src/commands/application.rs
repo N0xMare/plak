@@ -477,21 +477,20 @@ impl PlakousApplication {
         error: plakous::subscriptions::NativeSubscriptionError,
         account: &AccountRef,
     ) -> CliFailure {
+        if error == plakous::subscriptions::NativeSubscriptionError::AccountBusy {
+            return CliFailure::from(
+                plakous_hosted::capabilities::AccountAdmissionError::AccountBusy {
+                    account: account.to_string(),
+                },
+            );
+        }
         if account.is_named() {
             use plakous::subscriptions::NativeSubscriptionError;
             use plakous_hosted::capabilities::AccountAdmissionError;
-            match error {
-                NativeSubscriptionError::AccountBusy => {
-                    return CliFailure::from(AccountAdmissionError::AccountBusy {
-                        account: account.to_string(),
-                    });
-                }
-                NativeSubscriptionError::AccountSignedIn => {
-                    return CliFailure::from(AccountAdmissionError::AccountSignedIn {
-                        account: account.to_string(),
-                    });
-                }
-                _ => {}
+            if error == NativeSubscriptionError::AccountSignedIn {
+                return CliFailure::from(AccountAdmissionError::AccountSignedIn {
+                    account: account.to_string(),
+                });
             }
             if error == NativeSubscriptionError::CredentialUnavailable {
                 return super::support::account_unavailable(account);
