@@ -365,18 +365,8 @@ fn a_host_tui_shows_a_persistent_notice_only_when_the_installed_build_differs() 
     for mismatch in [false, true] {
         let fixture =
             Fixture::with_mode(&tool_then_answer("notice does not block work"), Mode::Host);
-        // Developer test binaries have no install manifest. Let an embedded
-        // client finish the normal identity cache before the host's welcome.
-        let warm = Fixture {
-            root: fixture.root.clone(),
-            mode: Mode::Embedded,
-            host: Mutex::default(),
-            owns_root: false,
-        };
-        let terminal = Terminal::spawn_ready(&warm);
-        fixture.wait_for_identity_cache();
-        terminal.quit();
-        let host = running_binary_id(&fixture);
+        let (image, host) = build_notice::installed_client(&fixture);
+        build_notice::start_image_host(&fixture, &image);
         let installed_id = if mismatch { "000000000000" } else { &host };
         let key = fixture.cli(&["version", "--state-key"]);
         assert!(key.status.success());
@@ -469,30 +459,61 @@ fn a_host_tui_reports_loss_and_attaches_after_the_host_restarts() {
 
 #[test]
 fn a_host_tui_refuses_a_handed_off_embedded_reload_without_a_continuation() {
+    handed_off_embedded_reload(false);
+}
+
+#[test]
+fn an_unknown_installed_build_refuses_before_a_later_host_handoff() {
+    assert!(handed_off_embedded_reload(true) > 0);
+}
+
+fn handed_off_embedded_reload(first_probe_unknown: bool) -> usize {
     let mut fixture =
         Fixture::with_mode(&tool_then_answer("answer before the host"), Mode::Embedded);
     enable_reload_requests(&fixture);
+    let (image, binary) = build_notice::installed_client(&fixture);
     let installed = fixture.root.join("handoff-install");
     std::fs::create_dir_all(&installed).unwrap();
+    if first_probe_unknown {
+        build_notice::make_first_installed_probe_unknown(&fixture, &image, &installed);
+    }
     let mut terminal = Terminal::spawn(&fixture, Launch::OnPath(&installed));
     terminal.wait_ready();
     terminal.send(b"answer before becoming a client\r");
     terminal.wait_screen("answer before the host");
     terminal.wait_absent("Esc stop");
     let session = fixture.session_ids()[0].clone();
-    let binary = running_binary_id(&fixture);
     let paid = provider_dispatches(&fixture);
     fixture.mode = Mode::Host;
-    fixture.ensure_host();
-    let outcome = ask_reload_until_announced(&fixture, &session, &binary);
-    let written = wait_for_outcome(&outcome);
-    assert_eq!(written["outcome"], "refused");
-    assert!(
-        written["reason"]
-            .as_str()
-            .unwrap()
-            .contains("the session now runs in plak host")
-    );
+    build_notice::start_image_host(&fixture, &image);
+    let until = Instant::now() + WAIT;
+    let mut unknown_probes = 0;
+    loop {
+        let outcome = ask_reload_when_announced(&fixture, &session, &binary);
+        let written = wait_for_outcome(&outcome);
+        eprintln!("embedded reload outcome: {written}");
+        assert_eq!(written["outcome"], "refused", "{written}");
+        let reason = written["reason"].as_str().unwrap();
+        if reason.contains("the session now runs in plak host") {
+            break;
+        }
+        // A bounded installed-build probe can legitimately answer without an
+        // identity (or miss its deadline) under load. That request must refuse
+        // before any handoff. Retry only this guard to reach the boundary this
+        // test exercises; every other refusal remains an unexpected failure.
+        assert_eq!(
+            reason,
+            format!("the installed build is unknown, not {binary}"),
+            "{written}"
+        );
+        assert!(
+            Instant::now() < until,
+            "no known installed probe: {written}"
+        );
+        assert!(terminal.is_alive());
+        assert_eq!(provider_dispatches(&fixture), paid);
+        unknown_probes += 1;
+    }
     terminal.wait_screen("requested reload refused: the session now runs in plak host");
     assert_eq!(
         provider_dispatches(&fixture),
@@ -504,6 +525,7 @@ fn a_host_tui_refuses_a_handed_off_embedded_reload_without_a_continuation() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["residency"], "resident");
     terminal.quit();
+    unknown_probes
 }
 
 #[test]

@@ -3282,6 +3282,11 @@ fn running_binary_id(fixture: &Fixture) -> String {
 /// every 5 s), then returns the outcome file the request names.
 fn ask_reload_until_announced(fixture: &Fixture, session: &str, binary: &str) -> PathBuf {
     fixture.wait_for_identity_cache();
+    ask_reload_when_announced(fixture, session, binary)
+}
+
+/// Manifest-backed fixtures do not need a home-cache entry before requesting.
+fn ask_reload_when_announced(fixture: &Fixture, session: &str, binary: &str) -> PathBuf {
     let deadline = Instant::now() + WAIT;
     let accepted = loop {
         let output = ask_reload(fixture, session, binary);

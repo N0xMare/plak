@@ -4559,8 +4559,10 @@ and start it again. The ids are read-only build facts; the terminal never
 restarts the host. Its installed-build probe runs off the UI thread, without
 delaying the first frame. A result belongs only to its connection; reconnecting
 never inherits an old connection's notice or pending result. Matching builds
-show no notice. An unavailable identity
-does not establish a mismatch.
+show no notice. An unavailable identity does not establish a mismatch:
+a welcome with binary id `unknown` shows no build notice. A source-checkout
+host without a manifest or cached identity may report `unknown` while its
+background hash is pending; welcome never waits for that hash.
 
 - **One per home and state key.** Before anything else it takes an exclusive
   lock on `state/<key>/host.lock` and holds it for its life; the file names
