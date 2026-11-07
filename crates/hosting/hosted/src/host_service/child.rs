@@ -49,6 +49,14 @@ pub type ControlDone = Box<dyn FnOnce(Result<(), String>) + Send>;
 
 /// The session tree's children, as its host service reaches them.
 pub trait ChildNodes: Send + Sync {
+    /// Live chrome for this node's own saved placement, without opening a runtime.
+    fn session_info(
+        &self,
+        _agent_id: &str,
+    ) -> Option<plakous_host_protocol::views::SessionInfoView> {
+        None
+    }
+
     /// Where the child `agent_id` stands; the tree's root is no child.
     fn state(&self, agent_id: &str) -> NodeState;
 
@@ -213,6 +221,7 @@ impl<P: ProtocolExtension> HostService<P> {
             return Err(RequestRefusal::UnknownNode);
         };
         admitted(nodes.state(agent))?;
+        let info = nodes.session_info(agent);
         let Some(actions) = self.mailbox() else {
             return Err(RequestRefusal::Disconnected);
         };
@@ -261,6 +270,13 @@ impl<P: ProtocolExtension> HostService<P> {
                 waiting,
             },
         )?;
+        if let Some(info) = info
+            && let Some(held) = state.attachments.get_mut(&id)
+        {
+            let observation = SessionObservation::SessionInfo(info);
+            let class = observation.class();
+            held.offer(observation, class, self.capacity);
+        }
         *state.agent_holders.entry(agent.to_owned()).or_default() += 1;
         Ok(id)
     }

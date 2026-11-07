@@ -217,6 +217,7 @@ impl<P: ProtocolExtension> ServedSession<P> {
     /// The session's observations ended: an opening no binding followed
     /// (the open failed) is the served session's.
     pub(super) fn end(&mut self) {
+        self.service.clear_wire_drafts();
         if std::mem::take(&mut self.unresolved) {
             // The opening never said whose it was: the attachments it held
             // end now rather than wait for a binding that will not come.

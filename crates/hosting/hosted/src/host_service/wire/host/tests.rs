@@ -92,6 +92,12 @@ fn node(session: &str) -> NodeAddress {
 
 fn row(session: &str, updated_at: u64) -> SessionRow {
     SessionRow {
+        runner: plakous_host_protocol::wire::RunnerLabel::local(),
+        runner_status: plakous_host_protocol::wire::RunnerStatus::Unknown,
+        needs_operator: false,
+        activity_seq: 0,
+        archived: false,
+        differences: Vec::new(),
         session: session.into(),
         node: node(session),
         title: None,
@@ -114,6 +120,7 @@ struct Script {
     hold_mailbox: std::sync::atomic::AtomicBool,
     queued: AtomicUsize,
     rows: Mutex<Vec<SessionRow>>,
+    row_limit: AtomicUsize,
     opens: AtomicUsize,
     /// Sessions whose open fails, with the failure.
     refuse: Mutex<BTreeMap<String, RequestRefusal>>,
@@ -167,7 +174,80 @@ impl Script {
 }
 
 impl HostSessions<Core> for Fake {
-    fn rows(&self, workspace: Option<&str>) -> Result<Vec<SessionRow>, String> {
+    fn options(
+        &self,
+        _workspace: Option<&plakous_host_protocol::wire::WorkspaceProbe>,
+        progress: &mut dyn FnMut(PickerProgress) -> Result<(), String>,
+    ) -> Result<plakous_host_protocol::wire::SessionOptions, RequestRefusal> {
+        use plakous_host_protocol::wire::{
+            RunnerLabel, RunnerOptions, RunnerPhase, RunnerStatus, SessionOptions,
+        };
+        let row = RunnerOptions {
+            runner: RunnerLabel::local(),
+            aliases: Vec::new(),
+            status: RunnerStatus::Ready,
+            checked_at: Some(1),
+            blocked_since: None,
+            roots: None,
+            default_workspace: Some("/w".into()),
+            recent_workspaces: Vec::new(),
+            discovered_workspaces: Vec::new(),
+            discovery_truncated: false,
+        };
+        for event in [
+            PickerProgress {
+                runner: row.runner.clone(),
+                phase: None,
+                row: None,
+            },
+            PickerProgress {
+                runner: row.runner.clone(),
+                phase: Some(RunnerPhase::Discovery),
+                row: Some(row.clone()),
+            },
+        ] {
+            progress(event).map_err(|detail| RequestRefusal::SessionUnavailable { detail })?;
+        }
+        Ok(SessionOptions {
+            runners: vec![row],
+            models: plakous_host_protocol::views::ReadyCatalog::default(),
+            profiles: plakous_host_protocol::views::ProfilesView::default(),
+            templates: Vec::new(),
+            workspace: None,
+        })
+    }
+
+    fn archived_view(
+        &self,
+        session: &str,
+    ) -> Result<Option<ArchivedSessionView<Core>>, RequestRefusal> {
+        let archived = self
+            .0
+            .rows
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|row| row.session == session && row.archived);
+        Ok(archived.then(|| ArchivedSessionView {
+            session: session.to_owned(),
+            root: node(session),
+            observations: vec![SessionObservation::PresentationSnapshot(
+                plakous_host_protocol::views::PresentationSnapshot {
+                    schema: plakous_host_protocol::views::presentation::PRESENTATION_SCHEMA_V3,
+                    scope: plakous_host_protocol::views::transcript::TranscriptScope::Root,
+                    revision: 1,
+                    items: Vec::new(),
+                },
+            )],
+        }))
+    }
+
+    fn rows(
+        &self,
+        workspace: Option<&str>,
+        runner: Option<&str>,
+        include_archived: bool,
+    ) -> Result<Vec<SessionRow>, String> {
         Ok(self
             .0
             .rows
@@ -175,6 +255,12 @@ impl HostSessions<Core> for Fake {
             .unwrap()
             .iter()
             .filter(|row| workspace.is_none_or(|workspace| row.workspace == workspace))
+            .filter(|row| runner.is_none_or(|id| row.runner.runner_id == id))
+            .filter(|row| include_archived || !row.archived)
+            .take(match self.0.row_limit.load(Ordering::SeqCst) {
+                0 => usize::MAX,
+                limit => limit,
+            })
             .cloned()
             .collect())
     }
@@ -278,6 +364,7 @@ impl HostSessions<Core> for Fake {
             .cloned()
             .unwrap_or_else(|| session.to_owned());
         Ok(OpenedSession {
+            runner_pending: None,
             root: node(&tree),
             session_id: session.to_owned(),
             actions,
@@ -300,12 +387,9 @@ impl HostSessions<Core> for Fake {
             })
     }
 
-    fn create(
-        &self,
-        workspace: &str,
-        _template: Option<&str>,
-        request_id: &str,
-    ) -> Result<Created, RequestRefusal> {
+    fn create(&self, request: &Creation<'_>) -> Result<Created, RequestRefusal> {
+        let workspace = request.workspace;
+        let request_id = request.request_id;
         let session = format!("new-{request_id}");
         let mut rows = self.0.rows.lock().unwrap();
         if !rows.iter().any(|row| row.session == session) {
@@ -700,8 +784,22 @@ fn host(rows: &[&str]) -> (Arc<SessionHost<Core>>, Fake) {
 fn request<W: Write + Clone>(
     connection: &mut HostConnection<Core, W>,
     id: RequestId,
-    op: Op<Core>,
+    mut op: Op<Core>,
 ) -> bool {
+    if let Op::Intent {
+        intent, client_id, ..
+    } = &mut op
+        && client_id.is_none()
+        && matches!(
+            intent,
+            SessionIntent::Prompt(_)
+                | SessionIntent::FollowUp(_)
+                | SessionIntent::Steer(_)
+                | SessionIntent::MailTopologyNode { .. }
+        )
+    {
+        *client_id = Some(plakous_host_protocol::wire::ClientDraftId::new());
+    }
     let line = encode_line(&ClientFrame::<Core>::Request { id, op }).unwrap();
     connection.frame(Ok(line)).unwrap()
 }
@@ -738,6 +836,7 @@ fn the_welcome_names_no_session_and_nothing_is_attached_by_default() {
         &mut connection,
         1,
         Op::Intent {
+            client_id: None,
             attachment: 1,
             intent: SessionIntent::Interrupt,
             blobs: Vec::new(),
@@ -751,6 +850,139 @@ fn the_welcome_names_no_session_and_nothing_is_attached_by_default() {
             Outcome::Refused(RequestRefusal::NotAttached)
         );
     }
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn picker_progress_is_scoped_and_precedes_exactly_one_final_without_opening_a_session() {
+    let (host, fake) = host(&["s1"]);
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    request(&mut connection, 7, Op::SessionOptions { workspace: None });
+    let frames = out.take();
+    assert_eq!(frames.len(), 3);
+    assert!(matches!(
+        frames[0],
+        HostFrame::OptionsProgress {
+            request_id: 7,
+            phase: None,
+            row: None,
+            ..
+        }
+    ));
+    assert!(matches!(
+        frames[1],
+        HostFrame::OptionsProgress {
+            request_id: 7,
+            row: Some(_),
+            ..
+        }
+    ));
+    assert!(matches!(
+        frames[2],
+        HostFrame::Response {
+            id: 7,
+            outcome: Outcome::Ok(Answer::Options { .. })
+        }
+    ));
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn directory_filters_precede_the_cap_and_watch_visibility_has_separate_caches() {
+    let (host, fake) = host(&[]);
+    let mut archived = row("archived", 3);
+    archived.archived = true;
+    let mut remote = row("remote", 2);
+    remote.runner = plakous_host_protocol::wire::RunnerLabel {
+        name: "machine".into(),
+        runner_id: "pinned-id".into(),
+    };
+    *fake.0.rows.lock().unwrap() = vec![archived, remote, row("local", 1)];
+    fake.0.row_limit.store(1, Ordering::SeqCst);
+    let active_out = Out::default();
+    let all_out = Out::default();
+    let mut active = host.connect(active_out.clone(), Face::Remote, || false);
+    let mut all = host.connect(all_out.clone(), Face::Remote, || false);
+    request(
+        &mut active,
+        1,
+        Op::WatchSessions {
+            include_archived: false,
+        },
+    );
+    active.flush().unwrap();
+    assert_eq!(directory(&active_out.take())[0].2[0].session, "remote");
+    request(
+        &mut all,
+        2,
+        Op::WatchSessions {
+            include_archived: true,
+        },
+    );
+    all.flush().unwrap();
+    assert_eq!(directory(&all_out.take())[0].2[0].session, "archived");
+    for (id, runner, expected) in [(3, None, "local"), (4, Some("pinned-id"), "remote")] {
+        request(
+            &mut active,
+            id,
+            Op::ListSessions {
+                workspace: Some("/w".into()),
+                runner: runner.map(str::to_owned),
+                include_archived: false,
+            },
+        );
+        let Outcome::Ok(Answer::Sessions { rows }) = outcome(&active_out.take(), id) else {
+            panic!("directory answer")
+        };
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].session, expected);
+    }
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn an_archived_attach_serves_persisted_facts_without_a_runtime_and_refuses_every_intent() {
+    let (host, fake) = host(&["s1"]);
+    fake.0.rows.lock().unwrap()[0].archived = true;
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    let attachment = attached(&out.take(), 1);
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 0);
+    connection.flush().unwrap();
+    assert!(
+        out.take()
+            .iter()
+            .any(|frame| matches!(frame, HostFrame::Snapshot(_)))
+    );
+    for (index, intent) in [
+        SessionIntent::Prompt("not admitted".into()),
+        SessionIntent::Interrupt,
+        SessionIntent::Compact,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        request(
+            &mut connection,
+            10 + index as u64,
+            Op::Intent {
+                attachment,
+                intent,
+                client_id: None,
+                blobs: Vec::new(),
+            },
+        );
+        assert_eq!(
+            outcome(&out.take(), 10 + index as u64),
+            Outcome::Refused(RequestRefusal::SessionArchived {
+                session: "s1".into()
+            })
+        );
+    }
+    request(&mut connection, 20, Op::Detach { attachment });
+    assert_eq!(outcome(&out.take(), 20), Outcome::Ok(Answer::Detached));
     assert_eq!(fake.0.opens.load(Ordering::SeqCst), 0);
 }
 
@@ -884,8 +1116,20 @@ fn a_connection_holds_at_most_one_host_attachment() {
     let (host, _) = host(&["s1"]);
     let out = Out::default();
     let mut connection = host.connect(out.clone(), Face::Remote, || false);
-    request(&mut connection, 1, Op::WatchSessions);
-    request(&mut connection, 2, Op::WatchSessions);
+    request(
+        &mut connection,
+        1,
+        Op::WatchSessions {
+            include_archived: false,
+        },
+    );
+    request(
+        &mut connection,
+        2,
+        Op::WatchSessions {
+            include_archived: false,
+        },
+    );
     let frames = out.take();
     let Outcome::Ok(Answer::Watching { attachment }) = outcome(&frames, 1) else {
         panic!("watching: {frames:?}");
@@ -902,7 +1146,13 @@ fn a_connection_holds_at_most_one_host_attachment() {
         },
     );
     request(&mut connection, 4, Op::UnwatchSessions { attachment });
-    request(&mut connection, 5, Op::WatchSessions);
+    request(
+        &mut connection,
+        5,
+        Op::WatchSessions {
+            include_archived: false,
+        },
+    );
     let frames = out.take();
     assert_eq!(
         outcome(&frames, 3),
@@ -939,7 +1189,13 @@ fn the_directory_sends_a_snapshot_then_the_rows_that_changed() {
     let (host, fake) = host(&["s1", "s2"]);
     let out = Out::default();
     let mut connection = host.connect(out.clone(), Face::Remote, || false);
-    request(&mut connection, 1, Op::WatchSessions);
+    request(
+        &mut connection,
+        1,
+        Op::WatchSessions {
+            include_archived: false,
+        },
+    );
     connection.flush().unwrap();
     let frames = directory(&out.take());
     assert_eq!(frames.len(), 1);
@@ -971,6 +1227,7 @@ fn the_directory_sends_a_snapshot_then_the_rows_that_changed() {
         &mut worker,
         2,
         Op::Intent {
+            client_id: None,
             attachment,
             intent: SessionIntent::Prompt("go".into()),
             blobs: Vec::new(),
@@ -1042,6 +1299,9 @@ fn new_session_answers_created_and_a_replay_answers_the_same() {
     let out = Out::default();
     let mut connection = host.connect(out.clone(), Face::Remote, || false);
     let new = |id| Op::NewSession {
+        runner: plakous_host_protocol::wire::RunnerLabel::local(),
+        profile: None,
+        model: None,
         workspace: "/w".into(),
         template: None,
         request_id: id,
@@ -1298,7 +1558,13 @@ fn a_leaving_client_detaches_everything() {
         let out = Out::default();
         let mut connection = host.connect(out.clone(), Face::Remote, || false);
         request(&mut connection, 1, Op::Attach { node: node("s1") });
-        request(&mut connection, 2, Op::WatchSessions);
+        request(
+            &mut connection,
+            2,
+            Op::WatchSessions {
+                include_archived: false,
+            },
+        );
         assert!(!connection.frame(Ok(leaving)).unwrap());
         assert!(connection.node.is_none());
         assert!(connection.watch.is_none());
@@ -1333,6 +1599,7 @@ fn prompt(
         connection,
         id,
         Op::Intent {
+            client_id: None,
             attachment,
             intent: SessionIntent::Prompt(text.into()),
             blobs: Vec::new(),
@@ -1443,9 +1710,9 @@ fn an_attachment_its_service_ended_lets_the_session_go() {
     handed_off(&host);
 }
 
-/// A resident session awaiting an approval reads awaiting_operator.
+/// Attention is independent of busy activity; neither state hides the other.
 #[test]
-fn a_session_awaiting_an_approval_reads_awaiting_operator() {
+fn a_busy_session_awaiting_an_approval_independently_needs_an_operator() {
     let (host, fake) = host(&["s1"]);
     let out = Out::default();
     let mut connection = host.connect(out.clone(), Face::Remote, || false);
@@ -1453,14 +1720,14 @@ fn a_session_awaiting_an_approval_reads_awaiting_operator() {
     let attachment = attached(&out.take(), 1);
     prompt(&mut connection, 2, attachment, "approve");
     let deadline = Instant::now() + Duration::from_secs(10);
-    while row_of(&host, "s1").activity != SessionActivity::AwaitingOperator {
+    while !row_of(&host, "s1").needs_operator {
         assert!(Instant::now() < deadline, "the approval never showed");
         std::thread::sleep(Duration::from_millis(20));
     }
-    // A protocol-4 client cannot infer idle from attention. Both running
-    // row states use Queue, not Prompt.
+    assert_eq!(row_of(&host, "s1").activity, SessionActivity::Busy);
+    // Attention does not replace activity; busy submissions still queue.
     let intent = match row_of(&host, "s1").activity {
-        SessionActivity::Busy | SessionActivity::AwaitingOperator => {
+        SessionActivity::Busy => {
             SessionIntent::FollowUp("queued".into())
         }
         _ => SessionIntent::Prompt("unexpected idle".into()),
@@ -1516,7 +1783,9 @@ fn stop_session_stops_the_attached_session() {
     request(&mut connection, 5, stop("s1"));
     assert_eq!(
         answer(&mut connection, &out, 5),
-        Outcome::Ok(Answer::Stopped)
+        Outcome::Ok(Answer::Stopped {
+            runner_pending: false
+        })
     );
 }
 
@@ -1569,7 +1838,9 @@ fn a_stop_is_answered_after_its_attachment_ends() {
         fake.0.hold_stops.store(false, Ordering::SeqCst);
         assert_eq!(
             answer(&mut connection, &out, 2),
-            Outcome::Ok(Answer::Stopped),
+            Outcome::Ok(Answer::Stopped {
+                runner_pending: false
+            }),
             "then {then}"
         );
         connection.leave();
@@ -1615,7 +1886,9 @@ fn a_draining_stops_settle_wakes_the_connection() {
     assert!(woke, "the settle did not wake the connection");
     assert_eq!(
         answer(&mut connection, &out, 2),
-        Outcome::Ok(Answer::Stopped)
+        Outcome::Ok(Answer::Stopped {
+            runner_pending: false
+        })
     );
 }
 
@@ -1645,7 +1918,9 @@ fn a_draining_stop_is_the_connections_one_in_flight() {
     fake.0.hold_stops.store(false, Ordering::SeqCst);
     assert_eq!(
         answer(&mut connection, &out, 2),
-        Outcome::Ok(Answer::Stopped)
+        Outcome::Ok(Answer::Stopped {
+            runner_pending: false
+        })
     );
 }
 
@@ -1817,12 +2092,16 @@ fn a_blob_reaches_the_session_with_its_intent() {
         &mut connection,
         2,
         Op::Intent {
+            client_id: None,
             attachment,
             intent,
             blobs: taken.ids,
         },
     );
-    assert_eq!(outcome(&out.take(), 2), Outcome::Ok(Answer::Accepted));
+    assert_eq!(
+        outcome(&out.take(), 2),
+        Outcome::Ok(Answer::Accepted { duplicate: false })
+    );
     let deadline = Instant::now() + Duration::from_secs(10);
     while fake.0.images.lock().unwrap().is_empty() {
         assert!(Instant::now() < deadline, "the prompt never arrived");
@@ -1848,6 +2127,9 @@ fn a_closed_host_opens_and_creates_nothing() {
         &mut connection,
         2,
         Op::NewSession {
+            runner: plakous_host_protocol::wire::RunnerLabel::local(),
+            profile: None,
+            model: None,
             workspace: "/w".into(),
             template: None,
             request_id: "r9".into(),

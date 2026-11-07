@@ -1326,6 +1326,29 @@ stops: neither an attachment nor a paid continuation is created by a stop.
 Test code has one home per kind, and production behavior is never moved into
 test code to change density accounting.
 
+Protocol-5 contracts pin closed request/answer/progress JSON and the generated
+schema together. Placement tests distinguish committed UUID replay from fresh
+admission: changed profiles/defaults, renamed aliases, missing paths and offline
+runners cannot invalidate stored-fact replay. Shared roster tests alternate two
+saved profile selections through one process-wide source and retain the None
+home-default path. Tool-row tests pin unchanged stored/export bytes and JSONL v1,
+and require host operation preservation through snapshot, patch and stream
+decode, including verbs the classifier does not currently emit. Client rendering
+uses the received operation rather than the display name.
+
+Draft-id tests distinguish mailbox acceptance, pending, durable acceptance,
+definite refusal/drop, conflict and capacity. Reconnect, two simultaneous devices,
+disconnect before delivery, session switching and host restart are distinct
+cases. Only durable acceptance survives a client disconnect; restart must not
+invent a durable verdict. Picker tests require bounded request-scoped progress
+before one final answer and no runtime creation. Archived attachment tests serve
+persisted facts with zero runtime opens and refuse execution even when the
+client ignores the archived UI state. Lifecycle tests exercise commit/crash cuts,
+idle-release and lease/dependency fences, concurrent metadata preservation and
+retryable deletion cleanup, not only setter round trips. Mutation evidence must
+kill the corresponding rule-breaking variants; a passing happy path alone does
+not prove admission, quiescence or unchanged persistence boundaries.
+
 | Kind | Home |
 | --- | --- |
 | Small private-invariant tests | Inline `#[cfg(test)]` in the crate |

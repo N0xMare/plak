@@ -52,6 +52,30 @@ impl TreeNodes {
 }
 
 impl ChildNodes for TreeNodes {
+    fn session_info(
+        &self,
+        agent_id: &str,
+    ) -> Option<plakous_host_protocol::views::SessionInfoView> {
+        let runtime = crate::topology_runtime::lookup(&self.tree_id)?;
+        runtime
+            .read(|tree| {
+                let node = crate::topology_navigator::project_snapshot(tree)
+                    .nodes
+                    .into_iter()
+                    .find(|node| node.agent_id == agent_id)?;
+                Some(plakous_host_protocol::views::SessionInfoView {
+                    runner: node.runner,
+                    host_version: plakous::VERSION.to_owned(),
+                    working_dir: node.workspace_path,
+                    root_model: Some(node.model_tuple),
+                    root_effort: node.model_effort,
+                    ..Default::default()
+                })
+            })
+            .ok()
+            .flatten()
+    }
+
     fn state(&self, agent_id: &str) -> NodeState {
         let Some(runtime) = crate::topology_runtime::lookup(&self.tree_id) else {
             return NodeState::Unknown;

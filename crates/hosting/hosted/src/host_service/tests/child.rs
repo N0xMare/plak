@@ -17,6 +17,7 @@ use super::{Observation, approval, observations, root, stream};
 /// each interrupt as the test says.
 #[derive(Default)]
 struct Nodes {
+    info: Mutex<BTreeMap<String, plakous_host_protocol::views::SessionInfoView>>,
     states: Mutex<BTreeMap<String, NodeState>>,
     interrupted: Mutex<Vec<String>>,
     refuse: Mutex<Option<String>>,
@@ -29,6 +30,13 @@ impl Nodes {
 }
 
 impl ChildNodes for Nodes {
+    fn session_info(
+        &self,
+        agent_id: &str,
+    ) -> Option<plakous_host_protocol::views::SessionInfoView> {
+        self.info.lock().unwrap().get(agent_id).cloned()
+    }
+
     fn state(&self, agent_id: &str) -> NodeState {
         self.states
             .lock()
@@ -57,6 +65,40 @@ fn child_service() -> (HostService<Core>, IntentReceiver<Core>, Arc<Nodes>) {
     nodes.set("c1", NodeState::Open);
     let service = HostService::new(actions, root(), 16).with_nodes(nodes.clone());
     (service, intents, nodes)
+}
+
+#[test]
+fn child_header_uses_its_own_placement_and_never_the_roots_chrome() {
+    use plakous_host_protocol::views::SessionInfoView;
+    use plakous_host_protocol::wire::RunnerLabel;
+
+    let (service, _intents, nodes) = child_service();
+    let child = SessionInfoView {
+        runner: RunnerLabel {
+            name: "child-runner".into(),
+            runner_id: "child-id".into(),
+        },
+        working_dir: "/child/workspace".into(),
+        ..Default::default()
+    };
+    nodes
+        .info
+        .lock()
+        .unwrap()
+        .insert("c1".into(), child.clone());
+    service.observe(Observation::SessionInfo(SessionInfoView {
+        runner: RunnerLabel {
+            name: "root-runner".into(),
+            runner_id: "root-id".into(),
+        },
+        working_dir: "/root/workspace".into(),
+        ..Default::default()
+    }));
+    let attachment = service.attach(&node("c1"), Face::Remote).unwrap();
+    assert_eq!(
+        observations(service.take(attachment)),
+        [Observation::SessionInfo(child)]
+    );
 }
 
 fn agent_snapshot(agent: &str) -> Observation {

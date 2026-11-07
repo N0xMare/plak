@@ -37,6 +37,7 @@ use serde::de::DeserializeOwned;
 use super::{HostService, Outbound, TreeNodes};
 use crate::error::{CliFailure, CliResult};
 use lines::Next;
+mod drafts;
 use served::{ServedSession, Shared};
 
 /// How often a connection with a stop hook looks at it, and how often the
@@ -264,6 +265,7 @@ impl Face {
 /// The connection's state after the handshake: one attachment at a time
 /// on the session's host service.
 pub struct WireConnection<P: ProtocolExtension, W: Write> {
+    drafts: Option<super::drafts::DraftRegistry>,
     stdout: W,
     actions: IntentSender<P>,
     service: HostService<P>,
@@ -305,6 +307,8 @@ pub struct WireConnection<P: ProtocolExtension, W: Write> {
     /// The `stop_session` in flight: its frame's id, its ticket, and when
     /// it is answered without the stop.
     stop: Option<(RequestId, StopTicket, Instant)>,
+    runner_pending: Option<std::sync::Arc<dyn Fn() -> bool + Send + Sync>>,
+    runner_labels: Option<RunnerLabels>,
     /// Who the transport admitted, when it names a login.
     login: Option<String>,
     lost_transcripts: LostTranscripts,
@@ -317,6 +321,9 @@ pub struct WireConnection<P: ProtocolExtension, W: Write> {
 
 /// The hook that wakes a serving connection, installed when it serves.
 type Waker = std::sync::Arc<std::sync::Mutex<Option<Box<dyn Fn() + Send + Sync>>>>;
+
+type RunnerLabels =
+    std::sync::Arc<dyn Fn(&str) -> plakous_host_protocol::wire::RunnerLabel + Send + Sync>;
 
 /// How long a stop may take before its request is answered without it: the
 /// root's cancel bound and the tree's release bound, with room.
@@ -466,6 +473,7 @@ where
     ) -> Self {
         let told = vec![service.root().clone()];
         Self {
+            drafts: None,
             stdout,
             service,
             actions,
@@ -487,6 +495,8 @@ where
             next_mail: 0,
             session_request: None,
             stop: None,
+            runner_pending: None,
+            runner_labels: None,
             login: None,
             lost_transcripts: LostTranscripts::default(),
             baseline_follows: false,
@@ -500,6 +510,41 @@ where
     pub fn identified(mut self, login: impl Into<String>) -> Self {
         self.login = Some(login.into());
         self
+    }
+
+    /// Read unresolved runner stop effects after the host's cancellation commits.
+    #[must_use]
+    pub fn with_runner_pending(
+        mut self,
+        pending: Option<std::sync::Arc<dyn Fn() -> bool + Send + Sync>>,
+    ) -> Self {
+        self.runner_pending = pending;
+        self
+    }
+
+    fn with_drafts(mut self, registry: super::drafts::DraftRegistry) -> Self {
+        self.drafts = Some(registry);
+        self
+    }
+
+    fn with_runner_labels(mut self, labels: RunnerLabels) -> Self {
+        self.runner_labels = Some(labels);
+        self
+    }
+
+    fn decorate_runners(&self, observation: &mut SessionObservation<P>) {
+        let Some(labels) = &self.runner_labels else {
+            return;
+        };
+        match observation {
+            SessionObservation::SessionInfo(info) => info.runner = labels(&info.runner.runner_id),
+            SessionObservation::TopologyNavigatorSnapshot(tree) => {
+                for node in &mut tree.nodes {
+                    node.runner = labels(&node.runner.runner_id);
+                }
+            }
+            _ => {}
+        }
     }
 
     /// This connection, its transport marked `face`; a connection is a
@@ -819,9 +864,13 @@ where
             Op::StopSession { session } => self.stop_request(id, &session),
             // A connection that serves one session has no directory.
             op @ (Op::ListSessions { .. }
-            | Op::WatchSessions
+            | Op::WatchSessions { .. }
             | Op::UnwatchSessions { .. }
             | Op::NewSession { .. }
+            | Op::SessionOptions { .. }
+            | Op::RenameSession { .. }
+            | Op::ArchiveSession { .. }
+            | Op::DeleteSession { .. }
             | Op::ReleaseSession { .. }) => refused(RequestRefusal::Unsupported {
                 detail: format!("{} needs a host of many sessions", op.name()),
             }),
@@ -883,10 +932,11 @@ where
                 }
             }
             Op::Intent {
+                client_id,
                 attachment,
                 intent,
                 blobs,
-            } => self.intent_request(id, attachment, intent, &blobs),
+            } => self.intent_request(id, attachment, intent, &blobs, client_id),
         }
     }
 
@@ -898,6 +948,7 @@ where
         attachment: AttachmentId,
         mut intent: SessionIntent<P>,
         blobs: &[String],
+        client_id: Option<plakous_host_protocol::wire::ClientDraftId>,
     ) -> Option<Outcome> {
         let refused = |refusal| Some(Outcome::Refused(refusal));
         if self.attachment != Some(attachment) {
@@ -915,6 +966,10 @@ where
                 detail: error.to_string(),
             });
         }
+        let identified = match self.reserve_draft(attachment, &intent, client_id) {
+            Ok(id) => id,
+            Err(outcome) => return Some(outcome),
+        };
         let quit = matches!(intent, SessionIntent::Quit);
         // A host's session outlives its clients: quitting a root
         // attachment detaches it, and only a stop ends the session.
@@ -927,12 +982,18 @@ where
             };
         }
         let mail = (is_mail(&intent) && self.service.is_child(attachment)).then(|| {
+            if let Some(client_id) = identified {
+                return client_id.to_string();
+            }
             self.next_mail += 1;
             format!("mail-{}", self.next_mail)
         });
+        let correlation = identified
+            .map(|client_id| client_id.to_string())
+            .or_else(|| mail.clone());
         match self
             .service
-            .intent_correlated(attachment, intent, mail.as_deref())
+            .intent_correlated(attachment, intent, correlation.as_deref())
         {
             Ok(()) => {
                 if let Some(mail) = mail {
@@ -947,9 +1008,14 @@ where
                         return Some(Outcome::Ok(Answer::Detached));
                     }
                 }
-                Some(Outcome::Ok(Answer::Accepted))
+                Some(Outcome::Ok(Answer::Accepted { duplicate: false }))
             }
-            Err(refusal) => refused(refusal),
+            Err(refusal) => {
+                if let Some(id) = identified {
+                    self.service.refuse_wire_draft(id);
+                }
+                refused(refusal)
+            }
         }
     }
 
@@ -1071,7 +1137,12 @@ where
             return;
         };
         let outcome = match self.actions.stop_settled(ticket) {
-            Some(Ok(())) => Outcome::Ok(Answer::Stopped),
+            Some(Ok(())) => Outcome::Ok(Answer::Stopped {
+                runner_pending: self
+                    .runner_pending
+                    .as_ref()
+                    .is_some_and(|pending| pending()),
+            }),
             Some(Err(detail)) => Outcome::Refused(RequestRefusal::SessionUnavailable { detail }),
             None if Instant::now() >= deadline => {
                 Outcome::Refused(RequestRefusal::SessionUnavailable {
@@ -1116,7 +1187,9 @@ where
                 }
                 return;
             }
-            SessionObservation::DraftAccepted(_) => Outcome::Ok(Answer::Accepted),
+            SessionObservation::DraftAccepted(_) => {
+                Outcome::Ok(Answer::Accepted { duplicate: false })
+            }
             SessionObservation::Row(TranscriptRow::Notice(notice))
                 if notice.tone == NoticeTone::Error =>
             {
@@ -1228,8 +1301,10 @@ where
                     seq,
                     class,
                     observation,
+                    client_id,
                 } => {
                     let mut observation = shown(observation);
+                    self.decorate_runners(&mut observation);
                     let taken = take_observation_images(&mut observation, &format!("e{seq}"));
                     for chunk in taken.chunks {
                         write_frame(&mut self.stdout, &HostFrame::<P>::Blob(chunk))?;
@@ -1237,6 +1312,7 @@ where
                     write_frame(
                         &mut self.stdout,
                         &HostFrame::<P>::Event {
+                            client_id,
                             attachment,
                             seq,
                             class,
@@ -1257,7 +1333,10 @@ mod served;
 mod session;
 mod slot;
 
-pub use host::{Created, HostConnection, HostSessions, SessionHost};
+pub use host::{
+    ArchivedSessionView, Created, Creation, HostConnection, HostSessions, PickerProgress,
+    SessionHost,
+};
 pub use lines::{Line, LineSender, Lines, lines};
 pub use session::WireSession;
 pub use slot::{OpenedSession, RootResolver, SessionSlot, SlotView};

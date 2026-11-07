@@ -45,6 +45,7 @@
 //! last face sender and attachment are gone.
 
 mod child;
+pub mod drafts;
 mod face;
 mod tree_nodes;
 pub mod wire;
@@ -85,6 +86,8 @@ pub enum Outbound<P: ProtocolExtension> {
     /// One observation, with the attachment's sequence number (from one;
     /// a gap means a droppable event was dropped) and its class.
     Event {
+        /// Process-local wire origin, never part of the shared observation.
+        client_id: Option<plakous_host_protocol::wire::ClientDraftId>,
         /// The attachment's sequence number.
         seq: u64,
         /// The observation's class.
@@ -175,6 +178,8 @@ struct Snapshot<P: ProtocolExtension> {
 }
 
 struct State<P: ProtocolExtension> {
+    pending_drafts: BTreeMap<plakous_host_protocol::wire::ClientDraftId, drafts::PendingDraft>,
+    draft_window: Option<plakous_host_protocol::wire::ClientDraftId>,
     attachments: BTreeMap<AttachmentId, Attachment<P>>,
     next_attachment: AttachmentId,
     snapshot: Snapshot<P>,
@@ -553,6 +558,8 @@ impl<P: ProtocolExtension> HostService<P> {
             capacity: capacity.max(1),
             nodes: None,
             state: Arc::new(Mutex::new(State {
+                pending_drafts: BTreeMap::new(),
+                draft_window: None,
                 attachments: BTreeMap::new(),
                 next_attachment: 1,
                 snapshot: Snapshot {
@@ -842,6 +849,7 @@ impl<P: ProtocolExtension> HostService<P> {
         for observation in items {
             attachment.seq += 1;
             attachment.queue.push_back(Outbound::Event {
+                client_id: None,
                 seq: attachment.seq,
                 class: observation.class(),
                 observation,
@@ -1012,6 +1020,7 @@ impl<P: ProtocolExtension> HostService<P> {
     pub fn observe(&self, observation: SessionObservation<P>) {
         {
             let mut state = self.lock();
+            let client_id = state.observe_draft(&observation);
             let class = observation.class();
             // Inside a child's answer window everything but a transcript is
             // that child's answer, and none of it is the root's to keep.
@@ -1085,11 +1094,13 @@ impl<P: ProtocolExtension> HostService<P> {
                     if let Some(held) = state.attachments.get_mut(id) {
                         let capacity = held.capacity(self.capacity);
                         held.offer(observation.clone(), class, capacity);
+                        held.correlate_draft(client_id);
                     }
                 }
                 if let Some(held) = state.attachments.get_mut(last) {
                     let capacity = held.capacity(self.capacity);
                     held.offer(observation, class, capacity);
+                    held.correlate_draft(client_id);
                 }
             }
         }
@@ -1464,6 +1475,7 @@ impl<P: ProtocolExtension> Attachment<P> {
         }
         self.seq += 1;
         self.queue.push_back(Outbound::Event {
+            client_id: None,
             seq: self.seq,
             class,
             observation,

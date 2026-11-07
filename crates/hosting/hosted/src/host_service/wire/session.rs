@@ -24,6 +24,7 @@ use super::{ATTACHMENT_CAPACITY, Face, Leave, LostTranscripts, POLL, WireConnect
 
 /// A session served to any number of connections over time.
 pub struct WireSession<P: ProtocolExtension> {
+    runner_pending: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
     actions: IntentSender<P>,
     served: Shared<P>,
     changes: watch::Receiver<u64>,
@@ -36,6 +37,15 @@ pub struct WireSession<P: ProtocolExtension> {
 }
 
 impl<P: ProtocolExtension> WireSession<P> {
+    /// Read-only runner debt projected after durable cancellation.
+    #[must_use]
+    pub fn with_runner_pending(
+        mut self,
+        pending: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
+    ) -> Self {
+        self.runner_pending = pending;
+        self
+    }
     /// Serves the session `session_id` that `actions` sends to and `events`
     /// observes, whose root node is `root`, starting its pump; `roots` finds
     /// the root of a session it switches to. A switch whose root cannot be
@@ -121,6 +131,7 @@ impl<P: ProtocolExtension> WireSession<P> {
             }
         });
         Self {
+            runner_pending: None,
             actions,
             served,
             changes,
@@ -167,6 +178,7 @@ impl<P: ProtocolExtension> WireSession<P> {
         );
         drop(guard);
         WireConnection::on_service(service, out, self.actions.clone(), Leave::Detach)
+            .with_runner_pending(self.runner_pending.clone())
             .face(face)
             .with_stop(stopped)
             .on_served(Arc::clone(&self.served), generation, session)

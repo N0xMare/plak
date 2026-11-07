@@ -20,6 +20,82 @@ fn service(capacity: usize) -> (HostService<Core>, IntentReceiver<Core>) {
     (HostService::new(actions, root(), capacity), intents)
 }
 
+#[test]
+fn durable_draft_verdict_outlives_its_attachment_and_mailbox_ack_is_not_cached() {
+    use super::drafts::{DraftRegistry, DraftReservation, DraftReservationError};
+    use plakous_host_protocol::wire::ClientDraftId;
+
+    for disconnect in [false, true] {
+        let registry = DraftRegistry::default();
+        let (service, _intents) = service(64);
+        let attachment = service.attach(&root(), Face::Remote).unwrap();
+        service.take(attachment);
+        let id = ClientDraftId::new();
+        let DraftReservation::Pending(pending) = registry.reserve(id, [1; 32]).unwrap() else {
+            panic!("fresh identity");
+        };
+        service.begin_wire_draft(id, pending);
+        assert!(matches!(
+            registry.reserve(id, [1; 32]),
+            Err(DraftReservationError::Pending)
+        ));
+        if disconnect {
+            service.detach(attachment).unwrap();
+        }
+        service.observe(Observation::IntentStarted(Some(format!(
+            "attachment:{attachment}:{id}"
+        ))));
+        service.observe(Observation::DraftAccepted(SessionIntent::Prompt(
+            Draft::from("one admission"),
+        )));
+        assert!(matches!(
+            registry.reserve(id, [1; 32]),
+            Ok(DraftReservation::Duplicate)
+        ));
+        if !disconnect {
+            assert!(service.take(attachment).iter().any(|outbound| matches!(outbound,
+                Outbound::Event { client_id: Some(origin), observation: Observation::DraftAccepted(_), .. } if *origin == id
+            )));
+        }
+        drop(service);
+        assert!(matches!(
+            registry.reserve(id, [1; 32]),
+            Ok(DraftReservation::Duplicate)
+        ));
+    }
+}
+
+#[test]
+fn rejected_or_dropped_wire_drafts_release_the_hostwide_identity() {
+    use super::drafts::{DraftRegistry, DraftReservation};
+    use plakous_host_protocol::wire::ClientDraftId;
+
+    let registry = DraftRegistry::default();
+    let (service, _intents) = service(64);
+    for rejected in [false, true] {
+        let id = ClientDraftId::new();
+        let DraftReservation::Pending(pending) = registry.reserve(id, [1; 32]).unwrap() else {
+            panic!("fresh identity");
+        };
+        service.begin_wire_draft(id, pending);
+        if rejected {
+            service.observe(Observation::IntentStarted(Some(format!(
+                "attachment:1:{id}"
+            ))));
+            service.observe(Observation::DraftRejected(SessionIntent::Prompt(
+                Draft::from("refused"),
+            )));
+        } else {
+            service.clear_wire_drafts();
+        }
+        // Different contents may reserve after a definite refusal/drop.
+        assert!(matches!(
+            registry.reserve(id, [2; 32]),
+            Ok(DraftReservation::Pending(_))
+        ));
+    }
+}
+
 fn observations(outbound: Vec<Outbound<Core>>) -> Vec<Observation> {
     outbound
         .into_iter()

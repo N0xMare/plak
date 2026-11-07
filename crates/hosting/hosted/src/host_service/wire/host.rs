@@ -60,17 +60,68 @@ pub struct Created {
     pub environment: SessionEnvironment,
 }
 
+/// Persisted attach facts for an archived session, without runtime ownership.
+pub struct ArchivedSessionView<P: ProtocolExtension> {
+    /// The product session id.
+    pub session: String,
+    /// The persisted root address.
+    pub root: NodeAddress,
+    /// Complete bounded attach facts, including the root transcript snapshot.
+    pub observations: Vec<plakous_host_protocol::SessionObservation<P>>,
+}
+
+/// One bounded picker phase or completed row, scoped to the caller's request.
+pub struct PickerProgress {
+    /// Canonical runner identity.
+    pub runner: plakous_host_protocol::wire::RunnerLabel,
+    /// Active phase; none means queued for a probe slot.
+    pub phase: Option<plakous_host_protocol::wire::RunnerPhase>,
+    /// Completed row, at most once per runner in a request.
+    pub row: Option<plakous_host_protocol::wire::RunnerOptions>,
+}
+
+/// Borrowed complete creation input, resolved by the product before one record commit.
+pub struct Creation<'a> {
+    /// Explicit pinned runner selection.
+    pub runner: &'a plakous_host_protocol::wire::RunnerLabel,
+    /// Canonical runner-owned workspace bytes.
+    pub workspace: &'a str,
+    /// User-facing profile, exclusive with template/model.
+    pub profile: Option<&'a str>,
+    /// Advanced root template override.
+    pub template: Option<&'a str>,
+    /// Advanced root model override.
+    pub model: Option<&'a plakous_host_protocol::wire::CreationModel>,
+    /// Stable create-action UUID.
+    pub request_id: &'a str,
+}
+
 /// What a host of many sessions needs of its product's stores.
 pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
+    /// Decorate a saved runner identity without probing or changing its authority.
+    fn runner_label(&self, id: &str) -> plakous_host_protocol::wire::RunnerLabel {
+        plakous_host_protocol::wire::RunnerLabel {
+            name: id.to_owned(),
+            runner_id: id.to_owned(),
+        }
+    }
+
     /// The directory's rows as the stores show them, newest first: each one
     /// dormant, with the activity its durable facts give, and
     /// `hosted_elsewhere` only for a holder of its tree that is not proven
     /// gone.
+    /// Apply workspace, pinned runner and archive visibility filters before
+    /// the product's directory row limit. A nonlocal key is never host-canonicalized.
     ///
     /// # Errors
     ///
     /// The stores cannot be read.
-    fn rows(&self, workspace: Option<&str>) -> Result<Vec<SessionRow>, String>;
+    fn rows(
+        &self,
+        workspace: Option<&str>,
+        runner: Option<&str>,
+        include_archived: bool,
+    ) -> Result<Vec<SessionRow>, String>;
 
     /// The newest session of the tree `node` is in, or `None`.
     ///
@@ -115,16 +166,69 @@ pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
     /// # Errors
     ///
     /// The request's refusal: nothing was created.
-    fn create(
+    fn create(&self, request: &Creation<'_>) -> Result<Created, RequestRefusal>;
+
+    /// Read archived attach facts without opening a runtime or taking a lease.
+    ///
+    /// # Errors
+    /// Product metadata or transcript facts could not be read.
+    fn archived_view(
         &self,
-        workspace: &str,
-        template: Option<&str>,
-        request_id: &str,
-    ) -> Result<Created, RequestRefusal>;
+        _session: &str,
+    ) -> Result<Option<ArchivedSessionView<P>>, RequestRefusal> {
+        Ok(None)
+    }
+
+    /// Read the bounded placement picker without opening a session.
+    ///
+    /// # Errors
+    /// Typed validation, transport or product refusal.
+    fn options(
+        &self,
+        _workspace: Option<&plakous_host_protocol::wire::WorkspaceProbe>,
+        _progress: &mut dyn FnMut(PickerProgress) -> Result<(), String>,
+    ) -> Result<plakous_host_protocol::wire::SessionOptions, RequestRefusal> {
+        Err(product_service_missing("session_options"))
+    }
+
+    /// Commit or clear the title override without opening a runtime.
+    ///
+    /// # Errors
+    /// Typed product validation or write refusal.
+    fn rename(
+        &self,
+        _session: &str,
+        _title: Option<&str>,
+    ) -> Result<Option<String>, RequestRefusal> {
+        Err(product_service_missing("rename_session"))
+    }
+
+    /// Commit archive state under the product admission barrier.
+    ///
+    /// # Errors
+    /// Typed lifecycle or write refusal.
+    fn archive(&self, _session: &str, _archived: bool) -> Result<(), RequestRefusal> {
+        Err(product_service_missing("archive_session"))
+    }
+
+    /// Run the guarded product deletion workflow after host release.
+    ///
+    /// # Errors
+    /// Typed deletion fences or infrastructure refusal.
+    fn delete(&self, _session: &str, _abandon_children: bool) -> Result<(), RequestRefusal> {
+        Err(product_service_missing("delete_session"))
+    }
+}
+
+fn product_service_missing(operation: &str) -> RequestRefusal {
+    RequestRefusal::Unsupported {
+        detail: format!("{operation} product service is not installed"),
+    }
 }
 
 /// The sessions one host serves.
 pub struct SessionHost<P: ProtocolExtension> {
+    drafts: super::super::drafts::DraftRegistry,
     sessions: Arc<dyn HostSessions<P>>,
     slots: Mutex<Vec<Arc<SessionSlot<P>>>>,
     changes: watch::Sender<u64>,
@@ -139,7 +243,7 @@ pub struct SessionHost<P: ProtocolExtension> {
     closing: Arc<std::sync::atomic::AtomicBool>,
     /// The directory last read, shared by every host attachment: when, at
     /// which host revision, and its rows.
-    directory: Mutex<Option<DirectoryRead>>,
+    directory: Mutex<[Option<DirectoryRead>; 2]>,
 }
 
 /// One shared read of the directory: when, at which host revision, and its
@@ -182,6 +286,7 @@ where
     ) -> Arc<Self> {
         let (changes, _) = watch::channel(0);
         Arc::new(Self {
+            drafts: super::super::drafts::DraftRegistry::default(),
             sessions: Arc::new(sessions),
             slots: Mutex::new(Vec::new()),
             changes,
@@ -191,7 +296,7 @@ where
             release_wait: RELEASE_WAIT,
             release_join: RELEASE_JOIN,
             closing: Arc::default(),
-            directory: Mutex::new(None),
+            directory: Mutex::new([None, None]),
         })
     }
 
@@ -213,18 +318,26 @@ where
     ///
     /// The stores cannot be read.
     pub fn directory(&self) -> Result<Arc<Vec<SessionRow>>, String> {
+        self.directory_with_archived(false)
+    }
+
+    fn directory_with_archived(
+        &self,
+        include_archived: bool,
+    ) -> Result<Arc<Vec<SessionRow>>, String> {
         let revision = *self.changes.borrow();
-        let mut cached = self
+        let mut entries = self
             .directory
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
+        let cached = &mut entries[usize::from(include_archived)];
         if let Some((read, at, rows)) = &*cached
             && *at == revision
             && read.elapsed() < DIRECTORY_POLL
         {
             return Ok(Arc::clone(rows));
         }
-        let rows = Arc::new(self.rows(None)?);
+        let rows = Arc::new(self.rows(None, None, include_archived)?);
         *cached = Some((Instant::now(), revision, Arc::clone(&rows)));
         Ok(rows)
     }
@@ -279,6 +392,7 @@ where
             stopped: Arc::new(stopped),
             login: None,
             node: None,
+            readonly: None,
             draining: None,
             watch: None,
         }
@@ -290,8 +404,13 @@ where
     /// # Errors
     ///
     /// The stores cannot be read.
-    pub fn rows(&self, workspace: Option<&str>) -> Result<Vec<SessionRow>, String> {
-        let mut rows = self.sessions.rows(workspace)?;
+    pub fn rows(
+        &self,
+        workspace: Option<&str>,
+        runner: Option<&str>,
+        include_archived: bool,
+    ) -> Result<Vec<SessionRow>, String> {
+        let mut rows = self.sessions.rows(workspace, runner, include_archived)?;
         let held: BTreeMap<String, SlotView<P>> = self
             .lock()
             .iter()
@@ -320,9 +439,8 @@ where
                     row.live_work.children = u32::try_from(kept.children).unwrap_or(u32::MAX);
                     row.live_work.held_children =
                         u32::try_from(kept.held_children).unwrap_or(u32::MAX);
-                    if kept.awaiting_operator {
-                        row.activity = SessionActivity::AwaitingOperator;
-                    } else if kept.busy {
+                    row.needs_operator = kept.awaiting_operator;
+                    if kept.busy {
                         row.activity = SessionActivity::Busy;
                     }
                 }
@@ -442,8 +560,15 @@ struct NodeLink<P: ProtocolExtension, W: Write> {
     _hold: ResidencyHold,
 }
 
+struct ReadOnlyLink<P: ProtocolExtension, W: Write> {
+    session: String,
+    connection: WireConnection<P, W>,
+    _mailbox: plakous_host_protocol::IntentReceiver<P>,
+}
+
 /// A connection's host attachment: the rows it sent last.
 struct Watch {
+    include_archived: bool,
     attachment: AttachmentId,
     seq: u64,
     sent: Option<BTreeMap<String, SessionRow>>,
@@ -462,6 +587,7 @@ pub struct HostConnection<P: ProtocolExtension, W: Write> {
     /// makes is identified by.
     login: Option<String>,
     node: Option<NodeLink<P, W>>,
+    readonly: Option<ReadOnlyLink<P, W>>,
     /// A node attachment that ended while its `stop_session` was in flight:
     /// its session connection, and its hold on the session's residency,
     /// stay until the stop is answered.
@@ -515,7 +641,7 @@ where
                 Ok(true)
             };
         };
-        match self.request(op, &text)? {
+        match self.request(id, op, &text)? {
             Forwarded::Answered(outcome) => {
                 write_frame(&mut self.out, &HostFrame::<P>::Response { id, outcome })?;
                 Ok(true)
@@ -524,18 +650,46 @@ where
         }
     }
 
-    fn request(&mut self, op: Op<P>, text: &str) -> CliResult<Forwarded> {
+    fn request(
+        &mut self,
+        request_id: plakous_host_protocol::wire::RequestId,
+        op: Op<P>,
+        text: &str,
+    ) -> CliResult<Forwarded> {
         let answered = |outcome| Ok(Forwarded::Answered(outcome));
         let refused = |refusal| Ok(Forwarded::Answered(Outcome::Refused(refusal)));
+        if let Some(link) = &self.readonly
+            && matches!(
+                &op,
+                Op::Intent { .. }
+                    | Op::RetryAttach { .. }
+                    | Op::ResumeSession { .. }
+                    | Op::Rebind { .. }
+            )
+        {
+            return refused(RequestRefusal::SessionArchived {
+                session: link.session.clone(),
+            });
+        }
         match op {
             Op::Ping => answered(Outcome::Ok(Answer::Pong)),
             // A one-shot list is a fresh read, so it names a holder the
             // moment it holds; only a watch shares the cached read.
-            Op::ListSessions { workspace } => match self.host.rows(workspace.as_deref()) {
+            Op::ListSessions {
+                runner,
+                include_archived,
+                workspace,
+            } => match self.host.rows(
+                workspace.as_deref(),
+                runner
+                    .as_deref()
+                    .or_else(|| workspace.as_ref().map(|_| "local")),
+                include_archived,
+            ) {
                 Ok(rows) => answered(Outcome::Ok(Answer::Sessions { rows })),
                 Err(detail) => refused(RequestRefusal::SessionUnavailable { detail }),
             },
-            Op::WatchSessions => {
+            Op::WatchSessions { include_archived } => {
                 if self.watch.is_some() {
                     return refused(RequestRefusal::OneInFlight);
                 }
@@ -544,6 +698,7 @@ where
                     .next_host_attachment
                     .fetch_add(1, Ordering::Relaxed);
                 self.watch = Some(Watch {
+                    include_archived,
                     attachment,
                     seq: 0,
                     sent: None,
@@ -561,25 +716,34 @@ where
             }
             Op::NewSession { .. } if self.host.closed() => refused(stopping()),
             Op::NewSession {
+                runner,
+                profile,
+                model,
                 workspace,
                 template,
                 request_id,
-            } => match self
-                .host
-                .sessions
-                .create(&workspace, template.as_deref(), &request_id)
-            {
-                Ok(created) => {
-                    self.host.changed();
-                    answered(Outcome::Ok(Answer::Created {
-                        session: created.session,
-                        node: created.node,
-                        environment: created.environment,
-                    }))
-                }
-                Err(refusal) => refused(refusal),
-            },
+            } => answered(self.create_session(&Creation {
+                runner: &runner,
+                workspace: &workspace,
+                profile: profile.as_deref(),
+                template: template.as_deref(),
+                model: model.as_ref(),
+                request_id: &request_id,
+            })),
             Op::ReleaseSession { session } => answered(self.release(&session)?),
+            Op::SessionOptions { workspace } => {
+                answered(self.session_options(request_id, workspace.as_ref()))
+            }
+            Op::RenameSession { session, title } => {
+                answered(self.rename_session(session, title.as_deref()))
+            }
+            Op::ArchiveSession { session, archived } => {
+                answered(self.archive_session(session, archived))
+            }
+            Op::DeleteSession {
+                session,
+                abandon_children,
+            } => answered(self.delete_session(session, abandon_children)),
             Op::StopSession { session } => self.stop(&session, text),
             Op::Attach { node } => self.attach(&node, text),
             Op::RetryAttach {
@@ -592,7 +756,7 @@ where
                 cause,
             } => answered(self.reopen(attachment, &request_id, Some(&cause))),
             Op::Detach { .. } | Op::Intent { .. } | Op::ResumeSession { .. } => {
-                if self.node.is_none() {
+                if self.node.is_none() && self.readonly.is_none() {
                     return refused(RequestRefusal::NotAttached);
                 }
                 if self
@@ -707,12 +871,84 @@ where
         }
     }
 
+    fn create_session(&self, creation: &Creation<'_>) -> Outcome {
+        match self.host.sessions.create(creation) {
+            Ok(created) => {
+                self.host.changed();
+                Outcome::Ok(Answer::Created {
+                    session: created.session,
+                    node: created.node,
+                    environment: created.environment,
+                })
+            }
+            Err(refusal) => Outcome::Refused(refusal),
+        }
+    }
+
+    fn session_options(
+        &mut self,
+        request_id: plakous_host_protocol::wire::RequestId,
+        workspace: Option<&plakous_host_protocol::wire::WorkspaceProbe>,
+    ) -> Outcome {
+        let out = &mut self.out;
+        let mut progress = |progress: PickerProgress| {
+            write_frame::<P>(
+                out,
+                &HostFrame::OptionsProgress {
+                    request_id,
+                    runner: progress.runner,
+                    phase: progress.phase,
+                    row: progress.row,
+                },
+            )
+            .map_err(|failure| failure.message().to_owned())
+        };
+        match self.host.sessions.options(workspace, &mut progress) {
+            Ok(options) => Outcome::Ok(Answer::Options {
+                options: Box::new(options),
+            }),
+            Err(refusal) => Outcome::Refused(refusal),
+        }
+    }
+
+    fn rename_session(&self, session: String, title: Option<&str>) -> Outcome {
+        match self.host.sessions.rename(&session, title) {
+            Ok(title) => {
+                self.host.changed();
+                Outcome::Ok(Answer::Renamed { session, title })
+            }
+            Err(refusal) => Outcome::Refused(refusal),
+        }
+    }
+
+    fn archive_session(&self, session: String, archived: bool) -> Outcome {
+        match self.host.sessions.archive(&session, archived) {
+            Ok(()) => {
+                self.host.changed();
+                Outcome::Ok(Answer::ArchiveUpdated { session, archived })
+            }
+            Err(refusal) => Outcome::Refused(refusal),
+        }
+    }
+
+    fn delete_session(&self, session: String, abandon_children: bool) -> Outcome {
+        match self.host.sessions.delete(&session, abandon_children) {
+            Ok(()) => {
+                self.host.changed();
+                Outcome::Ok(Answer::Deleted { session })
+            }
+            Err(refusal) => Outcome::Refused(refusal),
+        }
+    }
     /// Attaches `node`: on the session the connection already serves when
     /// the node is in its tree, else on its session, opened first when it
     /// is dormant. The old node attachment ends once the new one is made,
     /// as a new attach on one session's connection ends the one before it;
     /// a refused attach leaves it.
     fn attach(&mut self, node: &NodeAddress, text: &str) -> CliResult<Forwarded> {
+        if let Some(readonly) = self.archived_attachment(node, text)? {
+            return Ok(readonly);
+        }
         if self.node.as_ref().is_some_and(|link| {
             link.session.root().tree_id == node.tree_id && !link.session.ended()
         }) {
@@ -733,7 +969,11 @@ where
             }
         };
         let stopped = Arc::clone(&self.stopped);
-        let mut connection = session.connect(self.out.clone(), self.face, move || stopped());
+        let sessions = Arc::clone(&self.host.sessions);
+        let mut connection = session
+            .connect(self.out.clone(), self.face, move || stopped())
+            .with_drafts(self.host.drafts.clone())
+            .with_runner_labels(Arc::new(move |id| sessions.runner_label(id)));
         if let Some(login) = &self.login {
             connection = connection.identified(login.clone());
         }
@@ -765,7 +1005,7 @@ where
         self.host.lock().iter().any(|slot| slot.known() == session)
             || self
                 .host
-                .directory()
+                .directory_with_archived(true)
                 .is_ok_and(|rows| rows.iter().any(|row| row.session == session))
     }
 
@@ -883,6 +1123,13 @@ where
     /// client has left. A connection left holding nothing lets its session
     /// go.
     fn forward(&mut self, text: String) -> CliResult<bool> {
+        if let Some(link) = &mut self.readonly {
+            let reading = link.connection.frame(Ok(text))?;
+            if !reading || !link.connection.holding() {
+                self.readonly = None;
+            }
+            return Ok(reading);
+        }
         let Some(link) = &mut self.node else {
             return Ok(true);
         };
@@ -906,6 +1153,9 @@ where
     /// cannot be read.
     pub fn flush(&mut self) -> CliResult<()> {
         self.flush_draining()?;
+        if let Some(link) = &mut self.readonly {
+            link.connection.flush()?;
+        }
         if let Some(link) = &mut self.node {
             // A session that ended, or one a `release_session` since the
             // link asked for, is no longer this connection's.
@@ -951,13 +1201,17 @@ where
             return Ok(());
         }
         // A read that failed is a skipped tick: the next one reads again.
-        let Ok(rows) = self.host.directory() else {
+        let Ok(rows) = self.host.directory_with_archived(watch.include_archived) else {
             if let Some(watch) = &mut self.watch {
                 watch.read_at = Some(Instant::now());
             }
             return Ok(());
         };
-        let rows: Vec<SessionRow> = rows.as_ref().clone();
+        let rows: Vec<SessionRow> = rows
+            .iter()
+            .filter(|row| watch.include_archived || !row.archived)
+            .cloned()
+            .collect();
         let watch = self
             .watch
             .as_mut()
@@ -1025,6 +1279,9 @@ where
     /// request's `not_attached`), and a stop in flight keeps its session
     /// connection draining until the stop is answered.
     fn unlink(&mut self) {
+        if let Some(mut link) = self.readonly.take() {
+            link.connection.leave();
+        }
         if let Some(mut link) = self.node.take() {
             link.connection.leave();
             // A lost output is seen by the next write.
@@ -1066,3 +1323,5 @@ enum Forwarded {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]
 mod tests;
+
+mod archived;

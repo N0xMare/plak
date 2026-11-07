@@ -32,6 +32,8 @@ const RELEASE_JOIN: Duration = Duration::from_secs(60);
 
 /// A session opened on a host worker: what the slot serves it with.
 pub struct OpenedSession<P: ProtocolExtension> {
+    /// Read-only runner link/reconciliation debt after durable cancellation.
+    pub runner_pending: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
     /// The session's root node.
     pub root: NodeAddress,
     /// The session's id.
@@ -456,14 +458,17 @@ where
 {
     let roots = opened.roots;
     Slot::Resident {
-        session: Arc::new(WireSession::start_counted(
-            opened.root,
-            opened.session_id,
-            opened.actions,
-            opened.events,
-            move |id| roots(id),
-            &opened.attachments,
-        )),
+        session: Arc::new(
+            WireSession::start_counted(
+                opened.root,
+                opened.session_id,
+                opened.actions,
+                opened.events,
+                move |id| roots(id),
+                &opened.attachments,
+            )
+            .with_runner_pending(opened.runner_pending),
+        ),
         worker: opened.worker,
         attachments: opened.attachments,
     }

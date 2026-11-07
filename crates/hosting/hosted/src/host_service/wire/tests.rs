@@ -9,6 +9,138 @@ fn root() -> NodeAddress {
     }
 }
 
+#[test]
+fn runner_aliases_decorate_each_wire_node_without_changing_another_attachments_facts() {
+    use plakous_host_protocol::Core;
+    use plakous_host_protocol::wire::RunnerLabel;
+
+    let temporary = tempfile::tempdir().unwrap();
+    let tree = crate::agent_tree::ProductAgentTree::bootstrap_root_for_test(
+        "t1",
+        "t1",
+        "root",
+        temporary.path().to_owned(),
+        "tuple",
+        crate::agent_tree_protocol::WriterMode::SingleLease,
+    )
+    .unwrap();
+    let mut view = crate::topology_navigator::project_snapshot(&tree);
+    view.nodes[0].runner = RunnerLabel {
+        name: "root-id".into(),
+        runner_id: "root-id".into(),
+    };
+    let mut child = view.nodes[0].clone();
+    child.agent_id = "child".into();
+    child.parent_agent_id = Some("t1".into());
+    child.runner = RunnerLabel {
+        name: "child-id".into(),
+        runner_id: "child-id".into(),
+    };
+    view.nodes.push(child);
+    let (actions, _intents) = plakous_host_protocol::intent_channel::<Core>();
+    let service = HostService::new(actions.clone(), root(), ATTACHMENT_CAPACITY);
+    let attachment = service.attach(&root(), Face::Remote).unwrap();
+    let another = service.attach(&root(), Face::Remote).unwrap();
+    service.observe(SessionObservation::TopologyNavigatorSnapshot(view.clone()));
+    let mut connection =
+        WireConnection::on_service(service.clone(), Vec::new(), actions, Leave::Detach)
+            .with_runner_labels(std::sync::Arc::new(|id| RunnerLabel {
+                name: format!("alias-{id}"),
+                runner_id: id.to_owned(),
+            }));
+    connection.attachment = Some(attachment);
+    connection.flush().unwrap();
+    let shown = host_frames(&connection.stdout)
+        .into_iter()
+        .find_map(|frame| match frame {
+            HostFrame::Event {
+                observation: SessionObservation::TopologyNavigatorSnapshot(tree),
+                ..
+            } => Some(tree),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(shown.nodes[0].runner.name, "alias-root-id");
+    assert_eq!(shown.nodes[1].runner.name, "alias-child-id");
+    assert_eq!(shown.nodes[1].runner.runner_id, "child-id");
+    let cached = service
+        .take(another)
+        .into_iter()
+        .find_map(|event| match event {
+            Outbound::Event {
+                observation: SessionObservation::TopologyNavigatorSnapshot(tree),
+                ..
+            } => Some(tree),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(cached, view);
+    connection.leave();
+}
+
+#[test]
+fn host_draft_ids_survive_reconnect_only_after_durable_admission_for_every_submission_kind() {
+    use crate::host_service::drafts::DraftRegistry;
+    use plakous_host_protocol::{Core, wire::ClientDraftId};
+
+    for intent in [
+        SessionIntent::<Core>::Prompt(Draft::from("same input")),
+        SessionIntent::FollowUp(Draft::from("same input")),
+        SessionIntent::Steer(Draft::from("same input")),
+        SessionIntent::MailTopologyNode {
+            agent_id: "peer".to_owned(),
+            message: "same input".to_owned(),
+            urgent: true,
+        },
+    ] {
+        let registry = DraftRegistry::default();
+        let (actions, _intents) = plakous_host_protocol::intent_channel::<Core>();
+        let service = HostService::new(actions.clone(), root(), ATTACHMENT_CAPACITY);
+        let connect = || {
+            let mut connection = WireConnection::on_service(
+                service.clone(),
+                Vec::new(),
+                actions.clone(),
+                Leave::Detach,
+            )
+            .with_drafts(registry.clone());
+            connection.session = Some("session-a".to_owned());
+            connection.attachment = Some(service.attach(&root(), Face::Remote).unwrap());
+            connection
+        };
+        let mut first = connect();
+        let attachment = first.attachment.unwrap();
+        let id = ClientDraftId::new();
+        assert_eq!(
+            first.intent_request(1, attachment, intent.clone(), &[], Some(id)),
+            Some(Outcome::Ok(Answer::Accepted { duplicate: false }))
+        );
+        first.leave();
+        let mut second = connect();
+        let reattached = second.attachment.unwrap();
+        assert_eq!(
+            second.intent_request(2, reattached, intent.clone(), &[], Some(id)),
+            Some(Outcome::Refused(RequestRefusal::DraftPending {
+                client_id: id
+            }))
+        );
+        service.observe(SessionObservation::IntentStarted(Some(format!(
+            "attachment:{attachment}:{id}"
+        ))));
+        service.observe(SessionObservation::DraftAccepted(intent.clone()));
+        assert_eq!(
+            second.intent_request(3, reattached, intent.clone(), &[], Some(id)),
+            Some(Outcome::Ok(Answer::Accepted { duplicate: true }))
+        );
+        second.session = Some("session-b".to_owned());
+        assert!(matches!(
+            second.intent_request(4, reattached, intent, &[], Some(id)),
+            Some(Outcome::Refused(RequestRefusal::Malformed { .. }))
+        ));
+        second.leave();
+    }
+}
+
 /// A child's mail request is answered from its own answer window: accepted
 /// once the session reports the mail written, refused with the tree's
 /// reason or the navigator's, and not attached when its attachment ends
@@ -45,7 +177,7 @@ fn a_childs_mail_request_is_answered_once_the_mail_is_written() {
     assert_eq!(
         adapter.settled,
         [
-            (7, Outcome::Ok(Answer::Accepted)),
+            (7, Outcome::Ok(Answer::Accepted { duplicate: false })),
             (
                 8,
                 Outcome::Refused(RequestRefusal::MailRefused {
@@ -1357,6 +1489,7 @@ fn quit_on_root(leave: Leave) -> (Option<Outcome>, bool) {
     let outcome = connection.request(
         2,
         Op::Intent {
+            client_id: None,
             attachment,
             intent: SessionIntent::Quit,
             blobs: Vec::new(),
@@ -1383,7 +1516,10 @@ fn a_quit_on_the_root_detaches_in_a_host_and_quits_on_stdio() {
     assert_eq!(hosted, Some(Outcome::Ok(Answer::Detached)));
     assert!(!quit, "the host's session was asked to quit");
     let (stdio, quit) = quit_on_root(Leave::Quit);
-    assert_eq!(stdio, Some(Outcome::Ok(Answer::Accepted)));
+    assert_eq!(
+        stdio,
+        Some(Outcome::Ok(Answer::Accepted { duplicate: false }))
+    );
     assert!(quit, "stdio's session was not asked to quit");
 }
 
@@ -1414,7 +1550,13 @@ fn a_stop_of_a_session_not_served_is_refused_unknown() {
 fn a_stop_is_answered_once_the_session_settled_it() {
     let (actions, intents) = plakous_host_protocol::intent_channel::<plakous_host_protocol::Core>();
     let mut stdout = Vec::new();
-    let mut connection = WireConnection::new(root(), &mut stdout, actions).serving("s1", |_| None);
+    let pending = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let observed = pending.clone();
+    let mut connection = WireConnection::new(root(), &mut stdout, actions)
+        .serving("s1", |_| None)
+        .with_runner_pending(Some(std::sync::Arc::new(move || {
+            observed.load(std::sync::atomic::Ordering::SeqCst)
+        })));
     let stop = |id| ClientFrame::<plakous_host_protocol::Core>::Request {
         id,
         op: Op::StopSession {
@@ -1437,12 +1579,14 @@ fn a_stop_is_answered_once_the_session_settled_it() {
     };
     let ticket = *ticket;
     connection.flush().unwrap();
+    pending.store(true, std::sync::atomic::Ordering::SeqCst);
     intents.settle_stop(ticket, Ok(()));
     connection.flush().unwrap();
     assert!(connection.frame(line(stop(3))).unwrap());
     let SessionIntent::StopSession { ticket } = &*intents.try_recv().unwrap() else {
         panic!("the repeated stop did not reach the session");
     };
+    pending.store(false, std::sync::atomic::Ordering::SeqCst);
     intents.settle_stop(*ticket, Ok(()));
     connection.flush().unwrap();
     drop(connection);
@@ -1455,8 +1599,8 @@ fn a_stop_is_answered_once_the_session_settled_it() {
     assert_eq!(
         responses,
         [
-            serde_json::json!({"frame": "response", "id": 1, "outcome": {"ok": {"answer": "stopped"}}}),
-            serde_json::json!({"frame": "response", "id": 3, "outcome": {"ok": {"answer": "stopped"}}}),
+            serde_json::json!({"frame": "response", "id": 1, "outcome": {"ok": {"answer": "stopped", "runner_pending": true}}}),
+            serde_json::json!({"frame": "response", "id": 3, "outcome": {"ok": {"answer": "stopped", "runner_pending": false}}}),
         ]
     );
 }
@@ -1494,11 +1638,26 @@ fn a_single_session_connection_refuses_the_directory_requests() {
     let mut stdout = Vec::new();
     let mut connection = WireConnection::new(root(), &mut stdout, actions);
     for (op, name) in [
-        (Op::ListSessions { workspace: None }, "list_sessions"),
-        (Op::WatchSessions, "watch_sessions"),
+        (
+            Op::ListSessions {
+                runner: None,
+                include_archived: false,
+                workspace: None,
+            },
+            "list_sessions",
+        ),
+        (
+            Op::WatchSessions {
+                include_archived: false,
+            },
+            "watch_sessions",
+        ),
         (Op::UnwatchSessions { attachment: 1 }, "unwatch_sessions"),
         (
             Op::NewSession {
+                runner: plakous_host_protocol::wire::RunnerLabel::local(),
+                profile: None,
+                model: None,
                 workspace: "/w".to_owned(),
                 template: None,
                 request_id: "r".to_owned(),
@@ -1543,6 +1702,7 @@ fn a_childs_quit_answers_detached() {
         connection.request(
             2,
             Op::Intent {
+                client_id: None,
                 attachment,
                 intent: SessionIntent::Quit,
                 blobs: Vec::new(),

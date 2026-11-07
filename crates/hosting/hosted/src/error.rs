@@ -31,6 +31,8 @@ pub enum CliFailureKind {
     HostedElsewhere,
     /// An embedded attachment cannot take a daemon-held process line.
     LocalRunnerProcesses,
+    /// A standalone import cannot bind runners while a host owns the home.
+    ImportThroughRunningHost,
 }
 
 impl CliFailureKind {
@@ -39,7 +41,7 @@ impl CliFailureKind {
     pub const fn exit_code(self) -> u8 {
         match self {
             Self::Internal => 1,
-            Self::Usage => 2,
+            Self::Usage | Self::ImportThroughRunningHost => 2,
             Self::Auth => 3,
             Self::Agent | Self::RecoveryRequired => 5,
             Self::HostedElsewhere | Self::LocalRunnerProcesses => 7,
@@ -50,6 +52,7 @@ impl CliFailureKind {
 /// Structured CLI failure with an exit-code category.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CliFailure {
+    wire_refusal: Option<Box<plakous_host_protocol::wire::RequestRefusal>>,
     kind: CliFailureKind,
     message: String,
     shutdown: Option<Box<ShutdownFailures>>,
@@ -365,6 +368,7 @@ impl CliFailure {
     /// Failure with an explicit category.
     pub fn classified(kind: CliFailureKind, message: impl Into<String>) -> Self {
         Self {
+            wire_refusal: None,
             kind,
             message: message.into(),
             shutdown: None,
@@ -406,7 +410,9 @@ impl CliFailure {
         self
     }
 
-    pub(crate) fn with_context(mut self, context: impl std::fmt::Display) -> Self {
+    /// Prefix product context without losing the typed failure or its remedy.
+    #[must_use]
+    pub fn with_context(mut self, context: impl std::fmt::Display) -> Self {
         self.message = format!("{context}: {}", self.message);
         self
     }
@@ -434,6 +440,23 @@ impl CliFailure {
     #[must_use]
     pub fn message(&self) -> &str {
         &self.message
+    }
+
+    /// Retain an authenticated host refusal across a synchronous session opener.
+    /// This is process-local response metadata, never persisted or exported.
+    #[must_use]
+    pub fn with_wire_refusal(
+        mut self,
+        refusal: plakous_host_protocol::wire::RequestRefusal,
+    ) -> Self {
+        self.wire_refusal = Some(Box::new(refusal));
+        self
+    }
+
+    /// The typed host refusal, without reconstructing it from rendered text.
+    #[must_use]
+    pub fn wire_refusal(&self) -> Option<&plakous_host_protocol::wire::RequestRefusal> {
+        self.wire_refusal.as_deref()
     }
 
     /// Attach transient typed refusal facts without rendering frontend text.
@@ -551,6 +574,7 @@ impl CliFailure {
         match self.kind {
             CliFailureKind::HostedElsewhere => Some("tree_hosted_elsewhere"),
             CliFailureKind::LocalRunnerProcesses => Some("local_runner_processes"),
+            CliFailureKind::ImportThroughRunningHost => Some("import_through_running_host"),
             _ => None,
         }
     }

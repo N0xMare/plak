@@ -1193,8 +1193,8 @@ fragments.
 
 Version 12 adds two fields beside `workspace_root`. `runner` is
 `{"name", "runner_id"}`, the runner the session's root ran on, taken from the
-record's runner display copy; every session runs on the host's local runner
-today, so it is `{"name": "local", "runner_id": "local"}`. `profile` is
+record's runner display copy; the host's own local runner is explicitly
+`{"name": "local", "runner_id": "local"}`. `profile` is
 `{"root_template", "working_set"}`, the session's profile: its tree's current
 epoch when the tree has rows, otherwise the virtual-tree root profile its
 record keeps. Export never reads the live configuration; a session without tree
@@ -1204,8 +1204,18 @@ version 12 and absent in version 11. A document with the other version's shape
 refuses before import, naming the field, the version and its JSON path
 (``version 12 requires `runner` at $.runner``), as does a runner name or identity
 that is empty, too long or contains whitespace (`$.runner`), and a profile
-naming an invalid template or listing one twice (`$.profile`). This build runs sessions only on its local
-runner and refuses a document that names another. The embedded history and
+naming an invalid template or listing one twice (`$.profile`). A nonlocal
+version-12 placement imports only when its saved runner id is configured,
+paired and freshly validated at its canonical workspace before any destination
+record, runtime or carry intent commits. Refusal never imports it onto local.
+The saved id is authority; a changed alias does not retarget the import.
+Duplicate-carry lookup is scoped by `(runner_id, workspace)` and includes
+archived records without a directory limit. A standalone remote import takes
+exclusive home runner custody and retains its executor through the CLI face's
+lifetime. A running host refuses it before any bind with
+`import_through_running_host` (exit 2): stop the host, or import through an
+attached client. Local import remains direct and starts no daemon.
+The embedded history and
 binding encodings are those of version 11: the neutral history carries no
 backend descriptor or job owner, and jobs are never carried. Frozen tool
 selections are not exported (below), so the document carries no MCP placement;
@@ -4086,6 +4096,11 @@ verdicts) are addressed, the session profile and workspace chrome states.
   cursor, lease release, directory sequence or metadata timestamp. Every
   NodeView carries its own saved runner identity, decorated by the host with
   the lexically first configured alias, `local`, or the saved id if removed.
+- **Open admission.** Every open freshly validates its saved runner and
+  canonical workspace before starting a mutable runtime. This includes local:
+  an unready home-local daemon never silently becomes direct execution.
+  The synchronous opener retains its typed placement refusal as process-local
+  error metadata; the host does not reconstruct refusals from rendered prose.
 - **Stop effects.** `stopped {runner_pending}` certifies durable host-side
   cancellation. The flag is sampled after that commit from the session's
   runner services: true means an unavailable link or reconciliation barrier
