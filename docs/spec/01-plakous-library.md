@@ -2606,9 +2606,12 @@ session's orphan is not signalled.
 provider outcome records: each attempt counts once, completed and failed
 alike, contributing its recorded `usage`; an attempt closed as outcome unknown
 counts as an operation with usage `None`. Local tool attempts count each batch
-effect with a Dispatched transition. Missing usage stays unreported, never
-invented. A terminal the live driver records carries the live counters, which
-equal this sum over the same records.
+effect, composition evaluation or composition continuation (wait call) with a
+Dispatched transition. Missing usage stays unreported, never invented. A
+terminal the live driver records carries the live counters, which equal this
+sum over the same records. Child edges, actor controls, batons and compaction
+providers contribute zero. Recorded-decision completion and abandonment use
+this same sum.
 
 Abandonment never promotes a family artifact or reconstructs a request or
 occupancy anchor: it publishes the head's retained artifact and anchors, so

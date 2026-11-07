@@ -6,6 +6,89 @@
 use super::super::turn_recovery::{abandoned_turn_recovery_fold, local_terminal_recovery_fold};
 use super::*;
 
+#[tokio::test]
+async fn dispatched_wait_recovery_usage_matches_the_live_yielded_cell_turn() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let registry = neutral_composition_test_registry()?;
+    let descriptor = neutral_composition_test_descriptor()?;
+    let authority = artifact_authority(&descriptor, 1)?;
+    let model = Arc::new(
+        ArtifactModel::new(descriptor.clone(), authority.clone(), 0, 0xc0de_9900, false)
+            .with_scripted_tool_calls([
+                (0, "exec", serde_json::to_string("yield once")?),
+                (
+                    1,
+                    "wait",
+                    serde_json::to_string(&json!({"cell_id":"C","yield_time_ms":10}))?,
+                ),
+            ]),
+    );
+    let composition = neutral_composition_for(&model, &descriptor, &authority, &registry)?;
+    let evidence = Arc::new(FakeCompositionEvidence::default());
+    let builder = composition_test_builder(
+        workspace,
+        registry,
+        &model,
+        descriptor,
+        authority,
+        composition,
+        (evidence.clone(), LocalCompositionLifecycle::RootTurnJoined),
+    )?;
+    let store = Arc::new(TestCreateStore::default());
+    let sessions = DurableSessionRuntime::current(
+        store.clone(),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("lease")?,
+    )?;
+    let agent = sessions
+        .create("create:wait-recovery-usage", builder)
+        .await?;
+    let result = agent
+        .prompt("yield then wait for completion")
+        .await?
+        .result()
+        .await?;
+    assert!(
+        matches!(result.outcome(), TurnResultOutcome::Completed(_)),
+        "{:?}",
+        result.outcome()
+    );
+    assert_eq!(evidence.executes.load(Ordering::Acquire), 1);
+    assert_eq!(evidence.waits.load(Ordering::Acquire), 1);
+    assert_eq!(result.usage().local_tool_attempts(), 2);
+    let recovered = lock_mutex(&store.accepted_commits)
+        .iter()
+        .rev()
+        .find_map(|(checkpoint, _)| {
+            if !matches!(
+                checkpoint.manifest().lifecycle(),
+                RuntimeLifecycle::Working { .. }
+            ) {
+                return None;
+            }
+            if !checkpoint
+                .manifest()
+                .ledger()
+                .operations()
+                .iter()
+                .any(|record| {
+                    matches!(record.kind(), DurableOperationKind::Command { .. })
+                        && matches!(record.state(), DurableOperationState::Dispatched)
+                })
+            {
+                return None;
+            }
+            let fold = local_terminal_recovery_fold(checkpoint).ok()?;
+            let (_, evidence) = fold.synthesized?;
+            decode_pending_terminal_record(evidence.bytes())
+        })
+        .ok_or("recorded-terminal recovery cut")?;
+    assert_eq!(recovered.usage, result.usage());
+    agent.shutdown().await?;
+    Ok(())
+}
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum MixedRoot {
     Finalized,

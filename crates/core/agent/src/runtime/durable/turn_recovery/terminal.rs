@@ -400,7 +400,7 @@ fn landed_terminal_recovery_fold(
 /// failed alike; a round record without an outcome counts with usage `None`.
 /// A compaction's own provider attempt is not a round and is not counted,
 /// as the live counters do not count it. Local tool attempts count each
-/// effect or cell evaluation with a `Dispatched` transition.
+/// effect, cell evaluation or continuation with a `Dispatched` transition.
 pub(super) fn terminal_turn_usage(
     records: &[&DurableOperationRecord],
     turn_id: TurnId,
@@ -438,6 +438,7 @@ pub(super) fn terminal_turn_usage(
             }
             DurableOperationKind::Effect { .. }
             | DurableOperationKind::CompositionEvaluation { .. }
+            | DurableOperationKind::CompositionContinuation { .. }
                 if dispatched(record) =>
             {
                 usage.record_local_tool_attempt().map_err(|_| overflow())?;
