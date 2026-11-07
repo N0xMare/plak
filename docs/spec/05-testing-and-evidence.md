@@ -2070,8 +2070,10 @@ that the host process and resident session survive it.
 
 The exact durability test `review_tui_host_restart_switch` adds the TUI's
 own `/new`, `/resume <original>` and `/stop` while a busy root or real child
-runs. Twin pilots pin every indexed per-store label. Its 100 cuts (28 root,
-72 child) restart and reattach without redispatch, handoff or continuation;
+runs. Twin pilots pin every indexed per-store label. Both terminal shapes
+wait for the stopped child tree to become interrupted with no active turns
+before killing each pilot host. Their indexed cuts restart
+and reattach without redispatch, handoff or continuation;
 the original remains unique, and at most its one newly created session
 also exists. The strict sweep registers this shape independently and the
 offline lane excludes it by name.
@@ -2089,6 +2091,8 @@ require an immediate local refusal with no host intent or dispatch.
 
 Busy-root exit fixtures assert the original terminal sees its scripted
 stream, then reattach to the durable admitted prompt and still-busy turn.
+The provider waits at a file gate until that attachment is ready, then
+streams a second chunk that the reattached face must receive live.
 They do not wait for the old face's transient text delta to replay: that
 delta may not be in the new baseline, and waiting past the fixture's stall
 would instead observe its ordinary final output. Twenty repeats cover

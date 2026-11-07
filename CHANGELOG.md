@@ -10,6 +10,11 @@ one cross-build carrier (a build imports its own and the previous version).
 - Add the portable internal runner dial core: Noise IK, pairing proofs, offers,
   fingerprint confirmation and bounded encrypted transport framing, without a product caller.
 
+- Keep host startup tolerant of brief discovery lock probes and retire a
+  recovered creation request identity on explicit session selection. Pin
+  terminal restart pilots after stopped-tree settlement, and verify live
+  streaming after reattachment.
+
 ### Format cut
 
 This release changes every persisted store at once (the 0.0.4 format cut), so

@@ -227,12 +227,22 @@ fn directory_new_resume_stop_and_leaving_use_the_host_socket() {
         );
     });
     let face = SocketFace::discover(&paths).unwrap().unwrap();
+    face.restore_new_request(Some("an-unknown-earlier-creation".into()));
     face.select(Some(SESSION)).unwrap();
+    assert!(
+        face.state().new_request.is_none(),
+        "explicit selection retires an unknown creation"
+    );
     assert_eq!(event(&face), HostEvent::SetBusy(false));
     face.send(UserAction::NewSession).unwrap();
     assert_eq!(event(&face), HostEvent::SetBusy(true));
     assert_eq!(face.session().as_deref(), Some(NEXT));
+    face.restore_new_request(Some("another-unknown-creation".into()));
     face.send(UserAction::ResumeSession { id: None }).unwrap();
+    assert!(
+        face.state().new_request.is_none(),
+        "explicit resume retires an unknown creation"
+    );
     let HostEvent::ResumeSessions(rows) = event(&face) else {
         panic!("no picker rows")
     };

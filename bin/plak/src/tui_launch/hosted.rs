@@ -189,8 +189,7 @@ fn select_or_list(face: &SocketFace, selected: Option<&str>) -> CliResult<bool> 
         face.select(Some(session))?;
         return Ok(false);
     }
-    face.send(crate::surface_protocol::UserAction::ResumeSession { id: None })
-        .map_err(|_| CliFailure::new("the host disconnected before listing sessions"))?;
+    face.list_sessions()?;
     Ok(true)
 }
 

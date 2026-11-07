@@ -211,6 +211,20 @@ fn a_host_tui_new_switches_only_its_attachment_and_quit_detaches() {
     let rows = directory.rows();
     assert_eq!(rows.len(), 2);
     assert!(rows.iter().any(|row| row["session"] == original));
+    terminal.send(b"/new\r");
+    terminal.wait_absent("socket turn answered");
+    terminal.send(b"third host turn\r");
+    terminal.wait_screen("socket turn answered");
+    let rows = directory.rows();
+    let distinct = rows
+        .iter()
+        .map(|row| row["session"].as_str().unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        distinct.len(),
+        3,
+        "successive /new acts create distinct sessions"
+    );
     terminal.quit();
     assert!(
         fixture

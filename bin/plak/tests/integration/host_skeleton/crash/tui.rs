@@ -90,6 +90,7 @@ fn review_pilot(child: bool) -> (Vec<Commit>, Signature) {
     review_drive_switch(&baseline, &session, false, child);
     let rows = review_rows(&host);
     assert_eq!(rows.len(), 2, "the pilot made one more session: {rows:?}");
+    wait_stopped_tree(&baseline, &host, &session, child);
     host.child.as_mut().unwrap().kill().unwrap();
     host.child.take().unwrap().wait().unwrap();
     let commits = indexed_commits(&trace);
@@ -282,10 +283,47 @@ fn child_dispatches(fixture: &Fixture) -> usize {
 type Commit = (u64, String, u64);
 type Signature = Vec<(String, u64, String)>;
 
+fn wait_stopped_tree(fixture: &Fixture, host: &Host, session: &str, child: bool) {
+    use plakous_recursive_subagents::tree::TreeStore as _;
+    let until = Instant::now() + WAIT;
+    if child {
+        let node = review_rows(host)
+            .into_iter()
+            .find(|row| row.session == session)
+            .unwrap()
+            .node;
+        let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
+        let store =
+            plakous_recursive_subagents_store::SqliteTreeStore::open(&paths.subagents_database())
+                .unwrap();
+        loop {
+            let tree = store.load(&node.tree_id).unwrap().unwrap();
+            let tree = tree.rows();
+            if tree.state == plakous_recursive_subagents::tree::TreeAdmissionState::Interrupted
+                && tree.nodes().values().all(|node| {
+                    !node.active_turn
+                        && (node.agent_id == tree.root_agent_id
+                            || node.status
+                                == plakous_recursive_subagents::protocol::NodeStatus::Interrupted
+                            || node.status.is_finished())
+                })
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < until,
+                "the pilot's stopped tree never settled: {tree:?}"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
 fn signature(trace: &Path) -> Signature {
     let mut commits = std::fs::read_to_string(trace)
         .unwrap()
-        .lines()
+        .split_inclusive('\n')
+        .filter(|line| line.ends_with('\n'))
         .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
         .filter(|row| row["indexed"] == true)
         .map(|row| {
@@ -314,6 +352,7 @@ fn pilot(child: bool) -> (Vec<Commit>, Signature) {
             "the pilot stopped a real running child"
         );
     }
+    wait_stopped_tree(&baseline, &host, &session, child);
     host.child.as_mut().unwrap().kill().unwrap();
     host.child.take().unwrap().wait().unwrap();
     let commits = indexed_commits(&trace);

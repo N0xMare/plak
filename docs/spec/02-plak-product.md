@@ -4665,6 +4665,10 @@ host gets the bounded retry below. Once a connection answers, handshake failures
 the launch; a different wire version names the remedies: stop the host
 with `plak host stop`, or run its build. It never embeds beside that peer.
 
+A starting host re-asks a contended `host.lock` twice, 5 ms apart, before
+refusing an existing holder. A momentary discovery probe therefore does not
+make the host fail to start; the held lock remains the authority.
+
 In host mode the resume picker reads `list_sessions` for the workspace,
 and `/new` sends `new_session` with a fresh request id, then attaches the
 created root. Resuming or creating switches this terminal's attachment
@@ -4878,7 +4882,9 @@ Transport-loss notes include the ended reason. Stop and resume refusals,
 and stop/attach outcomes unknown at timeout or transport end, are visible.
 An unanswered `new_session` retains its request id across reconnect; the
 next operator `/new` reuses that id rather than creating an orphaned second
-session. It is never replayed automatically. `/stop` is host-mode only and
+session. It is never replayed automatically. An explicit resume or selection
+retires that unknown creation identity; an accepted creation also retires
+it, so successive `/new` acts create distinct sessions. `/stop` is host-mode only and
 hidden from the embedded palette. Config-editor return reloads terminal
 preferences before opening the terminal again.
 Declining the launch resume picker explicitly creates and attaches a fresh

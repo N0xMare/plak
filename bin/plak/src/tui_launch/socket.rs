@@ -80,6 +80,7 @@ impl SocketFace {
 
     pub(super) fn select(&self, requested: Option<&str>) -> CliResult<()> {
         let answer = if let Some(requested) = requested {
+            self.state().new_request = None;
             let Answer::Sessions { rows } = self.call(self.list())? else {
                 return Err(CliFailure::new(
                     "the host did not answer with its session directory",
@@ -221,11 +222,33 @@ impl SocketFace {
         true
     }
 
+    pub(super) fn list_sessions(&self) -> CliResult<()> {
+        self.request(UserAction::ResumeSession { id: None }, self.list())
+            .map_err(|_| CliFailure::new("the host disconnected before listing sessions"))
+    }
+
+    #[allow(clippy::result_large_err, reason = "return the user's unsent action")]
+    fn request(
+        &self,
+        action: UserAction,
+        op: Op<PlakExtension>,
+    ) -> Result<(), UserActionSendError> {
+        let mut state = self.state();
+        let Some(id) = self.sender.request_operation(op) else {
+            return Err(UserActionSendError::Disconnected(action));
+        };
+        state.pending.insert(id, (Some(action), Instant::now()));
+        Ok(())
+    }
+
     #[allow(clippy::result_large_err, reason = "return the user's unsent action")]
     pub(crate) fn send(&self, action: UserAction) -> Result<(), UserActionSendError> {
         let op = match &action {
             UserAction::NewSession => Some(self.new_session()),
-            UserAction::ResumeSession { .. } => Some(self.list()),
+            UserAction::ResumeSession { .. } => {
+                self.state().new_request = None;
+                Some(self.list())
+            }
             UserAction::Extension(crate::surface_protocol::SurfaceIntent::ProbeReload) => {
                 self.probe_reload();
                 return Ok(());
@@ -243,12 +266,7 @@ impl SocketFace {
             _ => None,
         };
         if let Some(op) = op {
-            let mut state = self.state();
-            let Some(id) = self.sender.request_operation(op) else {
-                return Err(UserActionSendError::Disconnected(action));
-            };
-            state.pending.insert(id, (Some(action), Instant::now()));
-            return Ok(());
+            return self.request(action, op);
         }
         self.sender.send(action).map_err(|error| match error {
             client::SendError::Refused(refused) => refused,

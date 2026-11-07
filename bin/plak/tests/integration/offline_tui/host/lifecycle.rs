@@ -48,9 +48,13 @@ fn review_end(terminal: Terminal, exit: &str) -> String {
 /// host, a running child is never redispatched, and a fresh attach finds the
 /// same work without a replay.
 fn review_busy_root_survives(exit: &str) {
-    let fixture = Fixture::with_mode(
-        &json!({"version": 1, "repeat_last_step": true, "steps": [{"stream": [{"text": "review busy root"}, {"stall": 30000}]}]}),
-        Mode::Host,
+    let fixture = Fixture::with_mode(&json!({"version": 1, "steps": []}), Mode::Host);
+    let gate = fixture.root.join("reattached-stream-gate");
+    fixture.write_script(
+        &json!({"version": 1, "repeat_last_step": true, "steps": [{"stream": [
+            {"text": "review busy root"}, {"gate": {"file": gate}},
+            {"text": " live stream after reattach"}, {"stall": 30000}
+        ]}]}),
     );
     let mut terminal = Terminal::spawn_ready(&fixture);
     terminal.send(b"keep this turn running\r");
@@ -73,6 +77,8 @@ fn review_busy_root_survives(exit: &str) {
     // admitted prompt and busy work, not replay that face's old text delta.
     again.wait_screen("keep this turn running");
     again.wait_screen("Esc stop");
+    std::fs::write(gate, "release").unwrap();
+    again.wait_screen("live stream after reattach");
     assert_eq!(
         provider_dispatches(&fixture),
         paid,
