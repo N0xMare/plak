@@ -3956,7 +3956,13 @@ drain, stops background processes, and writes the root record last:
 `stopped` on a held or pending root continuation, which ends it. That
 root record is the commit point either way. A stop during a workflow is
 observed as the operator's interrupt is, and the rest of the stop waits
-until the workflow ends. *Durable before and after:* a crash before the
+until the workflow ends. The idle stop also joins tracked child recovery
+before interrupting and retiring children, so recovery has released its
+canonical leases before the daemon stop takes a fresh head lease. This join
+uses the host release bound; a timed-out recovery remains tracked and the stop
+reports failure rather than claiming completion. The running-turn stop signal
+does not wait for recovery.
+*Durable before and after:* a crash before the
 root record is an ordinary loss, held or continued under the loss policy.
 After it, with no root turn admitted since, the whole tree reads stopped
 and nothing continues it under either policy. In `plak host`, the returning
@@ -3973,7 +3979,11 @@ an earlier child refuses; failures are collected and logged. A later root
 admission ends an old root stop, and a stop never follows an old product
 record onto a successor head. Terminals are
 recorded under that lease. Only this serving process finishes those stops,
-never an inspecting or embedded process. An idle host can hand off its
+never an inspecting or embedded process. Once a child line's recorded stop
+succeeds, the host retires any process-registry port below the stop's owner
+fence: that port no longer has control authority. A newer attachment's port
+is retained, and the job terminals stay durable on the line.
+An idle host can hand off its
 resident daemon jobs without rebranding a cancelled turn from a previous
 attachment as newly handed off: the root handoff record belongs only to a
 root turn this attachment quit while driving. A planned handoff or a

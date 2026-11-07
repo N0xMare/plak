@@ -1,6 +1,40 @@
 use crate::agent_tree_protocol::{NodeStatus, SpawnAgentRequest};
 use crate::runtime::test_kit::BlockOn as _;
 
+#[test]
+fn idle_stop_joins_child_recovery_before_acquiring_process_stop_leases() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let root = tempfile::tempdir().unwrap();
+    let tree_id = uuid::Uuid::new_v4().to_string();
+    let runtime = crate::runtime::test_kit::install_idle_topology_hub(&tree_id, root.path());
+    let executor = plakous::application::ApplicationExecutor::new().unwrap();
+    executor
+        .block_on(async {
+            let released = Arc::new(AtomicBool::new(false));
+            let (release, waiting) = tokio::sync::oneshot::channel();
+            let finished = Arc::clone(&released);
+            let recovery = runtime.driver().tasks().spawn(async move {
+                waiting.await.unwrap();
+                finished.store(true, Ordering::SeqCst);
+            });
+            assert!(runtime.track_recovery(recovery));
+            super::signal_root_stopped(&tree_id).await.unwrap();
+            assert!(!released.load(Ordering::SeqCst));
+            let mut stop = Box::pin(super::mark_root_interrupted_for_run(&tree_id));
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(100), &mut stop)
+                    .await
+                    .is_err(),
+                "the idle stop must wait for recovery to release its child session"
+            );
+            release.send(()).unwrap();
+            stop.await.unwrap();
+            assert!(released.load(Ordering::SeqCst));
+        })
+        .unwrap();
+}
+
 struct DelayedChild(
     std::sync::Arc<std::sync::atomic::AtomicBool>,
     std::sync::Arc<tokio::sync::Notify>,

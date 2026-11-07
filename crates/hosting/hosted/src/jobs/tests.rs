@@ -10,6 +10,30 @@ use std::{path::Path, str::FromStr, time::Duration};
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 #[test]
+fn a_recorded_stop_retires_only_the_superseded_process_port() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let registry = JobRegistry::default();
+    let initial = owner("00000000-0000-0000-0000-000000000702")?;
+    registry.attach(initial, sessions(root.path())?)?;
+    let stopped = plakous::tools::LineOwner::new(
+        initial.line,
+        initial.generation,
+        initial.branch_id,
+        initial.fence + 1,
+    );
+    registry.retire_stopped_line(stopped);
+    assert!(registry.service(initial.line).is_none());
+    let successor = JobOwner {
+        fence: initial.fence + 2,
+        ..initial
+    };
+    registry.attach(successor, sessions(root.path())?)?;
+    registry.retire_stopped_line(stopped);
+    assert!(registry.service(initial.line).is_some());
+    Ok(())
+}
+
+#[test]
 fn attributed_host_looks_up_only_the_exact_session_branch() -> TestResult {
     let root = tempfile::tempdir()?;
     let registry = Arc::new(JobRegistry::default());

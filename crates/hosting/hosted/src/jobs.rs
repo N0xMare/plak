@@ -438,6 +438,20 @@ impl JobRegistry {
         self.stop_owned(None, id)
     }
 
+    /// A lease-only stop supersedes an old driver's control port. Its terminal
+    /// evidence is durable on the line; a newer attachment must keep its port.
+    pub(crate) fn retire_stopped_line(&self, owner: plakous::tools::LineOwner) {
+        let mut services = self
+            .services
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if services.get(&owner.line()).is_some_and(|entry| {
+            (entry.owner.generation, entry.owner.fence) < (owner.generation(), owner.fence())
+        }) {
+            services.remove(&owner.line());
+        }
+    }
+
     /// [`Self::stop_user`] over one node's own jobs only: the services its
     /// lines' heads attached as the node `agent` of the tree `tree`. A
     /// child's id names it only within its tree.

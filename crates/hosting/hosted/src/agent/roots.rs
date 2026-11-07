@@ -396,7 +396,7 @@ impl ProductStateRoots {
                     .line_head_of(locator)
                     .await
                     .map_err(|error| CliFailure::new(error.to_string()))?;
-                crate::runner_adoption::finish_recorded_stop(
+                let stopped = crate::runner_adoption::finish_recorded_stop(
                     client,
                     &sessions,
                     head.line(),
@@ -404,6 +404,7 @@ impl ProductStateRoots {
                 )
                 .await
                 .map_err(CliFailure::new)?;
+                self.job_registry.retire_stopped_line(stopped.owner);
                 Ok::<_, CliFailure>(())
             }
             .await;

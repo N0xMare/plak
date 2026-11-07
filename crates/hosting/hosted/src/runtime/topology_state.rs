@@ -218,6 +218,9 @@ async fn interrupt_root(tree_id: &str, stop: ChildStop) -> Result<usize, String>
     let Some(runtime) = lookup(tree_id) else {
         return Ok(0);
     };
+    if matches!(stop, ChildStop::Join) {
+        join_stop_recoveries(&runtime).await?;
+    }
     let cause = match stop {
         ChildStop::Cascade => crate::agent_tree::InterruptCause::Cascade,
         ChildStop::Signal | ChildStop::Join => crate::agent_tree::InterruptCause::Stopped,
@@ -238,6 +241,34 @@ async fn interrupt_root(tree_id: &str, stop: ChildStop) -> Result<usize, String>
     }
     cancel_interrupted_children(&runtime, &interrupted, join, tree_id).await?;
     Ok(count)
+}
+
+async fn join_stop_recoveries(
+    runtime: &crate::topology_runtime::ProductTopologyRuntime,
+) -> Result<(), String> {
+    let deadline =
+        tokio::time::Instant::now() + crate::topology_runtime::HOST_SHUTDOWN_RELEASE_TIMEOUT;
+    loop {
+        let mut tasks = runtime.take_recoveries();
+        if tasks.is_empty() {
+            return Ok(());
+        }
+        let joined = tokio::time::timeout_at(deadline, async {
+            for task in &mut tasks {
+                task.await
+                    .map_err(|_| "child recovery failed before the session stop".to_owned())?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|_| Err("child recovery exceeded the session stop bound".to_owned()));
+        if let Err(error) = joined {
+            for task in tasks {
+                runtime.track_recovery(task);
+            }
+            return Err(error);
+        }
+    }
 }
 
 async fn cancel_interrupted_children(
