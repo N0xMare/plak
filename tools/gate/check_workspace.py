@@ -1651,6 +1651,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "ClientWindows",
             "ConnectError",
             "FileCallJournal",
+            "FileOwnerFloors",
             "RunnerClient",
             "protocol",
             "daemon",
