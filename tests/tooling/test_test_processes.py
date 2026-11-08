@@ -354,6 +354,7 @@ class TestProcessGuardTests(unittest.TestCase):
         table = MODULE.ProcessTable()
         with (
             patch.object(table, 'scan', return_value={new.pid: new}),
+            patch.object(MODULE.os, 'getpgid', return_value=new.pid),
             patch.object(MODULE.os, 'kill') as kill,
             patch.object(MODULE.os, 'killpg') as killpg,
         ):
