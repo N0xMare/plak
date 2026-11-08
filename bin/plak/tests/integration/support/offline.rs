@@ -56,18 +56,57 @@ impl Drop for TestChild {
 #[test]
 fn a_fixture_child_is_reaped_when_readiness_panics_or_times_out() {
     for panic in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let grandchild = root.path().join("grandchild");
+        let marker = grandchild.clone();
         let pid = Arc::new(Mutex::new(None));
         let observed = Arc::clone(&pid);
         let result = std::panic::catch_unwind(move || {
-            let child = TestChild::spawn(Command::new("sh").args(["-c", "sleep 60 & wait"]));
+            let child = TestChild::spawn(
+                Command::new("sh")
+                    .args([
+                        "-c",
+                        "sleep 60 & echo $! > \"$1\"; wait",
+                        "fixture",
+                        marker.to_str().unwrap(),
+                    ])
+                    .current_dir(marker.parent().unwrap()),
+            );
             *observed.lock().unwrap() = Some(child.id());
+            let until = Instant::now() + WAIT;
+            while !std::fs::read_to_string(&marker).is_ok_and(|value| !value.trim().is_empty()) {
+                assert!(Instant::now() < until, "background child never started");
+                std::thread::yield_now();
+            }
             assert!(!panic, "readiness refused");
             // Returning before startup succeeded must still reap the group.
         });
         assert_eq!(result.is_err(), panic);
-        let pid =
-            rustix::process::Pid::from_raw(pid.lock().unwrap().unwrap().cast_signed()).unwrap();
-        assert!(rustix::process::kill_process(pid, rustix::process::Signal::CONT).is_err());
+        let pid = nix::unistd::Pid::from_raw(pid.lock().unwrap().unwrap().cast_signed());
+        assert!(matches!(
+            nix::sys::wait::waitpid(pid, Some(nix::sys::wait::WaitPidFlag::WNOHANG)),
+            Err(nix::errno::Errno::ECHILD)
+        ));
+        let grandchild = std::fs::read_to_string(grandchild).unwrap();
+        let state = Command::new("ps")
+            .args(["-o", "stat=", "-p", grandchild.trim()])
+            .output()
+            .unwrap();
+        let stopped = state.stdout.is_empty()
+            || String::from_utf8_lossy(&state.stdout)
+                .trim()
+                .starts_with('Z');
+        // Keep a mutant's surviving child from becoming a fixture leak.
+        if !stopped
+            && let Ok(pid) = grandchild.trim().parse::<i32>()
+            && let Some(pid) = rustix::process::Pid::from_raw(pid)
+        {
+            let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
+        }
+        assert!(
+            stopped,
+            "the background child survived its fixture's process group"
+        );
     }
 }
 /// The facade's session lease (`SESSION_LEASE_SECONDS` in plakous sessions.rs).
@@ -89,9 +128,8 @@ impl Fixture {
         let ordinal = FIXTURE_ORDINAL.fetch_add(1, Ordering::Relaxed);
         // Under `TMPDIR`, like every other test's scratch, so the gate's
         // storage placement (`PLAK_TEST_TMPDIR`) reaches these sessions too.
-        let root = std::env::temp_dir()
-            .join("offline-e2e")
-            .join(format!("{}-{ordinal}", std::process::id()));
+        // Keep socket paths short even inside an invocation's run directory.
+        let root = std::env::temp_dir().join(format!("e{:x}-{ordinal:x}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let fixture = Self {
             root,

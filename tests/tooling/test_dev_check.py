@@ -882,7 +882,12 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         )
         for call in isolated:
             with self.subTest(call=call.get('args', call.get('python'))[:3]):
-                self.assertEqual(call['git_global'], str(scratch.resolve() / 'gitconfig'))
+                config = Path(call['git_global'])
+                self.assertTrue(config.is_relative_to(scratch.resolve()), config)
+                self.assertEqual(config.name, 'gitconfig')
+                if call.get('args', [])[:2] == ['nextest', 'run']:
+                    self.assertTrue(config.parent.name.startswith('run-'), config)
+                self.assertEqual(config.read_text(), '')
                 self.assertEqual(call['git_nosystem'], '1')
         self.assertEqual((scratch / 'gitconfig').read_text(), '')
 
@@ -1107,7 +1112,21 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertEqual(steps.returncode, 0, steps.stderr)
         soaks = [call for call in full_calls if '--run-ignored' in call['args']]
         self.assertEqual(len(soaks), 2)
-        self.assertEqual([call for call in full_calls if call not in soaks], step_calls)
+
+        def stable(calls):
+            return [
+                {
+                    key: '<run>/' + Path(value).name
+                    if key in ('plak_home', 'git_global') and value and '/run-' in value
+                    else value
+                    for key, value in call.items()
+                }
+                for call in calls
+            ]
+
+        self.assertEqual(
+            stable([call for call in full_calls if call not in soaks]), stable(step_calls)
+        )
         self.assertEqual(full_scripts, step_scripts)
         headings = [line for line in full.stdout.splitlines() if line.startswith('== group:')]
         self.assertEqual(headings, [f'== group: {group} ==' for group in GROUPS])

@@ -35,11 +35,14 @@ fn plak_command(home: &Path) -> Command {
 }
 
 fn isolated_home() -> (tempfile::TempDir, PathBuf) {
-    let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/plak-test-homes");
+    let base = std::env::temp_dir();
     std::fs::create_dir_all(&base).unwrap();
     // Credential storage refuses a home path with `..` in it.
     let base = base.canonicalize().unwrap();
-    let temporary = tempfile::tempdir_in(&base).unwrap();
+    let temporary = tempfile::Builder::new()
+        .prefix("r")
+        .tempdir_in(&base)
+        .unwrap();
     let home = temporary.path().join("home");
     std::fs::create_dir(&home).unwrap();
     std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o700)).unwrap();

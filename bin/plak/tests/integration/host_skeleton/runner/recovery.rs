@@ -392,3 +392,31 @@ fn a_busy_roots_child_job_survives_attach_after_host_loss() {
         }
     }
 }
+#[test]
+fn a_local_daemon_does_not_recreate_a_deleted_home() {
+    let Some(fixture) = fixture() else { return };
+    let mut command = fixture.command();
+    command
+        .args(["runner", "serve", "--local"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    std::fs::remove_dir_all(fixture.home()).unwrap();
+    let mut child = Child::spawn(&mut command);
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let failed = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break !status.success();
+        }
+        if std::time::Instant::now() >= until {
+            break false;
+        }
+        std::thread::yield_now();
+    };
+    drop(child);
+    assert!(failed, "the daemon served after its home was removed");
+    assert!(
+        !fixture.home().exists(),
+        "daemon startup resurrected its home"
+    );
+}

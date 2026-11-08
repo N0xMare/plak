@@ -14,11 +14,12 @@
     reason = "private real-process test harness"
 )]
 
+use super::offline_support::TestChild as Child;
 use std::fmt::Write as _;
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::process::{Child, Stdio};
+use std::process::Stdio;
 use std::sync::mpsc;
 
 use plakous_host_protocol::wire::{ClientFrame, Hello, NodeAddress, Op, WIRE_VERSION, encode_line};
@@ -44,15 +45,6 @@ struct Web {
     socket: PathBuf,
     /// Its stderr lines after the start line.
     lines: mpsc::Receiver<String>,
-}
-
-impl Drop for Web {
-    fn drop(&mut self) {
-        if let Some(mut child) = self.child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-    }
 }
 
 /// A socket directory short enough for a unix socket path.
@@ -109,7 +101,7 @@ fn launch_on(fixture: &Fixture, socket: &std::path::Path, extra: &[&str]) -> (We
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
-    let mut child = command.spawn().expect("plak host spawned");
+    let mut child = Child::spawn(&mut command);
     let stderr = child.stderr.take().unwrap();
     let (ready, started) = mpsc::channel();
     let (forward, lines) = mpsc::channel();

@@ -11,15 +11,6 @@ composition, and protocol it named — nothing adjacent. The second is that
 symbol that is nameable, a command that parses, and a route that renders are all
 accessibility facts. None of them is a support or correctness promise.
 
-Real-process fixtures own host children and their process groups from spawn,
-before waiting for readiness. Teardown reaps them on a failed readiness wait,
-panic or timeout, and reaps home-local daemons before removing their homes.
-The nextest and opt-in crash-sweep entry points check for same-user
-`plak host` and `plak runner serve` processes whose working directories are inside that checkout's isolated test
-directory, including deleted directories. A leaked process fails the command
-and is reaped; processes outside that directory are never signalled. The gate
-checks before resetting its test directory as well as after each test lane.
-
 Offline runner fault injection targets only the recorded daemon that still
 has the fixture home's lock file open, never a host's transient startup probe.
 Its exit wait tracks the killed daemon, not a replacement the live host may
@@ -1998,6 +1989,26 @@ capture failures on refusal bodies remain transport failures, not retryable
 provider status responses.
 
 ### 2.6 Spawned-binary lifecycles
+
+Real-process fixtures own host children and their process groups from spawn,
+before waiting for readiness. Teardown reaps them on drop, panic or a readiness
+timeout, and reaps home-local daemons before removing their homes.
+The guarded entry points are the Rust lanes in `tools/gate/dev-check.sh`,
+`just nextest`, and `just dev crash-sweep`. `tools/dev/coverage.sh` and
+`tools/perf/perf-smoke.sh` are not guarded.
+
+Each guarded invocation creates `TMPDIR/run-<pid>-<nonce>`, holds its run lock
+for its lifetime, and gives the child that directory as its test scratch and
+isolated home. Concurrent invocations never reap locked runs. At startup it
+reaps only unlocked earlier runs, reports those leftovers without failing the
+new command, and never resets a live run's files. A leak from the current run
+fails that command. Only same-user hosts and runners inside its run directory
+(including deleted working directories), and their owned descendants, are
+signalled. Hosts stop before daemons and cleanup re-lists successors launched
+while a host dies. TERM, INT, HUP and QUIT are forwarded without preempting the
+child's cancellation grace; only a second signal escalates to KILL. Interrupted
+cleanup skips the normal settle wait. The guard cannot clean up if it is itself
+SIGKILLed; an unlocked surviving run can be reaped by a later invocation.
 
 UI reload evidence keeps a real session WebSocket open across `SIGUSR1`,
 checks the replacement policy and continued wire service, and rejects an

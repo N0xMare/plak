@@ -53,7 +53,10 @@ shared_dir() {
   [[ -d "$base" && ! -L "$base" && -w "$base" ]] || return 1
   [[ "$(physical "$base")" == "$base" ]] || return 1
   dir="$base/plak-test-$(id -u)-$(printf '%s' "$root" | cksum | cut -d' ' -f1)"
-  if ((fresh)); then rm -rf "$dir" 2>/dev/null || true; fi
+  if ((fresh)) && [[ -d "$dir" && ! -L "$dir" ]]; then
+    # Run directories are lock-owned; test-processes.py reaps only free ones.
+    find "$dir" -mindepth 1 -maxdepth 1 ! -name 'run-*' ! -name '.guard.lock' -exec rm -rf -- {} +
+  fi
   mkdir -m 700 "$dir" 2>/dev/null || true
   [[ -d "$dir" && ! -L "$dir" && -O "$dir" ]] || return 1
   chmod 700 "$dir"

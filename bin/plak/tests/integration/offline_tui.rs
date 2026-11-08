@@ -102,9 +102,8 @@ impl Fixture {
         let ordinal = FIXTURE_ORDINAL.fetch_add(1, Ordering::Relaxed);
         // Under `TMPDIR`, like every other test's scratch, so the gate's
         // storage placement (`PLAK_TEST_TMPDIR`) reaches these sessions too.
-        let root = std::env::temp_dir()
-            .join("offline-tui")
-            .join(format!("{}-{ordinal}", std::process::id()));
+        // Keep socket paths short even inside an invocation's run directory.
+        let root = std::env::temp_dir().join(format!("t{:x}-{ordinal:x}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let fixture = Self {
             root,

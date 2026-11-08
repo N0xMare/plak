@@ -9,12 +9,13 @@
 //! completes or finds the process gone and stops; a step that fails while
 //! the process lives is the shape failing.
 
+use super::super::offline_support::TestChild as Child;
 use std::fmt::Write as _;
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, TryRecvError};
 use std::sync::{Arc, Mutex};
@@ -155,7 +156,7 @@ impl Web {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
-        let mut child = command.spawn().expect("plak host spawned");
+        let mut child = Child::spawn(&mut command);
         let stderr = Arc::new(Mutex::new(Vec::new()));
         let (ready, serving) = mpsc::channel();
         let reader = {
@@ -297,15 +298,6 @@ impl Web {
             status,
             lines: records.iter().map(Value::to_string).collect(),
             stderr,
-        }
-    }
-}
-
-impl Drop for Web {
-    fn drop(&mut self) {
-        if self.child.try_wait().ok().flatten().is_none() {
-            let _ = self.child.kill();
-            let _ = self.child.wait();
         }
     }
 }
