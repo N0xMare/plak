@@ -315,7 +315,7 @@ impl NativeSubscriptions {
     pub async fn subscription_usage_read_only<Permit>(
         &self,
         provider: NativeProvider,
-        _before_get: impl std::future::Future<Output = Permit>,
+        _before_get: impl Future<Output = Permit>,
     ) -> SubscriptionUsageRead {
         self.subscription_usage(provider).await
     }
