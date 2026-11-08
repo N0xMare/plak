@@ -16,6 +16,7 @@ fn archived_stop_is_a_read_only_noop_even_with_an_unreadable_runtime() {
     std::fs::write(paths.runtime_database(), b"not a runtime database").unwrap();
     let product = ProductSessions::new(&services, None, None).unwrap();
     product.stop_dormant(&record.id).unwrap();
+    assert!(!product.runner_pending(&record.id));
     assert!(
         services
             .session_records()

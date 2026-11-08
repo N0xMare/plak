@@ -181,7 +181,7 @@ mod storage;
 #[cfg(test)]
 pub(crate) mod test_seams;
 pub use factory::{ProductionRuntimeFactory, RuntimeFactory, RuntimeFuture, TurnObserver};
-pub use root_loss::{RootStanding, root_standing};
+pub use root_loss::{RootStanding, root_standing, root_standing_from_intents};
 #[cfg(any(test, feature = "test-support"))]
 pub use test_kit::ScriptedRuntimeFactory;
 #[cfg(test)]

@@ -1,23 +1,70 @@
 use super::*;
 
 #[test]
-fn lifecycle_slot_source_mismatch_is_retryable_without_mutation() {
+fn lifecycle_slot_predecessor_mutation_keeps_successor_serving() {
     let Switched {
         host,
         fake,
         slot,
         mut connection,
-        ..
+        out,
     } = switched();
-    let result = slot.mutate_lifecycle("s1", true, || {
-        fake.0.lifecycle_mutations.fetch_add(1, Ordering::SeqCst);
-        Ok(())
-    });
-    assert!(matches!(
-        result,
-        Err(RequestRefusal::SessionUnavailable { .. })
-    ));
-    assert_eq!(fake.0.lifecycle_mutations.load(Ordering::SeqCst), 0);
+    assert!(Arc::ptr_eq(&host.slot("s1"), &slot));
+    request(
+        &mut connection,
+        3,
+        Op::DeleteSession {
+            session: "s1".into(),
+            abandon_children: false,
+        },
+    );
+    assert_eq!(
+        outcome(&out.take(), 3),
+        Outcome::Ok(Answer::Deleted {
+            session: "s1".into()
+        })
+    );
+    assert_eq!(fake.0.active_workers.load(Ordering::SeqCst), 1);
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
+    assert_eq!(host.slots().len(), 1);
+    assert!(Arc::ptr_eq(&host.slot("s9"), &slot));
+    assert!(
+        matches!(slot.peek(),SlotView::Resident(served) if served.session_id()=="s9" && !served.ended())
+    );
+    connection.leave();
+    handed_off(&host);
+}
+
+#[test]
+fn lifecycle_slot_successor_releases_the_actor_through_its_predecessor_slot() {
+    let Switched {
+        host,
+        fake,
+        slot,
+        mut connection,
+        out,
+    } = switched();
+    assert!(Arc::ptr_eq(&host.slot("s9"), &slot));
+    request(
+        &mut connection,
+        3,
+        Op::ArchiveSession {
+            session: "s9".into(),
+            archived: true,
+        },
+    );
+    assert_eq!(
+        outcome(&out.take(), 3),
+        Outcome::Ok(Answer::ArchiveUpdated {
+            session: "s9".into(),
+            archived: true
+        })
+    );
+    assert_eq!(fake.0.active_workers.load(Ordering::SeqCst), 0);
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
+    assert_eq!(host.slots().len(), 1);
+    assert_eq!(slot.known(), "s1");
+    assert!(matches!(slot.peek(),SlotView::Dormant(id) if id=="s1"));
     connection.leave();
     handed_off(&host);
 }

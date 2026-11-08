@@ -494,7 +494,11 @@ where
         closing: &Arc<std::sync::atomic::AtomicBool>,
         session: &str,
     ) -> Arc<SessionSlot<P>> {
-        if let Some(slot) = slots.iter().find(|slot| serves(slot, session)) {
+        if let Some(slot) = slots
+            .iter()
+            .find(|slot| slot.serves_current(session))
+            .or_else(|| slots.iter().find(|slot| slot.known() == session))
+        {
             return Arc::clone(slot);
         }
         let (opener, closing) = (Arc::clone(sessions), Arc::clone(closing));
@@ -976,7 +980,11 @@ where
             sessions.delete(&session, abandon_children)
         }) {
             Ok(()) => {
-                self.host.lock().retain(|held| !Arc::ptr_eq(held, &slot));
+                self.host.lock().retain(|held| {
+                    !Arc::ptr_eq(held, &slot)
+                        || slot.known() != session
+                        || !matches!(slot.peek(),SlotView::Dormant(ref id) if id==&session)
+                });
                 self.host.changed();
                 Outcome::Ok(Answer::Deleted { session })
             }

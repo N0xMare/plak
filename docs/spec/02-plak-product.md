@@ -1565,6 +1565,10 @@ Unarchive starts nothing and does not release a resident actor when the flag
 is already clear; repeating unarchive during a turn is a metadata no-op.
 For deletion through the host, a busy resident owner is refused, while an idle
 resident owner is released before the same confirmed deletion service below.
+Lifecycle addresses the product id, not a cached slot key: after a rebind, an
+operation on the successor releases the actor serving that successor through
+its existing slot. An operation on its dormant predecessor leaves that actor
+serving. Deleting a predecessor never drops its successor's resident slot.
 
 Without a host, archive takes non-executing runtime branch leases on the root
 and every finished child through the activity read and metadata commit. A live

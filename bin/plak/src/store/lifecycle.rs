@@ -67,11 +67,11 @@ impl ProductStore {
         id: &str,
         title: Option<&str>,
     ) -> Result<Option<String>, LifecycleError> {
-        self.write_lifecycle(id, title, None, &|| Ok(()))
+        self.write_lifecycle(id, title, None, false, &|| Ok(()))
     }
 
     pub(crate) fn set_archived(&mut self, id: &str, archived: bool) -> Result<(), LifecycleError> {
-        self.write_lifecycle(id, None, Some(archived), &|| Ok(()))
+        self.write_lifecycle(id, None, Some(archived), false, &|| Ok(()))
             .map(|_| ())
     }
 
@@ -81,7 +81,7 @@ impl ProductStore {
         archived: bool,
         verify: &dyn Fn() -> Result<(), LifecycleError>,
     ) -> Result<(), LifecycleError> {
-        self.write_lifecycle(id, None, Some(archived), verify)
+        self.write_lifecycle(id, None, Some(archived), true, verify)
             .map(|_| ())
     }
 
@@ -90,6 +90,7 @@ impl ProductStore {
         id: &str,
         title: Option<&str>,
         archived: Option<bool>,
+        guard_work: bool,
         verify: &dyn Fn() -> Result<(), LifecycleError>,
     ) -> Result<Option<String>, LifecycleError> {
         self.durability(true).map_err(CliFailure::new)?;
@@ -104,6 +105,9 @@ impl ProductStore {
             .optional()
             .map_err(|error| CliFailure::new(error.to_string()))?;
         let revision = revision.ok_or(LifecycleError::Refused(LifecycleRefusal::NotFound))?;
+        if guard_work && archived == Some(true) {
+            refuse_pending_work(&transaction, &mut self.verified_submissions, id)?;
+        }
         // Runtime CAS revisions fence runtime projections, not these disjoint
         // operator columns. Keeping that token avoids aborting a busy turn's
         // next save; every runtime UPDATE deliberately excludes both columns.
@@ -142,12 +146,84 @@ impl ProductStore {
     }
 }
 
+fn refuse_pending_work(
+    connection: &rusqlite::Connection,
+    verified: &mut super::views::VerifiedSubmissions,
+    id: &str,
+) -> Result<(), LifecycleError> {
+    let intents = super::views::intents_of(connection, verified, id).map_err(CliFailure::new)?;
+    let views = super::views::views_of(connection, id)
+        .map_err(CliFailure::new)?
+        .unwrap_or_else(plakous_hosted::sessions::projector::SessionViews::empty);
+    let commands = plakous_hosted::sessions::QueueCommands::from_join(&intents, Some(&views));
+    let queued = super::load_queue(connection, id)
+        .map_err(CliFailure::new)?
+        .iter()
+        .any(|item| !commands.is_consumed(item));
+    let standing = plakous_hosted::runtime::root_standing_from_intents(&intents, &views);
+    if matches!(
+        standing,
+        plakous_hosted::runtime::RootStanding::Continuing { .. }
+    ) || queued
+        || commands.has_pending()
+    {
+        return Err(LifecycleError::Refused(LifecycleRefusal::Busy {
+            turn: true,
+            children: Vec::new(),
+            children_truncated: false,
+            processes: Vec::new(),
+            processes_truncated: false,
+            state_unknown: false,
+        }));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "lifecycle store contract tests")]
 mod tests {
     use super::*;
     use crate::home::paths::PlakPaths;
     use crate::store::sessions::SessionRecord;
+
+    #[test]
+    fn lifecycle_metadata_transaction_refuses_pending_work() {
+        use plakous_hosted::sessions::projector::{
+            RootInterrupt, RootInterruptCause, RootLossIntent, RootStopAnchor,
+        };
+        for queued in [false, true] {
+            let (_temporary, paths) = PlakPaths::isolated_test_home();
+            let mut store = ProductStore::open(&paths).unwrap();
+            let mut record = SessionRecord::new(paths.home().to_owned());
+            if queued {
+                record
+                    .pending_queue
+                    .push(plakous_hosted::sessions::QueueItem::new("queued"));
+            }
+            store.commit(&mut record).unwrap();
+            if !queued {
+                store
+                    .write_root_loss_at_cursor(
+                        &record.id,
+                        &RootLossIntent::Interrupt(RootInterrupt {
+                            anchor: RootStopAnchor::Turn {
+                                turn_id: "handoff-turn".into(),
+                            },
+                            cause: RootInterruptCause::Handoff,
+                        }),
+                    )
+                    .unwrap();
+            }
+            assert!(matches!(
+                store.set_archived_checked(&record.id, true, &|| Ok(())),
+                Err(LifecycleError::Refused(LifecycleRefusal::Busy {
+                    turn: true,
+                    ..
+                }))
+            ));
+            assert!(!store.lifecycle_metadata(&record.id).unwrap().1);
+        }
+    }
 
     #[test]
     fn archived_read_only_inspection_never_reads_runtime_or_drains_work() {

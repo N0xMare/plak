@@ -191,6 +191,13 @@ where
             .clone()
     }
 
+    pub(super) fn serves_current(&self, expected: &str) -> bool {
+        match &*self.lock() {
+            Slot::Resident { session, .. } => session.session_id() == expected,
+            Slot::Dormant { session_id } => session_id == expected,
+        }
+    }
+
     fn set_known(&self, session_id: &str) {
         session_id.clone_into(&mut self.known.lock().unwrap_or_else(PoisonError::into_inner));
     }

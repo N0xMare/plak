@@ -117,6 +117,7 @@ fn row(session: &str, updated_at: u64) -> SessionRow {
 /// The stores as a test scripts them, and what the host asked of them.
 #[derive(Default)]
 struct Script {
+    successors: Mutex<BTreeMap<String, String>>,
     active_workers: AtomicUsize,
     lifecycle_mutations: AtomicUsize,
     lease: Mutex<Option<plakous::sessions::LeaseOnlyHead>>,
@@ -161,7 +162,14 @@ impl Script {
         identity: &str,
         active: bool,
     ) -> bool {
-        let outcome = if session != identity {
+        let current = self
+            .successors
+            .lock()
+            .unwrap()
+            .get(identity)
+            .cloned()
+            .unwrap_or_else(|| identity.to_owned());
+        let outcome = if session != current {
             Err("the session moved".into())
         } else if active || self.processes.load(Ordering::SeqCst) {
             Err("work is running".into())
@@ -189,7 +197,7 @@ impl HostSessions<Core> for Fake {
     }
     fn archive(&self, session: &str, archived: bool) -> Result<(), RequestRefusal> {
         self.0.lifecycle_mutations.fetch_add(1, Ordering::SeqCst);
-        if archived {
+        if archived && !self.0.successors.lock().unwrap().contains_key(session) {
             assert_eq!(
                 self.0.active_workers.load(Ordering::SeqCst),
                 0,
@@ -211,11 +219,13 @@ impl HostSessions<Core> for Fake {
 
     fn delete(&self, session: &str, _abandon_children: bool) -> Result<(), RequestRefusal> {
         self.0.lifecycle_mutations.fetch_add(1, Ordering::SeqCst);
-        assert_eq!(
-            self.0.active_workers.load(Ordering::SeqCst),
-            0,
-            "delete raced the resident worker"
-        );
+        if !self.0.successors.lock().unwrap().contains_key(session) {
+            assert_eq!(
+                self.0.active_workers.load(Ordering::SeqCst),
+                0,
+                "delete raced the resident worker"
+            );
+        }
         self.0
             .rows
             .lock()
@@ -2246,6 +2256,11 @@ fn switched() -> Switched {
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     attached(&out.take(), 1);
     let slot = host.slot("s1");
+    fake.0
+        .successors
+        .lock()
+        .unwrap()
+        .insert("s1".into(), "s9".into());
     fake.0
         .ends
         .lock()

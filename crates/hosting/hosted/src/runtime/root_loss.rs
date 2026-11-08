@@ -565,19 +565,36 @@ pub fn root_standing(
     if stopped {
         return Ok(RootStanding::Stopped);
     }
-    let Some(loss) = latest_loss(&intents) else {
+    if latest_loss(&intents).is_none() {
         return Ok(RootStanding::Clear);
-    };
+    }
     let views = store
         .load_views(session_id)?
         .unwrap_or_else(SessionViews::empty);
-    Ok(match state(&loss, &intents, &views) {
+    Ok(root_standing_from_intents(&intents, &views))
+}
+
+/// Projects standing from intents and views read in one product transaction.
+#[must_use]
+pub fn root_standing_from_intents(intents: &ProductIntents, views: &SessionViews) -> RootStanding {
+    if intents
+        .root_interrupts
+        .iter()
+        .max_by_key(|intent| (intent.anchor, intent.ordinal))
+        .is_some_and(|latest| latest.value.cause == RootInterruptCause::Stopped)
+    {
+        return RootStanding::Stopped;
+    }
+    let Some(loss) = latest_loss(intents) else {
+        return RootStanding::Clear;
+    };
+    match state(&loss, intents, views) {
         None | Some(RootLossState::Running) => RootStanding::Clear,
         Some(standing) => RootStanding::Continuing {
             handoff: loss.cause == RootContinuationCause::Handoff,
             held: standing == RootLossState::Held,
         },
-    })
+    }
 }
 
 /// Whether the root's latest loss was a planned handoff, which continues by

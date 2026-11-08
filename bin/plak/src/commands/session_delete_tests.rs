@@ -228,7 +228,10 @@ fn lifecycle_archive_refuses_an_archived_runtime_branch() -> TestResult {
     let services = crate::shell::services::Services::for_home(f.paths.clone());
     assert!(matches!(
         lifecycle::archive_offline(&services, &f.record.id),
-        Err(LifecycleError::Failure(_))
+        Err(LifecycleError::Refused(LifecycleRefusal::Busy {
+            state_unknown: true,
+            ..
+        }))
     ));
     assert!(!f.product.load(&f.record.id).checked()?.archived);
     Ok(())
@@ -237,7 +240,7 @@ fn lifecycle_archive_refuses_an_archived_runtime_branch() -> TestResult {
 #[test]
 fn lifecycle_gc_refuses_archived_before_opening_runtime() -> TestResult {
     let (_temporary, paths) = crate::home::paths::PlakPaths::isolated_test_home();
-    let services = crate::shell::services::Services::for_home(paths.clone());
+    let services = crate::shell::services::Services::for_home(paths.for_workspace(paths.home()));
     let mut record = product_sessions::SessionRecord::new(paths.home().to_owned());
     record.archived = true;
     services.session_records()?.save(&mut record).checked()?;

@@ -247,9 +247,8 @@ mod tests {
         assert!(
             store
                 .list_for_workspace_filtered(paths.home(), true)
-                .unwrap()
-                .iter()
-                .all(|record| record.archived)
+                .unwrap_err()
+                .contains("result bound")
         );
     }
 

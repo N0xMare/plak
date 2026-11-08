@@ -445,9 +445,14 @@ impl HostSessions<PlakExtension> for ProductSessions {
                 .session_records()?
                 .load(session)
                 .map_err(CliFailure::new)?;
-            self.stop_roots(&record)
+            if record.archived {
+                return Ok(None);
+            }
+            self.stop_roots(&record).map(Some)
         })();
-        roots.map_or(true, |roots| roots.runner_pending())
+        roots.map_or(true, |roots| {
+            roots.is_some_and(|roots| roots.runner_pending())
+        })
     }
 
     fn refusal(&self, session: &str, failure: &CliFailure) -> RequestRefusal {

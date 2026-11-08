@@ -24,13 +24,10 @@ where
             Slot::Resident { session, .. } => session.session_id(),
             Slot::Dormant { session_id } => session_id.clone(),
         };
-        if source != expected {
-            return Err(RequestRefusal::SessionUnavailable {
-                detail: "the resident moved to a successor; refresh the directory and retry"
-                    .to_owned(),
-            });
-        }
-        if release && let Slot::Resident { session, .. } = &*slot {
+        if release
+            && source == expected
+            && let Slot::Resident { session, .. } = &*slot
+        {
             let old = Arc::clone(session);
             if !old.ended() {
                 if let Err(failure) = self.release_actor(&old, expected) {
@@ -39,9 +36,12 @@ where
                 }
             }
             self.busy.store(BUSY_RELEASING, Ordering::Release);
-            let Slot::Resident { worker, .. } =
-                std::mem::replace(&mut *slot, Slot::Dormant { session_id: source })
-            else {
+            let Slot::Resident { worker, .. } = std::mem::replace(
+                &mut *slot,
+                Slot::Dormant {
+                    session_id: self.known(),
+                },
+            ) else {
                 unreachable!("the slot lock retains its worker");
             };
             let result = join(worker, self.release_join);
@@ -51,8 +51,8 @@ where
                 detail: failure.message().to_owned(),
             })?;
         }
-        // No local trigger can race the product operation. Archive/delete have
-        // also released the actor; unarchive only changes reversible metadata.
+        // A predecessor has no resident actor here: its successor keeps serving.
+        // The product fences only the addressed session, under this slot lock.
         std::thread::scope(|scope| scope.spawn(change).join()).unwrap_or_else(|_| {
             Err(RequestRefusal::SessionUnavailable {
                 detail: "the lifecycle operation panicked".to_owned(),

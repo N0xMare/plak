@@ -47,6 +47,17 @@ impl Fences {
                 Err(error) if error.kind() == AgentSessionsErrorKind::Ownership => {
                     return Err(LifecycleError::Refused(LifecycleRefusal::Open));
                 }
+                Err(error) if error.kind() == AgentSessionsErrorKind::NotFound => {
+                    // A missing/archived branch grants no activity custody.
+                    return Err(LifecycleError::Refused(LifecycleRefusal::Busy {
+                        turn: false,
+                        children: Vec::new(),
+                        children_truncated: false,
+                        processes: Vec::new(),
+                        processes_truncated: false,
+                        state_unknown: true,
+                    }));
+                }
                 Err(error)
                     if error.kind() == AgentSessionsErrorKind::StaleLocator && attempt == 0 =>
                 {
@@ -70,11 +81,28 @@ impl Fences {
         paths: &crate::home::paths::PlakPaths,
         activity: &mut SessionActivity,
     ) -> Result<(), LifecycleError> {
-        let quiescent = self
-            .executor
-            .block_on(self.sessions.head_is_quiescent(head))
-            .map_err(|_| CliFailure::new("application execution failed"))?
-            .map_err(|error| CliFailure::new(error.to_string()))?;
+        // A branch hold fences the branch, not the recorded checkpoint. Refresh
+        // the exact head under that hold before reading its lifecycle.
+        let mut head = head;
+        let mut refreshed = false;
+        let quiescent = loop {
+            match self
+                .executor
+                .block_on(self.sessions.head_is_quiescent(head))
+                .map_err(|_| CliFailure::new("application execution failed"))?
+            {
+                Ok(quiescent) => break quiescent,
+                Err(error)
+                    if !refreshed && error.kind() == AgentSessionsErrorKind::StaleLocator =>
+                {
+                    head = error
+                        .current_locator()
+                        .ok_or_else(|| CliFailure::new("stale runtime head was not named"))?;
+                    refreshed = true;
+                }
+                Err(error) => return Err(CliFailure::new(error.to_string()).into()),
+            }
+        };
         activity.turn |= !quiescent;
         if !quiescent {
             return Ok(());
@@ -119,7 +147,7 @@ pub(super) fn archive(
         if allow_reservation {
             inspect_product(records.as_ref(), &record, &mut activity)?;
             activity.refuse_running()?;
-            return product.set_archived(id, true);
+            return product.set_archived_checked(id, true, &|| Ok(()));
         }
         activity.state_unknown = true;
         return activity.refuse_running();
@@ -165,13 +193,7 @@ pub(super) fn archive(
     #[cfg(test)]
     scan_pause_fixture()?;
     fences.verify()?;
-    product.set_archived_checked(id, true, &|| {
-        fences.verify()?;
-        let current = records.load(id).map_err(CliFailure::new)?;
-        let mut activity = SessionActivity::default();
-        inspect_product(records.as_ref(), &current, &mut activity)?;
-        activity.refuse_running()
-    })
+    product.set_archived_checked(id, true, &|| fences.verify())
 }
 
 fn inspect_product(

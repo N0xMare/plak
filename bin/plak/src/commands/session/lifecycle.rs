@@ -180,7 +180,7 @@ impl std::fmt::Display for LifecycleRefusal {
                 ..
             } => write!(
                 f,
-                "the session has unfinished work (turn or continuation: {turn}, children: {}, processes: {}, activity unknown: {state_unknown}); resume or stop outstanding work, then retry",
+                "the session has unfinished work (turn or continuation: {turn}, children: {}, processes: {}, activity unknown: {state_unknown}); resume or stop outstanding work, or finish interrupted deletion, then retry",
                 children.join(", "),
                 processes.join(", ")
             ),
