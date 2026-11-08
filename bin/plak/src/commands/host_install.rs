@@ -127,8 +127,7 @@ fn render(home: &Path, product_home: &Path, args: &HostInstall) -> CliResult<Str
         .collect::<Vec<_>>()
         .join(" ");
     Ok(format!(
-        "{MARKER}[Unit]\nDescription=Plak host\n\n[Service]\nExecStart=/usr/bin/env -i {environment} \"XDG_RUNTIME_DIR=%t\" \"DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus\" \"INVOCATION_ID=${{INVOCATION_ID}}\" {command}\nExecReload=/bin/kill -USR1 $MAINPID\nKillMode=mixed\nKillSignal=SIGTERM\nTimeoutStopSec=90\nRestart=on-failure\nUMask=0077\nWorkingDirectory={}\n\n[Install]\nWantedBy=default.target\n",
-        quote(home)
+        "{MARKER}[Unit]\nDescription=Plak host\n\n[Service]\nExecStart=/usr/bin/env -i {environment} \"XDG_RUNTIME_DIR=%t\" \"DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus\" \"INVOCATION_ID=${{INVOCATION_ID}}\" {command}\nExecReload=/bin/kill -USR1 $MAINPID\nKillMode=mixed\nKillSignal=SIGTERM\nTimeoutStopSec=90\nRestart=on-failure\nUMask=0077\n# WorkingDirectory is unset: the systemd user default is HOME.\n\n[Install]\nWantedBy=default.target\n"
     ))
 }
 

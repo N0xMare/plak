@@ -74,6 +74,9 @@ There is no need to reinstall an unchanged unit after updating the stable
 binary link. Remote runners still need the host's matching protocol/revision/
 flavor; follow the runner upgrade rules rather than substituting another build.
 
+The unit leaves WorkingDirectory unset, using systemd's user-service default
+of `$HOME`; it does not choose a workspace or change cwd to bypass startup checks.
+
 ## Disable or remove
 
 There is no uninstall command. Stop the service before removing its unit:

@@ -10,7 +10,7 @@ KillSignal=SIGTERM
 TimeoutStopSec=90
 Restart=on-failure
 UMask=0077
-WorkingDirectory="/home/user"
+# WorkingDirectory is unset: the systemd user default is HOME.
 
 [Install]
 WantedBy=default.target

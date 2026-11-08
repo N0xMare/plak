@@ -5041,6 +5041,7 @@ does not install a launchd agent. It runs before product-store setup.
 
 The generated unit executes the installed stable `$HOME/.local/bin/plak`
 link, not the invoking executable or a pinned snapshot, from `$HOME`.
+WorkingDirectory remains unset: systemd user services use `$HOME` by default.
 `/usr/bin/env -i` clears ambient variables. Only HOME, PLAK_HOME, a curated
 PATH (`$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin`), the systemd runtime
 directory and user-bus address, and the manager's INVOCATION_ID reach the
@@ -5072,7 +5073,6 @@ KillSignal=SIGTERM
 TimeoutStopSec=90
 Restart=on-failure
 UMask=0077
-WorkingDirectory=%h
 ```
 
 ## 5. The terminal interface

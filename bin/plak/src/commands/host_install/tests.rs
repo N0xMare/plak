@@ -74,7 +74,10 @@ fn host_install_refuses_unsupported_platform_before_reading_paths() {
 fn host_install_quotes_systemd_expansions_and_shell_paths() -> TestResult {
     let unit = render(Path::new("/tmp/a $%\""), Path::new("/tmp/home"), &args())?;
     assert!(unit.contains("\"HOME=/tmp/a $$%%\\\"\""));
-    assert!(unit.contains("WorkingDirectory=\"/tmp/a $%%\\\"\""));
+    assert!(
+        !unit.contains("WorkingDirectory="),
+        "retain the systemd user default HOME"
+    );
     assert!(unit.contains("\"INVOCATION_ID=${INVOCATION_ID}\""));
     Ok(())
 }
