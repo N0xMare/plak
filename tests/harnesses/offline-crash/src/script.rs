@@ -48,6 +48,10 @@ mod gate_tests {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScriptPlan {
+    /// Fixture-only host runner windows, in milliseconds, for controlled
+    /// link-loss proofs. Ordinary scripts keep production windows.
+    #[serde(default)]
+    pub runner_window_ms: Option<u64>,
     /// Park the first Prepared request at its pre-send authority check until
     /// this test-owned readiness gate opens. No native credential is read.
     #[serde(default)]

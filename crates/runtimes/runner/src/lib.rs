@@ -46,7 +46,8 @@ pub use floors::{FileOwnerFloors, Floor, OwnerFloors};
 pub use journal::{CallJournal, FileCallJournal, JournalEntry};
 pub use loopback::{Loopback, LoopbackError};
 pub use service::{
-    HostAllowlist, RunnerIdentity, RunnerLimits, RunnerOptions, RunnerService, WorkspaceFactory,
+    HostAllowlist, RunnerIdentity, RunnerLeaseClock, RunnerLimits, RunnerOptions, RunnerService,
+    WorkspaceFactory,
 };
 
 #[cfg(test)]

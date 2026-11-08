@@ -178,6 +178,7 @@ async fn serve(paths: &PlakPaths) -> CliResult<()> {
             binary_id: crate::build_identity::known_binary_id(),
         },
         RunnerOptions {
+            lease_clock: crate::test_hooks::runner_lease_clock(home.root()),
             machine_id: plakous::runner::machine_id().ok(),
             workspace_catalog: Some(Arc::new(workspace_catalog)),
             limits: RunnerLimits::default(),
@@ -254,6 +255,7 @@ async fn serve_local(paths: &PlakPaths) -> CliResult<()> {
             binary_id: crate::build_identity::known_binary_id(),
         },
         RunnerOptions {
+            lease_clock: crate::test_hooks::runner_lease_clock(home.root()),
             machine_id: plakous::runner::machine_id().ok(),
             workspace_catalog: None,
             workspaces: Some(workspaces),

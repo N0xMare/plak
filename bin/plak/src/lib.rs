@@ -142,6 +142,15 @@ pub mod telemetry_store;
 mod test_hooks;
 #[cfg(not(feature = "test-hooks"))]
 mod test_hooks {
+    #[allow(dead_code, reason = "only the optional host dials its local runner")]
+    pub(crate) fn runner_windows() -> plakous::runner::ClientWindows {
+        plakous::runner::ClientWindows::default()
+    }
+    pub(crate) fn runner_lease_clock(
+        _home: &std::path::Path,
+    ) -> Option<std::sync::Arc<plakous::runner::RunnerLeaseClock>> {
+        None
+    }
     pub(crate) const fn runner_services() -> Option<plakous::runner::RunnerServices> {
         None
     }

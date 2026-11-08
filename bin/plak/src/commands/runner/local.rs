@@ -102,7 +102,7 @@ pub(crate) async fn dial(paths: &PlakPaths) -> CliResult<RunnerClient> {
                 match RunnerClient::connect_home_local(
                     stream,
                     bind.clone(),
-                    ClientWindows::default(),
+                    crate::test_hooks::runner_windows(),
                     Some(journal.clone()),
                 )
                 .await

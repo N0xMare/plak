@@ -43,11 +43,19 @@ fn environment(root: &Path) -> ExecutionEnvironment {
 struct Fixture {
     root: tempfile::TempDir,
     service: RunnerService,
+    pids: std::sync::Mutex<Vec<i32>>,
 }
 impl Fixture {
     fn new(lease: Duration) -> Self {
+        Self::with_clock(lease, None)
+    }
+
+    fn with_clock(
+        lease: Duration,
+        lease_clock: Option<Arc<plakous_runner::RunnerLeaseClock>>,
+    ) -> Self {
         let root = tempfile::tempdir().unwrap();
-        let service = RunnerService::with_limits(
+        let service = RunnerService::with_options(
             environment(root.path()),
             RunnerIdentity {
                 runner_id: RunnerId::new("foreground").unwrap(),
@@ -55,13 +63,21 @@ impl Fixture {
                 boot_id: "boot".into(),
                 binary_id: None,
             },
-            RunnerLimits {
-                owner_lease: lease,
-                ..RunnerLimits::default()
+            plakous_runner::RunnerOptions {
+                lease_clock,
+                limits: RunnerLimits {
+                    owner_lease: lease,
+                    ..RunnerLimits::default()
+                },
+                ..plakous_runner::RunnerOptions::default()
             },
         )
         .unwrap();
-        Self { root, service }
+        Self {
+            root,
+            service,
+            pids: std::sync::Mutex::default(),
+        }
     }
     fn marker(&self) -> PathBuf {
         self.root.path().join("foreground.marker")
@@ -81,6 +97,18 @@ impl Fixture {
     async fn start(
         &self,
         link: &Link,
+    ) -> (Arc<RunnerSessions>, plakous_tools::JoinedProcessSessionId) {
+        self.start_call(
+            link,
+            "00000000-0000-0000-0000-000000000001".parse().unwrap(),
+        )
+        .await
+    }
+
+    async fn start_call(
+        &self,
+        link: &Link,
+        call_id: plakous_model::CallId,
     ) -> (Arc<RunnerSessions>, plakous_tools::JoinedProcessSessionId) {
         let env = runner_environment(
             environment(self.root.path()).descriptor().scope(),
@@ -107,33 +135,96 @@ impl Fixture {
                 )
                 .unwrap(),
                 control().with_class(OperationClass::EffectCall {
-                    call_id: "00000000-0000-0000-0000-000000000001".parse().unwrap(),
+                    call_id,
                     attempt_id: "00000000-0000-0000-0000-000000000002".parse().unwrap(),
                 }),
             )
             .await
             .unwrap();
-        self.pid();
+        self.pids.lock().unwrap().push(self.pid());
         (sessions, id)
     }
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
-        if let Ok(text) = std::fs::read_to_string(self.marker())
-            && let Ok(pid) = text.trim().parse::<i32>()
-            && let Some(pid) = rustix::process::Pid::from_raw(pid)
-        {
+        let marker = self.marker().display().to_string();
+        for pid in self.pids.get_mut().unwrap() {
+            let Some(pid) = rustix::process::Pid::from_raw(*pid) else {
+                continue;
+            };
             let command = std::process::Command::new("ps")
                 .args(["-o", "command=", "-p", &pid.as_raw_pid().to_string()])
                 .output()
                 .unwrap();
-            if String::from_utf8_lossy(&command.stdout)
-                .contains(&self.marker().display().to_string())
-            {
+            if String::from_utf8_lossy(&command.stdout).contains(&marker) {
                 let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
             }
         }
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn foreground_awake_clock_excludes_suspend_then_expires_once() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let ticks = Arc::new(AtomicU64::new(0));
+    let origin = Instant::now();
+    let clock = {
+        let ticks = ticks.clone();
+        Arc::new(move || origin + Duration::from_millis(ticks.load(Ordering::SeqCst)))
+    };
+    let fixture = Fixture::with_clock(Duration::from_millis(80), Some(clock));
+    let mut link = Link::new(&fixture.service, "before").await;
+    let (jobs, job) = fixture.start(&link).await;
+    let promoted = fixture.pid();
+    jobs.promote(job).await.unwrap();
+    // Distinct process-start keys; the foreground is never promoted.
+    std::fs::remove_file(fixture.marker()).unwrap();
+    fixture
+        .start_call(
+            &link,
+            "00000000-0000-0000-0000-000000000003".parse().unwrap(),
+        )
+        .await;
+    let foreground = fixture.pid();
+    link.relay.abort();
+    link.client.closed().await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    let _ = fixture.service.is_idle();
+    assert!(
+        alive(foreground) && alive(promoted),
+        "suspend time consumed the awake lease"
+    );
+    ticks.store(1000, Ordering::SeqCst);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while alive(foreground) {
+        let _ = fixture.service.is_idle();
+        assert!(
+            Instant::now() < deadline,
+            "awake lapse did not stop foreground"
+        );
+        tokio::task::yield_now().await;
+    }
+    assert!(alive(promoted), "lease lapse killed a promoted job");
+    link.reconnect(&fixture.service).await;
+    let lines = link.client.lines().await.unwrap();
+    assert!(!lines[0].adopted && !lines[0].foreground);
+    let report = link.client.transfer_owner(&owner(1)).await.unwrap();
+    assert_eq!(report.len(), 1);
+    assert_eq!(report[0].pid, foreground.cast_unsigned());
+    // Receipt cuts before acknowledgement cannot retire the report.
+    for _ in 0..2 {
+        link.reconnect(&fixture.service).await;
+        assert_eq!(link.client.transfer_owner(&owner(1)).await.unwrap(), report);
+    }
+    link.client
+        .acknowledge_stopped_foreground(&owner(1).line().to_string(), &report[0]);
+    link.client.lines().await.unwrap();
+    link.reconnect(&fixture.service).await;
+    assert_eq!(link.client.transfer_owner(&owner(1)).await.unwrap(), []);
+    assert_eq!(jobs.jobs().await.unwrap().len(), 1);
+    jobs.stop_jobs(plakous_tools::JobStopReason::User, Duration::ZERO)
+        .await
+        .unwrap();
 }
 
 struct Link {

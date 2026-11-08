@@ -9,6 +9,13 @@ import subprocess
 
 
 TERMINAL_SHAPES = {
+    "runner_deferred_pending_stop": "host_skeleton::runner::pending_stop::runner_deferred_bind_finishes_pending_stop_without_redispatch",
+    # These real-host authority shapes own explicit link/lease/receipt cuts,
+    # rather than SQLite-ordinal cuts. Like the TUI restart, run them directly.
+    "runner_wake_settled_foreground": "host_skeleton::runner::foreground::runner_wake_settled_foreground",
+    "runner_wake_live_foreground": "host_skeleton::runner::foreground::runner_wake_live_foreground",
+    "runner_lease_lapse_reports_foreground": "host_skeleton::runner::foreground::runner_lease_lapse_reports_foreground",
+    "runner_new_owner_foreground": "host_skeleton::runner::a_foreground_host_cut_stops_at_transfer_and_records_unknown_once",
     "review_tui_host_restart_switch": "host_skeleton::crash::tui::review_tui_host_restart_switch",
     "tui_host_restart": "host_skeleton::crash::tui::tui_host_restart",
 }

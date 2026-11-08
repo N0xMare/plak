@@ -15,6 +15,63 @@ fn registry(count: usize) -> RunnerRegistry {
     registry
 }
 
+#[test]
+fn request_projects_its_deadline_while_the_owner_executor_is_not_polling() {
+    let owner = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .start_paused(true)
+        .build()
+        .unwrap();
+    let reader = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .start_paused(true)
+        .build()
+        .unwrap();
+    let registry = registry(1);
+    registry.run_probes_on(owner.handle().clone());
+    let started = Arc::new(AtomicUsize::new(0));
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    registry.probe_with(Arc::new({
+        let (started, release) = (started.clone(), release.clone());
+        move |registry, id| {
+            let (started, release) = (started.clone(), release.clone());
+            Box::pin(async move {
+                registry.progress(&id, ProbePhase::Reconcile);
+                started.fetch_add(1, Ordering::SeqCst);
+                release.acquire().await.unwrap().forget();
+                registry.blocked(&id, PlacementFailure::RunnerNotPaired, 1);
+                Ok(())
+            })
+        }
+    }));
+    let task = reader.spawn({
+        let registry = registry.clone();
+        async move { registry.refresh(None).await }
+    });
+    reader.block_on(async { tokio::task::yield_now().await });
+    owner.block_on(until(|| started.load(Ordering::SeqCst) == 1));
+    let rows = reader.block_on(async {
+        tokio::time::advance(Duration::from_secs(25)).await;
+        task.await.unwrap().unwrap()
+    });
+    assert_eq!(
+        rows[0].status,
+        RunnerStatus::Blocked(PlacementFailure::RunnerUnreachable {
+            phase: ProbePhase::Reconcile,
+            timed_out: true
+        })
+    );
+    assert_eq!(
+        registry.rows()[0].status,
+        RunnerStatus::Unknown,
+        "a request overwrote shared probe state"
+    );
+    release.add_permits(1);
+    owner.block_on(until(|| {
+        registry.rows()[0].status == RunnerStatus::Blocked(PlacementFailure::RunnerNotPaired)
+    }));
+}
+
 #[tokio::test(start_paused = true)]
 async fn stop_debt_invalidates_an_inflight_probe_before_readiness_can_reopen() {
     let home = tempfile::tempdir().unwrap();
@@ -230,6 +287,7 @@ async fn queue_time_does_not_consume_budget_and_reconcile_outlives_the_picker() 
     tokio::time::advance(Duration::from_secs(24)).await;
     assert!(!request.is_finished());
     tokio::time::advance(Duration::from_secs(1)).await;
+    until(|| request.is_finished()).await;
     let rows = request.await.unwrap().unwrap();
     assert_eq!(
         rows.iter()

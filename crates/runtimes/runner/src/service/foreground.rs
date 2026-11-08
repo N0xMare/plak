@@ -167,9 +167,9 @@ impl RunnerService {
             .get(&(host.to_owned(), instance.to_owned()))
             .is_some_and(|lease| {
                 lease.connections != 0
-                    || lease
-                        .released
-                        .is_some_and(|at| at.elapsed() < self.inner.owner_lease)
+                    || lease.released.is_some_and(|at| {
+                        self.lease_now().duration_since(at) < self.inner.owner_lease
+                    })
             })
     }
 

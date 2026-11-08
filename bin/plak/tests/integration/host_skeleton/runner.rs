@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod foreground;
+mod pending_stop;
 mod recovery;
 
 fn reload_signal(host: &Host) {
@@ -589,6 +591,10 @@ fn a_runner_restart_leaves_an_unpromoted_call_unknown_without_restarting_it() {
 }
 
 fn unknown_effects(fixture: &Fixture, session: &str) -> usize {
+    effect_settlements(fixture, session, true)
+}
+
+fn effect_settlements(fixture: &Fixture, session: &str, unknown_only: bool) -> usize {
     use plak::store::session_records::SessionRecordStore as _;
     use plakous::sessions::feed::{
         FeedCursor, FeedFact, FeedOperationKind, FeedOperationState, FeedPage, FeedPageRequest,
@@ -630,8 +636,10 @@ fn unknown_effects(fixture: &Fixture, session: &str) -> usize {
                                 fact,
                                 FeedFact::OperationAdvanced {
                                     kind: FeedOperationKind::Effect { .. },
-                                    state: FeedOperationState::OutcomeUnknown,
+                                    state,
                                     ..
+                                } if if unknown_only { *state == FeedOperationState::OutcomeUnknown } else {
+                                    matches!(state, FeedOperationState::Completed | FeedOperationState::OutcomeUnknown | FeedOperationState::Finalized)
                                 }
                             )
                         })

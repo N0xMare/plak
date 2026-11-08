@@ -243,6 +243,9 @@ not (
   | test(jj_cli_doctor_bounds_output_wait_after_leader_exit)
   | test(pending_wakes_return_the_wait_and_are_consumed)
   | test(durability::)
+  | test(host_skeleton::runner::foreground::)
+  | test(host_skeleton::runner::pending_stop::)
+  | test(foreground_awake_clock_excludes_suspend_then_expires_once)
   | test(host_binding_request_crash_cuts_keep_one_owner_and_never_redispatch)
   | test(lifecycle_commit_crash_cuts_reopen_exactly_before_or_after)
   | test(lifecycle_keepalive_scan_survives_expiry_and_refuses_renewal_loss)
@@ -341,6 +344,8 @@ not (
 test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
+  test(foreground_awake_clock_excludes_suspend_then_expires_once)
+  |
   test(a_committed_reopen_joins_a_late_idle_quit_before_opening)
   |
   test(a_reopen_ack_timeout_cancels_the_fence_and_keeps_the_actor)
@@ -499,6 +504,9 @@ default-filter = '''
 test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
+  test(host_skeleton::runner::foreground::)
+  | test(host_skeleton::runner::pending_stop::)
+  |
   test(host_binding_request_crash_cuts_keep_one_owner_and_never_redispatch)
   | test(lifecycle_commit_crash_cuts_reopen_exactly_before_or_after)
   | test(lifecycle_deletion_crash_cuts_finish_without_recovery_or_cascade)

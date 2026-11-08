@@ -57,6 +57,7 @@ struct Inner {
     hello: Hello,
     dead: Duration,
     owner_lease: Duration,
+    lease_clock: Option<Arc<RunnerLeaseClock>>,
     capacity: JoinedProcessHostCapacity,
     tables: Mutex<Tables>,
     /// Which hosts may bind; `None` admits every host.
@@ -166,6 +167,10 @@ pub type HostAllowlist = dyn Fn(&str) -> bool + Send + Sync;
 /// Answers whether a probe may answer about a path.
 pub type PathAdmission = dyn Fn(&Path) -> bool + Send + Sync;
 
+/// Suspend-excluding, nondecreasing monotonic lease time. Embedders can supply
+/// a controlled clock for authority-loss tests; production defaults to `Instant`.
+pub type RunnerLeaseClock = dyn Fn() -> Instant + Send + Sync;
+
 /// Makes the environment of a workspace a request names, by root and cwd,
 /// the first time one does: a runner serves every workspace it can open.
 pub type WorkspaceFactory =
@@ -174,6 +179,8 @@ pub type WorkspaceFactory =
 /// What a runner serves beyond its default environment.
 #[derive(Clone, Default)]
 pub struct RunnerOptions {
+    /// Explicit lease clock; absent uses the platform's suspend-excluding clock.
+    pub lease_clock: Option<Arc<RunnerLeaseClock>>,
     /// Stable physical-machine identity; unknown identities cannot be paired for placement.
     pub machine_id: Option<String>,
     /// Runner-owned effective workspace consent and bounded discovery.
@@ -290,6 +297,7 @@ impl RunnerService {
                 hello,
                 dead: limits.dead,
                 owner_lease: limits.owner_lease,
+                lease_clock: options.lease_clock,
                 capacity: job_capacity(usize::try_from(limits.job_bound).unwrap_or(usize::MAX)),
                 tables: Mutex::new(tables),
                 hosts_allowed: options.hosts,
@@ -444,7 +452,7 @@ impl RunnerService {
         closer: &CancellationToken,
     ) -> u64 {
         // A late reconnect cannot revive authority before the idle tick runs.
-        self.expire_leases(Instant::now());
+        self.expire_leases(self.lease_now());
         let connection = self.inner.next_connection.fetch_add(1, Ordering::Relaxed);
         let previous = lock(&self.inner.hosts).insert(
             (host.to_owned(), instance.to_owned()),
@@ -486,7 +494,7 @@ impl RunnerService {
             if let Some(lease) = leases.get_mut(&(host.to_owned(), instance.to_owned())) {
                 lease.connections = lease.connections.saturating_sub(1);
                 if lease.connections == 0 {
-                    lease.released = Some(Instant::now());
+                    lease.released = Some(self.lease_now());
                 }
             }
         }
@@ -557,10 +565,17 @@ impl RunnerService {
         }
     }
 
+    fn lease_now(&self) -> Instant {
+        self.inner
+            .lease_clock
+            .as_ref()
+            .map_or_else(Instant::now, |clock| clock())
+    }
+
     /// The line table: every line of `host` that holds sessions here, or of
     /// every host, with its owner, whether that owner holds it, and its jobs.
     pub(crate) async fn lines(&self, host: Option<&str>) -> Vec<LineStatus> {
-        self.expire_leases(Instant::now());
+        self.expire_leases(self.lease_now());
         let mut held: Vec<(
             (String, String),
             (JoinedProcessSessions, ExecutionEnvironment),
@@ -604,7 +619,7 @@ impl RunnerService {
     #[must_use]
     pub fn is_idle(&self) -> bool {
         let now = Instant::now();
-        self.expire_leases(now);
+        self.expire_leases(self.lease_now());
         self.inner.foreground.prune();
         if self.inner.open.load(Ordering::Acquire) != 0 || !lock(&self.inner.services).is_empty() {
             return false;

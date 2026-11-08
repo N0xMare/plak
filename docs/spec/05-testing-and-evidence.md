@@ -1328,6 +1328,26 @@ probe already in flight cannot publish ready over newer stop debt; it must
 perform a fresh reconciliation before admitting work.
 Neither an attachment nor a paid continuation is created by a stop.
 
+Runner authority shapes in the strict sweep own explicit process/link cuts,
+like the direct TUI restart shapes, rather than pretending their clocks are
+SQLite commit ordinals. `runner_wake_settled_foreground` freezes runner awake
+time while the driver settles, then checks keyed cleanup before a new effect;
+`runner_wake_live_foreground` reconnects inside the effect window and proves
+natural completion. `runner_lease_lapse_reports_foreground` advances awake
+time past the lease without a wall-clock wait. `runner_new_owner_foreground`
+cuts newer-owner transfer and receipt recovery. No foreground case may insert
+a job-terminal row or revise an already-settled call.
+`runner_deferred_pending_stop` uses a separately paired runner home, stops its
+transport while its host remains alive, durably cancels without an admitting
+open, and cuts the later first-bind lease/transfer/terminals/before-stop/
+after-stop phases. Restart and repeated stop must preserve the original
+intent and never redispatch the promoted job. `RunnerOptions::lease_clock`
+is an explicit, nondecreasing suspend-excluding monotonic test/embedding port;
+absent, production uses the platform `Instant`. Its controlled-clock proof
+checks that frozen awake time preserves foreground, advancing it stops
+foreground but preserves promoted jobs, and report cuts before receipt
+acknowledgment retain exactly the same report. No wire or binding input changes.
+
 Test code has one home per kind, and production behavior is never moved into
 test code to change density accounting.
 
