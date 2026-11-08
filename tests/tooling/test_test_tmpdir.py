@@ -134,6 +134,10 @@ class TestTmpdirSelectorTests(unittest.TestCase):
                 self.assertIn("test-env.sh", (ROOT / path).read_text())
         dev = (ROOT / "tools/dev/dev.just").read_text()
         self.assertIn("tools/dev/coverage.sh", dev)
+        self.assertIn(
+            "tools/gate/test-env.sh -- python3 tools/gate/test-processes.py -- tools/dev/crash-sweep.py",
+            dev,
+        )
         self.assertNotIn('TMPDIR="$PWD/target/plak-test-tmp"', dev)
         justfile = (ROOT / "Justfile").read_text()
         self.assertNotIn('TMPDIR="$PWD/target/plak-test-tmp"', justfile)

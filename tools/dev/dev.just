@@ -39,7 +39,7 @@ test-timing *ARGS:
 # Opt-in indexed SQLite crash-point sweep of the real offline binary.
 [doc("opt-in indexed SQLite crash-point sweep of the real offline binary")]
 crash-sweep *ARGS:
-    tools/dev/crash-sweep.py {{ARGS}}
+    tools/gate/test-env.sh -- python3 tools/gate/test-processes.py -- tools/dev/crash-sweep.py {{ARGS}}
 
 [doc("compare two crash-sweep reports at equal cuts")]
 crash-compare *ARGS:
