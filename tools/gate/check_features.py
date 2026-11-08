@@ -920,7 +920,9 @@ def validate_excluded_closures() -> list[str]:
         if name in NAMED_VARIANT_EXCLUSIONS:
             pins[("plak", selected)] = NAMED_VARIANT_EXCLUSIONS[name]
     without_python = tuple(sorted(set(manifest["features"]["default"]) - {"python"}))
-    pins[("plak", without_python)] = ("monty-pool", "tungstenite")
+    pins[("plak", without_python)] = ("monty-pool",)
+    without_web = tuple(sorted(set(manifest["features"]["default"]) - {"web"}))
+    pins[("plak", without_web)] = ("tungstenite", "tokio-tungstenite")
     for (package, selected), excluded in sorted(pins.items()):
         reached = full_closure(package, selected)
         present = sorted(name for name in excluded if name in reached)

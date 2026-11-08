@@ -211,15 +211,15 @@ pub struct Listener {
 }
 
 impl Listener {
-    /// A remote face leaves a live announcer in place. All remote faces
-    /// refuse requests for the session, so the announcing nonce is irrelevant.
-    pub(crate) fn announce_remote(paths: &PlakPaths, session: &str) -> Option<Self> {
+    /// A hosted session leaves a live announcer in place. The service, not
+    /// any client, owns its announcement and instance-bound request polling.
+    pub(crate) fn announce_hosted(paths: &PlakPaths, session: &str) -> Option<Self> {
         use std::os::unix::fs::OpenOptionsExt as _;
         if !enabled(paths) {
             return None;
         }
-        // Serialize the live-pid check with publication across client
-        // processes; neither may erase a request for a just-published peer.
+        // Serialize the live-pid check with publication so a concurrent
+        // owner never erases a request for a just-published peer.
         let lock = fs::OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -238,13 +238,6 @@ impl Listener {
         Self::announce(paths, session)
     }
 
-    /// Takes a hosted session's request without requiring this face's nonce.
-    pub(crate) fn take_remote(paths: &PlakPaths, session: &str) -> Option<ReloadRequest> {
-        if !enabled(paths) {
-            return None;
-        }
-        Self::take_inner(paths, session, None)
-    }
     /// Announces `session` as accepting requests, when the home opted in. A
     /// request left from before this instance is discarded, and outcomes past
     /// their retention are pruned.

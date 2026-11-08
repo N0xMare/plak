@@ -1,4 +1,4 @@
-//! `plak host` (hidden, feature `web`): the per-user host process (spec 02
+//! `plak host` (feature `web`, enabled by default): the per-user host process (spec 02
 //! §4.6), serving every session of the home.
 //!
 //! It takes this home's `host.lock` for its state key before anything else,
@@ -13,6 +13,7 @@
 
 mod console;
 mod lock;
+mod requested_reload;
 mod sessions;
 mod socket;
 
@@ -123,6 +124,7 @@ pub(crate) fn run_host_command(
         None
     };
     runner::host::start(&services, local, &environment, &runtime);
+    crate::shell::catalog_refresh::hook(services.paths()?.clone(), None)(None);
     eprintln!(
         "plak host: serving on {} (host {}, instance {}); tools get {}",
         bound.path().display(),
@@ -131,9 +133,15 @@ pub(crate) fn run_host_command(
         environment.describe(),
     );
     scan(&host, owed, stop, &services, runtime.handle());
+    let reload_requests = runtime.spawn(requested_reload::serve(
+        Arc::clone(&host),
+        services.paths()?.clone(),
+    ));
     // The web endpoint serves beside the control socket and stops with it.
     let web = web.map(|web| runtime.spawn(web.serve()));
     runtime.block_on(bound.serve(&host, move || stop.stopped()));
+    reload_requests.abort();
+    let _ = runtime.block_on(reload_requests);
     if let Some(web) = web {
         let _ = runtime.block_on(web);
     }

@@ -4911,8 +4911,8 @@ chapter 04 §2.10; its keys are `[web]` (chapter 07 §3).
 
 ### 4.6 `plak host`
 
-The hidden maintainer command `plak host` (feature `web`, in maintainer
-builds) is the per-user host process, run in the foreground under a systemd
+The supported command `plak host` (feature `web`, enabled by default)
+is the per-user host process, run in the foreground under a systemd
 user unit or a terminal multiplexer on the host machine. It serves every
 session of the home, across workspaces, to the clients of its control
 socket and, with `--web`, of its web endpoint (§4.5), through the session
@@ -4930,6 +4930,13 @@ not compile the TUI never advertises that capability. A build that does
 not advertise it refuses in the TUI with an install-compatible-client remedy;
 the terminal stays attached, rather than execing an unsupported option or
 falling back to an embedded-capable resume command.
+
+During the client split the public TUI keeps this launch rule: bare `plak`
+attaches to a running host for the home and state key, otherwise it runs
+embedded. It never auto-starts a host and retains its direct hosted transport.
+Adding a public stdio bridge for independent clients does not rewire this
+terminal. Bridge-only launch belongs to the later private client.
+The service refreshes native catalogs at startup without requiring a terminal.
 
 A terminal connected to a host whose welcome binary id differs from the
 locally installed binary id shows a persistent, non-blocking notice naming
@@ -5553,9 +5560,9 @@ A running interactive session can also be asked to reload by this user's own
 processes, including the agent's shell: `plak session reload <session>
 --expect-binary <binary-id>`. Requests are off unless the operator sets the
 home-scoped `tui.reload_requests = true` (chapter 07 §3).
-In host mode the client still announces its attached session in
-`run/reload-requests/` and consumes this channel locally. Every request it
-takes is settled immediately as `refused`, with the transcript note
+In host mode the service announces every resident session in
+`run/reload-requests/`, polls the channel and refuses requests without any
+client connected. Every request it takes is settled as `refused`, with the transcript note
 `requested reload refused: this session runs in plak host (build <host
 binary id>); restarting the host moves it onto the installed build (plak
 host stop, or restart its unit)`; the parenthetical is omitted when the
@@ -5564,11 +5571,11 @@ redispatches work or hands the session off. A hand `/reload` still replaces
 only the client. Moving a hosted session to another build is a host restart
 (the SIGTERM handoff and start scan), not a client act.
 
-Any remote face may refuse a request naming its attached session regardless
-of the announcing nonce. It leaves a live announcement in place, replacing
-one only after its pid is dead; requests are taken before re-announcement
-can discard stale files. A private, transient announcements lock serializes
-the live-pid check with publication across client processes. An embedded requested reload landing in a running
+The service validates its announcing nonce, leaves another live announcement
+in place and removes only announcements it owns. A private, transient
+announcements lock serializes the live-pid check with publication. Client
+disconnect never withdraws the announcement; release or movement of the
+session removes the old announcement. An embedded requested reload landing in a running
 host takes its handed-off request and settles `refused` with `the session
 now runs in plak host` and the same restart remedy, never `reloaded` or a
 host-authored continuation.

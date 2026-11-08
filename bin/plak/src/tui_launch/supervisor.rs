@@ -977,10 +977,10 @@ fn prepare_deferred_tui_host(
             reason: RESUME_PICKER_SHELL_REASON.into(),
             ready_catalog: plakous_host_protocol::views::ReadyCatalog::default(),
         });
-        let catalog_refresh = shell::catalog_refresh::hook(prep_paths.clone(), &mode);
+        let catalog_refresh = shell::catalog_refresh::hook(prep_paths.clone(), Some(&mode));
         return product_host::HostLaunchPreparation {
             providers: supported_provider_rows(),
-            catalog_refresh: Some(catalog_refresh),
+            catalog_refresh: Some(Box::new(move |events| catalog_refresh(Some(events)))),
             shell_host,
             mode,
         };
@@ -1074,11 +1074,11 @@ fn prepare_deferred_tui_host(
             ready_catalog: sections.clone(),
         })
     };
-    let catalog_refresh = shell::catalog_refresh::hook(prep_paths.clone(), &mode);
+    let catalog_refresh = shell::catalog_refresh::hook(prep_paths.clone(), Some(&mode));
     product_host::HostLaunchPreparation {
         providers,
         mode,
-        catalog_refresh: Some(catalog_refresh),
+        catalog_refresh: Some(Box::new(move |events| catalog_refresh(Some(events)))),
         shell_host,
     }
 }

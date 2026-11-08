@@ -13,17 +13,18 @@ use plakous::application::ApplicationExecutor;
 use plakous::subscriptions::{
     CompatibilityStatus, NativeAuthStatus, NativeProvider, NativeSubscriptions, SubscriptionPaths,
 };
-use plakous_hosted::runtime::{HostLaunchMode, Sender, oauth_provider_for_account};
+use plakous_hosted::runtime::HostLaunchMode;
+use plakous_hosted::runtime::{Sender, oauth_provider_for_account};
 use plakous_hosted::session_log::{SessionEvent, SessionLog};
 
 /// The refresh hook for one prepared host mode: only an attached mode
 /// excludes its selected provider. Logs under the record only once published.
 pub(crate) fn hook(
     paths: PlakPaths,
-    mode: &HostLaunchMode<PlakExtension>,
-) -> Box<dyn FnOnce(Sender<PlakExtension>) + Send> {
-    let (session_id, account) = refresh_context(mode);
-    Box::new(move |events| spawn(paths, session_id, account, events))
+    mode: Option<&HostLaunchMode<PlakExtension>>,
+) -> impl FnOnce(Option<Sender<PlakExtension>>) + Send + use<> {
+    let (session_id, account) = mode.map(refresh_context).unwrap_or_default();
+    move |events| spawn(paths, session_id, account, events)
 }
 
 fn refresh_context(mode: &HostLaunchMode<PlakExtension>) -> (Option<String>, Option<String>) {
@@ -47,7 +48,7 @@ fn spawn(
     paths: PlakPaths,
     session_id: Option<String>,
     attached_account: Option<String>,
-    events: Sender<PlakExtension>,
+    events: Option<Sender<PlakExtension>>,
 ) {
     thread::spawn(move || {
         let refresh_started = Instant::now();
@@ -86,7 +87,9 @@ fn spawn(
             }
             let _ = log.append_for(session_id, event);
         }
-        if let Ok((providers, _)) = crate::presentation::tui_presentation_values(&paths) {
+        if let Some(events) = events
+            && let Ok((providers, _)) = crate::presentation::tui_presentation_values(&paths)
+        {
             let _ = events.send(ContentEvent::ProviderSnapshot { providers });
         }
     });

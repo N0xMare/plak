@@ -4,9 +4,18 @@ USAGE:
   plak host [--web <unix:path|127.0.0.1:port>] [--ui <dir>]
   plak host install --web unix:<absolute socket> --ui <absolute dir> [--dry-run]
 
-The host requires a build with feature web. Service installation currently
-supports Linux systemd user units only. Both install paths are explicit and
-absolute; --dev-login is never accepted by install.
+The supported default build includes the host and web endpoint. A private
+same-user control socket serves the session directory; disconnecting a client
+does not stop its sessions. Bare plak attaches to a running host or runs
+embedded; it does not start a host.
+
+--web adds the web endpoint; loopback development also requires --dev-login.
+--ui serves a validated static build with csp.json. SIGUSR1 reloads that build
+atomically; invalid replacements keep the old build. SIGHUP and SIGTERM mean
+planned handoff, not UI reload. A control-only host needs no --web.
+
+Service installation supports Linux systemd user units only. Both paths are
+explicit and absolute; --dev-login is never accepted by install.
 
 Install writes ~/.config/systemd/user/plak-host.service and reloads the user
 manager. It never enables or starts a service. An identical unit is a no-op;

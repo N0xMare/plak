@@ -130,7 +130,7 @@ openai = ["plakous/openai", "plakous-hosted/openai", "js"]
 xai-api = ["plakous/xai", "plakous-hosted/xai-api"]
 anthropic = ["plakous/anthropic", "plakous-hosted/anthropic"]
 openrouter = ["plakous/openrouter", "plakous-hosted/openrouter"]
-default = ["git-cli", "tui", "clipboard", "images", "js", "python", "mcp", "web-fetch", "codex", "grok", "claude", "openai", "xai-api", "anthropic", "openrouter"]
+default = ["git-cli", "tui", "clipboard", "images", "js", "python", "mcp", "web-fetch", "web", "codex", "grok", "claude", "openai", "xai-api", "anthropic", "openrouter"]
 js = ["plakous/composition", "plakous-hosted/js"]
 web-fetch = ["plakous/web-fetch", "plakous-hosted/web-fetch"]
 tui = ["plakous-hosted/tui", "dep:ratatui", "dep:crossterm", "dep:pulldown-cmark", "dep:syntect"]
@@ -141,7 +141,7 @@ mcp = ["plakous/mcp", "plakous-hosted/mcp"]
 git-cli = ["plakous-hosted/git-cli", "plakous-recursive-subagents/git-cli", "plakous-recursive-subagents-store/git-cli"]
 jj = ["plakous-hosted/jj-lib", "plakous-recursive-subagents/jj-lib", "plakous-recursive-subagents-store/jj-lib"]
 maintainer = ["jj", "web"]
-# The maintainer web endpoint (`plak host --web`): HTTP/1.1 and WebSocket on a
+# The supported web endpoint (`plak host --web`): HTTP/1.1 and WebSocket on a
 # private listener, the web UI's static files.
 web = [
     "dep:bytes",

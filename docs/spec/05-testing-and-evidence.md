@@ -3640,6 +3640,14 @@ not move library evidence out of §3.1.
 
 ### 3.1 Offline fixture evidence
 
+`host_skeleton::reload::a_host_refuses_requested_reload_without_any_client_or_redispatch`
+uses the real host and socket with idle and busy roots. After the only client
+disconnects, the host's pid owns the announcement and the service records a
+refusal; a fresh attachment reaches the same session with one physical
+provider dispatch. The existing host-TUI request test retains the terminal
+notice assertion. Neither client polling nor a terminal is required for the
+public runtime invariant.
+
 The real wire settings client saves runtime settings with nondefault terminal
 preferences in the host configuration. Skipped appearance fields never travel
 in that request, and the durable `[tui]` values remain unchanged.

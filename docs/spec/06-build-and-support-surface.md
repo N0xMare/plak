@@ -721,12 +721,12 @@ fork   compact   compatibility
 session rehearse <full-session-uuid>  # hidden, offline, read-only
 ```
 
-`maintainer` also enables `web`, the hidden `plak host` and its web endpoint
+The default product enables `web`, the supported `plak host` and its web endpoint
 (chapter 02 §4.5, §4.6): `hyper` and `hyper-util` (HTTP/1.1 server and
 upgrades), `http-body-util`, `bytes`, `futures-util`, `ring` (the cookie
 HMAC, the WebSocket accept digest and `new_session`'s name-based ids) and
-`tokio-tungstenite`. Without it `plak host` parses and refuses with a typed
-error; the default product links none of the endpoint's crates. There is
+`tokio-tungstenite`. A reduced product without `web` parses `plak host` and
+refuses with a typed capability error. `maintainer` also selects `web`. There is
 no `plak web`: the web endpoint is `plak host --web`.
 
 `models` is not gated — it is an ordinary product verb alongside `login`,
@@ -1710,7 +1710,7 @@ already locked `url` crate. The facade selects it only through `web-fetch`
 (chapter 01 section 12.1), independently of providers, subscriptions, auth
 and MCP; no composition-only closure reaches the converter.
 
-The web endpoint (`plak` feature `web`, maintainer builds only) speaks
+The supported web endpoint (`plak` feature `web`, enabled by default) speaks
 WebSocket with crates.io `tokio-tungstenite =0.29.0` over `tungstenite
 =0.29.0` (both MIT OR Apache-2.0, MSRV 1.63), default features off: no TLS
 (Tailscale Serve terminates it), no client connector and no handshake module,

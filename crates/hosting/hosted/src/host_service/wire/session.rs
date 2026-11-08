@@ -28,6 +28,7 @@ pub struct WireSession<P: ProtocolExtension> {
     actions: IntentSender<P>,
     served: Shared<P>,
     changes: watch::Receiver<u64>,
+    notify: watch::Sender<u64>,
     ended: Arc<AtomicBool>,
     /// Bumped by each `release_session`: every connection attached before
     /// it detaches.
@@ -101,6 +102,7 @@ impl<P: ProtocolExtension> WireSession<P> {
         let ended = Arc::new(AtomicBool::new(false));
         let pumped = Arc::clone(&served);
         let pump_ended = Arc::clone(&ended);
+        let host_notify = notify.clone();
         // The pump is the session's only observation consumer; it ends
         // with the session's observations and is never joined.
         thread::spawn(move || {
@@ -135,6 +137,7 @@ impl<P: ProtocolExtension> WireSession<P> {
             actions,
             served,
             changes,
+            notify: host_notify,
             ended,
             releases: std::sync::atomic::AtomicU64::new(0),
             attachments: attachments.clone(),
@@ -153,6 +156,20 @@ impl<P: ProtocolExtension> WireSession<P> {
     #[must_use]
     pub fn session_id(&self) -> String {
         served::lock(&self.served).session().to_owned()
+    }
+
+    /// Publishes host-owned observations to the currently served generation,
+    /// waking its connections just as a session observation does. A later
+    /// session switch does not redirect a retained publisher.
+    #[must_use]
+    pub fn publisher(&self) -> super::super::FacePublisher<P> {
+        let notify = self.notify.clone();
+        served::lock(&self.served)
+            .service()
+            .publisher()
+            .waking(move || {
+                notify.send_modify(|revision| *revision = revision.wrapping_add(1));
+            })
     }
 
     /// A new connection writing its frames to `out`, serving this session

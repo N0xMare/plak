@@ -39,7 +39,6 @@ struct State {
     new_request: Option<String>,
     events: VecDeque<HostEvent>,
     unsent: VecDeque<client::SendError<PlakExtension>>,
-    listener: Option<(String, crate::reload_request::Listener)>,
 }
 
 #[derive(Clone)]
@@ -397,7 +396,6 @@ impl SocketFace {
             }
             // Build probes are client-local, never remote-face intents.
             UserAction::Extension(crate::surface_protocol::SurfaceIntent::CheckBuild) => {
-                self.refuse_requested_reload();
                 self.state().events.push_back(HostEvent::Extension(
                     crate::surface_protocol::SurfaceObservation::BuildStatus {
                         newer_installed: build_identity::newer_build_installed(),
@@ -505,39 +503,6 @@ impl SocketFace {
                     self.note(format!("session request refused: {reason:?}"));
                 }
             }
-        }
-    }
-
-    fn refuse_requested_reload(&self) {
-        let mut state = self.state();
-        let Some(session) = state.session.clone() else {
-            return;
-        };
-        let request = crate::reload_request::Listener::take_remote(&self.paths, &session);
-        if state
-            .listener
-            .as_ref()
-            .is_none_or(|(id, listener)| *id != session || !listener.is_current())
-        {
-            state.listener =
-                crate::reload_request::Listener::announce_remote(&self.paths, &session)
-                    .map(|listener| (session.clone(), listener));
-        }
-        if let Some(request) = request {
-            let reason = self.reload_refusal(false);
-            crate::reload_request::record(
-                &self.paths,
-                &request.request_id,
-                &crate::reload_request::ReloadOutcome::Refused {
-                    reason: reason.clone(),
-                },
-            );
-            state
-                .events
-                .push_back(HostEvent::Row(TranscriptRow::warning(
-                    NoticeScope::Settings,
-                    format!("requested reload refused: {reason}"),
-                )));
         }
     }
 

@@ -283,6 +283,7 @@ fn is_known_command(name: &str) -> bool {
             | "secret"
             | "mcp"
             | "runner"
+            | "host"
             | "run"
             | "agent"
             | "resume"
@@ -474,10 +475,8 @@ enum TopCommand {
     Resume {
         session: Option<String>,
     },
-    /// The per-user host process: one per home and state key, serving
-    /// every session of the home on a private control socket (maintainer
-    /// builds).
-    #[command(hide = true, args_conflicts_with_subcommands = true)]
+    /// The per-user host process, serving sessions on a private control socket.
+    #[command(args_conflicts_with_subcommands = true)]
     Host {
         #[command(subcommand)]
         action: Option<HostAction>,

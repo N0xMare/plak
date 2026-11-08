@@ -2,7 +2,7 @@
 //! beside the host loop rather than inside it.
 
 pub mod binding_document;
-#[cfg(feature = "tui")]
+#[cfg(any(feature = "tui", feature = "web"))]
 pub mod catalog_refresh;
 mod chrome_refresh;
 pub mod home;

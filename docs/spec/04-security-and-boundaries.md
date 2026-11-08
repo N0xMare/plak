@@ -1818,8 +1818,12 @@ running interactive session to reload onto the installed build (chapter 02
   launch's lookup progress, whether as it happens or replayed on attach.
   stdio's `plak agent --wire v2` and the embedded TUI are local. A host-mode
   TUI is a remote face on the control socket: it checks installed build facts
-  locally and refuses requested reloads locally, never forwarding them to
-  the host. Its hand `/reload` replaces only the client, even with running
+  locally. The service owns resident-session announcements, instance-bound
+  request polling and refusals even without a client. Clients do not read or
+  write this hosted request channel. Host-generated refusal observations use
+  the current service generation and wake attached clients; they cannot
+  trigger a continuation, redispatch or runtime handoff. The TUI's hand
+  `/reload` replaces only the client, even with running
   processes; embedded reload's process refusal is unchanged. A persistent
   build-mismatch notice names both builds and the host-level remedy (restart
   its unit, or `plak host stop` and start again), without granting the TUI

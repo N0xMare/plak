@@ -5831,6 +5831,7 @@ def _check_workspace() -> int:
             "python",
             "mcp",
             "web-fetch",
+            "web",
             "codex",
             "grok",
             "claude",

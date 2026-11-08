@@ -567,7 +567,7 @@ fn save_settings_over_the_socket_preserves_terminal_preferences() {
 }
 
 #[test]
-fn requested_reload_is_settled_locally_with_the_known_host_build_or_no_parenthetical() {
+fn a_client_build_check_leaves_the_host_reload_channel_untouched() {
     use std::os::unix::fs::PermissionsExt as _;
     for binary in ["abcdef012345", "unknown", ""] {
         let (_root, paths) = paths();
@@ -588,27 +588,30 @@ fn requested_reload_is_settled_locally_with_the_known_host_build_or_no_parenthet
                 "a reload request never reaches the host"
             );
         });
+        let announced = crate::reload_request::Listener::announce(&paths, SESSION).unwrap();
         let face = SocketFace::discover(&paths).unwrap().unwrap();
         face.state().session = Some(SESSION.into());
         let check = UserAction::Extension(crate::surface_protocol::SurfaceIntent::CheckBuild);
         face.send(check.clone()).unwrap();
         let _ = event(&face);
-        let (_, path) =
+        let (session_id, outcome) =
             crate::reload_request::request(&paths, SESSION, "0123456789ab", "0123456789ab")
                 .unwrap();
         face.send(check).unwrap();
-        let note = format!("{:?}", event(&face));
-        assert!(note.contains("requested reload refused: this session runs in plak host"));
-        let written: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
-        assert_eq!(written["outcome"], "refused");
-        let reason = written["reason"].as_str().unwrap();
-        assert_eq!(
-            reason.contains("(build abcdef012345)"),
-            binary == "abcdef012345"
+        assert!(matches!(
+            event(&face),
+            HostEvent::Extension(crate::surface_protocol::SurfaceObservation::BuildStatus { .. })
+        ));
+        assert!(
+            !outcome.exists(),
+            "the client must not settle a hosted request"
         );
-        assert!(!reason.contains("(build unknown)") && !reason.contains("(build )"));
-        assert!(reason.contains("plak host stop, or restart its unit"));
+        let taken = announced.take(&paths, SESSION).unwrap();
+        assert_eq!(taken.session_id, session_id);
+        assert_eq!(
+            crate::reload_request::outcome_path(&paths, &taken.request_id),
+            outcome
+        );
         assert_eq!(crate::reload_request::take_reload_continuation(), None);
         drop(face);
         host.join().unwrap();
@@ -838,7 +841,7 @@ fn a_hosted_elsewhere_row_refuses_locally_and_keeps_the_current_session() {
 }
 
 #[test]
-fn two_remote_faces_preserve_the_live_announcement_and_either_refuses_its_request() {
+fn two_clients_leave_a_live_host_announcement_and_its_request_untouched() {
     use std::os::unix::fs::PermissionsExt as _;
     let (_root, paths) = paths();
     paths.ensure_layout().unwrap();
@@ -857,6 +860,7 @@ fn two_remote_faces_preserve_the_live_announcement_and_either_refuses_its_reques
             assert!(matches!(peer.read(), ClientFrame::Bye));
         }
     });
+    let announced = crate::reload_request::Listener::announce(&paths, SESSION).unwrap();
     let first = SocketFace::discover(&paths).unwrap().unwrap();
     let second = SocketFace::discover(&paths).unwrap().unwrap();
     first.state().session = Some(SESSION.into());
@@ -870,37 +874,19 @@ fn two_remote_faces_preserve_the_live_announcement_and_either_refuses_its_reques
     let before = std::fs::read(&announcement).unwrap();
     second.send(check.clone()).unwrap();
     assert_eq!(std::fs::read(&announcement).unwrap(), before);
-    let (_, outcome) =
+    let (session_id, outcome) =
         crate::reload_request::request(&paths, SESSION, "0123456789ab", "0123456789ab").unwrap();
     second.send(check.clone()).unwrap();
     first.send(check).unwrap();
-    let written: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(outcome).unwrap()).unwrap();
-    assert_eq!(written["outcome"], "refused");
-    assert!(
-        written["reason"]
-            .as_str()
-            .unwrap()
-            .contains("this session runs in plak host")
-    );
+    assert!(!outcome.exists());
     let notes: Vec<_> = std::iter::from_fn(|| second.try_recv().ok()).collect();
-    assert!(format!("{notes:?}").contains("requested reload refused"));
+    assert!(!format!("{notes:?}").contains("requested reload refused"));
     assert_eq!(std::fs::read(&announcement).unwrap(), before);
-    let (_, outcome) =
-        crate::reload_request::request(&paths, SESSION, "0123456789ab", "0123456789ab").unwrap();
-    let mut dead: serde_json::Value = serde_json::from_slice(&before).unwrap();
-    dead["pid"] = serde_json::json!(i32::MAX);
-    std::fs::write(&announcement, serde_json::to_vec(&dead).unwrap()).unwrap();
-    second
-        .send(UserAction::Extension(
-            crate::surface_protocol::SurfaceIntent::CheckBuild,
-        ))
-        .unwrap();
-    let written: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(outcome).unwrap()).unwrap();
+    let taken = announced.take(&paths, SESSION).unwrap();
+    assert_eq!(taken.session_id, session_id);
     assert_eq!(
-        written["outcome"], "refused",
-        "re-announcement must not erase a pending request"
+        crate::reload_request::outcome_path(&paths, &taken.request_id),
+        outcome
     );
     drop((first, second));
     host.join().unwrap();
