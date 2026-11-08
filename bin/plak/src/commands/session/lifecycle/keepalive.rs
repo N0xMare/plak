@@ -21,13 +21,18 @@ pub(super) struct Keepalive {
     worker: Option<std::thread::JoinHandle<()>>,
 }
 
+#[cfg(test)]
+fn renewal_failure_fixture() -> bool {
+    std::env::var("PLAK_LIFECYCLE_FAIL_RENEWAL").as_deref() == Ok("1")
+}
+
 fn renew(state: &mut State, executor: &ApplicationExecutor) -> Result<(), LifecycleError> {
     if let Some(failure) = &state.failure {
         return Err(CliFailure::new(failure.clone()).into());
     }
     for held in &mut state.holds {
         #[cfg(test)]
-        if std::env::var("PLAK_LIFECYCLE_FAIL_RENEWAL").as_deref() == Ok("1") {
+        if renewal_failure_fixture() {
             state.failure = Some("injected branch renewal refusal".into());
             return Err(CliFailure::new("injected branch renewal refusal").into());
         }

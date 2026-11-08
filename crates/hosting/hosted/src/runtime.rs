@@ -218,11 +218,10 @@ pub use binding_document::{
 pub use clear::clear_session_rebuild;
 pub(crate) use host_loop::publication::RECOVERY_PENDING_NOTE;
 pub use info::effort_label;
-pub use models::effort_from_config;
-pub use models::effort_from_record;
-pub use models::native_compact_facet;
-pub use models::oauth_provider_for_account;
-pub use models::ready_catalog_model_needs_effort;
+pub use models::{
+    effort_from_config, effort_from_record, native_compact_facet, oauth_provider_for_account,
+    ready_catalog_model_needs_effort,
+};
 pub use oneshot::{OneShot, OneShotOutcome, RunBounds};
 #[doc(hidden)]
 pub use projection::projected_head;

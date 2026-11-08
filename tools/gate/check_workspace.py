@@ -659,6 +659,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-hosted", "src/agent/roots.rs"): {"warn"},
     ("plak", "src/commands/runner/local.rs"): {"warn"},
     ("plak", "src/host.rs"): {"select"},
+    ("plak", "src/host/sessions/options.rs"): {"pin", "select"},
     ("plak", "src/commands/runner/services.rs"): {"info", "select", "warn"},
     ("plak", "src/commands/runner/services/host.rs"): {"warn"},
     # Typed, output-free runner diagnostics and the recorded stop's fixed payload.
@@ -1956,6 +1957,17 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         "model": {"HostedRetrievalTable"},
     },
     ('plak', 'src/host.rs'): {'runner': {'RunnerStatus'}},
+    ('plak', 'src/host/sessions/options.rs'): {'runner': {'RunnerRow'}},
+    ('plak', 'src/host/sessions/runner_views.rs'): {
+        'runner': {
+            'PlacementFailure',
+            'ProbePhase',
+            'RepositoryHead',
+            'RunnerRow',
+            'RunnerStatus',
+            'WorkspaceRefusal',
+        },
+    },
     ('plak', 'src/lib.rs'): {'runner': {'RunnerServices'}},
     ('plak', 'src/commands/runner/registry.rs'): {
         'runner': {

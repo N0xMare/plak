@@ -14,6 +14,17 @@ pub(crate) fn crash_cut(point: &str) {
     }
 }
 
+#[cfg(test)]
+fn commit_pause_fixture() -> Result<(), LifecycleError> {
+    if let Ok(milliseconds) = std::env::var("PLAK_LIFECYCLE_COMMIT_PAUSE_MS") {
+        let milliseconds = milliseconds
+            .parse::<u64>()
+            .map_err(|_| CliFailure::new("invalid commit pause fixture"))?;
+        std::thread::sleep(std::time::Duration::from_millis(milliseconds));
+    }
+    Ok(())
+}
+
 pub(super) fn admit_work(
     connection: &rusqlite::Connection,
     id: &str,
@@ -107,12 +118,7 @@ impl ProductStore {
         #[cfg(test)]
         crash_cut("metadata_before_commit");
         #[cfg(test)]
-        if let Ok(milliseconds) = std::env::var("PLAK_LIFECYCLE_COMMIT_PAUSE_MS") {
-            let milliseconds = milliseconds
-                .parse::<u64>()
-                .map_err(|_| CliFailure::new("invalid commit pause fixture"))?;
-            std::thread::sleep(std::time::Duration::from_millis(milliseconds));
-        }
+        commit_pause_fixture()?;
         let title = transaction
             .query_row(
                 "SELECT COALESCE(title_override,title) FROM sessions WHERE id=?1",

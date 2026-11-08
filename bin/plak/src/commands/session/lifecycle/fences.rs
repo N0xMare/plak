@@ -183,12 +183,18 @@ pub(super) fn archive(
     }
     activity.refuse_running()?;
     #[cfg(test)]
+    scan_pause_fixture()?;
+    fences.verify()?;
+    product.set_archived_checked(id, true, &|| fences.verify())
+}
+
+#[cfg(test)]
+fn scan_pause_fixture() -> Result<(), LifecycleError> {
     if let Ok(milliseconds) = std::env::var("PLAK_LIFECYCLE_SCAN_PAUSE_MS") {
         let milliseconds = milliseconds
             .parse::<u64>()
             .map_err(|_| CliFailure::new("invalid scan pause fixture"))?;
         std::thread::sleep(std::time::Duration::from_millis(milliseconds));
     }
-    fences.verify()?;
-    product.set_archived_checked(id, true, &|| fences.verify())
+    Ok(())
 }
