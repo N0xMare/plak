@@ -45,6 +45,13 @@ pub fn probe_openrouter_key_usage(
 ) -> OpenRouterKeyUsageProbe {
     OpenRouterKeyUsageProbe::Failed(unavailable().to_string())
 }
+
+pub async fn read_openrouter_key_usage(
+    credentials: &dyn OpenRouterCredentials,
+    account: &crate::account::AccountRef,
+) -> OpenRouterKeyUsageProbe {
+    probe_openrouter_key_usage(credentials, account)
+}
 pub(crate) fn carry_input_window<P: plakous_host_protocol::ProtocolExtension>(
     _: &crate::runtime::HostConfig<P>,
 ) -> CliResult<plakous::sessions::SessionInputWindow> {

@@ -807,6 +807,9 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-recursive-subagents", "src/tree/projection.rs"): {"json"},
     # Static WAL-checkpoint contention warning; no SQL, paths, or session data.
     ("plak", "src/telemetry_store.rs"): {"params", "warn"},
+    # Typed SQLite binds only; neither projection admits or dispatches work.
+    ("plak", "src/telemetry_store/recorded_usage.rs"): {"params"},
+    ("plak", "src/host/console/recorded.rs"): {"params"},
     ("plak", "src/telemetry_sink.rs"): {"warn"},
     # Static panic notice; no payload, path or session data.
     ("plak", "src/shell/chrome_refresh.rs"): {"warn"},
@@ -1364,6 +1367,7 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "ResolvedProvider",
         "SubscriptionInferenceScope",
         "SubscriptionPaths",
+        "USAGE_OBSERVATION_FRESHNESS",
         "SubscriptionRequestClass",
         "SubscriptionRequestGate",
         "SubscriptionRequestLimits",

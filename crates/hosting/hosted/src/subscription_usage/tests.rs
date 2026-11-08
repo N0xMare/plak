@@ -941,6 +941,11 @@ fn claude_unavailable(reason: &str) -> UsageLimitsView {
 
 #[test]
 fn a_fresh_held_projection_is_served_as_current() {
+    assert_eq!(
+        USAGE_PROJECTION_FRESHNESS,
+        Duration::from_secs(60),
+        "console reuse must not change legacy session aging"
+    );
     let mut view = ready_claude_view();
     view.stale_age_seconds = Some(12);
     let served = cached_if_fresh(&view, Duration::from_secs(59)).expect("still fresh");

@@ -39,6 +39,7 @@ use placement::Placement;
 
 /// This home's sessions, as `plak host` serves them.
 pub(super) struct ProductSessions {
+    console: std::sync::Arc<super::console::Console>,
     runtime: Option<tokio::runtime::Handle>,
     services: Services,
     idle_release: Option<std::time::Duration>,
@@ -78,6 +79,11 @@ impl ProductSessions {
         let tree =
             crate::store::tree::open_tree_store(services.paths()?).map_err(CliFailure::new)?;
         Ok(Self {
+            console: super::console::Console::new(
+                services.paths()?.clone(),
+                services.home().state()?.to_path_buf(),
+                runtime.clone(),
+            ),
             runtime: runtime.clone(),
             placement: Box::new(placement::RegistryPlacement {
                 services: services.clone(),
@@ -331,10 +337,17 @@ impl HostSessions<PlakExtension> for ProductSessions {
     }
     fn welcome_extension(
         &self,
-        _: &plakous_hosted::host_service::wire::HostPrincipal,
-        _: &plakous_hosted::host_service::wire::HostReadLimits,
+        principal: &plakous_hosted::host_service::wire::HostPrincipal,
+        limits: &plakous_hosted::host_service::wire::HostReadLimits,
     ) -> <PlakExtension as plakous_host_protocol::ProtocolExtension>::WelcomeExtension {
-        None
+        Some(super::console::Console::welcome(principal, limits))
+    }
+    fn host_request(
+        &self,
+        context: plakous_hosted::host_service::wire::HostRequestContext,
+        request: plakd_wire_types::console::HostRequest,
+    ) -> plakous_hosted::host_service::wire::HostReadTask<PlakExtension> {
+        self.console.request(context, request)
     }
     fn contains(&self, session: &str) -> Result<bool, String> {
         self.with_product(|store| store.session_exists(session))

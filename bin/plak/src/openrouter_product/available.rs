@@ -18,16 +18,33 @@ use crate::home::paths::PlakPaths;
 use plakous_hosted::openrouter::OpenRouterCredentials;
 use plakous_hosted::{CliFailure, CliResult};
 
+#[derive(Clone, Default)]
+pub(crate) struct UsageReceipt {
+    pub(crate) dispatched: Arc<std::sync::Mutex<Option<String>>>,
+}
+impl UsageReceipt {
+    pub(crate) fn generation(&self) -> Option<String> {
+        self.dispatched
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+}
+
 /// Plak's credentials: the product secret store under one product home.
 pub struct ProductOpenRouterCredentials {
     paths: PlakPaths,
+    usage_receipt: Option<UsageReceipt>,
 }
 
 impl ProductOpenRouterCredentials {
     /// The OpenRouter credentials of one product home.
     #[must_use]
     pub const fn new(paths: PlakPaths) -> Self {
-        Self { paths }
+        Self {
+            paths,
+            usage_receipt: None,
+        }
     }
 
     /// A handle for a [`plakous_hosted::openrouter::ProductOpenRouterSpec`].
@@ -37,7 +54,47 @@ impl ProductOpenRouterCredentials {
     }
 }
 
+pub(crate) fn usage_credentials(
+    paths: &PlakPaths,
+) -> (Arc<dyn OpenRouterCredentials>, UsageReceipt) {
+    let receipt = UsageReceipt::default();
+    (
+        Arc::new(ProductOpenRouterCredentials {
+            paths: paths.clone(),
+            usage_receipt: Some(receipt.clone()),
+        }),
+        receipt,
+    )
+}
+
+pub(crate) fn key_usage_fence(
+    paths: &PlakPaths,
+    account: &plakous_hosted::account::AccountRef,
+) -> Result<Option<String>, String> {
+    if crate::home::secrets::key_status(paths, account.as_str())?.source
+        == crate::home::secrets::KeySource::Missing
+    {
+        return Ok(None);
+    }
+    ProductOpenRouterApiKeySource::new(paths.clone(), account.clone())
+        .map_err(|_| "key authority unavailable".to_owned())?
+        .generation()
+        .map(|generation| Some(generation.fingerprint().to_hex()))
+        .map_err(|_| "key generation unavailable".to_owned())
+}
+
 impl OpenRouterCredentials for ProductOpenRouterCredentials {
+    fn usage_read(
+        &self,
+        account: &plakous_hosted::account::AccountRef,
+    ) -> CliResult<plakous_hosted::openrouter::OpenRouterUsageRead> {
+        let (credentials, observer) = super::usage::capture(&self.paths, account);
+        Ok(plakous_hosted::openrouter::OpenRouterUsageRead {
+            source: credentials.source(account)?,
+            label: credentials.key_label(account)?,
+            observer: Some(observer),
+        })
+    }
     fn key_label(&self, account: &plakous_hosted::account::AccountRef) -> CliResult<String> {
         require_openrouter(account)?;
         let status = crate::home::secrets::key_status(&self.paths, account.as_str())
@@ -55,10 +112,9 @@ impl OpenRouterCredentials for ProductOpenRouterCredentials {
         account: &plakous_hosted::account::AccountRef,
     ) -> CliResult<Arc<OpenRouterKeySource>> {
         require_openrouter(account)?;
-        Ok(Arc::new(ProductOpenRouterApiKeySource::new(
-            self.paths.clone(),
-            account.clone(),
-        )?))
+        let mut source = ProductOpenRouterApiKeySource::new(self.paths.clone(), account.clone())?;
+        source.usage_receipt = self.usage_receipt.clone();
+        Ok(Arc::new(source))
     }
 }
 
@@ -90,6 +146,7 @@ struct ProductOpenRouterApiKeySource {
     paths: PlakPaths,
     account: plakous_hosted::account::AccountRef,
     binding: OpenRouterCredentialBinding,
+    usage_receipt: Option<UsageReceipt>,
 }
 
 impl ProductOpenRouterApiKeySource {
@@ -103,6 +160,7 @@ impl ProductOpenRouterApiKeySource {
             paths,
             account,
             binding,
+            usage_receipt: None,
         })
     }
 
@@ -160,6 +218,13 @@ impl plakous::api_key::ApiKeySource<OpenRouterCredentialRequest<'_>, OpenRouterC
         ) != *expected
         {
             return Err(plakous::api_key::ApiKeyError::BindingMismatch);
+        }
+        if let Some(receipt) = &self.usage_receipt {
+            *receipt
+                .dispatched
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                Some(expected.fingerprint().to_hex());
         }
         Ok(key)
     }

@@ -5320,6 +5320,23 @@ record while a refresh claim still owns the execution lock, in this or another
 process, or whose record changes under the probe, reports retryable `Busy`
 rather than quarantine; the probe neither waits nor writes.
 
+`subscription_usage_read_only` is the console-only observational variant: it
+never logs in, refreshes a token or retries a rejection with a grant. Console
+reads coalesce per exact account and can reuse an observation for 30 s only
+after rechecking its current consent and credential generations. Legacy usage
+reads register their in-flight GET and publish only after the same exact fence
+recheck; they never consume this cache. Bounded observation registries refuse
+console misses on exhaustion without changing legacy reads. An absent native
+namespace stays absent. `account_observation_revision` returns only an opaque
+local generation digest, not admission authority; bounded named enumeration
+returns sorted names, the raw scan count and a truncation flag.
+
+The hosted OpenRouter read has a cancellable async form with caller-owned
+deadline. Its optional observation scope covers both legacy session probes
+and console reads. Publication requires the full generation attested by the
+actual dispatch and a matching current account/source fence, not the shortened
+display fingerprint. Observer failure cannot change the legacy provider result.
+
 Refresh emits a `CredentialRefresh` telemetry observation labelled `codex`,
 `xai`, or `claude`. A failure carries a closed, content-free sub-reason
 (`CredentialRefreshFailureReason`: `token_shape`, `response_too_large`,

@@ -170,7 +170,7 @@ fn drive(
 }
 
 fn project(
-    observation: &plakous_host_protocol::SessionObservation<Core>,
+    observation: &plakous_host_protocol::SessionObservation<PlakExtension>,
     records: &mut Vec<String>,
 ) {
     if let Some(line) = plakous_host_protocol::jsonl::project_host_event(

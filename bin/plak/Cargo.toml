@@ -41,7 +41,7 @@ plakous-offline-crash-harness = { path = "../../tests/harnesses/offline-crash", 
 tracing-subscriber.workspace = true
 plakous = { workspace = true, features = ["sessions-sqlite"] }
 nix.workspace = true
-rusqlite.workspace = true
+rusqlite = { workspace = true, features = ["hooks"] }
 rustix = { workspace = true, features = ["event", "fs", "process", "system", "termios", "time"] }
 # The TUI module's terminal stack: match Ratatui's current Crossterm backend so
 # the product carries one terminal stack.
@@ -63,7 +63,7 @@ shell-words = "1.1"
 zeroize.workspace = true
 tempfile = { workspace = true }
 # `local-offset`: the resume picker reads the UTC offset once on the main thread.
-time = { version = "0.3", features = ["formatting", "local-offset"] }
+time = { version = "0.3", features = ["formatting", "local-offset", "parsing"] }
 # Prompt send times resolve each stamp in the process zone. `tz-system` loads
 # it once; `tzdb-zoneinfo` reads the host zoneinfo for that stamp's offset.
 jiff = { version = "0.2.35", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }

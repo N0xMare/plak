@@ -27,7 +27,7 @@ fn seeded(fixture: &Fixture, host: &Host) -> (Client, String, NodeAddress, u64) 
     (client, session, node, attachment)
 }
 
-fn change(attachment: u64, rebind: bool) -> Op<Core> {
+fn change(attachment: u64, rebind: bool) -> Op<PlakExtension> {
     if rebind {
         Op::Rebind {
             attachment,

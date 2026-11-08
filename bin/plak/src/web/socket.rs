@@ -3,6 +3,9 @@
 //! message, a message past the line cap, a slow reader, a silent peer or a
 //! client that floods intents ends the connection, which detaches.
 
+#[cfg(test)]
+mod principal_tests;
+
 use std::collections::VecDeque;
 use std::io::Write;
 use std::sync::{Arc, Mutex, PoisonError};

@@ -167,6 +167,15 @@ impl SubscriptionState {
         &self,
         provider: NativeProvider,
     ) -> Result<Vec<String>, NativeSubscriptionError> {
+        self.named_accounts_bounded(provider, usize::MAX)
+            .map(|(names, _, _)| names)
+    }
+
+    pub(in crate::subscriptions) fn named_accounts_bounded(
+        &self,
+        provider: NativeProvider,
+        maximum: usize,
+    ) -> Result<(Vec<String>, usize, bool), NativeSubscriptionError> {
         let selected = self.paths.for_named_account(provider, "account")?;
         let slot = selected
             .named
@@ -174,13 +183,20 @@ impl SubscriptionState {
             .ok_or(NativeSubscriptionError::Internal)?;
         let Some(directory) = super::filesystem::named_parent(&selected.state_root, slot.vertical)?
         else {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), 0, false));
         };
         let entries = rustix::fs::Dir::read_from(&directory)
             .map_err(|_| NativeSubscriptionError::UnsafeStorage)?;
         let mut names = Vec::new();
-        for entry in entries {
+        let mut truncated = false;
+        let mut count = 0;
+        for (scanned, entry) in entries.enumerate() {
+            if scanned >= maximum {
+                truncated = true;
+                break;
+            }
             let entry = entry.map_err(|_| NativeSubscriptionError::UnsafeStorage)?;
+            count += 1;
             let Ok(name) = entry.file_name().to_str() else {
                 continue;
             };
@@ -189,7 +205,7 @@ impl SubscriptionState {
             }
         }
         names.sort();
-        Ok(names)
+        Ok((names, count, truncated))
     }
 
     pub(in crate::subscriptions) fn for_named_account(

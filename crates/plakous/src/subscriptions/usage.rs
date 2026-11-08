@@ -2,6 +2,8 @@
 
 use super::vertical::NativeFuture;
 
+mod cache;
+
 use super::{
     Future, NativeAuthStatus, NativeProvider, NativeSubscriptionError, NativeSubscriptionStatus,
     NativeSubscriptions, PrivateFilesystemLock, SubscriptionUsageCredentialState,
@@ -9,6 +11,103 @@ use super::{
 };
 
 impl NativeSubscriptions {
+    /// Non-secret identity of the exact local consent and credential generations.
+    /// This is an observation fence, not authority to admit work or reuse data
+    /// without revalidating the selected account.
+    ///
+    /// # Errors
+    /// Reports busy or unreadable storage without creating an absent layout.
+    pub async fn account_observation_revision(
+        &self,
+        provider: NativeProvider,
+    ) -> Result<Option<[u8; 32]>, SubscriptionUsageUnavailable> {
+        if super::vertical::vertical(provider).is_none() {
+            return Err(SubscriptionUsageUnavailable::NotConnected);
+        }
+        self.state
+            .require_provider(provider)
+            .map_err(|_| SubscriptionUsageUnavailable::LocalState)?;
+        let state = self.state.clone();
+        if !run_blocking(move || state.layout_exists())
+            .await
+            .map_err(|_| SubscriptionUsageUnavailable::LocalState)?
+            .map_err(|_| SubscriptionUsageUnavailable::LocalState)?
+        {
+            return Ok(None);
+        }
+        let lock = self.usage_lock(provider).await?;
+        let revision = self
+            .usage_snapshot(provider)
+            .await
+            .map_err(|_| SubscriptionUsageUnavailable::LocalState)?;
+        lock.verify()
+            .map_err(|_| SubscriptionUsageUnavailable::LocalState)?;
+        let encoded =
+            serde_json::to_vec(&revision).map_err(|_| SubscriptionUsageUnavailable::LocalState)?;
+        Ok(Some(plakous_model::sha256_bytes(&[
+            b"plak.console-observation.v1",
+            &encoded,
+        ])))
+    }
+    /// Reads allowance once without login, token refresh or a refresh retry.
+    /// Console reads coalesce and may consume a fresh exact-fenced observation
+    /// produced by a legacy read. Legacy reads never consume this cache.
+    pub async fn subscription_usage_read_only(
+        &self,
+        provider: NativeProvider,
+    ) -> SubscriptionUsageRead {
+        if super::vertical::vertical(provider).is_none() {
+            return self.usage_unavailable(SubscriptionUsageUnavailable::NotConnected);
+        }
+        if self.state.require_provider(provider).is_err() {
+            return self.usage_unavailable(SubscriptionUsageUnavailable::LocalState);
+        }
+        let state = self.state.clone();
+        match run_blocking(move || state.layout_exists()).await {
+            Ok(Ok(true)) => {}
+            Ok(Ok(false)) => {
+                return self.usage_unavailable(SubscriptionUsageUnavailable::NotConnected);
+            }
+            _ => return self.usage_unavailable(SubscriptionUsageUnavailable::LocalState),
+        }
+        let Some(entry) = cache::entry(self.state.observation_paths(), provider) else {
+            return self.usage_unavailable(SubscriptionUsageUnavailable::Busy);
+        };
+        let _console = entry.console.lock().await;
+        loop {
+            if let Some(mut changed) = entry.pending() {
+                let _ = changed.changed().await;
+                continue;
+            }
+            let lock = match self.usage_lock(provider).await {
+                Ok(lock) => lock,
+                Err(reason) => return self.usage_unavailable(reason),
+            };
+            // Recheck under the same guard a legacy read uses to register its
+            // in-flight observation, closing the check-then-GET race.
+            if let Some(mut changed) = entry.pending() {
+                drop(lock);
+                let _ = changed.changed().await;
+                continue;
+            }
+            if !matches!(self.status_unlocked(provider).await, Ok(status) if status.compatibility() == super::CompatibilityStatus::Current && status.credential() == NativeAuthStatus::Ready)
+            {
+                return self.usage_unavailable(self.fenced_credential_reason(provider).await);
+            }
+            let revision = match self.usage_snapshot(provider).await {
+                Ok(revision) if lock.verify().is_ok() => revision,
+                _ => return self.usage_unavailable(SubscriptionUsageUnavailable::LocalState),
+            };
+            if let Some(observation) = entry.cached(&revision) {
+                return observation;
+            }
+            if !cache::can_fetch() {
+                return self.usage_unavailable(SubscriptionUsageUnavailable::Busy);
+            }
+            return Box::pin(self.read_usage_prepared(provider, false, lock)).await;
+        }
+    }
+
     async fn usage_lock(
         &self,
         provider: NativeProvider,
@@ -67,6 +166,15 @@ impl NativeSubscriptions {
             Ok(lock) => lock,
             Err(reason) => return self.usage_unavailable(reason),
         };
+        Box::pin(self.read_usage_prepared(provider, refresh, lock)).await
+    }
+
+    async fn read_usage_prepared(
+        &self,
+        provider: NativeProvider,
+        refresh: bool,
+        lock: PrivateFilesystemLock,
+    ) -> SubscriptionUsageRead {
         if refresh
             && !matches!(
                 self.refresh_locked(provider, true).await,
@@ -136,6 +244,7 @@ impl NativeSubscriptions {
             Ok(snapshot) if lock.verify().is_ok() => snapshot,
             _ => return self.usage_unavailable(SubscriptionUsageUnavailable::LocalState),
         };
+        let flight = cache::Flight::start(self.state.observation_paths(), provider);
         drop(lock);
         let observation = read.await;
         let lock = match self.usage_lock(provider).await {
@@ -143,7 +252,10 @@ impl NativeSubscriptions {
             Err(reason) => return self.usage_unavailable(reason),
         };
         match self.usage_snapshot(provider).await {
-            Ok(after) if before == after && lock.verify().is_ok() => observation,
+            Ok(after) if before == after && lock.verify().is_ok() => {
+                flight.publish(after, &observation);
+                observation
+            }
             _ => self.usage_unavailable(SubscriptionUsageUnavailable::AccountChanged),
         }
     }

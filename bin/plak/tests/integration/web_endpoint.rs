@@ -286,6 +286,14 @@ fn hello(socket: &mut WebSocket<UnixStream>) -> NodeAddress {
     );
     let welcome = next_frame(socket);
     assert_eq!(welcome["frame"], "welcome", "{welcome}");
+    assert_eq!(welcome["extension"]["console"]["face"], "web");
+    assert_eq!(
+        welcome["extension"]["console"]["accounts_read"]["enabled"],
+        false
+    );
+    socket.send(Message::Text(serde_json::json!({"frame":"request","id":899,"op":{"op":"host","request":{"request":"accounts_status"}}}).to_string().into())).unwrap();
+    let console = response(socket, 899);
+    assert_eq!(console["refused"]["refusal"], "capability_disabled");
     assert_eq!(
         welcome.get("session"),
         None,

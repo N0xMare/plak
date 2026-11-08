@@ -1,6 +1,10 @@
 //! Native subscription vocabulary and exact per-route capability dispatch.
 //! An omitted route never falls back to a different provider.
 
+/// Freshness of exact-fenced read-only allowance observations. This does not
+/// change legacy fresh reads or their caller's per-session projection aging.
+pub const USAGE_OBSERVATION_FRESHNESS: Duration = Duration::from_secs(30);
+
 #[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
 mod catalog;
 #[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]

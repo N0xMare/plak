@@ -4012,6 +4012,28 @@ when enqueued or woken, with a real wake notification selected by both
 acceptors; the nearest read deadline is also selected. Request ids are unique
 across all pending host and session operations on a connection.
 
+Product `accounts_status` and `accounts_usage` are home-scoped reads without
+attachment or session admission. Exact canonical full account ids are required;
+no whitespace repair, aliases, sibling or default fallback is allowed. The
+roster includes all seven defaults, bounded named-account inventory and, for
+usage, retained historical account groups. Raw invalid directory entries count
+toward the 512-entry scan budget. Each provider GET is observational, one at a
+time per host with a 5 s deadline; an unavailable allowance does not erase
+recorded subtotals. Counters are decimal strings, unknowns are explicit null,
+and windows are half-open 24 h, 7 d or 30 d intervals by terminal commit time.
+Pages retain the accepted as-of instant and measured snapshot. Their opaque
+cursors bind principal, filter, window, host generation and source revision;
+they expire after 30 s or a source change. Limits are 100 rows/page and 256 KiB
+per response, with explicit truncated-page or typed refusal rather than a
+fabricated complete list. No SQLite transaction is held between page requests.
+
+Allowance sharing is asymmetric. Console reads coalesce among themselves and
+may reuse an exact-account, consent-generation and credential-generation
+fenced observation from a legacy refresh for 30 s, or join its in-flight GET.
+Legacy reads never consume the console cache: they retain fresh provider reads,
+their existing per-session 60 s aging and their unchanged freshness law.
+A console read never refreshes a token or retries a rejected token with a grant.
+
 Wire v2 is the framed protocol every frontend will speak to a host; it
 replaces the JSONL host of §4.3, which stays byte-identical until it is
 removed. Its types live in `plakous-host-protocol` (`wire`, the observation

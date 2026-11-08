@@ -252,6 +252,9 @@ fn fingerprint(secret: &str) -> String {
     format!("sha256:{hex}")
 }
 
+#[cfg(feature = "web")]
+pub(crate) mod observation;
+
 fn write_private_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
     use std::fs::OpenOptions;
     #[cfg(unix)]
@@ -474,14 +477,30 @@ pub fn list_named_secrets(paths: &PlakPaths) -> Result<Vec<String>, String> {
 
 /// The names stored on `shelf`, sorted. Never a value.
 pub fn list_shelf_secrets(paths: &PlakPaths, shelf: SecretShelf) -> Result<Vec<String>, String> {
+    list_shelf_secrets_bounded(paths, shelf, usize::MAX).map(|(names, _, _)| names)
+}
+
+/// Counts raw directory entries, including invalid names, against the bound.
+pub(crate) fn list_shelf_secrets_bounded(
+    paths: &PlakPaths,
+    shelf: SecretShelf,
+    maximum: usize,
+) -> Result<(Vec<String>, usize, bool), String> {
     if !paths.verify_secret_shelf_dir(shelf)? {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), 0, false));
     }
     let entries = fs::read_dir(paths.secret_shelf_dir(shelf))
         .map_err(|_| "could not read the secrets directory".to_owned())?;
     let mut names = Vec::new();
-    for entry in entries {
+    let mut count = 0;
+    let mut truncated = false;
+    for (index, entry) in entries.enumerate() {
+        if index >= maximum {
+            truncated = true;
+            break;
+        }
         let entry = entry.map_err(|_| "could not read the secrets directory".to_owned())?;
+        count += 1;
         let file_name = entry.file_name();
         let Some(name) = file_name
             .to_str()
@@ -494,7 +513,7 @@ pub fn list_shelf_secrets(paths: &PlakPaths, shelf: SecretShelf) -> Result<Vec<S
         }
     }
     names.sort();
-    Ok(names)
+    Ok((names, count, truncated))
 }
 
 /// One named secret, or `None` when it is not stored. The directory chain and

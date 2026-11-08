@@ -1844,6 +1844,14 @@ of the web session-message close bucket; reconnect cannot refresh its burst.
 Deadlines drop the future and reject late completion, with no automatic retry.
 The same immutable product limits are supplied to welcome and enforcement.
 No read can acquire a runtime merely by passing the wire routing gate.
+Account reads select only canonical full local account references; provider
+identity text is not a selector. They consume the composition root's credential
+state namespace and product home, never a client pathname. They do not create
+missing credential storage, open product/runtime sessions, refresh credentials
+or admit paid work. Cached allowance observations require exact account and
+full credential-generation evidence; display fingerprints are never authority.
+Recorded telemetry is disposable, content-free usage evidence, not recovery or
+admission authority, and unproved coverage is always explicitly incomplete.
 
 `plak host` (chapter 02 §4.6) listens on `host/run/<state key>.sock` under
 the product home. Its authority is exactly the user's own:

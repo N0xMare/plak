@@ -465,6 +465,9 @@ pub(super) struct SubscriptionState {
 }
 
 impl SubscriptionState {
+    pub(super) fn observation_paths(&self) -> &SubscriptionPaths {
+        &self.paths
+    }
     pub(super) fn slot_id(
         &self,
     ) -> Result<plakous_auth::CredentialSlotId, NativeSubscriptionError> {
@@ -721,7 +724,7 @@ impl SubscriptionState {
     clippy::too_many_lines,
     reason = "unit tests may assert with expect/unwrap; scenario tests keep their steps in order"
 )]
-mod tests;
+pub(in crate::subscriptions) mod tests;
 
 impl SubscriptionState {
     pub(super) fn load_persisted_catalog(

@@ -20,11 +20,12 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::mpsc;
 
+use plakd_wire_types::PlakExtension;
 use plakous_host_protocol::wire::{
     Answer, ClientFrame, Hello, HostFrame, NodeAddress, Op, Outcome, RequestId, SessionActivity,
     SessionEnvironment, SessionResidency, SessionRow, WIRE_VERSION, decode_line, encode_line,
 };
-use plakous_host_protocol::{Core, Draft, SessionIntent};
+use plakous_host_protocol::{Draft, SessionIntent};
 use plakous_hosted::sessions::projector::RootInterruptCause;
 use serde_json::json;
 
@@ -198,13 +199,13 @@ impl Client {
         client
     }
 
-    fn send(&mut self, frame: &ClientFrame<Core>) {
+    fn send(&mut self, frame: &ClientFrame<PlakExtension>) {
         self.stream
             .write_all(encode_line(frame).unwrap().as_bytes())
             .unwrap();
     }
 
-    fn next(&mut self) -> HostFrame<Core> {
+    fn next(&mut self) -> HostFrame<PlakExtension> {
         let mut line = String::new();
         self.stream.set_read_timeout(Some(WAIT)).unwrap();
         assert_ne!(
@@ -217,7 +218,7 @@ impl Client {
 
     /// Sends request `id` and returns its outcome, skipping what comes
     /// before it.
-    fn request(&mut self, id: RequestId, op: Op<Core>) -> Outcome<Core> {
+    fn request(&mut self, id: RequestId, op: Op<PlakExtension>) -> Outcome<PlakExtension> {
         self.send(&ClientFrame::Request { id, op });
         loop {
             if let HostFrame::Response {
@@ -342,7 +343,7 @@ fn lifecycle_real_product_archive_delete_releases_idle_actor_without_reopen() {
     stop(&mut host);
 }
 
-fn new_session(workspace: &std::path::Path) -> Op<Core> {
+fn new_session(workspace: &std::path::Path) -> Op<PlakExtension> {
     Op::NewSession {
         runner: plakous_host_protocol::wire::RunnerLabel::local(),
         profile: None,
@@ -1295,7 +1296,7 @@ fn concurrent_replays_of_one_request_make_one_session() {
     let Some(fixture) = fixture() else { return };
     let host = start(&fixture);
     let socket = host.socket.clone();
-    let answers: Vec<Outcome<Core>> = std::thread::scope(|scope| {
+    let answers: Vec<Outcome<PlakExtension>> = std::thread::scope(|scope| {
         let replays: Vec<_> = (0..8)
             .map(|_| {
                 scope.spawn(|| {

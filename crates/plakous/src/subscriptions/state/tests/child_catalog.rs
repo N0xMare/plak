@@ -6,14 +6,27 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 const MODEL: &str = "gpt-5.6-luna";
 
-struct CatalogFixture {
-    client: plakous_http::Client,
-    origin: plakous_openai::EndpointOrigin,
-    gets: Arc<AtomicUsize>,
-    server: tokio::task::JoinHandle<TestResult>,
+pub(in crate::subscriptions) struct CatalogFixture {
+    pub(in crate::subscriptions) client: plakous_http::Client,
+    pub(in crate::subscriptions) origin: plakous_openai::EndpointOrigin,
+    pub(in crate::subscriptions) gets: Arc<AtomicUsize>,
+    pub(in crate::subscriptions) server: tokio::task::JoinHandle<TestResult>,
 }
 
 async fn catalog_server(statuses: Vec<u16>) -> TestResult<CatalogFixture> {
+    scripted_server(statuses, ReadPath::Catalog).await
+}
+pub(in crate::subscriptions) async fn usage_server(
+    statuses: Vec<u16>,
+) -> TestResult<CatalogFixture> {
+    scripted_server(statuses, ReadPath::Usage).await
+}
+enum ReadPath {
+    Catalog,
+    Usage,
+}
+
+async fn scripted_server(statuses: Vec<u16>, path: ReadPath) -> TestResult<CatalogFixture> {
     let rcgen::CertifiedKey { cert, signing_key } =
         rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()])?;
     let certificate = cert.der().clone();
@@ -51,17 +64,25 @@ async fn catalog_server(statuses: Vec<u16>) -> TestResult<CatalogFixture> {
             while !head.ends_with(b"\r\n\r\n") {
                 head.push(stream.read_u8().await?);
             }
-            assert!(head.starts_with(b"GET /backend-api/codex/models?client_version="));
+            assert!(head.starts_with(match path {
+                ReadPath::Catalog => b"GET /backend-api/codex/models?client_version=".as_slice(),
+                ReadPath::Usage => b"GET /backend-api/wham/usage HTTP/1.1".as_slice(),
+            }));
             count.fetch_add(1, Ordering::SeqCst);
             // The provider's existing catalog fixture, with one exact direct row.
-            let body = serde_json::to_vec(&serde_json::json!({"models": [{
-                "slug": MODEL, "visibility": "list", "priority": 1,
-                "supported_in_api": true, "tool_mode": "direct",
-                "supported_reasoning_levels": [{"effort": "low"}],
-                "shell_type": "shell_command", "input_modalities": ["text"],
-                "context_window": 272_000, "max_context_window": 1_000_000,
-                "effective_context_window_percent": 95, "auto_compact_token_limit": 240_000
-            }]}))?;
+            let body = match path {
+                ReadPath::Usage => serde_json::to_vec(
+                    &serde_json::json!({"rate_limit":{"primary_window":{"used_percent":12,"limit_window_seconds":18_000,"reset_at":1_800_000_000}}}),
+                )?,
+                ReadPath::Catalog => serde_json::to_vec(&serde_json::json!({"models": [{
+                    "slug": MODEL, "visibility": "list", "priority": 1,
+                    "supported_in_api": true, "tool_mode": "direct",
+                    "supported_reasoning_levels": [{"effort": "low"}],
+                    "shell_type": "shell_command", "input_modalities": ["text"],
+                    "context_window": 272_000, "max_context_window": 1_000_000,
+                    "effective_context_window_percent": 95, "auto_compact_token_limit": 240_000
+                }]}))?,
+            };
             stream.write_all(format!("HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes()).await?;
             stream.write_all(&body).await?;
             stream.shutdown().await?;
@@ -76,7 +97,7 @@ async fn catalog_server(statuses: Vec<u16>) -> TestResult<CatalogFixture> {
     })
 }
 
-fn seed(paths: &SubscriptionPaths, now: u64) -> TestResult {
+pub(in crate::subscriptions) fn seed(paths: &SubscriptionPaths, now: u64) -> TestResult {
     paths.prepare()?;
     store_acceptance(
         paths,

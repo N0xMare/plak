@@ -1,4 +1,5 @@
 use std::io::{BufRead as _, BufReader};
+use std::os::unix::fs::MetadataExt as _;
 use std::os::unix::fs::PermissionsExt as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -6,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use plakous_host_protocol::wire::{
     Answer, ClientFrame, Hello, HostFrame, Op, Outcome, WIRE_VERSION,
 };
+use plakous_hosted::host_service::wire::HostPrincipal;
 
 use super::*;
 
@@ -18,15 +20,36 @@ fn short_home() -> tempfile::TempDir {
 }
 
 /// Sessions as a test scripts them: none.
-struct NoSessions;
+#[derive(Default)]
+struct NoSessions {
+    principals: Arc<Mutex<Vec<HostPrincipal>>>,
+}
 
 impl plakous_hosted::host_service::wire::HostSessions<PlakExtension> for NoSessions {
+    fn host_request(
+        &self,
+        context: plakous_hosted::host_service::wire::HostRequestContext,
+        _: plakd_wire_types::console::HostRequest,
+    ) -> plakous_hosted::host_service::wire::HostReadTask<PlakExtension> {
+        self.principals.lock().unwrap().push(context.principal);
+        Box::pin(async {
+            Ok(plakd_wire_types::console::HostResponse::AccountsStatus {
+                as_of: "fixture".into(),
+                rows: Vec::new(),
+                diagnostics: Vec::new(),
+                page: plakd_wire_types::console::Page {
+                    next: None,
+                    truncated: false,
+                },
+            })
+        })
+    }
     fn host_read_limits(&self) -> plakous_hosted::host_service::wire::HostReadLimits {
         crate::host::host_read_limits()
     }
     fn welcome_extension(
         &self,
-        _: &plakous_hosted::host_service::wire::HostPrincipal,
+        _: &HostPrincipal,
         _: &plakous_hosted::host_service::wire::HostReadLimits,
     ) -> <PlakExtension as plakous_host_protocol::ProtocolExtension>::WelcomeExtension {
         None
@@ -119,7 +142,9 @@ fn an_admitted_connection_is_welcomed_to_the_directory_and_a_stop_ends_the_host(
     assert_eq!(mode(&socket), 0o600);
     let stop = Arc::new(AtomicBool::new(false));
     let stopping = Arc::clone(&stop);
-    let host = SessionHost::new(NoSessions, "0123456789ab", 7);
+    let sessions = NoSessions::default();
+    let principals = Arc::clone(&sessions.principals);
+    let host = SessionHost::new(sessions, "0123456789ab", 7);
     let server = std::thread::spawn(move || {
         runtime.block_on(bound.serve(&host, move || stopping.load(Ordering::Acquire)));
         bound
@@ -158,6 +183,32 @@ fn an_admitted_connection_is_welcomed_to_the_directory_and_a_stop_ends_the_host(
         }
     );
 
+    send(
+        &mut client,
+        &ClientFrame::Request {
+            id: 2,
+            op: Op::Host {
+                request: plakd_wire_types::console::HostRequest::AccountsStatus {
+                    account_id: None,
+                    cursor: None,
+                    limit: None,
+                },
+            },
+        },
+    );
+    assert!(matches!(
+        next(&mut reader),
+        HostFrame::Response {
+            id: 2,
+            outcome: Outcome::Ok(Answer::Host { .. })
+        }
+    ));
+    assert_eq!(
+        *principals.lock().unwrap(),
+        vec![HostPrincipal::Socket(
+            std::fs::metadata(home.path()).unwrap().uid()
+        )]
+    );
     stop.store(true, Ordering::Release);
     let bound = server.join().unwrap();
     // The stop ended the connection too.
@@ -184,7 +235,7 @@ fn a_hello_of_another_version_is_refused() {
     };
     let stop = Arc::new(AtomicBool::new(false));
     let stopping = Arc::clone(&stop);
-    let host = SessionHost::new(NoSessions, "0123456789ab", 7);
+    let host = SessionHost::new(NoSessions::default(), "0123456789ab", 7);
     let server = std::thread::spawn(move || {
         runtime.block_on(bound.serve(&host, move || stopping.load(Ordering::Acquire)));
     });

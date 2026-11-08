@@ -541,7 +541,7 @@ class PublicCompileGateTests(unittest.TestCase):
                     for _, command in compile_gate.LOCK_PREFLIGHT
                 ],
             )
-            self.assertEqual(len(commands), 6)
+            self.assertEqual(len(commands), 7)
 
     def test_fetch_failure_stops_before_other_fixtures(self):
         with (

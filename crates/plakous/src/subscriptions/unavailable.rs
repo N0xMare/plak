@@ -17,6 +17,16 @@ pub struct NativeSubscriptions {
     reason = "disabled routes retain the compiled async API contract"
 )]
 impl NativeSubscriptions {
+    /// No local native observation exists when native routes are omitted.
+    ///
+    /// # Errors
+    /// Always reports that this provider was not compiled, before I/O.
+    pub async fn account_observation_revision(
+        &self,
+        _provider: NativeProvider,
+    ) -> Result<Option<[u8; 32]>, plakous_model::SubscriptionUsageUnavailable> {
+        Err(plakous_model::SubscriptionUsageUnavailable::NotConnected)
+    }
     /// Refuses account comparison for an omitted native route before I/O.
     ///
     /// # Errors
@@ -35,6 +45,18 @@ impl NativeSubscriptions {
         &self,
         provider: NativeProvider,
     ) -> Result<Vec<String>, NativeSubscriptionError> {
+        Err(NativeSubscriptionError::NotCompiled(provider))
+    }
+
+    /// Refuses bounded enumeration before I/O when the native route is omitted.
+    ///
+    /// # Errors
+    /// Returns the exact omitted route.
+    pub async fn named_accounts_bounded(
+        &self,
+        provider: NativeProvider,
+        _maximum: usize,
+    ) -> Result<(Vec<String>, usize, bool), NativeSubscriptionError> {
         Err(NativeSubscriptionError::NotCompiled(provider))
     }
     /// Refuses an existence read for an omitted native route before I/O.
@@ -287,6 +309,14 @@ impl NativeSubscriptions {
             observed_at: plakous_model::Clock::now(&plakous_model::SystemClock),
             reason: plakous_model::SubscriptionUsageUnavailable::NotConnected,
         }
+    }
+
+    /// Reports no connected subscription without reading or refreshing credentials.
+    pub async fn subscription_usage_read_only(
+        &self,
+        provider: NativeProvider,
+    ) -> SubscriptionUsageRead {
+        self.subscription_usage(provider).await
     }
 }
 /// No provider login can be created without a compiled vertical.

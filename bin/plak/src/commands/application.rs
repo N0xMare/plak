@@ -26,7 +26,6 @@ use crate::presentation::{
 use plakous_hosted::account::{AccountRef, Vertical};
 use plakous_hosted::agent as product_agent;
 use plakous_hosted::error::{CliFailure, CliFailureKind, CliResult};
-use plakous_hosted::openrouter as product_openrouter;
 use plakous_hosted::subscription_usage as product_usage;
 
 pub(crate) fn native_provider(account: &AccountRef) -> CliResult<NativeProvider> {
@@ -816,24 +815,10 @@ impl AccountOps for PlakousApplication {
         &mut self,
         account: &AccountRef,
     ) -> CliResult<product_usage::VerticalObservation> {
-        let credentials =
-            crate::openrouter_product::ProductOpenRouterCredentials::shared(self.product_paths()?);
-        Ok(
-            match product_openrouter::probe_openrouter_key_usage(credentials.as_ref(), account) {
-                product_openrouter::OpenRouterKeyUsageProbe::NotConfigured => {
-                    product_usage::VerticalObservation::NotConnected
-                }
-                product_openrouter::OpenRouterKeyUsageProbe::Ok(usage, label) => {
-                    product_usage::VerticalObservation::OpenRouterKey(usage, label)
-                }
-                product_openrouter::OpenRouterKeyUsageProbe::Failed(reason) => {
-                    product_usage::VerticalObservation::Unavailable(reason)
-                }
-                product_openrouter::OpenRouterKeyUsageProbe::Rejected { reason, source } => {
-                    product_usage::VerticalObservation::RejectedKey { reason, source }
-                }
-            },
-        )
+        Ok(crate::openrouter_product::legacy_key_usage(
+            self.product_paths()?,
+            account,
+        ))
     }
 
     fn acknowledge_exact(

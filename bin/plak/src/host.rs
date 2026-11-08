@@ -11,6 +11,7 @@
 //! (spec 02 §4.4). A `SIGTERM` or `SIGINT` hands every resident
 //! session off and ends the process within [`HANDOFF_DEADLINE`].
 
+mod console;
 mod lock;
 mod sessions;
 mod socket;
@@ -37,15 +38,7 @@ pub(crate) const HANDOFF_DEADLINE: Duration = Duration::from_secs(60);
 const STOP_MARGIN: Duration = Duration::from_secs(5);
 
 fn host_read_limits() -> plakous_hosted::host_service::wire::HostReadLimits {
-    plakous_hosted::host_service::wire::HostReadLimits {
-        request_bytes: 64 * 1024,
-        per_connection: 2,
-        per_principal: 4,
-        host: 32,
-        deadline: Duration::from_secs(10),
-        messages_per_second: 12,
-        burst: 12,
-    }
+    console::admission_limits()
 }
 
 fn startup_runtime() -> CliResult<(tokio::runtime::Runtime, tokio::signal::unix::Signal)> {

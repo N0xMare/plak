@@ -62,6 +62,17 @@ struct PreparedOpenRouter {
 /// re-resolves at every attempt fence and retains no secret, so a one-shot value
 /// would break the refresh it exists for.
 pub trait OpenRouterCredentials: Send + Sync + 'static {
+    /// Prepares one read's source and optional best-effort observation scope.
+    ///
+    /// # Errors
+    /// The selected source or its safe label cannot be read.
+    fn usage_read(&self, account: &crate::account::AccountRef) -> CliResult<OpenRouterUsageRead> {
+        Ok(OpenRouterUsageRead {
+            source: self.source(account)?,
+            label: self.key_label(account)?,
+            observer: None,
+        })
+    }
     /// Fail fast with a construction diagnostic before any client is built.
     ///
     /// # Errors
@@ -83,6 +94,16 @@ pub trait OpenRouterCredentials: Send + Sync + 'static {
     ///
     /// Returns a redaction-safe failure when the selected key cannot be read.
     fn key_label(&self, _account: &crate::account::AccountRef) -> CliResult<String>;
+}
+
+/// One physical allowance read, including an optional observation lifetime.
+pub struct OpenRouterUsageRead {
+    /// Exact source, revalidated by the provider client at dispatch.
+    pub source: Arc<OpenRouterKeySource>,
+    /// Credential-free product label.
+    pub label: String,
+    /// Dropped on cancellation, including when no response was available.
+    pub observer: Option<Box<dyn super::KeyUsageObserver>>,
 }
 
 /// Authenticates, discovers one literal model, and constructs its exact Chat runtime.
@@ -687,18 +708,9 @@ pub fn probe_openrouter_key_usage(
     credentials: &dyn OpenRouterCredentials,
     account: &crate::account::AccountRef,
 ) -> OpenRouterKeyUsageProbe {
-    // "Is a key configured at all" is the credential's own preflight; an
-    // unconfigured product is `NotConfigured`, not a failure.
-    if credentials.preflight(account).is_err() {
-        return OpenRouterKeyUsageProbe::NotConfigured;
-    }
-    let source = match credentials.source(account) {
-        Ok(source) => source,
-        Err(error) => return OpenRouterKeyUsageProbe::Failed(error.message().to_owned()),
-    };
-    let label = match credentials.key_label(account) {
-        Ok(label) => label,
-        Err(error) => return OpenRouterKeyUsageProbe::Failed(error.message().to_owned()),
+    let prepared = match prepare_key_usage(credentials, account) {
+        Ok(prepared) => prepared,
+        Err(reason) => return reason,
     };
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -707,43 +719,84 @@ pub fn probe_openrouter_key_usage(
         Ok(runtime) => runtime,
         Err(error) => return OpenRouterKeyUsageProbe::Failed(error.to_string()),
     };
-    runtime.block_on(async move {
-        let client = match OpenRouterChatClient::connect_with_retention(
-            source,
-            OpenRouterRetentionPolicy::gateway_default(),
-        )
-        .and_then(OpenRouterChatClient::with_plak_attribution)
-        {
-            Ok(client) => client,
-            Err(error) => {
-                return OpenRouterKeyUsageProbe::Failed(format!(
-                    "OpenRouter connection is invalid: {error}"
-                ));
-            }
-        };
-        match client.key_usage().await {
-            Ok(usage) => OpenRouterKeyUsageProbe::Ok(Box::new(usage), label),
-            Err(error) => {
-                let reason = key_usage_failure(&error, &label);
-                if matches!(
-                    error,
-                    plakous::openrouter::OpenRouterKeyUsageError::Unauthorized
-                        | plakous::openrouter::OpenRouterKeyUsageError::Forbidden
-                ) {
-                    OpenRouterKeyUsageProbe::Rejected {
-                        reason,
-                        source: if label == "OPENROUTER_API_KEY" {
-                            plakous_host_protocol::views::KeySource::Environment
-                        } else {
-                            plakous_host_protocol::views::KeySource::File
-                        },
-                    }
-                } else {
-                    OpenRouterKeyUsageProbe::Failed(reason)
+    runtime.block_on(read_key_usage(prepared))
+}
+
+/// One cancellable allowance GET, without inference, login or refresh. The
+/// caller owns its deadline; the legacy synchronous probe keeps its policy.
+pub async fn read_openrouter_key_usage(
+    credentials: &dyn OpenRouterCredentials,
+    account: &crate::account::AccountRef,
+) -> OpenRouterKeyUsageProbe {
+    match prepare_key_usage(credentials, account) {
+        Ok(prepared) => read_key_usage(prepared).await,
+        Err(reason) => reason,
+    }
+}
+
+fn prepare_key_usage(
+    credentials: &dyn OpenRouterCredentials,
+    account: &crate::account::AccountRef,
+) -> Result<OpenRouterUsageRead, OpenRouterKeyUsageProbe> {
+    // "Is a key configured at all" is the credential's own preflight; an
+    // unconfigured product is `NotConfigured`, not a failure.
+    if credentials.preflight(account).is_err() {
+        return Err(OpenRouterKeyUsageProbe::NotConfigured);
+    }
+    credentials
+        .usage_read(account)
+        .map_err(|error| OpenRouterKeyUsageProbe::Failed(error.message().to_owned()))
+}
+
+async fn read_key_usage(prepared: OpenRouterUsageRead) -> OpenRouterKeyUsageProbe {
+    let observation = fetch_key_usage(prepared.source, prepared.label).await;
+    if let Some(observer) = prepared.observer {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            observer.completed(&observation);
+        }));
+    }
+    observation
+}
+
+async fn fetch_key_usage(
+    source: Arc<OpenRouterKeySource>,
+    label: String,
+) -> OpenRouterKeyUsageProbe {
+    let client = match OpenRouterChatClient::connect_with_retention(
+        source,
+        OpenRouterRetentionPolicy::gateway_default(),
+    )
+    .and_then(OpenRouterChatClient::with_plak_attribution)
+    {
+        Ok(client) => client,
+        Err(error) => {
+            return OpenRouterKeyUsageProbe::Failed(format!(
+                "OpenRouter connection is invalid: {error}"
+            ));
+        }
+    };
+    match client.key_usage().await {
+        Ok(usage) => OpenRouterKeyUsageProbe::Ok(Box::new(usage), label),
+        Err(error) => {
+            let reason = key_usage_failure(&error, &label);
+            if matches!(
+                error,
+                plakous::openrouter::OpenRouterKeyUsageError::Unauthorized
+                    | plakous::openrouter::OpenRouterKeyUsageError::Forbidden
+            ) {
+                OpenRouterKeyUsageProbe::Rejected {
+                    reason,
+                    source: if label == "OPENROUTER_API_KEY" {
+                        plakous_host_protocol::views::KeySource::Environment
+                    } else {
+                        plakous_host_protocol::views::KeySource::File
+                    },
                 }
+            } else {
+                OpenRouterKeyUsageProbe::Failed(reason)
             }
         }
-    })
+    }
 }
 
 fn key_usage_failure(error: &plakous::openrouter::OpenRouterKeyUsageError, label: &str) -> String {

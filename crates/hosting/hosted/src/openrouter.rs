@@ -100,3 +100,10 @@ pub enum OpenRouterKeyUsageProbe {
         source: plakous_host_protocol::views::KeySource,
     },
 }
+
+/// Optional observation of one completed allowance GET, never admission authority.
+pub trait KeyUsageObserver: Send {
+    /// Called before the operation leaves its in-flight scope. Failures must
+    /// not change the provider result or initiate another request.
+    fn completed(&self, observation: &OpenRouterKeyUsageProbe);
+}

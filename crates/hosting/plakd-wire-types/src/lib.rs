@@ -11,6 +11,8 @@ use plakous_host_protocol::{
 };
 use std::fmt;
 
+pub mod console;
+
 mod reload;
 pub use reload::{CarryCapacityProbe, ReloadProbe, ReloadRequest, ReloadTarget, ReopenProbe};
 
@@ -173,9 +175,9 @@ pub struct PlakExtension;
 impl ProtocolExtension for PlakExtension {
     type Intent = SurfaceIntent;
     type Observation = SurfaceObservation;
-    type HostRequest = plakous_host_protocol::Never;
-    type HostResponse = plakous_host_protocol::Never;
-    type WelcomeExtension = Option<plakous_host_protocol::Never>;
+    type HostRequest = console::HostRequest;
+    type HostResponse = console::HostResponse;
+    type WelcomeExtension = Option<console::HostWelcome>;
 
     fn reads_usage(intent: &SurfaceIntent) -> bool {
         matches!(

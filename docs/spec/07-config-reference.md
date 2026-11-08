@@ -278,6 +278,9 @@ including apparently empty windows. Null is unknown, not zero; unavailable
 stores are reported explicitly. Recording and loss evidence is best effort,
 not an admission dependency or a home-wide coverage mechanism. Later proof
 of whole-home coverage can advance the same flag without changing the wire.
+Console allowance reuse is 30 s and one-way from exact-fenced legacy reads;
+legacy reads remain fresh and retain their separate 60 s session-aging law.
+Provider reads have a 5 s deadline inside the 10 s console request budget.
 
 The attachment-free console's initial host limits are product defaults, not
 user configuration keys: 64 KiB per request before product payload decoding,

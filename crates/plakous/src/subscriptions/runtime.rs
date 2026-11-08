@@ -61,6 +61,22 @@ impl NativeSubscriptions {
         let state = self.state.clone();
         run_blocking(move || state.named_accounts(provider)).await?
     }
+
+    /// Lists at most `maximum` directory entries, reporting a truncated scan.
+    /// Invalid names count toward the scan bound and no credentials are read.
+    ///
+    /// # Errors
+    /// Refuses an omitted vertical and unsafe directory ancestors.
+    pub async fn named_accounts_bounded(
+        &self,
+        provider: super::NativeProvider,
+        maximum: usize,
+    ) -> Result<(Vec<String>, usize, bool), NativeSubscriptionError> {
+        super::vertical::require_vertical(provider)?;
+        self.state.require_provider(provider)?;
+        let state = self.state.clone();
+        run_blocking(move || state.named_accounts_bounded(provider, maximum)).await?
+    }
     /// Reports whether this selected named account exists, without creating it.
     /// Bare defaults always exist as selections, even when signed out.
     ///
