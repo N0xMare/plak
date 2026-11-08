@@ -3123,6 +3123,9 @@ fn a_reload_whose_binding_changed_keeps_a_running_turn_here_and_continues_it_onc
         "repeat_last_step": true,
         "steps": [{"output": {"text": "continued in this build"}}]
     }));
+    // The reload check refuses if the turn's state changes while it runs;
+    // send it only once the face shows the dispatched turn.
+    terminal.wait_screen("waiting for model");
     terminal.send(b"/reload\r");
     terminal.wait_screen("this build reopens it");
     terminal.wait_screen("continued in this build");
@@ -3531,6 +3534,9 @@ fn a_reload_during_a_running_turn_hands_it_to_the_new_build_once() {
         terminal.quit();
         return;
     }
+    // The reload check refuses if the turn's state changes while it runs;
+    // send it only once the face shows the dispatched turn.
+    terminal.wait_screen("waiting for model");
     terminal.send(b"/reload\r");
     terminal.wait_screen("continued after the reload");
     gate.release();
