@@ -18,4 +18,3 @@ class = "repository-only"
 [dependencies]
 plakous-host-protocol = { version = "0.0.3", path = "../../../crates/hosting/host-protocol", default-features = false }
 serde_json = "1"
-
