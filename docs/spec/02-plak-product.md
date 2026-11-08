@@ -4967,7 +4967,12 @@ exclusion. Standalone local placement remains direct and starts no local daemon.
   reconnecting the existing client and repeating sweep, recovery, recorded stops
   and settled-foreground cleanup before readiness. Failures block that runner row,
   not the host. Needed connections retry with 1, 2, 5 and then 15 second backoff;
-  idle remote picker rows do not keep an SSH connection alive. A refused owner
+  idle remote picker rows do not keep an SSH connection alive. Recorded stop debt
+  skipped under a live holder retains the required connection and one coalesced
+  delayed retry on that same backoff, without holding the row below Ready. The
+  retry bypasses the picker cache and settles the debt after release without a
+  new user action or link change; a settled pass clears it and resets the delay.
+  A refused owner
   floors file remains unavailable until the operator repairs its cause.
   Inspection, sweep and recorded-stop failures are structured `plak.runner`
   diagnostics scoped to their protocol, line or session. The next item still

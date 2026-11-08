@@ -111,6 +111,24 @@ async fn line_runner(
 
 #[tokio::test]
 async fn a_resident_stopped_line_reopens_ready_while_its_runtime_stays_open() {
+    stopped_line_followup(false).await;
+}
+
+#[tokio::test]
+async fn a_branch_hold_releases_recorded_stop_without_a_new_trigger() {
+    stopped_line_followup(true).await;
+}
+
+struct StoppedLine {
+    _temporary: tempfile::TempDir,
+    services: Services,
+    sessions: Arc<AgentSessions>,
+    session: plakous::sessions::OpenedSession,
+    catalog: Arc<WorkspaceCatalog>,
+    line: LineId,
+}
+
+async fn stopped_runtime() -> StoppedLine {
     use plakous_hosted::sessions::projector::{RootInterrupt, RootLossIntent, RootStopAnchor};
     use plakous_offline_crash_harness::protocol::CrashBoundary;
     use plakous_offline_crash_harness::{BoundaryController, runtime_binding};
@@ -153,9 +171,49 @@ async fn a_resident_stopped_line_reopens_ready_while_its_runtime_stays_open() {
         )
         .unwrap();
     let line = sessions.line_head_of(locator).await.unwrap().line();
-    let stops = Arc::new(AtomicUsize::new(0));
-    let client = line_runner(&workspace, line, stops.clone()).await;
     let catalog = Arc::new(WorkspaceCatalog::local(Some(&workspace), &[], paths.home()).unwrap());
+    StoppedLine {
+        _temporary: temporary,
+        services,
+        sessions,
+        session,
+        catalog,
+        line,
+    }
+}
+
+async fn stopped_line_followup(branch_hold: bool) {
+    let StoppedLine {
+        _temporary,
+        services,
+        sessions,
+        session,
+        catalog,
+        line,
+    } = stopped_runtime().await;
+    let locator = session.locator();
+    let mut resident = Some(session);
+    let branch = if branch_hold {
+        resident.take().unwrap().release().await.unwrap();
+        Some(
+            sessions
+                .hold_branch(
+                    &SessionOperationId::new("review:branch-hold").unwrap(),
+                    locator,
+                )
+                .await
+                .unwrap(),
+        )
+    } else {
+        None
+    };
+    let stops = Arc::new(AtomicUsize::new(0));
+    let client = line_runner(
+        services.paths().unwrap().workspace().unwrap(),
+        line,
+        stops.clone(),
+    )
+    .await;
     let registry = services.runners();
     registry.configure(ConfiguredRunner {
         runner_id: "local".into(),
@@ -164,17 +222,24 @@ async fn a_resident_stopped_line_reopens_ready_while_its_runtime_stays_open() {
     registry.ready_local(catalog.clone(), 1).unwrap();
     registry.require_connection("local", true);
     registry.run_probes_on(tokio::runtime::Handle::current());
+    let retries: Retries = Arc::default();
+    let calls = Arc::new(AtomicUsize::new(0));
     registry.probe_with(Arc::new({
         let context = services.runner_probe_context();
+        let (retries, calls) = (retries.clone(), calls.clone());
         move |registry, id| {
             let (services, client, catalog) = (
                 context.with_runner_registry(registry.clone()),
                 client.clone(),
                 catalog.clone(),
             );
+            let (retries, calls) = (retries.clone(), calls.clone());
             Box::pin(async move {
-                reconcile_remote(&services, &id, &client).await?;
-                registry.ready_local(catalog, 1)
+                calls.fetch_add(1, Ordering::SeqCst);
+                let pending = reconcile_remote(&services, &id, &client).await?;
+                registry.ready_local(catalog, 1)?;
+                complete_reconciliation(&registry, &id, pending, &retries);
+                Ok(())
             })
         }
     }));
@@ -183,11 +248,38 @@ async fn a_resident_stopped_line_reopens_ready_while_its_runtime_stays_open() {
         plakous::runner::RunnerStatus::Ready
     );
     assert_eq!(stops.load(Ordering::SeqCst), 0);
-    session.release().await.unwrap();
-    registry.reconcile_when_available("local");
+    assert!(registry.needs_connection("local"));
+    let delay = retries.lock().unwrap()["local"].delay;
+    let calls_before_release = calls.load(Ordering::SeqCst);
+    assert!([1, 2, 5, 15].contains(&delay));
+    for _ in 0..3 {
+        complete_reconciliation(registry, "local", true, &retries);
+    }
+    assert_eq!(retries.lock().unwrap()["local"].delay, delay);
+    assert_eq!(calls.load(Ordering::SeqCst), calls_before_release);
     assert_eq!(
-        registry.refresh(None).await.unwrap()[0].status,
+        registry.rows()[0].status,
         plakous::runner::RunnerStatus::Ready
     );
+    let mut progress = registry.progress_events();
+    if let Some(branch) = branch {
+        branch.release().await.unwrap();
+    }
+    if let Some(session) = resident {
+        session.release().await.unwrap();
+    }
+    // Only the previously queued retry can settle this debt: no picker, link
+    // change, explicit reconciliation or host restart is triggered here.
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while stops.load(Ordering::SeqCst) == 0
+            || registry.rows()[0].status != plakous::runner::RunnerStatus::Ready
+        {
+            progress.recv().await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
     assert_eq!(stops.load(Ordering::SeqCst), 1);
+    assert!(calls.load(Ordering::SeqCst) > calls_before_release);
+    assert!(!registry.needs_connection("local"));
 }

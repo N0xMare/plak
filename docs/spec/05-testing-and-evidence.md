@@ -1341,7 +1341,11 @@ can publish Ready. A failed Held-path settlement must fence before releasing its
 lease; a store-locked release and a paused skipping pass pin that ordering. A
 resident runtime with a recorded Stopped intent remains open across reconnect:
 its ownership must not block Ready for unrelated sessions. The removed held-debt
-guard is a passing no-op-equivalence check, not a mutant kill. The review driver
+guard is a passing no-op-equivalence check, not a mutant kill. A resident-runtime
+and a branch-hold variant release their holder after the pass publishes Ready:
+the previously queued bounded-backoff retry must settle the stop exactly once
+without an explicit refresh, reconnect, command or restart. Repeated observations
+of the same pending debt cannot queue duplicate retries or reset the delay. The review driver
 reseeds the head-free repair, fresh descendant-debt fence and release-ordering
 decisions; build failures and empty selections are not mutant kills.
 Neither an attachment nor a paid continuation is created by a stop.

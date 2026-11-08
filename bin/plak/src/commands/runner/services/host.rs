@@ -32,7 +32,7 @@ async fn bind_local(
     catalog: std::sync::Arc<plakous::runner::WorkspaceCatalog>,
     environment: &super::super::environment::HostEnvironment,
     runtime: &tokio::runtime::Handle,
-) -> Result<RunnerClient, plakous::runner::PlacementFailure> {
+) -> Result<(RunnerClient, bool), plakous::runner::PlacementFailure> {
     use plakous::runner::{PlacementFailure, ProbePhase};
     let unavailable = |phase| PlacementFailure::RunnerUnreachable {
         phase,
@@ -85,7 +85,7 @@ async fn bind_local(
         return Err(unavailable(ProbePhase::Reconcile));
     }
     let _ = client.recover().await;
-    finish_stops(services, &client, &sessions, &readopted)
+    let pending = finish_stops(services, &client, &sessions, &readopted)
         .await
         .map_err(|_| unavailable(ProbePhase::Reconcile))?;
     client
@@ -97,5 +97,5 @@ async fn bind_local(
     tokio::task::spawn_blocking(move || registry.ready_local(catalog, now))
         .await
         .map_err(|_| unavailable(ProbePhase::Discovery))??;
-    Ok(client)
+    Ok((client, pending))
 }

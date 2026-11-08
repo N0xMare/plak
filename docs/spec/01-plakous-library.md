@@ -5986,7 +5986,12 @@ cache is retained. A failed Held-path settlement fences the runner before releas
 its lease: a concurrent pass that skipped that lease cannot reopen readiness in
 between. Resident and topology runtimes remain live owners of their own stop
 settlement; a reconnect pass may skip their held lines without blocking unrelated
-placement readiness. Stop intent, runner protocol and binding encodings are unchanged.
+placement readiness. A pass that skips recorded stop debt retains the runner's
+required-connection flag and one coalesced follow-up on the existing 1/2/5/15-second
+backoff. Ready stays open during that delay; when due, the owned pass bypasses the
+picker cache and re-drives the debt without a new user, link or restart trigger.
+Successful settlement clears that requirement and resets the retry delay. Stop
+intent, runner protocol and binding encodings are unchanged.
 
 - **Frames.** A big-endian `u32` length, then one JSON value. Neither end
   reads or writes a frame over 16 MiB; an answer that would exceed it is
