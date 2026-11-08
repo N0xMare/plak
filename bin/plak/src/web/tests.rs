@@ -117,6 +117,38 @@ fn ui_dir() -> tempfile::TempDir {
 }
 
 #[test]
+fn captured_console_switches_gate_bind_and_survive_reload() {
+    use plakd_wire_types::console::ConfiguredSwitches;
+    let dir = ui_dir();
+    let legacy = std::fs::read_to_string(dir.path().join("csp.json")).unwrap();
+    let strict = "default-src 'self'; connect-src 'self'; require-trusted-types-for 'script'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'";
+    for (accounts, config) in [(false, false), (true, false), (false, true)] {
+        let switches = ConfiguredSwitches {
+            web_accounts_read: accounts,
+            web_config_read: config,
+        };
+        std::fs::write(dir.path().join("csp.json"), &legacy).unwrap();
+        assert_eq!(
+            super::load_ui(Some(dir.path()), switches).is_err(),
+            accounts || config
+        );
+        std::fs::write(
+            dir.path().join("csp.json"),
+            serde_json::json!({"header":strict}).to_string(),
+        )
+        .unwrap();
+        let builds = super::load_ui(Some(dir.path()), switches).unwrap().unwrap();
+        let current = builds.snapshot();
+        std::fs::write(dir.path().join("csp.json"), &legacy).unwrap();
+        assert_eq!(builds.reload().is_err(), accounts || config);
+        assert_eq!(
+            Arc::ptr_eq(&current, &builds.snapshot()),
+            accounts || config
+        );
+    }
+}
+
+#[test]
 fn console_csp_is_enforced_on_cold_load_and_every_reload_without_replacing_a_good_build() {
     let dir = ui_dir();
     assert!(

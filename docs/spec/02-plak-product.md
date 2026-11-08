@@ -3994,8 +3994,19 @@ Definition snapshots include bounded config/profile/template bytes, comments,
 missing-file markers and built-in/build identity in generation-scoped opaque
 etags. Changed inputs refuse Busy rather than claiming a multi-file transaction.
 Reads cap files at 256 KiB, dependency bytes at 8 MiB and entries at 512; symlinks
-and non-regular input files are not followed. Responses cap at 256 KiB; stable
-principal/request/source-bound cursors expire after 30 s, with at most 100 rows
+and non-regular input files are not followed.
+`config.toml` read failures refuse the request. Unreadable, oversized, symlinked
+or non-regular entries under `agents/` and `profiles/` are skipped with bounded
+`definition_unavailable` diagnostics naming validated stems; unavailable
+directories are skipped without following them. Scan and consumed-byte budgets
+still apply. Profiles referencing skipped templates are unavailable.
+Responses cap at 256 KiB; stable
+principal/request/source-bound cursors expire after 30 s, with at most eight
+live cursors per principal and 32 host-wide. A successful continuation retires
+its input token; shared snapshots count once toward the byte budget. Usage
+pages retain one SQLite snapshot and acceptance-time `as_of`; concurrent
+telemetry writes do not invalidate them. Credential/key generations still
+fence the after-check and continuations. There are at most 100 rows
 per page. No cursor holds a SQLite transaction. A terminal truncated page is
 not a complete inventory. Cached/bundled model pages never fetch or repair a
 catalog, never confer admission, and leave an unknown capture time null.
@@ -4045,12 +4056,18 @@ no whitespace repair, aliases, sibling or default fallback is allowed. The
 roster includes all seven defaults, bounded named-account inventory and, for
 usage, retained historical account groups. Raw invalid directory entries count
 toward the 512-entry scan budget. Each provider GET is observational, one at a
-time per host with a 5 s deadline; an unavailable allowance does not erase
-recorded subtotals. Counters are decimal strings, unknowns are explicit null,
+time per host with a timeout of at most 5 s, clipped to the remaining request
+budget minus a 1 s reserve for the after-check and paging. Cache hits do not
+acquire the provider permit; misses wait for it within that timeout. Once the
+allowance budget is exhausted, remaining accounts carry `deadline` allowance
+diagnostics, never a refusal replacing recorded subtotals. An unavailable
+allowance does not erase recorded subtotals. Counters are decimal strings, unknowns are explicit null,
 and windows are half-open 24 h, 7 d or 30 d intervals by terminal commit time.
 Pages retain the accepted as-of instant and measured snapshot. Their opaque
 cursors bind principal, filter, window, host generation and source revision;
-they expire after 30 s or a source change. Limits are 100 rows/page and 256 KiB
+they expire after 30 s or a credential/key generation change, not telemetry
+file writes. Recorded subtotals cover `[coverage.from,to)`, excluding facts
+before recording/retention's lower bound. Limits are 100 rows/page and 256 KiB
 per response, with explicit truncated-page or typed refusal rather than a
 fabricated complete list. No SQLite transaction is held between page requests.
 

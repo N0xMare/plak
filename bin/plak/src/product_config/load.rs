@@ -872,7 +872,7 @@ impl ProductConfig {
                 && CONFIG_KEYS
                     .iter()
                     .filter(|row| row.section() == *section)
-                    .all(|row| self.field_value(row.field).is_none());
+                    .all(|row| self.value_line(row).is_none());
             if dormant && !annotated {
                 continue;
             }
@@ -907,6 +907,13 @@ impl ProductConfig {
     /// The rendered `key = value` line, or `None` for a key this config leaves
     /// unset (`[root] agent` and `[mcp] client_id_metadata_url`).
     fn value_line(&self, key: &ConfigKey) -> Option<String> {
+        if matches!(
+            key.field,
+            ConfigField::WebAccountsRead | ConfigField::WebConfigRead
+        ) && self.field_value(key.field)?.as_bool() == Some(false)
+        {
+            return None;
+        }
         Some(format!(
             "{} = {}\n",
             key.key(),

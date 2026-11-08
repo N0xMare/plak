@@ -5323,7 +5323,9 @@ rather than quarantine; the probe neither waits nor writes.
 `subscription_usage_read_only` is the console-only observational variant: it
 never logs in, refreshes a token or retries a rejection with a grant. Console
 reads coalesce per exact account and can reuse an observation for 30 s only
-after rechecking its current consent and credential generations. Legacy usage
+after rechecking its current Ready credential, consent and credential
+generations. The caller supplies a concurrency-permit future; it is awaited
+only after a cache miss and retained through a real GET. Legacy usage
 reads register their in-flight GET and publish only after the same exact fence
 recheck; they never consume this cache. Bounded observation registries refuse
 console misses on exhaustion without changing legacy reads. An absent native

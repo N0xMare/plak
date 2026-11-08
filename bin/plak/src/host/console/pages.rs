@@ -26,6 +26,17 @@ enum RequestKind {
     Single,
 }
 impl Selection {
+    fn scope(&self) -> ReadScope {
+        match self.kind {
+            RequestKind::Status => ReadScope::Accounts,
+            RequestKind::Usage => ReadScope::Usage,
+            RequestKind::Profiles => ReadScope::Profiles,
+            RequestKind::Templates => ReadScope::Templates,
+            RequestKind::Metadata => ReadScope::Metadata,
+            RequestKind::Single => ReadScope::Config,
+        }
+    }
+
     pub fn from_request(request: &HostRequest) -> Self {
         match request {
             HostRequest::AccountsStatus { account_id, .. } => Self {
@@ -92,7 +103,7 @@ impl Pages {
         limit: usize,
     ) -> Result<HostResponse, ReadRefusal> {
         let bytes = super::wire_size::size(&response, limits::DEPENDENCY_BYTES)
-            .ok_or_else(|| unavailable(ReadScope::Accounts, UnavailableCode::DependencyLimit))?;
+            .ok_or_else(|| unavailable(selection.scope(), UnavailableCode::DependencyLimit))?;
         let snapshot = Arc::new(Snapshot {
             response,
             principal: context.principal,
@@ -129,7 +140,15 @@ impl Pages {
         {
             return Err(validation("cursor", ValidationCode::InvalidCursor));
         }
-        self.page(Arc::clone(&cursor.snapshot), cursor.offset, limit)
+        let cursor = self
+            .cursors
+            .remove(token)
+            .ok_or_else(|| validation("cursor", ValidationCode::InvalidCursor))?;
+        let result = self.page(Arc::clone(&cursor.snapshot), cursor.offset, limit);
+        if result.is_err() {
+            self.cursors.insert(token.to_owned(), cursor);
+        }
+        result
     }
     fn page(
         &mut self,
@@ -175,7 +194,7 @@ impl Pages {
             _ => {
                 if super::wire_size::size(&response, limits::RESPONSE_BYTES - 256).is_none() {
                     return Err(unavailable(
-                        ReadScope::Config,
+                        snapshot.selection.scope(),
                         UnavailableCode::DefinitionTooLarge,
                     ));
                 }
@@ -192,7 +211,7 @@ impl Pages {
                 return self.page(snapshot, offset, limit / 2);
             }
             return Err(unavailable(
-                ReadScope::Accounts,
+                snapshot.selection.scope(),
                 UnavailableCode::DependencyLimit,
             ));
         }
@@ -201,13 +220,13 @@ impl Pages {
                 || self
                     .cursors
                     .values()
-                    .map(|cursor| cursor.snapshot.bytes)
-                    .sum::<usize>()
-                    .saturating_add(snapshot.bytes)
-                    > limits::DEPENDENCY_BYTES
+                    .filter(|cursor| cursor.snapshot.principal == snapshot.principal)
+                    .count()
+                    >= limits::CURSORS_PER_PRINCIPAL
+                || self.retained_bytes(&snapshot) > limits::DEPENDENCY_BYTES
             {
                 return Err(ReadRefusal::Busy {
-                    scope: ReadScope::Accounts,
+                    scope: snapshot.selection.scope(),
                     retry_after_ms: 1_000,
                 });
             }
@@ -221,13 +240,25 @@ impl Pages {
         }
         Ok(response)
     }
+
+    fn retained_bytes(&self, next: &Arc<Snapshot>) -> usize {
+        let mut snapshots = vec![next];
+        for cursor in self.cursors.values() {
+            if !snapshots
+                .iter()
+                .any(|snapshot| Arc::ptr_eq(snapshot, &cursor.snapshot))
+            {
+                snapshots.push(&cursor.snapshot);
+            }
+        }
+        snapshots.iter().map(|snapshot| snapshot.bytes).sum()
+    }
 }
 
 pub(super) async fn source_revision(
     paths: &PlakPaths,
     state: &std::path::Path,
     selected: Option<&str>,
-    include_telemetry: bool,
     deadline: Instant,
     cancelled: &std::sync::atomic::AtomicBool,
 ) -> Result<[u8; 32], ReadRefusal> {
@@ -251,23 +282,6 @@ pub(super) async fn source_revision(
             hash.update(generation);
         }
     }
-    for file in [
-        paths.telemetry_database(),
-        paths.telemetry_database().with_extension("sqlite3-wal"),
-    ]
-    .into_iter()
-    .filter(|_| include_telemetry)
-    {
-        if let Ok(metadata) = std::fs::symlink_metadata(file) {
-            hash.update(metadata.len().to_le_bytes());
-            if let Ok(modified) = metadata.modified().and_then(|at| {
-                at.duration_since(std::time::UNIX_EPOCH)
-                    .map_err(std::io::Error::other)
-            }) {
-                hash.update(modified.as_nanos().to_le_bytes());
-            }
-        }
-    }
     Ok(hash.finalize().into())
 }
 
@@ -277,6 +291,158 @@ mod tests {
     use super::*;
     use plakd_wire_types::console::{AccountUsage, Allowance, CoverageReason, Page};
     use std::time::Duration;
+
+    #[test]
+    fn review_limit_one_pages_reach_the_end_of_a_forty_row_snapshot() {
+        let mut response = response();
+        let HostResponse::AccountsUsage { rows, .. } = &mut response else {
+            panic!("usage")
+        };
+        let row = rows[0].clone();
+        *rows = (0..40)
+            .map(|index| {
+                let mut row = row.clone();
+                row.account_id = format!("openai/account-{index}");
+                row.allowance.unavailable = Some(super::super::diagnostic(
+                    "fixture",
+                    None,
+                    &"x".repeat(65_000),
+                ));
+                row
+            })
+            .collect();
+        let context = HostRequestContext {
+            principal: HostPrincipal::Socket(7),
+            connection_id: 1,
+            host_generation: 10,
+        };
+        let selection = Selection::from_request(&HostRequest::AccountsUsage {
+            account_id: None,
+            window: UsageWindow::Days7,
+            cursor: None,
+            limit: Some(1),
+        });
+        let mut pages = Pages::default();
+        let mut response = pages
+            .start(response, context.clone(), selection.clone(), [3; 32], 1)
+            .expect("first page");
+        let mut count = 0;
+        loop {
+            let HostResponse::AccountsUsage { rows, page, .. } = response else {
+                panic!("usage")
+            };
+            count += rows.len();
+            let Some(token) = page.next else { break };
+            response = pages
+                .resume(&token, &context, &selection, &[3; 32], 1)
+                .expect("next page");
+            assert!(!pages.cursors.contains_key(&token));
+            assert!(pages.cursors.len() <= 1);
+        }
+        assert_eq!(count, 40);
+        assert!(pages.cursors.is_empty());
+    }
+
+    #[test]
+    fn definitions_overflow_refusals_have_the_selected_scope() {
+        let mut pages = Pages::default();
+        for (request, scope) in [
+            (
+                HostRequest::ProfilesList {
+                    cursor: None,
+                    limit: None,
+                },
+                ReadScope::Profiles,
+            ),
+            (
+                HostRequest::TemplatesList {
+                    cursor: None,
+                    limit: None,
+                },
+                ReadScope::Templates,
+            ),
+            (
+                HostRequest::ConsoleMetadataGet {
+                    account_id: None,
+                    cursor: None,
+                    limit: None,
+                },
+                ReadScope::Metadata,
+            ),
+            (HostRequest::ConfigGet {}, ReadScope::Config),
+        ] {
+            let selection = Selection::from_request(&request);
+            let response = HostResponse::ConfigGet {
+                etag: "x".repeat(limits::DEPENDENCY_BYTES),
+                scope: plakd_wire_types::console::HomeScope::Home,
+                fields: vec![],
+                diagnostics: vec![],
+            };
+            let context = HostRequestContext {
+                principal: HostPrincipal::Socket(7),
+                connection_id: 1,
+                host_generation: 1,
+            };
+            assert!(
+                matches!(pages.start(response, context, selection, [0;32], 1), Err(ReadRefusal::Unavailable {scope:actual, cause:UnavailableCode::DependencyLimit, ..}) if actual == scope)
+            );
+        }
+        let selection = Selection::from_request(&HostRequest::ProfilesList {
+            cursor: None,
+            limit: None,
+        });
+        let response = HostResponse::ProfilesList {
+            etag: "x".repeat(limits::RESPONSE_BYTES),
+            current: None,
+            rows: vec![],
+            diagnostics: vec![],
+            page: Page {
+                next: None,
+                truncated: false,
+            },
+        };
+        let context = HostRequestContext {
+            principal: HostPrincipal::Socket(7),
+            connection_id: 1,
+            host_generation: 1,
+        };
+        assert!(matches!(
+            pages.start(response, context, selection, [0; 32], 1),
+            Err(ReadRefusal::Unavailable {
+                scope: ReadScope::Profiles,
+                cause: UnavailableCode::DependencyLimit,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn principal_cursor_cap_leaves_capacity_for_other_clients() {
+        let mut pages = Pages::default();
+        let mut context = HostRequestContext {
+            principal: HostPrincipal::Socket(7),
+            connection_id: 1,
+            host_generation: 1,
+        };
+        let selection = Selection::from_request(&HostRequest::AccountsStatus {
+            account_id: None,
+            cursor: None,
+            limit: None,
+        });
+        for _ in 0..limits::CURSORS_PER_PRINCIPAL {
+            pages
+                .start(response(), context.clone(), selection.clone(), [0; 32], 1)
+                .expect("within principal cap");
+        }
+        assert!(matches!(
+            pages.start(response(), context.clone(), selection.clone(), [0; 32], 1),
+            Err(ReadRefusal::Busy { .. })
+        ));
+        context.principal = HostPrincipal::Socket(8);
+        pages
+            .start(response(), context, selection, [0; 32], 1)
+            .expect("other principal");
+    }
 
     #[test]
     fn encoded_byte_pressure_makes_smaller_pages_without_losing_rows() {
@@ -366,7 +532,9 @@ mod tests {
             kind: RequestKind::Usage,
         };
         let mut pages = Pages::default();
-        for _ in 0..limits::SNAPSHOTS {
+        for principal in 0..limits::SNAPSHOTS {
+            let mut context = context.clone();
+            context.principal = HostPrincipal::Socket(principal as u32);
             pages
                 .start(response(), context.clone(), selection.clone(), [3; 32], 1)
                 .expect("within capacity");
@@ -437,7 +605,16 @@ mod tests {
         let second = pages
             .resume(&token, &context, &selection, &[3; 32], 1)
             .expect("resume");
-        let HostResponse::AccountsUsage { as_of, rows, .. } = second else {
+        assert!(!pages.cursors.contains_key(&token));
+        let HostResponse::AccountsUsage {
+            as_of,
+            rows,
+            page: Page {
+                next: Some(token), ..
+            },
+            ..
+        } = second
+        else {
             panic!("usage page")
         };
         assert_eq!(as_of, "accepted-instant");
@@ -495,16 +672,20 @@ mod tests {
                 .resume(&token, &context, &selection, &[4; 32], 1)
                 .is_err()
         );
-        pages.cursors.retain(|key, _| key == &token);
-        let cursor = pages.cursors.get_mut(&token).expect("cursor");
+        expire(&mut pages, &token);
+        assert!(matches!(
+            pages.resume(&token, &context, &selection, &[3; 32], 1),
+            Err(ReadRefusal::ValidationFailed { .. })
+        ));
+    }
+
+    fn expire(pages: &mut Pages, token: &str) {
+        pages.cursors.retain(|key, _| key == token);
+        let cursor = pages.cursors.get_mut(token).expect("cursor");
         Arc::get_mut(&mut cursor.snapshot)
             .expect("only stored snapshot")
             .at = Instant::now()
             .checked_sub(Duration::from_secs(31))
             .expect("clock range");
-        assert!(matches!(
-            pages.resume(&token, &context, &selection, &[3; 32], 1),
-            Err(ReadRefusal::ValidationFailed { .. })
-        ));
     }
 }

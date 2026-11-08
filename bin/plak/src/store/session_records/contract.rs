@@ -18,6 +18,28 @@ use plakous_hosted::sessions::projector::{
 };
 
 #[test]
+fn terminal_attribution_reads_never_open_for_empty_batches_or_replace_session_baselines() {
+    let root = tempfile::tempdir().unwrap();
+    let paths = PlakPaths::explicit(root.path().join("home"));
+    let store = SqliteSessionStore::new(paths.clone());
+    store.emit_projected_turn_usages("absent", &[]);
+    assert_eq!(store.opened_connections(), 0);
+    assert!(!paths.home().exists());
+    let mut record = SessionRecord::new(root.path().to_path_buf());
+    record.account = Some("codex/work".into());
+    store.save(&mut record).unwrap();
+    store
+        .with_store::<_, String>(|backend| {
+            backend.baselines.clear();
+            let attribution = backend.load_turn_attribution(&record.id)?;
+            assert_eq!(attribution.account.as_deref(), Some("codex/work"));
+            assert!(backend.baselines.is_empty());
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[test]
 fn product_capacity_outage_retains_the_exact_queue_write_until_commit() {
     use std::sync::{
         Arc,

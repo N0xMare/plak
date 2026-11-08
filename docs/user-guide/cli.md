@@ -859,8 +859,8 @@ A local analytics store; nothing leaves your machine.
 ```
 $ plak telemetry status
 Telemetry store
-  Path           /home/you/.plak/telemetry/telemetry-v21.sqlite3
-  Schema version 21
+  Path           /home/you/.plak/telemetry/telemetry-v22.sqlite3
+  Schema version 22
   Size on disk    507904 bytes
   Retention       536870912 bytes, 90 days
   Write errors    0
@@ -870,6 +870,8 @@ TABLE                 ROWS
 turns                 42
 model_attempts        58
 tool_calls            21
+recorded_terminals    42
+recording_evidence    1
 …
 ```
 

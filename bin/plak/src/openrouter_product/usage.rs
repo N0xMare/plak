@@ -265,7 +265,7 @@ mod tests {
             })
         };
         ready.await?;
-        let mut read = Box::pin(console::read(&paths, &account));
+        let mut read = Box::pin(console::read(&paths, &account, std::future::ready(())));
         std::future::poll_fn(|context| {
             assert!(
                 read.as_mut().poll(context).is_pending(),
@@ -280,7 +280,7 @@ mod tests {
         );
         legacy.join().map_err(|_| "legacy fixture panicked")?;
         assert!(
-            matches!(console::read(&paths,&account).await,VerticalObservation::Unavailable(reason) if reason=="offline fixture observation")
+            matches!(console::read(&paths,&account, std::future::ready(())).await,VerticalObservation::Unavailable(reason) if reason=="offline fixture observation")
         );
         assert_eq!(gets.load(Ordering::SeqCst), 1);
         observe_legacy(&paths, &account, |_, receipt| {
@@ -297,7 +297,7 @@ mod tests {
         );
         let sibling: AccountRef = "openrouter/other".parse()?;
         assert!(matches!(
-            console::read(&paths, &sibling).await,
+            console::read(&paths, &sibling, std::future::ready(())).await,
             VerticalObservation::NotConnected
         ));
         Ok(())

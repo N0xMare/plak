@@ -11,6 +11,8 @@ pub(super) const PROVIDER_READS: usize = 1;
 pub(super) const PROVIDER_DEADLINE: Duration = Duration::from_secs(5);
 pub(super) const CURSOR_TTL: Duration = Duration::from_secs(30);
 pub(super) const SNAPSHOTS: usize = 32;
+pub(super) const CURSORS_PER_PRINCIPAL: usize = 8;
+pub(super) const PROVIDER_RESERVE: Duration = Duration::from_secs(1);
 
 pub(super) fn admission() -> HostReadLimits {
     HostReadLimits {

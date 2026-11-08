@@ -312,9 +312,10 @@ impl NativeSubscriptions {
     }
 
     /// Reports no connected subscription without reading or refreshing credentials.
-    pub async fn subscription_usage_read_only(
+    pub async fn subscription_usage_read_only<Permit>(
         &self,
         provider: NativeProvider,
+        _before_get: impl std::future::Future<Output = Permit>,
     ) -> SubscriptionUsageRead {
         self.subscription_usage(provider).await
     }

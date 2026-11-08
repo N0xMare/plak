@@ -27,6 +27,8 @@ mod pages;
 #[cfg(test)]
 mod tests;
 mod usage;
+#[cfg(test)]
+mod usage_tests;
 mod wire_size;
 
 pub(super) struct Console {
@@ -37,6 +39,8 @@ pub(super) struct Console {
     provider: Arc<tokio::sync::Semaphore>,
     definition_nonce: [u8; 16],
     switches: ConfiguredSwitches,
+    #[cfg(test)]
+    native_fixture: Mutex<Option<plakous::subscriptions::NativeSubscriptions>>,
 }
 
 pub(super) fn admission_limits() -> HostReadLimits {
@@ -58,6 +62,8 @@ impl Console {
             provider: Arc::new(tokio::sync::Semaphore::new(limits::PROVIDER_READS)),
             definition_nonce: *uuid::Uuid::new_v4().as_bytes(),
             switches,
+            #[cfg(test)]
+            native_fixture: Mutex::new(None),
         })
     }
 
@@ -163,12 +169,10 @@ impl Console {
             }
             _ => return Ok(refused(validation("limit", ValidationCode::InvalidLimit))),
         };
-        let include_telemetry = matches!(request, HostRequest::AccountsUsage { .. });
         let revision = match pages::source_revision(
             &self.paths,
             &self.state,
             selection.account_id.as_deref(),
-            include_telemetry,
             deadline,
             &cancelled,
         )
@@ -211,7 +215,6 @@ impl Console {
             &self.paths,
             &self.state,
             selection.account_id.as_deref(),
-            include_telemetry,
             deadline,
             &cancelled,
         )

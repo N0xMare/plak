@@ -82,7 +82,7 @@ async fn console_read_of_an_absent_namespace_does_not_create_it()
     let subscriptions = NativeSubscriptions::new(paths);
     assert!(matches!(
         subscriptions
-            .subscription_usage_read_only(NativeProvider::Codex)
+            .subscription_usage_read_only(NativeProvider::Codex, std::future::ready(()))
             .await,
         SubscriptionUsageRead::Unavailable {
             reason: SubscriptionUsageUnavailable::NotConnected,

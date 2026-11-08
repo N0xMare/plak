@@ -244,6 +244,7 @@ fn usage_totals_survive_deleted_views_and_behind_retention_rebuilds() -> TestRes
         let locator = session.locator();
         let mut record = SessionRecord::new(workspace.path().to_owned());
         record.plakous_locator = Some(locator);
+        record.account = Some("codex/projected".into());
         product.save(&mut record).unwrap();
         // Seed an old cursor before the terminal: a lease-free catch-up is the emitter.
         project_session(&sessions, &records, &record).await.unwrap();
@@ -285,6 +286,7 @@ fn usage_totals_survive_deleted_views_and_behind_retention_rebuilds() -> TestRes
             )
         };
         let expected = snapshot();
+        assert_eq!(telemetry.query_text("SELECT account FROM recorded_terminals"), Some("codex/projected".into()));
         let rows = || {
             let mut statement = telemetry
                 .connection

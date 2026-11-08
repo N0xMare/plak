@@ -1,7 +1,7 @@
 use super::{Console, accounts, diagnostic, recorded, unavailable};
 use plakd_wire_types::console::{
-    AccountUsage, Allowance, CoverageReason, HostResponse, Page, ReadRefusal, ReadScope,
-    UnavailableCode, UsageWindow,
+    AccountUsage, Allowance, CoverageReason, HostResponse, Page, ReadAction, ReadRefusal,
+    ReadRemedy, ReadScope, UnavailableCode, UsageWindow,
 };
 use plakous_host_protocol::views::presentation::SessionLedgerView;
 use plakous_hosted::account::AccountRef;
@@ -76,12 +76,11 @@ impl Console {
         };
         let mut rows = Vec::new();
         for account in accounts {
-            accounts::check(deadline, &cancelled)?;
             let recorded = totals
                 .remove(account.as_str())
                 .unwrap_or_else(|| empty.clone());
             rows.push(AccountUsage {
-                allowance: self.allowance(&account).await,
+                allowance: self.allowance(&account, deadline).await,
                 account_id: account.to_string(),
                 recorded,
             });
@@ -101,7 +100,19 @@ impl Console {
         })
     }
 
-    async fn allowance(&self, account: &AccountRef) -> Allowance {
+    async fn allowance(&self, account: &AccountRef, deadline: Instant) -> Allowance {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let Some(budget) = remaining
+            .checked_sub(super::limits::PROVIDER_RESERVE)
+            .filter(|budget| !budget.is_zero())
+        else {
+            return missing(
+                account,
+                "deadline",
+                "provider allowance budget exhausted; retry",
+            );
+        };
+        let timeout = budget.min(super::limits::PROVIDER_DEADLINE);
         if !account.vertical().capability().compiled {
             return missing(
                 account,
@@ -110,12 +121,13 @@ impl Console {
             );
         }
         if account.vertical() == plakous_hosted::account::Vertical::OpenRouter {
-            let Ok(_permit) = self.provider.clone().try_acquire_owned() else {
-                return missing(account, "busy", "another provider read is in flight");
-            };
             return match tokio::time::timeout(
-                super::limits::PROVIDER_DEADLINE,
-                crate::openrouter_product::usage::console::read(&self.paths, account),
+                timeout,
+                crate::openrouter_product::usage::console::read(
+                    &self.paths,
+                    account,
+                    self.provider.clone().acquire_owned(),
+                ),
             )
             .await
             {
@@ -139,12 +151,17 @@ impl Console {
         let Ok(subscriptions) = subscriptions else {
             return missing(account, "local_state", "allowance state could not be read");
         };
-        let Ok(_permit) = self.provider.clone().try_acquire_owned() else {
-            return missing(account, "busy", "another provider read is in flight");
-        };
+        #[cfg(test)]
+        let subscriptions = self
+            .native_fixture
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .unwrap_or(subscriptions);
         let Ok(observation) = tokio::time::timeout(
-            super::limits::PROVIDER_DEADLINE,
-            subscriptions.subscription_usage_read_only(provider),
+            timeout,
+            subscriptions
+                .subscription_usage_read_only(provider, self.provider.clone().acquire_owned()),
         )
         .await
         else {
@@ -159,6 +176,7 @@ impl Console {
 }
 
 fn project(account: &AccountRef, observation: VerticalObservation) -> Allowance {
+    let remedies = remedies(account, &observation);
     let Some(vertical) = crate::commands::usage::usage_vertical_for_account(account.as_str())
     else {
         return missing(
@@ -191,8 +209,36 @@ fn project(account: &AccountRef, observation: VerticalObservation) -> Allowance 
         stale_age_ms,
         view: Some(view),
         unavailable: None,
-        remedies: Vec::new(),
+        remedies,
     }
+}
+
+fn remedies(account: &AccountRef, observation: &VerticalObservation) -> Vec<ReadRemedy> {
+    use plakous::model::{
+        SubscriptionUsageCredentialState as C, SubscriptionUsageRead as R,
+        SubscriptionUsageUnavailable as U,
+    };
+    let action = match observation {
+        VerticalObservation::Native(R::Unavailable {
+            reason: U::Unauthorized | U::CredentialState(C::RefreshRequired),
+            ..
+        }) => ReadAction::Refresh,
+        VerticalObservation::Native(R::Unavailable {
+            reason:
+                U::NotConnected | U::CredentialState(C::LoginRequired | C::Revoked | C::Quarantined),
+            ..
+        }) => ReadAction::Login,
+        VerticalObservation::RejectedKey { .. } | VerticalObservation::NotConnected
+            if account.vertical() == plakous_hosted::account::Vertical::OpenRouter =>
+        {
+            ReadAction::SetKey
+        }
+        _ => return Vec::new(),
+    };
+    vec![ReadRemedy {
+        action,
+        account_id: Some(account.to_string()),
+    }]
 }
 
 fn missing(account: &AccountRef, code: &str, detail: &str) -> Allowance {
@@ -206,4 +252,51 @@ fn missing(account: &AccountRef, code: &str, detail: &str) -> Allowance {
 }
 fn utc(at: i64) -> String {
     super::clock::utc(at).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use plakous::model::{
+        SubscriptionUsageCredentialState as C, SubscriptionUsageRead as R,
+        SubscriptionUsageUnavailable as U, Timestamp,
+    };
+
+    #[test]
+    fn allowance_repairs_name_the_exact_account_and_credential_action() {
+        let native: AccountRef = "codex/work".parse().unwrap();
+        for (reason, action) in [
+            (U::Unauthorized, ReadAction::Refresh),
+            (U::CredentialState(C::RefreshRequired), ReadAction::Refresh),
+            (U::NotConnected, ReadAction::Login),
+        ] {
+            let observation = VerticalObservation::Native(R::Unavailable {
+                observed_at: Timestamp::new(1, 0).unwrap(),
+                reason,
+            });
+            assert_eq!(
+                project(&native, observation).remedies,
+                vec![ReadRemedy {
+                    action,
+                    account_id: Some("codex/work".into())
+                }]
+            );
+        }
+        let router: AccountRef = "openrouter/work".parse().unwrap();
+        for observation in [
+            VerticalObservation::NotConnected,
+            VerticalObservation::RejectedKey {
+                reason: "fixture".into(),
+                source: plakous_host_protocol::views::KeySource::Environment,
+            },
+        ] {
+            assert_eq!(
+                project(&router, observation).remedies,
+                vec![ReadRemedy {
+                    action: ReadAction::SetKey,
+                    account_id: Some("openrouter/work".into())
+                }]
+            );
+        }
+    }
 }

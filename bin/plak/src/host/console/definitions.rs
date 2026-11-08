@@ -30,6 +30,14 @@ impl Snapshot {
         paths: &crate::home::paths::PlakPaths,
         nonce: &[u8; 16],
     ) -> Result<Self, ReadRefusal> {
+        Self::read_with_hook(paths, nonce, || {})
+    }
+
+    fn read_with_hook(
+        paths: &crate::home::paths::PlakPaths,
+        nonce: &[u8; 16],
+        between_reads: impl FnOnce(),
+    ) -> Result<Self, ReadRefusal> {
         let first = files::Files::read(paths)?;
         let config = ProductConfig::from_home_snapshot(first.config.as_deref(), &first.templates)
             .map_err(|_| unavailable(ReadScope::Config, UnavailableCode::Configuration))?;
@@ -51,6 +59,7 @@ impl Snapshot {
         for (id, template) in &config.templates {
             templates.insert(id.clone(), (TemplateSource::Home, template.clone()));
         }
+        between_reads();
         if first != files::Files::read(paths)? {
             return Err(ReadRefusal::Busy {
                 scope: ReadScope::Config,
@@ -71,15 +80,20 @@ impl Snapshot {
         for byte in hash.finalize() {
             let _ = write!(etag, "{byte:02x}");
         }
-        let diagnostics = profiles
+        let diagnostics = first
             .unavailable
             .iter()
-            .take(32)
             .map(|id| Diagnostic {
+                code: "definition_unavailable".into(),
+                subject: Some(id.clone()),
+                detail: "the home definition could not be read".into(),
+            })
+            .chain(profiles.unavailable.iter().map(|id| Diagnostic {
                 code: "profile_unavailable".into(),
                 subject: Some(id.clone()),
                 detail: "the profile could not be resolved from home definitions".into(),
-            })
+            }))
+            .take(32)
             .collect();
         Ok(Self {
             config,
@@ -141,7 +155,7 @@ impl Snapshot {
                         summary: template_summary(id, template),
                     })
                     .collect(),
-                diagnostics: Vec::new(),
+                diagnostics: self.diagnostics.clone(),
                 page: empty_page(),
             }),
             HostRequest::TemplatesGet { id } => {
@@ -164,7 +178,7 @@ impl Snapshot {
                 etag: self.etag.clone(),
                 scope: HomeScope::Home,
                 fields: settings::fields(&self.config),
-                diagnostics: Vec::new(),
+                diagnostics: self.diagnostics.clone(),
             }),
             _ => Err(unavailable(
                 ReadScope::Config,
@@ -266,6 +280,16 @@ impl super::Console {
         context: super::HostRequestContext,
         request: HostRequest,
     ) -> Result<HostResponse, ReadRefusal> {
+        self.read_definitions_with_hook(context, request, || {})
+            .await
+    }
+
+    async fn read_definitions_with_hook(
+        &self,
+        context: super::HostRequestContext,
+        request: HostRequest,
+        between_reads: impl FnOnce() + Send,
+    ) -> Result<HostResponse, ReadRefusal> {
         match &request {
             HostRequest::ProfilesGet { id } | HostRequest::TemplatesGet { id } => validate_id(id)?,
             HostRequest::ConsoleMetadataGet {
@@ -320,6 +344,7 @@ impl super::Console {
         let bytes = serde_json::to_vec(&response)
             .map_err(|_| unavailable(ReadScope::Config, UnavailableCode::Configuration))?;
         let revision: [u8; 32] = Sha256::digest(&bytes).into();
+        between_reads();
         let paths = self.paths.clone();
         let after = tokio::task::spawn_blocking(move || Snapshot::read(&paths, &nonce))
             .await

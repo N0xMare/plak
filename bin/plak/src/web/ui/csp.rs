@@ -57,19 +57,50 @@ pub(super) fn console_policy(header: &str) -> bool {
 fn script_sources(values: &[&str]) -> bool {
     !values.is_empty()
         && values.iter().all(|value| {
-            matches!(
-                *value,
-                "'none'" | "'self'" | "'strict-dynamic'" | "'wasm-unsafe-eval'"
-            ) || ["'nonce-", "'sha256-", "'sha384-", "'sha512-"]
-                .iter()
-                .any(|prefix| value.starts_with(prefix) && value.ends_with('\''))
+            matches!(*value, "'none'" | "'self'")
+                || ["'sha256-", "'sha384-", "'sha512-"]
+                    .iter()
+                    .any(|prefix| value.starts_with(prefix) && value.ends_with('\''))
         })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    const STRICT: &str = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; require-trusted-types-for 'script'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'";
+    const STRICT: &str = "default-src 'self'; script-src 'self'; connect-src 'self'; require-trusted-types-for 'script'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'";
+
+    #[test]
+    fn console_csp_rejects_each_isolated_unsafe_or_widened_source() {
+        for invalid in [
+            format!("{STRICT}; style-src 'unsafe-inline'"),
+            format!("{STRICT}; script-src-attr 'unsafe-hashes'"),
+            format!("{STRICT}; script-src-attr 'self'"),
+            STRICT.replace("connect-src 'self'", "connect-src 'self' https:"),
+            STRICT.replace("object-src 'none'", "object-src 'none' 'self'"),
+        ] {
+            assert!(!console_policy(&invalid), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn static_console_scripts_allow_only_self_none_and_hashes() {
+        for source in ["'strict-dynamic'", "'nonce-example'", "'wasm-unsafe-eval'"] {
+            assert!(!console_policy(&STRICT.replace(
+                "script-src 'self'",
+                &format!("script-src 'self' {source}")
+            )));
+        }
+        for source in [
+            "'none'",
+            "'sha256-example'",
+            "'sha384-example'",
+            "'sha512-example'",
+        ] {
+            assert!(console_policy(
+                &STRICT.replace("script-src 'self'", &format!("script-src {source}"))
+            ));
+        }
+    }
 
     #[test]
     fn enforced_console_policy_requires_every_boundary_without_unsafe_escape_hatches() {
@@ -81,8 +112,8 @@ mod tests {
             STRICT.replace("object-src 'none'", "object-src 'self'"),
             STRICT.replace("frame-ancestors 'none'", "frame-ancestors 'self'"),
             format!("script-src 'unsafe-inline'; {STRICT}"),
-            STRICT.replace("'wasm-unsafe-eval'", "'unsafe-eval'"),
-            STRICT.replace("script-src 'self' 'wasm-unsafe-eval'", "script-src *"),
+            STRICT.replace("script-src 'self'", "script-src 'unsafe-eval'"),
+            STRICT.replace("script-src 'self'", "script-src *"),
             format!("{STRICT}; script-src-elem https:"),
             format!("connect-src *; {STRICT}"),
         ] {

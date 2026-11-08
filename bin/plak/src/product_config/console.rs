@@ -45,6 +45,11 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let defaults = ProductConfig::default_product();
         assert!(!defaults.web_accounts_read && !defaults.web_config_read);
+        assert!(!defaults.render().contains("[web]"));
+        let reference = defaults.render_annotated();
+        assert!(reference.contains("# [web]\n"));
+        assert!(reference.contains("# accounts_read = false\n"));
+        assert!(reference.contains("# config_read = false\n"));
         let config = ProductConfig::parse("[web]\naccounts_read = true\nconfig_read = false\n")?;
         assert!(config.web_accounts_read && !config.web_config_read);
         for name in ["web.accounts_read", "web.config_read"] {

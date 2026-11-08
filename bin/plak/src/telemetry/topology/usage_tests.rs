@@ -34,6 +34,14 @@ impl ChildUsageFixture {
             WriterMode::SingleLease,
         )
         .unwrap();
+        tree.pin_template(
+            "review",
+            plakous_hosted::orchestration::RosterBinding::leaf("openai/child", "selected-tuple"),
+        );
+        tree.pin_bind_hints_for_test(plakous_hosted::orchestration::BindHints::from_names(
+            &["openai/child"],
+            &[],
+        ));
         let child = tree
             .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
             .unwrap();
@@ -227,6 +235,10 @@ fn child_projected_usage_is_one_keyed_row_across_reprojection_and_rebuild() {
     assert_eq!(turn_id.to_string(), "00000000-0000-4000-8000-000000001001");
     assert_eq!(emitted, turn_usage());
     telemetry.write_batch(&[item]).unwrap();
+    assert_eq!(
+        telemetry.query_text("SELECT account FROM recorded_terminals"),
+        Some("openai/child".into())
+    );
     assert_eq!(project().applied, 0);
     assert!(fixture.receiver.try_recv().is_err());
     fixture

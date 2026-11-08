@@ -10,6 +10,28 @@ use super::{
     SubscriptionUsageRead, SubscriptionUsageUnavailable, Timestamp, run_blocking,
 };
 
+#[cfg(feature = "test-hooks")]
+pub(super) mod test_usage;
+#[cfg(not(feature = "test-hooks"))]
+pub(super) mod test_usage {
+    #[derive(Clone)]
+    pub(in crate::subscriptions) struct Fixture;
+    pub(in crate::subscriptions) const EMPTY: Fixture = Fixture;
+    impl Fixture {
+        #[allow(
+            clippy::unused_self,
+            reason = "disabled fixture matches the enabled boundary"
+        )]
+        pub fn read(
+            &self,
+            _provider: super::NativeProvider,
+            _refreshing: bool,
+        ) -> Option<super::NativeFuture<'static, super::SubscriptionUsageRead>> {
+            None
+        }
+    }
+}
+
 impl NativeSubscriptions {
     /// Non-secret identity of the exact local consent and credential generations.
     /// This is an observation fence, not authority to admit work or reuse data
@@ -52,10 +74,17 @@ impl NativeSubscriptions {
     /// Reads allowance once without login, token refresh or a refresh retry.
     /// Console reads coalesce and may consume a fresh exact-fenced observation
     /// produced by a legacy read. Legacy reads never consume this cache.
-    pub async fn subscription_usage_read_only(
+    /// `before_get` is awaited only for a real GET; its output is retained as
+    /// the caller's concurrency permit until that read finishes.
+    pub async fn subscription_usage_read_only<Permit>(
         &self,
         provider: NativeProvider,
+        before_get: impl Future<Output = Permit>,
     ) -> SubscriptionUsageRead {
+        if let Some(fixture) = self.usage_fixture.read(provider, false) {
+            let _permit = before_get.await;
+            return fixture.await;
+        }
         if super::vertical::vertical(provider).is_none() {
             return self.usage_unavailable(SubscriptionUsageUnavailable::NotConnected);
         }
@@ -74,6 +103,8 @@ impl NativeSubscriptions {
             return self.usage_unavailable(SubscriptionUsageUnavailable::Busy);
         };
         let _console = entry.console.lock().await;
+        let mut before_get = Some(before_get);
+        let mut _permit = None;
         loop {
             if let Some(mut changed) = entry.pending() {
                 let _ = changed.changed().await;
@@ -104,6 +135,11 @@ impl NativeSubscriptions {
             if !cache::can_fetch() {
                 return self.usage_unavailable(SubscriptionUsageUnavailable::Busy);
             }
+            if let Some(acquire) = before_get.take() {
+                drop(lock);
+                _permit = Some(acquire.await);
+                continue;
+            }
             return Box::pin(self.read_usage_prepared(provider, false, lock)).await;
         }
     }
@@ -130,6 +166,9 @@ impl NativeSubscriptions {
     /// credential leases protect the network read; the compatibility guard is
     /// held only while preparing and checking its local consent snapshot.
     pub async fn subscription_usage(&self, provider: NativeProvider) -> SubscriptionUsageRead {
+        if let Some(fixture) = self.usage_fixture.read(provider, true) {
+            return fixture.await;
+        }
         if super::vertical::vertical(provider).is_none() {
             return self.usage_unavailable(SubscriptionUsageUnavailable::NotConnected);
         }

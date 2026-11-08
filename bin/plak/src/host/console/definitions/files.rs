@@ -3,7 +3,7 @@
 use super::super::{ReadRefusal, ReadScope, UnavailableCode, limits, unavailable};
 use crate::home::paths::PlakPaths;
 use rustix::fs::{Mode, OFlags};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::Read as _;
 
@@ -12,6 +12,7 @@ pub(super) struct Files {
     pub config: Option<String>,
     pub templates: BTreeMap<String, String>,
     pub profiles: BTreeMap<String, String>,
+    pub unavailable: BTreeSet<String>,
 }
 
 struct Budget {
@@ -45,16 +46,23 @@ impl Files {
         if config.is_some() {
             budget.entries = 1;
         }
-        let templates = read_directory(&home, "agents", &mut budget)?;
-        let profiles = read_directory(&home, "profiles", &mut budget)?;
+        let mut unavailable = BTreeSet::new();
+        let templates = read_directory(&home, "agents", &mut budget, &mut unavailable)?;
+        let profiles = read_directory(&home, "profiles", &mut budget, &mut unavailable)?;
         Ok(Self {
             config,
             templates,
             profiles,
+            unavailable,
         })
     }
 
     pub fn hash_into(&self, hash: &mut impl sha2::Digest) {
+        for name in &self.unavailable {
+            hash.update(b"unavailable");
+            hash.update((name.len() as u64).to_le_bytes());
+            hash.update(name.as_bytes());
+        }
         for (kind, files) in [
             (b"agents".as_slice(), &self.templates),
             (b"profiles".as_slice(), &self.profiles),
@@ -97,21 +105,17 @@ fn read_file(
     let mut bytes = Vec::new();
     let allowed =
         limits::DEFINITION_BYTES.min(limits::DEPENDENCY_BYTES.saturating_sub(budget.bytes));
-    file.take((allowed + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|_| failure(UnavailableCode::Storage))?;
-    if bytes.len() > limits::DEFINITION_BYTES {
-        return Err(failure(UnavailableCode::DefinitionTooLarge));
-    }
-    if bytes.len() > allowed {
-        return Err(failure(UnavailableCode::DependencyLimit));
-    }
+    let read = file.take((allowed + 1) as u64).read_to_end(&mut bytes);
     budget.bytes = budget
         .bytes
         .checked_add(bytes.len())
         .ok_or_else(|| failure(UnavailableCode::DependencyLimit))?;
     if budget.bytes > limits::DEPENDENCY_BYTES {
         return Err(failure(UnavailableCode::DependencyLimit));
+    }
+    read.map_err(|_| failure(UnavailableCode::Storage))?;
+    if bytes.len() > limits::DEFINITION_BYTES {
+        return Err(failure(UnavailableCode::DefinitionTooLarge));
     }
     String::from_utf8(bytes)
         .map(Some)
@@ -122,17 +126,26 @@ fn read_directory(
     home: &impl std::os::fd::AsFd,
     name: &str,
     budget: &mut Budget,
+    unavailable: &mut BTreeSet<String>,
 ) -> Result<BTreeMap<String, String>, ReadRefusal> {
     let directory = match rustix::fs::openat(home.as_fd(), name, DIRECTORY, Mode::empty()) {
         Ok(directory) => directory,
         Err(rustix::io::Errno::NOENT) => return Ok(BTreeMap::new()),
-        Err(_) => return Err(failure(UnavailableCode::Storage)),
+        Err(_) => {
+            unavailable.insert(name.to_owned());
+            return Ok(BTreeMap::new());
+        }
     };
-    let entries =
-        rustix::fs::Dir::read_from(&directory).map_err(|_| failure(UnavailableCode::Storage))?;
+    let Ok(entries) = rustix::fs::Dir::read_from(&directory) else {
+        unavailable.insert(name.to_owned());
+        return Ok(BTreeMap::new());
+    };
     let mut files = BTreeMap::new();
     for entry in entries {
-        let entry = entry.map_err(|_| failure(UnavailableCode::Storage))?;
+        let Ok(entry) = entry else {
+            unavailable.insert(name.to_owned());
+            break;
+        };
         let raw = entry.file_name().to_bytes();
         if raw == b"." || raw == b".." {
             continue;
@@ -157,8 +170,19 @@ fn read_directory(
         {
             continue;
         }
-        if let Some(body) = read_file(&directory, filename, budget)? {
-            files.insert(stem.to_owned(), body);
+        match read_file(&directory, filename, budget) {
+            Ok(Some(body)) => {
+                files.insert(stem.to_owned(), body);
+            }
+            Err(
+                error @ ReadRefusal::Unavailable {
+                    cause: UnavailableCode::DependencyLimit,
+                    ..
+                },
+            ) => return Err(error),
+            Ok(None) | Err(_) => {
+                unavailable.insert(stem.to_owned());
+            }
         }
     }
     Ok(files)

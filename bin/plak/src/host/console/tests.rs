@@ -43,6 +43,14 @@ async fn welcome_and_dispatch_share_independent_startup_switches_without_session
             assert_eq!(welcome.console.configured_switches, switches);
             assert_eq!(welcome.console.accounts_read.enabled, accounts);
             assert_eq!(welcome.console.config_read.enabled, config);
+            assert_eq!(
+                welcome.console.accounts_read.remedy,
+                (!accounts).then_some(CapabilityRemedy::EnableWebAccountsReadAndRestart)
+            );
+            assert_eq!(
+                welcome.console.config_read.remedy,
+                (!config).then_some(CapabilityRemedy::EnableWebConfigReadAndRestart)
+            );
             let response = console.request(web.clone(), status(None, None)).await;
             assert_eq!(response.is_ok(), accounts);
             let response = console

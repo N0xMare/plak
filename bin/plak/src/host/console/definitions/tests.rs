@@ -4,6 +4,153 @@ use crate::home::paths::PlakPaths;
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 #[test]
+fn unavailable_definition_entries_are_skipped_and_diagnosed() -> TestResult {
+    use std::os::unix::fs::symlink;
+    let root = tempfile::tempdir()?;
+    let paths = PlakPaths::explicit(root.path().join("home"));
+    std::fs::create_dir_all(paths.user_agents_dir())?;
+    std::fs::create_dir_all(paths.home().join("profiles"))?;
+    let outside = root.path().join("outside.toml");
+    std::fs::write(&outside, "account = 'codex'\nmodel = 'private'\n")?;
+    symlink(&outside, paths.user_agents_dir().join("linked.toml"))?;
+    std::fs::create_dir(paths.user_agents_dir().join("directory.toml"))?;
+    std::fs::create_dir(paths.home().join("profiles/directory.toml"))?;
+    std::fs::write(
+        paths.user_agents_dir().join("oversized.toml"),
+        vec![b'#'; 256 * 1024 + 1],
+    )?;
+    std::fs::write(
+        paths.home().join("profiles/references-link.toml"),
+        "root = 'linked'\n",
+    )?;
+    let snapshot = Snapshot::read(&paths, &[1; 16]).map_err(|_| "snapshot refused")?;
+    for id in ["linked", "directory", "oversized"] {
+        assert!(!snapshot.templates.contains_key(id));
+        assert!(
+            snapshot
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "definition_unavailable" && d.subject.as_deref() == Some(id))
+        );
+    }
+    assert!(snapshot.diagnostics.iter().any(
+        |d| d.code == "profile_unavailable" && d.subject.as_deref() == Some("references-link")
+    ));
+    for request in [
+        HostRequest::ConfigGet {},
+        HostRequest::TemplatesList {
+            cursor: None,
+            limit: None,
+        },
+        HostRequest::ProfilesList {
+            cursor: None,
+            limit: None,
+        },
+    ] {
+        let response = snapshot.response(&request).map_err(|_| "read refused")?;
+        assert!(serde_json::to_string(&response)?.contains("definition_unavailable"));
+    }
+    Ok(())
+}
+
+#[test]
+fn symlinked_agents_directory_is_never_followed() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let paths = PlakPaths::explicit(root.path().join("home"));
+    std::fs::create_dir_all(paths.home())?;
+    let outside = root.path().join("outside");
+    std::fs::create_dir(&outside)?;
+    std::fs::write(
+        outside.join("escaped.toml"),
+        "account = 'codex'\nmodel = 'private'\n",
+    )?;
+    std::os::unix::fs::symlink(&outside, paths.user_agents_dir())?;
+    let snapshot = Snapshot::read(&paths, &[1; 16]).map_err(|_| "snapshot refused")?;
+    assert!(!snapshot.templates.contains_key("escaped"));
+    assert!(
+        snapshot
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "definition_unavailable" && d.subject.as_deref() == Some("agents"))
+    );
+    Ok(())
+}
+
+#[test]
+fn snapshot_fence_refuses_config_and_template_changes() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let paths = PlakPaths::explicit(root.path().join("home"));
+    std::fs::create_dir_all(paths.user_agents_dir())?;
+    for file in [
+        paths.config_file(),
+        paths.user_agents_dir().join("reader.toml"),
+    ] {
+        let body = if file == paths.config_file() {
+            String::new()
+        } else {
+            "account='codex'\nmodel='fixture'\n".into()
+        };
+        std::fs::write(&file, format!("{body}# before\n"))?;
+        let result = Snapshot::read_with_hook(&paths, &[1; 16], || {
+            assert!(std::fs::write(&file, format!("{body}# after\n")).is_ok());
+        });
+        assert!(matches!(
+            result,
+            Err(ReadRefusal::Busy {
+                scope: ReadScope::Config,
+                ..
+            })
+        ));
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn response_fence_refuses_config_and_template_changes() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let paths = PlakPaths::explicit(root.path().join("home"));
+    std::fs::create_dir_all(paths.user_agents_dir())?;
+    let console = super::super::Console::new(
+        paths.clone(),
+        root.path().join("state"),
+        Some(tokio::runtime::Handle::current()),
+        plakd_wire_types::console::ConfiguredSwitches {
+            web_accounts_read: false,
+            web_config_read: false,
+        },
+    );
+    for file in [
+        paths.config_file(),
+        paths.user_agents_dir().join("reader.toml"),
+    ] {
+        let body = if file == paths.config_file() {
+            String::new()
+        } else {
+            "account='codex'\nmodel='fixture'\n".into()
+        };
+        std::fs::write(&file, format!("{body}# before\n"))?;
+        let context = super::super::HostRequestContext {
+            principal: plakous_hosted::host_service::wire::HostPrincipal::Socket(7),
+            connection_id: 1,
+            host_generation: 1,
+        };
+        let result = console
+            .read_definitions_with_hook(context, HostRequest::ConfigGet {}, || {
+                assert!(std::fs::write(&file, format!("{body}# after\n")).is_ok());
+            })
+            .await;
+        assert!(matches!(
+            result,
+            Err(ReadRefusal::Busy {
+                scope: ReadScope::Config,
+                ..
+            })
+        ));
+    }
+    Ok(())
+}
+
+#[test]
 fn definitions_withhold_literals_and_etags_cover_comments_and_host_generation() -> TestResult {
     let root = tempfile::tempdir()?;
     let paths = PlakPaths::explicit(root.path().join("home"));
@@ -108,6 +255,22 @@ fn definition_dependencies_have_an_eight_mib_aggregate_bound() -> TestResult {
                 .user_agents_dir()
                 .join(format!("bounded-{index}.toml")),
             &bytes,
+        )?;
+    }
+    assert!(matches!(
+        files::Files::read(&paths),
+        Err(ReadRefusal::Unavailable {
+            cause: UnavailableCode::DependencyLimit,
+            ..
+        })
+    ));
+    // Skipped oversized definitions still consume the aggregate read budget.
+    for index in 0..33 {
+        std::fs::write(
+            paths
+                .user_agents_dir()
+                .join(format!("bounded-{index}.toml")),
+            vec![b'#'; 256 * 1024 + 1],
         )?;
     }
     assert!(matches!(

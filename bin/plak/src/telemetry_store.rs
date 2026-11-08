@@ -481,7 +481,7 @@ pub enum TelemetryItem {
 
 pub(crate) fn emit_projected_turn_usages(
     paths: &PlakPaths,
-    record: Option<&plakous_hosted::sessions::SessionRecord>,
+    record: Option<&recorded_usage::TurnAttribution>,
     terminals: &[plakous_hosted::sessions::projector::ProjectedTurnUsage],
 ) {
     let observations: Vec<_> = terminals

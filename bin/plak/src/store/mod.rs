@@ -497,6 +497,27 @@ impl ProductStore {
         self.baselines.insert(session.id.clone(), baseline);
         Ok(session)
     }
+
+    fn load_turn_attribution(
+        &self,
+        id: &str,
+    ) -> Result<crate::telemetry_store::recorded_usage::TurnAttribution, String> {
+        self.connection
+            .query_row(
+                "SELECT account, locator FROM sessions WHERE id=?1",
+                [id],
+                |row| {
+                    let locator: Option<String> = row.get(1)?;
+                    Ok(crate::telemetry_store::recorded_usage::TurnAttribution {
+                        account: row.get(0)?,
+                        locator: locator
+                            .map(|value| value.parse().map_err(|_| rusqlite::Error::InvalidQuery))
+                            .transpose()?,
+                    })
+                },
+            )
+            .map_err(|_| "could not read terminal attribution".to_owned())
+    }
 }
 
 fn load_record(

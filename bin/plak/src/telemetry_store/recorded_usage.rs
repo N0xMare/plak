@@ -10,11 +10,16 @@ pub(crate) fn exact_account(value: &str) -> Option<BoundedText64> {
         .flatten()
 }
 
+pub(crate) struct TurnAttribution {
+    pub locator: Option<plakous::sessions::SessionLocator>,
+    pub account: Option<String>,
+}
+
 pub(super) fn account_for(
-    record: &plakous_hosted::sessions::SessionRecord,
+    record: &TurnAttribution,
     terminal: &plakous_hosted::sessions::projector::ProjectedTurnUsage,
 ) -> Option<BoundedText64> {
-    let locator = record.plakous_locator?;
+    let locator = record.locator?;
     if locator.session_id() != terminal.session_id || locator.branch_id() != terminal.branch_id {
         return None;
     }
@@ -204,15 +209,15 @@ mod tests {
     #[test]
     fn attribution_never_borrows_a_different_branch_or_default_account() -> TestResult {
         let context = fixture_context()?;
-        let mut record =
-            plakous_hosted::sessions::SessionRecord::new(std::path::PathBuf::from("/fixture"));
         let checkpoint = plakous::model::CheckpointId::try_from(uuid::Uuid::from_u128(20))?;
-        record.plakous_locator = Some(plakous::sessions::SessionLocator::new(
-            context.session_id(),
-            context.branch_id(),
-            checkpoint,
-        ));
-        record.account = Some("openai/work".into());
+        let mut record = TurnAttribution {
+            locator: Some(plakous::sessions::SessionLocator::new(
+                context.session_id(),
+                context.branch_id(),
+                checkpoint,
+            )),
+            account: Some("openai/work".into()),
+        };
         let mut terminal = plakous_hosted::sessions::projector::ProjectedTurnUsage {
             session_id: context.session_id(),
             branch_id: context.branch_id(),

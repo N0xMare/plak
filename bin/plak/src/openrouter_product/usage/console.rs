@@ -5,7 +5,11 @@ use super::{
     openrouter, project, registry,
 };
 
-pub(crate) async fn read(paths: &PlakPaths, account: &AccountRef) -> VerticalObservation {
+pub(crate) async fn read<Permit>(
+    paths: &PlakPaths,
+    account: &AccountRef,
+    before_get: impl Future<Output = Permit>,
+) -> VerticalObservation {
     let Some(entry) = entry(paths, account) else {
         return unavailable("provider observation registry is busy");
     };
@@ -44,6 +48,7 @@ pub(crate) async fn read(paths: &PlakPaths, account: &AccountRef) -> VerticalObs
             continue;
         };
         let credentials = super::super::ProductOpenRouterCredentials::shared(paths);
+        let _permit = before_get.await;
         // The console owns the shared provider deadline; legacy callers keep
         // their existing timeout policy and never consume this cache.
         let observation =

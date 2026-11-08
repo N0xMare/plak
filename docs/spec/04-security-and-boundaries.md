@@ -780,8 +780,9 @@ not write authority. Catalog metadata never refreshes, logs in or opens sessions
 If either web console read switch is enabled, a served UI must carry an
 enforced CSP with no unsafe-inline/eval, same-origin connection sources,
 Trusted Types for script, no framing/objects/base URLs, and restricted script
-sources (same-origin or nonce/hash authority). Reviewed WASM may use only
-`wasm-unsafe-eval`. Cold load and every reload validate this same captured
+sources (only `'self'`, hashes and `'none'`). Nonces, `'strict-dynamic'` and
+`'wasm-unsafe-eval'` are refused in P6; WASM evaluation is reserved for the
+protocol-9 terminal UI. Cold load and every reload validate this same captured
 policy; an invalid reload retains the previous immutable files-and-CSP build.
 A report-only header is insufficient. A headless host serves no document.
 

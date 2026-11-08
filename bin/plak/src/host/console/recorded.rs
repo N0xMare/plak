@@ -196,7 +196,7 @@ pub(super) fn read(
         "SELECT substr(account,1,65),substr(input_tokens,1,21),substr(output_tokens,1,21),substr(reasoning_tokens,1,21),substr(cached_input_tokens,1,21),substr(cache_write_tokens,1,21),substr(model_operations,1,21),substr(reporting_operations,1,21),substr(cost_micros,1,21) FROM recorded_terminals WHERE committed_at_ms>=?1 AND committed_at_ms<?2 AND (?3 IS NULL OR account=?3 OR account IS NULL) ORDER BY committed_at_ms",
     ).map_err(|_| Unavailable::Storage)?;
     let mut rows = statement
-        .query(params![from, to, selected])
+        .query(params![lower, to, selected])
         .map_err(|_| Unavailable::Storage)?;
     while let Some(row) = rows.next().map_err(|_| Unavailable::Storage)? {
         if Instant::now() >= deadline || cancelled.load(Ordering::Acquire) {
@@ -235,6 +235,51 @@ pub(super) fn read(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retained_coverage_bounds_totals_and_selected_reads_keep_only_the_account_and_unattributed()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let paths = PlakPaths::explicit(root.path().join("home"));
+        let _store = crate::telemetry_store::TelemetryStore::open(&paths)?;
+        let connection = Connection::open(paths.telemetry_database())?;
+        connection.execute("UPDATE recording_evidence SET started_at_ms=5,retained_from_ms=10,dropped=1,write_errors=1", [])?;
+        for (id, at, account) in [
+            ("old", 7, Some("openai/work")),
+            ("retained", 10, Some("openai/work")),
+            ("other", 11, Some("codex/other")),
+            ("unattributed", 12, None),
+        ] {
+            connection.execute("INSERT INTO recorded_terminals VALUES(?1,'session','branch',?2,?3,'3','0','0','0','0','1','1',NULL)", params![id,at,account])?;
+        }
+        let snapshot = read(
+            &paths,
+            0,
+            20,
+            Some("openai/work"),
+            512,
+            Instant::now() + Duration::from_secs(10),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .map_err(|e| format!("{e:?}"))?;
+        assert_eq!(snapshot.accounts.len(), 1);
+        let row = &snapshot.accounts["openai/work"];
+        assert_eq!(row.calls.as_ref().map(Decimal::as_str), Some("1"));
+        assert_eq!(row.input_tokens.as_ref().map(Decimal::as_str), Some("3"));
+        assert_eq!(row.coverage.from, utc(10));
+        assert_eq!(
+            snapshot.unattributed.calls.as_ref().map(Decimal::as_str),
+            Some("1")
+        );
+        for reason in [
+            CoverageReason::PreRecording,
+            CoverageReason::Retention,
+            CoverageReason::WriterGap,
+        ] {
+            assert!(row.coverage.reasons.contains(&reason), "{reason:?}");
+        }
+        Ok(())
+    }
 
     #[test]
     fn windows_use_terminal_commit_time_and_keep_large_subtotals_incomplete()

@@ -14,6 +14,7 @@ pub(super) const MODEL_CATALOG_DEADLINE: Duration = Duration::from_secs(120);
 /// provider-native route object.
 #[derive(Clone)]
 pub struct NativeSubscriptions {
+    pub(super) usage_fixture: super::usage::test_usage::Fixture,
     #[cfg(test)]
     pub(super) child_backoff: Option<child::BackoffHook>,
     #[cfg(test)]
@@ -149,6 +150,7 @@ impl NativeSubscriptions {
 
     pub(super) fn from_state(state: SubscriptionState) -> Self {
         Self {
+            usage_fixture: super::usage::test_usage::EMPTY,
             #[cfg(test)]
             child_backoff: None,
             #[cfg(test)]
@@ -162,6 +164,7 @@ impl NativeSubscriptions {
     #[must_use]
     pub const fn new(paths: SubscriptionPaths) -> Self {
         Self {
+            usage_fixture: super::usage::test_usage::EMPTY,
             #[cfg(test)]
             child_backoff: None,
             #[cfg(test)]

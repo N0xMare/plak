@@ -13,6 +13,34 @@ use uuid::Uuid;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
+#[test]
+fn a_full_writer_queue_persists_writer_gap_evidence() -> TestResult {
+    let (_guard, paths) = PlakPaths::isolated_test_home();
+    let store = TelemetryStore::open(&paths)?;
+    let (writer, receiver) = TelemetryWriter::detached(1);
+    assert!(writer.try_emit(observation()?).is_ok());
+    assert!(writer.try_emit(observation()?).is_err());
+    assert_eq!(writer.status().dropped, 1);
+    writer.sender.lock().unwrap().take();
+    writer_loop(
+        store,
+        receiver,
+        Arc::clone(&writer.write_errors),
+        Arc::clone(&writer.dropped),
+        Arc::clone(&writer.wal_checkpoint_busy),
+    );
+    let connection = rusqlite::Connection::open(paths.telemetry_database())?;
+    assert_eq!(
+        connection.query_row(
+            "SELECT dropped FROM recording_evidence WHERE singleton=1",
+            [],
+            |row| row.get::<_, i64>(0)
+        )?,
+        1
+    );
+    Ok(())
+}
+
 fn observation() -> TestResult<TelemetryObservation> {
     Ok(TelemetryObservation::new(
         TelemetryContext::new(
