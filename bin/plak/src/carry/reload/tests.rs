@@ -3,6 +3,23 @@ use plakous::agent::BindingChange;
 use plakous::subscriptions::NativeAuthStatus;
 
 #[test]
+fn host_resume_capability_stays_local_to_the_installed_client_probe() {
+    let root = tempfile::tempdir().unwrap();
+    let local = reload_probe(&PlakPaths::explicit(root.path().join("home")));
+    let wire = plakd_wire_types::ReloadProbe::from(local.clone());
+    assert!(
+        serde_json::to_value(&wire)
+            .unwrap()
+            .get("host_resume")
+            .is_none()
+    );
+    let restored = ReloadProbe::from(wire);
+    assert!(!restored.host_resume);
+    assert_eq!(restored.state_key, local.state_key);
+    assert_eq!(restored.binary_id, local.binary_id);
+}
+
+#[test]
 fn host_resume_capability_matches_the_compiled_client() {
     let root = tempfile::tempdir().unwrap();
     let probe = reload_probe(&PlakPaths::explicit(root.path().join("home")));

@@ -277,6 +277,9 @@ impl From<ReloadProbe> for plakd_wire_types::ReloadProbe {
 impl From<plakd_wire_types::ReloadProbe> for ReloadProbe {
     fn from(value: plakd_wire_types::ReloadProbe) -> Self {
         Self {
+            // Host-only resume is an installed-client probe fact, not a wire
+            // capability. The socket face checks it before exporting this DTO.
+            host_resume: false,
             state_key: value.state_key,
             export_versions: value.export_versions,
             config_error: value.config_error,
