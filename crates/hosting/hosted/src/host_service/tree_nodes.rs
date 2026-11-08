@@ -10,6 +10,30 @@ pub(super) fn child_counts(tree_id: &str) -> (usize, usize) {
         .unwrap_or_default()
 }
 
+pub(super) fn lifecycle_children(tree_id: &str) -> Result<Vec<String>, ()> {
+    let Some(runtime) = crate::topology_runtime::lookup(tree_id) else {
+        return Ok(Vec::new());
+    };
+    runtime
+        .read(|tree| {
+            tree.nodes()
+                .iter()
+                .filter(|(id, node)| {
+                    **id != tree.root_agent_id
+                        && matches!(
+                            node.status,
+                            NodeStatus::Pending
+                                | NodeStatus::Running
+                                | NodeStatus::Paused
+                                | NodeStatus::Sealing
+                        )
+                })
+                .map(|(id, _)| id.clone())
+                .collect()
+        })
+        .map_err(|_| ())
+}
+
 fn count_children(tree: &crate::agent_tree::ProductAgentTree) -> (usize, usize) {
     use crate::agent_tree::LossContinuationState;
     let mut running = 0;

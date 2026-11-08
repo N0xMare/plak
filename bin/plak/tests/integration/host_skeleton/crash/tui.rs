@@ -20,8 +20,12 @@ fn review_rows(host: &Host) -> Vec<SessionRow> {
         },
     )
     .unwrap();
-    send.request_operation(Op::ListSessions { workspace: None })
-        .unwrap();
+    send.request_operation(Op::ListSessions {
+        workspace: None,
+        runner: None,
+        include_archived: false,
+    })
+    .unwrap();
     match receive.recv_response(WAIT).unwrap().1 {
         Outcome::Ok(Answer::Sessions { rows }) => rows,
         other => panic!("{other:?}"),
@@ -207,6 +211,9 @@ fn create(host: &Host, fixture: &Fixture) -> Option<String> {
     )
     .ok()?;
     send.request_operation(Op::NewSession {
+        runner: plakous_host_protocol::wire::RunnerLabel::local(),
+        profile: None,
+        model: None,
         workspace: fixture.workspace().display().to_string(),
         template: None,
         request_id: REQUEST.into(),

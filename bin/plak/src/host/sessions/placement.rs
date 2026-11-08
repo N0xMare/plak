@@ -41,8 +41,8 @@ impl Placement for RegistryPlacement {
             (bound.runner_id != "local").then(|| plakous_hosted::sessions::RunnerDisplay {
                 name: selected.name,
                 runner_id: bound.runner_id,
-                workspace_root: bound.root.clone(),
-                workspace_cwd: bound.cwd,
+                workspace_root: bound.root.clone().into(),
+                workspace_cwd: bound.cwd.into(),
             });
         let probe = bound.services.map_or_else(
             || {

@@ -307,6 +307,15 @@ mod tests {
                 .id,
             carried.id
         );
+        assert_carried_lookup_is_indexed(&store, &source, key, &alias);
+    }
+
+    fn assert_carried_lookup_is_indexed(
+        store: &ProductStore,
+        source: &str,
+        key: &str,
+        alias: &Path,
+    ) {
         let operation = format!("{}{key}", sessions::CARRY_FORWARD_OPERATION_PREFIX);
         let mut plan = store
             .connection
@@ -314,7 +323,7 @@ mod tests {
             .unwrap();
         let steps = plan
             .query_map(
-                (&source, operation, alias.to_str(), "runner-a", true),
+                (source, operation, alias.to_str(), "runner-a", true),
                 |row| row.get::<_, String>(3),
             )
             .unwrap()
@@ -377,7 +386,7 @@ mod tests {
             store.recent_workspaces("runner-a").unwrap(),
             [(remote_root.to_string_lossy().into_owned(), 9999)]
         );
-        assert!(store.recent_workspaces("unknown").unwrap().is_empty());
+        assert_eq!(store.recent_workspaces("unknown").unwrap(), []);
     }
 
     #[cfg(unix)]
@@ -412,11 +421,11 @@ mod tests {
                 [remote.id.as_str()]
             );
             assert_eq!(rows[0].workspace_root, alias);
-            assert!(
+            assert_eq!(
                 store
                     .directory_filtered(Some(&actual), Some("runner-a"), false)
-                    .unwrap()
-                    .is_empty()
+                    .unwrap(),
+                []
             );
         }
         std::os::unix::fs::symlink(&actual, &alias).unwrap();

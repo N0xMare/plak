@@ -217,29 +217,6 @@ fn current_record(
         })
 }
 
-/// The carried successor of `source` that is still an interrupted carry,
-/// if any: deleting the source would strand it.
-///
-/// # Errors
-/// Returns the store's failure.
-pub(crate) fn pending_successor(
-    services: &crate::shell::services::Services,
-    source: &SessionRecord,
-) -> CliResult<Option<SessionRecord>> {
-    Ok(super::already_carried(
-        services,
-        &source.workspace_root,
-        source
-            .runner
-            .as_ref()
-            .map_or("local", |runner| runner.runner_id.as_str()),
-        &source.id,
-        &crate::home::state::state_key(),
-    )
-    .map_err(CliFailure::new)?
-    .filter(|successor| successor.carry_intent.is_some() && successor.plakous_locator.is_none()))
-}
-
 /// Settles every interrupted carry in `workspace` at startup, so a reload
 /// carry that never relaunched is not left pending. Returns their notes.
 pub(crate) fn settle_workspace(

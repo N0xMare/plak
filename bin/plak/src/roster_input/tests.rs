@@ -52,7 +52,7 @@ fn one_shared_source_resolves_each_saved_profile_without_selector_leakage() {
             roster
                 .working_set
                 .iter()
-                .map(|name| name.as_str())
+                .map(TemplateName::as_str)
                 .collect::<Vec<_>>(),
             selected
                 .working_set

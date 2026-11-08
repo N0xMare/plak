@@ -236,14 +236,14 @@ fn deletion_reconciles_creation_before_locator_publication() -> TestResult {
     assert!(record.plakous_locator.is_none());
     let services = crate::shell::services::Services::for_home(f.paths.clone());
     lifecycle::delete_confirmed(&services, &record.id, false)?;
-    assert!(f.product.load(&record.id).checked()?.is_none());
+    assert_eq!(f.product.load(&record.id).unwrap_err(), "session not found");
     let missing = f
         .runtime
         .run(f.runtime.sessions.head_is_quiescent(locator))
         .checked()?
         .unwrap_err();
     assert_eq!(missing.kind(), AgentSessionsErrorKind::NotFound);
-    assert!(f.product.load(&f.record.id).checked()?.is_some());
+    assert_eq!(f.product.load(&f.record.id).checked()?.id, f.record.id);
     Ok(())
 }
 

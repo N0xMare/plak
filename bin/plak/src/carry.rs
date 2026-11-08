@@ -80,7 +80,7 @@ pub(crate) const fn probe_reload(
 }
 
 pub(crate) use import::{CarriedImport, already_carried, carried_forward_label, import_and_resume};
-pub(crate) use intent::{load_for_work, pending_successor, work_id};
+pub(crate) use intent::{load_for_work, work_id};
 
 pub(crate) use reference::remove_retained_archive;
 

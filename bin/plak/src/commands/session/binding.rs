@@ -138,7 +138,7 @@ mod vcs_selection_tests {
         let mut record = product_sessions::SessionRecord::new(root.path().to_owned());
         let config = product_config::ProductConfig::default_product();
         seed_new_session_binding_on(&mut record, &config, &Remote).unwrap();
-        assert!(record.transcript.pending_notices().is_empty());
+        assert_eq!(record.transcript.pending_notices(), []);
     }
 
     #[test]

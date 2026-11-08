@@ -116,12 +116,13 @@ fn drive(
             client.request(
                 3,
                 Op::Intent {
+                    client_id: Some(uuid::Uuid::new_v4().to_string().parse().unwrap()),
                     attachment,
                     intent: SessionIntent::Prompt(Draft::from("crash-sweep-original-prompt")),
                     blobs: Vec::new(),
                 }
             ),
-            Outcome::Ok(Answer::Accepted)
+            Outcome::Ok(Answer::Accepted { duplicate: false })
         );
     }
     let mut answered = answer.is_empty();

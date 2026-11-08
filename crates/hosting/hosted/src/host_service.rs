@@ -1015,6 +1015,48 @@ impl<P: ProtocolExtension> HostService<P> {
         kept
     }
 
+    pub(super) fn lifecycle_busy(&self) -> plakous_host_protocol::wire::LifecycleReason {
+        use plakous_host_protocol::views::ProcessStatus;
+        use plakous_host_protocol::wire::{LifecycleReason, MAX_LIFECYCLE_IDS};
+        let state = self.lock();
+        let mut turn = false;
+        let mut processes = Vec::new();
+        for observation in &state.snapshot.states {
+            match observation {
+                SessionObservation::SetBusy(busy) => turn = *busy,
+                SessionObservation::Processes { views, .. } => {
+                    processes = views
+                        .iter()
+                        .filter(|view| {
+                            matches!(
+                                view.status,
+                                ProcessStatus::Running | ProcessStatus::Stopping
+                            )
+                        })
+                        .map(|view| view.id.clone())
+                        .collect();
+                }
+                _ => {}
+            }
+        }
+        drop(state);
+        let children = tree_nodes::lifecycle_children(&self.root().tree_id);
+        let state_unknown = children.is_err();
+        let mut children = children.unwrap_or_default();
+        let children_truncated = children.len() > MAX_LIFECYCLE_IDS;
+        let processes_truncated = processes.len() > MAX_LIFECYCLE_IDS;
+        children.truncate(MAX_LIFECYCLE_IDS);
+        processes.truncate(MAX_LIFECYCLE_IDS);
+        LifecycleReason::Busy {
+            turn,
+            state_unknown: state_unknown || (!turn && children.is_empty() && processes.is_empty()),
+            children,
+            children_truncated,
+            processes,
+            processes_truncated,
+        }
+    }
+
     /// Takes one observation from the session: keeps what an attach needs
     /// and queues it for the attachments its class names.
     pub fn observe(&self, observation: SessionObservation<P>) {

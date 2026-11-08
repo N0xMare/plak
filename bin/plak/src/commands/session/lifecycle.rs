@@ -303,12 +303,12 @@ mod tests {
                 Err(LifecycleError::Refused(LifecycleRefusal::NotFound))
             ));
         }
-        assert!(
+        assert_eq!(
             crate::store::ProductStore::open(&paths)
                 .unwrap()
                 .directory(None)
-                .unwrap()
-                .is_empty()
+                .unwrap(),
+            []
         );
         assert!(!paths.runtime_database().exists());
     }
@@ -412,7 +412,7 @@ mod tests {
         assert_eq!(loaded.title.as_deref(), Some("generated"));
         assert_eq!(loaded.title_override.as_deref(), Some("archived label"));
         assert!(loaded.archived);
-        assert!(store.directory(None).unwrap().is_empty());
+        assert_eq!(store.directory(None).unwrap(), []);
         assert_eq!(
             store.directory_with_archived(None, true).unwrap()[0]
                 .title

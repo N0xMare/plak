@@ -190,6 +190,10 @@ impl<P: ProtocolExtension> WireSession<P> {
         served::lock(&self.served).service().kept_activity()
     }
 
+    pub(super) fn lifecycle_busy(&self) -> plakous_host_protocol::wire::LifecycleReason {
+        served::lock(&self.served).service().lifecycle_busy()
+    }
+
     /// Changes whenever the session published something or ended.
     #[must_use]
     pub fn changes(&self) -> watch::Receiver<u64> {

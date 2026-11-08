@@ -40,8 +40,8 @@ impl CarryDocument {
             .map(|runner| plakous_hosted::sessions::RunnerDisplay {
                 name: runner.name.clone(),
                 runner_id: runner.runner_id.clone(),
-                workspace_root: self.workspace_root.display().to_string(),
-                workspace_cwd: self.workspace_root.display().to_string(),
+                workspace_root: self.workspace_root.clone(),
+                workspace_cwd: self.workspace_root.clone(),
             });
         let note = self.import_note(&record.id);
         let history = self

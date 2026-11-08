@@ -199,7 +199,9 @@ fn an_upgraded_host_inspects_the_old_protocol_and_starts_a_separate_daemon() {
     client.attach(1, &node);
     assert_eq!(
         client.request(2, Op::StopSession { session }),
-        Outcome::Ok(Answer::Stopped)
+        Outcome::Ok(Answer::Stopped {
+            runner_pending: false
+        })
     );
     stopped(pid);
     stop(&mut host);
@@ -452,7 +454,9 @@ fn runner_job_survives_host_loss_and_is_readopted_before_attach() {
     job(&fixture);
     assert_eq!(
         client.request(2, Op::StopSession { session }),
-        Outcome::Ok(Answer::Stopped)
+        Outcome::Ok(Answer::Stopped {
+            runner_pending: false
+        })
     );
     stopped(pid);
     stop(&mut host);
@@ -539,12 +543,13 @@ fn start_foreground(fixture: &Fixture) -> (Host, String, NodeAddress) {
         client.request(
             3,
             Op::Intent {
+                client_id: Some(uuid::Uuid::new_v4().to_string().parse().unwrap()),
                 attachment,
                 intent: SessionIntent::Prompt(Draft::from("start foreground")),
                 blobs: Vec::new()
             }
         ),
-        Outcome::Ok(Answer::Accepted)
+        Outcome::Ok(Answer::Accepted { duplicate: false })
     );
     let deadline = std::time::Instant::now() + WAIT;
     while !fixture.root.join("local-job.marker").exists() {
@@ -685,7 +690,9 @@ fn an_idle_handoff_does_not_resurrect_a_previously_cancelled_root() {
         client.attach(1, &node);
         assert_eq!(
             client.request(2, Op::StopSession { session }),
-            Outcome::Ok(Answer::Stopped)
+            Outcome::Ok(Answer::Stopped {
+                runner_pending: false
+            })
         );
         stopped(pid);
         stop(&mut host);
@@ -733,7 +740,9 @@ fn handoff_keeps_jobs(policy: &str) {
     assert_eq!(root_record(&fixture, &session).1, 1);
     assert_eq!(
         client.request(2, Op::StopSession { session }),
-        Outcome::Ok(Answer::Stopped)
+        Outcome::Ok(Answer::Stopped {
+            runner_pending: false
+        })
     );
     stopped(pid);
     stop(&mut host);
@@ -771,7 +780,9 @@ fn a_childs_daemon_job_survives_host_loss_and_handoff() {
         job(&fixture);
         assert_eq!(
             client.request(2, Op::StopSession { session }),
-            Outcome::Ok(Answer::Stopped)
+            Outcome::Ok(Answer::Stopped {
+                runner_pending: false
+            })
         );
         stopped(pid);
         stop(&mut host);
@@ -828,7 +839,9 @@ fn assert_child_job_refuses_embedded_open(busy: bool) {
     job(&fixture);
     assert_eq!(
         client.request(2, Op::StopSession { session }),
-        Outcome::Ok(Answer::Stopped)
+        Outcome::Ok(Answer::Stopped {
+            runner_pending: false
+        })
     );
     stopped(pid);
     assert_eq!(terminals(), 1, "the child job must settle once");
@@ -977,7 +990,9 @@ fn an_unattached_stop_stops_a_busy_root_and_live_children() {
                 session: session.clone()
             }
         ),
-        Outcome::Ok(Answer::Stopped)
+        Outcome::Ok(Answer::Stopped {
+            runner_pending: false
+        })
     );
     stopped(pid);
     let row = client
@@ -994,7 +1009,9 @@ fn an_unattached_stop_stops_a_busy_root_and_live_children() {
     );
     assert_eq!(
         client.request(4, Op::StopSession { session }),
-        Outcome::Ok(Answer::Stopped)
+        Outcome::Ok(Answer::Stopped {
+            runner_pending: false
+        })
     );
     drop(client);
     stop(&mut host);
@@ -1073,7 +1090,9 @@ fn host_crash_mid_readopt_converges_after_every_transfer_boundary() {
         assert!(alive(pid));
         assert_eq!(
             client.request(2, Op::StopSession { session }),
-            Outcome::Ok(Answer::Stopped)
+            Outcome::Ok(Answer::Stopped {
+                runner_pending: false
+            })
         );
         stopped(pid);
         job(&fixture);
@@ -1157,7 +1176,9 @@ fn an_old_stop_never_stops_a_job_of_a_later_admitted_turn() {
                 session: session.clone()
             }
         ),
-        Outcome::Ok(Answer::Stopped)
+        Outcome::Ok(Answer::Stopped {
+            runner_pending: false
+        })
     );
     stopped(old_pid);
     assert_eq!(
@@ -1183,7 +1204,9 @@ fn an_old_stop_never_stops_a_job_of_a_later_admitted_turn() {
     client.attach(1, &node);
     assert_eq!(
         client.request(2, Op::StopSession { session }),
-        Outcome::Ok(Answer::Stopped)
+        Outcome::Ok(Answer::Stopped {
+            runner_pending: false
+        })
     );
     stopped(pid);
     stop(&mut host);

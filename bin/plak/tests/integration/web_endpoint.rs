@@ -304,6 +304,9 @@ fn hello(socket: &mut WebSocket<UnixStream>) -> NodeAddress {
         &ClientFrame::Request {
             id: 900,
             op: Op::NewSession {
+                runner: plakous_host_protocol::wire::RunnerLabel::local(),
+                profile: None,
+                model: None,
                 workspace: WORKSPACE.with(|workspace| workspace.borrow().clone()),
                 template: None,
                 request_id: REQUEST.into(),
@@ -385,6 +388,7 @@ fn a_tailnet_client_attaches_prompts_and_reads_the_answer() {
         &ClientFrame::Request {
             id: 2,
             op: Op::Intent {
+                client_id: Some(uuid::Uuid::new_v4().to_string().parse().unwrap()),
                 attachment,
                 intent: SessionIntent::Prompt(Draft::from("hello from the web")),
                 blobs: Vec::new(),
@@ -393,7 +397,7 @@ fn a_tailnet_client_attaches_prompts_and_reads_the_answer() {
     );
     assert_eq!(
         response(&mut socket, 2),
-        json!({"ok": {"answer": "accepted"}})
+        json!({"ok": {"answer": "accepted", "duplicate": false}})
     );
     loop {
         let frame = next_frame(&mut socket);
@@ -492,7 +496,11 @@ fn a_web_face_and_a_terminal_share_one_hosts_transcript() {
         &mut socket,
         &ClientFrame::Request {
             id: 901,
-            op: Op::ListSessions { workspace: None },
+            op: Op::ListSessions {
+                workspace: None,
+                runner: None,
+                include_archived: false,
+            },
         },
     );
     let listed = response(&mut socket, 901);
@@ -515,6 +523,7 @@ fn a_web_face_and_a_terminal_share_one_hosts_transcript() {
         &ClientFrame::Request {
             id: 902,
             op: Op::Intent {
+                client_id: Some(uuid::Uuid::new_v4().to_string().parse().unwrap()),
                 attachment,
                 intent: SessionIntent::Prompt(Draft::from("a prompt from the web")),
                 blobs: Vec::new(),
@@ -721,13 +730,17 @@ fn wake(web: &mut Web) {
             &ClientFrame::Request {
                 id: 2,
                 op: Op::Intent {
+                    client_id: Some(uuid::Uuid::new_v4().to_string().parse().unwrap()),
                     attachment,
                     intent: SessionIntent::Prompt(Draft::from(text)),
                     blobs: Vec::new(),
                 },
             },
         );
-        assert_eq!(response(socket, 2), json!({"ok": {"answer": "accepted"}}));
+        assert_eq!(
+            response(socket, 2),
+            json!({"ok": {"answer": "accepted", "duplicate": false}})
+        );
         loop {
             let frame = next_frame(socket);
             if frame["frame"] == "event" && frame.to_string().contains(answer) {
@@ -756,7 +769,11 @@ fn wake(web: &mut Web) {
             &mut again,
             &ClientFrame::Request {
                 id,
-                op: Op::ListSessions { workspace: None },
+                op: Op::ListSessions {
+                    workspace: None,
+                    runner: None,
+                    include_archived: false,
+                },
             },
         );
         let rows = response(&mut again, id);

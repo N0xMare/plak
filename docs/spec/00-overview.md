@@ -235,7 +235,7 @@ of the one before, and no other store crosses between builds. A pre-release
 format change bumps the store's schema or the runtime format epoch; the
 per-component revision constants inside the checkpoint graph are frozen. Plak
 keeps each build's stores in a state directory named by all four versions
-(chapter 02 §2.5), currently `r27.e37.p36.t10`, so a build never opens files from another version tuple as
+(chapter 02 §2.5), currently `r27.e37.p37.t10`, so a build never opens files from another version tuple as
 session authority. Explicit legacy pruning may take schema-blind SQLite and
 holder locks to prove a directory is
 unused (chapter 02 §2.5). A session another build wrote is

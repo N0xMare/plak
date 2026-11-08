@@ -118,16 +118,15 @@ pub(super) fn delete_confirmed(
             state_unknown: true,
         }));
     }
-    let locator = match record.plakous_locator {
-        Some(locator) => locator,
-        None => {
-            let operation = plakous::sessions::SessionOperationId::new(&record.create_operation_id)
-                .map_err(|error| CliFailure::new(error.to_string()))?;
-            // Creation may have committed before its product locator save failed.
-            // The immutable create intent names that runtime even then.
-            AgentSessions::genesis_locator_for(&operation)
-                .map_err(|error| CliFailure::new(error.to_string()))?
-        }
+    let locator = if let Some(locator) = record.plakous_locator {
+        locator
+    } else {
+        let operation = plakous::sessions::SessionOperationId::new(&record.create_operation_id)
+            .map_err(|error| CliFailure::new(error.to_string()))?;
+        // Creation may have committed before its product locator save failed.
+        // The immutable create intent names that runtime even then.
+        AgentSessions::genesis_locator_for(&operation)
+            .map_err(|error| CliFailure::new(error.to_string()))?
     };
     let runtime = RuntimeDeletion::new(services)?;
     let plan = deletion_plan(paths, &mut product, &record, locator, abandon_children)?;

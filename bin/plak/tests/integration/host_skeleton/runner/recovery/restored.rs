@@ -40,6 +40,7 @@ fn a_sigterm_during_a_restored_admitted_turn_records_its_own_handoff() {
     client.send(&ClientFrame::Request {
         id: 3,
         op: Op::Intent {
+            client_id: Some(uuid::Uuid::new_v4().to_string().parse().unwrap()),
             attachment,
             intent: SessionIntent::Prompt(Draft::from("admitted turn")),
             blobs: Vec::new(),

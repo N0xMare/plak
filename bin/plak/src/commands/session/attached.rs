@@ -14,6 +14,18 @@ use plakous_hosted::sessions::{NoticePlacement, NoticeTone, TranscriptRow};
 use std::io;
 use std::path::Path;
 
+pub(super) fn session_paths(
+    services: &crate::shell::services::Services,
+    record: &product_sessions::SessionRecord,
+) -> CliResult<crate::home::paths::PlakPaths> {
+    let paths = services.paths()?;
+    Ok(if record.runner.is_some() {
+        paths.for_remote_workspace(&record.workspace_root)
+    } else {
+        paths.for_workspace(&record.workspace_root)
+    })
+}
+
 #[derive(Debug)]
 pub(super) enum AttachedConfigError {
     Unresolvable(CliFailure),
@@ -143,25 +155,13 @@ fn build_attached_host_config(
         });
         if classify_rebind_fallback && unknown_account {
             // Choosing the configured root requires a valid local policy first.
-            let paths = if record.runner.is_some() {
-                services
-                    .paths()?
-                    .for_remote_workspace(&record.workspace_root)
-            } else {
-                services.paths()?.for_workspace(&record.workspace_root)
-            };
+            let paths = session_paths(services, &record)?;
             product_config::SessionPolicy::load(&paths).map_err(CliFailure::new)?;
             return Err(AttachedConfigError::Unresolvable(error));
         }
         return Err(error.into());
     }
-    let context = if record.runner.is_some() {
-        services
-            .paths()?
-            .for_remote_workspace(&record.workspace_root)
-    } else {
-        services.paths()?.for_workspace(&record.workspace_root)
-    };
+    let context = session_paths(services, &record)?;
     let paths = &context;
     product_config::SessionPolicy::load(paths).map_err(CliFailure::new)?;
     let cwd = record.workspace_root.clone();

@@ -194,13 +194,7 @@ pub(super) fn import_prepared_with_fallback(
     if let Some(intent) = resumed {
         resume_identity(&mut record, &mut note, intent);
     }
-    let paths = if record.runner.is_some() {
-        services
-            .paths()?
-            .for_remote_workspace(&record.workspace_root)
-    } else {
-        services.paths()?.for_workspace(&record.workspace_root)
-    };
+    let paths = super::attached::session_paths(services, &record)?;
     product_config::SessionPolicy::load(&paths).map_err(CliFailure::new)?;
     let (source_id, source_key) = record
         .carried_forward_from()
@@ -244,25 +238,7 @@ pub(super) fn import_prepared_with_fallback(
         ));
     }
     let (record, notes) = created.into_session();
-    let projected = (|| -> CliResult<()> {
-        let executor = plakous::application::ApplicationExecutor::new()
-            .map_err(|_| CliFailure::new("application executor failed"))?;
-        let sessions = services
-            .state_roots_on(
-                &paths,
-                record
-                    .runner
-                    .as_ref()
-                    .map_or("local", |runner| runner.runner_id.as_str()),
-            )?
-            .runtime_sessions()?;
-        let records = services.session_records()?;
-        executor
-            .block_on(product_host::project_session(&sessions, &records, &record))
-            .map_err(|_| CliFailure::new("application execution failed"))?
-            .map_err(CliFailure::new)?;
-        Ok(())
-    })();
+    let projected = project_imported_session(services, &paths, &record);
     if projected.is_err() {
         note.push_str(&format!(
             "; warning: session {} was imported but its views need a projector pass; open it once",
@@ -276,6 +252,30 @@ pub(super) fn import_prepared_with_fallback(
         );
     }
     Ok((record, note))
+}
+
+fn project_imported_session(
+    services: &crate::shell::services::Services,
+    paths: &crate::home::paths::PlakPaths,
+    record: &product_sessions::SessionRecord,
+) -> CliResult<()> {
+    let executor = plakous::application::ApplicationExecutor::new()
+        .map_err(|_| CliFailure::new("application executor failed"))?;
+    let sessions = services
+        .state_roots_on(
+            paths,
+            record
+                .runner
+                .as_ref()
+                .map_or("local", |runner| runner.runner_id.as_str()),
+        )?
+        .runtime_sessions()?;
+    let records = services.session_records()?;
+    executor
+        .block_on(product_host::project_session(&sessions, &records, record))
+        .map_err(|_| CliFailure::new("application execution failed"))?
+        .map(|_| ())
+        .map_err(CliFailure::new)
 }
 
 /// Refuses a second import of a source this workspace already carried
@@ -383,19 +383,7 @@ fn keep_source_profile(
     note: &mut String,
 ) {
     match successor_profile(paths, profile) {
-        Ok((mut selected, profile)) => {
-            if let Some(template) = selected
-                .root_agent
-                .as_ref()
-                .and_then(|name| selected.templates.get_mut(name))
-            {
-                if let Some(account) = &config.session.account {
-                    template.account.clone_from(account);
-                }
-                if let Some(model) = &config.session.model {
-                    template.model.clone_from(model);
-                }
-            }
+        Ok((selected, profile)) => {
             config.root_template = selected.root_template_fact();
             config.session.root_profile = Some(plakous_hosted::sessions::RootProfile {
                 root_template: profile.root.clone(),

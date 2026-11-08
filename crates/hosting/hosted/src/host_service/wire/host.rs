@@ -155,6 +155,11 @@ pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
         Err(CliFailure::new("this launcher cannot stop dormant work"))
     }
 
+    /// Read-only link or reconciliation debt after a durable dormant stop.
+    fn runner_pending(&self, _session: &str) -> bool {
+        false
+    }
+
     /// The refusal of an attach whose session did not open with `failure`:
     /// `tree_hosted_elsewhere` while another live host process holds its
     /// tree, `session_unavailable` with why otherwise.
@@ -690,22 +695,7 @@ where
                 Err(detail) => refused(RequestRefusal::SessionUnavailable { detail }),
             },
             Op::WatchSessions { include_archived } => {
-                if self.watch.is_some() {
-                    return refused(RequestRefusal::OneInFlight);
-                }
-                let attachment = self
-                    .host
-                    .next_host_attachment
-                    .fetch_add(1, Ordering::Relaxed);
-                self.watch = Some(Watch {
-                    include_archived,
-                    attachment,
-                    seq: 0,
-                    sent: None,
-                    read_at: None,
-                    dirty: true,
-                });
-                answered(Outcome::Ok(Answer::Watching { attachment }))
+                answered(self.watch_sessions(include_archived))
             }
             Op::UnwatchSessions { attachment } => {
                 if self.watch.as_ref().map(|watch| watch.attachment) != Some(attachment) {
@@ -773,7 +763,31 @@ where
         }
     }
 
+    fn watch_sessions(&mut self, include_archived: bool) -> Outcome {
+        if self.watch.is_some() {
+            return Outcome::Refused(RequestRefusal::OneInFlight);
+        }
+        let attachment = self
+            .host
+            .next_host_attachment
+            .fetch_add(1, Ordering::Relaxed);
+        self.watch = Some(Watch {
+            include_archived,
+            attachment,
+            seq: 0,
+            sent: None,
+            read_at: None,
+            dirty: true,
+        });
+        Outcome::Ok(Answer::Watching { attachment })
+    }
+
     fn reopen(&mut self, attachment: AttachmentId, request: &str, cause: Option<&str>) -> Outcome {
+        if let Some(link) = &self.readonly {
+            return Outcome::Refused(RequestRefusal::SessionArchived {
+                session: link.session.clone(),
+            });
+        }
         let Some(link) = &self.node else {
             return Outcome::Refused(RequestRefusal::NotAttached);
         };
@@ -824,6 +838,15 @@ where
 
     fn stop(&mut self, session: &str, text: &str) -> CliResult<Forwarded> {
         let refused = |refusal| Ok(Forwarded::Answered(Outcome::Refused(refusal)));
+        if self
+            .readonly
+            .as_ref()
+            .is_some_and(|link| link.session == session)
+        {
+            return refused(RequestRefusal::SessionArchived {
+                session: session.to_owned(),
+            });
+        }
         if self.draining.is_some()
             || self
                 .node
@@ -848,7 +871,9 @@ where
         match slot.stop_target(session, |id| sessions.stop_dormant(id)) {
             Ok(None) => {
                 self.host.changed();
-                Ok(Forwarded::Answered(Outcome::Ok(Answer::Stopped)))
+                Ok(Forwarded::Answered(Outcome::Ok(Answer::Stopped {
+                    runner_pending: self.host.sessions.runner_pending(session),
+                })))
             }
             Ok(Some((session, hold, releases))) => {
                 let stopped = Arc::clone(&self.stopped);
@@ -922,7 +947,9 @@ where
     }
 
     fn archive_session(&self, session: String, archived: bool) -> Outcome {
-        match self.host.sessions.archive(&session, archived) {
+        let slot = self.host.slot(&session);
+        let sessions = Arc::clone(&self.host.sessions);
+        match slot.mutate_released(&session, || sessions.archive(&session, archived)) {
             Ok(()) => {
                 self.host.changed();
                 Outcome::Ok(Answer::ArchiveUpdated { session, archived })
@@ -932,7 +959,9 @@ where
     }
 
     fn delete_session(&self, session: String, abandon_children: bool) -> Outcome {
-        match self.host.sessions.delete(&session, abandon_children) {
+        let slot = self.host.slot(&session);
+        let sessions = Arc::clone(&self.host.sessions);
+        match slot.mutate_released(&session, || sessions.delete(&session, abandon_children)) {
             Ok(()) => {
                 self.host.changed();
                 Outcome::Ok(Answer::Deleted { session })

@@ -27,6 +27,8 @@ use super::WireSession;
 use crate::error::{CliFailure, CliResult};
 use crate::runtime::HostWorkerHandle;
 
+mod lifecycle;
+
 /// How long a release may take to join before the slot gives up on it.
 const RELEASE_JOIN: Duration = Duration::from_secs(60);
 

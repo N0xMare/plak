@@ -21,11 +21,7 @@ fn private_run() -> (tempfile::TempDir, std::path::PathBuf) {
 
 #[test]
 fn lifecycle_forwarding_never_turns_a_host_refusal_or_unknown_outcome_into_offline_permission() {
-    use plakous_host_protocol::wire::{
-        Answer, ClientFrame, HostFrame, Op, Outcome, RequestRefusal, Welcome, decode_line,
-        encode_line,
-    };
-    use std::io::{BufRead as _, Write as _};
+    use plakous_host_protocol::wire::{Answer, Op, Outcome};
 
     let (_root, paths) = crate::home::paths::PlakPaths::isolated_test_home();
     assert!(
@@ -63,60 +59,7 @@ fn lifecycle_forwarding_never_turns_a_host_refusal_or_unknown_outcome_into_offli
     for (index, op) in operations.into_iter().enumerate() {
         let listener = UnixListener::bind(paths.host_socket()).unwrap();
         let expected = op.clone();
-        let peer = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream
-                .set_read_timeout(Some(Duration::from_secs(5)))
-                .unwrap();
-            let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
-            let mut line = String::new();
-            reader.read_line(&mut line).unwrap();
-            assert!(matches!(
-                decode_line::<ClientFrame<PlakExtension>>(&line).unwrap(),
-                ClientFrame::Hello(_)
-            ));
-            stream
-                .write_all(
-                    encode_line(&HostFrame::<PlakExtension>::Welcome(Welcome {
-                        proto: WIRE_VERSION,
-                        binary_id: "fixture".into(),
-                        host_generation: 1,
-                        caps: Vec::new(),
-                        session: None,
-                    }))
-                    .unwrap()
-                    .as_bytes(),
-                )
-                .unwrap();
-            line.clear();
-            reader.read_line(&mut line).unwrap();
-            let ClientFrame::Request { id, op } =
-                decode_line::<ClientFrame<PlakExtension>>(&line).unwrap()
-            else {
-                panic!("expected lifecycle request")
-            };
-            assert_eq!(op, expected);
-            if index == 3 {
-                return;
-            }
-            let outcome = if index == 0 {
-                Outcome::Ok(Answer::Renamed {
-                    session: "s".into(),
-                    title: None,
-                })
-            } else {
-                Outcome::Refused(RequestRefusal::SessionUnavailable {
-                    detail: "refused by fixture".into(),
-                })
-            };
-            stream
-                .write_all(
-                    encode_line(&HostFrame::<PlakExtension>::Response { id, outcome })
-                        .unwrap()
-                        .as_bytes(),
-                )
-                .unwrap();
-        });
+        let peer = std::thread::spawn(move || lifecycle_peer(listener, expected, index));
         let result = forward_lifecycle(&paths, op);
         peer.join().unwrap();
         match index {
@@ -129,6 +72,68 @@ fn lifecycle_forwarding_never_turns_a_host_refusal_or_unknown_outcome_into_offli
         }
         std::fs::remove_file(paths.host_socket()).unwrap();
     }
+}
+
+fn lifecycle_peer(
+    listener: UnixListener,
+    expected: plakous_host_protocol::wire::Op<PlakExtension>,
+    index: usize,
+) {
+    use plakous_host_protocol::wire::{
+        Answer, ClientFrame, HostFrame, Outcome, RequestRefusal, Welcome, decode_line, encode_line,
+    };
+    use std::io::{BufRead as _, Write as _};
+    let (mut stream, _) = listener.accept().unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let mut reader = io::BufReader::new(stream.try_clone().unwrap());
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    assert!(matches!(
+        decode_line::<ClientFrame<PlakExtension>>(&line).unwrap(),
+        ClientFrame::Hello(_)
+    ));
+    stream
+        .write_all(
+            encode_line(&HostFrame::<PlakExtension>::Welcome(Welcome {
+                proto: WIRE_VERSION,
+                binary_id: "fixture".into(),
+                host_generation: 1,
+                caps: Vec::new(),
+                session: None,
+            }))
+            .unwrap()
+            .as_bytes(),
+        )
+        .unwrap();
+    line.clear();
+    reader.read_line(&mut line).unwrap();
+    let ClientFrame::Request { id, op } = decode_line::<ClientFrame<PlakExtension>>(&line).unwrap()
+    else {
+        panic!("expected lifecycle request")
+    };
+    assert_eq!(op, expected);
+    if index == 3 {
+        return;
+    }
+    let outcome = if index == 0 {
+        Outcome::Ok(Answer::Renamed {
+            session: "s".into(),
+            title: None,
+        })
+    } else {
+        Outcome::Refused(RequestRefusal::SessionUnavailable {
+            detail: "refused by fixture".into(),
+        })
+    };
+    stream
+        .write_all(
+            encode_line(&HostFrame::<PlakExtension>::Response { id, outcome })
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
 }
 
 /// The host socket is used only in a directory private to this user and

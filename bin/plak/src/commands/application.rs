@@ -497,7 +497,9 @@ impl PlakousApplication {
             }
             return CliFailure::classified(CliFailureKind::Auth, format!("{account}: {error}"))
                 .with_remedy(plakous_host_protocol::notice_remedy::NoticeRemedy::Login {
-                    account: plakous_host_protocol::notice_remedy::AccountTarget::Unspecified,
+                    account: plakous_host_protocol::notice_remedy::AccountTarget::from_account(
+                        &account.to_string(),
+                    ),
                 });
         }
         match native_provider(account) {

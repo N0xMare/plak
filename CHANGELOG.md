@@ -49,8 +49,11 @@ This release changes every persisted store at once (the 0.0.4 format cut), so
 a 0.0.4 build opens no 0.0.3 state; 0.0.3 sessions cross through `/reload` or
 an export.
 
-- State key `r27.e36.p36.t10` (runtime SQLite schema 27, runtime format epoch
-  36, product schema 36, agent tree schema 10; 0.0.3 used `r26.e34.p35.t9`).
+- State key `r27.e37.p37.t10` (runtime SQLite schema 27, runtime format epoch
+  37, product schema 37, agent tree schema 10; 0.0.3 used `r26.e34.p35.t9`).
+- Product schema 37 adds operator titles and archival state. Client protocol
+  5 adds explicit runner placement and directory lifecycle; runner protocol
+  4 adds workspace catalogs and per-session execution services.
 - Epoch 36: a prepared-call record no longer embeds its request's wire-input
   item list (about 166 bytes per item, every round); it stores the list's
   identity digest, so a long turn's records stop growing as rounds times

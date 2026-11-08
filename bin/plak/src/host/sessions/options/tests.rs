@@ -51,7 +51,7 @@ fn cached_picker_rows_finish_once_profiles_stay_ungated_and_workspace_checks_sta
             .unwrap();
         completed.sort();
         assert_eq!(completed, ["local", "unpaired-peer"]);
-        assert!(!options.profiles.rows.is_empty());
+        assert_ne!(options.profiles.rows, []);
         assert!(options.runners.iter().any(|row| row.runner.name == "peer"
             && matches!(row.status, wire::RunnerStatus::Blocked { .. })));
         if exists {

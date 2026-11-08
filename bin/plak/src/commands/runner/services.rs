@@ -20,11 +20,7 @@ type LocalDial = dyn Fn(
         std::sync::Arc<plakous::runner::WorkspaceCatalog>,
         tokio::runtime::Handle,
     ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<
-                    Output = Result<RunnerClient, plakous::runner::PlacementFailure>,
-                > + Send,
-        >,
+        Box<dyn Future<Output = Result<RunnerClient, plakous::runner::PlacementFailure>> + Send>,
     > + Send
     + Sync;
 

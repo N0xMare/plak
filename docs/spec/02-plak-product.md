@@ -3903,11 +3903,11 @@ latency, and nothing else. Prompt text never reaches a span.
 
 ### 4.4 Wire v2
 
-On protocol 4, directory attention takes precedence over activity:
-`awaiting_operator` means an unresolved approval or credential wait on any
+On protocol 5, directory attention is independent of activity:
+`needs_operator` means an unresolved approval or credential wait on any
 node, or a pending context-capacity decision, even while a turn runs.
-Clients must treat it as potentially running and submit `follow_up` (Queue),
-not infer idle and submit `prompt`. The row shape and protocol stay unchanged.
+Clients use the busy activity to submit `follow_up` (Queue), never infer
+idle merely from attention. Child and held-child counts cover the whole tree.
 
 Every protocol-5 NodeView carries its own required runner `{name,runner_id}`.
 Local is explicitly `{name:"local",runner_id:"local"}`. The saved node id is

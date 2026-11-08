@@ -189,7 +189,14 @@ impl Client {
     }
 
     fn rows(&mut self, id: RequestId) -> Vec<SessionRow> {
-        match self.request(id, Op::ListSessions { workspace: None }) {
+        match self.request(
+            id,
+            Op::ListSessions {
+                workspace: None,
+                runner: None,
+                include_archived: false,
+            },
+        ) {
             Outcome::Ok(Answer::Sessions { rows }) => rows,
             other => panic!("not listed: {other:?}"),
         }
@@ -207,12 +214,13 @@ impl Client {
         let accepted = self.request(
             id,
             Op::Intent {
+                client_id: Some(uuid::Uuid::new_v4().to_string().parse().unwrap()),
                 attachment,
                 intent: SessionIntent::Prompt(Draft::from(text)),
                 blobs: Vec::new(),
             },
         );
-        assert_eq!(accepted, Outcome::Ok(Answer::Accepted));
+        assert_eq!(accepted, Outcome::Ok(Answer::Accepted { duplicate: false }));
         loop {
             if let HostFrame::Event { observation, .. } = self.next()
                 && format!("{observation:?}").contains(answer)
@@ -228,6 +236,9 @@ const REQUEST: &str = "00000000-0000-4000-8000-0000000000a1";
 
 fn new_session(workspace: &std::path::Path) -> Op<Core> {
     Op::NewSession {
+        runner: plakous_host_protocol::wire::RunnerLabel::local(),
+        profile: None,
+        model: None,
         workspace: workspace.display().to_string(),
         template: None,
         request_id: REQUEST.into(),
@@ -291,7 +302,12 @@ fn a_client_creates_attaches_and_prompts_a_session_across_host_restarts() {
     client.prompt(5, attachment, "hello from the host test", ANSWER);
     let mut watcher = Client::connect(&host);
     assert!(matches!(
-        watcher.request(1, Op::WatchSessions),
+        watcher.request(
+            1,
+            Op::WatchSessions {
+                include_archived: false
+            }
+        ),
         Outcome::Ok(Answer::Watching { .. })
     ));
     let HostFrame::Directory {
@@ -1072,6 +1088,9 @@ fn a_new_session_that_cannot_be_made_creates_nothing() {
         client.request(
             1,
             Op::NewSession {
+                runner: plakous_host_protocol::wire::RunnerLabel::local(),
+                profile: None,
+                model: None,
                 workspace: fixture.workspace().display().to_string(),
                 template: None,
                 request_id: "not-a-uuid".into(),
@@ -1087,6 +1106,9 @@ fn a_new_session_that_cannot_be_made_creates_nothing() {
         client.request(
             3,
             Op::NewSession {
+                runner: plakous_host_protocol::wire::RunnerLabel::local(),
+                profile: None,
+                model: None,
                 workspace: fixture.workspace().display().to_string(),
                 template: Some("no-such-template".into()),
                 request_id: REQUEST.into(),
@@ -1120,6 +1142,9 @@ fn a_new_session_that_cannot_be_made_creates_nothing() {
     );
     let request_id = "00000000-0000-4000-8000-0000000000a3";
     let made = |template: Option<&str>| Op::NewSession {
+        runner: plakous_host_protocol::wire::RunnerLabel::local(),
+        profile: None,
+        model: None,
         workspace: fixture.workspace().display().to_string(),
         template: template.map(str::to_owned),
         request_id: request_id.into(),
@@ -1139,6 +1164,9 @@ fn a_new_session_that_cannot_be_made_creates_nothing() {
         client.request(
             9,
             Op::NewSession {
+                runner: plakous_host_protocol::wire::RunnerLabel::local(),
+                profile: None,
+                model: None,
                 workspace: file.display().to_string(),
                 template: None,
                 request_id: "00000000-0000-4000-8000-0000000000a2".into(),
@@ -1305,7 +1333,14 @@ fn a_tree_store_that_cannot_be_read_fails_the_directory() {
             [&node.tree_id],
         )
         .unwrap();
-    match client.request(2, Op::ListSessions { workspace: None }) {
+    match client.request(
+        2,
+        Op::ListSessions {
+            workspace: None,
+            runner: None,
+            include_archived: false,
+        },
+    ) {
         Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::SessionUnavailable {
             detail,
         }) => assert!(detail.contains("tree store"), "{detail}"),
@@ -1421,7 +1456,12 @@ fn a_stop_is_answered_after_its_attachment_detaches() {
             answered.insert(id, outcome);
         }
     }
-    assert_eq!(answered[&4], Outcome::Ok(Answer::Stopped));
+    assert_eq!(
+        answered[&4],
+        Outcome::Ok(Answer::Stopped {
+            runner_pending: false
+        })
+    );
     assert_eq!(answered[&5], Outcome::Ok(Answer::Detached));
 }
 

@@ -207,7 +207,9 @@ fn an_embedded_open_refuses_a_daemon_held_line_without_recording_a_terminal() {
                 session: session.clone()
             }
         ),
-        Outcome::Ok(Answer::Stopped)
+        Outcome::Ok(Answer::Stopped {
+            runner_pending: false
+        })
     );
     stopped(pid);
     stop(&mut host);
@@ -373,7 +375,9 @@ fn a_busy_roots_child_job_survives_attach_after_host_loss() {
             );
             assert_eq!(
                 client.request(2, Op::StopSession { session }),
-                Outcome::Ok(Answer::Stopped)
+                Outcome::Ok(Answer::Stopped {
+                    runner_pending: false
+                })
             );
             stopped(pid);
             stop(&mut host);

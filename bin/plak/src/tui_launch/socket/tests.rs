@@ -14,8 +14,10 @@ const NEXT: &str = "00000000-0000-4000-8000-000000000002";
 
 fn placement_options() -> plakous_host_protocol::wire::SessionOptions {
     use plakous_host_protocol::wire::{RunnerLabel, RunnerOptions, RunnerStatus, SessionOptions};
-    let mut profiles = plakous_host_protocol::views::ProfilesView::default();
-    profiles.current = Some("claude-default".into());
+    let profiles = plakous_host_protocol::views::ProfilesView {
+        current: Some("claude-default".into()),
+        ..plakous_host_protocol::views::ProfilesView::default()
+    };
     SessionOptions {
         runners: vec![RunnerOptions {
             runner: RunnerLabel {
@@ -32,7 +34,7 @@ fn placement_options() -> plakous_host_protocol::wire::SessionOptions {
             discovered_workspaces: Vec::new(),
             discovery_truncated: false,
         }],
-        models: Default::default(),
+        models: plakous_host_protocol::views::ReadyCatalog::default(),
         profiles,
         templates: Vec::new(),
         workspace: None,
@@ -72,9 +74,9 @@ fn remote_launch_uses_host_picker_identity_and_canonical_validation_without_fall
             } else {
                 WorkspaceOptions::Valid {
                     canonical_path: "/remote/work".into(),
-                    profiles: Default::default(),
+                    profiles: plakous_host_protocol::views::ProfilesView::default(),
                     templates: Vec::new(),
-                    models: Default::default(),
+                    models: plakous_host_protocol::views::ReadyCatalog::default(),
                 }
             });
             peer.answer(

@@ -201,7 +201,9 @@ fn a_recorded_stop_of_a_predecessor_never_dispatches_on_its_successor_head() {
                 session: session.clone()
             }
         ),
-        Outcome::Ok(Answer::Stopped)
+        Outcome::Ok(Answer::Stopped {
+            runner_pending: false
+        })
     );
     kill(&mut host);
     let paths = plak::home::paths::PlakPaths::explicit(fixture.home());

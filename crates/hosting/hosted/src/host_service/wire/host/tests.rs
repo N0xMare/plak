@@ -6,6 +6,8 @@ use plakous_host_protocol::{Core, SessionIntent, SessionObservation};
 use super::*;
 use crate::runtime::HostWorkerHandle;
 
+mod lifecycle;
+
 /// The frames written so far, shared between the connection and the test.
 #[derive(Clone, Default)]
 struct Out(Arc<Mutex<Vec<u8>>>);
@@ -115,6 +117,8 @@ fn row(session: &str, updated_at: u64) -> SessionRow {
 /// The stores as a test scripts them, and what the host asked of them.
 #[derive(Default)]
 struct Script {
+    active_workers: AtomicUsize,
+    lifecycle_mutations: AtomicUsize,
     lease: Mutex<Option<plakous::sessions::LeaseOnlyHead>>,
     processes: std::sync::atomic::AtomicBool,
     hold_mailbox: std::sync::atomic::AtomicBool,
@@ -174,6 +178,40 @@ impl Script {
 }
 
 impl HostSessions<Core> for Fake {
+    fn archive(&self, session: &str, archived: bool) -> Result<(), RequestRefusal> {
+        self.0.lifecycle_mutations.fetch_add(1, Ordering::SeqCst);
+        assert_eq!(
+            self.0.active_workers.load(Ordering::SeqCst),
+            0,
+            "lifecycle raced the resident worker"
+        );
+        if let Some(row) = self
+            .0
+            .rows
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .find(|row| row.session == session)
+        {
+            row.archived = archived;
+        }
+        Ok(())
+    }
+
+    fn delete(&self, session: &str, _abandon_children: bool) -> Result<(), RequestRefusal> {
+        self.0.lifecycle_mutations.fetch_add(1, Ordering::SeqCst);
+        assert_eq!(
+            self.0.active_workers.load(Ordering::SeqCst),
+            0,
+            "delete raced the resident worker"
+        );
+        self.0
+            .rows
+            .lock()
+            .unwrap()
+            .retain(|row| row.session != session);
+        Ok(())
+    }
     fn options(
         &self,
         _workspace: Option<&plakous_host_protocol::wire::WorkspaceProbe>,
@@ -303,6 +341,7 @@ impl HostSessions<Core> for Fake {
         let script = Arc::clone(&self.0);
         let lease = script.lease.lock().unwrap().take();
         let identity = session.to_owned();
+        script.active_workers.fetch_add(1, Ordering::SeqCst);
         let worker = HostWorkerHandle::spawn(move || {
             drop(observations);
             let mut stops = Vec::new();
@@ -353,6 +392,7 @@ impl HostSessions<Core> for Fake {
             if let Some(lease) = lease {
                 crate::runtime::test_kit::BlockOn::block(lease.release()).unwrap();
             }
+            script.active_workers.fetch_sub(1, Ordering::SeqCst);
             Ok(())
         });
         let tree = self
@@ -622,6 +662,7 @@ fn cancelled_reopen(mode: u8) {
                 attachment,
                 intent: SessionIntent::Prompt("busy".into()),
                 blobs: Vec::new(),
+                client_id: None,
             },
         );
     }
@@ -664,6 +705,7 @@ fn cancelled_reopen(mode: u8) {
             attachment,
             intent: SessionIntent::FollowUp("still served".into()),
             blobs: Vec::new(),
+            client_id: None,
         },
     );
     let until = Instant::now() + Duration::from_secs(2);
@@ -1727,9 +1769,7 @@ fn a_busy_session_awaiting_an_approval_independently_needs_an_operator() {
     assert_eq!(row_of(&host, "s1").activity, SessionActivity::Busy);
     // Attention does not replace activity; busy submissions still queue.
     let intent = match row_of(&host, "s1").activity {
-        SessionActivity::Busy => {
-            SessionIntent::FollowUp("queued".into())
-        }
+        SessionActivity::Busy => SessionIntent::FollowUp("queued".into()),
         _ => SessionIntent::Prompt("unexpected idle".into()),
     };
     request(
@@ -1739,6 +1779,7 @@ fn a_busy_session_awaiting_an_approval_independently_needs_an_operator() {
             attachment,
             intent,
             blobs: Vec::new(),
+            client_id: None,
         },
     );
     while fake.0.queued.load(Ordering::SeqCst) == 0 {
@@ -1768,7 +1809,12 @@ fn stop_session_stops_the_attached_session() {
         session: session.into(),
     };
     request(&mut connection, 1, stop("s1"));
-    assert_eq!(outcome(&out.take(), 1), Outcome::Ok(Answer::Stopped));
+    assert_eq!(
+        outcome(&out.take(), 1),
+        Outcome::Ok(Answer::Stopped {
+            runner_pending: false
+        })
+    );
     assert_eq!(fake.0.opens.load(Ordering::SeqCst), 0);
     request(&mut connection, 2, stop("nope"));
     assert_eq!(
@@ -1779,7 +1825,12 @@ fn stop_session_stops_the_attached_session() {
     attached(&out.take(), 3);
     // Attached to s1, a stop of dormant s2 leaves that attachment alone.
     request(&mut connection, 4, stop("s2"));
-    assert_eq!(outcome(&out.take(), 4), Outcome::Ok(Answer::Stopped));
+    assert_eq!(
+        outcome(&out.take(), 4),
+        Outcome::Ok(Answer::Stopped {
+            runner_pending: false
+        })
+    );
     request(&mut connection, 5, stop("s1"));
     assert_eq!(
         answer(&mut connection, &out, 5),

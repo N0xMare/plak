@@ -47,18 +47,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         user_echoed: bool,
         one_shot: Option<&mut super::super::oneshot::OneShotState>,
     ) -> CliResult<HostStep> {
-        if self
-            .role
-            .config
-            .store
-            .load(&self.role.config.session.id)
-            .map_err(CliFailure::new)?
-            .archived
-        {
-            let _ = self.role.events.notice(TranscriptRow::info(
-                NoticeScope::Session,
-                "session_archived: unarchive this session before admitting work",
-            ));
+        if self.refuse_archived_prompt()? {
             return Ok(HostStep::Continue);
         }
         let wake = queued_delivery
@@ -139,27 +128,43 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 .discard_undispatched_wake(intent, before_recovery, before_drain, stopped)
                 .await
         {
-            self.suppress_child_wake(None)?;
-            let _ = self.role.events.notice(
-                TranscriptRow::error(NoticeScope::Queue, error.message().to_owned())
-                    .with_optional_remedy(error.remedy()),
-            );
-            return Ok(HostStep::Continue);
+            return self.suppress_wake_error(&error);
         }
         if wake.is_some()
             && let Err(error) = outcome
         {
-            self.suppress_child_wake(None)?;
-            let _ = self.role.events.notice(
-                TranscriptRow::error(NoticeScope::Queue, error.message().to_owned())
-                    .with_optional_remedy(error.remedy()),
-            );
-            return Ok(HostStep::Continue);
+            return self.suppress_wake_error(&error);
         }
         outcome.map(|outcome| match outcome {
             PromptOutcome::Dispatched(step) => step,
             PromptOutcome::Stopped(_) | PromptOutcome::Refused => HostStep::Continue,
         })
+    }
+
+    fn suppress_wake_error(&mut self, error: &CliFailure) -> CliResult<HostStep> {
+        self.suppress_child_wake(None)?;
+        let _ = self.role.events.notice(
+            TranscriptRow::error(NoticeScope::Queue, error.message().to_owned())
+                .with_optional_remedy(error.remedy()),
+        );
+        Ok(HostStep::Continue)
+    }
+
+    fn refuse_archived_prompt(&self) -> CliResult<bool> {
+        let archived = self
+            .role
+            .config
+            .store
+            .load(&self.role.config.session.id)
+            .map_err(CliFailure::new)?
+            .archived;
+        if archived {
+            let _ = self.role.events.notice(TranscriptRow::info(
+                NoticeScope::Session,
+                "session_archived: unarchive this session before admitting work",
+            ));
+        }
+        Ok(archived)
     }
 
     /// Whether `delivery` is the idle prompt whose row the host echoed.

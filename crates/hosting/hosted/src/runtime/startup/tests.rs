@@ -416,7 +416,7 @@ fn unavailable_native_authority_names_its_login_remedy() {
 }
 
 #[test]
-fn named_runtime_credential_failures_keep_full_reference_and_unspecified_remedy() {
+fn named_runtime_credential_failures_keep_full_reference_and_exact_remedy() {
     use plakous_host_protocol::notice_remedy::{AccountTarget, NoticeRemedy};
     for account in ["claude/work", "codex/work", "grok/work"] {
         for failure in [
@@ -429,11 +429,10 @@ fn named_runtime_credential_failures_keep_full_reference_and_unspecified_remedy(
                 failure.remedy(),
                 Some(
                     NoticeRemedy::Login {
-                        account: AccountTarget::Unspecified
+                        account: AccountTarget::Named(named)
                     } | NoticeRemedy::RestoreAccountOrRebind {
-                        account: AccountTarget::Unspecified
-                    }
-                )
+                        account: AccountTarget::Named(named)
+                    }) if named.as_str() == account
             ));
         }
     }

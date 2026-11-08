@@ -1214,24 +1214,7 @@ pub(super) fn item_label_raw(
     let mut label = if let Some(label) = &plan.activity_action {
         label.clone()
     } else if let Some(facts) = wait {
-        let head = match verb {
-            ToolVerb::WaitAgent | ToolVerb::Agent => if running {
-                "Waiting for agents"
-            } else {
-                "Waited for agents"
-            }
-            .to_owned(),
-            _ => item_label(name, state, kind, Some(subject), None, plan),
-        };
-        let mut label = crate::tui::blocks::wait_label(head, running, facts);
-        if tool_is_failed(state)
-            && !tool_is_interrupted(state)
-            && let Some(reason) = tool_state_detail(state)
-        {
-            label.push_str(" · ");
-            label.push_str(reason);
-        }
-        label
+        wait_item_label(name, state, kind, subject, facts, plan)
     } else {
         let or_unknown = if subject.is_empty() {
             "(unknown)"
@@ -1313,6 +1296,39 @@ pub(super) fn item_label_raw(
         label.push_str(" · interrupted");
     }
     label.truncate(label.trim_end().len());
+    label
+}
+
+fn wait_item_label(
+    name: &str,
+    state: &str,
+    kind: ActivityKind,
+    subject: &str,
+    facts: &WaitFacts,
+    plan: &RowPlan,
+) -> String {
+    let running = tool_is_running(state) || plan.activity_running;
+    let verb = plan
+        .operation
+        .map(super::blocks::operation_verb)
+        .unwrap_or_else(|| subject_tool_verb(name, kind, Some(subject)));
+    let head = match verb {
+        ToolVerb::WaitAgent | ToolVerb::Agent => if running {
+            "Waiting for agents"
+        } else {
+            "Waited for agents"
+        }
+        .to_owned(),
+        _ => item_label(name, state, kind, Some(subject), None, plan),
+    };
+    let mut label = crate::tui::blocks::wait_label(head, running, facts);
+    if tool_is_failed(state)
+        && !tool_is_interrupted(state)
+        && let Some(reason) = tool_state_detail(state)
+    {
+        label.push_str(" · ");
+        label.push_str(reason);
+    }
     label
 }
 

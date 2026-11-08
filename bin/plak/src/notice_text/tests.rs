@@ -9,8 +9,8 @@ fn named_credential_refusals_never_render_a_default_account_remedy() {
     assert!(matches!(
         failure.remedy(),
         Some(NoticeRemedy::Login {
-            account: AccountTarget::Unspecified
-        })
+            account: AccountTarget::Named(named)
+        }) if named.as_str() == "claude/work"
     ));
     for frontend in [Frontend::Run, Frontend::Jsonl, Frontend::Tui] {
         let text = remedy_text(
@@ -20,7 +20,7 @@ fn named_credential_refusals_never_render_a_default_account_remedy() {
                 session_id: None,
             },
         );
-        assert!(!text.contains("plak login claude"), "{text}");
+        assert!(text.contains("plak login claude/work"), "{text}");
         assert!(!text.contains("plak login codex"), "{text}");
         assert!(!text.contains("plak login grok"), "{text}");
     }
@@ -296,8 +296,8 @@ fn named_account_remedies_never_suggest_the_default_slot() {
         ("openai/work", "plak key set openai/work"),
     ] {
         let target = AccountTarget::from_account(account);
-        assert_eq!(super::credential_command(target), command);
-        assert_eq!(super::account_label(target), account);
+        assert_eq!(credential_command(target), command);
+        assert_eq!(account_label(target), account);
     }
 }
 

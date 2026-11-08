@@ -470,14 +470,14 @@ pub async fn coding_session_runtime_binding(
     spec: ProductAgentSpec,
     stderr: &mut (dyn Write + Send),
 ) -> CliResult<SessionRuntimeBinding> {
-    coding_session_runtime_binding_for(
+    Box::pin(coding_session_runtime_binding_for(
         spec,
         stderr,
         false,
         SessionToolFence::Full,
         crate::topology_runtime::TopologyHubAttach::LookupOnly,
         &mut None,
-    )
+    ))
     .await
 }
 
@@ -487,14 +487,14 @@ pub async fn coding_session_runtime_binding_attaching_root(
     spec: ProductAgentSpec,
     stderr: &mut (dyn Write + Send),
 ) -> CliResult<SessionRuntimeBinding> {
-    coding_session_runtime_binding_for(
+    Box::pin(coding_session_runtime_binding_for(
         spec,
         stderr,
         false,
         SessionToolFence::Full,
         crate::topology_runtime::TopologyHubAttach::AttachRoot,
         &mut None,
-    )
+    ))
     .await
 }
 
@@ -506,14 +506,14 @@ pub(crate) async fn coding_session_runtime_binding_with_attach(
     attach: crate::topology_runtime::TopologyHubAttach,
     attached_tree: &mut Option<String>,
 ) -> CliResult<SessionRuntimeBinding> {
-    coding_session_runtime_binding_for(
+    Box::pin(coding_session_runtime_binding_for(
         spec,
         stderr,
         false,
         SessionToolFence::Full,
         attach,
         attached_tree,
-    )
+    ))
     .await
 }
 

@@ -397,7 +397,20 @@ impl HostSessions<PlakExtension> for ProductSessions {
                 holder.pid
             )));
         }
-        let roots = self.services.state_roots()?;
+        let context = if record.runner.is_some() {
+            self.services
+                .paths()?
+                .for_remote_workspace(&record.workspace_root)
+        } else {
+            self.services.paths()?.for_workspace(&record.workspace_root)
+        };
+        let roots = self.services.state_roots_on(
+            &context,
+            record
+                .runner
+                .as_ref()
+                .map_or("local", |runner| runner.runner_id.as_str()),
+        )?;
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -407,6 +420,31 @@ impl HostSessions<PlakExtension> for ProductSessions {
             store.as_ref(),
             &mut record,
         ))
+    }
+
+    fn runner_pending(&self, session: &str) -> bool {
+        let roots = (|| -> CliResult<_> {
+            let record = self
+                .services
+                .session_records()?
+                .load(session)
+                .map_err(CliFailure::new)?;
+            let context = if record.runner.is_some() {
+                self.services
+                    .paths()?
+                    .for_remote_workspace(&record.workspace_root)
+            } else {
+                self.services.paths()?.for_workspace(&record.workspace_root)
+            };
+            self.services.state_roots_on(
+                &context,
+                record
+                    .runner
+                    .as_ref()
+                    .map_or("local", |runner| runner.runner_id.as_str()),
+            )
+        })();
+        roots.map_or(true, |roots| roots.runner_pending())
     }
 
     fn refusal(&self, session: &str, failure: &CliFailure) -> RequestRefusal {
@@ -756,9 +794,8 @@ mod tests {
             .unwrap();
         let product =
             ProductSessions::new(&services, None, Some(runtime.handle().clone())).unwrap();
-        let failure = match product.open(&record.id) {
-            Ok(_) => panic!("an unready local daemon must not admit a direct runtime"),
-            Err(failure) => failure,
+        let Err(failure) = product.open(&record.id) else {
+            panic!("an unready local daemon must not admit a direct runtime");
         };
         assert!(
             matches!(

@@ -66,8 +66,8 @@ mod tests {
             runner: Some(plakous_hosted::sessions::RunnerDisplay {
                 name: "peer".into(),
                 runner_id: "peer-id".into(),
-                workspace_root: root.path().display().to_string(),
-                workspace_cwd: root.path().display().to_string(),
+                workspace_root: root.path().to_path_buf(),
+                workspace_cwd: root.path().to_path_buf(),
             }),
             id: "fixture".into(),
             account: None,

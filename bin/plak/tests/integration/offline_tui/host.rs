@@ -65,7 +65,11 @@ impl Directory {
     }
 
     fn rows(&mut self) -> Vec<Value> {
-        self.request(Op::ListSessions { workspace: None })["ok"]["rows"]
+        self.request(Op::ListSessions {
+            workspace: None,
+            runner: None,
+            include_archived: false,
+        })["ok"]["rows"]
             .as_array()
             .unwrap()
             .clone()
