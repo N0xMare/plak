@@ -124,6 +124,11 @@ pub(crate) fn list(config: &ProductConfig, home: &Path) -> ProfilesView {
 /// An unknown or unreadable profile, a missing template, or a config the
 /// product would refuse.
 pub(crate) fn prepare(config: &ProductConfig, home: &Path, name: &str) -> Result<Prepared, String> {
+    // CLI selection shares exact catalog lookup with wire creation, then
+    // additionally permits the documented CLI aliases and diagnostics.
+    if let Ok(prepared) = prepare_wire(config, home, name) {
+        return Ok(prepared);
+    }
     let resolved = resolve(config, home, name)?;
     prepare_resolved(config, resolved)
 }
