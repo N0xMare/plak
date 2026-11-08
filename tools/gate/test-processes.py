@@ -104,6 +104,9 @@ class ProcessTable:
                         "test process guard requires lsof on this platform"
                     ) from None
                 return False
+            except PermissionError:
+                # Same-uid protected services can also deny proc cwd reads.
+                return False
             except (OSError, subprocess.SubprocessError) as error:
                 if not self.warned:
                     print(f"test process inspection unavailable: {error}", file=sys.stderr)

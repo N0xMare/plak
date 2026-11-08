@@ -283,6 +283,17 @@ class TestProcessGuardTests(unittest.TestCase):
         read.assert_not_called()
         self.assertFalse(table.warned)
 
+    def test_protected_same_uid_cwd_is_skipped_without_a_warning(self):
+        process = MODULE.Process(410001, 1, 'protected', None)
+        table = MODULE.ProcessTable()
+        with (
+            patch.object(MODULE.sys, 'platform', 'linux'),
+            patch.object(MODULE.os, 'lstat', return_value=SimpleNamespace(st_uid=os.getuid())),
+            patch.object(MODULE.os, 'readlink', side_effect=PermissionError('protected')),
+        ):
+            self.assertFalse(table.inside(process, Path('/scoped-fixture')))
+        self.assertFalse(table.warned)
+
     def test_stale_run_leak_is_reaped_without_failing_the_new_command(self):
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary).resolve()
