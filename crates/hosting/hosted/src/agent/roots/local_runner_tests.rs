@@ -52,7 +52,7 @@ async fn an_unresolvable_child_refuses_embedded_daemon_inspection_with_a_remedy(
         // A missing daemon has no ownership to inspect. The same tree must
         // fail closed once a daemon answers, even when it reports no jobs.
         roots.refuse_daemon_tree(root, &tree_id).await.unwrap();
-        let daemon = inspection_daemon(home.path()).await;
+        let daemon = inspection_daemon(home.path());
         let failure = roots.refuse_daemon_tree(root, &tree_id).await.unwrap_err();
         assert_eq!(failure.exit_code(), 7, "{}", failure.message());
         assert_eq!(failure.code(), Some("local_runner_inspection"));
@@ -90,7 +90,7 @@ fn inspection_socket(home: &std::path::Path) -> std::path::PathBuf {
     ))
 }
 
-async fn inspection_daemon(home: &std::path::Path) -> tokio::task::JoinHandle<()> {
+fn inspection_daemon(home: &std::path::Path) -> tokio::task::JoinHandle<()> {
     use plakous::runner::protocol::VersionTriple;
     use plakous::runner::{RunnerIdentity, RunnerOptions, RunnerService};
     use plakous::tools::{
