@@ -4000,9 +4000,14 @@ per page. No cursor holds a SQLite transaction. A terminal truncated page is
 not a complete inventory. Cached/bundled model pages never fetch or repair a
 catalog, never confer admission, and leave an unknown capture time null.
 
-Same-user sockets are trusted for config reads by default. Existing remote
-settings/profile-default intents remain unchanged in P6; P7 owns their
-write-authority cut.
+Welcome reports face-effective accounts/config read capability, configured
+switches and the same immutable limits enforced by dispatch. Web switches are
+home-only, default false and restart-bound. Same-user sockets are trusted by
+default. An unreadable startup configuration grants neither web capability
+and emits one content-free diagnostic; it does not block the non-web session
+directory. Web endpoint startup still refuses malformed configuration.
+Existing remote settings/profile-default intents remain unchanged in
+P6; P7 owns their write-authority cut.
 
 Protocol 6 carries attachment-free product requests as
 `{"frame":"request","id":7,"op":{"op":"host","request":...}}` and

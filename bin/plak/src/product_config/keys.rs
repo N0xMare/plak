@@ -300,6 +300,9 @@ pub enum ConfigField {
     WebAllow,
     /// `[web] origin`.
     WebOrigin,
+    /// Attachment-free web console reads; home-only, captured at host start.
+    WebAccountsRead,
+    WebConfigRead,
 }
 
 impl ConfigField {
@@ -321,6 +324,8 @@ impl ConfigField {
                 | Self::ResumeAfterLoss
                 | Self::WebAllow
                 | Self::WebOrigin
+                | Self::WebAccountsRead
+                | Self::WebConfigRead
         )
     }
 
@@ -334,6 +339,8 @@ impl ConfigField {
                     | Self::ResumeAfterLoss
                     | Self::WebAllow
                     | Self::WebOrigin
+                    | Self::WebAccountsRead
+                    | Self::WebConfigRead
             )
     }
 }
@@ -700,6 +707,24 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         constraint: "https://<host>[:port], nothing after it; home-scoped",
         doc: "The exact origin tailscale serve publishes plak host --web at; every request must name its host and a WebSocket upgrade its origin. Read when plak host starts with --web; a 0.0.3 build refuses a config.toml that sets it.",
         example: "\"https://host.example.ts.net\"",
+        scope: ConfigScope::Immediate,
+    },
+    ConfigKey {
+        path: "web.accounts_read",
+        field: ConfigField::WebAccountsRead,
+        kind: "bool",
+        constraint: "true or false; home-scoped; host restart required",
+        doc: "Allow admitted web principals to read home account status and usage. Same-user sockets are trusted independently. Captured at host startup; restart to change it.",
+        example: "false",
+        scope: ConfigScope::Immediate,
+    },
+    ConfigKey {
+        path: "web.config_read",
+        field: ConfigField::WebConfigRead,
+        kind: "bool",
+        constraint: "true or false; home-scoped; host restart required",
+        doc: "Allow admitted web principals to read home profiles, templates and allowlisted configuration. Same-user sockets are trusted independently. Captured at host startup; restart to change it.",
+        example: "false",
         scope: ConfigScope::Immediate,
     },
 ];

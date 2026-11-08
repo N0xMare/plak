@@ -768,11 +768,22 @@ widens it.
 ### 2.10 The web endpoint
 
 P6 console reads are attachment-free home observations, never authority to
-admit a session, model, template or credential. Configuration reads retain
+admit a session, model, template or credential. Admitted web principals require
+the corresponding startup-captured `web.accounts_read` or `web.config_read`;
+denial precedes selector lookup or file/provider access. Welcome, dispatch and
+served-UI policy share those same captured switches. Configuration reads retain
 bounded home-only bytes through no-follow directory handles; client IDs select
 exact entries, never paths. Template hook/environment literals are withheld
 markers, not round-trip secrets. Etags are generation-salted content identities,
 not write authority. Catalog metadata never refreshes, logs in or opens sessions.
+
+If either web console read switch is enabled, a served UI must carry an
+enforced CSP with no unsafe-inline/eval, same-origin connection sources,
+Trusted Types for script, no framing/objects/base URLs, and restricted script
+sources (same-origin or nonce/hash authority). Reviewed WASM may use only
+`wasm-unsafe-eval`. Cold load and every reload validate this same captured
+policy; an invalid reload retains the previous immutable files-and-CSP build.
+A report-only header is insufficient. A headless host serves no document.
 
 Protocol-5 placement/options metadata is authenticated operator information,
 not a trust grant or permission to execute a probe's workspace. Picker reads

@@ -162,6 +162,7 @@ REVIEWED_REFERENCES: dict[str, tuple[frozenset[str], str]] = {
 EXCLUDED_READERS = {
     "bin/plak/src/product_config/tests.rs": "docs/spec/07-config-reference.md",
     "bin/plak/src/host/console/definitions/settings.rs": "docs/spec/07-config-reference.md",
+    "bin/plak/src/host/console/limits.rs": "docs/spec/07-config-reference.md",
 }
 # Allowlisted paths, their path components and Markdown globs. Bare component
 # literals catch path joins such as `.join("docs").join("user-guide")` and

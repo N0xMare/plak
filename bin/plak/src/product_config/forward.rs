@@ -99,6 +99,8 @@ impl ProductConfig {
         let web = [
             (ConfigField::WebAllow, "[web] allow"),
             (ConfigField::WebOrigin, "[web] origin"),
+            (ConfigField::WebAccountsRead, "[web] accounts_read"),
+            (ConfigField::WebConfigRead, "[web] config_read"),
         ];
         let set = web.iter().filter(|(field, _)| self.present.contains(field));
         let before = keys.len();

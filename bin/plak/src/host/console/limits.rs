@@ -49,3 +49,29 @@ pub(super) fn welcome(limits: &HostReadLimits) -> ConsoleLimits {
 fn milliseconds(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn welcome_limits_match_the_documented_enforced_defaults()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let spec = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../docs/spec/07-config-reference.md"),
+        )?;
+        let value = serde_json::to_value(welcome(&admission()))?;
+        let limits = value.as_object().ok_or("limits object")?;
+        assert_eq!(limits.len(), 17);
+        for (key, value) in limits {
+            let number = value.as_u64().ok_or("integer limit")?;
+            assert!(
+                spec.lines()
+                    .any(|line| line.starts_with(&format!("| `{key}` | `{number}` |"))),
+                "{key} default must match spec 07"
+            );
+        }
+        Ok(())
+    }
+}

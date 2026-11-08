@@ -78,11 +78,23 @@ impl ProductSessions {
     ) -> CliResult<Self> {
         let tree =
             crate::store::tree::open_tree_store(services.paths()?).map_err(CliFailure::new)?;
+        let (web_accounts_read, web_config_read) =
+            crate::product_config::ProductConfig::console_switches(services.paths()?)
+                .unwrap_or_else(|_| {
+                    eprintln!(
+                        "plak host: unreadable console configuration; web console reads disabled"
+                    );
+                    (false, false)
+                });
         Ok(Self {
             console: super::console::Console::new(
                 services.paths()?.clone(),
                 services.home().state()?.to_path_buf(),
                 runtime.clone(),
+                plakd_wire_types::console::ConfiguredSwitches {
+                    web_accounts_read,
+                    web_config_read,
+                },
             ),
             runtime: runtime.clone(),
             placement: Box::new(placement::RegistryPlacement {
@@ -94,6 +106,10 @@ impl ProductSessions {
             product: Mutex::new(None),
             tree,
         })
+    }
+
+    pub(super) fn console_switches(&self) -> plakd_wire_types::console::ConfiguredSwitches {
+        self.console.switches()
     }
 
     fn stop_roots(
@@ -340,7 +356,7 @@ impl HostSessions<PlakExtension> for ProductSessions {
         principal: &plakous_hosted::host_service::wire::HostPrincipal,
         limits: &plakous_hosted::host_service::wire::HostReadLimits,
     ) -> <PlakExtension as plakous_host_protocol::ProtocolExtension>::WelcomeExtension {
-        Some(super::console::Console::welcome(principal, limits))
+        Some(self.console.welcome(principal, limits))
     }
     fn host_request(
         &self,
@@ -1023,6 +1039,13 @@ mod tests {
         records.save(&mut broken).unwrap();
         std::fs::write(paths.config_file(), "[invalid").unwrap();
         let product = ProductSessions::new(&services, None, None).unwrap();
+        assert_eq!(
+            product.console_switches(),
+            plakd_wire_types::console::ConfiguredSwitches {
+                web_accounts_read: false,
+                web_config_read: false
+            }
+        );
         let rows = product.rows(None, None, false).unwrap();
         assert_eq!(rows.len(), 2);
         for row in rows {

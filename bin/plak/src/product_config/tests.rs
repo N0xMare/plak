@@ -233,14 +233,14 @@ fn trusted_project_cannot_override_home_orchestration() {
     let (_temp, project, paths) = project_fixture();
     fs::write(
         paths.config_file(),
-        "[orchestration]\nsubagents = false\nmax_depth = 2\nmax_children = 3\nmax_nodes = 8\nmax_attempts = 12\ntransient_resumes = 0\nmax_concurrent_requests_per_account = 3\nrequire_review_evidence = true\n[turn]\nauto_continue = false\n[tui]\nreload_requests = false\n[mcp]\nclient_id_metadata_url = \"https://home.example/plak/client.json\"\n[host]\nresume_after_loss = \"hold\"\n[web]\nallow = [\"home@example.com\"]\norigin = \"https://home.example.ts.net\"\n",
+        "[orchestration]\nsubagents = false\nmax_depth = 2\nmax_children = 3\nmax_nodes = 8\nmax_attempts = 12\ntransient_resumes = 0\nmax_concurrent_requests_per_account = 3\nrequire_review_evidence = true\n[turn]\nauto_continue = false\n[tui]\nreload_requests = false\n[mcp]\nclient_id_metadata_url = \"https://home.example/plak/client.json\"\n[host]\nresume_after_loss = \"hold\"\n[web]\nallow = [\"home@example.com\"]\norigin = \"https://home.example.ts.net\"\naccounts_read = false\nconfig_read = false\n",
     )
     .unwrap();
     let home = project_home(&project);
     fs::create_dir_all(&home).unwrap();
     fs::write(
         home.join("config.toml"),
-        "[orchestration]\nsubagents = true\nmax_depth = 4\nmax_children = 8\nmax_nodes = 32\nmax_attempts = 64\ntransient_resumes = 2\nmax_concurrent_requests_per_account = 9\nrequire_review_evidence = false\n[turn]\nauto_continue = true\n[tui]\nmouse = false\nreload_requests = true\n[mcp]\nclient_id_metadata_url = \"https://project.example/client.json\"\n[host]\nresume_after_loss = \"continue\"\n[runners.buildbox]\nssh = \"buildbox\"\ncommand = \"/opt/bin/plak\"\n[web]\nallow = [\"repo@example.com\"]\norigin = \"https://repo.example.ts.net\"\n",
+        "[orchestration]\nsubagents = true\nmax_depth = 4\nmax_children = 8\nmax_nodes = 32\nmax_attempts = 64\ntransient_resumes = 2\nmax_concurrent_requests_per_account = 9\nrequire_review_evidence = false\n[turn]\nauto_continue = true\n[tui]\nmouse = false\nreload_requests = true\n[mcp]\nclient_id_metadata_url = \"https://project.example/client.json\"\n[host]\nresume_after_loss = \"continue\"\n[runners.buildbox]\nssh = \"buildbox\"\ncommand = \"/opt/bin/plak\"\n[web]\nallow = [\"repo@example.com\"]\norigin = \"https://repo.example.ts.net\"\naccounts_read = true\nconfig_read = true\n",
     )
     .unwrap();
     project_trust::trust(&paths, project.path()).unwrap();

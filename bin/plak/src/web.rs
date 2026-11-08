@@ -64,12 +64,20 @@ impl WebEndpoint {
         host: Arc<SessionHost<PlakExtension>>,
         stop: StopProbe,
         reload: tokio::signal::unix::Signal,
+        console_switches: plakd_wire_types::console::ConfiguredSwitches,
     ) -> CliResult<Self> {
         let listen = Listen::parse(&args.listen).map_err(CliFailure::new)?;
         let paths = services.paths()?;
         let config = ProductConfig::load(paths).map_err(CliFailure::new)?;
         let access = access(&listen, &config, args.dev_login.clone())?;
-        let ui = args.ui.as_deref().map(ui::Builds::load).transpose()?;
+        // Capture the same immutable switches used by host enforcement and
+        // welcome; rereading config here must not weaken the UI's CSP.
+        let console = console_switches.web_accounts_read || console_switches.web_config_read;
+        let ui = args
+            .ui
+            .as_deref()
+            .map(|root| ui::Builds::load(root, console))
+            .transpose()?;
         let gate = auth::Gate::new(access, auth::CookieKey::load_or_create(paths)?);
         let (listener, socket_file) = listen::bind(&listen).await?;
         Ok(Self {

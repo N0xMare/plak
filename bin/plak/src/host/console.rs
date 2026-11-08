@@ -36,6 +36,7 @@ pub(super) struct Console {
     pages: Mutex<pages::Pages>,
     provider: Arc<tokio::sync::Semaphore>,
     definition_nonce: [u8; 16],
+    switches: ConfiguredSwitches,
 }
 
 pub(super) fn admission_limits() -> HostReadLimits {
@@ -47,6 +48,7 @@ impl Console {
         paths: PlakPaths,
         state: std::path::PathBuf,
         runtime: Option<tokio::runtime::Handle>,
+        switches: ConfiguredSwitches,
     ) -> Arc<Self> {
         Arc::new(Self {
             paths,
@@ -55,13 +57,14 @@ impl Console {
             pages: Mutex::default(),
             provider: Arc::new(tokio::sync::Semaphore::new(limits::PROVIDER_READS)),
             definition_nonce: *uuid::Uuid::new_v4().as_bytes(),
+            switches,
         })
     }
 
-    pub fn welcome(principal: &HostPrincipal, limits: &HostReadLimits) -> HostWelcome {
+    pub fn welcome(&self, principal: &HostPrincipal, limits: &HostReadLimits) -> HostWelcome {
         let socket = matches!(principal, HostPrincipal::Socket(_));
-        let accounts = socket;
-        let config = socket;
+        let accounts = socket || self.switches.web_accounts_read;
+        let config = socket || self.switches.web_config_read;
         HostWelcome {
             console: ConsoleWelcome {
                 face: if socket {
@@ -80,10 +83,7 @@ impl Console {
                     disabled_reason: (!config).then_some(DisabledReason::Configuration),
                     remedy: (!config).then_some(CapabilityRemedy::EnableWebConfigReadAndRestart),
                 },
-                configured_switches: ConfiguredSwitches {
-                    web_accounts_read: false,
-                    web_config_read: false,
-                },
+                configured_switches: self.switches,
                 limits: limits::welcome(limits),
             },
         }
@@ -95,7 +95,12 @@ impl Console {
         request: HostRequest,
     ) -> HostReadTask<PlakExtension> {
         let accounts = is_account_request(&request);
-        let permitted = matches!(context.principal, HostPrincipal::Socket(_));
+        let permitted = matches!(context.principal, HostPrincipal::Socket(_))
+            || if accounts {
+                self.switches.web_accounts_read
+            } else {
+                self.switches.web_config_read
+            };
         if !permitted {
             let capability = if accounts {
                 ConsoleCapability::AccountsRead
@@ -127,6 +132,10 @@ impl Console {
                 )))
             })
         })
+    }
+
+    pub(super) const fn switches(&self) -> ConfiguredSwitches {
+        self.switches
     }
 
     async fn read(

@@ -14,6 +14,8 @@ use hyper::{Method, Request, Response, StatusCode};
 use plakous_hosted::error::{CliFailure, CliResult};
 use serde::Deserialize;
 
+mod csp;
+
 /// The largest file the UI serves.
 const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
 /// The most files, and bytes in all, a build may hold.
@@ -50,13 +52,15 @@ pub(crate) struct Ui {
 pub(crate) struct Builds {
     root: PathBuf,
     current: RwLock<Arc<Ui>>,
+    console: bool,
 }
 
 impl Builds {
-    pub(crate) fn load(root: &Path) -> CliResult<Self> {
+    pub(crate) fn load(root: &Path, console: bool) -> CliResult<Self> {
         Ok(Self {
             root: root.to_path_buf(),
-            current: RwLock::new(Arc::new(Ui::load(root)?)),
+            current: RwLock::new(Arc::new(Ui::load(root, console)?)),
+            console,
         })
     }
 
@@ -65,7 +69,7 @@ impl Builds {
     }
 
     pub(crate) fn reload(&self) -> CliResult<()> {
-        let next = Arc::new(Ui::load(&self.root)?);
+        let next = Arc::new(Ui::load(&self.root, self.console)?);
         *self.current.write().unwrap_or_else(PoisonError::into_inner) = next;
         Ok(())
     }
@@ -88,7 +92,7 @@ impl Ui {
     ///
     /// A directory that does not exist; a missing or malformed CSP, or one
     /// that allows framing; a build past its file or byte caps.
-    pub(crate) fn load(root: &Path) -> CliResult<Self> {
+    pub(crate) fn load(root: &Path, console: bool) -> CliResult<Self> {
         let root = std::fs::canonicalize(root).map_err(|_| {
             CliFailure::new(format!(
                 "plak host --web: no UI directory {}",
@@ -106,6 +110,11 @@ impl Ui {
         if !forbids_framing(&file.header) {
             return Err(CliFailure::new(
                 "plak host --web: csp.json's header must carry frame-ancestors 'none'",
+            ));
+        }
+        if console && !csp::console_policy(&file.header) {
+            return Err(CliFailure::new(
+                "plak host --web: console reads require a restrictive enforced CSP: scripts without unsafe-inline/eval, connect-src 'self', require-trusted-types-for 'script', frame-ancestors 'none', object-src 'none', base-uri 'none'",
             ));
         }
         let value = |text: &str| {

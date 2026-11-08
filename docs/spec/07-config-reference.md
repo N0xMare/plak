@@ -270,6 +270,8 @@ repository can never grant web access.
 | `host.resume_after_loss` | enum | `(unset)` | hold\|continue; unset holds; home-scoped | Whether the root and the sub-agents whose host was lost (a crash, a lease loss) hold for the operator's Resume or continue once by themselves with a new instruction turn, the root's restored queue draining too (chapter 03 §14.1). Read when the root attaches and opens, and by plak host's start scan, which under continue opens a session whose root's loss is held; a released 0.0.3 build (or older) refuses a config.toml that sets it. |
 | `web.allow` | array of string | `(unset)` | tailnet logins, no duplicates; unset admits no one; home-scoped | The tailnet logins (Tailscale-User-Login) plak host --web admits through tailscale serve. Read when plak host starts with --web; a 0.0.3 build refuses a config.toml that sets it. |
 | `web.origin` | string | `(unset)` | https://<host>[:port], nothing after it; home-scoped | The exact origin tailscale serve publishes plak host --web at; every request must name its host and a WebSocket upgrade its origin. Read when plak host starts with --web; a 0.0.3 build refuses a config.toml that sets it. |
+| `web.accounts_read` | bool | `false` | true or false; home-scoped; host restart required | Allow admitted web principals to read home account status and usage. Same-user sockets are trusted independently. Captured at host startup; restart to change it. |
+| `web.config_read` | bool | `false` | true or false; home-scoped; host restart required | Allow admitted web principals to read home profiles, templates and allowlisted configuration. Same-user sockets are trusted independently. Captured at host startup; restart to change it. |
 
 Telemetry retention applies to schema 22's frozen terminal facts as well as
 diagnostic rows. Recorded console values are measured retained subtotals,
@@ -327,6 +329,38 @@ The workspace writer mode is fixed at `single_lease` and the Code Mode cell
 spawn budget is fixed at 8; neither is a config key any more, and a file that
 still carries `occupancy` or `max_agents_per_cell` gets the named removal
 error in §5.
+
+### Console read limits
+
+The console welcome advertises these enforced defaults (byte counts are
+encoded bytes; durations are milliseconds). They are product limits, not
+additional configuration keys. Capability denial happens before work;
+capacity and rate refusals do not open a session or close the connection.
+
+| welcome limit | default | meaning |
+| --- | --- | --- |
+| `max_request_bytes` | `65536` | Pre-decode request bound. |
+| `max_response_bytes` | `262144` | Private response bound. |
+| `max_definition_bytes` | `262144` | Retained source-file bound. |
+| `page_rows` | `100` | Default and maximum; explicit limits must be 1 through 100. |
+| `dependency_bytes` | `8388608` | Aggregate retained definition bytes and snapshot budget. |
+| `dependency_definitions` | `512` | Scan entries, including rejected names. |
+| `message_rate_per_second` | `12` | Principal-wide console message rate. |
+| `message_burst` | `12` | Principal-wide burst, not reset by reconnect. |
+| `inflight_per_connection` | `2` | Pending reads per connection. |
+| `inflight_per_principal` | `4` | Pending reads across a principal's connections. |
+| `inflight_host` | `32` | Pending reads across the host. |
+| `provider_reads_inflight_host` | `1` | Console allowance GET concurrency. |
+| `provider_deadline_ms` | `5000` | Console provider read deadline. |
+| `request_deadline_ms` | `10000` | Whole-request deadline, with late results dropped. |
+| `usage_cache_ms` | `30000` | Exact-fenced console observation freshness. |
+| `usage_reread_ms` | `30000` | Suggested explicit refresh interval, not automatic retry. |
+| `cursor_ttl_ms` | `30000` | Immutable page-snapshot lifetime. |
+
+Diagnostics retain at most 32 entries, each with at most 512 encoded message
+bytes. At most 32 page snapshots share the host's 8 MiB snapshot budget.
+Legacy per-session usage reads keep their own fresh-read and 60 s aging law;
+the console may consume their observations, never the reverse.
 
 ### Host console read applicability
 

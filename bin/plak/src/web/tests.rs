@@ -116,11 +116,46 @@ fn ui_dir() -> tempfile::TempDir {
     dir
 }
 
+#[test]
+fn console_csp_is_enforced_on_cold_load_and_every_reload_without_replacing_a_good_build() {
+    let dir = ui_dir();
+    assert!(
+        Ui::load(dir.path(), true).is_err(),
+        "legacy CSP is not sufficient for console data"
+    );
+    let policy = "default-src 'self'; connect-src 'self'; require-trusted-types-for 'script'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'";
+    std::fs::write(
+        dir.path().join("csp.json"),
+        serde_json::json!({"header":policy}).to_string(),
+    )
+    .unwrap();
+    let builds = super::ui::Builds::load(dir.path(), true).unwrap();
+    let current = builds.snapshot();
+    let weak = "default-src 'self'; frame-ancestors 'none'";
+    std::fs::write(
+        dir.path().join("csp.json"),
+        serde_json::json!({"header":weak,"report_only_header":policy}).to_string(),
+    )
+    .unwrap();
+    assert!(
+        builds.reload().is_err(),
+        "report-only cannot replace enforced policy"
+    );
+    assert!(Arc::ptr_eq(&current, &builds.snapshot()));
+    assert_eq!(
+        header(
+            &get(&builds.snapshot(), "/", &[]),
+            "content-security-policy"
+        ),
+        Some(policy)
+    );
+}
+
 #[tokio::test]
 async fn ui_reload_swaps_files_and_policy_together_and_keeps_old_build_on_failure() {
     use http_body_util::BodyExt as _;
     let dir = ui_dir();
-    let builds = super::ui::Builds::load(dir.path()).unwrap();
+    let builds = super::ui::Builds::load(dir.path(), false).unwrap();
     let old = builds.snapshot();
     let policy = "default-src 'none'; frame-ancestors 'none'";
     std::fs::write(dir.path().join("index.html"), "new build").unwrap();
@@ -154,7 +189,7 @@ async fn ui_reload_swaps_files_and_policy_together_and_keeps_old_build_on_failur
         r#"{"header":"frame-ancestors 'none'","unexpected":true}"#,
     ] {
         std::fs::write(dir.path().join("csp.json"), invalid).unwrap();
-        assert!(Ui::load(dir.path()).is_err());
+        assert!(Ui::load(dir.path(), false).is_err());
         assert!(builds.reload().is_err());
         assert!(Arc::ptr_eq(&current, &builds.snapshot()));
     }
@@ -165,7 +200,7 @@ async fn ui_reload_swaps_files_and_policy_together_and_keeps_old_build_on_failur
     .unwrap();
     let huge = std::fs::File::create(dir.path().join("large.js")).unwrap();
     huge.set_len(32 * 1024 * 1024 + 1).unwrap();
-    assert!(Ui::load(dir.path()).is_err());
+    assert!(Ui::load(dir.path(), false).is_err());
     assert!(builds.reload().is_err());
     assert!(Arc::ptr_eq(&current, &builds.snapshot()));
 }
@@ -198,7 +233,7 @@ fn header<'a>(
 #[test]
 fn static_files_carry_their_cache_rules_and_security_headers() {
     let dir = ui_dir();
-    let ui = Ui::load(dir.path()).unwrap();
+    let ui = Ui::load(dir.path(), false).unwrap();
     let asset = get(&ui, "/_app/immutable/a.js", &[]);
     assert_eq!(
         header(&asset, "cache-control"),
@@ -254,7 +289,7 @@ fn static_files_carry_their_cache_rules_and_security_headers() {
 #[test]
 fn a_stray_service_worker_gets_the_kill_switch() {
     let dir = ui_dir();
-    let ui = Ui::load(dir.path()).unwrap();
+    let ui = Ui::load(dir.path(), false).unwrap();
     let stray = get(&ui, "/sw.js", &[("service-worker", "script")]);
     assert_eq!(
         header(&stray, "clear-site-data"),
@@ -269,7 +304,7 @@ fn a_stray_service_worker_gets_the_kill_switch() {
     // A build with no worker answers even /service-worker.js with the
     // switch, so a worker planted there cannot outlive the host's repair.
     std::fs::remove_file(dir.path().join("service-worker.js")).unwrap();
-    let ui = Ui::load(dir.path()).unwrap();
+    let ui = Ui::load(dir.path(), false).unwrap();
     let absent = get(&ui, "/service-worker.js", &[("service-worker", "script")]);
     assert_eq!(
         header(&absent, "clear-site-data"),
@@ -291,7 +326,7 @@ fn a_ui_that_allows_framing_is_refused() {
             serde_json::json!({ "header": header }).to_string(),
         )
         .unwrap();
-        assert!(Ui::load(dir.path()).is_err(), "{header}");
+        assert!(Ui::load(dir.path(), false).is_err(), "{header}");
     }
 }
 
@@ -374,7 +409,7 @@ fn only_serves_forwarded_shape_from_another_machine_is_admitted() {
 fn a_ui_without_csp_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("index.html"), "app").unwrap();
-    assert!(Ui::load(dir.path()).is_err());
+    assert!(Ui::load(dir.path(), false).is_err());
 }
 
 /// A cookie-key file that holds no key is never replaced, and the start

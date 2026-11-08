@@ -91,6 +91,7 @@ pub(crate) fn run_host_command(
     // Read before the host serves, so nothing this host does is mistaken
     // for what the last one left.
     let owed = sessions.owed()?;
+    let console_switches = sessions.console_switches();
     let host = SessionHost::new(sessions, binary, host_generation());
     let mut idle_reload = None;
     let web = if let Some(args) = &command.web {
@@ -100,6 +101,7 @@ pub(crate) fn run_host_command(
             Arc::clone(&host),
             stop,
             reload,
+            console_switches,
         ));
         match bound_web {
             Ok(endpoint) => {

@@ -1,5 +1,10 @@
 use super::*;
 
+const DISABLED_SWITCHES: ConfiguredSwitches = ConfiguredSwitches {
+    web_accounts_read: false,
+    web_config_read: false,
+};
+
 fn context(principal: HostPrincipal) -> HostRequestContext {
     HostRequestContext {
         principal,
@@ -16,6 +21,44 @@ fn status(account_id: Option<&str>, limit: Option<u64>) -> HostRequest {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn welcome_and_dispatch_share_independent_startup_switches_without_session_admission()
+-> Result<(), Box<dyn std::error::Error>> {
+    for accounts in [false, true] {
+        for config in [false, true] {
+            let root = tempfile::tempdir()?;
+            let paths = PlakPaths::explicit(root.path().join("home"));
+            let state = root.path().join("state");
+            let switches = ConfiguredSwitches {
+                web_accounts_read: accounts,
+                web_config_read: config,
+            };
+            let console = Console::new(
+                paths.clone(),
+                state.clone(),
+                Some(tokio::runtime::Handle::current()),
+                switches,
+            );
+            let web = context(HostPrincipal::Web("verified".into()));
+            let welcome = console.welcome(&web.principal, &admission_limits());
+            assert_eq!(welcome.console.configured_switches, switches);
+            assert_eq!(welcome.console.accounts_read.enabled, accounts);
+            assert_eq!(welcome.console.config_read.enabled, config);
+            let response = console.request(web.clone(), status(None, None)).await;
+            assert_eq!(response.is_ok(), accounts);
+            let response = console
+                .request(web.clone(), HostRequest::ConfigGet {})
+                .await;
+            assert_eq!(response.is_ok(), config);
+            let socket = console.welcome(&HostPrincipal::Socket(7), &admission_limits());
+            assert!(socket.console.accounts_read.enabled && socket.console.config_read.enabled);
+            assert!(!paths.home().exists());
+            assert!(!state.exists());
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn socket_reads_are_attachment_free_and_web_is_gated_before_work()
 -> Result<(), Box<dyn std::error::Error>> {
     let root = tempfile::tempdir()?;
@@ -25,6 +68,7 @@ async fn socket_reads_are_attachment_free_and_web_is_gated_before_work()
         paths.clone(),
         state.clone(),
         Some(tokio::runtime::Handle::current()),
+        DISABLED_SWITCHES,
     );
     let socket = context(HostPrincipal::Socket(7));
     let web = context(HostPrincipal::Web("operator".into()));
@@ -64,6 +108,7 @@ async fn account_selectors_and_page_limits_are_exact_and_refused_before_network(
         paths,
         root.path().join("state"),
         Some(tokio::runtime::Handle::current()),
+        DISABLED_SWITCHES,
     );
     let socket = context(HostPrincipal::Socket(7));
     for alias in [
@@ -135,6 +180,7 @@ async fn definitions_and_metadata_need_no_attachment_and_cursors_do_not_cross_re
         paths.clone(),
         state.clone(),
         Some(tokio::runtime::Handle::current()),
+        DISABLED_SWITCHES,
     );
     let socket = context(HostPrincipal::Socket(7));
     assert!(matches!(

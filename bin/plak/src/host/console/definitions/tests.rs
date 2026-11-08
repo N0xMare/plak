@@ -136,6 +136,10 @@ async fn encoded_definition_refuses_response_overflow_without_opening_a_session(
         paths,
         root.path().join("state"),
         Some(tokio::runtime::Handle::current()),
+        plakd_wire_types::console::ConfiguredSwitches {
+            web_accounts_read: false,
+            web_config_read: false,
+        },
     );
     let context = super::super::HostRequestContext {
         principal: plakous_hosted::host_service::wire::HostPrincipal::Socket(7),
