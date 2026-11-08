@@ -112,8 +112,12 @@ impl<F: StoreFaults + 'static> SessionRecordStore for FaultStore<F> {
             .unwrap_or_else(|| self.inner.storage_admission())
     }
 
-    fn emit_projected_turn_usages(&self, usages: &[sessions::projector::ProjectedTurnUsage]) {
-        self.inner.emit_projected_turn_usages(usages);
+    fn emit_projected_turn_usages(
+        &self,
+        id: &str,
+        usages: &[sessions::projector::ProjectedTurnUsage],
+    ) {
+        self.inner.emit_projected_turn_usages(id, usages);
     }
     fn emit_projected_abandonments(
         &self,

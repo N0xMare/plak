@@ -10651,7 +10651,12 @@ Live token counters belong to the hosted turn projection, not L0 attach state.
 The host folds cumulative provider updates against each dispatch's observed
 base and replaces them with checked terminal usage when observed. These
 numbers are presentation observations, never checkpoint authority or session
-export data. Tool adapters may attach a neutral
+export data. Winning product projections pass their product id with terminal
+usage so the product may freeze the account from that exact runtime locator.
+Missing or mismatched locators remain unattributed, never joined to a current
+default. Child terminal projections carry their node's frozen account. These
+best-effort observations are not admission or recovery authority. Tool adapters
+may attach a neutral
 await receipt through `ToolOutcome::with_wait_observation`; the topology adapter
 supplies its typed wake classification, without topology entering L0. A
 waiting tool also attaches a `WaitFact` (`ToolOutcome::with_wait_fact`): the
@@ -10720,7 +10725,7 @@ and completed otherwise, including a process its own timer killed.
   `missed_input_tokens` is an optional non-negative integer, absent when the
   provider omitted the count. The observation carries no provider message id
   and no raw unknown spelling. Malformed diagnostics are not an observation.
-  The product persists that pair in telemetry schema 21, with the count
+  The product persists that pair in telemetry schema 22, with the count
   column nullable, and does not project it to OTEL. Turn model rounds and
   compaction provider streams both record it. It is not canonical usage;
 - `ModelArtifactPrefixDrift { fields }`, a model round whose stable request
@@ -10789,7 +10794,7 @@ busy, stale, unavailable, invalid_input, or rejected) in `CompactionFinished`,
 and retains the measured source tokens even when the ladder cannot commit.
 The exact bounded diagnostic remains in the session event's `detail`, never
 in the content-incapable telemetry sink. The product persists the refusal class
-in telemetry schema 21 and projects it to OTEL.
+in telemetry schema 22 and projects it to OTEL.
 
 Driver shutdown emits content-free `DurabilityAttemptFinished` phase timings
 for tool drain, job-terminal publication, heartbeat join, lease release and

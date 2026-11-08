@@ -271,6 +271,14 @@ repository can never grant web access.
 | `web.allow` | array of string | `(unset)` | tailnet logins, no duplicates; unset admits no one; home-scoped | The tailnet logins (Tailscale-User-Login) plak host --web admits through tailscale serve. Read when plak host starts with --web; a 0.0.3 build refuses a config.toml that sets it. |
 | `web.origin` | string | `(unset)` | https://<host>[:port], nothing after it; home-scoped | The exact origin tailscale serve publishes plak host --web at; every request must name its host and a WebSocket upgrade its origin. Read when plak host starts with --web; a 0.0.3 build refuses a config.toml that sets it. |
 
+Telemetry retention applies to schema 22's frozen terminal facts as well as
+diagnostic rows. Recorded console values are measured retained subtotals,
+with `complete:false` whenever whole-home producer coverage is unproved,
+including apparently empty windows. Null is unknown, not zero; unavailable
+stores are reported explicitly. Recording and loss evidence is best effort,
+not an admission dependency or a home-wide coverage mechanism. Later proof
+of whole-home coverage can advance the same flag without changing the wire.
+
 The attachment-free console's initial host limits are product defaults, not
 user configuration keys: 64 KiB per request before product payload decoding,
 2 requests in flight per connection, 4 per transport principal and 32 per

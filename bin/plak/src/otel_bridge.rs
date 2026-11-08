@@ -297,6 +297,7 @@ fn emit_product_observation(worker: &BridgeWorker, observation: ProductObservati
         branch_id,
         turn_id,
         usage,
+        ..
     } = observation
     else {
         return;

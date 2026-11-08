@@ -255,8 +255,10 @@ pub struct BindConflict {
 }
 
 /// A child terminal's disposable observation, keyed by the runtime turn.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProjectedChildTurnUsage {
+    /// The node's frozen full account at this terminal, never a read-time join.
+    pub account: Option<String>,
     /// The terminal fact's runtime session.
     pub session_id: plakous::model::SessionId,
     /// The branch whose record holds the terminal.
@@ -821,6 +823,7 @@ impl ProductAgentTree {
                     && let FeedFact::TurnTerminal { turn_id, usage, .. } = fact
                 {
                     projection.terminal_usages.push(ProjectedChildTurnUsage {
+                        account: self.nodes.get(agent_id).map(|node| node.account.clone()),
                         session_id: header.session_id,
                         branch_id: header.branch_id,
                         turn_id: *turn_id,

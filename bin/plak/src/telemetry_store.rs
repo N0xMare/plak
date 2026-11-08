@@ -27,7 +27,7 @@ use crate::observation_projection::labels::{
 use crate::observation_projection::{Output, project};
 use plakous_hosted::product_observation::{ChildKind, ProductObservation};
 
-pub(crate) const TELEMETRY_SCHEMA_VERSION: i64 = 21;
+pub(crate) const TELEMETRY_SCHEMA_VERSION: i64 = 22;
 
 /// Default disposable telemetry retention.
 pub const DEFAULT_TELEMETRY_MAX_BYTES: u64 = 512 * 1024 * 1024;
@@ -36,6 +36,7 @@ pub(crate) mod files;
 mod observation;
 #[cfg(all(test, feature = "otel"))]
 mod projection_tests;
+pub(crate) mod recorded_usage;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// Truncate checkpoints must not stall the writer behind a reader.
@@ -261,6 +262,7 @@ CREATE TABLE credential_refreshes (
   id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
   at INTEGER NOT NULL,
   provider TEXT NOT NULL,
+  account TEXT,
   phase TEXT NOT NULL,
   failure_class TEXT,
   transport_phase TEXT,
@@ -270,6 +272,34 @@ CREATE TABLE credential_refreshes (
   failure_reason TEXT,
   oauth_error_code TEXT,
   oauth_error_description TEXT
+);
+CREATE INDEX credential_refreshes_account_at ON credential_refreshes(account, at);
+
+CREATE TABLE recorded_terminals (
+  turn_id TEXT PRIMARY KEY NOT NULL,
+  session_id TEXT NOT NULL,
+  branch_id TEXT NOT NULL,
+  committed_at_ms INTEGER NOT NULL CHECK(committed_at_ms >= 0),
+  account TEXT,
+  input_tokens TEXT NOT NULL,
+  output_tokens TEXT NOT NULL,
+  reasoning_tokens TEXT NOT NULL,
+  cached_input_tokens TEXT NOT NULL,
+  cache_write_tokens TEXT NOT NULL,
+  model_operations TEXT NOT NULL,
+  reporting_operations TEXT NOT NULL,
+  cost_micros TEXT
+);
+CREATE INDEX recorded_terminals_window ON recorded_terminals(committed_at_ms, account);
+CREATE INDEX recorded_terminals_account_window ON recorded_terminals(account, committed_at_ms);
+CREATE INDEX recorded_terminals_session ON recorded_terminals(session_id);
+
+CREATE TABLE recording_evidence (
+  singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+  started_at_ms INTEGER NOT NULL,
+  retained_from_ms INTEGER,
+  dropped INTEGER NOT NULL DEFAULT 0,
+  write_errors INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE prompt_cache_diagnoses (
@@ -365,6 +395,7 @@ CREATE VIEW v_credential_refreshes AS
 SELECT
   id,
   provider,
+  account,
   phase,
   failure_class,
   transport_phase,
@@ -450,6 +481,7 @@ pub enum TelemetryItem {
 
 pub(crate) fn emit_projected_turn_usages(
     paths: &PlakPaths,
+    record: Option<&plakous_hosted::sessions::SessionRecord>,
     terminals: &[plakous_hosted::sessions::projector::ProjectedTurnUsage],
 ) {
     let observations: Vec<_> = terminals
@@ -466,6 +498,7 @@ pub(crate) fn emit_projected_turn_usages(
                 branch_id: terminal.branch_id,
                 turn_id: terminal.turn_id,
                 usage: terminal.usage,
+                account: record.and_then(|record| recorded_usage::account_for(record, terminal)),
             })
         })
         .collect();
@@ -499,6 +532,8 @@ pub struct TelemetryStoreStatus {
 }
 
 const TELEMETRY_TABLES: &[&str] = &[
+    "recorded_terminals",
+    "recording_evidence",
     "turns",
     "model_attempts",
     "tool_calls",
@@ -514,6 +549,7 @@ const TELEMETRY_TABLES: &[&str] = &[
 ];
 
 const SESSION_PRUNE_TABLES: &[&str] = &[
+    "recorded_terminals",
     "turns",
     "model_attempts",
     "tool_calls",
@@ -614,6 +650,15 @@ impl TelemetryStore {
         })?;
         let mut store = Self { connection };
         store.admit_schema()?;
+        store
+            .connection
+            .execute(
+                "INSERT OR IGNORE INTO recording_evidence(singleton, started_at_ms) VALUES(1, ?1)",
+                [recorded_usage::now_ms()],
+            )
+            .map_err(|_| {
+                TelemetryStoreOpenError::unavailable("could not initialize recording evidence")
+            })?;
         let connection = &store.connection;
         let mode: String = connection
             .query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))
@@ -1125,13 +1170,20 @@ fn prune_expired_sessions(
 }
 
 fn delete_session_rows(connection: &Connection, session_id: &str) -> Result<(), rusqlite::Error> {
+    let transaction = connection.unchecked_transaction()?;
+    // This watermark is evidence of loss, not proof that every producer was
+    // observed above it. Retain it even after the deleted session is gone.
+    transaction.execute(
+        "UPDATE recording_evidence SET retained_from_ms = MAX(COALESCE(retained_from_ms, 0), COALESCE((SELECT MAX(committed_at_ms) + 1 FROM recorded_terminals WHERE session_id = ?1), 0)) WHERE singleton = 1",
+        [session_id],
+    )?;
     for table in SESSION_PRUNE_TABLES {
-        connection.execute(
+        transaction.execute(
             &format!("DELETE FROM {table} WHERE session_id = ?1"),
             [session_id],
         )?;
     }
-    Ok(())
+    transaction.commit()
 }
 
 #[allow(
@@ -1151,6 +1203,7 @@ fn write_product_observation(
             usage,
             ..
         } => {
+            recorded_usage::write_terminal(transaction, observation)?;
             let model = usage.model();
             let (cost_micros, cost_status) = cost_fields_from_usage(model);
             transaction.execute(

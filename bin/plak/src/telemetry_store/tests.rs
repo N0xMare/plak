@@ -412,6 +412,7 @@ fn every_observation_kind_lands_as_one_row() -> TestResult {
     let emitter = Arc::new(plakous::agent::TelemetryEmitter::enabled(sink));
     let context = fixture_context()?;
     writer.emit_product(ProductObservation::TurnUsage {
+        account: None,
         at: fixture_timestamp()?,
         session_id: context.session_id(),
         branch_id: context.branch_id(),
@@ -765,7 +766,7 @@ fn replay_loss_rows_are_content_free_and_pruned_with_their_session() -> TestResu
         store.query_i64("SELECT COUNT(*) FROM v_replay_loss"),
         Some(2)
     );
-    assert_eq!(store.query_i64("PRAGMA user_version"), Some(21));
+    assert_eq!(store.query_i64("PRAGMA user_version"), Some(22));
     assert_eq!(
         store.query_i64(
             "SELECT COUNT(*) FROM model_retries WHERE cause_kind = 'record_rejected_in_transit'"
@@ -1045,7 +1046,7 @@ fn prompt_cache_diagnoses_are_counted_and_nullable() -> TestResult {
             .iter()
             .any(|(name, count)| { name == "prompt_cache_diagnoses" && *count == 1 })
     );
-    assert_eq!(TelemetryStore::count_all_rows(&paths)?, 1);
+    assert_eq!(TelemetryStore::count_all_rows(&paths)?, 2);
     Ok(())
 }
 
@@ -1348,7 +1349,7 @@ fn writer_leaves_legacy_and_other_schema_files_untouched() -> TestResult {
         drop(connection);
         let before = std::fs::read(&database)?;
         let store = TelemetryStore::open(&paths)?;
-        assert_eq!(store.query_i64("PRAGMA user_version"), Some(21));
+        assert_eq!(store.query_i64("PRAGMA user_version"), Some(22));
         assert_eq!(
             store.query_i64("SELECT count(*) FROM sqlite_master WHERE name = 'evidence'"),
             Some(0)

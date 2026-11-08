@@ -163,8 +163,8 @@ impl SessionRecordStore for PresentingStore {
     ) -> Result<ProjectionCommit, crate::session_store::RecordStoreError> {
         self.inner.commit_projection_views(id, writes, views)
     }
-    fn emit_projected_turn_usages(&self, terminals: &[ProjectedTurnUsage]) {
-        self.inner.emit_projected_turn_usages(terminals);
+    fn emit_projected_turn_usages(&self, id: &str, terminals: &[ProjectedTurnUsage]) {
+        self.inner.emit_projected_turn_usages(id, terminals);
         let mut usage = self
             .usage
             .lock()

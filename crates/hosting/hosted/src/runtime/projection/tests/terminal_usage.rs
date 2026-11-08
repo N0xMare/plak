@@ -18,7 +18,7 @@ fn projection_store_wrappers_forward_terminal_usage() {
         committed_at_ms: 0,
         usage: plakous::agent::TurnUsage::default(),
     };
-    wrapper.emit_projected_turn_usages(&[terminal]);
+    wrapper.emit_projected_turn_usages("fixture", &[terminal]);
     assert_eq!(store.projected_usage_emissions(), vec![terminal]);
 }
 

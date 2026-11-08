@@ -77,11 +77,12 @@ impl TelemetryWriter {
         let dropped = Arc::new(AtomicU64::new(0));
         let wal_checkpoint_busy = Arc::new(AtomicU64::new(0));
         let errors = Arc::clone(&write_errors);
+        let losses = Arc::clone(&dropped);
         let checkpoint_busy = Arc::clone(&wal_checkpoint_busy);
         let thread = thread::Builder::new()
             .name("plak-telemetry-writer".into())
             .spawn(move || {
-                writer_loop(store, receiver, errors, checkpoint_busy);
+                writer_loop(store, receiver, errors, losses, checkpoint_busy);
             })
             .map_err(|source| TelemetryStoreOpenError::WriterThread { source })?;
         #[cfg(not(test))]
@@ -249,9 +250,11 @@ fn writer_loop(
     mut store: TelemetryStore,
     receiver: Receiver<TelemetryItem>,
     write_errors: Arc<AtomicU64>,
+    dropped: Arc<AtomicU64>,
     wal_checkpoint_busy: Arc<AtomicU64>,
 ) {
     let mut writes_since_checkpoint = 0_u32;
+    let mut persisted = (0, 0);
     while let Ok(first) = receiver.recv() {
         let mut batch = vec![first];
         loop {
@@ -265,19 +268,43 @@ fn writer_loop(
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
                     flush_batch(&mut store, &write_errors, &batch);
+                    persist_writer_losses(&store, &dropped, &write_errors, &mut persisted);
                     record_wal_checkpoint(&store, &wal_checkpoint_busy);
                     return;
                 }
             }
         }
         flush_batch(&mut store, &write_errors, &batch);
+        persist_writer_losses(&store, &dropped, &write_errors, &mut persisted);
         writes_since_checkpoint = writes_since_checkpoint.saturating_add(1);
         if writes_since_checkpoint >= WAL_CHECKPOINT_EVERY_WRITES {
             record_wal_checkpoint(&store, &wal_checkpoint_busy);
             writes_since_checkpoint = 0;
         }
     }
+    persist_writer_losses(&store, &dropped, &write_errors, &mut persisted);
     record_wal_checkpoint(&store, &wal_checkpoint_busy);
+}
+
+fn persist_writer_losses(
+    store: &TelemetryStore,
+    dropped: &AtomicU64,
+    errors: &AtomicU64,
+    persisted: &mut (u64, u64),
+) {
+    let current = (
+        dropped.load(Ordering::Acquire),
+        errors.load(Ordering::Acquire),
+    );
+    if store
+        .record_writer_losses(
+            current.0.saturating_sub(persisted.0),
+            current.1.saturating_sub(persisted.1),
+        )
+        .is_ok()
+    {
+        *persisted = current;
+    }
 }
 
 fn record_wal_checkpoint(store: &TelemetryStore, wal_checkpoint_busy: &AtomicU64) {

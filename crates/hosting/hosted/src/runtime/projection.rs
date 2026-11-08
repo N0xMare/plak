@@ -464,7 +464,7 @@ async fn project_to_tail_controlled(
         let (outcome, next) = blocking(store, product_id, move |store, id| {
             let outcome = store.commit_projection_views(id, &writes, &next.state)?;
             if outcome == ProjectionCommit::Applied {
-                store.emit_projected_turn_usages(&observations);
+                store.emit_projected_turn_usages(id, &observations);
                 store.emit_projected_abandonments(&abandonments);
             }
             Ok((outcome, next))

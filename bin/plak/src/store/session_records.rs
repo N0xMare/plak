@@ -193,9 +193,11 @@ impl SessionRecordStore for SqliteSessionStore {
 
     fn emit_projected_turn_usages(
         &self,
+        id: &str,
         terminals: &[plakous_hosted::sessions::projector::ProjectedTurnUsage],
     ) {
-        crate::telemetry_store::emit_projected_turn_usages(&self.paths, terminals);
+        let record = self.with_store::<_, String>(|store| store.load(id)).ok();
+        crate::telemetry_store::emit_projected_turn_usages(&self.paths, record.as_ref(), terminals);
     }
     fn write_host_controls(
         &self,

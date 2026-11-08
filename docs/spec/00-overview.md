@@ -208,7 +208,7 @@ them on 0.0.2 or start new ones. 0.0.2 state is left untouched for the 0.0.2 bin
 | Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **37** (authenticates the root-bound count of retired dispatched local-tool attempts; component revisions remain frozen) |
 | Product store (`product.sqlite3`): intents and feed-derived views | Plak | schema **36** (adds the write-ahead `carry_intent` of a same-store carry, the session's node, the virtual root profile, the runner display copy, frozen MCP placement, the `switch` workflow kind, the root interrupt cause and continuation decision intents, the clear workflow kind renamed `new` with `plak:new:` operation ids, and no legacy `workflows` table) |
 | Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **10** |
-| Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **21**, disposable, never recovery authority |
+| Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **22**, disposable, never recovery authority |
 | Session export document | Plak | version **12** (adds the session's runner and profile), imports **12** and **11** |
 
 Tree schema 10 adds the node's line, epoch and runner placement, successor

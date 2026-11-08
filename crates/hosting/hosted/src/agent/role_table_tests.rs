@@ -505,6 +505,7 @@ async fn a_childs_usage_view_carries_its_own_ledger() {
     let usage = plakous::agent::TurnUsage::new(plakous::model::Usage::new(10, 4, 1, 2, 0), 2, 2, 0)
         .unwrap();
     observer.turn_usage(crate::agent_tree::ProjectedChildTurnUsage {
+        account: None,
         session_id: locator.session_id(),
         branch_id: locator.branch_id(),
         turn_id: turn,

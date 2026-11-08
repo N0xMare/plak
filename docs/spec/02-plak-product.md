@@ -338,7 +338,7 @@ another session's jobs.
       deleted-artifacts/<uuid>.json  retained physical ownership, never authority
   carry/<id>.<uuid>.json      session export documents, 0600 in 0700 (§2.5.1)
   references/<id>.json        obsolete archives, retained only for cleanup (§2.5)
-  telemetry/telemetry-v21.sqlite3 disposable analytics, schema 21
+  telemetry/telemetry-v22.sqlite3 disposable analytics, schema 22
   logs/plak.log               PLAK_LOG boundary spans
   binary-ids                  development-build identity cache, 0600 (§1), disposable
   host-id                     this home's host identity (runners, tree custody), 0600, made at first use
@@ -392,6 +392,36 @@ worktrees and jj workspaces live under the launch checkout, not the home
 (chapter 03).
 
 ### 2.2 The four databases
+
+Telemetry schema 22 records canonical terminal usage separately from diagnostic
+attempt rows. Each terminal key retains its original commit time, exact decimal
+usage and model-operation counters, and the full account frozen from the
+winning product or child projection. Replaying the key never changes its
+attribution; an unavailable binding remains explicitly unattributed. These
+facts survive product-session and account removal until telemetry retention
+prunes them. They are not reconstructed from current defaults or a live
+product/tree join. Calls count terminal `model_operations`, not turns or tools.
+
+Recording-start, queue/write-loss and retention-watermark evidence describes
+only this store's recording. Retention removes terminal rows and advances its
+loss watermark in the same transaction. Loss evidence is best effort too: a
+crash can lose it. Telemetry never blocks or authorizes admission or recovery.
+The schema cut creates a fresh disposable file; older files are not migrated,
+implicitly summed, or backfilled by opening sessions on a console read. It
+changes no runtime epoch, product/tree schema or session-export encoding.
+
+Recorded console totals are measured retained subtotals, not invoices or
+whole-home totals. `complete` remains false whenever whole-home producer
+coverage is unproved, including apparently empty windows. A non-null subtotal
+can be useful while coverage is incomplete; null means no known measurement,
+and store unavailability is explicit, never a fabricated zero. A later
+increment may prove coverage using the existing flag; this cut adds no
+home-wide coverage mechanism or telemetry dependency to admission.
+
+Schema 22 also reserves nullable `credential_refreshes.account` and its
+account/time index and view column for exact full-account refresh attribution.
+Until the scoped refresh producer supplies that fact, null remains unknown;
+neither a default account nor a label is inferred from `provider`.
 
 New-work capacity is checked on the volume containing the product home, not
 the current workspace. Below 5 GiB available to the current user,
@@ -9277,7 +9307,7 @@ prose enters the row. The cause column is unconstrained SQL `TEXT`, populated
 by `ModelRetryCause::kind()`: its closed spelling set is `http_status`, `connect`,
 `record_rejected_in_transit`, `transport_after_send`, and `stream_interrupted`.
 The new string value requires no column of its own. The disposable store is
-schema 21. Request host, route and body size are log fields, not SQL columns.
+schema 22. Request host, route and body size are log fields, not SQL columns.
 The bounded writer has the same best-effort drop behavior
 as other analytics; these rows are not recovery authority. `v_replay_loss` is
 the canned view printed by `plak telemetry status --views`, including declined
@@ -9355,7 +9385,7 @@ that cannot yet shrink.
 
 Two asymmetries are worth stating. `telemetry sql` is strictly read-only, while
 `telemetry status` opens the current per-schema file for writing, creating
-schema 21 from scratch when absent. Existing older telemetry files are left
+schema 22 from scratch when absent. Existing older telemetry files are left
 untouched and are not imported; telemetry is disposable. Only explicit
 `state prune-legacy` inventories and removes older-schema and unversioned
 telemetry files and their SQLite sidecars, under the same lock, path-safety and

@@ -221,6 +221,7 @@ fn failing_product_exporters_never_disable_the_telemetry_writer() {
         install_product_exporter(&writer, Some(extra.clone()));
         let context = observation().unwrap().context();
         let observation = ProductObservation::TurnUsage {
+            account: None,
             at: observation().unwrap().timestamp(),
             session_id: context.session_id(),
             branch_id: context.branch_id(),

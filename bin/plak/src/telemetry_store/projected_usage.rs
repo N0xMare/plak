@@ -41,7 +41,7 @@ fn projected_terminal_batch_is_one_atomic_telemetry_write() -> TestResult {
         turn_id: plakous::model::TurnId::try_from(uuid::Uuid::new_v4())?,
         ..first
     };
-    emit_projected_turn_usages(&paths, &[first, second]);
+    emit_projected_turn_usages(&paths, None, &[first, second]);
     assert_eq!(
         store.count_rows("turns"),
         0,
@@ -117,6 +117,7 @@ fn projected_usage_keeps_unknown_identity_empty_and_preserves_live_identity() ->
             store.write_batch(&[TelemetryItem::Agent(all_observations()?[0])])?;
         }
         let usage = TelemetryItem::Product(ProductObservation::TurnUsage {
+            account: None,
             at: fixture_timestamp()?,
             session_id: context.session_id(),
             branch_id: context.branch_id(),
@@ -163,6 +164,7 @@ fn projected_usage_upsert_is_identical_and_live_timings_cannot_replace_it() -> T
     let mut store = TelemetryStore::open(&paths)?;
     let context = fixture_context()?;
     let observation = TelemetryItem::Product(ProductObservation::TurnUsage {
+        account: None,
         at: fixture_timestamp()?,
         session_id: context.session_id(),
         branch_id: context.branch_id(),

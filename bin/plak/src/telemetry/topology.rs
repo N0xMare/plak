@@ -52,6 +52,10 @@ impl TopologyObserver for ProductTopologyObserver {
             return;
         };
         self.writer.emit_product(ProductObservation::TurnUsage {
+            account: terminal
+                .account
+                .as_deref()
+                .and_then(crate::telemetry_store::recorded_usage::exact_account),
             at,
             session_id: terminal.session_id,
             branch_id: terminal.branch_id,

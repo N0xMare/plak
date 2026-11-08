@@ -93,7 +93,8 @@ impl TreeFeed {
             };
         projection.refused_intents.extend(refused);
         for terminal in &projection.terminal_usages {
-            next.pending_turn_usages.insert(terminal.turn_id, *terminal);
+            next.pending_turn_usages
+                .insert(terminal.turn_id, terminal.clone());
         }
         *tree = next;
         Ok(projection)

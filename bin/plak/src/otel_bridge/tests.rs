@@ -360,6 +360,7 @@ fn projected_turn_usage_exports_without_live_diagnostics_through_the_writer() {
         crate::telemetry_sink::open_product_telemetry(&paths, Some(bridge.clone())).unwrap();
     let ctx = fixture_context();
     let observation = ProductObservation::TurnUsage {
+        account: None,
         at: fixture_timestamp(),
         session_id: ctx.session_id(),
         branch_id: ctx.branch_id(),

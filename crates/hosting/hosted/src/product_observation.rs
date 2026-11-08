@@ -234,6 +234,9 @@ pub enum ProductObservation {
         branch_id: BranchId,
         turn_id: TurnId,
         usage: plakous::agent::TurnUsage,
+        /// Exact product binding captured by the winning projector. Unknown
+        /// attribution stays unknown; readers never join to current defaults.
+        account: Option<BoundedText64>,
     },
     RunBoundExit {
         at: Timestamp,

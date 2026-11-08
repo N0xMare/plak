@@ -107,16 +107,26 @@ fn observations() -> TestResult<Vec<TelemetryObservation>> {
 }
 
 fn rows(connection: &Connection) -> TestResult<serde_json::Value> {
-    let tables = connection.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")?
+    // New terminal facts and recording evidence have their own contract. This
+    // pin still proves that the legacy agent diagnostics and spans did not change.
+    let tables = connection.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('recorded_terminals', 'recording_evidence') ORDER BY name")?
         .query_map([], |row| row.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
     let mut snapshot = serde_json::Map::new();
     for table in tables {
         let mut query = connection.prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))?;
-        let count = query.column_count();
+        let columns: Vec<_> = query
+            .column_names()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, name)| {
+                (table != "credential_refreshes" || *name != "account").then_some(index)
+            })
+            .collect();
         let values = query
             .query_map([], |row| {
-                (0..count)
-                    .map(|column| {
+                columns
+                    .iter()
+                    .map(|&column| {
                         row.get::<_, rusqlite::types::Value>(column)
                             .map(|value| format!("{value:?}"))
                     })
