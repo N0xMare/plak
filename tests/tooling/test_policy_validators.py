@@ -1365,7 +1365,7 @@ class RepositoryPolicyTests(unittest.TestCase):
 
     def test_every_package_carries_layer_metadata_and_the_tree_is_clean(self) -> None:
         workspace = self.workspace
-        self.assertEqual(len(workspace.packages), 40)
+        self.assertEqual(len(workspace.packages), 41)
         for validator in (
             workspace_policy.validate_package_metadata,
             workspace_policy.validate_layout,
@@ -1426,6 +1426,7 @@ class RepositoryPolicyTests(unittest.TestCase):
                 "plakous-tools",
             },
             "published-internal": {
+                "plakd-wire-types",
                 "plakous-compose",
                 "plakous-host-protocol",
                 "plakous-hosted",
@@ -1467,7 +1468,7 @@ class RepositoryPolicyTests(unittest.TestCase):
         }
         actual = workspace_policy.package_classifications(self.workspace)
         self.assertEqual(actual, expected)
-        self.assertEqual(sum(map(len, actual.values())), 40)
+        self.assertEqual(sum(map(len, actual.values())), 41)
 
     def test_layers_and_neutral_packages_are_as_designed(self) -> None:
         by_layer = {
@@ -1479,6 +1480,7 @@ class RepositoryPolicyTests(unittest.TestCase):
         self.assertEqual(
             by_layer["host"],
             {
+                "plakd-wire-types",
                 "plakous-host-protocol",
                 "plakous-hosted",
                 "plakous-workspace",
@@ -1577,6 +1579,7 @@ class RepositoryPolicyTests(unittest.TestCase):
         self.assertEqual(
             edges["plak"],
             {
+                "plakd-wire-types",
                 "plakous",
                 "plakous-host-protocol",
                 "plakous-hosted",
@@ -1599,6 +1602,7 @@ class RepositoryPolicyTests(unittest.TestCase):
         )
         self.assertEqual(edges["plakous-host-protocol"], set())
         self.assertEqual(edges["plakous-workspace"], {"plakous-host-protocol"})
+        self.assertEqual(edges["plakd-wire-types"], {"plakous-host-protocol"})
         self.assertEqual(
             edges["plakous-recursive-subagents"],
             {"plakous", "plakous-host-protocol", "plakous-workspace"},
@@ -1614,6 +1618,7 @@ class RepositoryPolicyTests(unittest.TestCase):
                 "plakous": ("plakous-exchange", "plakous-responses"),
                 "plakous-auth": ("plakous-model",),
                 "plak": (
+                    "plakd-wire-types",
                     "plakous-host-protocol",
                     "plakous-hosted",
                     # The only `bin -> test` edge in the workspace, and it
@@ -1629,6 +1634,7 @@ class RepositoryPolicyTests(unittest.TestCase):
                     "plakous-workspace",
                 ),
                 "plakous-workspace": ("plakous-host-protocol",),
+                "plakd-wire-types": ("plakous-host-protocol",),
                 "plakous-recursive-subagents": (
                     "plakous-host-protocol",
                     "plakous-workspace",

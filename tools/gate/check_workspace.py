@@ -1538,6 +1538,8 @@ _SHARED_PLAKOUS_SYMBOLS = {
 }
 ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
     "plak": _SHARED_PLAKOUS_SYMBOLS,
+    # Wire DTOs only; the facade is not a dependency.
+    "plakd-wire-types": {},
     "plakous-host-protocol": _SHARED_PLAKOUS_SYMBOLS,
     "plakous-hosted": {
         **_SHARED_PLAKOUS_SYMBOLS,
