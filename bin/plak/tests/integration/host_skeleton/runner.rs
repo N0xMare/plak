@@ -16,7 +16,7 @@ pub(super) fn wait_local_runner_ready(host: &Host) {
             std::time::Instant::now() < deadline,
             "local runner did not reconcile: {status:?}"
         );
-        std::thread::yield_now();
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }
 
