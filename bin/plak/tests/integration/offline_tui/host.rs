@@ -123,6 +123,56 @@ pub(super) fn assert_client_loss_keeps_work(fixture: &Fixture, session: &str, an
 }
 
 #[test]
+fn a_host_tui_fixture_reaps_its_host_and_daemon_on_drop_and_panic() {
+    for panic in [false, true] {
+        let root = Arc::new(Mutex::new(None));
+        let observed = Arc::clone(&root);
+        let result = std::panic::catch_unwind(move || {
+            let fixture = Fixture::with_mode(&json!({"version": 1, "steps": []}), Mode::Host);
+            fixture.ensure_host();
+            let mut pids = vec![fixture.host.lock().unwrap().as_ref().unwrap().child.id()];
+            for version in std::fs::read_dir(fixture.home().join("host/runner")).unwrap() {
+                for lock in std::fs::read_dir(version.unwrap().path().join("run")).unwrap() {
+                    let path = lock.unwrap().path();
+                    if path
+                        .extension()
+                        .is_some_and(|extension| extension == "lock")
+                    {
+                        pids.push(
+                            std::fs::read_to_string(path)
+                                .unwrap()
+                                .parse::<u32>()
+                                .unwrap(),
+                        );
+                    }
+                }
+            }
+            assert!(pids.len() >= 2, "the fixture must own a real daemon");
+            *observed.lock().unwrap() = Some((fixture.root.clone(), pids));
+            assert!(fixture.home().join("host/runner").is_dir());
+            if panic {
+                panic!("fixture failure after readiness");
+            }
+        });
+        assert_eq!(result.is_err(), panic);
+        let observed = root.lock().unwrap();
+        let (path, pids) = observed.as_ref().unwrap();
+        assert!(!path.exists());
+        for pid in pids {
+            let state = Command::new("ps")
+                .args(["-o", "stat=", "-p", &pid.to_string()])
+                .output()
+                .unwrap();
+            let state = String::from_utf8_lossy(&state.stdout);
+            assert!(
+                state.trim().is_empty() || state.trim().starts_with('Z'),
+                "fixture process {pid} still runs: {state}"
+            );
+        }
+    }
+}
+
+#[test]
 fn a_host_tui_refuses_requested_reload_without_touching_the_session() {
     for busy in [false, true] {
         assert_requested_reload_refused(busy);

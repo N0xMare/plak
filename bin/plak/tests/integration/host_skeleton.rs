@@ -17,7 +17,7 @@
 use std::io::{BufRead as _, BufReader, Write as _};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::process::{Child, Stdio};
+use std::process::Stdio;
 use std::sync::mpsc;
 
 use plakous_host_protocol::wire::{
@@ -28,6 +28,7 @@ use plakous_host_protocol::{Core, Draft, SessionIntent};
 use plakous_hosted::sessions::projector::RootInterruptCause;
 use serde_json::json;
 
+use super::offline_support::TestChild as Child;
 use super::offline_support::*;
 
 /// A started `plak host` and the socket its start line names.
@@ -36,15 +37,6 @@ struct Host {
     socket: PathBuf,
     /// Its stderr lines after the start line.
     lines: mpsc::Receiver<String>,
-}
-
-impl Drop for Host {
-    fn drop(&mut self) {
-        if let Some(mut child) = self.child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-    }
 }
 
 /// Starts `plak host`; its stderr lines arrive on `lines`.
@@ -63,16 +55,16 @@ fn spawn_env(
     extra: &[&str],
     env: &[(&str, String)],
 ) -> (Child, mpsc::Receiver<String>) {
-    let mut child = fixture
-        .command()
-        .arg("host")
-        .args(extra)
-        .envs(env.iter().map(|(name, value)| (*name, value.as_str())))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("plak host spawned");
+    let mut child = Child::spawn(
+        fixture
+            .command()
+            .arg("host")
+            .args(extra)
+            .envs(env.iter().map(|(name, value)| (*name, value.as_str())))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped()),
+    );
     let stderr = child.stderr.take().unwrap();
     let (send, lines) = mpsc::channel();
     std::thread::spawn(move || {
@@ -461,24 +453,17 @@ struct Agent {
     _records: mpsc::Receiver<serde_json::Value>,
 }
 
-impl Drop for Agent {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
 /// Starts `plak agent --session <session>`; `Ok` once it opened the session,
 /// `Err` with its first JSONL error record when it was refused.
 fn embedded(fixture: &Fixture, session: &str) -> Result<Agent, serde_json::Value> {
-    let mut child = fixture
-        .command()
-        .args(["agent", "--session", session])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut child = Child::spawn(
+        fixture
+            .command()
+            .args(["agent", "--session", session])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null()),
+    );
     let stdout = child.stdout.take().unwrap();
     let (send, records) = mpsc::channel();
     std::thread::spawn(move || {

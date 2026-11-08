@@ -115,6 +115,9 @@ class DevCheckWorkerTests(unittest.TestCase):
             shutil.copyfile(ROOT / "tools/gate" / name, destination)
             destination.chmod(0o755)
         shutil.copyfile(ROOT / "tools/gate/vcs_listing.py", self.root / "tools/gate/vcs_listing.py")
+        shutil.copyfile(
+            ROOT / "tools/gate/test-processes.py", self.root / "tools/gate/test-processes.py"
+        )
         self.bin = self.root / "bin"
         self.bin.mkdir()
         self.log = self.root / "calls.jsonl"
@@ -216,7 +219,7 @@ if args[0] == 'test':
         self.executable(
             'python3',
             r'''import json, os, sys
-if sys.argv[1] == '-' or sys.argv[1].endswith('vcs_listing.py'):
+if sys.argv[1] == '-' or sys.argv[1].endswith(('vcs_listing.py', 'test-processes.py')):
     os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
 with open(os.environ['GATE_CALLS'], 'a') as log:
     log.write(json.dumps(dict(python=sys.argv[1:], git_global=os.environ.get('GIT_CONFIG_GLOBAL'),

@@ -77,7 +77,7 @@ enum Mode {
 }
 
 struct HostProcess {
-    child: std::process::Child,
+    child: super::offline_support::TestChild,
     socket: PathBuf,
 }
 
@@ -272,13 +272,13 @@ impl Fixture {
         if slot.is_some() {
             return;
         }
-        let mut child = command
-            .arg("host")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("fixture host");
+        let mut child = super::offline_support::TestChild::spawn(
+            command
+                .arg("host")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped()),
+        );
         let stderr = child.stderr.take().unwrap();
         let (send, lines) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
@@ -302,10 +302,12 @@ impl Fixture {
     }
 
     fn kill_host(&self) {
-        if let Some(mut host) = self.host.lock().unwrap().take() {
-            host.child.kill().unwrap();
-            host.child.wait().unwrap();
-        }
+        drop(
+            self.host
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take(),
+        );
     }
 
     /// One CLI command in this fixture, read to completion.
@@ -380,6 +382,7 @@ impl Drop for Fixture {
     fn drop(&mut self) {
         self.kill_host();
         if self.owns_root {
+            super::offline_support::kill_home_local_runner(&self.home());
             let _ = std::fs::remove_dir_all(&self.root);
         }
     }
@@ -556,11 +559,44 @@ struct Capture {
 pub(super) struct Terminal {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn std::io::Write + Send>,
-    child: Box<dyn portable_pty::Child + Send + Sync>,
+    child: PtyChild,
     capture: Arc<Mutex<Capture>>,
     reader: Option<std::thread::JoinHandle<()>>,
     /// The fixture's product home, read for the logs a failed exit reports.
     home: PathBuf,
+}
+
+/// Reaps the PTY child when a readiness wait unwinds too.
+struct PtyChild(Box<dyn portable_pty::Child + Send + Sync>);
+
+impl std::ops::Deref for PtyChild {
+    type Target = dyn portable_pty::Child + Send + Sync;
+
+    fn deref(&self) -> &Self::Target {
+        &*self.0
+    }
+}
+
+impl std::ops::DerefMut for PtyChild {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut *self.0
+    }
+}
+
+impl Drop for PtyChild {
+    fn drop(&mut self) {
+        if matches!(self.0.try_wait(), Ok(None)) {
+            if let Some(pid) = self
+                .0
+                .process_id()
+                .and_then(|pid| rustix::process::Pid::from_raw(pid.cast_signed()))
+            {
+                let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+            }
+            let _ = self.0.kill();
+        }
+        let _ = self.0.wait();
+    }
 }
 
 /// How the terminal is launched.
@@ -674,7 +710,7 @@ impl Terminal {
         command.cwd(fixture.workspace());
         let mut reader = pair.master.try_clone_reader().expect("pty reader");
         let writer = pair.master.take_writer().expect("pty writer");
-        let child = pair.slave.spawn_command(command).expect("tui spawned");
+        let child = PtyChild(pair.slave.spawn_command(command).expect("tui spawned"));
         drop(pair.slave);
         let capture = Arc::new(Mutex::new(Capture {
             parser: vt100::Parser::new(rows, cols, 0),

@@ -11,6 +11,15 @@ composition, and protocol it named — nothing adjacent. The second is that
 symbol that is nameable, a command that parses, and a route that renders are all
 accessibility facts. None of them is a support or correctness promise.
 
+Real-process fixtures own host children and their process groups from spawn,
+before waiting for readiness. Teardown reaps them on a failed readiness wait,
+panic or timeout, and reaps home-local daemons before removing their homes.
+The nextest entry points check for same-user `plak host` and `plak runner serve`
+processes whose working directories are inside that checkout's isolated test
+directory, including deleted directories. A leaked process fails the command
+and is reaped; processes outside that directory are never signalled. The gate
+checks before resetting its test directory as well as after each test lane.
+
 Offline runner fault injection targets only the recorded daemon that still
 has the fixture home's lock file open, never a host's transient startup probe.
 Its exit wait tracks the killed daemon, not a replacement the live host may

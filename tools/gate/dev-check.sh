@@ -432,7 +432,7 @@ run_lane() {
   local profile=$1
   shift
   prepare_tests
-  PLAK_HOME="$isolated_home" PLAK_PY_HOST="$py_host" PLAK_JS_HOST="$js_host" cargo nextest run --locked --workspace --all-features \
+  PLAK_HOME="$isolated_home" PLAK_PY_HOST="$py_host" PLAK_JS_HOST="$js_host" python3 tools/gate/test-processes.py -- cargo nextest run --locked --workspace --all-features \
     --profile "$profile" ${target_args[@]+"${target_args[@]}"} "$@"
 }
 

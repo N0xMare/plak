@@ -14,6 +14,64 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 pub(super) const WAIT: Duration = Duration::from_secs(45);
+
+/// Owns a fixture child from spawn, including failed readiness waits.
+pub(super) struct TestChild(Child);
+
+impl TestChild {
+    pub(super) fn spawn(command: &mut Command) -> Self {
+        use std::os::unix::process::CommandExt as _;
+        Self(command.process_group(0).spawn().expect("fixture child"))
+    }
+}
+
+impl std::ops::Deref for TestChild {
+    type Target = Child;
+
+    fn deref(&self) -> &Child {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for TestChild {
+    fn deref_mut(&mut self) -> &mut Child {
+        &mut self.0
+    }
+}
+
+impl Drop for TestChild {
+    fn drop(&mut self) {
+        // An unreaped child still pins its pid; a cached exit must not signal
+        // a potentially reused group id.
+        if matches!(self.0.try_wait(), Ok(None)) {
+            if let Some(pid) = rustix::process::Pid::from_raw(self.0.id().cast_signed()) {
+                let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+            }
+            let _ = self.0.kill();
+        }
+        let _ = self.0.wait();
+    }
+}
+
+#[test]
+fn a_fixture_child_is_reaped_when_readiness_panics_or_times_out() {
+    for panic in [false, true] {
+        let pid = Arc::new(Mutex::new(None));
+        let observed = Arc::clone(&pid);
+        let result = std::panic::catch_unwind(move || {
+            let child = TestChild::spawn(Command::new("sh").args(["-c", "sleep 60 & wait"]));
+            *observed.lock().unwrap() = Some(child.id());
+            if panic {
+                panic!("readiness refused");
+            }
+            // Returning before startup succeeded must still reap the group.
+        });
+        assert_eq!(result.is_err(), panic);
+        let pid =
+            rustix::process::Pid::from_raw(pid.lock().unwrap().unwrap().cast_signed()).unwrap();
+        assert!(rustix::process::kill_process(pid, rustix::process::Signal::CONT).is_err());
+    }
+}
 /// The facade's session lease (`SESSION_LEASE_SECONDS` in plakous sessions.rs).
 const SESSION_LEASE: Duration = Duration::from_secs(30);
 /// One disposable product home, workspace and script document.

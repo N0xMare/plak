@@ -24,6 +24,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 # bash, not a direct exec: callers copy the selector without its executable bit.
+if [[ ${#fresh[@]} -gt 0 && -f "$here/test-processes.py" ]]; then
+  # Check before --fresh erases the homes and lock files needed for diagnosis.
+  previous_tmp="$(bash "$here/test-tmpdir.sh")"
+  TMPDIR="$previous_tmp" python3 "$here/test-processes.py" --check
+fi
 TMPDIR="$(bash "$here/test-tmpdir.sh" ${fresh[@]+"${fresh[@]}"})"
 export TMPDIR
 isolated="$TMPDIR/plak-isolated-home"

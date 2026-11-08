@@ -138,7 +138,10 @@ class TestTmpdirSelectorTests(unittest.TestCase):
         justfile = (ROOT / "Justfile").read_text()
         self.assertNotIn('TMPDIR="$PWD/target/plak-test-tmp"', justfile)
         self.assertIn("[positional-arguments]", justfile)
-        self.assertIn('tools/gate/test-env.sh -- cargo nextest "$@"', justfile)
+        self.assertIn(
+            'tools/gate/test-env.sh -- python3 tools/gate/test-processes.py -- cargo nextest "$@"',
+            justfile,
+        )
         self.assertIn("plak_dev_tools_prefix", justfile)
         self.assertIn("dev-tools.sh check-nextest", justfile)
         self.assertNotIn("\ntest:\n", justfile)
@@ -179,6 +182,7 @@ class TestTmpdirSelectorTests(unittest.TestCase):
             "eval/harbor.just",
             "tools/gate/test-env.sh",
             "tools/gate/test-tmpdir.sh",
+            "tools/gate/test-processes.py",
             "tools/gate/dev-tools.sh",
             "tools/gate/dev-tools-prefix.sh",
         ):
