@@ -232,6 +232,7 @@ pub fn display_tool_title(name: &str) -> String {
 
 /// Display title for a tool row with its host-classified kind.
 #[must_use]
+#[cfg(test)]
 pub fn display_tool_title_for(name: &str, kind: ActivityKind) -> String {
     display_tool_title_with_verb(name, tool_verb(name, kind))
 }
@@ -565,7 +566,7 @@ pub fn format_tool_row(
     let label = if grouped {
         group_header(verb, plan.group_count)
     } else {
-        display_tool_title_for(name, kind)
+        display_tool_title_with_verb(name, verb)
     };
     // Direct rows have no fold triangle. Compose keeps ▶/▼ for the program
     // rail. An open/folded group head uses the same triangles.
