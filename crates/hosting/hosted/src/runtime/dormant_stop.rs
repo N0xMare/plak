@@ -42,7 +42,7 @@ pub async fn stop_dormant_session(
 enum StopHead {
     Absent,
     Pending,
-    Held(LeaseOnlyHead),
+    Held(Box<LeaseOnlyHead>),
 }
 
 async fn stop_head(
@@ -70,7 +70,7 @@ async fn stop_head(
             )
             .await
         {
-            Ok(head) => Ok(StopHead::Held(head)),
+            Ok(head) => Ok(StopHead::Held(Box::new(head))),
             Err(error) => {
                 // Repeating an already-durable cancellation must not compete
                 // with its recovery lease. A new stop cannot use this path.
@@ -106,7 +106,7 @@ async fn stop(
             record(roots, store, session).await?;
             return Ok(());
         }
-        StopHead::Held(head) => head,
+        StopHead::Held(head) => *head,
     };
     // A lease-only owner has no agent heartbeat. Keep the operation
     // strictly inside its lease; an unfinished recorded stop is retried
@@ -120,7 +120,9 @@ async fn stop(
             return Err(error);
         }
     };
-    let stopped = if !roots.runner_pending() {
+    let stopped = if roots.runner_pending() {
+        Err(CliFailure::new("runner stop settlement remains pending"))
+    } else {
         tokio::time::timeout(budget, async {
             roots
                 .finish_child_process_stops(&session.node.tree_id)
@@ -133,8 +135,6 @@ async fn stop(
                 "runner stop settlement exceeded its lease budget",
             ))
         })
-    } else {
-        Err(CliFailure::new("runner stop settlement remains pending"))
     };
     let line = head.line();
     let released = head
