@@ -462,7 +462,9 @@ One machine a host may run a node's tools on, reached over ssh as
 `<name>` matches `[a-z][a-z0-9-]{0,31}` and is never `local`, the name of the
 host's own runner, which needs no table. Home-scoped. `plak runner pair <name>`
 and `plak runner ps <name>` dial it. Saved sessions resolve pinned identity,
-never a reused alias. Aliases of one identity share one client.
+never a reused alias. Aliases of one identity share one client. A successful
+confirmation refreshes the root pins of every configured alias for that identity
+under the same home admission lock, including aliases not used for the dial.
 
 | key | type | default | constraint | meaning |
 | --- | --- | --- | --- | --- |

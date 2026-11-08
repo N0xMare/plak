@@ -13,7 +13,6 @@ use crate::shell::services::Services;
 #[derive(Clone)]
 pub(crate) struct Remote {
     pub(crate) id: String,
-    pub(crate) name: String,
     pub(crate) config: crate::product_config::RunnerConfig,
     pub(crate) pin: super::PairedRunner,
 }
@@ -63,7 +62,6 @@ pub(crate) fn remote(services: &Services, id: &str) -> Result<Remote, PlacementF
             })?;
             return Ok(Remote {
                 id: id.into(),
-                name,
                 config,
                 pin,
             });
@@ -279,16 +277,21 @@ pub(crate) fn confirm(
             roots: roots.clone(),
         },
         || {
-            if roots != remote.pin.roots {
-                let mut pin = remote.pin.clone();
-                pin.roots = roots;
-                let path = services
-                    .paths()
-                    .map_err(|_| PlacementFailure::RunnerNotPaired)?
-                    .home()
-                    .join("runners")
-                    .join(&remote.name)
-                    .join("runner.json");
+            let paths = services
+                .paths()
+                .map_err(|_| PlacementFailure::RunnerNotPaired)?;
+            let config = crate::product_config::ProductConfig::load(paths)
+                .map_err(|_| PlacementFailure::RunnerNotPaired)?;
+            for name in config.runners.keys() {
+                let Some(mut pin) = read_pin(paths, name).filter(|pin| pin.runner_id == remote.id)
+                else {
+                    continue;
+                };
+                if pin.roots == roots {
+                    continue;
+                }
+                pin.roots.clone_from(&roots);
+                let path = paths.home().join("runners").join(name).join("runner.json");
                 let bytes = serde_json::to_vec_pretty(&pin)
                     .map_err(|_| PlacementFailure::RunnerNotPaired)?;
                 super::home::write_private(&path, &bytes)
@@ -297,4 +300,91 @@ pub(crate) fn confirm(
             Ok(())
         },
     )
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "isolated alias pin fixtures")]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn confirmation_repairs_every_alias_even_when_the_selected_pin_is_current() {
+        use plakous::runner::protocol::VersionTriple;
+        use plakous::runner::{RunnerIdentity, RunnerOptions, RunnerService};
+        use plakous::tools::{
+            ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope, RunnerId,
+        };
+        let (temporary, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+        let roots = ["old", "new", "other"].map(|name| {
+            let path = temporary.path().join(name);
+            std::fs::create_dir_all(&path).unwrap();
+            path
+        });
+        std::fs::write(paths.home().join("config.toml"), "[runners.alpha]\nssh='fixture'\ncommand='/bin/false'\n[runners.beta]\nssh='fixture'\ncommand='/bin/false'\n[runners.gamma]\nssh='fixture'\ncommand='/bin/false'\n").unwrap();
+        let machine = plakous::runner::machine_id().unwrap();
+        for (name, id, root) in [
+            ("alpha", "runner", &roots[1]),
+            ("beta", "runner", &roots[0]),
+            ("gamma", "other", &roots[2]),
+        ] {
+            let directory = paths.home().join("runners").join(name);
+            super::super::private_directory(&directory).unwrap();
+            let pin = super::super::PairedRunner {
+                runner_id: id.into(),
+                source_revision: "review".into(),
+                flavor: "test".into(),
+                binary_id: None,
+                machine_id: machine.clone(),
+                roots: vec![root.to_str().unwrap().into()],
+            };
+            super::super::home::write_private(
+                &directory.join("runner.json"),
+                &serde_json::to_vec(&pin).unwrap(),
+            )
+            .unwrap();
+        }
+        let services =
+            Services::for_home(paths.clone()).with_runner_overlap(overlap_guard(&paths).unwrap());
+        let config = crate::product_config::ProductConfig::load(&paths).unwrap();
+        let remote = Remote {
+            id: "runner".into(),
+            config: config.runners["alpha"].clone(),
+            pin: read_pin(&paths, "alpha").unwrap(),
+        };
+        let catalog =
+            WorkspaceCatalog::machine(vec![roots[1].clone()], paths.home(), false).unwrap();
+        let service = RunnerService::with_options(
+            ExecutionEnvironment::host(
+                ExecutionEnvironmentScope::Run(
+                    "00000000-0000-4000-8000-000000000001".parse().unwrap(),
+                ),
+                &roots[1],
+                ".",
+                ExecutionEnvironmentConfig::default(),
+            )
+            .unwrap(),
+            RunnerIdentity {
+                runner_id: RunnerId::new("runner").unwrap(),
+                version: VersionTriple::current("review", "test"),
+                boot_id: "boot".into(),
+                binary_id: None,
+            },
+            RunnerOptions {
+                machine_id: Some(machine),
+                ..RunnerOptions::default()
+            },
+        )
+        .unwrap();
+        confirm(&services, &remote, service.hello(), &catalog.options()).unwrap();
+        for name in ["alpha", "beta"] {
+            assert_eq!(
+                read_pin(&paths, name).unwrap().roots,
+                vec![roots[1].to_str().unwrap()]
+            );
+        }
+        assert_eq!(
+            read_pin(&paths, "gamma").unwrap().roots,
+            vec![roots[2].to_str().unwrap()]
+        );
+    }
 }

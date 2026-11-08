@@ -201,10 +201,6 @@ impl Services {
         })
     }
 
-    #[allow(
-        dead_code,
-        reason = "remote session callers are integrated with the product cut"
-    )]
     pub(crate) fn state_roots_on(
         &self,
         context: &PlakPaths,
