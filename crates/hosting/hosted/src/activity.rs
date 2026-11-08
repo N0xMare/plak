@@ -20,7 +20,7 @@ pub fn tool_operation(
     name: &str,
     kind: ActivityKind,
 ) -> plakous_host_protocol::views::ToolOperation {
-    plakous_host_protocol::views::ToolOperation::classify(name, kind, None)
+    plakous_host_protocol::views::ToolOperation::classify(name, kind, None, None)
 }
 
 /// Canonical outer markers of a Plakous local-composition cell.
@@ -280,6 +280,17 @@ fn object_text(fields: &serde_json::Map<String, serde_json::Value>) -> String {
     }
     if let Some(content) = string_field(fields, &FILE_CONTENT_KEYS) {
         return content.trim_end().to_owned();
+    }
+    // Process controls must retain their input and polling mode through
+    // final-row reconstruction. The generic patch/wait renderers below
+    // would discard those facts (notably chars beside yield_time_ms).
+    if fields.contains_key("session_id")
+        && ["input", "chars", "yield_time_ms", "timeout_ms"]
+            .iter()
+            .any(|key| fields.contains_key(*key))
+    {
+        let value = serde_json::Value::Object(fields.clone());
+        return serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string());
     }
     // `apply_patch { patch }` reads as the patch itself (§5.2 Edit rows).
     if let Some(patch) = string_field(fields, &PATCH_KEYS) {

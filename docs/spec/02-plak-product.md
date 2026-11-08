@@ -5951,10 +5951,17 @@ one leaves them for the next.
 ### 5.4 The transcript grammar
 
 Host-protocol derives `ToolOperation` from each tool's canonical name,
-host-populated activity kind and host-authored process subject. Process read,
-input and interrupt subjects disambiguate shared process tool names on the
-host, never on clients. `ToolItem::operation()` uses that classifier;
-the operation is not a field in the persisted or exported row. A process-local
+host-populated activity kind and input detail. Structured write input exactly
+ETX (`U+0003`), or the host's normalized `Ctrl-C` detail, means interrupt for
+canonical `process_session_write` and native `write_stdin`; other input stays
+input, and read-only process reads stay reads. These facts take precedence
+over legacy host-authored process subject prefixes, which remain a fallback
+when input facts are absent. Classification happens on the host, never on
+clients. `ToolItem::operation()` uses that classifier.
+Process control arguments retain their structured input and polling mode in
+the detail rather than being reduced to a patch body or wait-only line, so
+live, completed and reconstructed rows classify identically.
+The operation is not a field in the persisted or exported row. A process-local
 `wire_operation` overlay may retain the host-supplied operation after decoding;
 it is excluded from serde, JSON Schema and row equality. Without that overlay,
 `operation()` uses the classifier. Protocol 5

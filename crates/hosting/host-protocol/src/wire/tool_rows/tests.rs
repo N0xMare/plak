@@ -66,6 +66,124 @@ fn process_interrupt_subject_is_classified_by_the_host_on_the_wire() {
 }
 
 #[test]
+fn canonical_and_native_process_writes_classify_input_bytes_not_subject_prose() {
+    for (name, key) in [
+        ("process_session_write", "input"),
+        ("write_stdin", "chars"),
+        ("process_session_write", "chars"),
+        ("write_stdin", "input"),
+    ] {
+        for (input, operation) in [
+            ("\u{3}", ToolOperation::InterruptProcess),
+            ("hello\n", ToolOperation::InputProcess),
+            ("Ctrl-C", ToolOperation::InputProcess),
+            ("\u{3}suffix", ToolOperation::InputProcess),
+        ] {
+            let mut arguments = serde_json::json!({"session_id":1});
+            arguments[key] = input.into();
+            if name == "process_session_write" {
+                arguments["disposition"] = "keep_open".into();
+            }
+            let mut tool = item(name, ActivityKind::Process);
+            // Deliberately misleading legacy prose must not override bytes.
+            tool.subject = Some("Sent interrupt to process 1".into());
+            tool.detail = Some(format!("{arguments}\n\nprocess output"));
+            assert_eq!(tool.operation(), operation, "{name}: {input:?}");
+            assert_eq!(WireToolItem::from(tool).operation, operation);
+        }
+        let mut tool = item(name, ActivityKind::Process);
+        tool.subject = Some("1".into());
+        tool.detail = Some("Ctrl-C".into());
+        let persisted = serde_json::to_string(&tool).unwrap();
+        let observation = SessionObservation::Row(TranscriptRow::Tool(tool));
+        let frame: HostFrame<Core> = HostFrame::Event {
+            attachment: 1,
+            seq: 1,
+            class: observation.class(),
+            observation,
+            client_id: None,
+            blobs: Vec::new(),
+        };
+        let encoded = encode_line(&frame).unwrap();
+        let value: Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(
+            value["observation"]["body"]["operation"],
+            "interrupt_process"
+        );
+        let HostFrame::Event {
+            observation: SessionObservation::Row(TranscriptRow::Tool(decoded)),
+            ..
+        } = decode_host_line::<Core>(&encoded).unwrap()
+        else {
+            panic!("not a tool event")
+        };
+        assert_eq!(decoded.operation(), ToolOperation::InterruptProcess);
+        assert_eq!(serde_json::to_string(&decoded).unwrap(), persisted);
+    }
+}
+
+#[test]
+fn process_read_shapes_remain_reads_and_waits_do_not_become_input() {
+    for (name, arguments, operation) in [
+        (
+            "process_session_read",
+            serde_json::json!({"session_id":1}),
+            ToolOperation::ReadProcess,
+        ),
+        (
+            "process_session_interrupt",
+            serde_json::json!({"session_id":1}),
+            ToolOperation::InterruptProcess,
+        ),
+        (
+            "process_session_poll",
+            serde_json::json!({"session_id":1,"timeout_ms":0}),
+            ToolOperation::ReadProcess,
+        ),
+        (
+            "write_stdin",
+            serde_json::json!({"session_id":1,"chars":"","yield_time_ms":0}),
+            ToolOperation::WaitProcess,
+        ),
+        (
+            "process_session_write",
+            serde_json::json!({"session_id":1,"input":""}),
+            ToolOperation::WaitProcess,
+        ),
+        (
+            "process_session_poll",
+            serde_json::json!({"session_id":1}),
+            ToolOperation::ReadProcess,
+        ),
+        (
+            "write_stdin",
+            serde_json::json!({"session_id":1,"chars":"","yield_time_ms":100}),
+            ToolOperation::WaitProcess,
+        ),
+        (
+            "BashOutput",
+            serde_json::json!({"bash_id":"1","block":false}),
+            ToolOperation::ReadProcess,
+        ),
+        (
+            "get_command_or_subagent_output",
+            serde_json::json!({"id":"1","timeout_ms":0}),
+            ToolOperation::ReadProcess,
+        ),
+        (
+            "exec_command",
+            serde_json::json!({"session_id":1,"yield_time_ms":0}),
+            ToolOperation::ReadProcess,
+        ),
+    ] {
+        let mut tool = item(name, ActivityKind::Process);
+        tool.subject = Some("1".into());
+        tool.detail = Some(arguments.to_string());
+        assert_eq!(WireToolItem::from(tool).operation, operation, "{name}");
+    }
+}
+
+#[test]
 fn snapshots_patches_rows_and_streams_all_carry_the_host_operation() {
     for (name, kind, operation) in [
         ("apply_patch", ActivityKind::Tool, "edit"),

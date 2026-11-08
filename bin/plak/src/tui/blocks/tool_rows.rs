@@ -139,7 +139,7 @@ impl ToolVerb {
 #[must_use]
 pub fn tool_verb(name: &str, kind: ActivityKind) -> ToolVerb {
     operation_verb(plakous_host_protocol::views::ToolOperation::classify(
-        name, kind, None,
+        name, kind, None, None,
     ))
 }
 
@@ -189,7 +189,7 @@ pub(in crate::tui) fn subject_tool_verb(
     subject: Option<&str>,
 ) -> ToolVerb {
     operation_verb(plakous_host_protocol::views::ToolOperation::classify(
-        name, kind, subject,
+        name, kind, subject, None,
     ))
 }
 

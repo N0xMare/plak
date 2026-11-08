@@ -22,7 +22,7 @@ fn wire_operation_is_process_local_and_does_not_change_exported_row_bytes_or_equ
     assert_eq!(restored.wire_operation, None);
     assert_eq!(
         restored.operation(),
-        ToolOperation::classify("unknown", ActivityKind::Tool, None)
+        ToolOperation::classify("unknown", ActivityKind::Tool, None, None)
     );
     let schema = serde_json::to_value(schemars::schema_for!(ToolItem)).unwrap();
     assert!(schema["properties"].get("wire_operation").is_none());

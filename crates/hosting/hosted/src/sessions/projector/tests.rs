@@ -3056,6 +3056,128 @@ fn only_tool(views: &SessionViews) -> &crate::sessions::ToolItem {
     tools[0]
 }
 
+#[test]
+fn process_operations_match_live_final_and_snapshot_replay_without_subject_verbs() {
+    use plakous_host_protocol::views::ToolOperation as O;
+
+    for (name, arguments, subject, expected) in [
+        (
+            "process_session_poll",
+            r#"{"session_id":1,"timeout_ms":0}"#,
+            "Read output of process 1",
+            O::ReadProcess,
+        ),
+        (
+            "process_session_poll",
+            r#"{"session_id":1,"timeout_ms":100}"#,
+            "Waited for process 1",
+            O::WaitProcess,
+        ),
+        (
+            "process_session_write",
+            r#"{"session_id":1,"input":"hello","disposition":"keep_open"}"#,
+            "Sent input to process 1",
+            O::InputProcess,
+        ),
+        (
+            "process_session_write",
+            r#"{"session_id":1,"input":"\u0003","disposition":"keep_open"}"#,
+            "Sent interrupt to process 1",
+            O::InterruptProcess,
+        ),
+        (
+            "exec_command",
+            r#"{"session_id":1,"yield_time_ms":0}"#,
+            "Read output of process 1",
+            O::ReadProcess,
+        ),
+        (
+            "write_stdin",
+            r#"{"session_id":1,"chars":"","yield_time_ms":100}"#,
+            "Waited for process 1",
+            O::WaitProcess,
+        ),
+        (
+            "write_stdin",
+            r#"{"session_id":1,"chars":"hello\n","yield_time_ms":100}"#,
+            "Sent input to process 1",
+            O::InputProcess,
+        ),
+        (
+            "write_stdin",
+            r#"{"session_id":1,"chars":"\u0003","yield_time_ms":100}"#,
+            "Sent interrupt to process 1",
+            O::InterruptProcess,
+        ),
+    ] {
+        let mut feed = Feed::new();
+        let turn: TurnId = id(feed.fresh());
+        let call: CallId = id(feed.fresh());
+        let mut live =
+            crate::runtime::projected_tool_row(&call.to_string(), name, name, Some(arguments));
+        live.subject = Some(subject.to_owned());
+        assert_eq!(live.operation(), expected, "live {name}: {arguments}");
+        crate::runtime::settle_tool_row(&mut live, true, "process output", None);
+        assert_eq!(live.operation(), expected, "completed live {name}");
+
+        // Reconstruct from retained call/result facts, not the live subject
+        // or its process-local overlay. This is the snapshot's projection.
+        let (response, items) = feed.history(
+            Some(turn),
+            HistorySegmentKind::ToolExchange,
+            vec![ReadItem {
+                actor: ReadActor::Other,
+                harness_authored: false,
+                parts: vec![
+                    ReadPart::Call {
+                        call_id: call.to_string(),
+                        canonical: name.to_owned(),
+                        exposed: name.to_owned(),
+                        arguments: Some(arguments.to_owned()),
+                        parent_call_id: None,
+                        cell_id: None,
+                        subject: Some("1".to_owned()),
+                    },
+                    ReadPart::Result {
+                        call_id: call.to_string(),
+                        result: ResultRead {
+                            succeeded: true,
+                            text: "process output".to_owned(),
+                        },
+                    },
+                ],
+            }],
+            Vec::new(),
+        );
+        feed.advance(
+            vec![response],
+            Reads {
+                items: vec![(0, items)],
+                ..Reads::default()
+            },
+        );
+        let views = project_all(&feed).views;
+        let final_row = only_tool(&views);
+        assert_ne!(final_row.state, "running");
+        assert_eq!(final_row.subject.as_deref(), Some("1"));
+        assert_eq!(
+            final_row.operation(),
+            expected,
+            "final {name}: {final_row:?}"
+        );
+        let (replayed, stored) = project_paged(&feed, &[1], 1);
+        assert_eq!(
+            only_tool(&replayed).operation(),
+            expected,
+            "replayed {name}"
+        );
+        assert_eq!(stored, views.rows);
+        let restored: crate::sessions::ToolItem =
+            serde_json::from_str(&serde_json::to_string(final_row).unwrap()).unwrap();
+        assert_eq!(restored.operation(), expected, "persisted snapshot {name}");
+    }
+}
+
 /// (h) A provider-hosted call has no operation: its call and result blocks
 /// commit together in the response segment, read through `feed_items`, and
 /// that commit settles its row. It is not a local tool call.

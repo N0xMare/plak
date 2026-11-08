@@ -318,7 +318,12 @@ impl ToolItem {
     #[must_use]
     pub fn operation(&self) -> super::ToolOperation {
         self.wire_operation.unwrap_or_else(|| {
-            super::ToolOperation::classify(&self.name, self.kind, self.subject.as_deref())
+            super::ToolOperation::classify(
+                &self.name,
+                self.kind,
+                self.subject.as_deref(),
+                self.detail.as_deref(),
+            )
         })
     }
 

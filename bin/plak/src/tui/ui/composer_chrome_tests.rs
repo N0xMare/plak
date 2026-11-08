@@ -1125,6 +1125,36 @@ fn assert_hud_width_classes(app: &mut App) {
 }
 
 #[test]
+fn canonical_process_write_hud_uses_input_detail_without_subject_prefix_or_overlay() {
+    use super::test_support::{restore_snapshot, tool_item};
+    use plakous_host_protocol::views::transcript::TranscriptRow;
+
+    for name in ["process_session_write", "write_stdin"] {
+        for (detail, expected) in [
+            ("Ctrl-C", "sending interrupt"),
+            (
+                if name == "write_stdin" {
+                    r#"{"chars":"go\n"}"#
+                } else {
+                    r#"{"input":"go\n"}"#
+                },
+                "sending input",
+            ),
+        ] {
+            let mut app = App::new(launch_basic(), true);
+            app.apply_host_event(HostEvent::SetBusy(true));
+            let mut item = tool_item("process", name);
+            item.kind = ActivityKind::Process;
+            item.state = "running".into();
+            item.subject = Some("1".into());
+            item.detail = Some(detail.into());
+            app.apply_host_event(restore_snapshot(1, vec![TranscriptRow::Tool(item)]));
+            assert_eq!(app.turn_status_label().as_deref(), Some(expected), "{name}");
+        }
+    }
+}
+
+#[test]
 fn process_activity_hud_uses_the_projected_operation() {
     use super::test_support::{restore_snapshot, tool_item};
     use plakous_host_protocol::views::{ToolOperation, transcript::TranscriptRow};
