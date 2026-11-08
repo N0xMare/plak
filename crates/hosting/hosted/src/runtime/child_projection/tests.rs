@@ -168,6 +168,13 @@ async fn credential_wait_labels_snapshot_without_rewriting_retained_updates() {
         service.kept_activity().awaiting_operator,
         "a child's wait did not reach the root row"
     );
+    {
+        let _contended = runtime.live.lock().await;
+        assert!(
+            service.kept_activity().awaiting_operator,
+            "live-table contention must preserve the last-known operator wait"
+        );
+    }
     assert!(!snapshot.terminal);
     {
         let state = observation.lock();

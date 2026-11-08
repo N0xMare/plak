@@ -32,6 +32,23 @@ impl AgentSessions {
         Ok(head.revision().get())
     }
 
+    /// Read directory activity revisions with one read-only SQLite snapshot.
+    /// Missing or unreadable branches return `None` independently of other rows.
+    /// No runtime, lease, recovery or write is opened.
+    ///
+    /// # Errors
+    /// The shared database snapshot cannot be read or admitted.
+    pub fn inspect_branch_revisions_sqlite(
+        path: impl AsRef<Path>,
+        locators: &[SessionLocator],
+    ) -> Result<Vec<Option<u64>>, AgentSessionsError> {
+        let selectors = locators
+            .iter()
+            .map(|locator| locator.session_ref())
+            .collect::<Vec<_>>();
+        SqliteSessionStore::inspect_branch_revisions(path, &selectors).map_err(store_error)
+    }
+
     /// Pages committed canonical history at one exact SQLite branch head,
     /// including Working heads. This reads no uncommitted stream items, opens
     /// no mutable runtime, takes no lease, and performs no recovery or writes.

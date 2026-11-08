@@ -1433,6 +1433,9 @@ checkpoint selector. It reads addressed checkpoint metadata without loading
 conversation history, taking a runtime lease, recovering or writing. The value
 is the existing durable checkpoint revision, never a product-record revision
 or a feed cursor; lease release alone does not advance it.
+`inspect_branch_revisions_sqlite(path, locators)` reads a directory batch
+through one read-only snapshot. Missing or unreadable individual branches
+return no revision without preventing other rows from being projected.
 
 `SessionStoreError::Corrupt` carries only a content-free reason:
 `missing_base`, `missing_root`, `missing_child`, or `inconsistent` for other

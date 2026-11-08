@@ -906,6 +906,11 @@ where
     }
 
     fn create_session(&self, creation: &Creation<'_>) -> Outcome {
+        if creation.profile.is_some() && (creation.template.is_some() || creation.model.is_some()) {
+            return Outcome::Refused(RequestRefusal::Malformed {
+                detail: "profile is exclusive with template and model".into(),
+            });
+        }
         match self.host.sessions.create(creation) {
             Ok(created) => {
                 self.host.changed();

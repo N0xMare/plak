@@ -47,11 +47,7 @@ pub(crate) fn connect(paths: &PlakPaths, window: Duration) -> CliResult<Option<T
 }
 
 fn locked_host(paths: &PlakPaths) -> CliResult<Option<String>> {
-    let mut file = match std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(paths.host_lock())
-    {
+    let mut file = match std::fs::File::open(paths.host_lock()) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {
@@ -60,23 +56,18 @@ fn locked_host(paths: &PlakPaths) -> CliResult<Option<String>> {
             )));
         }
     };
-    match file.try_lock() {
-        Ok(()) => Ok(None),
-        Err(std::fs::TryLockError::WouldBlock) => {
-            let mut holder = String::new();
-            file.read_to_string(&mut holder).map_err(|error| {
-                CliFailure::new(format!("the host lock holder could not be read: {error}"))
-            })?;
-            Ok(Some(
-                holder
-                    .split_whitespace()
-                    .next()
-                    .unwrap_or("unknown")
-                    .to_owned(),
-            ))
+    let mut holder = String::new();
+    file.read_to_string(&mut holder).map_err(|error| {
+        CliFailure::new(format!("the host lock holder could not be read: {error}"))
+    })?;
+    let pid = holder.split_whitespace().next().unwrap_or("unknown");
+    if let Ok(pid) = pid.parse::<i32>() {
+        if pid > 0
+            && nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None)
+                == Err(nix::errno::Errno::ESRCH)
+        {
+            return Ok(None);
         }
-        Err(std::fs::TryLockError::Error(error)) => Err(CliFailure::new(format!(
-            "the host lock could not be checked: {error}"
-        ))),
     }
+    Ok(Some(pid.to_owned()))
 }

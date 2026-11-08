@@ -89,7 +89,14 @@ fn remote_launch_uses_host_picker_identity_and_canonical_validation_without_fall
         let face = SocketFace::discover(&paths).unwrap().unwrap();
         let verdict = face.place(Some("other-name"), Some("/remote/alias"));
         if refused {
-            assert!(verdict.unwrap_err().message().contains("workspace refused"));
+            let failure = verdict.unwrap_err();
+            assert_eq!(failure.exit_code(), 2);
+            assert!(
+                failure
+                    .message()
+                    .contains("outside the runner's allowed roots")
+            );
+            assert!(!failure.message().contains("WorkspaceRefused"));
             assert!(face.state().creation.is_none());
             assert!(face.session().is_none());
         } else {

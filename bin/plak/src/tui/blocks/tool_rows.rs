@@ -139,7 +139,7 @@ impl ToolVerb {
 #[must_use]
 pub fn tool_verb(name: &str, kind: ActivityKind) -> ToolVerb {
     operation_verb(plakous_host_protocol::views::ToolOperation::classify(
-        name, kind,
+        name, kind, None,
     ))
 }
 
@@ -206,21 +206,7 @@ pub(in crate::tui) fn subject_tool_verb(
 }
 
 pub(in crate::tui) fn process_subject_verb(subject: &str) -> Option<ToolVerb> {
-    match subject {
-        subject
-            if subject.starts_with("Waiting on process ")
-                || subject.starts_with("Waited on process ") =>
-        {
-            Some(ToolVerb::WaitProcess)
-        }
-        subject if subject.starts_with("Read output of process ") => Some(ToolVerb::ReadProcess),
-        subject if subject.starts_with("Sent input to process ") => Some(ToolVerb::InputProcess),
-        subject if subject.starts_with("Sent interrupt to process ") => {
-            Some(ToolVerb::InterruptProcess)
-        }
-        subject if subject.starts_with("Stopped process ") => Some(ToolVerb::StopProcess),
-        _ => None,
-    }
+    plakous_host_protocol::views::ToolOperation::process_subject(subject).map(operation_verb)
 }
 
 /// Display title for a tool row (§5.2 verbs; else humanized name).

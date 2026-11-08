@@ -514,7 +514,7 @@ where
 
     /// Read unresolved runner stop effects after the host's cancellation commits.
     #[must_use]
-    pub fn with_runner_pending(
+    pub(crate) fn with_runner_pending(
         mut self,
         pending: Option<std::sync::Arc<dyn Fn() -> bool + Send + Sync>>,
     ) -> Self {

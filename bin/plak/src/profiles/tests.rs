@@ -1,4 +1,6 @@
-use super::{ROLES, SessionSelection, list, prepare, selection_config};
+use super::{
+    ROLES, SessionSelection, list, prepare, prepare_wire, prepared_catalog, selection_config,
+};
 use crate::home::paths::PlakPaths;
 use crate::product_config::ProductConfig;
 use std::fs;
@@ -58,6 +60,31 @@ fn builtins_are_listed_without_a_profiles_directory() {
             ("reviewer", "claude"),
             ("researcher", "grok")
         ]
+    );
+}
+
+#[test]
+fn wire_profiles_accept_only_exact_catalog_ids_without_path_or_trim_aliases() {
+    let root = tempfile::tempdir().unwrap();
+    let config = ProductConfig::default_product();
+    let catalog = prepared_catalog(&config, root.path());
+    assert!(!catalog.is_empty());
+    let id = &catalog[0].0.id;
+    assert!(prepare_wire(&config, root.path(), id).is_ok());
+    for invalid in [
+        format!(" {id}"),
+        format!("{id} "),
+        "../../outside".into(),
+        "..\\outside".into(),
+    ] {
+        assert!(
+            prepare_wire(&config, root.path(), &invalid).is_err(),
+            "{invalid}"
+        );
+    }
+    assert!(
+        prepare_wire(&config, root.path(), "multi").is_err(),
+        "built-in alias is not a wire id"
     );
 }
 

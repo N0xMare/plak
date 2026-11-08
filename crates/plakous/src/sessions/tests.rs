@@ -4000,6 +4000,12 @@ async fn sqlite_history_inspection_pages_committed_content_without_mutation() ->
         advanced,
         AgentSessions::inspect_branch_revision_sqlite(&database, current)?
     );
+    let absent: SessionLocator =
+        format!("{}/{}/{}", Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4()).parse()?;
+    assert_eq!(
+        AgentSessions::inspect_branch_revisions_sqlite(&database, &[source, absent, current])?,
+        [Some(advanced), None, Some(advanced)]
+    );
     let before = store.stats().await?;
     let stale = AgentSessions::inspect_history_page_sqlite(
         &database,

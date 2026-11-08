@@ -119,6 +119,7 @@ fn row(session: &str, updated_at: u64) -> SessionRow {
 struct Script {
     successors: Mutex<BTreeMap<String, String>>,
     active_workers: AtomicUsize,
+    unrelated_lifecycle_workers: AtomicUsize,
     lifecycle_mutations: AtomicUsize,
     lease: Mutex<Option<plakous::sessions::LeaseOnlyHead>>,
     processes: std::sync::atomic::AtomicBool,
@@ -200,7 +201,7 @@ impl HostSessions<Core> for Fake {
         if archived && !self.0.successors.lock().unwrap().contains_key(session) {
             assert_eq!(
                 self.0.active_workers.load(Ordering::SeqCst),
-                0,
+                self.0.unrelated_lifecycle_workers.load(Ordering::SeqCst),
                 "lifecycle raced the resident worker"
             );
         }
@@ -222,7 +223,7 @@ impl HostSessions<Core> for Fake {
         if !self.0.successors.lock().unwrap().contains_key(session) {
             assert_eq!(
                 self.0.active_workers.load(Ordering::SeqCst),
-                0,
+                self.0.unrelated_lifecycle_workers.load(Ordering::SeqCst),
                 "delete raced the resident worker"
             );
         }
@@ -1044,6 +1045,19 @@ fn an_archived_attach_serves_persisted_facts_without_a_runtime_and_refuses_every
             })
         );
     }
+    request(
+        &mut connection,
+        19,
+        Op::StopSession {
+            session: "s1".into(),
+        },
+    );
+    assert_eq!(
+        outcome(&out.take(), 19),
+        Outcome::Ok(Answer::Stopped {
+            runner_pending: false
+        })
+    );
     request(&mut connection, 20, Op::Detach { attachment });
     assert_eq!(outcome(&out.take(), 20), Outcome::Ok(Answer::Detached));
     assert_eq!(fake.0.opens.load(Ordering::SeqCst), 0);
@@ -1383,6 +1397,35 @@ fn new_session_answers_created_and_a_replay_answers_the_same() {
     assert_eq!(outcome(&frames, 1), created);
     assert_eq!(outcome(&frames, 2), created);
     assert_eq!(*fake.0.creates.lock().unwrap(), ["new-r1"]);
+}
+
+#[test]
+fn profile_creation_refuses_both_advanced_overrides_before_product_creation() {
+    let (host, fake) = host(&[]);
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    for model in [false, true] {
+        request(
+            &mut connection,
+            1,
+            Op::NewSession {
+                runner: plakous_host_protocol::wire::RunnerLabel::local(),
+                workspace: "/w".into(),
+                profile: Some("claude-default".into()),
+                template: (!model).then(|| "template".into()),
+                model: model.then(|| plakous_host_protocol::wire::CreationModel {
+                    account: "claude".into(),
+                    model: "model".into(),
+                }),
+                request_id: "r1".into(),
+            },
+        );
+        assert!(matches!(
+            outcome(&out.take(), 1),
+            Outcome::Refused(RequestRefusal::Malformed { .. })
+        ));
+    }
+    assert!(fake.0.creates.lock().unwrap().is_empty());
 }
 
 /// `release_session` detaches every attachment of a resident session, the
@@ -2280,6 +2323,75 @@ fn switched() -> Switched {
         slot,
         connection,
         out,
+    }
+}
+
+#[test]
+fn lifecycle_releases_a_successor_served_through_its_predecessor_slot() {
+    for delete in [false, true] {
+        let Switched {
+            host,
+            fake,
+            slot,
+            mut connection,
+            out,
+        } = switched();
+        let op = if delete {
+            Op::DeleteSession {
+                session: "s9".into(),
+                abandon_children: false,
+            }
+        } else {
+            Op::ArchiveSession {
+                session: "s9".into(),
+                archived: true,
+            }
+        };
+        request(&mut connection, 2, op);
+        assert!(matches!(outcome(&out.take(), 2), Outcome::Ok(_)));
+        assert!(!matches!(slot.peek(), SlotView::Resident(_)));
+        assert_eq!(fake.0.active_workers.load(Ordering::SeqCst), 0);
+        assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
+        assert_eq!(fake.0.lifecycle_mutations.load(Ordering::SeqCst), 1);
+        connection.leave();
+        handed_off(&host);
+    }
+}
+
+#[test]
+fn lifecycle_on_a_dormant_predecessor_does_not_release_its_resident_successor() {
+    for delete in [false, true] {
+        let Switched {
+            host,
+            fake,
+            slot,
+            mut connection,
+            out,
+        } = switched();
+        fake.0
+            .unrelated_lifecycle_workers
+            .store(1, Ordering::SeqCst);
+        let op = if delete {
+            Op::DeleteSession {
+                session: "s1".into(),
+                abandon_children: false,
+            }
+        } else {
+            Op::ArchiveSession {
+                session: "s1".into(),
+                archived: true,
+            }
+        };
+        request(&mut connection, 2, op);
+        assert!(matches!(outcome(&out.take(), 2), Outcome::Ok(_)));
+        let SlotView::Resident(served) = slot.peek() else {
+            panic!("successor released");
+        };
+        assert_eq!(served.session_id(), "s9");
+        assert_eq!(fake.0.active_workers.load(Ordering::SeqCst), 1);
+        assert_eq!(fake.0.lifecycle_mutations.load(Ordering::SeqCst), 1);
+        connection.leave();
+        handed_off(&host);
     }
 }
 

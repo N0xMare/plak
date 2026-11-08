@@ -4098,6 +4098,9 @@ verdicts) are addressed, the session profile and workspace chrome states.
   that read is shared by every host attachment; an idle release is seen by
   the next read. A read that fails is a skipped tick, not a lost
   connection. A row gone from the stores is said by a fresh snapshot.
+  A wire creation profile is an exact listed built-in or user profile id,
+  never a trimmed spelling, path or CLI alias. Profile is mutually exclusive
+  with template/model overrides; malformed combinations fail before creation.
 - **Placement and attention.** Every directory row carries `runner
   {name,runner_id}`, `runner_status`, `needs_operator`, `activity_seq` and
   `archived`. Local is explicitly `{name:"local",runner_id:"local"}` and
@@ -4112,6 +4115,14 @@ verdicts) are addressed, the session profile and workspace chrome states.
   cursor, lease release, directory sequence or metadata timestamp. Every
   NodeView carries its own saved runner identity, decorated by the host with
   the lexically first configured alias, `local`, or the saved id if removed.
+  Live-table contention keeps the last-known operator-attention value for
+  that resident tree, rather than publishing a false cleared state.
+  A directory read resolves its home config and profile catalog once and
+  uses one read-only runtime snapshot for checkpoint revisions. A broken
+  individual row remains visible with activity revision zero, unknown runner
+  status and custom profile with a roster difference as needed; it does not
+  fail the directory for other sessions. These display fallbacks never admit
+  an open or execution.
 - **Open admission.** Every open freshly validates its saved runner and
   canonical workspace before starting a mutable runtime. This includes local:
   an unready home-local daemon never silently becomes direct execution.
@@ -4165,7 +4176,11 @@ verdicts) are addressed, the session profile and workspace chrome states.
   Identical pending input refuses `draft_pending {client_id}`. Before
   delivering DraftAccepted, retain the durable verdict independent of the
   originating connection; only that state answers `accepted {duplicate:true}`
-  without enqueueing. Rejection, pre-admission refusal and mailbox drop free
+  without enqueueing. `Sender::answering` windows are nested: neither an
+  answer-prefixed boundary nor its reopen frees the interrupted submission.
+  Only that submission's accepted/rejected/error verdict, definite refusal
+  or session end resolves its pending reservation.
+  Rejection, pre-admission refusal and mailbox drop free
   the reservation. Keep admitted ids for the host process lifetime without
   TTL/LRU; pending plus admitted entries are bounded at 100,000, with
   `draft_registry_full {limit:100000}` for new ids and duplicates still usable.
@@ -5915,8 +5930,10 @@ one leaves them for the next.
 
 ### 5.4 The transcript grammar
 
-Host-protocol derives `ToolOperation` from each tool's canonical name and
-host-populated activity kind. `ToolItem::operation()` uses that classifier;
+Host-protocol derives `ToolOperation` from each tool's canonical name,
+host-populated activity kind and host-authored process subject. Process read,
+input and interrupt subjects disambiguate shared process tool names on the
+host, never on clients. `ToolItem::operation()` uses that classifier;
 the operation is not a field in the persisted or exported row. A process-local
 `wire_operation` overlay may retain the host-supplied operation after decoding;
 it is excluded from serde, JSON Schema and row equality. Without that overlay,

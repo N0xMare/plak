@@ -317,8 +317,9 @@ impl ToolItem {
     /// Semantic operation, derived without adding a persisted discriminator.
     #[must_use]
     pub fn operation(&self) -> super::ToolOperation {
-        self.wire_operation
-            .unwrap_or_else(|| super::ToolOperation::classify(&self.name, self.kind))
+        self.wire_operation.unwrap_or_else(|| {
+            super::ToolOperation::classify(&self.name, self.kind, self.subject.as_deref())
+        })
     }
 
     /// The name the row is labelled by: the exposed name when the model

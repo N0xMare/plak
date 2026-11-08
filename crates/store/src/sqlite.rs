@@ -495,6 +495,30 @@ impl SqliteSessionStore {
         Ok((branch.head, inspection))
     }
 
+    /// Read current branch revisions through one read-only snapshot.
+    /// Missing or unreadable individual branches have no revision.
+    ///
+    /// # Errors
+    /// The database or snapshot could not be admitted for inspection.
+    pub fn inspect_branch_revisions(
+        path: impl AsRef<Path>,
+        selectors: &[SessionRef],
+    ) -> Result<Vec<Option<u64>>, SessionStoreError> {
+        let connection =
+            Self::open_inspection(path.as_ref())?.ok_or(SessionStoreError::NotFound)?;
+        let snapshot = connection.unchecked_transaction().map_err(map_sqlite)?;
+        admit_inspection_snapshot(&snapshot)?;
+        Ok(selectors
+            .iter()
+            .map(|selector| {
+                branch_row(&snapshot, *selector)
+                    .ok()
+                    .flatten()
+                    .map(|branch| branch.head.revision().get())
+            })
+            .collect())
+    }
+
     /// Reads one bounded page of a session's change feed after `after`, with
     /// its retained window, over one read-only snapshot: no runtime, lease or
     /// write. The page has the same bounds and retention answer as

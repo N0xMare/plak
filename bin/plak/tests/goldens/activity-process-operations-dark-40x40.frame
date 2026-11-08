@@ -7,7 +7,7 @@ p4 Rgb(112, 180, 255)/Rgb(20, 22, 27)
 p5 Reset/Rgb(20, 22, 27)
 p6 Rgb(190, 194, 204)/Rgb(20, 22, 27)
 p7 Rgb(248, 248, 246)/Rgb(20, 22, 27)
-00 symbols ··✓·Ran·1·command,·checked·2·process…·▸·
+00 symbols ··✓·Ran·1·command,·checked·3·process…·▸·
 00 colors  0-1:p0, 2-2:p1, 3-36:p2, 37-38:p0, 39-39:p3
 01 symbols ··⠋·Waiting·on·process·7···ca…········▸·
 01 colors  0-1:p0, 2-2:p4, 3-29:p2, 30-36:p5, 37-38:p0, 39-39:p3

@@ -125,6 +125,41 @@ pub(crate) fn list(config: &ProductConfig, home: &Path) -> ProfilesView {
 /// product would refuse.
 pub(crate) fn prepare(config: &ProductConfig, home: &Path, name: &str) -> Result<Prepared, String> {
     let resolved = resolve(config, home, name)?;
+    prepare_resolved(config, resolved)
+}
+
+/// Wire ids are exact catalog ids, never aliases or path spellings.
+pub(crate) fn prepare_wire(
+    config: &ProductConfig,
+    home: &Path,
+    name: &str,
+) -> Result<Prepared, String> {
+    if name != name.trim() || name.contains(['/', '\\']) {
+        return Err(format!("unknown profile `{name}`"));
+    }
+    prepared_catalog(config, home)
+        .into_iter()
+        .find(|(row, _)| row.id == name)
+        .map(|(_, prepared)| prepared)
+        .ok_or_else(|| format!("unknown profile `{name}`"))
+}
+
+/// Resolve the profile files once for a complete directory read.
+pub(crate) fn prepared_catalog(config: &ProductConfig, home: &Path) -> Vec<(ProfileRow, Prepared)> {
+    let (users, _) = user_profiles(config, home);
+    builtins()
+        .filter_map(|builtin| resolve_builtin(config, builtin).ok())
+        .chain(users)
+        .filter_map(|resolved| {
+            let row = row(config, &resolved, Vec::new());
+            prepare_resolved(config, resolved)
+                .ok()
+                .map(|prepared| (row, prepared))
+        })
+        .collect()
+}
+
+fn prepare_resolved(config: &ProductConfig, resolved: Resolved) -> Result<Prepared, String> {
     let mut prepared = config.clone();
     for (template_name, template) in std::iter::once(&resolved.root).chain(&resolved.cards) {
         prepared
@@ -232,6 +267,9 @@ fn builtin_template(name: &str) -> Option<Result<AgentTemplate, String>> {
 /// user profile owns. The Agents list and `/agents <name>` both use this.
 fn resolve(config: &ProductConfig, home: &Path, name: &str) -> Result<Resolved, String> {
     let name = name.trim();
+    if name.contains(['/', '\\']) {
+        return Err(format!("unknown profile `{name}`"));
+    }
     let (users, _) = user_profiles(config, home);
     if let Some(user) = users.into_iter().find(|user| user.id == name) {
         return Ok(user);

@@ -7,6 +7,7 @@
 //! stale custody never reads as held, and a holder on another machine,
 //! which cannot be proven gone, always does.
 
+use plakous::runner::RunnerRow;
 use std::path::Path;
 use std::sync::{Mutex, PoisonError};
 
@@ -145,80 +146,80 @@ impl ProductSessions {
             }))
     }
 
-    fn row(&self, entry: DirectoryEntry) -> Result<SessionRow, String> {
+    fn row(
+        &self,
+        entry: DirectoryEntry,
+        config: Option<&crate::product_config::ProductConfig>,
+        profiles: &[(
+            crate::surface_protocol::ProfileRow,
+            crate::profiles::Prepared,
+        )],
+        runners: &[RunnerRow],
+        activity_seq: u64,
+    ) -> SessionRow {
         use plakous_recursive_subagents::tree::TreeStore as _;
-        let store = self
-            .services
-            .session_records()
-            .map_err(|failure| failure.message().to_owned())?;
-        let activity = activity_of(plakous_hosted::runtime::root_standing(
-            store.as_ref(),
-            &entry.id,
-        )?);
-        let hosted_elsewhere = self.elsewhere(&entry.node.tree_id, entry.locator)?;
-        let record = store.load(&entry.id)?;
-        let paths = self
-            .services
-            .paths()
-            .map_err(|failure| failure.message().to_owned())?;
-        let context = if record.runner.is_some() {
-            paths.for_remote_workspace(&record.workspace_root)
-        } else {
-            paths.for_workspace(&record.workspace_root)
-        };
-        let config = crate::product_config::ProductConfig::load(&context);
-        let roster = self
-            .tree
-            .load(&entry.node.tree_id)
-            .map_err(|error| error.detail)?
+        let store = self.services.session_records().ok();
+        let activity = store
+            .as_ref()
+            .and_then(|store| {
+                plakous_hosted::runtime::root_standing(store.as_ref(), &entry.id).ok()
+            })
+            .map_or(SessionActivity::Idle, activity_of);
+        let hosted_elsewhere = self
+            .elsewhere(&entry.node.tree_id, entry.locator)
+            .ok()
+            .flatten();
+        let record = store.and_then(|store| store.load(&entry.id).ok());
+        let tree = self.tree.load(&entry.node.tree_id);
+        let degraded = record.is_none() || config.is_none() || tree.is_err();
+        let roster = tree
+            .ok()
+            .flatten()
             .map(plakous_recursive_subagents::tree::ProductAgentTree::reopen)
             .map(|tree| tree.current_epoch().clone());
-        let profile = config.map(|config| {
-            crate::shell::settings::session_profile(
-                &config,
-                paths.home(),
-                &plakous_hosted::runtime::SurfaceSession {
-                    runner: record.runner.clone(),
-                    id: record.id.clone(),
-                    account: record.account.clone(),
-                    model: record.model.clone(),
-                    effort: record.effort.clone(),
-                    fast: record.target_selection
-                        == crate::product_config::ProductTargetSelection::NativePriority,
-                    workspace: record.workspace_root.clone(),
-                    roster,
-                    live_children: false,
-                    mcp: None,
-                },
-            )
-        });
+        let profile = config
+            .zip(record.as_ref())
+            .filter(|_| roster.is_some())
+            .map(|(config, record)| {
+                crate::shell::settings::session_profile_with_profiles(
+                    config,
+                    &plakous_hosted::runtime::SurfaceSession {
+                        runner: record.runner.clone(),
+                        id: record.id.clone(),
+                        account: record.account.clone(),
+                        model: record.model.clone(),
+                        effort: record.effort.clone(),
+                        fast: record.target_selection
+                            == crate::product_config::ProductTargetSelection::NativePriority,
+                        workspace: record.workspace_root.clone(),
+                        roster,
+                        live_children: false,
+                        mcp: None,
+                    },
+                    profiles,
+                )
+            });
         let (profile, differences) = match profile {
-            Ok(profile) => (Some(profile.id), profile.differences),
-            Err(_) => (
+            Some(profile) => (Some(profile.id), profile.differences),
+            None => (
                 Some("custom".to_owned()),
                 vec![plakous_host_protocol::views::ProfileDifference::Roster],
             ),
         };
-        let runners = self.services.runners().rows();
         let runner_id = record
-            .runner
             .as_ref()
+            .and_then(|record| record.runner.as_ref())
             .map_or("local", |runner| runner.runner_id.as_str());
-        Ok(SessionRow {
-            runner: runner_views::label(runner_id, &runners),
-            runner_status: runner_views::status(runner_id, &runners)?,
+        SessionRow {
+            runner: runner_views::label(runner_id, runners),
+            runner_status: if degraded {
+                plakous_host_protocol::wire::RunnerStatus::Unknown
+            } else {
+                runner_views::status(runner_id, runners)
+                    .unwrap_or(plakous_host_protocol::wire::RunnerStatus::Unknown)
+            },
             needs_operator: false,
-            activity_seq: entry
-                .locator
-                .map(|locator| {
-                    plakous::sessions::AgentSessions::inspect_branch_revision_sqlite(
-                        paths.runtime_database(),
-                        locator,
-                    )
-                    .map_err(|error| error.to_string())
-                })
-                .transpose()?
-                .unwrap_or(0),
+            activity_seq,
             archived: entry.archived,
             differences,
             environment: environment_of(hosted_elsewhere.is_some()),
@@ -235,7 +236,7 @@ impl ProductSessions {
             activity,
             live_work: plakous_host_protocol::wire::LiveWork::default(),
             session: entry.id,
-        })
+        }
     }
 }
 
@@ -358,7 +359,36 @@ impl HostSessions<PlakExtension> for ProductSessions {
         let entries = self.with_product(|store| {
             store.directory_filtered(workspace.map(Path::new), runner, include_archived)
         })?;
-        entries.into_iter().map(|entry| self.row(entry)).collect()
+        let paths = self
+            .services
+            .paths()
+            .map_err(|failure| failure.message().to_owned())?;
+        let config = crate::product_config::ProductConfig::load_user(paths).ok();
+        let profiles = config
+            .as_ref()
+            .map(|config| crate::profiles::prepared_catalog(config, paths.home()))
+            .unwrap_or_default();
+        let runners = self.services.runners().rows();
+        let locators = entries
+            .iter()
+            .filter_map(|entry| entry.locator)
+            .collect::<Vec<_>>();
+        let revisions = plakous::sessions::AgentSessions::inspect_branch_revisions_sqlite(
+            paths.runtime_database(),
+            &locators,
+        )
+        .unwrap_or_else(|_| vec![None; locators.len()]);
+        let mut revisions = revisions.into_iter();
+        Ok(entries
+            .into_iter()
+            .map(|entry| {
+                let revision = entry
+                    .locator
+                    .and_then(|_| revisions.next().flatten())
+                    .unwrap_or(0);
+                self.row(entry, config.as_ref(), &profiles, &runners, revision)
+            })
+            .collect())
     }
 
     fn session_of(&self, node: &NodeAddress) -> Result<Option<String>, String> {
@@ -631,7 +661,7 @@ fn new_record(
     let mut config = crate::commands::support::admit_product_config(&context, &mut std::io::sink())
         .map_err(|_| binding(BindingRefusalKind::Configuration))?;
     if let Some(profile) = creation.profile {
-        config = crate::profiles::prepare(&config, context.home(), profile)
+        config = crate::profiles::prepare_wire(&config, context.home(), profile)
             .map_err(|_| binding(BindingRefusalKind::UnknownProfile))?
             .config;
     }
@@ -769,6 +799,45 @@ fn open_session(
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
     use super::*;
+
+    #[test]
+    fn directory_rows_survive_missing_runtime_and_unreadable_configuration() {
+        let (temporary, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+        let workspace = temporary.path().join("workspace");
+        std::fs::create_dir(&workspace).unwrap();
+        let services = Services::for_home(paths.clone());
+        let records = services.session_records().unwrap();
+        let mut healthy = crate::store::sessions::SessionRecord::new(workspace.clone());
+        records.save(&mut healthy).unwrap();
+        let mut broken = crate::store::sessions::SessionRecord::new(workspace);
+        broken.plakous_locator = Some(
+            format!(
+                "{}/{}/{}",
+                uuid::Uuid::new_v4(),
+                uuid::Uuid::new_v4(),
+                uuid::Uuid::new_v4()
+            )
+            .parse()
+            .unwrap(),
+        );
+        records.save(&mut broken).unwrap();
+        std::fs::write(paths.config_file(), "[invalid").unwrap();
+        let product = ProductSessions::new(&services, None, None).unwrap();
+        let rows = product.rows(None, None, false).unwrap();
+        assert_eq!(rows.len(), 2);
+        for row in rows {
+            assert_eq!(row.activity_seq, 0);
+            assert_eq!(
+                row.runner_status,
+                plakous_host_protocol::wire::RunnerStatus::Unknown
+            );
+            assert_eq!(row.profile.as_deref(), Some("custom"));
+            assert_eq!(
+                row.differences,
+                [plakous_host_protocol::views::ProfileDifference::Roster]
+            );
+        }
+    }
 
     #[test]
     fn opening_local_before_daemon_readiness_never_falls_back_to_direct_execution() {

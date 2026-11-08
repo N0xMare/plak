@@ -20,7 +20,7 @@ pub fn tool_operation(
     name: &str,
     kind: ActivityKind,
 ) -> plakous_host_protocol::views::ToolOperation {
-    plakous_host_protocol::views::ToolOperation::classify(name, kind)
+    plakous_host_protocol::views::ToolOperation::classify(name, kind, None)
 }
 
 /// Canonical outer markers of a Plakous local-composition cell.

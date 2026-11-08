@@ -1391,7 +1391,7 @@ fn a_second_host_refuses_and_a_sigterm_stops_the_first() {
 /// A tree store that cannot be read fails the directory's read: a holder is
 /// never read free on an error.
 #[test]
-fn a_tree_store_that_cannot_be_read_fails_the_directory() {
+fn a_broken_tree_row_degrades_the_directory_but_does_not_admit_an_open() {
     let Some(fixture) = fixture() else { return };
     let host = start(&fixture);
     let mut client = Client::connect(&host);
@@ -1416,11 +1416,17 @@ fn a_tree_store_that_cannot_be_read_fails_the_directory() {
             include_archived: false,
         },
     ) {
-        Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::SessionUnavailable {
-            detail,
-        }) => assert!(detail.contains("tree store"), "{detail}"),
-        other => panic!("the directory read through a broken tree store: {other:?}"),
+        Outcome::Ok(Answer::Sessions { rows }) => {
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].profile.as_deref(), Some("custom"));
+            assert_eq!(rows[0].activity_seq, 0);
+        }
+        other => panic!("one broken row failed the directory: {other:?}"),
     }
+    assert!(
+        matches!(client.request(3, Op::Attach { node }), Outcome::Refused(_)),
+        "degraded directory facts must never authorize execution"
+    );
 }
 
 /// A root turn its host lost and an open held is continued by the next

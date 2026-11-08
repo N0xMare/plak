@@ -111,6 +111,10 @@ fn host_draft_ids_survive_reconnect_only_after_durable_admission_for_every_submi
         let mut first = connect();
         let attachment = first.attachment.unwrap();
         let id = ClientDraftId::new();
+        assert!(matches!(
+            first.intent_request(0, attachment, intent.clone(), &[], None),
+            Some(Outcome::Refused(RequestRefusal::Malformed { .. }))
+        ));
         assert_eq!(
             first.intent_request(1, attachment, intent.clone(), &[], Some(id)),
             Some(Outcome::Ok(Answer::Accepted { duplicate: false }))
@@ -132,6 +136,22 @@ fn host_draft_ids_survive_reconnect_only_after_durable_admission_for_every_submi
             second.intent_request(3, reattached, intent.clone(), &[], Some(id)),
             Some(Outcome::Ok(Answer::Accepted { duplicate: true }))
         );
+        service
+            .lock()
+            .attachments
+            .get_mut(&reattached)
+            .unwrap()
+            .node = Some("other-node".into());
+        assert!(matches!(
+            second.intent_request(4, reattached, intent.clone(), &[], Some(id)),
+            Some(Outcome::Refused(RequestRefusal::Malformed { .. }))
+        ));
+        service
+            .lock()
+            .attachments
+            .get_mut(&reattached)
+            .unwrap()
+            .node = None;
         second.session = Some("session-b".to_owned());
         assert!(matches!(
             second.intent_request(4, reattached, intent, &[], Some(id)),
@@ -139,6 +159,105 @@ fn host_draft_ids_survive_reconnect_only_after_durable_admission_for_every_submi
         ));
         second.leave();
     }
+}
+
+#[test]
+fn not_attached_refusal_frees_an_identified_draft_for_a_new_attachment() {
+    use crate::host_service::drafts::DraftRegistry;
+    use plakous_host_protocol::Core;
+    use plakous_host_protocol::wire::ClientDraftId;
+    let registry = DraftRegistry::default();
+    let (actions, _intents) = plakous_host_protocol::intent_channel::<Core>();
+    let service = HostService::new(actions.clone(), root(), ATTACHMENT_CAPACITY);
+    let mut connection =
+        WireConnection::on_service(service.clone(), Vec::new(), actions, Leave::Detach)
+            .with_drafts(registry);
+    let attachment = service.attach(&root(), Face::Remote).unwrap();
+    connection.attachment = Some(attachment);
+    let id = ClientDraftId::new();
+    let intent = SessionIntent::Prompt(Draft::from("retry only after refusal"));
+    service.detach(attachment).unwrap();
+    assert_eq!(
+        connection.intent_request(1, attachment, intent.clone(), &[], Some(id)),
+        Some(Outcome::Refused(RequestRefusal::NotAttached))
+    );
+    let next = service.attach(&root(), Face::Remote).unwrap();
+    connection.attachment = Some(next);
+    assert_eq!(
+        connection.intent_request(2, next, intent, &[], Some(id)),
+        Some(Outcome::Ok(Answer::Accepted { duplicate: false }))
+    );
+}
+
+#[test]
+fn answering_mail_records_durable_admission_before_a_reconnected_retry() {
+    answering_draft(SessionIntent::MailTopologyNode {
+        agent_id: "peer".into(),
+        message: "deliver once".into(),
+        urgent: true,
+    });
+}
+
+#[test]
+fn interleaved_answer_keeps_steer_pending_until_its_own_admission() {
+    answering_draft(SessionIntent::Steer(Draft::from("steer once")));
+}
+
+fn answering_draft(intent: SessionIntent<plakous_host_protocol::Core>) {
+    use crate::host_service::drafts::DraftRegistry;
+    use plakous_host_protocol::wire::ClientDraftId;
+    use plakous_host_protocol::{ContentObservation, Core};
+    let registry = DraftRegistry::default();
+    let (actions, _intents) = plakous_host_protocol::intent_channel::<Core>();
+    let service = HostService::new(actions.clone(), root(), ATTACHMENT_CAPACITY);
+    let connect = || {
+        let mut wire =
+            WireConnection::on_service(service.clone(), Vec::new(), actions.clone(), Leave::Detach)
+                .with_drafts(registry.clone());
+        wire.session = Some("session".into());
+        wire.attachment = Some(service.attach(&root(), Face::Remote).unwrap());
+        wire
+    };
+    let mut first = connect();
+    let attachment = first.attachment.unwrap();
+    let id = ClientDraftId::new();
+    assert_eq!(
+        first.intent_request(1, attachment, intent.clone(), &[], Some(id)),
+        Some(Outcome::Ok(Answer::Accepted { duplicate: false }))
+    );
+    let (channel, events) = crate::surface_protocol::host_event_channel::<Core>();
+    let sender = crate::runtime::Sender::over(channel);
+    let drain = || {
+        while let Ok(event) = events.try_recv() {
+            service.observe(event);
+        }
+    };
+    sender.send(ContentObservation::IntentStarted(Some(
+        "attachment:999:detail".into(),
+    )));
+    let detail = sender.answering();
+    sender.send(ContentObservation::IntentStarted(Some(format!(
+        "attachment:{attachment}:{id}"
+    ))));
+    let admission = sender.answering();
+    drain();
+    detail.send(ContentObservation::SetBusy(false));
+    drain();
+    first.leave();
+    let mut retry = connect();
+    let reattached = retry.attachment.unwrap();
+    assert_eq!(
+        retry.intent_request(2, reattached, intent.clone(), &[], Some(id)),
+        Some(Outcome::Refused(RequestRefusal::DraftPending {
+            client_id: id
+        }))
+    );
+    admission.send(ContentObservation::DraftAccepted(intent.clone()));
+    drain();
+    assert_eq!(
+        retry.intent_request(3, reattached, intent, &[], Some(id)),
+        Some(Outcome::Ok(Answer::Accepted { duplicate: true }))
+    );
 }
 
 /// A child's mail request is answered from its own answer window: accepted
@@ -311,6 +430,30 @@ fn the_hello_wait_ends_at_its_deadline_or_a_stop() {
     let mut stdout = Vec::new();
     assert!(!handshake::<Core>(&lines, welcome(), &mut stdout, &|| true).unwrap());
     assert!(stdout.is_empty(), "a stopped wait writes nothing");
+}
+
+#[test]
+fn protocol_four_is_explicitly_refused_before_any_attachment() {
+    use plakous_host_protocol::Core;
+    use plakous_host_protocol::wire::Hello;
+    let (sender, lines) = lines(1);
+    sender
+        .send(Ok(encode_line(&ClientFrame::<Core>::Hello(Hello {
+            proto: 4,
+            binary_id: "old-client".into(),
+            caps: Vec::new(),
+        }))
+        .unwrap()))
+        .unwrap();
+    let mut stdout = Vec::new();
+    assert!(!handshake::<Core>(&lines, welcome(), &mut stdout, &|| false).unwrap());
+    assert!(matches!(
+        host_frames(&stdout).as_slice(),
+        [HostFrame::Refused(HandshakeRefusal::VersionMismatch {
+            host: 5,
+            client: 4
+        })]
+    ));
 }
 
 fn binding(session: &str) -> SessionObservation<plakous_host_protocol::Core> {

@@ -1549,6 +1549,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
     "plakous-recursive-subagents-store": _SHARED_PLAKOUS_SYMBOLS,
 }
 ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
+    ("plak", "src/host/sessions.rs"): {"runner": {"RunnerRow"}},
     ("plakous-hosted", "src/jobs.rs"): {"tools": {"LineOwner"}},
     ("plak", "src/platform_product/anthropic.rs"): {
         "anthropic": {"ANTHROPIC_PLATFORM_ORIGIN"},

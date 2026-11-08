@@ -75,9 +75,47 @@ pub enum ToolOperation {
 }
 
 impl ToolOperation {
-    /// Classify a tool without consulting an exposed alias or presentation text.
+    /// Classify the canonical tool and its host-authored process subject.
     #[must_use]
-    pub fn classify(name: &str, kind: ActivityKind) -> Self {
+    pub fn classify(name: &str, kind: ActivityKind, subject: Option<&str>) -> Self {
+        let operation = Self::classify_name(name, kind);
+        if (operation == Self::Run && name != "exec_command")
+            || !matches!(
+                operation,
+                Self::Run
+                    | Self::WaitProcess
+                    | Self::ReadProcess
+                    | Self::InputProcess
+                    | Self::InterruptProcess
+                    | Self::StopProcess
+            )
+        {
+            return operation;
+        }
+        Self::process_subject(subject.unwrap_or_default()).unwrap_or(operation)
+    }
+
+    /// The semantic operation carried by a host-authored process subject.
+    #[must_use]
+    pub fn process_subject(subject: &str) -> Option<Self> {
+        match subject {
+            value
+                if value.starts_with("Waiting on process ")
+                    || value.starts_with("Waited on process ") =>
+            {
+                Some(Self::WaitProcess)
+            }
+            value if value.starts_with("Read output of process ") => Some(Self::ReadProcess),
+            value if value.starts_with("Sent input to process ") => Some(Self::InputProcess),
+            value if value.starts_with("Sent interrupt to process ") => {
+                Some(Self::InterruptProcess)
+            }
+            value if value.starts_with("Stopped process ") => Some(Self::StopProcess),
+            _ => None,
+        }
+    }
+
+    fn classify_name(name: &str, kind: ActivityKind) -> Self {
         // The three read/mail topology tools carry their own verb. Collapsing
         // every `ActivityKind::Agent` row to `Agent` printed `▸ ✓ Agent · 6.3s`
         // for a `wait_agent`, which says nothing about what is being waited on.
@@ -165,23 +203,23 @@ mod tests {
     #[test]
     fn canonical_topology_wins_before_kind_and_kind_before_generic_aliases() {
         assert_eq!(
-            ToolOperation::classify("wait_agent", ActivityKind::Agent),
+            ToolOperation::classify("wait_agent", ActivityKind::Agent, None),
             ToolOperation::WaitAgent
         );
         assert_eq!(
-            ToolOperation::classify("adopt_candidate", ActivityKind::Tool),
+            ToolOperation::classify("adopt_candidate", ActivityKind::Tool, None),
             ToolOperation::Adopt
         );
         assert_eq!(
-            ToolOperation::classify("read_file", ActivityKind::Compose),
+            ToolOperation::classify("read_file", ActivityKind::Compose, None),
             ToolOperation::Compose
         );
         assert_eq!(
-            ToolOperation::classify("unknown", ActivityKind::Tool),
+            ToolOperation::classify("unknown", ActivityKind::Tool, None),
             ToolOperation::Generic
         );
         assert_eq!(
-            ToolOperation::classify("mcp__docs__read", ActivityKind::Tool),
+            ToolOperation::classify("mcp__docs__read", ActivityKind::Tool, None),
             ToolOperation::Mcp
         );
         for name in [
@@ -193,7 +231,7 @@ mod tests {
             "process_session_start",
         ] {
             assert_eq!(
-                ToolOperation::classify(name, ActivityKind::Tool),
+                ToolOperation::classify(name, ActivityKind::Tool, None),
                 ToolOperation::Run
             );
         }

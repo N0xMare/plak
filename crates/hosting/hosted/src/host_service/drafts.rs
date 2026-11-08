@@ -8,11 +8,11 @@ use plakous_host_protocol::wire::{AttachmentId, ClientDraftId, NodeAddress};
 use plakous_host_protocol::{ProtocolExtension, SessionObservation};
 
 /// Maximum pending plus durably admitted wire submissions in one host generation.
-pub const MAX_DRAFT_IDS: usize = 100_000;
+pub(crate) const MAX_DRAFT_IDS: usize = 100_000;
 
 /// Why reserving a wire submission did not create a new admission opportunity.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DraftReservationError {
+pub(crate) enum DraftReservationError {
     /// The same submission is still waiting for durable admission.
     Pending,
     /// The id was used with different session, node, kind or exact content.
@@ -34,7 +34,7 @@ struct Registry {
 
 /// One host's registry, shared by sessions and independent of their attachments.
 #[derive(Clone)]
-pub struct DraftRegistry(Arc<Mutex<Registry>>);
+pub(crate) struct DraftRegistry(Arc<Mutex<Registry>>);
 
 impl Default for DraftRegistry {
     fn default() -> Self {
@@ -46,7 +46,7 @@ impl Default for DraftRegistry {
 }
 
 /// A reservation or an already durable verdict; neither means mailbox acceptance.
-pub enum DraftReservation {
+pub(crate) enum DraftReservation {
     /// The caller must keep this through durable admission or definite refusal/drop.
     Pending(PendingDraft),
     /// An identical submission was durably admitted earlier in this host generation.
@@ -62,7 +62,7 @@ impl DraftRegistry {
     ///
     /// # Errors
     /// A conflicting id, an identical pending submission, or exhausted capacity.
-    pub fn reserve(
+    pub(crate) fn reserve(
         &self,
         id: ClientDraftId,
         digest: [u8; 32],
@@ -97,7 +97,7 @@ impl DraftRegistry {
 
 /// Process-local pending admission owned by the service, not the submitting connection.
 /// Dropping it before durable admission frees the id, including mailbox drop/refusal.
-pub struct PendingDraft {
+pub(crate) struct PendingDraft {
     registry: DraftRegistry,
     id: ClientDraftId,
 }
@@ -105,7 +105,7 @@ pub struct PendingDraft {
 impl PendingDraft {
     /// Record durable admission before delivering its addressed observation.
     /// Mail calls this only after its translated input/mail is durably admitted.
-    pub fn admit(self) {
+    pub(crate) fn admit(self) {
         let mut state = self
             .registry
             .0
@@ -169,10 +169,8 @@ impl<P: ProtocolExtension> super::State<P> {
     ) -> Option<ClientDraftId> {
         match observation {
             SessionObservation::IntentStarted(started) => {
-                if let Some(previous) = self.draft_window.take() {
-                    // An answered window ended without durable admission.
-                    self.pending_drafts.remove(&previous);
-                }
+                // Sender::answering nests an answer window and then reopens
+                // the interrupted one. Neither boundary is an admission verdict.
                 self.draft_window = started
                     .as_deref()
                     .map(|value| value.strip_prefix(ANSWER).unwrap_or(value))
@@ -197,12 +195,6 @@ impl<P: ProtocolExtension> super::State<P> {
             SessionObservation::Row(
                 plakous_host_protocol::views::transcript::TranscriptRow::Notice(notice),
             ) if notice.tone == plakous_host_protocol::views::transcript::NoticeTone::Error => {
-                if let Some(id) = self.draft_window {
-                    self.pending_drafts.remove(&id);
-                }
-                None
-            }
-            SessionObservation::TopologyNavigatorUnavailable { .. } => {
                 if let Some(id) = self.draft_window {
                     self.pending_drafts.remove(&id);
                 }

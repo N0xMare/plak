@@ -45,7 +45,7 @@
 //! last face sender and attachment are gone.
 
 mod child;
-pub mod drafts;
+pub(crate) mod drafts;
 mod face;
 mod tree_nodes;
 pub mod wire;

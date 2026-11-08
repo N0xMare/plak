@@ -465,17 +465,39 @@ pub(crate) fn of(
 }
 
 pub(crate) fn tree_needs_operator(tree_id: &str) -> bool {
+    struct Attention {
+        runtime: std::sync::Weak<crate::topology_runtime::ProductTopologyRuntime>,
+        value: bool,
+    }
+    static LAST: std::sync::LazyLock<Mutex<std::collections::BTreeMap<String, Attention>>> =
+        std::sync::LazyLock::new(Mutex::default);
     let Some(runtime) = crate::topology_runtime::lookup(tree_id) else {
         return false;
     };
     let Ok(live) = runtime.live.try_lock() else {
-        return false;
+        return LAST
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(tree_id)
+            .is_some_and(|last| last.runtime.ptr_eq(&Arc::downgrade(&runtime)) && last.value);
     };
-    live.keys().any(|id| {
+    let value = live.keys().any(|id| {
         live.get(id)
             .and_then(of)
             .is_some_and(|observation| observation.needs_operator())
-    })
+    });
+    let mut last = LAST
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    last.retain(|_, last| last.runtime.strong_count() > 0);
+    last.insert(
+        tree_id.to_owned(),
+        Attention {
+            runtime: Arc::downgrade(&runtime),
+            value,
+        },
+    );
+    value
 }
 
 impl ChildObservation {

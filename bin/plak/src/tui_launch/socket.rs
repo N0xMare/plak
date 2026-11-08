@@ -130,9 +130,12 @@ impl SocketFace {
         let canonical_path = match validated.workspace {
             Some(WorkspaceOptions::Valid { canonical_path, .. }) => canonical_path,
             Some(WorkspaceOptions::Refused { refusal }) => {
-                return Err(CliFailure::new(format!(
-                    "workspace refused: {refusal:?}; no session was created"
-                )));
+                return Err(crate::wire_transport::refusal(
+                    plakous_host_protocol::wire::RequestRefusal::PlacementRefused {
+                        runner: row.runner.clone(),
+                        reason: Box::new(refusal),
+                    },
+                ));
             }
             None => {
                 return Err(CliFailure::new(
@@ -215,9 +218,7 @@ impl SocketFace {
         }
         match outcome {
             Outcome::Ok(answer) => Ok(answer),
-            Outcome::Refused(reason) => {
-                Err(CliFailure::new(format!("the host refused: {reason:?}")))
-            }
+            Outcome::Refused(reason) => Err(crate::wire_transport::refusal(reason)),
         }
     }
 

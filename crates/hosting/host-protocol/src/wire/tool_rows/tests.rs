@@ -53,6 +53,19 @@ fn tool_projection_never_changes_stored_or_exported_row_bytes() {
 }
 
 #[test]
+fn process_interrupt_subject_is_classified_by_the_host_on_the_wire() {
+    let mut item = item("write_stdin", ActivityKind::Tool);
+    item.subject = Some("Sent interrupt to process build".into());
+    assert_eq!(item.operation(), ToolOperation::InterruptProcess);
+    let wire = WireToolItem::from(item);
+    assert_eq!(wire.operation, ToolOperation::InterruptProcess);
+    assert_eq!(
+        serde_json::to_value(wire).unwrap()["operation"],
+        "interrupt_process"
+    );
+}
+
+#[test]
 fn snapshots_patches_rows_and_streams_all_carry_the_host_operation() {
     for (name, kind, operation) in [
         ("apply_patch", ActivityKind::Tool, "edit"),

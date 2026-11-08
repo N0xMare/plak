@@ -100,28 +100,37 @@ pub(crate) fn session_profile(
     home: &std::path::Path,
     session: &plakous_hosted::runtime::SurfaceSession,
 ) -> crate::surface_protocol::ProfileRow {
+    session_profile_with_profiles(
+        config,
+        session,
+        &crate::profiles::prepared_catalog(config, home),
+    )
+}
+
+pub(crate) fn session_profile_with_profiles(
+    config: &ProductConfig,
+    session: &plakous_hosted::runtime::SurfaceSession,
+    profiles: &[(
+        crate::surface_protocol::ProfileRow,
+        crate::profiles::Prepared,
+    )],
+) -> crate::surface_protocol::ProfileRow {
     let mut matched_order = None;
     let mut nearest: Option<(String, Vec<crate::surface_protocol::ProfileDifference>)> = None;
-    let matched = crate::profiles::list(config, home)
-        .rows
-        .into_iter()
-        .find_map(|row| {
-            let Ok(prepared) = crate::profiles::prepare(config, home, &row.id) else {
-                return None;
-            };
-            let differences = profile_differences(&row, &prepared.config, session);
-            if differences.is_empty() {
-                matched_order = Some(prepared.config.working_set.names().to_vec());
-                return Some(row.id);
-            }
-            if nearest
-                .as_ref()
-                .is_none_or(|(_, previous)| differences.len() < previous.len())
-            {
-                nearest = Some((row.id, differences));
-            }
-            None
-        });
+    let matched = profiles.iter().find_map(|(row, prepared)| {
+        let differences = profile_differences(row, &prepared.config, session);
+        if differences.is_empty() {
+            matched_order = Some(prepared.config.working_set.names().to_vec());
+            return Some(row.id.clone());
+        }
+        if nearest
+            .as_ref()
+            .is_none_or(|(_, previous)| differences.len() < previous.len())
+        {
+            nearest = Some((row.id.clone(), differences));
+        }
+        None
+    });
     // An exact match names its profile; otherwise the nearest profile names
     // the session, with the values that differ from it.
     let (id, differences) = match matched {
