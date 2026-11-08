@@ -137,7 +137,6 @@ struct Entry {
     connection: Option<Connection>,
     refresh: refresh::ProbeState,
     required: bool,
-    stop_intents: BTreeMap<plakous_model::LineId, String>,
 }
 
 #[derive(Clone)]
@@ -289,7 +288,6 @@ impl RunnerRegistry {
                     connection: None,
                     refresh: refresh::ProbeState::default(),
                     required: false,
-                    stop_intents: BTreeMap::new(),
                 },
             );
         }
@@ -437,7 +435,7 @@ impl RunnerRegistry {
 
     /// Retains durable stop debt and queues a fresh owned reconciliation.
     /// A probe already in flight cannot publish readiness over this debt.
-    fn reconcile_when_available(&self, id: &str) {
+    pub fn reconcile_when_available(&self, id: &str) {
         if let Some(entry) = self
             .entries
             .write()
@@ -459,35 +457,20 @@ impl RunnerRegistry {
         }
     }
 
-    /// Retains a durable stop without letting retries of its same line/intent
-    /// invalidate the sweep already settling it. A different intent still
-    /// fences an in-flight sweep and requires a fresh pass.
-    pub fn reconcile_stop_when_available(
-        &self,
-        id: &str,
-        line: plakous_model::LineId,
-        intent: &str,
-    ) {
-        let fresh = {
+    /// Continues an already-durable cancellation without invalidating the
+    /// pass settling it. Never use this after an attempted settlement failed.
+    pub fn continue_reconciliation(&self, id: &str) {
+        {
             let mut entries = self.entries.write().unwrap_or_else(PoisonError::into_inner);
             let Some(entry) = entries.get_mut(id) else {
                 return;
             };
-            let fresh = entry
-                .stop_intents
-                .get(&line)
-                .is_none_or(|known| known != intent);
-            if fresh {
-                entry.stop_intents.insert(line, intent.into());
-            } else if entry.row.status == RunnerStatus::Ready {
+            if entry.row.status == RunnerStatus::Ready {
                 return;
             }
             entry.required = true;
-            fresh
-        };
-        if fresh {
-            self.reconcile_when_available(id);
-        } else if self
+        }
+        if self
             .executor
             .read()
             .unwrap_or_else(PoisonError::into_inner)

@@ -85,7 +85,7 @@ async fn bind_local(
         return Err(unavailable(ProbePhase::Reconcile));
     }
     let _ = client.recover().await;
-    finish_stops(services, &client, &sessions, &readopted)
+    finish_stops(services, &client, &sessions, &readopted, &failures)
         .await
         .map_err(|_| unavailable(ProbePhase::Reconcile))?;
     client

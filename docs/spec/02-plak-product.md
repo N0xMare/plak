@@ -4112,10 +4112,14 @@ verdicts) are addressed, the session profile and workspace chrome states.
   fresh reconciliation must finish before readiness reopens, even when a
   previous picker probe was already in flight. No continuation is admitted to
   settle this debt, and repeated stop does not mint a new stop intent.
-  If reconciliation owns the line lease, a retry of that already-recorded
-  cancellation remains successful and pending without taking or transferring
-  its lease. This requires the same current session/branch and no later
-  accepted submission; a new cancellation still requires ownership.
+  When the runner-pending barrier/link proxy is true, an already-recorded
+  cancellation may be acknowledged without taking any head lease, whether or
+  not reconciliation currently owns one. It still repairs the idempotent host
+  controls, queue pause and descendant interruptions under tree custody. This
+  requires the same current session/branch and no later accepted submission.
+  Ready runners and new cancellations still acquire ownership; every open
+  failure refuses. A settlement attempt that fails always closes readiness,
+  including a repeated intent on a previously Ready runner.
   The flag is sampled after that commit from the session's
   runner services: true means an unavailable link or reconciliation barrier
   leaves runner stop effects unresolved, never proof of process death. A

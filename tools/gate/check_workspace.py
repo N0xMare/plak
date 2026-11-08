@@ -1708,6 +1708,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         },
         'tools': {'runner::RunnerBackend'},
     },
+    ('plakous-hosted', 'src/runtime/dormant_stop.rs'): {'sessions': {'LeaseOnlyHead'}},
     # Re-adoption of a runner's lines through a lease-only head (spec 01 §8.4).
     ("plakous-hosted", "src/runner_adoption.rs"): {
         "sessions": {"LeaseOnlyHead"},
@@ -1986,6 +1987,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     },
     ('plak', 'src/commands/runner/home.rs'): {'runner': {'daemon', 'protocol'}},
     ('plak', 'src/commands/runner/services.rs'): {
+        'sessions': {'SessionLocator'},
         'runner': {
             'PlacementFailure',
             'ProbePhase',

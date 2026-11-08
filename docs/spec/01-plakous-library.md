@@ -5970,14 +5970,19 @@ lookup; an alias rename preserves an id, while removal/re-pair cannot retarget a
 existing record or its retained reconciliation client. Every final non-read dispatch
 rechecks terminal foreground cleanup under the settlement fence, including when
 settlement occurs while that dispatch awaits an owner transfer.
-A pending dormant stop signals reconciliation with its line and stable durable
-intent. Retries of that same obligation coalesce with its active sweep instead
-of invalidating it; a different intent still fences an older pass. Completion
-of the same stop cannot reopen an already-ready barrier. These process-local
-keys do not change the persisted stop, runner protocol or binding encoding.
-A retry may acknowledge its already-durable cancellation while reconciliation
-holds the head lease, without taking that lease or changing its owner. A later
-accepted turn or successor invalidates that repeated-stop shortcut.
+Reconciliation has separate acknowledgement and failure paths. A retry whose
+runner is pending and whose cancellation is already recorded acknowledges it
+without taking the head lease; it still repairs host controls, queue pause and
+descendant-stop rows under tree custody. A later accepted turn or successor
+invalidates that shortcut. The pending flag is a barrier/link proxy, not proof
+of which process owns a lease. An attempted settlement that fails always fences
+readiness and requests a fresh pass, even for an old intent on a Ready runner.
+New descendant debt repaired after a crash also requires a fresh pass; unchanged
+acknowledgements merely continue existing recovery. No per-line acknowledgement
+cache is retained. A sweep that skipped stop debt held in this process (or whose
+foreign holder cannot be proved) must retry rather than publish Ready. A proven
+foreign holder remains isolated from unrelated placement readiness. Stop intent,
+runner protocol and binding encodings are unchanged.
 
 - **Frames.** A big-endian `u32` length, then one JSON value. Neither end
   reads or writes a frame over 16 MiB; an answer that would exceed it is

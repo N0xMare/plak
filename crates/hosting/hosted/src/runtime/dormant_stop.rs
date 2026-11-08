@@ -8,7 +8,7 @@ use crate::sessions::SessionRecord;
 use crate::sessions::projector::{
     RootInterrupt, RootInterruptCause, RootLossIntent, RootStopAnchor,
 };
-use plakous::sessions::{AgentSessionsErrorKind, LeaseOnlyHead, SessionOperationId};
+use plakous::sessions::{LeaseOnlyHead, SessionOperationId};
 
 /// Stops new dormant work under tree custody and a lease-only root head.
 /// An already-durable pending cancellation needs no new head lease.
@@ -61,35 +61,18 @@ async fn stop_head(
                 "the session has a successor; stop its current session instead",
             ));
         }
-        let reconciling = roots.runner_pending();
-        match sessions
+        if roots.runner_pending() && recorded_stop_ordinal(store, session)?.is_some() {
+            return Ok(StopHead::Pending);
+        }
+        sessions
             .open_lease_only(
                 &SessionOperationId::new(format!("plak:stop:{}", session.id))
                     .map_err(|error| CliFailure::new(error.to_string()))?,
                 line.line(),
             )
             .await
-        {
-            Ok(head) => Ok(StopHead::Held(Box::new(head))),
-            Err(error) => {
-                // Repeating an already-durable cancellation must not compete
-                // with its recovery lease. A new stop cannot use this path.
-                if (reconciling || roots.runner_pending())
-                    && matches!(
-                        error.kind(),
-                        AgentSessionsErrorKind::Ownership | AgentSessionsErrorKind::Busy
-                    )
-                    && let Some(ordinal) = recorded_stop_ordinal(store, session)?
-                    && roots.retain_runner_stop_debt(
-                        line.line(),
-                        &format!("plak:stop:{}:{ordinal}", session.id),
-                    )
-                {
-                    return Ok(StopHead::Pending);
-                }
-                Err(CliFailure::new(error.to_string()))
-            }
-        }
+            .map(|head| StopHead::Held(Box::new(head)))
+            .map_err(|error| CliFailure::new(error.to_string()))
     } else {
         Ok(StopHead::Absent)
     }
@@ -101,7 +84,15 @@ async fn stop(
     session: &mut SessionRecord,
 ) -> CliResult<()> {
     let head = match stop_head(roots, store, session).await? {
-        StopHead::Pending => return Ok(()),
+        StopHead::Pending => {
+            let recorded = record(roots, store, session).await?;
+            if recorded.new_descendant_debt {
+                roots.failed_runner_stop_settlement();
+            } else {
+                roots.retain_runner_stop_debt();
+            }
+            return Ok(());
+        }
         StopHead::Absent => {
             record(roots, store, session).await?;
             return Ok(());
@@ -114,7 +105,7 @@ async fn stop(
     let budget =
         std::time::Duration::from_secs(roots.runtime_sessions()?.lease_period_seconds()) / 2;
     let intent = match record(roots, store, session).await {
-        Ok(intent) => intent,
+        Ok(recorded) => recorded.intent,
         Err(error) => {
             let _ = head.release().await;
             return Err(error);
@@ -136,25 +127,30 @@ async fn stop(
             ))
         })
     };
-    let line = head.line();
     let released = head
         .release()
         .await
         .map_err(|error| CliFailure::new(error.to_string()));
+    let retained = stopped.is_err() && roots.failed_runner_stop_settlement();
     released?;
     if let Err(error) = stopped {
-        if !roots.retain_runner_stop_debt(line, &intent) {
+        if !retained {
             return Err(error);
         }
     }
     Ok(())
 }
 
+struct RecordedStop {
+    intent: String,
+    new_descendant_debt: bool,
+}
+
 async fn record(
     roots: &ProductStateRoots,
     store: &dyn SessionRecordStore,
     session: &mut SessionRecord,
-) -> CliResult<String> {
+) -> CliResult<RecordedStop> {
     if !session.child_wake_suppressed {
         store
             .write_host_controls(&session.id, true, None)
@@ -171,6 +167,7 @@ async fn record(
         .map_err(CliFailure::new)?;
     let intent = root_stop_intent(roots, store, session).await?;
     let tree_store = roots.tree_store()?;
+    let mut new_descendant_debt = false;
     if let Some(persisted) = tree_store
         .load(&session.node.tree_id)
         .map_err(|error| CliFailure::new(error.to_string()))?
@@ -184,9 +181,13 @@ async fn record(
                 .save_in_custody(&tree)
                 .map_err(|error| CliFailure::new(error.to_string()))?;
             tree.acknowledge_revision(revision);
+            new_descendant_debt = true;
         }
     }
-    Ok(intent)
+    Ok(RecordedStop {
+        intent,
+        new_descendant_debt,
+    })
 }
 
 fn recorded_stop_ordinal(

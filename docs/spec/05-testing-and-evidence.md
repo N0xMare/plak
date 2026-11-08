@@ -1326,12 +1326,20 @@ must be durable before the pending answer, repeat preserves the intent and
 revision, and recovery cannot dispatch the stopped turn. A separately owned
 probe already in flight cannot publish ready over newer stop debt; it must
 perform a fresh reconciliation before admitting work.
-The paused-probe regression also retries the same line/intent during that fresh
-pass: retries must not dirty it again or prevent readiness. A distinct later
-intent still requires a new sweep. Removing that coalescing must fail the proof.
+The paused-probe regression also acknowledges an existing cancellation during
+that fresh pass: acknowledgements must not dirty it again or prevent readiness.
+A failed settlement always requires a fresh sweep, including on a Ready row;
+the failing-owner-floor regression exercises the same recorded stop twice.
 The dormant-stop regression holds the root head during both a new and a repeated
 stop: the new cancellation refuses ownership without recording a stop, while
 the already-recorded cancellation remains pending without changing its revision.
+Review cases also require refusal after a later accepted submission, on a Ready
+runner with a held head, and for a non-ownership open failure. A post-root-commit,
+pre-descendant-save injected failure cut followed by a head-held retry must repair
+descendant-stop rows. The real reconciliation callback must keep Ready closed
+when its readoption skipped this process's stop lease, then settle on a later
+pass after release. The review mutant driver reseeds each of these decisions;
+build failures and empty selections are not mutant kills.
 Neither an attachment nor a paid continuation is created by a stop.
 
 Host serving is not a runner-readiness barrier. Daemon recovery fixtures use

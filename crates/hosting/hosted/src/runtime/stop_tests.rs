@@ -27,6 +27,7 @@ use crate::runtime::{IdleRelease, ResumeAfterLoss, spawn_host_worker};
 use crate::sessions::projector::RootInterruptCause;
 
 type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
+mod review;
 type UserAction = crate::surface_protocol::UserAction<TestExtension>;
 
 /// What the session settled the stop `ticket` to, within a bound.

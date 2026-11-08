@@ -10,6 +10,10 @@ use plakous_hosted::sessions::projector::RootInterruptCause;
 
 use crate::shell::services::Services;
 
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "owned stop-reconciliation fixtures")]
+mod tests;
+
 pub(crate) use super::ownership::StandaloneRunnerError;
 
 #[cfg(feature = "web")]
@@ -330,7 +334,7 @@ async fn reconcile_remote(
         return Err(unavailable(ProbePhase::Reconcile, false));
     }
     let _ = client.recover().await;
-    finish_stops(services, client, &sessions, &readopted)
+    finish_stops(services, client, &sessions, &readopted, &failures)
         .await
         .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
     client
@@ -425,11 +429,12 @@ async fn finish_stops(
     client: &RunnerClient,
     sessions: &AgentSessions,
     readopted: &[plakous_hosted::runner_adoption::Readopted],
+    failures: &[plakous_hosted::runner_adoption::ReadoptFailure],
 ) -> CliResult<()> {
     let paths = services.paths()?;
     let mut product = crate::store::ProductStore::open(paths)
         .map_err(|error| CliFailure::new(error.to_string()))?;
-    let mut stops = BTreeMap::<LineId, String>::new();
+    let mut stops = BTreeMap::new();
     for id in product.session_ids().map_err(CliFailure::new)? {
         collect_stops(&mut product, paths, sessions, &id, &mut stops).await?;
     }
@@ -446,8 +451,17 @@ async fn finish_stops(
                 continue;
             }
         };
-        if let Some(intent) = stops.get(&line) {
+        if let Some((intent, locator)) = stops.get(&line) {
             if !readopted.iter().any(|adopted| adopted.line == line) {
+                if failures
+                    .iter()
+                    .any(|failure| failure.line == status.line && failure.held_elsewhere)
+                    && crate::store::holders::runtime_holder(paths, *locator).is_none()
+                {
+                    return Err(CliFailure::new(format!(
+                        "recorded stop on {line} was skipped by a local or released holder; a fresh sweep is required"
+                    )));
+                }
                 continue;
             }
             plakous_hosted::runner_adoption::finish_recorded_stop(client, sessions, line, intent)
@@ -465,7 +479,7 @@ async fn collect_stops(
     paths: &crate::home::paths::PlakPaths,
     sessions: &AgentSessions,
     id: &str,
-    stops: &mut BTreeMap<LineId, String>,
+    stops: &mut BTreeMap<LineId, (String, plakous::sessions::SessionLocator)>,
 ) -> CliResult<()> {
     let record = product.load(id).map_err(CliFailure::new)?;
     if let Some(tree) =
@@ -474,7 +488,15 @@ async fn collect_stops(
         for (locator, intent) in tree.recorded_process_stops() {
             match child_stop_line(sessions, &locator).await {
                 Ok(line) => {
-                    stops.insert(line, intent);
+                    stops.insert(
+                        line,
+                        (
+                            intent,
+                            locator.parse().map_err(|error| {
+                                CliFailure::new(format!("child stop locator: {error}"))
+                            })?,
+                        ),
+                    );
                 }
                 Err(error) => {
                     tracing::warn!(target: "plak.runner", phase = "finish_stops", session = %id, error = %error, "runner_recovery_failed");
@@ -503,7 +525,7 @@ async fn collect_stops(
         if head.session_id() != locator.session_id() || head.branch_id() != locator.branch_id() {
             return Ok(());
         }
-        stops.insert(head.line(), intent.clone());
+        stops.insert(head.line(), (intent.clone(), locator));
     }
     Ok(())
 }
