@@ -1355,7 +1355,7 @@ Neither an attachment nor a paid continuation is created by a stop.
 Host serving is not a runner-readiness barrier. Daemon recovery fixtures use
 the product's local `Ready` verdict, published after ownership sweep, answered-key
 recovery, recorded stops and foreground cleanup, before inspecting daemon state
-or asserting an empty journal. Child-stop crash fixtures cross that barrier
+or asserting an empty journal. Root- and child-stop crash fixtures cross that barrier
 before counting terminals: physical death can precede the durable terminal
 receipt. Uncut readoption and stop pilots cross the same barrier before shutting
 down and reading their complete commit traces; the stop

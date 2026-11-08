@@ -1190,6 +1190,7 @@ fn host_crash_mid_stop_finishes_the_recorded_stop_once_after_retransfer() {
             }
         }
         let mut host = start(&fixture);
+        wait_local_runner_ready(&host);
         stopped(pid);
         job(&fixture);
         let connection = rusqlite::Connection::open(paths.runtime_database()).unwrap();
