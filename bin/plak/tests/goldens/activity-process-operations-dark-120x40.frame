@@ -7,8 +7,8 @@ p4 Reset/Rgb(128, 128, 128)
 p5 Rgb(112, 180, 255)/Rgb(20, 22, 27)
 p6 Rgb(190, 194, 204)/Rgb(20, 22, 27)
 p7 Rgb(248, 248, 246)/Rgb(20, 22, 27)
-00 symbols ··✓·Ran·1·command,·checked·3·processes,·sent·input·to·1·process,·interrupted·1·process,·stopped·1·process·············▸·
-00 colors  0-1:p0, 2-2:p1, 3-104:p2, 105-116:p3, 117-118:p0, 119-119:p4
+00 symbols ··✓·Ran·1·command,·checked·2·processes,·sent·input·to·3·processes,·stopped·1·process··································▸·
+00 colors  0-1:p0, 2-2:p1, 3-83:p2, 84-116:p3, 117-118:p0, 119-119:p4
 01 symbols ··⠋·Waiting·on·process·7···cargo·test·················································································▸·
 01 colors  0-1:p0, 2-2:p5, 3-36:p2, 37-116:p3, 117-118:p0, 119-119:p4
 02 symbols ··⠋·Waiting·on·process·11·····························································································▸·

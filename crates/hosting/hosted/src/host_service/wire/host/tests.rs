@@ -180,11 +180,13 @@ impl Script {
 impl HostSessions<Core> for Fake {
     fn archive(&self, session: &str, archived: bool) -> Result<(), RequestRefusal> {
         self.0.lifecycle_mutations.fetch_add(1, Ordering::SeqCst);
-        assert_eq!(
-            self.0.active_workers.load(Ordering::SeqCst),
-            0,
-            "lifecycle raced the resident worker"
-        );
+        if archived {
+            assert_eq!(
+                self.0.active_workers.load(Ordering::SeqCst),
+                0,
+                "lifecycle raced the resident worker"
+            );
+        }
         if let Some(row) = self
             .0
             .rows

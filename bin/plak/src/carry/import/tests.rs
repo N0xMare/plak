@@ -43,7 +43,7 @@ fn import_resume_post_commit_failure_names_the_successor_and_recovery_command() 
     );
     assert_eq!(
         failure.message(),
-        "synthetic TUI failure; session new-session was carried forward from old-session; fix the error and run: plak --resume new-session"
+        "session new-session was carried forward from old-session; fix the error and run: plak --resume new-session: synthetic TUI failure"
     );
 }
 

@@ -206,6 +206,7 @@ fn scan(
                 if stop.stopped() || !placement_ready(&services, session) {
                     return true;
                 }
+                eprintln!("plak host: continuing session {session}");
                 if let Err(failure) = host.slot(session).resident() {
                     eprintln!(
                         "plak host: session {session} did not continue: {}",

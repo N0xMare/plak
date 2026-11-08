@@ -949,7 +949,7 @@ where
     fn archive_session(&self, session: String, archived: bool) -> Outcome {
         let slot = self.host.slot(&session);
         let sessions = Arc::clone(&self.host.sessions);
-        match slot.mutate_released(&session, || sessions.archive(&session, archived)) {
+        match slot.mutate_lifecycle(&session, archived, || sessions.archive(&session, archived)) {
             Ok(()) => {
                 self.host.changed();
                 Outcome::Ok(Answer::ArchiveUpdated { session, archived })
@@ -961,7 +961,9 @@ where
     fn delete_session(&self, session: String, abandon_children: bool) -> Outcome {
         let slot = self.host.slot(&session);
         let sessions = Arc::clone(&self.host.sessions);
-        match slot.mutate_released(&session, || sessions.delete(&session, abandon_children)) {
+        match slot.mutate_lifecycle(&session, true, || {
+            sessions.delete(&session, abandon_children)
+        }) {
             Ok(()) => {
                 self.host.changed();
                 Outcome::Ok(Answer::Deleted { session })

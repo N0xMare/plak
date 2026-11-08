@@ -151,13 +151,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     }
 
     fn refuse_archived_prompt(&self) -> CliResult<bool> {
-        let archived = self
-            .role
-            .config
-            .store
-            .load(&self.role.config.session.id)
-            .map_err(CliFailure::new)?
-            .archived;
+        let archived = if self.role.config.session.store_revision == 0 {
+            self.role.config.session.archived
+        } else {
+            self.role
+                .config
+                .store
+                .load(&self.role.config.session.id)
+                .map_err(CliFailure::new)?
+                .archived
+        };
         if archived {
             let _ = self.role.events.notice(TranscriptRow::info(
                 NoticeScope::Session,

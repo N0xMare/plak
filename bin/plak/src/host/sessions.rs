@@ -29,6 +29,9 @@ use crate::surface_protocol::PlakExtension;
 mod archived;
 mod lifecycle;
 mod options;
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "durable dormant-stop fixtures")]
+mod pending_stop_tests;
 mod placement;
 mod runner_views;
 use placement::Placement;

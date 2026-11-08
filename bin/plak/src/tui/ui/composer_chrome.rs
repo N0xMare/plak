@@ -55,6 +55,9 @@ pub(super) fn activity_label_on(
     {
         return format!("calling mcp:{}", call.server);
     }
+    if verb == crate::tui::blocks::ToolVerb::Compose && name == "wait" {
+        return "waiting".to_owned();
+    }
     operation
         .map_or_else(
             || crate::tui::activity::hud_verb(name, kind, subject),

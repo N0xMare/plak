@@ -1559,7 +1559,8 @@ residents and releases idle residents first. The product service then holds
 the root and every finished child's runtime branch lease through its activity
 check and durable metadata commit. It renews all holds during the scan and
 commit, verifies them immediately before commit, and refuses a lost hold.
-Unarchive starts nothing.
+Unarchive starts nothing and does not release a resident actor when the flag
+is already clear; repeating unarchive during a turn is a metadata no-op.
 For deletion through the host, a busy resident owner is refused, while an idle
 resident owner is released before the same confirmed deletion service below.
 

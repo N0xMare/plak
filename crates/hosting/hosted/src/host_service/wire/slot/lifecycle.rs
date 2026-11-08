@@ -1,4 +1,4 @@
-//! Release the actor and retain the same slot fence through a product mutation.
+//! Retain the slot fence through lifecycle mutation, releasing only when required.
 
 use plakous_host_protocol::wire::{LifecycleReason, RequestRefusal};
 
@@ -13,9 +13,10 @@ where
     P::Intent: Send,
     P::Observation: Send,
 {
-    pub(in crate::host_service::wire) fn mutate_released<T: Send>(
+    pub(in crate::host_service::wire) fn mutate_lifecycle<T: Send>(
         &self,
         expected: &str,
+        release: bool,
         change: impl FnOnce() -> Result<T, RequestRefusal> + Send,
     ) -> Result<T, RequestRefusal> {
         let mut slot = self.lock();
@@ -29,7 +30,7 @@ where
                 reason: LifecycleReason::NotFound,
             });
         }
-        if let Slot::Resident { session, .. } = &*slot {
+        if release && let Slot::Resident { session, .. } = &*slot {
             let old = Arc::clone(session);
             if !old.ended() {
                 if let Err(failure) = self.release_actor(&old, expected) {
@@ -50,8 +51,8 @@ where
                 detail: failure.message().to_owned(),
             })?;
         }
-        // The actor and its lease are gone; no local trigger can reopen until
-        // this product operation has acquired its cross-process branch fences.
+        // No local trigger can race the product operation. Archive/delete have
+        // also released the actor; unarchive only changes reversible metadata.
         std::thread::scope(|scope| scope.spawn(change).join()).unwrap_or_else(|_| {
             Err(RequestRefusal::SessionUnavailable {
                 detail: "the lifecycle operation panicked".to_owned(),

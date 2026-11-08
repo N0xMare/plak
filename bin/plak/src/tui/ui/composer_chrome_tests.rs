@@ -1126,39 +1126,42 @@ fn assert_hud_width_classes(app: &mut App) {
 
 #[test]
 fn process_activity_hud_uses_the_projected_operation() {
-    for (name, subject, expected) in [
+    use super::test_support::{restore_snapshot, tool_item};
+    use plakous_host_protocol::views::{ToolOperation, transcript::TranscriptRow};
+    for (name, subject, operation, expected) in [
         (
             "exec_command",
             "Waiting on process 7 · cargo test",
+            ToolOperation::WaitProcess,
             "waiting",
         ),
         (
             "process_session_poll",
             "Read output of process 7 · cargo test",
+            ToolOperation::ReadProcess,
             "reading",
         ),
         (
             "write_stdin",
             "Sent input to process 7 · 4 bytes",
+            ToolOperation::InputProcess,
             "sending input",
         ),
         (
             "process_session_write",
             "Sent interrupt to process 7 · cargo test",
+            ToolOperation::InterruptProcess,
             "sending interrupt",
         ),
     ] {
         let mut app = App::new(launch_basic(), true);
         app.apply_host_event(HostEvent::SetBusy(true));
-        app.apply_host_event(tool_line(
-            "process",
-            None,
-            None,
-            ActivityKind::Process,
-            name,
-            "running",
-            Some(subject),
-        ));
+        let mut item = tool_item("process", name);
+        item.wire_operation = Some(operation);
+        item.kind = ActivityKind::Process;
+        item.state = "running".into();
+        item.subject = Some(subject.into());
+        app.apply_host_event(restore_snapshot(1, vec![TranscriptRow::Tool(item)]));
         assert_eq!(app.turn_status_label().as_deref(), Some(expected), "{name}");
     }
 }

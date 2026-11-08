@@ -1100,7 +1100,10 @@ fn a_new_session_that_cannot_be_made_creates_nothing() {
     ));
     assert!(matches!(
         client.request(2, new_session(&fixture.root.join("nowhere"))),
-        Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::SessionUnavailable { .. })
+        Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::PlacementRefused { reason, .. })
+            if matches!(reason.as_ref(), plakous_host_protocol::wire::PlacementReason::WorkspaceRefused {
+                kind: plakous_host_protocol::wire::WorkspaceRefusalKind::NotFound, ..
+            })
     ));
     assert!(matches!(
         client.request(
@@ -1114,7 +1117,11 @@ fn a_new_session_that_cannot_be_made_creates_nothing() {
                 request_id: REQUEST.into(),
             }
         ),
-        Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::SessionUnavailable { .. })
+        Outcome::Refused(
+            plakous_host_protocol::wire::RequestRefusal::BindingRefused {
+                kind: plakous_host_protocol::wire::BindingRefusalKind::UnknownTemplate,
+            }
+        )
     ));
     assert_eq!(client.rows(4), Vec::new());
     // A replay answers the session its request made, whatever became of
@@ -1172,7 +1179,10 @@ fn a_new_session_that_cannot_be_made_creates_nothing() {
                 request_id: "00000000-0000-4000-8000-0000000000a2".into(),
             }
         ),
-        Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::SessionUnavailable { .. })
+        Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::PlacementRefused { reason, .. })
+            if matches!(reason.as_ref(), plakous_host_protocol::wire::PlacementReason::WorkspaceRefused {
+                kind: plakous_host_protocol::wire::WorkspaceRefusalKind::NotDirectory, ..
+            })
     ));
     assert_eq!(client.rows(10).len(), 2);
 }

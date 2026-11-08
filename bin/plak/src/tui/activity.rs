@@ -1195,6 +1195,20 @@ pub(super) fn item_label(
     one_line(&item_label_raw(name, state, kind, subject, wait, plan))
 }
 
+fn process_subject_is_label(name: &str, verb: ToolVerb, subject: &str) -> bool {
+    (verb != ToolVerb::Run || name == "exec_command")
+        && matches!(
+            verb,
+            ToolVerb::Run
+                | ToolVerb::WaitProcess
+                | ToolVerb::ReadProcess
+                | ToolVerb::InputProcess
+                | ToolVerb::InterruptProcess
+                | ToolVerb::StopProcess
+        )
+        && process_subject_verb(subject).is_some()
+}
+
 /// [`item_label`] with the subject's own newlines and tabs, which a copy of
 /// the row carries.
 pub(super) fn item_label_raw(
@@ -1222,7 +1236,7 @@ pub(super) fn item_label_raw(
             subject
         };
         match verb {
-            verb if process_subject_verb(subject) == Some(verb) => {
+            verb if process_subject_is_label(name, verb, subject) => {
                 if !running && let Some(subject) = subject.strip_prefix("Waiting on process ") {
                     format!("Waited on process {subject}")
                 } else {
