@@ -4955,11 +4955,18 @@ the home-local daemon. An endpoint startup refusal leaves no new daemon behind
 and never stops an already-existing daemon or its jobs. Runner readiness still
 settles asynchronously after endpoint binding, before local admission.
 
-- **One per home and state key.** Before anything else it takes an exclusive
-  lock on `state/<key>/host.lock` and holds it for its life; the file names
-  its pid and binary id. A second `plak host` of the same home and state key
-  refuses, naming them. The lock is per state key because the stores are, so
-  builds of different formats each host their own state.
+- **One per home.** Direct, unit-managed and starter-created hosts take the
+  exclusive `host/host.lock` before startup and hold it through shutdown.
+  They also retain `state/<key>/host.lock` for state-key liveness and holder
+  diagnostics. All `host/run/*.sock` entries and every state's kernel lock
+  are checked: a live other-key host refuses the start with the key/holder
+  diagnosis; multiple keys are reported, never silently selected or stopped.
+  A missing or stale socket does not prove absence. A held kernel lock is
+  authoritative even if its pid text is stale; a free lock naming a live pid
+  is not a live host. Unverifiable files/directories fail closed. Only a
+  future explicit upgrade custody-transfer operation may cross this guard;
+  ordinary starts never do. Existing jobs must settle and the old host must
+  stop before a manual state-key transition.
 - **Identity.** It binds its custody identity at start (chapter 03 §14): the
   home's `host-id` and this process's instance, which its start line names.
 - **Control socket.** `host/run/<key>.sock` under the home, 0600 in a 0700

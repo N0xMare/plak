@@ -359,8 +359,8 @@ impl PlakPaths {
             .join(format!("{}.sock", crate::home::state::state_key()))
     }
 
-    /// The lock this build's `plak host` holds for its whole life: one host
-    /// per home and state key.
+    /// This build's per-key host liveness lock. A separate home-wide guard
+    /// prevents a second state-key host from starting beside it.
     #[must_use]
     pub fn host_lock(&self) -> PathBuf {
         self.state_dir().join("host.lock")

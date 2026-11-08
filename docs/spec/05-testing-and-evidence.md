@@ -3640,6 +3640,15 @@ not move library evidence out of §3.1.
 
 ### 3.1 Offline fixture evidence
 
+`wire_transport::hosts::tests` distinguishes held kernel locks from stale pid
+text, discovers every live socket key, and refuses unsafe locks, directories
+and state-directory links. `host_skeleton::singleton` drives the real host:
+an older key held without a socket refuses before any session starts, a held
+home guard is not absence, and a free older-key lock naming a live pid does
+not block startup. The same-key second-host/restart test retains its process
+and socket-cleanup assertions. `host::lock::tests` also proves a linked lock
+cannot truncate its target.
+
 In a build without `tui`,
 `cli_contract::omitted_terminal_placement_refuses_before_creating_a_home_or_host`
 executes the real placement launch grammar and verifies the typed missing

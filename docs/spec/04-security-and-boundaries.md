@@ -1894,6 +1894,15 @@ the product home. Its authority is exactly the user's own:
 - Only the holder of the state key's `host.lock` binds or replaces the
   socket, so a live host's socket is never unlinked by another, and a host
   removes only the socket file it bound (by device and inode).
+- A home-wide `host/host.lock` also serializes starts across state keys.
+  Direct and unit starts inspect all state-key sockets and kernel-held
+  locks, not just their own key. Missing sockets and stale pid text do not
+  authorize a second host. Lock files must be this user's bounded private
+  regular files, opened without following links; discovery directories must
+  be owned by this user and not writable by others, beneath the private home.
+  The socket run directory remains strictly 0700. Unsafe or unreadable evidence refuses
+  rather than declaring absence. No discovery operation stops a host,
+  removes a live socket or crosses a key on the operator's behalf.
 - The socket grants nothing the user's shell does not already have: any
   process of the user can already read and write the home. There is no
   port and no network surface; a remote client reaches a host only through

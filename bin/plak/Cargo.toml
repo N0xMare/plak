@@ -99,7 +99,7 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = ["s
 
 [dev-dependencies]
 plakous = { workspace = true, features = ["test-clock"] }
-rustix = { workspace = true, features = ["pty", "termios"] }
+rustix = { workspace = true, features = ["pty", "termios", "net"] }
 plakous-hosted = { workspace = true, default-features = false, features = ["test-support"] }
 plakous-offline-crash-harness = { path = "../../tests/harnesses/offline-crash" }
 plakous-recursive-subagents = { workspace = true, features = ["test-support"] }

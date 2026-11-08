@@ -17,6 +17,8 @@ use plakous_host_protocol::client::Transport;
 pub use crate::surface_protocol::PlakExtension;
 
 pub(crate) mod discovery;
+#[cfg(feature = "web")]
+pub(crate) mod hosts;
 mod refusal;
 pub(crate) use refusal::refusal;
 
@@ -83,6 +85,27 @@ pub(crate) fn forward_lifecycle(
 /// [`io::ErrorKind::PermissionDenied`] naming what is not private, or the
 /// failed connection.
 pub fn host_socket(path: &Path) -> io::Result<Transport> {
+    let stream = verified_socket(path)?;
+    let interrupt = stream.try_clone()?;
+    Ok(
+        Transport::new(stream.try_clone()?, stream).with_welcome_deadline(
+            std::time::Duration::from_secs(10),
+            move || {
+                let _ = interrupt.shutdown(std::net::Shutdown::Both);
+            },
+        ),
+    )
+}
+
+/// The verified byte stream, before a client performs its own handshake.
+pub(crate) fn verified_socket(path: &Path) -> io::Result<UnixStream> {
+    verified_socket_with(path, |path| UnixStream::connect(path))
+}
+
+fn verified_socket_with(
+    path: &Path,
+    connect: impl FnOnce(&Path) -> io::Result<UnixStream>,
+) -> io::Result<UnixStream> {
     let refused = |what: String| io::Error::new(io::ErrorKind::PermissionDenied, what);
     let user = rustix::process::geteuid().as_raw();
     let directory = path
@@ -102,19 +125,11 @@ pub fn host_socket(path: &Path) -> io::Result<Transport> {
             path.display()
         )));
     }
-    let stream = UnixStream::connect(path)?;
+    let stream = connect(path)?;
     // The path checks name what is wrong; the peer's credentials decide,
     // since a directory above the socket's may be another user's to swap.
     peer_is(peer_uid(&stream), user)?;
-    let interrupt = stream.try_clone()?;
-    Ok(
-        Transport::new(stream.try_clone()?, stream).with_welcome_deadline(
-            std::time::Duration::from_secs(10),
-            move || {
-                let _ = interrupt.shutdown(std::net::Shutdown::Both);
-            },
-        ),
-    )
+    Ok(stream)
 }
 
 /// The uid of `stream`'s peer (`SO_PEERCRED`, or `getpeereid` on macOS).

@@ -1,8 +1,8 @@
 //! `plak host` (feature `web`, enabled by default): the per-user host process (spec 02
 //! §4.6), serving every session of the home.
 //!
-//! It takes this home's `host.lock` for its state key before anything else,
-//! so one host serves one home's state; binds the control socket
+//! It takes the home-wide guard and its state key's diagnostic lock before
+//! serving, so no second state-key host starts beside it; binds the control socket
 //! `<home>/host/run/<state key>.sock` for this user only (spec 04 §4.7);
 //! names its custody identity (the home's host id and this process's
 //! instance); and captures the login shell's environment once for the tools
@@ -76,7 +76,7 @@ pub(crate) fn run_host_command(
     let paths = services.paths()?;
     paths.ensure_layout().map_err(CliFailure::new)?;
     let binary = crate::build_identity::known_binary_id().unwrap_or_else(|| "unknown".into());
-    let lock = lock::HostLock::take(&paths.host_lock(), &binary)?;
+    let (home_lock, lock) = lock::HostLock::take_home(paths, &binary)?;
     crate::store::tree::bind_custody_host(paths).map_err(CliFailure::new)?;
     let identity = plakous_recursive_subagents::tree::custody_host();
     let environment = environment::HostEnvironment::capture();
@@ -168,6 +168,7 @@ pub(crate) fn run_host_command(
     );
     drop(lock);
     runtime.shutdown_timeout(Duration::from_secs(1));
+    drop(home_lock);
     Ok(ProcessOutcome::Success)
 }
 

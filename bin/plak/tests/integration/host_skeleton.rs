@@ -1597,4 +1597,5 @@ mod crash;
 mod reload;
 mod requests;
 mod runner;
+mod singleton;
 pub(crate) mod sweep;

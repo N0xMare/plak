@@ -34,6 +34,14 @@ operator title overrides and archival state; it composes with runtime epoch
 37 without changing the runtime codec or tree encoding. Session export stays
 version 12, with the version 11 importer retained for the previous version.
 
+Host process coordination is outside the wire and configuration vocabulary:
+`host/host.lock` serializes the whole home, while each
+`state/<key>/host.lock` remains a per-key liveness diagnostic. The host inspects
+all state-key sockets and kernel-held locks before starting; it does not infer
+absence from a missing socket or a pid line. Only one state-key host may run
+per home, including direct and unit starts. These private process locks are
+not session authority or an export carrier and introduce no format version.
+
 Accounts accept a canonical `vertical[/name]` reference. A named selection uses
 only its own credential. Named aliases normalize before slot selection; bare
 default templates keep their existing stored spelling. The vertical determines

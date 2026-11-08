@@ -1,9 +1,9 @@
-//! `host.lock`: one `plak host` per home and state key. The lock is taken
-//! before anything else and held for the process's life; the kernel
+//! Home-wide and per-state-key locks: one `plak host` per home. The locks
+//! precede host startup and remain held through handoff; the kernel
 //! releases it however the process ends. The file names its holder, so a
 //! second host can say who serves; the lock, not the text, proves it.
 
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::{Read as _, Write as _};
 use std::path::Path;
 
@@ -24,6 +24,23 @@ impl Drop for HostLock {
 }
 
 impl HostLock {
+    /// Serializes all current-key starts and refuses any already-live state key.
+    pub(super) fn take_home(
+        paths: &crate::product_paths::PlakPaths,
+        binary: &str,
+    ) -> CliResult<(Self, Self)> {
+        use crate::wire_transport::hosts;
+        crate::commands::runner::private_directory(&paths.home().join("host"))?;
+        let home = Self::take(&hosts::home_lock(paths), binary);
+        let live = hosts::live(paths)?;
+        if !live.is_empty() {
+            return Err(hosts::conflict(&live));
+        }
+        let home = home?;
+        let state = Self::take(&paths.host_lock(), binary)?;
+        Ok((home, state))
+    }
+
     /// Takes the lock at `path`, naming this process and `binary` as its
     /// holder.
     ///
@@ -38,18 +55,33 @@ impl HostLock {
     }
 
     fn take_with_retry(path: &Path, binary: &str, mut pause: impl FnMut()) -> CliResult<Self> {
-        use std::os::unix::fs::OpenOptionsExt as _;
+        use rustix::fs::{Mode, OFlags};
+        use std::os::unix::fs::MetadataExt as _;
         let failed = |error: std::io::Error| {
             CliFailure::new(format!("{} could not be locked: {error}", path.display()))
         };
-        let mut file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .mode(0o600)
-            .open(path)
-            .map_err(failed)?;
+        let mut file = File::from(
+            rustix::fs::open(
+                path,
+                OFlags::CREATE
+                    | OFlags::RDWR
+                    | OFlags::NOFOLLOW
+                    | OFlags::NONBLOCK
+                    | OFlags::CLOEXEC,
+                Mode::RUSR | Mode::WUSR,
+            )
+            .map_err(|error| failed(error.into()))?,
+        );
+        let metadata = file.metadata().map_err(failed)?;
+        if !metadata.is_file()
+            || metadata.uid() != rustix::process::geteuid().as_raw()
+            || metadata.mode() & 0o077 != 0
+            || metadata.len() > 4096
+        {
+            return Err(CliFailure::new(
+                "host lock is not this user's bounded private regular file",
+            ));
+        }
         let mut result = file.try_lock();
         for _ in 0..40 {
             if !matches!(result, Err(std::fs::TryLockError::WouldBlock)) {
@@ -62,7 +94,15 @@ impl HostLock {
             Ok(()) => {}
             Err(std::fs::TryLockError::WouldBlock) => {
                 let mut holder = String::new();
-                let _ = file.read_to_string(&mut holder);
+                (&mut file)
+                    .take(4097)
+                    .read_to_string(&mut holder)
+                    .map_err(failed)?;
+                if holder.len() > 4096 {
+                    return Err(CliFailure::new(
+                        "host lock diagnostic grew beyond its bound",
+                    ));
+                }
                 return Err(CliFailure::new(held_by(&holder)));
             }
             Err(std::fs::TryLockError::Error(error)) => return Err(failed(error)),
@@ -88,9 +128,24 @@ fn held_by(holder: &str) -> String {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
+    use std::fs::OpenOptions;
     use std::os::unix::fs::PermissionsExt as _;
 
     use super::*;
+
+    #[test]
+    fn a_linked_lock_refuses_without_modifying_its_target() {
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("not-a-lock");
+        std::fs::write(&target, "leave this file intact").unwrap();
+        let path = root.path().join("host.lock");
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        assert!(HostLock::take(&path, "fixture-binary").is_err());
+        assert_eq!(
+            std::fs::read_to_string(target).unwrap(),
+            "leave this file intact"
+        );
+    }
 
     /// A second host refuses while the first holds the lock, naming the
     /// holder; once the first is gone the next one takes it.
@@ -133,6 +188,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("host.lock");
         std::fs::write(&path, "1 stale-build\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
         let probe = OpenOptions::new()
             .read(true)
             .write(true)
