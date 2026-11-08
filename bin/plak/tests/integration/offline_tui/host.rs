@@ -132,20 +132,15 @@ fn a_host_tui_fixture_reaps_its_host_and_daemon_on_drop_and_panic() {
             fixture.ensure_host();
             let mut pids = vec![fixture.host.lock().unwrap().as_ref().unwrap().child.id()];
             for version in std::fs::read_dir(fixture.home().join("host/runner")).unwrap() {
-                for lock in std::fs::read_dir(version.unwrap().path().join("run")).unwrap() {
-                    let path = lock.unwrap().path();
-                    if path
-                        .extension()
-                        .is_some_and(|extension| extension == "lock")
-                    {
-                        pids.push(
-                            std::fs::read_to_string(path)
-                                .unwrap()
-                                .parse::<u32>()
-                                .unwrap(),
-                        );
-                    }
-                }
+                let run = version.unwrap().path().join("run");
+                // Other locks are coordination fences, not daemon pid records.
+                std::fs::File::create_new(run.join("fixture-empty.lock")).unwrap();
+                pids.push(
+                    std::fs::read_to_string(run.join("runner.lock"))
+                        .unwrap()
+                        .parse::<u32>()
+                        .unwrap(),
+                );
             }
             assert!(pids.len() >= 2, "the fixture must own a real daemon");
             *observed.lock().unwrap() = Some((fixture.root.clone(), pids));
