@@ -132,6 +132,10 @@ struct StoppedLine {
 }
 
 async fn stopped_runtime() -> StoppedLine {
+    stopped_runtime_named("review:create").await
+}
+
+async fn stopped_runtime_named(operation: &str) -> StoppedLine {
     use plakous_hosted::sessions::projector::{RootInterrupt, RootLossIntent, RootStopAnchor};
     use plakous_offline_crash_harness::protocol::CrashBoundary;
     use plakous_offline_crash_harness::{BoundaryController, runtime_binding};
@@ -149,7 +153,7 @@ async fn stopped_runtime() -> StoppedLine {
     .unwrap();
     let CreateSessionOutcome::Created { session, .. } = sessions
         .create(CreateSessionRequest::new(
-            SessionOperationId::new("review:create").unwrap(),
+            SessionOperationId::new(operation).unwrap(),
             runtime_binding(&workspace, controller).unwrap(),
         ))
         .await
@@ -454,6 +458,66 @@ async fn a_delayed_stop_revalidates_a_later_accepted_submission_under_the_head()
         "the old stop dispatched after later acceptance"
     );
     assert_eq!(harness.full_passes.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn a_stale_stop_attempt_preserves_a_new_pending_set_and_context() {
+    use std::future::Future as _;
+    let mut harness = StopHarness::new(true).await;
+    let second = stopped_runtime_named("review:create-second").await;
+    assert_ne!(harness.fixture.line, second.line);
+    let registry = harness.fixture.services.runners().clone();
+    let retries: Retries = Arc::new(std::sync::Mutex::new(BTreeMap::from([(
+        "review".into(),
+        Retry {
+            delay: 15,
+            scheduled: true,
+            pending_stops: vec![harness.fixture.line],
+            context: Some(StopContext {
+                services: harness.fixture.services.runner_probe_context(),
+                client: harness.client.clone(),
+            }),
+            generation: 1,
+        },
+    )])));
+    let mut attempt = Box::pin(retry_stops(
+        registry.clone(),
+        "review".into(),
+        retries.clone(),
+    ));
+    // Poll into the lease-open await while the branch still holds the line.
+    // Keeping this future local prevents it resuming before the replacement.
+    std::future::poll_fn(|context| {
+        assert!(attempt.as_mut().poll(context).is_pending());
+        std::task::Poll::Ready(())
+    })
+    .await;
+    complete_reconciliation(
+        &second.services.with_runner_registry(registry.clone()),
+        "review",
+        &harness.client,
+        vec![harness.fixture.line, second.line],
+        &retries,
+    );
+    harness.release_holder().await;
+    attempt.await;
+    let state = retries.lock().unwrap();
+    let retry = &state["review"];
+    assert!(retry.pending_stops.contains(&second.line));
+    assert_eq!(retry.pending_stops.len(), 2);
+    assert_eq!(
+        retry
+            .context
+            .as_ref()
+            .unwrap()
+            .services
+            .paths()
+            .unwrap()
+            .home(),
+        second.services.paths().unwrap().home()
+    );
+    assert!(retry.scheduled);
+    assert!(registry.needs_connection("review"));
 }
 
 #[tokio::test]

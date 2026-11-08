@@ -1353,7 +1353,9 @@ AdmittedLink dispatch remain continuously available; attempt counts pin the
 1/2/5/15-second ramp without full sweeps. Its release settles once and disarms.
 A later accepted submission during the delay suppresses the old stop after lease
 acquisition. Registry laws reject stale clearing in both the Ready-to-blocked
-fence window and an already-blocked fresh pass. The review driver
+fence window and an already-blocked fresh pass. An attempt paused at lease
+acquisition cannot overwrite a newer pending set or its retained context, and
+the newer set keeps its timer armed after the old attempt completes. The review driver
 reseeds the head-free repair, fresh descendant-debt fence and release-ordering
 decisions; build failures and empty selections are not mutant kills.
 Neither an attachment nor a paid continuation is created by a stop.

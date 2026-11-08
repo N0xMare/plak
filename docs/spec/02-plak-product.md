@@ -4235,7 +4235,9 @@ verdicts) are addressed, the session profile and workspace chrome states.
   failures for a new cancellation still refuse; no answer invents process
   termination. Retrying an already-recorded pending stop does not take the
   reconciliation lease. A new stop against another live holder is refused
-  under the same authority checks as an open;
+  under the same authority checks as an open. A concurrent stop settlement may
+  therefore return the existing terse ownership refusal rather than a distinct
+  typed "stop settlement in progress" cause;
   an unknown session is `unknown_session`. Its answer comes even when the node attachment ends
   first: the session connection, and its hold on the session's residency,
   stay until the stop is answered (at most 90 s), and only then let the
