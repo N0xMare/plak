@@ -590,10 +590,16 @@ fn an_unbindable_socket_path_uses_the_embedded_launcher() {
 }
 
 #[test]
-fn a_locked_host_without_a_socket_refuses_until_its_lock_is_free() {
+fn a_recorded_live_host_without_a_socket_refuses_until_the_process_is_gone() {
     let (_root, paths) = paths();
+    let mut owner = std::process::Command::new("/bin/sh")
+        .args(["-c", "read line"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let pid = owner.id();
     std::fs::create_dir_all(paths.host_lock().parent().unwrap()).unwrap();
-    std::fs::write(paths.host_lock(), "4242 fixture\n").unwrap();
+    std::fs::write(paths.host_lock(), format!("{pid} fixture\n")).unwrap();
     let lock = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -605,13 +611,18 @@ fn a_locked_host_without_a_socket_refuses_until_its_lock_is_free() {
             drop(UnixListener::bind(paths.host_socket()).unwrap());
         }
         let error = discovery::connect(&paths, Duration::ZERO).err().unwrap();
-        assert!(error.message().contains("pid 4242"), "{error}");
+        assert!(error.message().contains(&format!("pid {pid}")), "{error}");
         assert!(
             error.message().contains("starting or stopping; retry"),
             "{error}"
         );
     }
     drop(lock);
+    // Discovery never takes the lock, even when it is free. A live recorded
+    // process remains a start/stop barrier until its death is proved.
+    assert!(discovery::connect(&paths, Duration::ZERO).is_err());
+    drop(owner.stdin.take());
+    owner.wait().unwrap();
     assert!(SocketFace::discover(&paths).unwrap().is_none());
 }
 
@@ -619,7 +630,11 @@ fn a_locked_host_without_a_socket_refuses_until_its_lock_is_free() {
 fn a_host_that_answers_during_its_start_window_is_used() {
     let (_root, paths) = paths();
     std::fs::create_dir_all(paths.host_lock().parent().unwrap()).unwrap();
-    std::fs::write(paths.host_lock(), "4242 fixture\n").unwrap();
+    std::fs::write(
+        paths.host_lock(),
+        format!("{} fixture\n", std::process::id()),
+    )
+    .unwrap();
     let lock = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
