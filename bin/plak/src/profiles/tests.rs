@@ -88,6 +88,34 @@ fn wire_profiles_accept_only_exact_catalog_ids_without_path_or_trim_aliases() {
     );
 }
 
+#[test]
+fn user_profile_catalog_rejects_unselectable_stems_with_diagnostics() {
+    let (_root, paths) = home();
+    fs::write(
+        paths.user_agents_dir().join("mine.toml"),
+        "account = \"codex\"\nmodel = \"gpt-5.6-luna\"\ndescription = \"test\"\n",
+    )
+    .unwrap();
+    for name in ["valid", " leading", "has space", "bad\\name"] {
+        fs::write(
+            paths.home().join("profiles").join(format!("{name}.toml")),
+            "root = \"mine\"\nworking_set = [\"mine\"]\n",
+        )
+        .unwrap();
+    }
+    let config = ProductConfig::load(&paths).unwrap();
+    let catalog = list(&config, paths.home());
+    assert_eq!(catalog.diagnostics.len(), 3);
+    assert!(catalog.rows.iter().any(|row| row.id == "valid"));
+    for row in catalog.rows {
+        assert!(
+            prepare_wire(&config, paths.home(), &row.id).is_ok(),
+            "{}",
+            row.id
+        );
+    }
+}
+
 /// Every built-in applies and saves as a loadable home whose roles under
 /// the root are leaves: deeper trees are the user's to configure.
 #[test]

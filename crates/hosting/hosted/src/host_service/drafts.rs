@@ -147,6 +147,7 @@ impl<P: ProtocolExtension> super::HostService<P> {
         let mut state = self.lock();
         state.pending_drafts.clear();
         state.draft_window = None;
+        state.draft_answer = false;
     }
 
     pub(super) fn wire_target(&self, attachment: AttachmentId) -> NodeAddress {
@@ -171,6 +172,9 @@ impl<P: ProtocolExtension> super::State<P> {
             SessionObservation::IntentStarted(started) => {
                 // Sender::answering nests an answer window and then reopens
                 // the interrupted one. Neither boundary is an admission verdict.
+                self.draft_answer = started
+                    .as_deref()
+                    .is_some_and(|value| value.starts_with(ANSWER));
                 self.draft_window = started
                     .as_deref()
                     .map(|value| value.strip_prefix(ANSWER).unwrap_or(value))
@@ -194,7 +198,15 @@ impl<P: ProtocolExtension> super::State<P> {
             SessionObservation::DraftRestored(_) => self.draft_window,
             SessionObservation::Row(
                 plakous_host_protocol::views::transcript::TranscriptRow::Notice(notice),
-            ) if notice.tone == plakous_host_protocol::views::transcript::NoticeTone::Error => {
+            ) if self.draft_answer
+                && notice.tone == plakous_host_protocol::views::transcript::NoticeTone::Error =>
+            {
+                if let Some(id) = self.draft_window {
+                    self.pending_drafts.remove(&id);
+                }
+                None
+            }
+            SessionObservation::TopologyNavigatorUnavailable { .. } => {
                 if let Some(id) = self.draft_window {
                     self.pending_drafts.remove(&id);
                 }

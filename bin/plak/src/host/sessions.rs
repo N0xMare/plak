@@ -47,6 +47,23 @@ pub(super) struct ProductSessions {
     placement: Box<dyn Placement>,
 }
 
+struct DirectoryProfiles {
+    config: Option<crate::product_config::ProductConfig>,
+    profiles: Vec<(
+        crate::surface_protocol::ProfileRow,
+        crate::profiles::Prepared,
+    )>,
+}
+
+#[derive(Clone, Copy)]
+struct DirectoryRowRead<'a> {
+    store: &'a dyn crate::store::session_records::SessionRecordStore,
+    record: Option<&'a crate::store::sessions::SessionRecord>,
+    profiles: Option<&'a DirectoryProfiles>,
+    runners: &'a [RunnerRow],
+    activity_seq: u64,
+}
+
 impl ProductSessions {
     /// The sessions of `services`' home.
     ///
@@ -146,30 +163,34 @@ impl ProductSessions {
             }))
     }
 
-    fn row(
-        &self,
-        entry: DirectoryEntry,
-        config: Option<&crate::product_config::ProductConfig>,
-        profiles: &[(
-            crate::surface_protocol::ProfileRow,
-            crate::profiles::Prepared,
-        )],
-        runners: &[RunnerRow],
-        activity_seq: u64,
-    ) -> SessionRow {
+    fn row(&self, entry: DirectoryEntry, read: DirectoryRowRead<'_>) -> Option<SessionRow> {
         use plakous_recursive_subagents::tree::TreeStore as _;
-        let store = self.services.session_records().ok();
-        let activity = store
-            .as_ref()
-            .and_then(|store| {
-                plakous_hosted::runtime::root_standing(store.as_ref(), &entry.id).ok()
-            })
-            .map_or(SessionActivity::Idle, activity_of);
-        let hosted_elsewhere = self
-            .elsewhere(&entry.node.tree_id, entry.locator)
-            .ok()
-            .flatten();
-        let record = store.and_then(|store| store.load(&entry.id).ok());
+        static OMITTED: Mutex<std::collections::BTreeSet<(std::path::PathBuf, String)>> =
+            Mutex::new(std::collections::BTreeSet::new());
+
+        let activity = plakous_hosted::runtime::root_standing(read.store, &entry.id);
+        let holder = self.elsewhere(&entry.node.tree_id, entry.locator);
+        let (activity, hosted_elsewhere) = match (activity, holder) {
+            (Ok(activity), Ok(holder)) => (activity_of(activity), holder),
+            (activity, _) => {
+                let reason = if activity.is_err() {
+                    "activity"
+                } else {
+                    "holder"
+                };
+                let home = self.services.paths().ok()?.home().to_owned();
+                if OMITTED
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .insert((home, entry.id.clone()))
+                {
+                    eprintln!("plak host: session directory row omitted ({reason})");
+                }
+                return None;
+            }
+        };
+        let record = read.record;
+        let config = read.profiles.and_then(|profiles| profiles.config.as_ref());
         let tree = self.tree.load(&entry.node.tree_id);
         let degraded = record.is_none() || config.is_none() || tree.is_err();
         let roster = tree
@@ -178,7 +199,7 @@ impl ProductSessions {
             .map(plakous_recursive_subagents::tree::ProductAgentTree::reopen)
             .map(|tree| tree.current_epoch().clone());
         let profile = config
-            .zip(record.as_ref())
+            .zip(record)
             .filter(|_| roster.is_some())
             .map(|(config, record)| {
                 crate::shell::settings::session_profile_with_profiles(
@@ -196,7 +217,8 @@ impl ProductSessions {
                         live_children: false,
                         mcp: None,
                     },
-                    profiles,
+                    read.profiles
+                        .map_or(&[], |profiles| profiles.profiles.as_slice()),
                 )
             });
         let (profile, differences) = match profile {
@@ -210,16 +232,16 @@ impl ProductSessions {
             .as_ref()
             .and_then(|record| record.runner.as_ref())
             .map_or("local", |runner| runner.runner_id.as_str());
-        SessionRow {
-            runner: runner_views::label(runner_id, runners),
+        Some(SessionRow {
+            runner: runner_views::label(runner_id, read.runners),
             runner_status: if degraded {
                 plakous_host_protocol::wire::RunnerStatus::Unknown
             } else {
-                runner_views::status(runner_id, runners)
+                runner_views::status(runner_id, read.runners)
                     .unwrap_or(plakous_host_protocol::wire::RunnerStatus::Unknown)
             },
             needs_operator: false,
-            activity_seq,
+            activity_seq: read.activity_seq,
             archived: entry.archived,
             differences,
             environment: environment_of(hosted_elsewhere.is_some()),
@@ -236,7 +258,7 @@ impl ProductSessions {
             activity,
             live_work: plakous_host_protocol::wire::LiveWork::default(),
             session: entry.id,
-        }
+        })
     }
 }
 
@@ -356,6 +378,10 @@ impl HostSessions<PlakExtension> for ProductSessions {
         runner: Option<&str>,
         include_archived: bool,
     ) -> Result<Vec<SessionRow>, String> {
+        let store = self
+            .services
+            .session_records()
+            .map_err(|failure| failure.message().to_owned())?;
         let entries = self.with_product(|store| {
             store.directory_filtered(workspace.map(Path::new), runner, include_archived)
         })?;
@@ -363,11 +389,32 @@ impl HostSessions<PlakExtension> for ProductSessions {
             .services
             .paths()
             .map_err(|failure| failure.message().to_owned())?;
-        let config = crate::product_config::ProductConfig::load_user(paths).ok();
-        let profiles = config
-            .as_ref()
-            .map(|config| crate::profiles::prepared_catalog(config, paths.home()))
-            .unwrap_or_default();
+        let records = entries
+            .iter()
+            .map(|entry| store.load(&entry.id).ok())
+            .collect::<Vec<_>>();
+        let mut contexts = std::collections::BTreeMap::new();
+        for record in records.iter().flatten() {
+            let key = record
+                .runner
+                .as_ref()
+                .is_none_or(|runner| runner.runner_id == "local")
+                .then(|| record.workspace_root.clone());
+            contexts.entry(key.clone()).or_insert_with(|| {
+                let config = match &key {
+                    Some(workspace) => {
+                        crate::product_config::ProductConfig::load(&paths.for_workspace(workspace))
+                    }
+                    None => crate::product_config::ProductConfig::load_user(paths),
+                }
+                .ok();
+                let profiles = config
+                    .as_ref()
+                    .map(|config| crate::profiles::prepared_catalog(config, paths.home()))
+                    .unwrap_or_default();
+                DirectoryProfiles { config, profiles }
+            });
+        }
         let runners = self.services.runners().rows();
         let locators = entries
             .iter()
@@ -379,16 +426,32 @@ impl HostSessions<PlakExtension> for ProductSessions {
         )
         .unwrap_or_else(|_| vec![None; locators.len()]);
         let mut revisions = revisions.into_iter();
-        Ok(entries
+        let rows: Vec<_> = entries
             .into_iter()
-            .map(|entry| {
+            .zip(records.iter())
+            .filter_map(|(entry, record)| {
                 let revision = entry
                     .locator
                     .and_then(|_| revisions.next().flatten())
                     .unwrap_or(0);
-                self.row(entry, config.as_ref(), &profiles, &runners, revision)
+                let key = record.as_ref().and_then(|record| {
+                    record
+                        .runner
+                        .as_ref()
+                        .is_none_or(|runner| runner.runner_id == "local")
+                        .then(|| record.workspace_root.clone())
+                });
+                let read = DirectoryRowRead {
+                    store: store.as_ref(),
+                    record: record.as_ref(),
+                    profiles: record.as_ref().and_then(|_| contexts.get(&key)),
+                    runners: &runners,
+                    activity_seq: revision,
+                };
+                self.row(entry, read)
             })
-            .collect())
+            .collect();
+        Ok(rows)
     }
 
     fn session_of(&self, node: &NodeAddress) -> Result<Option<String>, String> {
@@ -799,6 +862,120 @@ fn open_session(
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unreadable_row_is_omitted_without_hiding_healthy_rows_and_returns_after_repair() {
+        for activity_unreadable in [true, false] {
+            let (temporary, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+            let services = Services::for_home(paths.clone());
+            let store = services.session_records().unwrap();
+            let mut broken =
+                crate::store::sessions::SessionRecord::new(temporary.path().join("broken"));
+            let mut healthy =
+                crate::store::sessions::SessionRecord::new(temporary.path().join("healthy"));
+            store.save(&mut broken).unwrap();
+            store.save(&mut healthy).unwrap();
+            let product = ProductSessions::new(&services, None, None).unwrap();
+            let database = if activity_unreadable {
+                let database = rusqlite::Connection::open(paths.product_database()).unwrap();
+                database.execute(
+                    "INSERT INTO host_intents(session_id,kind,anchor,ordinal,value) VALUES(?1,'interrupt_cause',0,0,'\"invalid\"')",
+                    [&broken.id],
+                ).unwrap();
+                assert!(store.load_intents(&broken.id).is_err());
+                database
+            } else {
+                let database = rusqlite::Connection::open(paths.subagents_database()).unwrap();
+                database.execute(
+                    "INSERT INTO agent_tree_custody(tree_id,fence,host_id,host_instance,host_name,claimed_at,renewed_at,released) VALUES(?1,1,'h','not an instance','m',0,0,0)",
+                    [&broken.node.tree_id],
+                ).unwrap();
+                assert!(product.elsewhere(&broken.node.tree_id, None).is_err());
+                database
+            };
+            for _ in 0..2 {
+                let rows = product.rows(None, None, false).unwrap();
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0].session, healthy.id);
+            }
+            if activity_unreadable {
+                database
+                    .execute(
+                        "DELETE FROM host_intents WHERE session_id = ?1",
+                        [&broken.id],
+                    )
+                    .unwrap();
+            } else {
+                database
+                    .execute(
+                        "DELETE FROM agent_tree_custody WHERE tree_id = ?1",
+                        [&broken.node.tree_id],
+                    )
+                    .unwrap();
+            }
+            assert_eq!(product.rows(None, None, false).unwrap().len(), 2);
+        }
+    }
+
+    #[test]
+    fn directory_profile_uses_the_same_workspace_overlay_as_the_attached_session() {
+        use plakous_recursive_subagents::tree::{ProductAgentTree, TreeStore as _};
+        let (temporary, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+        let workspace = temporary.path().join("workspace");
+        std::fs::create_dir_all(workspace.join(".git")).unwrap();
+        std::fs::create_dir_all(workspace.join(".plak/agents")).unwrap();
+        std::fs::write(
+            workspace.join(".plak/agents/codex-default-root.toml"),
+            "account = \"codex\"\nmodel = \"workspace-only-model\"\ndescription = \"overlay\"\n",
+        )
+        .unwrap();
+        let context = paths.for_workspace(&workspace);
+        crate::product_config::project_trust::trust(&context, &workspace).unwrap();
+        let config = crate::product_config::ProductConfig::load(&context).unwrap();
+        let prepared =
+            crate::profiles::prepare_wire(&config, paths.home(), "codex-default").unwrap();
+        let services = Services::for_home(paths.clone());
+        let product = ProductSessions::new(&services, None, None).unwrap();
+        let mut record = crate::store::sessions::SessionRecord::new(workspace.clone());
+        record.account = Some(prepared.root.account.clone());
+        record.model = Some(prepared.root.model.clone());
+        record.effort = prepared.root.effort.clone();
+        services
+            .session_records()
+            .unwrap()
+            .save(&mut record)
+            .unwrap();
+        let mut tree = ProductAgentTree::bootstrap_root_for_test(
+            &record.node.tree_id,
+            &record.node.agent_id,
+            "owner",
+            workspace.clone(),
+            &prepared.root.model,
+            plakous_hosted::agent_tree_protocol::WriterMode::SingleLease,
+        )
+        .unwrap();
+        tree.acknowledge_revision(product.tree.save_in_custody(&tree).unwrap());
+        let expected = crate::shell::settings::session_profile(
+            &config,
+            paths.home(),
+            &plakous_hosted::runtime::SurfaceSession {
+                runner: None,
+                id: record.id.clone(),
+                account: record.account.clone(),
+                model: record.model.clone(),
+                effort: record.effort.clone(),
+                fast: record.target_selection
+                    == crate::product_config::ProductTargetSelection::NativePriority,
+                workspace,
+                roster: Some(tree.current_epoch().clone()),
+                live_children: false,
+                mcp: None,
+            },
+        );
+        let actual = product.rows(None, None, false).unwrap().remove(0);
+        assert_eq!(actual.profile.as_deref(), Some(expected.id.as_str()));
+        assert_eq!(actual.differences, expected.differences);
+    }
 
     #[test]
     fn directory_rows_survive_missing_runtime_and_unreadable_configuration() {

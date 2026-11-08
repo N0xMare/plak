@@ -12,7 +12,15 @@ use plakous_hosted::error::{CliFailure, CliResult};
 /// The held lock; dropping it releases the home's state to the next host.
 #[derive(Debug)]
 pub(super) struct HostLock {
-    _file: File,
+    file: File,
+}
+
+impl Drop for HostLock {
+    fn drop(&mut self) {
+        // Clear the diagnostic while still owning the kernel lock. Crashes
+        // can still leave stale text, so discovery must confirm that lock.
+        let _ = self.file.set_len(0);
+    }
 }
 
 impl HostLock {
@@ -43,7 +51,7 @@ impl HostLock {
             .open(path)
             .map_err(failed)?;
         let mut result = file.try_lock();
-        for _ in 0..2 {
+        for _ in 0..40 {
             if !matches!(result, Err(std::fs::TryLockError::WouldBlock)) {
                 break;
             }
@@ -62,7 +70,7 @@ impl HostLock {
         file.set_len(0).map_err(failed)?;
         writeln!(file, "{} {binary}", std::process::id()).map_err(failed)?;
         file.sync_all().map_err(failed)?;
-        Ok(Self { _file: file })
+        Ok(Self { file })
     }
 }
 
@@ -100,6 +108,7 @@ mod tests {
             )
         );
         drop(first);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
         let _second = HostLock::take(&path, "ba9876543210").unwrap();
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
@@ -133,12 +142,15 @@ mod tests {
         let mut pauses = 0;
         let _host = HostLock::take_with_retry(&path, "new-build", || {
             pauses += 1;
-            if pauses == 2 {
+            if pauses == 30 {
                 probe.unlock().unwrap();
             }
         })
         .unwrap();
-        assert_eq!(pauses, 2, "both discovery-probe retries were needed");
+        assert_eq!(
+            pauses, 30,
+            "a starting host must outwait a transient discovery probe"
+        );
         assert_eq!(
             std::fs::read_to_string(path).unwrap(),
             format!("{} new-build\n", std::process::id())

@@ -42,10 +42,17 @@ fn archived_resident_never_admits_a_prompt_from_its_stale_record() {
     })
     .unwrap();
     assert_eq!(host.role.config.session.root_turn_count, 0);
+    let observed = events.try_iter().collect::<Vec<_>>();
     assert!(
-        !events
-            .try_iter()
+        !observed
+            .iter()
             .any(|event| matches!(event, HostEvent::PromptStarted(_)))
+    );
+    assert!(
+        observed.iter().any(|event| matches!(event,
+        HostEvent::DraftRejected(crate::surface_protocol::UserAction::Prompt(draft))
+        if draft.text == "must not run")),
+        "archived refusal must settle its draft"
     );
     host.block(async |host| host.release().await).unwrap();
 }

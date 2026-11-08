@@ -139,7 +139,7 @@ pub(crate) fn prepare_wire(
     home: &Path,
     name: &str,
 ) -> Result<Prepared, String> {
-    if name != name.trim() || name.contains(['/', '\\']) {
+    if name.chars().any(char::is_whitespace) || name.contains(['/', '\\']) {
         return Err(format!("unknown profile `{name}`"));
     }
     prepared_catalog(config, home)
@@ -344,6 +344,12 @@ fn user_profiles(config: &ProductConfig, home: &Path) -> (Vec<Resolved>, Vec<Str
     files.sort();
     let mut profiles = Vec::new();
     for (stem, path) in files {
+        if stem.chars().any(char::is_whitespace) || stem.contains(['/', '\\']) {
+            diagnostics.push(format!(
+                "profile {stem:?} is ignored: ids cannot contain whitespace or path separators"
+            ));
+            continue;
+        }
         if builtins().any(|builtin| builtin.id == stem) {
             diagnostics.push(format!(
                 "profiles/{stem}.toml is ignored: `{stem}` is the built-in profile's name"

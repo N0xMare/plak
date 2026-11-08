@@ -47,7 +47,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         user_echoed: bool,
         one_shot: Option<&mut super::super::oneshot::OneShotState>,
     ) -> CliResult<HostStep> {
-        if self.refuse_archived_prompt()? {
+        if self.refuse_archived_prompt(&raw_text)? {
             return Ok(HostStep::Continue);
         }
         let wake = queued_delivery
@@ -150,7 +150,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         Ok(HostStep::Continue)
     }
 
-    fn refuse_archived_prompt(&self) -> CliResult<bool> {
+    fn refuse_archived_prompt(&self, raw_text: &str) -> CliResult<bool> {
         let archived = if self.role.config.session.store_revision == 0 {
             self.role.config.session.archived
         } else {
@@ -162,6 +162,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 .archived
         };
         if archived {
+            reject_draft(
+                &self.role.events,
+                super::UserAction::Prompt(raw_text.into()),
+            );
             let _ = self.role.events.notice(TranscriptRow::info(
                 NoticeScope::Session,
                 "session_archived: unarchive this session before admitting work",

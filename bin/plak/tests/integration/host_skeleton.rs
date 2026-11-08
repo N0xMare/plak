@@ -1388,8 +1388,7 @@ fn a_second_host_refuses_and_a_sigterm_stops_the_first() {
     assert_eq!(next.socket, first.socket);
 }
 
-/// A tree store that cannot be read fails the directory's read: a holder is
-/// never read free on an error.
+/// Unreadable custody omits only its row and never admits an open.
 #[test]
 fn a_broken_tree_row_degrades_the_directory_but_does_not_admit_an_open() {
     let Some(fixture) = fixture() else { return };
@@ -1401,6 +1400,16 @@ fn a_broken_tree_row_degrades_the_directory_but_does_not_admit_an_open() {
         panic!("not created");
     };
     let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
+    let mut create_healthy = new_session(&fixture.workspace());
+    let Op::NewSession { request_id, .. } = &mut create_healthy else {
+        unreachable!();
+    };
+    *request_id = "00000000-0000-4000-8000-0000000000b9".into();
+    let Outcome::Ok(Answer::Created { node: healthy, .. }) = client.request(2, create_healthy)
+    else {
+        panic!("healthy session not created");
+    };
+    assert_ne!(healthy, node);
     rusqlite::Connection::open(paths.subagents_database())
         .unwrap()
         .execute(
@@ -1409,7 +1418,7 @@ fn a_broken_tree_row_degrades_the_directory_but_does_not_admit_an_open() {
         )
         .unwrap();
     match client.request(
-        2,
+        3,
         Op::ListSessions {
             workspace: None,
             runner: None,
@@ -1418,13 +1427,14 @@ fn a_broken_tree_row_degrades_the_directory_but_does_not_admit_an_open() {
     ) {
         Outcome::Ok(Answer::Sessions { rows }) => {
             assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].node, healthy);
             assert_eq!(rows[0].profile.as_deref(), Some("custom"));
             assert_eq!(rows[0].activity_seq, 0);
         }
         other => panic!("one broken row failed the directory: {other:?}"),
     }
     assert!(
-        matches!(client.request(3, Op::Attach { node }), Outcome::Refused(_)),
+        matches!(client.request(4, Op::Attach { node }), Outcome::Refused(_)),
         "degraded directory facts must never authorize execution"
     );
 }

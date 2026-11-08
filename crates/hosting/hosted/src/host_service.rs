@@ -180,6 +180,7 @@ struct Snapshot<P: ProtocolExtension> {
 struct State<P: ProtocolExtension> {
     pending_drafts: BTreeMap<plakous_host_protocol::wire::ClientDraftId, drafts::PendingDraft>,
     draft_window: Option<plakous_host_protocol::wire::ClientDraftId>,
+    draft_answer: bool,
     attachments: BTreeMap<AttachmentId, Attachment<P>>,
     next_attachment: AttachmentId,
     snapshot: Snapshot<P>,
@@ -560,6 +561,7 @@ impl<P: ProtocolExtension> HostService<P> {
             state: Arc::new(Mutex::new(State {
                 pending_drafts: BTreeMap::new(),
                 draft_window: None,
+                draft_answer: false,
                 attachments: BTreeMap::new(),
                 next_attachment: 1,
                 snapshot: Snapshot {

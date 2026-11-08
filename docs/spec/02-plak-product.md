@@ -4117,12 +4117,17 @@ verdicts) are addressed, the session profile and workspace chrome states.
   the lexically first configured alias, `local`, or the saved id if removed.
   Live-table contention keeps the last-known operator-attention value for
   that resident tree, rather than publishing a false cleared state.
-  A directory read resolves its home config and profile catalog once and
-  uses one read-only runtime snapshot for checkpoint revisions. A broken
-  individual row remains visible with activity revision zero, unknown runner
-  status and custom profile with a roster difference as needed; it does not
-  fail the directory for other sessions. These display fallbacks never admit
-  an open or execution.
+  A directory read resolves config and the profile catalog once per distinct
+  workspace context (including trusted project overlays for local rows;
+  remote rows stay home-only), and uses one read-only runtime snapshot for
+  checkpoint revisions. Failure to obtain the session-record store refuses
+  the read. Rows whose activity or holder cannot be read are omitted until
+  readable again, with one content-free diagnostic per session per host run.
+  There is no last-known row cache and no fabricated idle, held or unheld
+  verdict. Other per-row failures use activity revision zero, unknown runner
+  status and custom profile with a roster difference as needed; no individual
+  row failure freezes the directory for other sessions. These display
+  fallbacks never admit an open or execution.
 - **Open admission.** Every open freshly validates its saved runner and
   canonical workspace before starting a mutable runtime. This includes local:
   an unready home-local daemon never silently becomes direct execution.
@@ -4178,8 +4183,10 @@ verdicts) are addressed, the session profile and workspace chrome states.
   originating connection; only that state answers `accepted {duplicate:true}`
   without enqueueing. `Sender::answering` windows are nested: neither an
   answer-prefixed boundary nor its reopen frees the interrupted submission.
-  Only that submission's accepted/rejected/error verdict, definite refusal
-  or session end resolves its pending reservation.
+  Only that submission's accepted/rejected verdict, addressed answer-window
+  error, navigator-unavailable refusal or session end resolves its pending
+  reservation. Unwindowed background error notices are not draft verdicts;
+  synchronous draft refusals, including archival, emit DraftRejected.
   Rejection, pre-admission refusal and mailbox drop free
   the reservation. Keep admitted ids for the host process lifetime without
   TTL/LRU; pending plus admitted entries are bounded at 100,000, with
@@ -5019,9 +5026,15 @@ host gets the bounded retry below. Once a connection answers, handshake failures
 the launch; a different wire version names the remedies: stop the host
 with `plak host stop`, or run its build. It never embeds beside that peer.
 
-A starting host re-asks a contended `host.lock` twice, 5 ms apart, before
+A starting host re-asks a contended `host.lock` up to forty times, 5 ms apart, before
 refusing an existing holder. A momentary discovery probe therefore does not
 make the host fail to start; the held lock remains the authority.
+Discovery treats a proved-dead pid as absent. Live, inaccessible, empty or
+unparseable pid hints are confirmed against the kernel lock: a contended lock
+means a starting/stopping host, while a briefly acquired and immediately
+released lock proves a stale file. PID reuse never proves a host present.
+Normal host drop truncates the pid text while still holding the lock; crash
+leftovers remain safe through the same kernel confirmation.
 
 In host mode the resume picker reads `list_sessions` for the workspace,
 and `/new` sends `new_session` with a fresh request id, then attaches the

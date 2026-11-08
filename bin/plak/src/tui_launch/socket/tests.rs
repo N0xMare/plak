@@ -590,14 +590,9 @@ fn an_unbindable_socket_path_uses_the_embedded_launcher() {
 }
 
 #[test]
-fn a_recorded_live_host_without_a_socket_refuses_until_the_process_is_gone() {
+fn a_kernel_locked_host_without_a_socket_refuses_until_the_lock_is_free() {
     let (_root, paths) = paths();
-    let mut owner = std::process::Command::new("/bin/sh")
-        .args(["-c", "read line"])
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-        .unwrap();
-    let pid = owner.id();
+    let pid = std::process::id();
     std::fs::create_dir_all(paths.host_lock().parent().unwrap()).unwrap();
     std::fs::write(paths.host_lock(), format!("{pid} fixture\n")).unwrap();
     let lock = std::fs::OpenOptions::new()
@@ -618,12 +613,49 @@ fn a_recorded_live_host_without_a_socket_refuses_until_the_process_is_gone() {
         );
     }
     drop(lock);
-    // Discovery never takes the lock, even when it is free. A live recorded
-    // process remains a start/stop barrier until its death is proved.
-    assert!(discovery::connect(&paths, Duration::ZERO).is_err());
-    drop(owner.stdin.take());
-    owner.wait().unwrap();
     assert!(SocketFace::discover(&paths).unwrap().is_none());
+}
+
+#[test]
+fn review2_probe_reused_pid_with_free_lock_is_an_absent_host() {
+    let (_root, paths) = paths();
+    std::fs::create_dir_all(paths.host_lock().parent().unwrap()).unwrap();
+    std::fs::write(
+        paths.host_lock(),
+        format!("{} old-build\n", std::process::id()),
+    )
+    .unwrap();
+    assert!(
+        discovery::connect(&paths, Duration::ZERO)
+            .unwrap()
+            .is_none()
+    );
+    assert!(SocketFace::discover(&paths).unwrap().is_none());
+}
+
+#[test]
+fn review2_probe_empty_free_lock_is_an_absent_host() {
+    let (_root, paths) = paths();
+    std::fs::create_dir_all(paths.host_lock().parent().unwrap()).unwrap();
+    for hint in ["", "not a pid"] {
+        std::fs::write(paths.host_lock(), hint).unwrap();
+        assert!(
+            discovery::connect(&paths, Duration::ZERO)
+                .unwrap()
+                .is_none()
+        );
+        let lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(paths.host_lock())
+            .unwrap();
+        lock.try_lock().unwrap();
+        assert!(
+            discovery::connect(&paths, Duration::ZERO).is_err(),
+            "an incomplete pid write must still respect a starting host's lock"
+        );
+        drop(lock);
+    }
 }
 
 #[test]

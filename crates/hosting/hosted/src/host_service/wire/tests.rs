@@ -191,19 +191,34 @@ fn not_attached_refusal_frees_an_identified_draft_for_a_new_attachment() {
 
 #[test]
 fn answering_mail_records_durable_admission_before_a_reconnected_retry() {
-    answering_draft(SessionIntent::MailTopologyNode {
-        agent_id: "peer".into(),
-        message: "deliver once".into(),
-        urgent: true,
-    });
+    answering_draft(
+        SessionIntent::MailTopologyNode {
+            agent_id: "peer".into(),
+            message: "deliver once".into(),
+            urgent: true,
+        },
+        false,
+    );
 }
 
 #[test]
 fn interleaved_answer_keeps_steer_pending_until_its_own_admission() {
-    answering_draft(SessionIntent::Steer(Draft::from("steer once")));
+    answering_draft(SessionIntent::Steer(Draft::from("steer once")), false);
 }
 
-fn answering_draft(intent: SessionIntent<plakous_host_protocol::Core>) {
+#[test]
+fn review2_probe_stray_error_row_before_async_mail_admission() {
+    answering_draft(
+        SessionIntent::MailTopologyNode {
+            agent_id: "peer".into(),
+            message: "one mail".into(),
+            urgent: false,
+        },
+        true,
+    );
+}
+
+fn answering_draft(intent: SessionIntent<plakous_host_protocol::Core>, stray_error: bool) {
     use crate::host_service::drafts::DraftRegistry;
     use plakous_host_protocol::wire::ClientDraftId;
     use plakous_host_protocol::{ContentObservation, Core};
@@ -243,6 +258,13 @@ fn answering_draft(intent: SessionIntent<plakous_host_protocol::Core>) {
     drain();
     detail.send(ContentObservation::SetBusy(false));
     drain();
+    if stray_error {
+        sender.send(ContentObservation::Row(TranscriptRow::error(
+            plakous_host_protocol::views::transcript::NoticeScope::Host,
+            "an unrelated background failure",
+        )));
+        drain();
+    }
     first.leave();
     let mut retry = connect();
     let reattached = retry.attachment.unwrap();
@@ -257,6 +279,80 @@ fn answering_draft(intent: SessionIntent<plakous_host_protocol::Core>) {
     assert_eq!(
         retry.intent_request(3, reattached, intent, &[], Some(id)),
         Some(Outcome::Ok(Answer::Accepted { duplicate: true }))
+    );
+}
+
+#[test]
+fn review2_probe_navigator_unavailable_mail_frees_its_reservation() {
+    terminal_draft_verdict(
+        SessionIntent::MailTopologyNode {
+            agent_id: "peer".into(),
+            message: "not delivered".into(),
+            urgent: false,
+        },
+        plakous_host_protocol::ContentObservation::TopologyNavigatorUnavailable {
+            reason: "no navigator".into(),
+        },
+        false,
+    );
+}
+
+#[test]
+fn every_handled_draft_kind_settles_accepted_rejected_or_addressed_error() {
+    use plakous_host_protocol::ContentObservation as C;
+    for intent in [
+        SessionIntent::Prompt("prompt".into()),
+        SessionIntent::FollowUp("follow".into()),
+        SessionIntent::Steer("steer".into()),
+        SessionIntent::MailTopologyNode {
+            agent_id: "peer".into(),
+            message: "mail".into(),
+            urgent: true,
+        },
+    ] {
+        terminal_draft_verdict(intent.clone(), C::DraftAccepted(intent.clone()), true);
+        terminal_draft_verdict(intent.clone(), C::DraftRejected(intent.clone()), false);
+        terminal_draft_verdict(
+            intent,
+            C::Row(TranscriptRow::error(
+                plakous_host_protocol::views::transcript::NoticeScope::Host,
+                "addressed failure",
+            )),
+            false,
+        );
+    }
+}
+
+fn terminal_draft_verdict(
+    intent: SessionIntent<plakous_host_protocol::Core>,
+    verdict: plakous_host_protocol::ContentObservation<plakous_host_protocol::Core>,
+    duplicate: bool,
+) {
+    use crate::host_service::drafts::DraftRegistry;
+    use plakous_host_protocol::{ContentObservation as C, Core, wire::ClientDraftId};
+    let (actions, _intents) = plakous_host_protocol::intent_channel::<Core>();
+    let service = HostService::new(actions.clone(), root(), ATTACHMENT_CAPACITY);
+    let mut wire = WireConnection::on_service(service.clone(), Vec::new(), actions, Leave::Detach)
+        .with_drafts(DraftRegistry::default());
+    let attachment = service.attach(&root(), Face::Remote).unwrap();
+    wire.attachment = Some(attachment);
+    let id = ClientDraftId::new();
+    assert_eq!(
+        wire.intent_request(1, attachment, intent.clone(), &[], Some(id)),
+        Some(Outcome::Ok(Answer::Accepted { duplicate: false }))
+    );
+    let (channel, events) = crate::surface_protocol::host_event_channel::<Core>();
+    let sender = crate::runtime::Sender::over(channel);
+    sender.send(C::IntentStarted(Some(format!(
+        "attachment:{attachment}:{id}"
+    ))));
+    sender.answering().send(verdict);
+    while let Ok(event) = events.try_recv() {
+        service.observe(event);
+    }
+    assert_eq!(
+        wire.intent_request(2, attachment, intent, &[], Some(id)),
+        Some(Outcome::Ok(Answer::Accepted { duplicate }))
     );
 }
 

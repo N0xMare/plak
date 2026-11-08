@@ -47,7 +47,11 @@ pub(crate) fn connect(paths: &PlakPaths, window: Duration) -> CliResult<Option<T
 }
 
 fn locked_host(paths: &PlakPaths) -> CliResult<Option<String>> {
-    let mut file = match std::fs::File::open(paths.host_lock()) {
+    let mut file = match std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(paths.host_lock())
+    {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {
@@ -69,5 +73,18 @@ fn locked_host(paths: &PlakPaths) -> CliResult<Option<String>> {
             return Ok(None);
         }
     }
-    Ok(Some(pid.to_owned()))
+    match file.try_lock() {
+        Ok(()) => {
+            file.unlock().map_err(|error| {
+                CliFailure::new(format!(
+                    "the host probe lock could not be released: {error}"
+                ))
+            })?;
+            Ok(None)
+        }
+        Err(std::fs::TryLockError::WouldBlock) => Ok(Some(pid.to_owned())),
+        Err(std::fs::TryLockError::Error(error)) => Err(CliFailure::new(format!(
+            "the host lock could not be checked: {error}"
+        ))),
+    }
 }
