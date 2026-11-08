@@ -16,6 +16,7 @@ struct Fixture {
 impl Fixture {
     fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let root = tempfile::tempdir()?;
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700))?;
         let home = root.path().join("user");
         let product = root.path().join("home");
         let log = root.path().join("manager.log");
