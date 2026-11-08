@@ -86,14 +86,16 @@ class CrashSweepTests(unittest.TestCase):
 
     def test_strict_default_defers_to_all_registered_shapes_even_with_inherited_selection(self):
         with tempfile.TemporaryDirectory() as directory:
-            code, calls = self.run_sweep(Path(directory), [0, 0, 0, 0], ["--strict"])
+            code, calls = self.run_sweep(
+                Path(directory), [0] * (len(SWEEP.TERMINAL_SHAPES) + 2), ["--strict"]
+            )
             self.assertEqual(code, 0)
             for call in calls:
                 self.assertNotIn("PLAK_CRASH_SWEEP_SHAPES", call.kwargs["env"])
                 self.assertEqual(call.kwargs["env"]["PLAK_CRASH_SWEEP_STRICT"], "1")
             self.assertEqual(
-                calls[-1].args[0][-4:],
-                ["host_skeleton::crash::tui::tui_host_restart", "--", "--exact", "--nocapture"],
+                [call.args[0][-4] for call in calls[2:]],
+                list(SWEEP.TERMINAL_SHAPES.values()),
             )
 
     def test_terminal_shape_is_selected_and_repeated_without_the_generic_sweep(self):

@@ -50,7 +50,7 @@ def predicate_is_defined(
     if name.startswith("="):
         return name[1:] in exact
     if name.endswith("::"):
-        return name[:-2] in modules
+        return name[:-2] in modules or any(path.startswith(name) for path in exact)
     if "::" in name:
         return name in qualified
     return name in functions or name in modules
@@ -154,6 +154,16 @@ def exact_inventory(root: Path) -> set[str]:
 
 
 class NextestLaneTests(unittest.TestCase):
+    def test_qualified_module_predicates_require_a_test_below_that_module(self) -> None:
+        exact = {"host::runner::foreground::runs"}
+        self.assertTrue(
+            predicate_is_defined("host::runner::foreground::", set(), set(), set(), exact)
+        )
+        self.assertFalse(
+            predicate_is_defined("host::runner::missing::", set(), set(), set(), exact)
+        )
+        self.assertFalse(predicate_is_defined("host::runner::fore::", set(), set(), set(), exact))
+
     def test_exact_paths_follow_binary_roots_and_explicit_module_names(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
