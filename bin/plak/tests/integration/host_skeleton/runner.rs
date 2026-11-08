@@ -995,6 +995,7 @@ fn host_crash_mid_child_stop_finishes_the_recorded_intent_once() {
             }
         }
         let mut host = start(&fixture);
+        wait_local_runner_ready(&host);
         stopped(pid);
         job(&fixture);
         let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
