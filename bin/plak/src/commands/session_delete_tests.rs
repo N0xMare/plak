@@ -35,7 +35,8 @@ fn lifecycle_keepalive_worker() {
         1
     );
     let result = lifecycle::archive_offline(&services, &id);
-    let failure = std::env::var("PLAK_LIFECYCLE_FAIL_RENEWAL").as_deref() == Ok("1");
+    let failure = std::env::var("PLAK_LIFECYCLE_FAIL_RENEWAL").as_deref() == Ok("1")
+        || std::env::var_os("PLAK_LIFECYCLE_RENEWAL_LOSS_AT").is_some();
     if failure {
         assert!(matches!(result, Err(LifecycleError::Failure(_))));
     } else {
@@ -90,6 +91,48 @@ fn lifecycle_keepalive_scan_survives_expiry_and_refuses_renewal_loss() -> TestRe
     Ok(())
 }
 
+#[cfg(feature = "test-hooks")]
+#[test]
+fn lifecycle_renewal_loss_before_metadata_write_and_during_commit_refuses() -> TestResult {
+    for phase in ["scan", "commit"] {
+        let mut f = fixture(false)?;
+        f.tree.abandon_recovery_for_delete(&f.child_id).checked()?;
+        crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
+        let mut worker = std::process::Command::new(std::env::current_exe()?);
+        worker
+            .args([
+                "--exact",
+                "commands::session::delete::deletion_tests::lifecycle_keepalive_worker",
+                "--nocapture",
+            ])
+            .env("PLAK_LIFECYCLE_CRASH_HOME", f.paths.home())
+            .env("PLAK_LIFECYCLE_CRASH_SESSION", &f.record.id)
+            .env("PLAK_TEST_SESSION_LEASE_SECONDS", "1")
+            .env("PLAK_LIFECYCLE_RENEWAL_LOSS_AT", phase)
+            .env(
+                "PLAK_LIFECYCLE_RENEWAL_LOSS_FILE",
+                f.paths.home().join("renewal-loss"),
+            )
+            .env(
+                "PLAK_LIFECYCLE_SCAN_PAUSE_MS",
+                if phase == "scan" { "600" } else { "0" },
+            )
+            .env("PLAK_LIFECYCLE_COMMIT_PAUSE_MS", "1200");
+        if phase == "scan" {
+            worker.env("PLAK_LIFECYCLE_CRASH_CUT", "metadata_before_commit");
+        }
+        let output = worker.output()?;
+        assert!(
+            output.status.success(),
+            "{phase}: {} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!f.product.load(&f.record.id).checked()?.archived);
+    }
+    Ok(())
+}
+
 #[test]
 fn offline_archive_fences_owners_and_live_children_without_archiving_runtime() -> TestResult {
     let mut f = fixture(false).checked()?;
@@ -111,6 +154,16 @@ fn offline_archive_fences_owners_and_live_children_without_archiving_runtime() -
     assert!(!f.product.load(&f.record.id).checked()?.archived);
     f.tree.abandon_recovery_for_delete(&f.child_id).checked()?;
     crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
+    let child_hold = f
+        .runtime
+        .run(f.runtime.sessions.hold_branch(&operation, f.child_locator))
+        .checked()??;
+    assert!(matches!(
+        lifecycle::archive_offline(&services, &f.record.id),
+        Err(LifecycleError::Refused(LifecycleRefusal::Open))
+    ));
+    assert!(!f.product.load(&f.record.id).checked()?.archived);
+    f.runtime.run(child_hold.release()).checked()??;
     lifecycle::archive_offline(&services, &f.record.id).checked()?;
     assert!(f.product.load(&f.record.id).checked()?.archived);
     AgentSessions::export_history_sqlite(f.paths.runtime_database(), locator).checked()?;
@@ -120,6 +173,265 @@ fn offline_archive_fences_owners_and_live_children_without_archiving_runtime() -
         .run(f.runtime.sessions.hold_branch(&operation, locator))
         .checked()??;
     f.runtime.run(held.release()).checked()??;
+    Ok(())
+}
+
+#[test]
+fn lifecycle_archive_refuses_product_continuation_and_queued_work() -> TestResult {
+    use plakous_hosted::sessions::projector::{
+        RootInterrupt, RootInterruptCause, RootLossIntent, RootStopAnchor,
+    };
+    for queued in [false, true] {
+        let mut f = fixture(false)?;
+        f.tree.abandon_recovery_for_delete(&f.child_id).checked()?;
+        crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
+        let services = crate::shell::services::Services::for_home(f.paths.clone());
+        if queued {
+            f.record
+                .pending_queue
+                .push(product_sessions::QueueItem::new("queued prompt"));
+            f.product.commit(&mut f.record).checked()?;
+        } else {
+            services
+                .session_records()?
+                .write_root_loss(
+                    &f.record.id,
+                    RootLossIntent::Interrupt(RootInterrupt {
+                        anchor: RootStopAnchor::Turn {
+                            turn_id: "handoff-turn".to_owned(),
+                        },
+                        cause: RootInterruptCause::Handoff,
+                    }),
+                )
+                .checked()?;
+        }
+        assert!(matches!(
+            lifecycle::archive_offline(&services, &f.record.id),
+            Err(LifecycleError::Refused(LifecycleRefusal::Busy {
+                turn: true,
+                ..
+            }))
+        ));
+        assert!(!f.product.load(&f.record.id).checked()?.archived);
+    }
+    Ok(())
+}
+
+#[test]
+fn lifecycle_archive_refuses_an_archived_runtime_branch() -> TestResult {
+    let mut f = fixture(false)?;
+    f.tree.abandon_recovery_for_delete(&f.child_id).checked()?;
+    crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
+    f.runtime
+        .archive(&f.record.id, f.record.plakous_locator.unwrap())
+        .checked()?;
+    let services = crate::shell::services::Services::for_home(f.paths.clone());
+    assert!(matches!(
+        lifecycle::archive_offline(&services, &f.record.id),
+        Err(LifecycleError::Failure(_))
+    ));
+    assert!(!f.product.load(&f.record.id).checked()?.archived);
+    Ok(())
+}
+
+#[test]
+fn lifecycle_gc_refuses_archived_before_opening_runtime() -> TestResult {
+    let (_temporary, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+    let services = crate::shell::services::Services::for_home(paths.clone());
+    let mut record = product_sessions::SessionRecord::new(paths.home().to_owned());
+    record.archived = true;
+    services.session_records()?.save(&mut record).checked()?;
+    std::fs::write(paths.runtime_database(), b"not a runtime database")?;
+    let error = gc_sessions(&services, Some(&record.id), &mut Vec::new()).unwrap_err();
+    assert!(error.message().contains("unarchive"), "{error}");
+    assert_eq!(
+        std::fs::read(paths.runtime_database())?,
+        b"not a runtime database"
+    );
+    Ok(())
+}
+
+#[test]
+fn lifecycle_gc_all_reports_archived_sessions_as_skipped() -> TestResult {
+    let mut f = fixture(false)?;
+    f.product.set_archived(&f.record.id, true)?;
+    let services = crate::shell::services::Services::for_home(f.paths.clone());
+    let mut output = Vec::new();
+    gc_sessions(&services, None, &mut output)?;
+    let output = String::from_utf8(output)?;
+    assert!(
+        output.contains(&format!(
+            "skipped {}: archived; unarchive before gc",
+            f.record.id
+        )),
+        "{output}"
+    );
+    assert!(f.product.load(&f.record.id).checked()?.archived);
+    Ok(())
+}
+
+#[test]
+fn lifecycle_delete_refuses_root_and_finished_child_owners() -> TestResult {
+    for child in [false, true] {
+        let mut f = fixture(false)?;
+        f.tree.abandon_recovery_for_delete(&f.child_id).checked()?;
+        crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
+        let locator = if child {
+            f.child_locator
+        } else {
+            f.record.plakous_locator.unwrap()
+        };
+        let operation = SessionOperationId::new("delete:held-owner").checked()?;
+        let held = f
+            .runtime
+            .run(f.runtime.sessions.hold_branch(&operation, locator))
+            .checked()??;
+        let services = crate::shell::services::Services::for_home(f.paths.clone());
+        assert!(matches!(
+            lifecycle::delete_confirmed(&services, &f.record.id, false),
+            Err(LifecycleError::Refused(LifecycleRefusal::Open))
+        ));
+        assert_eq!(f.product.load(&f.record.id).checked()?.id, f.record.id);
+        f.runtime.run(held.release()).checked()??;
+    }
+    Ok(())
+}
+
+#[cfg(feature = "test-hooks")]
+#[test]
+fn lifecycle_working_worker() {
+    let Ok(home) = std::env::var("PLAK_LIFECYCLE_WORKING_HOME") else {
+        return;
+    };
+    let paths = crate::home::paths::PlakPaths::explicit(home.into());
+    let id = std::env::var("PLAK_LIFECYCLE_WORKING_ID").unwrap();
+    let services = crate::shell::services::Services::for_home(paths.clone());
+    let runtime = RuntimeDeletion::new(&services).unwrap();
+    let evidence = paths.home().join("working-evidence.jsonl");
+    let controller =
+        BoundaryController::quiet_from_evidence_path(CrashBoundary::None, &evidence).unwrap();
+    let plan = Arc::new(
+        serde_json::from_value(
+            serde_json::json!({"version":1,"steps":[{"stream":[{"stall":30000}]}]}),
+        )
+        .unwrap(),
+    );
+    let binding =
+        plakous_offline_crash_harness::scripted_runtime_binding(paths.home(), controller, plan)
+            .unwrap();
+    let mut product = crate::store::ProductStore::open(&paths).unwrap();
+    let mut record = product.load(&id).unwrap();
+    let CreateSessionOutcome::Created { session, .. } = runtime
+        .run(runtime.sessions.create(CreateSessionRequest::new(
+            SessionOperationId::new(&record.create_operation_id).unwrap(),
+            binding,
+        )))
+        .unwrap()
+        .unwrap()
+    else {
+        panic!("created")
+    };
+    record.bind_plakous_locator(session.locator()).unwrap();
+    product.commit(&mut record).unwrap();
+    runtime.executor.block_on(async {
+        let _turn = session.agent().prompt("leave working").await.unwrap();
+        loop {
+            if plakous_offline_crash_harness::evidence::read_evidence(&evidence).unwrap().iter().any(|record|record.kind==plakous_offline_crash_harness::evidence::EvidenceKind::ProviderDispatched) {
+                std::process::exit(0);
+            }
+            tokio::task::yield_now().await;
+        }
+    }).unwrap();
+}
+
+#[cfg(feature = "test-hooks")]
+#[test]
+fn lifecycle_archive_refuses_expired_working_root_and_finished_child() -> TestResult {
+    archive_expired_working(false)
+}
+
+#[cfg(feature = "test-hooks")]
+#[test]
+fn lifecycle_archive_refuses_expired_working_finished_child() -> TestResult {
+    archive_expired_working(true)
+}
+
+#[cfg(feature = "test-hooks")]
+fn archive_expired_working(child: bool) -> TestResult {
+    let mut f = fixture(false)?;
+    f.tree.abandon_recovery_for_delete(&f.child_id).checked()?;
+    crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
+    let mut working = product_sessions::SessionRecord::new(f.paths.home().to_owned());
+    f.product.commit(&mut working).checked()?;
+    let output = std::process::Command::new(std::env::current_exe()?)
+        .args([
+            "--exact",
+            "commands::session::delete::deletion_tests::lifecycle_working_worker",
+            "--nocapture",
+        ])
+        .env("PLAK_LIFECYCLE_WORKING_HOME", f.paths.home())
+        .env("PLAK_LIFECYCLE_WORKING_ID", &working.id)
+        .env("PLAK_TEST_SESSION_LEASE_SECONDS", "1")
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    working = f.product.load(&working.id).checked()?;
+    let mut locator = working.plakous_locator.unwrap();
+    let operation = SessionOperationId::new("archive:wait-expiry").checked()?;
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match f
+            .runtime
+            .run(f.runtime.sessions.hold_branch(&operation, locator))
+            .checked()?
+        {
+            Ok(held) => {
+                f.runtime.run(held.release()).checked()??;
+                break;
+            }
+            Err(error) if error.kind() == AgentSessionsErrorKind::Ownership => {
+                assert!(std::time::Instant::now() < until);
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(error) if error.kind() == AgentSessionsErrorKind::StaleLocator => {
+                locator = error.current_locator().ok_or("missing current locator")?;
+            }
+            Err(error) => return Err(format!("{error}").into()),
+        }
+    }
+    let target = if child {
+        let id = f
+            .tree
+            .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+            .checked()?
+            .agent_id;
+        f.tree
+            .bind_session_locator(&id, locator.to_string())
+            .checked()?;
+        f.tree
+            .record_turn_failure(
+                &id,
+                FailedTurnDisposition::RecoveryRequired,
+                "crashed child".into(),
+            )
+            .checked()?;
+        f.tree.abandon_recovery_for_delete(&id).checked()?;
+        crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
+        f.record.id.clone()
+    } else {
+        working.id.clone()
+    };
+    let services = crate::shell::services::Services::for_home(f.paths.clone());
+    let refusal = lifecycle::archive_offline(&services, &target);
+    assert!(
+        matches!(refusal,Err(LifecycleError::Refused(LifecycleRefusal::Busy {turn,ref children,..})) if (child && !children.is_empty()) || (!child && turn)),
+        "{refusal:?}"
+    );
+    assert!(!f.product.load(&target).checked()?.archived);
     Ok(())
 }
 

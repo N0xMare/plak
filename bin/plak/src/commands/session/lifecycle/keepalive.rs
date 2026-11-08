@@ -24,6 +24,8 @@ pub(super) struct Keepalive {
 #[cfg(test)]
 fn renewal_failure_fixture() -> bool {
     std::env::var("PLAK_LIFECYCLE_FAIL_RENEWAL").as_deref() == Ok("1")
+        || std::env::var_os("PLAK_LIFECYCLE_RENEWAL_LOSS_FILE")
+            .is_some_and(|path| std::path::Path::new(&path).exists())
 }
 
 fn renew(state: &mut State, executor: &ApplicationExecutor) -> Result<(), LifecycleError> {
@@ -112,4 +114,20 @@ impl Drop for Keepalive {
             let _ = worker.join();
         }
     }
+}
+
+#[cfg(test)]
+#[test]
+fn lifecycle_keepalive_rejects_a_stopped_worker() -> Result<(), Box<dyn std::error::Error>> {
+    let mut keeper = Keepalive::new(1)?;
+    keeper.stop.send(())?;
+    keeper
+        .worker
+        .take()
+        .ok_or("missing worker")?
+        .join()
+        .map_err(|_| "worker panicked")?;
+    let executor = ApplicationExecutor::new()?;
+    assert!(keeper.verify(&executor).is_err());
+    Ok(())
 }

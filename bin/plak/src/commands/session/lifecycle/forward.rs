@@ -1,6 +1,6 @@
 //! CLI lifecycle requests use the live host; only proved absence permits offline work.
 
-use plakous_host_protocol::wire::{Answer, Op, Outcome};
+use plakous_host_protocol::wire::{Answer, LifecycleReason, Op, Outcome, RequestRefusal};
 
 use crate::shell::services::Services;
 use crate::surface_protocol::PlakExtension;
@@ -34,7 +34,7 @@ pub(super) fn request(services: &Services, id: &str, change: Change) -> CliResul
     let answer = match outcome {
         Outcome::Ok(answer) => answer,
         Outcome::Refused(reason) => {
-            return Err(CliFailure::new(format!("the host refused: {reason:?}")));
+            return Err(CliFailure::new(host_refusal(reason)));
         }
     };
     let matched = match (&change, &answer) {
@@ -51,4 +51,67 @@ pub(super) fn request(services: &Services, id: &str, change: Change) -> CliResul
         ));
     }
     Ok(true)
+}
+
+fn host_refusal(reason: RequestRefusal) -> String {
+    match reason {
+        RequestRefusal::SessionLifecycleRefused { reason, .. } => product_refusal(reason).to_string(),
+        RequestRefusal::SessionUnavailable { detail } => format!("{detail}; refresh the session list and retry"),
+        RequestRefusal::SessionArchived { .. } => "the session is archived; unarchive it before writing".to_owned(),
+        RequestRefusal::UnknownSession => super::LifecycleRefusal::NotFound.to_string(),
+        _ => "the host refused the request; refresh the session list and retry; no offline mutation attempted".to_owned(),
+    }
+}
+
+fn product_refusal(reason: LifecycleReason) -> super::LifecycleRefusal {
+    use super::{InvalidTitleKind, LifecycleRefusal as R};
+    match reason {
+        LifecycleReason::NotFound => R::NotFound,
+        LifecycleReason::InvalidTitle { kind } => R::InvalidTitle {
+            kind: match kind {
+                plakous_host_protocol::wire::InvalidTitleKind::Empty => InvalidTitleKind::Empty,
+                plakous_host_protocol::wire::InvalidTitleKind::TooLong => InvalidTitleKind::TooLong,
+                plakous_host_protocol::wire::InvalidTitleKind::ControlCharacter => {
+                    InvalidTitleKind::ControlCharacter
+                }
+            },
+        },
+        LifecycleReason::Busy {
+            turn,
+            children,
+            children_truncated,
+            processes,
+            processes_truncated,
+            state_unknown,
+        } => R::Busy {
+            turn,
+            children,
+            children_truncated,
+            processes,
+            processes_truncated,
+            state_unknown,
+        },
+        LifecycleReason::Open => R::Open,
+        LifecycleReason::LiveTree {
+            children,
+            children_truncated,
+        } => R::LiveTree {
+            children,
+            children_truncated,
+        },
+        LifecycleReason::RecoveryRequiredTree {
+            children,
+            children_truncated,
+        } => R::RecoveryRequiredTree {
+            children,
+            children_truncated,
+        },
+        LifecycleReason::ForkDependency {
+            dependents,
+            dependents_truncated,
+        } => R::ForkDependency {
+            dependents,
+            dependents_truncated,
+        },
+    }
 }

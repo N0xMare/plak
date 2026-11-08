@@ -2,6 +2,35 @@ use super::*;
 
 struct NoAdmission;
 
+#[test]
+fn archived_stop_is_a_read_only_noop_even_with_an_unreadable_runtime() {
+    let (_temporary, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+    let services = Services::for_home(paths.clone());
+    let mut record = crate::store::sessions::SessionRecord::new(paths.home().to_owned());
+    record.archived = true;
+    services
+        .session_records()
+        .unwrap()
+        .save(&mut record)
+        .unwrap();
+    std::fs::write(paths.runtime_database(), b"not a runtime database").unwrap();
+    let product = ProductSessions::new(&services, None, None).unwrap();
+    product.stop_dormant(&record.id).unwrap();
+    assert!(
+        services
+            .session_records()
+            .unwrap()
+            .load_intents(&record.id)
+            .unwrap()
+            .root_interrupts
+            .is_empty()
+    );
+    assert_eq!(
+        std::fs::read(paths.runtime_database()).unwrap(),
+        b"not a runtime database"
+    );
+}
+
 impl Placement for NoAdmission {
     fn validate(
         &self,

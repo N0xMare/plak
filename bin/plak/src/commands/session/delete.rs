@@ -129,20 +129,6 @@ pub(super) fn delete_confirmed(
             .map_err(|error| CliFailure::new(error.to_string()))?
     };
     let runtime = RuntimeDeletion::new(services)?;
-    let plan = deletion_plan(paths, &mut product, &record, locator, abandon_children)?;
-    let fences = super::lifecycle::fence_for_delete(services, locator, &plan.children)?;
-    let settled = plan
-        .children
-        .iter()
-        .filter(|(id, _)| !plan.abandon.contains(id))
-        .cloned()
-        .collect::<Vec<_>>();
-    runtime.refuse_unsettled_children(id, &settled)?;
-    fences.verify()?;
-    // Runtime archival takes over with its own irreversible admission
-    // fence. It rechecks after release and refuses a racing owner before
-    // any deletion; later cleanup is protected by archived revisions.
-    drop(fences);
     delete_confirmed_session(
         paths,
         &mut product,
@@ -673,6 +659,15 @@ pub(crate) fn gc_sessions(
     stdout: &mut dyn io::Write,
 ) -> CliResult<()> {
     let paths = services.paths()?;
+    if let Some(id) = id {
+        let record =
+            load_metadata_product_session(paths, services.session_records()?.as_ref(), id)?;
+        if record.archived {
+            return Err(CliFailure::new(
+                "session is archived; unarchive it before running gc",
+            ));
+        }
+    }
     let mut product = crate::store::ProductStore::open(paths)
         .map_err(|error| CliFailure::new(error.to_string()))?;
     let runtime = RuntimeDeletion::new(services)?;
@@ -697,6 +692,12 @@ pub(crate) fn gc_sessions(
             .collect::<CliResult<_>>()?
     };
     for record in targets {
+        if record.archived {
+            tally
+                .skipped
+                .push(format!("{}: archived; unarchive before gc", record.id));
+            continue;
+        }
         prune_session_history(&runtime, &records, &record, &mut tally)?;
     }
     let report = runtime
@@ -918,6 +919,12 @@ fn finish_interrupted_deletes(
                     .map(|locator| (id, locator))
             })
             .collect();
+        if named
+            .iter()
+            .any(|(id, _)| records.load(id).is_ok_and(|record| record.archived))
+        {
+            continue;
+        }
         let mut reclaimed = Reclaimed::default();
         let finished = if named.is_empty() {
             // Gone by now when a record deleted above took it as its child.

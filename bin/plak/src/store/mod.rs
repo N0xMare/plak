@@ -710,7 +710,15 @@ impl ProductStore {
     }
 
     pub fn list_for_workspace(&mut self, workspace: &Path) -> Result<Vec<SessionRecord>, String> {
-        self.list_for_workspace_with_query_count(workspace)
+        self.list_for_workspace_filtered(workspace, true)
+    }
+
+    pub(crate) fn list_for_workspace_filtered(
+        &mut self,
+        workspace: &Path,
+        include_archived: bool,
+    ) -> Result<Vec<SessionRecord>, String> {
+        self.list_for_workspace_with_query_count(workspace, include_archived)
             .map(|(sessions, _)| sessions)
     }
 
@@ -721,6 +729,7 @@ impl ProductStore {
     fn list_for_workspace_with_query_count(
         &mut self,
         workspace: &Path,
+        include_archived: bool,
     ) -> Result<(Vec<SessionRecord>, usize), String> {
         #[cfg(feature = "test-hooks")]
         let _settle = SettleCommitTrace;
@@ -733,61 +742,64 @@ impl ProductStore {
             .map_err(|_| "could not start product listing read".to_owned())?;
         let mut query_count = 0usize;
         let mut statement = transaction.prepare(
-            "SELECT id,create_operation_id,workspace_root,created_at,updated_at,account,model,effort,title,source_session_id,source_operation_id,CASE WHEN v.session_id IS NULL THEN sessions.locator ELSE v.head_locator END,composition,target_selection,COALESCE(v.root_turn_count,0),COALESCE(v.tool_call_count,0),COALESCE(v.compaction_count,0),sessions.carry_intent,sessions.node_tree_id,sessions.node_agent_id,sessions.root_profile,sessions.runner_display,sessions.title_override,sessions.archived FROM sessions LEFT JOIN session_views v ON v.session_id=sessions.id WHERE workspace_identity = ?1 ORDER BY updated_at DESC, id ASC LIMIT ?2"
+            "SELECT id,create_operation_id,workspace_root,created_at,updated_at,account,model,effort,title,source_session_id,source_operation_id,CASE WHEN v.session_id IS NULL THEN sessions.locator ELSE v.head_locator END,composition,target_selection,COALESCE(v.root_turn_count,0),COALESCE(v.tool_call_count,0),COALESCE(v.compaction_count,0),sessions.carry_intent,sessions.node_tree_id,sessions.node_agent_id,sessions.root_profile,sessions.runner_display,sessions.title_override,sessions.archived FROM sessions LEFT JOIN session_views v ON v.session_id=sessions.id WHERE workspace_identity = ?1 AND (?3 OR sessions.archived=0) ORDER BY updated_at DESC, id ASC LIMIT ?2"
         ).map_err(|_| "could not query product sessions".to_owned())?;
         query_count += 1;
         let mut sessions = statement
-            .query_map(params![identity, MAX_LIST_SESSIONS_SQL + 1], |row| {
-                let id: String = row.get(0)?;
-                let locator: Option<String> = row.get(11)?;
-                Ok(SessionRecord {
-                    store_revision: 0,
-                    id,
-                    create_operation_id: row.get(1)?,
-                    workspace_root: PathBuf::from(row.get::<_, String>(2)?),
-                    created_at_unix: from_i64(row.get(3)?)?,
-                    updated_at_unix: from_i64(row.get(4)?)?,
-                    account: row.get(5)?,
-                    model: row.get(6)?,
-                    effort: row.get(7)?,
-                    composition: ProductCompositionSelection::parse_config(
-                        &row.get::<_, String>(12)?,
-                    )
-                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                    target_selection: serde_json::from_str(&row.get::<_, String>(13)?)
+            .query_map(
+                params![identity, MAX_LIST_SESSIONS_SQL + 1, include_archived],
+                |row| {
+                    let id: String = row.get(0)?;
+                    let locator: Option<String> = row.get(11)?;
+                    Ok(SessionRecord {
+                        store_revision: 0,
+                        id,
+                        create_operation_id: row.get(1)?,
+                        workspace_root: PathBuf::from(row.get::<_, String>(2)?),
+                        created_at_unix: from_i64(row.get(3)?)?,
+                        updated_at_unix: from_i64(row.get(4)?)?,
+                        account: row.get(5)?,
+                        model: row.get(6)?,
+                        effort: row.get(7)?,
+                        composition: ProductCompositionSelection::parse_config(
+                            &row.get::<_, String>(12)?,
+                        )
                         .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                    title: row.get(8)?,
-                    source_product_session_id: row.get(9)?,
-                    source_workflow_operation_id: row.get(10)?,
-                    plakous_locator: locator
-                        .map(|value| value.parse().map_err(|_| rusqlite::Error::InvalidQuery))
-                        .transpose()?,
-                    frozen_tools: None,
-                    transcript: sessions::ProductTranscript::default(),
-                    first_prompt: None,
-                    prompt_history: Vec::new(),
-                    pending_queue: Vec::new(),
-                    queue_commands: sessions::QueueCommands::default(),
-                    queue_projection_debt: false,
-                    queue_drain_state: QueueDrainState::RestoredPaused,
-                    root_turn_count: from_i64(row.get(14)?)?,
-                    child_wake_suppressed: false,
-                    tool_call_count: from_i64(row.get(15)?)?,
-                    compaction_count: from_i64(row.get(16)?)?,
-                    carry_intent: row
-                        .get::<_, Option<String>>(17)?
-                        .map(|value| {
-                            plakous_hosted::sessions::CarryIntent::decode(&value)
-                                .map_err(|_| rusqlite::Error::InvalidQuery)
-                        })
-                        .transpose()?,
-                    node: decode_node(row, 18)?,
-                    root_profile: decode_root_profile(row, 20)?,
-                    runner: decode_runner_display(row, 21)?,
-                    title_override: row.get(22)?,
-                    archived: row.get(23)?,
-                })
-            })
+                        target_selection: serde_json::from_str(&row.get::<_, String>(13)?)
+                            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                        title: row.get(8)?,
+                        source_product_session_id: row.get(9)?,
+                        source_workflow_operation_id: row.get(10)?,
+                        plakous_locator: locator
+                            .map(|value| value.parse().map_err(|_| rusqlite::Error::InvalidQuery))
+                            .transpose()?,
+                        frozen_tools: None,
+                        transcript: sessions::ProductTranscript::default(),
+                        first_prompt: None,
+                        prompt_history: Vec::new(),
+                        pending_queue: Vec::new(),
+                        queue_commands: sessions::QueueCommands::default(),
+                        queue_projection_debt: false,
+                        queue_drain_state: QueueDrainState::RestoredPaused,
+                        root_turn_count: from_i64(row.get(14)?)?,
+                        child_wake_suppressed: false,
+                        tool_call_count: from_i64(row.get(15)?)?,
+                        compaction_count: from_i64(row.get(16)?)?,
+                        carry_intent: row
+                            .get::<_, Option<String>>(17)?
+                            .map(|value| {
+                                plakous_hosted::sessions::CarryIntent::decode(&value)
+                                    .map_err(|_| rusqlite::Error::InvalidQuery)
+                            })
+                            .transpose()?,
+                        node: decode_node(row, 18)?,
+                        root_profile: decode_root_profile(row, 20)?,
+                        runner: decode_runner_display(row, 21)?,
+                        title_override: row.get(22)?,
+                        archived: row.get(23)?,
+                    })
+                },
+            )
             .map_err(|_| "could not query product sessions".to_owned())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| "product session listing row is invalid".to_owned())?;

@@ -1,6 +1,6 @@
 //! Retain the slot fence through lifecycle mutation, releasing only when required.
 
-use plakous_host_protocol::wire::{LifecycleReason, RequestRefusal};
+use plakous_host_protocol::wire::RequestRefusal;
 
 use super::{
     Arc, BUSY_NONE, BUSY_RELEASING, Duration, Instant, Ordering, ProtocolExtension, SessionSlot,
@@ -25,9 +25,9 @@ where
             Slot::Dormant { session_id } => session_id.clone(),
         };
         if source != expected {
-            return Err(RequestRefusal::SessionLifecycleRefused {
-                session: expected.to_owned(),
-                reason: LifecycleReason::NotFound,
+            return Err(RequestRefusal::SessionUnavailable {
+                detail: "the resident moved to a successor; refresh the directory and retry"
+                    .to_owned(),
             });
         }
         if release && let Slot::Resident { session, .. } = &*slot {

@@ -98,6 +98,11 @@ pub struct Creation<'a> {
 
 /// What a host of many sessions needs of its product's stores.
 pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
+    /// Whether the full product id exists, without directory row limits.
+    ///
+    /// # Errors
+    /// The product store could not be read.
+    fn contains(&self, session: &str) -> Result<bool, String>;
     /// Decorate a saved runner identity without probing or changing its authority.
     fn runner_label(&self, id: &str) -> plakous_host_protocol::wire::RunnerLabel {
         plakous_host_protocol::wire::RunnerLabel {
@@ -947,6 +952,9 @@ where
     }
 
     fn archive_session(&self, session: String, archived: bool) -> Outcome {
+        if let Err(refusal) = self.require_lifecycle_session(&session) {
+            return Outcome::Refused(refusal);
+        }
         let slot = self.host.slot(&session);
         let sessions = Arc::clone(&self.host.sessions);
         match slot.mutate_lifecycle(&session, archived, || sessions.archive(&session, archived)) {
@@ -959,16 +967,30 @@ where
     }
 
     fn delete_session(&self, session: String, abandon_children: bool) -> Outcome {
+        if let Err(refusal) = self.require_lifecycle_session(&session) {
+            return Outcome::Refused(refusal);
+        }
         let slot = self.host.slot(&session);
         let sessions = Arc::clone(&self.host.sessions);
         match slot.mutate_lifecycle(&session, true, || {
             sessions.delete(&session, abandon_children)
         }) {
             Ok(()) => {
+                self.host.lock().retain(|held| !Arc::ptr_eq(held, &slot));
                 self.host.changed();
                 Outcome::Ok(Answer::Deleted { session })
             }
             Err(refusal) => Outcome::Refused(refusal),
+        }
+    }
+    fn require_lifecycle_session(&self, session: &str) -> Result<(), RequestRefusal> {
+        match self.host.sessions.contains(session) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(RequestRefusal::SessionLifecycleRefused {
+                session: session.to_owned(),
+                reason: plakous_host_protocol::wire::LifecycleReason::NotFound,
+            }),
+            Err(detail) => Err(RequestRefusal::SessionUnavailable { detail }),
         }
     }
     /// Attaches `node`: on the session the connection already serves when

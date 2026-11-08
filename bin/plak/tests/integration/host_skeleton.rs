@@ -234,6 +234,71 @@ impl Client {
 const ANSWER: &str = "the host answer";
 const REQUEST: &str = "00000000-0000-4000-8000-0000000000a1";
 
+#[test]
+fn lifecycle_real_product_archive_delete_releases_idle_actor_without_reopen() {
+    let Some(fixture) = fixture() else { return };
+    let mut host = start(&fixture);
+    let mut client = Client::connect(&host);
+    let Outcome::Ok(Answer::Created { session, node, .. }) =
+        client.request(1, new_session(&fixture.workspace()))
+    else {
+        panic!("session not created");
+    };
+    client.attach(2, &node);
+    let mut admin = Client::connect(&host);
+    let until = std::time::Instant::now() + WAIT;
+    loop {
+        let rows = admin.rows(3);
+        if rows.iter().any(|row| {
+            row.session == session
+                && row.residency == SessionResidency::Resident
+                && row.activity == SessionActivity::Idle
+        }) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < until,
+            "attached actor never became idle: {rows:?}"
+        );
+        std::thread::yield_now();
+    }
+    assert_eq!(
+        admin.request(
+            4,
+            Op::ArchiveSession {
+                session: session.clone(),
+                archived: true
+            }
+        ),
+        Outcome::Ok(Answer::ArchiveUpdated {
+            session: session.clone(),
+            archived: true
+        })
+    );
+    assert!(admin.rows(5).is_empty());
+    assert_eq!(
+        admin.request(
+            6,
+            Op::DeleteSession {
+                session: session.clone(),
+                abandon_children: false
+            }
+        ),
+        Outcome::Ok(Answer::Deleted {
+            session: session.clone()
+        })
+    );
+    let openings = host
+        .lines
+        .try_iter()
+        .filter(|line| line.starts_with("plak host: opening session "))
+        .count();
+    assert_eq!(openings, 1, "lifecycle unexpectedly reopened the runtime");
+    drop(client);
+    drop(admin);
+    stop(&mut host);
+}
+
 fn new_session(workspace: &std::path::Path) -> Op<Core> {
     Op::NewSession {
         runner: plakous_host_protocol::wire::RunnerLabel::local(),

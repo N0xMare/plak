@@ -953,7 +953,7 @@ fn workspace_listing_uses_two_set_queries_and_preserves_bounded_previews() {
     store.commit(&mut empty).unwrap();
 
     let (listed, query_count) = store
-        .list_for_workspace_with_query_count(&workspace)
+        .list_for_workspace_with_query_count(&workspace, true)
         .unwrap();
     assert_eq!(
         query_count, 2,

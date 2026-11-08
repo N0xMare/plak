@@ -1531,7 +1531,7 @@ user whose directory and `plak` are not group- or world-writable are used.
 Without such a snapshot the incompatible-session refusal above stands. When no
 snapshot exists, a paid compaction fallback is not offered.
 
-#### 2.5.2 Deleting a session
+#### 2.5.2 Session lifecycle: rename, archive, delete
 
 Session lifecycle metadata is home-local. A nullable `title_override` sets or
 clears the operator's label without changing the generated `title`, history or
@@ -1553,8 +1553,10 @@ Explicit archived-inclusive lists filter before applying row limits. An archived
 session is read-only until explicitly unarchived; inspection must not open its
 runtime, recover, drain its queue or execute a continuation. Rename, unarchive
 and guarded delete remain available. Repeating the archive state is a no-op.
-Archive refuses a busy turn, any live child, a running process, or incomplete
-running-state evidence. The host holds the session's slot lock, refuses busy
+Archive refuses a busy turn, any live child, a running process, a durable
+Continuing standing (including a handoff or held loss), queued prompts, pending
+submissions, or incomplete running-state evidence. Durable work is checked
+under the branch holds and again inside the metadata transaction. The host holds the session's slot lock, refuses busy
 residents and releases idle residents first. The product service then holds
 the root and every finished child's runtime branch lease through its activity
 check and durable metadata commit. It renews all holds during the scan and
@@ -1563,6 +1565,35 @@ Unarchive starts nothing and does not release a resident actor when the flag
 is already clear; repeating unarchive during a turn is a metadata no-op.
 For deletion through the host, a busy resident owner is refused, while an idle
 resident owner is released before the same confirmed deletion service below.
+
+Without a host, archive takes non-executing runtime branch leases on the root
+and every finished child through the activity read and metadata commit. A live
+lease refuses open; unresolved jobs refuse unknown running state. A reservation
+that never had a runtime branch also refuses `Busy {state_unknown: true}`
+offline: no existing branch can fence a concurrent first creation. A running
+host can serialize that reservation and archive it. Reversible product archive
+never uses deletion's irreversible runtime archive operation.
+Offline deletion refuses an unbound reservation as unknown. Deletion does not
+take temporary branch holds: archiving the root runtime is its irreversible
+cross-process fence, and each child is then archived before its exact revision
+is deleted. Confirmed
+host deletion uses its immutable creation operation to find and remove runtime
+history even if creation committed before the product locator was saved. An
+unbound pending carry refuses unknown state until its creation is reconciled.
+
+Directory workspace filters use the local canonical identity only for the
+local runner. A pinned non-local runner filters by its id and the exact saved
+UTF-8 `workspace_root` spelling, without consulting the host filesystem.
+Workspace, runner and archived filters all precede the directory row limit.
+Carry deduplication reads the `(source_session_id, source_operation_id)` index
+directly, qualified by that runner and workspace; it includes archived carries
+and is never limited by directory or workspace-list row bounds.
+
+Archived attach reads only the root transcript and facts, without opening a
+runtime or running a continuation. Child-node attach refuses `UnknownNode`.
+`StopSession` on an archived session succeeds without opening or writing it.
+`plak session gc <id>` refuses an archived session with an unarchive remedy;
+`gc --all` skips archived sessions.
 
 `plak session delete <id> [--yes] [--abandon-children]` removes one session and all of its retained
 runtime history. It is a remedy when logical retention bounds are full; physical
@@ -1694,26 +1725,6 @@ holder probe does, so a lock file left by a gone or re-executed process does
 not count.
 
 ### 2.6 Intents, views, and the projector
-
-Without a host, archive takes non-executing runtime branch leases on the root
-and every finished child through the activity read and metadata commit. A live
-lease refuses open; unresolved jobs refuse unknown running state. A reservation
-that never had a runtime branch also refuses `Busy {state_unknown: true}`
-offline: no existing branch can fence a concurrent first creation. A running
-host can serialize that reservation and archive it. Reversible product archive
-never uses deletion's irreversible runtime archive operation.
-Offline deletion likewise refuses an unbound reservation as unknown. Confirmed
-host deletion uses its immutable creation operation to find and remove runtime
-history even if creation committed before the product locator was saved. An
-unbound pending carry refuses unknown state until its creation is reconciled.
-
-Directory workspace filters use the local canonical identity only for the
-local runner. A pinned non-local runner filters by its id and the exact saved
-UTF-8 `workspace_root` spelling, without consulting the host filesystem.
-Workspace, runner and archived filters all precede the directory row limit.
-Carry deduplication reads the `(source_session_id, source_operation_id)` index
-directly, qualified by that runner and workspace; it includes archived carries
-and is never limited by directory or workspace-list row bounds.
 
 Projector reads are planned only for records on the product session's followed
 lineage (or its initial creation record); sibling-branch facts advance the

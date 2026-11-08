@@ -16,6 +16,12 @@ pub(crate) fn crash_cut(point: &str) {
 
 #[cfg(test)]
 fn commit_pause_fixture() -> Result<(), LifecycleError> {
+    if std::env::var("PLAK_LIFECYCLE_RENEWAL_LOSS_AT").as_deref() == Ok("commit") {
+        let path = std::env::var("PLAK_LIFECYCLE_RENEWAL_LOSS_FILE")
+            .map_err(|error| CliFailure::new(error.to_string()))?;
+        std::fs::write(path, b"renewal failed")
+            .map_err(|error| CliFailure::new(error.to_string()))?;
+    }
     if let Ok(milliseconds) = std::env::var("PLAK_LIFECYCLE_COMMIT_PAUSE_MS") {
         let milliseconds = milliseconds
             .parse::<u64>()

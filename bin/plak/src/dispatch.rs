@@ -280,13 +280,10 @@ pub(super) fn execute_session_list(
 ) -> CliResult<ProcessOutcome> {
     let paths = services.paths()?;
     let cwd = paths.workspace().map_err(CliFailure::new)?.to_path_buf();
-    let sessions = services
-        .session_records()?
-        .list_for_workspace(&cwd)
-        .map_err(CliFailure::from)?
-        .into_iter()
-        .filter(|session| include_archived || !session.archived)
-        .collect::<Vec<_>>();
+    let sessions = crate::store::ProductStore::open(paths)
+        .map_err(CliFailure::new)?
+        .list_for_workspace_filtered(&cwd, include_archived)
+        .map_err(CliFailure::new)?;
     if sessions.is_empty() {
         writeln!(stdout, "No sessions in this workspace.")
             .map_err(|_| CliFailure::new("stdout failed"))?;
@@ -305,10 +302,13 @@ pub(super) fn execute_session_list(
         for s in sessions {
             let n = product_session_log::count_events(&paths.session_home(), &s.id)
                 .map_or_else(|_| "—".to_owned(), |count| count.to_string());
-            let preview = match carry::carried_forward_label(&s) {
+            let mut preview = match carry::carried_forward_label(&s) {
                 Some(link) => format!("{} [{link}]", session_preview_line(&s)),
                 None => session_preview_line(&s),
             };
+            if s.archived {
+                preview.push_str(" [archived]");
+            }
             table
                 .push([
                     s.id,

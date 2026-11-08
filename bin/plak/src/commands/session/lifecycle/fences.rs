@@ -10,7 +10,7 @@ use plakous_recursive_subagents_store::TreeInspection;
 use super::{LifecycleError, LifecycleRefusal, SessionActivity};
 use crate::shell::services::Services;
 
-pub(in crate::commands::session) struct Fences {
+struct Fences {
     executor: ApplicationExecutor,
     sessions: std::sync::Arc<AgentSessions>,
     keepalive: super::keepalive::Keepalive,
@@ -27,14 +27,10 @@ impl Fences {
         })
     }
 
-    pub(in crate::commands::session) fn verify(&self) -> Result<(), LifecycleError> {
+    fn verify(&self) -> Result<(), LifecycleError> {
         self.keepalive.verify(&self.executor)
     }
-    fn acquire(
-        &mut self,
-        recorded: SessionLocator,
-        deleting: bool,
-    ) -> Result<SessionLocator, LifecycleError> {
+    fn acquire(&mut self, recorded: SessionLocator) -> Result<SessionLocator, LifecycleError> {
         let operation = SessionOperationId::new(format!("plak:archive:{}", uuid::Uuid::new_v4()))
             .map_err(|error| CliFailure::new(error.to_string()))?;
         let mut head = recorded;
@@ -50,11 +46,6 @@ impl Fences {
                 }
                 Err(error) if error.kind() == AgentSessionsErrorKind::Ownership => {
                     return Err(LifecycleError::Refused(LifecycleRefusal::Open));
-                }
-                Err(error) if deleting && error.kind() == AgentSessionsErrorKind::NotFound => {
-                    // An earlier delete already archived or removed this branch.
-                    // Its irreversible fence replaces a lease during retry cleanup.
-                    return Ok(recorded);
                 }
                 Err(error)
                     if error.kind() == AgentSessionsErrorKind::StaleLocator && attempt == 0 =>
@@ -103,20 +94,6 @@ impl Fences {
     }
 }
 
-pub(in crate::commands::session) fn for_delete(
-    services: &Services,
-    root: SessionLocator,
-    children: &[(String, SessionLocator)],
-) -> Result<Fences, LifecycleError> {
-    let mut fences = Fences::new(services)?;
-    fences.acquire(root, true)?;
-    for (_, locator) in children {
-        fences.acquire(*locator, true)?;
-    }
-    fences.verify()?;
-    Ok(fences)
-}
-
 pub(super) fn archive(
     services: &Services,
     id: &str,
@@ -140,13 +117,16 @@ pub(super) fn archive(
         // No existing branch can fence a concurrent first runtime creation.
         // The host can serialize that reservation; offline cannot prove idle.
         if allow_reservation {
+            inspect_product(records.as_ref(), &record, &mut activity)?;
+            activity.refuse_running()?;
             return product.set_archived(id, true);
         }
         activity.state_unknown = true;
         return activity.refuse_running();
     };
     let mut fences = Fences::new(services)?;
-    let head = fences.acquire(locator, false)?;
+    let head = fences.acquire(locator)?;
+    inspect_product(records.as_ref(), &record, &mut activity)?;
     fences.inspect(head, paths, &mut activity)?;
     let (_, inspected) = crate::topology_product::inspect_session_tree(paths, &record)?;
     if let TreeInspection::Tree(tree) = inspected {
@@ -166,7 +146,7 @@ pub(super) fn archive(
                 let locator = locator
                     .parse::<SessionLocator>()
                     .map_err(|error| CliFailure::new(error.to_string()))?;
-                let head = fences.acquire(locator, false)?;
+                let head = fences.acquire(locator)?;
                 let mut child_activity = SessionActivity {
                     turn: false,
                     children: Vec::new(),
@@ -185,11 +165,38 @@ pub(super) fn archive(
     #[cfg(test)]
     scan_pause_fixture()?;
     fences.verify()?;
-    product.set_archived_checked(id, true, &|| fences.verify())
+    product.set_archived_checked(id, true, &|| {
+        fences.verify()?;
+        let current = records.load(id).map_err(CliFailure::new)?;
+        let mut activity = SessionActivity::default();
+        inspect_product(records.as_ref(), &current, &mut activity)?;
+        activity.refuse_running()
+    })
+}
+
+fn inspect_product(
+    records: &dyn plakous_hosted::session_store::SessionRecordStore,
+    record: &plakous_hosted::sessions::SessionRecord,
+    activity: &mut SessionActivity,
+) -> Result<(), LifecycleError> {
+    let standing =
+        plakous_hosted::runtime::root_standing(records, &record.id).map_err(CliFailure::new)?;
+    activity.turn |= matches!(
+        standing,
+        plakous_hosted::runtime::RootStanding::Continuing { .. }
+    ) || !record.pending_queue.is_empty()
+        || record.queue_commands.has_pending();
+    Ok(())
 }
 
 #[cfg(test)]
 fn scan_pause_fixture() -> Result<(), LifecycleError> {
+    if std::env::var("PLAK_LIFECYCLE_RENEWAL_LOSS_AT").as_deref() == Ok("scan") {
+        let path = std::env::var("PLAK_LIFECYCLE_RENEWAL_LOSS_FILE")
+            .map_err(|error| CliFailure::new(error.to_string()))?;
+        std::fs::write(path, b"renewal failed")
+            .map_err(|error| CliFailure::new(error.to_string()))?;
+    }
     if let Ok(milliseconds) = std::env::var("PLAK_LIFECYCLE_SCAN_PAUSE_MS") {
         let milliseconds = milliseconds
             .parse::<u64>()

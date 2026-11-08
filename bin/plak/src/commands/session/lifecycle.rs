@@ -7,7 +7,6 @@ use crate::shell::services::Services;
 mod fences;
 mod forward;
 mod keepalive;
-pub(super) use fences::for_delete as fence_for_delete;
 
 pub(crate) fn archive_offline(services: &Services, id: &str) -> Result<(), LifecycleError> {
     fences::archive(services, id, false)
@@ -130,6 +129,32 @@ impl std::fmt::Display for LifecycleError {
 impl std::error::Error for LifecycleError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::NotFound => f.write_str(
+                "the session was not found; refresh the session list and choose an existing id",
+            ),
+            Self::InvalidTitle { kind } => f.write_str(match kind {
+                InvalidTitleKind::Empty => {
+                    "the title is blank; supply a nonblank title or use --clear"
+                }
+                InvalidTitleKind::TooLong => {
+                    "the title is too long; use at most 128 Unicode characters and 512 UTF-8 bytes"
+                }
+                InvalidTitleKind::ControlCharacter => {
+                    "the title contains control characters; remove them before retrying"
+                }
+            }),
+            Self::Busy {
+                turn,
+                children,
+                processes,
+                state_unknown,
+                ..
+            } => write!(
+                f,
+                "the session has unfinished work (turn or continuation: {turn}, children: {}, processes: {}, activity unknown: {state_unknown}); resume or stop outstanding work, then retry",
+                children.join(", "),
+                processes.join(", ")
+            ),
             Self::Failure(error) => Some(error),
             Self::Refused(_) => None,
         }
@@ -172,10 +197,9 @@ impl std::fmt::Display for LifecycleRefusal {
             ),
             Self::ForkDependency { dependents, .. } => write!(
                 f,
-                "sessions {} continue from it or share its runtime history",
+                "sessions {} continue from it or share its runtime history; finish their carry or delete the dependent sessions first",
                 dependents.join(", ")
             ),
-            other => write!(f, "{other:?}"),
         }
     }
 }
@@ -203,7 +227,7 @@ pub(crate) fn validate_title(title: Option<&str>) -> Result<(), LifecycleError> 
 
 /// Evidence sampled while the caller holds the entire tree's admission barrier.
 /// An incomplete probe must set `state_unknown`; it never proves quiescence.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct SessionActivity {
     turn: bool,
     children: Vec<String>,

@@ -21,6 +21,9 @@ fn short_home() -> tempfile::TempDir {
 struct NoSessions;
 
 impl plakous_hosted::host_service::wire::HostSessions<PlakExtension> for NoSessions {
+    fn contains(&self, _: &str) -> Result<bool, String> {
+        Ok(false)
+    }
     fn rows(
         &self,
         _workspace: Option<&str>,

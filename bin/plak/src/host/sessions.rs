@@ -303,6 +303,9 @@ const fn environment_of(held_elsewhere: bool) -> SessionEnvironment {
 }
 
 impl HostSessions<PlakExtension> for ProductSessions {
+    fn contains(&self, session: &str) -> Result<bool, String> {
+        self.with_product(|store| store.session_exists(session))
+    }
     fn archived_view(
         &self,
         session: &str,
@@ -411,6 +414,9 @@ impl HostSessions<PlakExtension> for ProductSessions {
     fn stop_dormant(&self, session: &str) -> CliResult<()> {
         let store = self.services.session_records()?;
         let mut record = store.load(session).map_err(CliFailure::new)?;
+        if record.archived {
+            return Ok(());
+        }
         if let Some(holder) = self
             .elsewhere(&record.node.tree_id, record.plakous_locator)
             .map_err(CliFailure::new)?

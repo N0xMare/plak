@@ -178,6 +178,15 @@ impl Script {
 }
 
 impl HostSessions<Core> for Fake {
+    fn contains(&self, session: &str) -> Result<bool, String> {
+        Ok(self
+            .0
+            .rows
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|row| row.session == session))
+    }
     fn archive(&self, session: &str, archived: bool) -> Result<(), RequestRefusal> {
         self.0.lifecycle_mutations.fetch_add(1, Ordering::SeqCst);
         if archived {

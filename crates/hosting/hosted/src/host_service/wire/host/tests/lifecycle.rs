@@ -1,6 +1,89 @@
 use super::*;
 
 #[test]
+fn lifecycle_slot_source_mismatch_is_retryable_without_mutation() {
+    let Switched {
+        host,
+        fake,
+        slot,
+        mut connection,
+        ..
+    } = switched();
+    let result = slot.mutate_lifecycle("s1", true, || {
+        fake.0.lifecycle_mutations.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    });
+    assert!(matches!(
+        result,
+        Err(RequestRefusal::SessionUnavailable { .. })
+    ));
+    assert_eq!(fake.0.lifecycle_mutations.load(Ordering::SeqCst), 0);
+    connection.leave();
+    handed_off(&host);
+}
+
+#[test]
+fn lifecycle_unknown_ids_do_not_allocate_slots_and_delete_drops_its_slot() {
+    let (host, _) = host(&["s1"]);
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    request(
+        &mut connection,
+        1,
+        Op::ArchiveSession {
+            session: "missing".into(),
+            archived: true,
+        },
+    );
+    assert!(matches!(
+        outcome(&out.take(), 1),
+        Outcome::Refused(RequestRefusal::SessionLifecycleRefused {
+            reason: plakous_host_protocol::wire::LifecycleReason::NotFound,
+            ..
+        })
+    ));
+    assert!(host.slots().is_empty());
+    request(
+        &mut connection,
+        2,
+        Op::DeleteSession {
+            session: "s1".into(),
+            abandon_children: false,
+        },
+    );
+    assert!(matches!(
+        outcome(&out.take(), 2),
+        Outcome::Ok(Answer::Deleted { .. })
+    ));
+    assert!(host.slots().is_empty());
+}
+
+#[test]
+fn lifecycle_slot_waits_for_worker_join_before_mutation() {
+    let (host, fake) = host(&["s1"]);
+    fake.0.linger.store(150, Ordering::SeqCst);
+    let out = Out::default();
+    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    attached(&out.take(), 1);
+    request(
+        &mut connection,
+        2,
+        Op::ArchiveSession {
+            session: "s1".into(),
+            archived: true,
+        },
+    );
+    assert!(matches!(
+        outcome(&out.take(), 2),
+        Outcome::Ok(Answer::ArchiveUpdated { .. })
+    ));
+    assert_eq!(fake.0.active_workers.load(Ordering::SeqCst), 0);
+    connection.leave();
+    handed_off(&host);
+}
+
+#[test]
 fn lifecycle_unarchive_noop_keeps_a_busy_actor_running() {
     let (host, fake) = host(&["s1"]);
     let out = Out::default();

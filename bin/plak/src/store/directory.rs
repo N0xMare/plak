@@ -36,6 +36,17 @@ fn workspace_filter(
     Ok((identity, nonlocal))
 }
 
+fn directory_sql(workspace: bool, nonlocal: bool) -> String {
+    let predicate = match (workspace, nonlocal) {
+        (true, false) => "sessions.workspace_identity=?1",
+        (true, true) => "sessions.workspace_root=?1",
+        (false, _) => "?1 IS NULL",
+    };
+    format!(
+        "SELECT sessions.id,sessions.workspace_root,sessions.updated_at,COALESCE(sessions.title_override,sessions.title),sessions.account,sessions.model,sessions.node_tree_id,sessions.node_agent_id,sessions.root_profile,CASE WHEN v.session_id IS NULL THEN sessions.locator ELSE v.head_locator END,sessions.archived FROM sessions LEFT JOIN session_views v ON v.session_id=sessions.id WHERE {predicate} AND (?3 OR sessions.archived=0) AND (?4 IS NULL OR COALESCE(json_extract(sessions.runner_display,'$.runner_id'),'local')=?4) ORDER BY sessions.updated_at DESC, sessions.id ASC LIMIT ?2"
+    )
+}
+
 /// One session as the directory reads it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DirectoryEntry {
@@ -53,6 +64,16 @@ pub struct DirectoryEntry {
 }
 
 impl ProductStore {
+    #[cfg(feature = "web")]
+    pub(crate) fn session_exists(&self, session: &str) -> Result<bool, String> {
+        self.connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sessions WHERE id=?1)",
+                [session],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())
+    }
     /// The committed carry of one source on one runner/workspace, including archives.
     /// Uses the source index rather than a capped presentation listing.
     ///
@@ -151,21 +172,14 @@ impl ProductStore {
         include_archived: bool,
     ) -> Result<Vec<DirectoryEntry>, String> {
         let (identity, nonlocal) = workspace_filter(workspace, runner_id)?;
+        let sql = directory_sql(identity.is_some(), nonlocal);
         let mut statement = self
             .connection
-            .prepare(
-                "SELECT sessions.id,sessions.workspace_root,sessions.updated_at,COALESCE(sessions.title_override,sessions.title),sessions.account,sessions.model,sessions.node_tree_id,sessions.node_agent_id,sessions.root_profile,CASE WHEN v.session_id IS NULL THEN sessions.locator ELSE v.head_locator END,sessions.archived FROM sessions LEFT JOIN session_views v ON v.session_id=sessions.id WHERE (?1 IS NULL OR (CASE WHEN ?5 THEN sessions.workspace_root ELSE sessions.workspace_identity END)=?1) AND (?3 OR sessions.archived=0) AND (?4 IS NULL OR COALESCE(json_extract(sessions.runner_display,'$.runner_id'),'local')=?4) ORDER BY sessions.updated_at DESC, sessions.id ASC LIMIT ?2",
-            )
+            .prepare(&sql)
             .map_err(|_| "could not query the session directory".to_owned())?;
         let rows = statement
             .query_map(
-                (
-                    identity,
-                    MAX_DIRECTORY_ROWS,
-                    include_archived,
-                    runner_id,
-                    nonlocal,
-                ),
+                (identity, MAX_DIRECTORY_ROWS, include_archived, runner_id),
                 |row| {
                     Ok(DirectoryEntry {
                         id: row.get(0)?,
@@ -211,6 +225,56 @@ impl ProductStore {
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
     use super::*;
+
+    #[test]
+    fn workspace_list_filters_archived_before_its_limit() {
+        let (_temporary, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+        let mut store = ProductStore::open(&paths).unwrap();
+        let mut visible = sessions::SessionRecord::new(paths.home().to_owned());
+        visible.updated_at_unix = 1;
+        store.commit(&mut visible).unwrap();
+        for number in 0..501 {
+            let mut archived = sessions::SessionRecord::new(paths.home().to_owned());
+            archived.archived = true;
+            archived.updated_at_unix = number + 2;
+            store.commit(&mut archived).unwrap();
+        }
+        let listed = store
+            .list_for_workspace_filtered(paths.home(), false)
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, visible.id);
+        assert!(
+            store
+                .list_for_workspace_filtered(paths.home(), true)
+                .unwrap()
+                .iter()
+                .all(|record| record.archived)
+        );
+    }
+
+    #[test]
+    fn local_directory_uses_workspace_index() {
+        let (_temporary, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+        let store = ProductStore::open(&paths).unwrap();
+        let query = format!("EXPLAIN QUERY PLAN {}", directory_sql(true, false));
+        let plan = store
+            .connection
+            .prepare(&query)
+            .unwrap()
+            .query_map(("/workspace", 256, false, "local"), |row| {
+                row.get::<_, String>(3)
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(
+            plan.iter().any(|line| line.contains(
+                "SEARCH sessions USING INDEX sessions_workspace_updated (workspace_identity=?)"
+            )),
+            "{plan:?}"
+        );
+    }
 
     #[cfg(unix)]
     #[test]
