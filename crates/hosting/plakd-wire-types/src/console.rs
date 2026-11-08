@@ -7,10 +7,39 @@ mod accounts;
 pub use accounts::*;
 mod welcome;
 pub use welcome::*;
+mod definitions;
+pub use definitions::*;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "request", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HostRequest {
+    ProfilesList {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cursor: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<u64>,
+    },
+    ProfilesGet {
+        id: String,
+    },
+    TemplatesList {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cursor: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<u64>,
+    },
+    TemplatesGet {
+        id: String,
+    },
+    ConfigGet {},
+    ConsoleMetadataGet {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        account_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cursor: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<u64>,
+    },
     AccountsStatus {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         account_id: Option<String>,
@@ -33,6 +62,40 @@ pub enum HostRequest {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "response", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HostResponse {
+    ProfilesList {
+        etag: String,
+        #[serde(deserialize_with = "required")]
+        #[schemars(required, schema_with = "nullable::<String>")]
+        current: Option<String>,
+        rows: Vec<ProfileSummary>,
+        diagnostics: Vec<Diagnostic>,
+        page: Page,
+    },
+    ProfilesGet {
+        profile: ProfileDefinition,
+    },
+    TemplatesList {
+        etag: String,
+        rows: Vec<TemplateSummary>,
+        diagnostics: Vec<Diagnostic>,
+        page: Page,
+    },
+    TemplatesGet {
+        template: Box<TemplateDefinition>,
+    },
+    ConfigGet {
+        etag: String,
+        scope: HomeScope,
+        fields: Vec<ConfigFieldValue>,
+        diagnostics: Vec<Diagnostic>,
+    },
+    ConsoleMetadata {
+        etag: String,
+        needs_setup: bool,
+        settings: Vec<SettingRow>,
+        catalog: CatalogPage,
+        diagnostics: Vec<Diagnostic>,
+    },
     AccountsStatus {
         as_of: String,
         rows: Vec<AccountStatus>,

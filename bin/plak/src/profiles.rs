@@ -12,6 +12,9 @@
 use std::fs;
 use std::path::Path;
 
+#[cfg(feature = "web")]
+pub(crate) mod console;
+
 use serde::Deserialize;
 
 use crate::product_config::{AgentTemplate, ProductConfig, parse_template};
@@ -367,6 +370,14 @@ fn user_profiles(config: &ProductConfig, home: &Path) -> (Vec<Resolved>, Vec<Str
 fn user_profile(config: &ProductConfig, id: &str, path: &Path) -> Result<Resolved, String> {
     let text = fs::read_to_string(path).map_err(|error| format!("could not be read: {error}"))?;
     let file: UserFile = toml::from_str(&text).map_err(|error| error.message().to_owned())?;
+    resolve_profile_file(config, id, file)
+}
+
+fn resolve_profile_file(
+    config: &ProductConfig,
+    id: &str,
+    file: UserFile,
+) -> Result<Resolved, String> {
     if file.root.is_empty() || file.working_set.is_empty() {
         return Err("it needs `root` and a non-empty `working_set`".to_owned());
     }

@@ -280,6 +280,110 @@ pub fn tui_presentation_values_with_backend_and_composition(
     (bundle.providers, bundle.sections.accounts)
 }
 
+/// Pure catalog projection shared by the session picker and home console.
+pub(crate) fn native_model_entries(
+    provider: NativeProvider,
+    models: Vec<CliModelSummary>,
+    composition: ProductCompositionSelection,
+) -> Vec<plakous_host_protocol::views::ModelEntry> {
+    let entries = models
+        .into_iter()
+        .filter(|model| model.visibility == NativeModelVisibility::List)
+        .filter(|model| provider.enrolls(&model.exact_id))
+        .map(|model| native_model_entry(provider, model, composition))
+        .collect::<Option<Vec<_>>>();
+    entries.unwrap_or_default()
+}
+
+fn native_model_entry(
+    provider: NativeProvider,
+    model: CliModelSummary,
+    composition: ProductCompositionSelection,
+) -> Option<plakous_host_protocol::views::ModelEntry> {
+    let qualified_code_mode_only = provider == NativeProvider::Codex
+        && provider.enrolled_tool_mode(&model.exact_id) == Some(NativeToolMode::CodeModeOnly)
+        && model.native_tool_mode == Some(NativeToolMode::CodeModeOnly)
+        && !model.reasoning_efforts.is_empty();
+    let unavailable_reason = if provider != NativeProvider::Codex
+        || model.native_tool_mode == Some(NativeToolMode::Direct)
+        || qualified_code_mode_only
+    {
+        None
+    } else {
+        Some(
+            match model.native_tool_mode {
+                Some(NativeToolMode::CodeMode) => "hybrid Code Mode is not yet exactly qualified",
+                Some(NativeToolMode::CodeModeOnly) => {
+                    "this Code Mode-only tuple is not yet exactly qualified"
+                }
+                Some(NativeToolMode::Direct) => unreachable!(),
+                None => "catalog tool mode is unrecognized",
+            }
+            .to_owned(),
+        )
+    };
+    // Codex `ultra` lowers to provider effort `max` and
+    // separately enables proactive multi-agent delegation.
+    // It is therefore an orchestration mode, not a portable
+    // single-agent reasoning effort.
+    let reasoning_efforts = model
+        .reasoning_efforts
+        .into_iter()
+        .filter(|effort| *effort != ReasoningEffort::Ultra)
+        .collect::<Vec<_>>();
+    let direct_composition_capable =
+        plakous_hosted::agent::direct_composition_capable(provider, model.native_tool_mode);
+    let composition_refusal = match composition {
+        ProductCompositionSelection::JsPtc
+        | ProductCompositionSelection::PyPtc
+        | ProductCompositionSelection::PySdk
+            if direct_composition_capable =>
+        {
+            None
+        }
+        ProductCompositionSelection::JsPtc
+        | ProductCompositionSelection::PyPtc
+        | ProductCompositionSelection::PySdk => Some(
+            "Plak-owned custom composition requires exact Direct-capable catalog authority"
+                .to_owned(),
+        ),
+        _ => None,
+    };
+    let unavailable_reason = model
+        .unavailable_reason
+        .or(composition_refusal)
+        .or(unavailable_reason);
+    let reasoning = !reasoning_efforts.is_empty();
+    Some(plakous_host_protocol::views::ModelEntry {
+        tag: [
+            model.streaming.then_some("stream"),
+            model.tools.then_some("tools"),
+            reasoning.then_some("reasoning"),
+            model.native_tool_mode.map(native_tool_mode_label),
+            unavailable_reason.as_ref().map(|_| "not qualified"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · "),
+        effort_options: tui_efforts(&reasoning_efforts)?,
+        extras: model
+            .service_tiers
+            .into_iter()
+            .map(
+                |(id, name, description)| plakous_host_protocol::views::ExtraState {
+                    enabled: false,
+                    id,
+                    label: format!("{name} · {description}"),
+                },
+            )
+            .collect(),
+        unavailable_reason,
+        id: model.exact_id,
+        reasoning,
+    })
+}
+
 /// Build TUI picker rows and full-catalog native model facts using an injected backend.
 #[allow(
     clippy::too_many_lines,
@@ -410,93 +514,7 @@ pub fn tui_presentation_bundle_with_backend_and_composition(
                         reasoning_efforts: model.reasoning_efforts.clone(),
                         service_tiers: model.service_tiers.clone(),
                     }));
-                    let entries = models
-                        .into_iter()
-                        .filter(|model| model.visibility == NativeModelVisibility::List)
-                        .filter(|model| provider.enrolls(&model.exact_id))
-                        .map(|model| {
-                            let qualified_code_mode_only = provider == NativeProvider::Codex
-                                && provider.enrolled_tool_mode(&model.exact_id)
-                                    == Some(NativeToolMode::CodeModeOnly)
-                                && model.native_tool_mode == Some(NativeToolMode::CodeModeOnly)
-                                && !model.reasoning_efforts.is_empty();
-                            let unavailable_reason =
-                                if provider != NativeProvider::Codex
-                                    || model.native_tool_mode == Some(NativeToolMode::Direct)
-                                    || qualified_code_mode_only
-                                {
-                                    None
-                                } else {
-                                    Some(match model.native_tool_mode {
-                                    Some(NativeToolMode::CodeMode) => {
-                                        "hybrid Code Mode is not yet exactly qualified"
-                                    }
-                                    Some(NativeToolMode::CodeModeOnly) => {
-                                        "this Code Mode-only tuple is not yet exactly qualified"
-                                    }
-                                    Some(NativeToolMode::Direct) => unreachable!(),
-                                    None => "catalog tool mode is unrecognized",
-                                }
-                                .to_owned())
-                                };
-                            // Codex `ultra` lowers to provider effort `max` and
-                            // separately enables proactive multi-agent delegation.
-                            // It is therefore an orchestration mode, not a portable
-                            // single-agent reasoning effort.
-                            let reasoning_efforts = model
-                                .reasoning_efforts
-                                .into_iter()
-                                .filter(|effort| *effort != ReasoningEffort::Ultra)
-                                .collect::<Vec<_>>();
-                            let direct_composition_capable =
-                                plakous_hosted::agent::direct_composition_capable(
-                                    provider,
-                                    model.native_tool_mode,
-                                );
-                            let composition_refusal = match composition {
-                                ProductCompositionSelection::JsPtc
-                                | ProductCompositionSelection::PyPtc
-                                | ProductCompositionSelection::PySdk
-                                    if direct_composition_capable => None,
-                                ProductCompositionSelection::JsPtc
-                                | ProductCompositionSelection::PyPtc
-                                | ProductCompositionSelection::PySdk => Some(
-                                    "Plak-owned custom composition requires exact Direct-capable catalog authority"
-                                        .to_owned(),
-                                ),
-                                _ => None,
-                            };
-                            let unavailable_reason = model.unavailable_reason.or(composition_refusal).or(unavailable_reason);
-                            let reasoning = !reasoning_efforts.is_empty();
-                            Some(plakous_host_protocol::views::ModelEntry {
-                                tag: [
-                                    model.streaming.then_some("stream"),
-                                    model.tools.then_some("tools"),
-                                    reasoning.then_some("reasoning"),
-                                    model.native_tool_mode.map(native_tool_mode_label),
-                                    unavailable_reason.as_ref().map(|_| "not qualified"),
-                                ]
-                                .into_iter()
-                                .flatten()
-                                .collect::<Vec<_>>()
-                                .join(" · "),
-                                effort_options: tui_efforts(&reasoning_efforts)?,
-                                extras: model
-                                    .service_tiers
-                                    .into_iter()
-                                    .map(|(id, name, description)| plakous_host_protocol::views::ExtraState {
-                                        enabled: false,
-                                        id,
-                                        label: format!("{name} · {description}"),
-                                    })
-                                    .collect(),
-                                unavailable_reason,
-                                id: model.exact_id,
-                                reasoning,
-                            })
-                        })
-                        .collect::<Option<Vec<_>>>();
-                    let mut entries = entries.unwrap_or_default();
+                    let mut entries = native_model_entries(provider, models, composition);
                     if entries.is_empty() {
                         "no picker-visible supported models".clone_into(&mut detail);
                     } else if let Some(recommended) = product_recommended_model(account) {

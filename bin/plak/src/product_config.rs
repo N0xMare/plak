@@ -1,6 +1,8 @@
 //! Product `config.toml` (non-secret preferences).
 
 mod atomic;
+#[cfg(feature = "web")]
+pub(crate) mod console;
 mod forward;
 mod keys;
 mod load;

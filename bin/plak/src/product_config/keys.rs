@@ -220,7 +220,8 @@ pub enum ConfigScope {
     /// `[root]`, `[roster]` and `[orchestration]`: the tree's own rules, which
     /// only a new epoch may change.
     Epoch,
-    /// Everything else: in force as soon as the file is saved.
+    /// Everything else: no successor-epoch publication is required. The
+    /// owning read site still decides when a running host observes it.
     Immediate,
 }
 

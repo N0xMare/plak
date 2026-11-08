@@ -767,6 +767,13 @@ widens it.
 
 ### 2.10 The web endpoint
 
+P6 console reads are attachment-free home observations, never authority to
+admit a session, model, template or credential. Configuration reads retain
+bounded home-only bytes through no-follow directory handles; client IDs select
+exact entries, never paths. Template hook/environment literals are withheld
+markers, not round-trip secrets. Etags are generation-salted content identities,
+not write authority. Catalog metadata never refreshes, logs in or opens sessions.
+
 Protocol-5 placement/options metadata is authenticated operator information,
 not a trust grant or permission to execute a probe's workspace. Picker reads
 do not create sessions, trust projects, bind new effect owners or dispatch
@@ -1825,6 +1832,10 @@ running interactive session to reload onto the installed build (chapter 02
   wants agents to restart its sessions is not asked.
 
 ### 4.7 The host socket is a same-user local channel
+
+Verified same-user socket principals receive both console read capabilities
+independently of web switches. They remain remote faces for local-only execution
+and reload intents. No principal or scope is accepted from a wire payload.
 
 Client protocol 6 carries attachment-free product reads outside session
 admission. Their context retains the socket's verified uid or the web gate's

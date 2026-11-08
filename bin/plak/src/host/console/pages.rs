@@ -14,6 +14,16 @@ use std::time::Instant;
 pub(super) struct Selection {
     pub account_id: Option<String>,
     window: Option<UsageWindow>,
+    kind: RequestKind,
+}
+#[derive(Clone, Eq, PartialEq)]
+enum RequestKind {
+    Status,
+    Usage,
+    Profiles,
+    Templates,
+    Metadata,
+    Single,
 }
 impl Selection {
     pub fn from_request(request: &HostRequest) -> Self {
@@ -21,12 +31,34 @@ impl Selection {
             HostRequest::AccountsStatus { account_id, .. } => Self {
                 account_id: account_id.clone(),
                 window: None,
+                kind: RequestKind::Status,
             },
             HostRequest::AccountsUsage {
                 account_id, window, ..
             } => Self {
                 account_id: account_id.clone(),
                 window: Some(*window),
+                kind: RequestKind::Usage,
+            },
+            HostRequest::ProfilesList { .. } => Self {
+                account_id: None,
+                window: None,
+                kind: RequestKind::Profiles,
+            },
+            HostRequest::TemplatesList { .. } => Self {
+                account_id: None,
+                window: None,
+                kind: RequestKind::Templates,
+            },
+            HostRequest::ConsoleMetadataGet { account_id, .. } => Self {
+                account_id: account_id.clone(),
+                window: None,
+                kind: RequestKind::Metadata,
+            },
+            _ => Self {
+                account_id: None,
+                window: None,
+                kind: RequestKind::Single,
             },
         }
     }
@@ -119,7 +151,36 @@ impl Pages {
                 *rows = rows.iter().skip(offset).take(limit).cloned().collect();
                 (length, page)
             }
-            HostResponse::Refused { .. } => return Ok(response),
+            HostResponse::ProfilesList { rows, page, .. } => {
+                let length = rows.len();
+                *rows = rows.iter().skip(offset).take(limit).cloned().collect();
+                (length, page)
+            }
+            HostResponse::TemplatesList { rows, page, .. } => {
+                let length = rows.len();
+                *rows = rows.iter().skip(offset).take(limit).cloned().collect();
+                (length, page)
+            }
+            HostResponse::ConsoleMetadata { catalog, .. } => {
+                let length = catalog.rows.len();
+                catalog.rows = catalog
+                    .rows
+                    .iter()
+                    .skip(offset)
+                    .take(limit)
+                    .cloned()
+                    .collect();
+                (length, &mut catalog.page)
+            }
+            _ => {
+                if super::wire_size::size(&response, limits::RESPONSE_BYTES - 256).is_none() {
+                    return Err(unavailable(
+                        ReadScope::Config,
+                        UnavailableCode::DefinitionTooLarge,
+                    ));
+                }
+                return Ok(response);
+            }
         };
         let token =
             (offset.saturating_add(limit) < length).then(|| uuid::Uuid::new_v4().to_string());
@@ -253,6 +314,7 @@ mod tests {
         let selection = Selection {
             account_id: None,
             window: Some(UsageWindow::Days7),
+            kind: RequestKind::Usage,
         };
         let mut pages = Pages::default();
         let first = pages
@@ -301,6 +363,7 @@ mod tests {
         let selection = Selection {
             account_id: None,
             window: Some(UsageWindow::Days7),
+            kind: RequestKind::Usage,
         };
         let mut pages = Pages::default();
         for _ in 0..limits::SNAPSHOTS {
@@ -356,6 +419,7 @@ mod tests {
         let selection = Selection {
             account_id: None,
             window: Some(UsageWindow::Days7),
+            kind: RequestKind::Usage,
         };
         let mut pages = Pages::default();
         let first = pages

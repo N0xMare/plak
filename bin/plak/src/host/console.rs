@@ -2,6 +2,7 @@
 
 mod accounts;
 mod clock;
+mod definitions;
 mod limits;
 mod recorded;
 
@@ -34,6 +35,7 @@ pub(super) struct Console {
     runtime: Option<tokio::runtime::Handle>,
     pages: Mutex<pages::Pages>,
     provider: Arc<tokio::sync::Semaphore>,
+    definition_nonce: [u8; 16],
 }
 
 pub(super) fn admission_limits() -> HostReadLimits {
@@ -52,11 +54,14 @@ impl Console {
             runtime,
             pages: Mutex::default(),
             provider: Arc::new(tokio::sync::Semaphore::new(limits::PROVIDER_READS)),
+            definition_nonce: *uuid::Uuid::new_v4().as_bytes(),
         })
     }
 
     pub fn welcome(principal: &HostPrincipal, limits: &HostReadLimits) -> HostWelcome {
         let socket = matches!(principal, HostPrincipal::Socket(_));
+        let accounts = socket;
+        let config = socket;
         HostWelcome {
             console: ConsoleWelcome {
                 face: if socket {
@@ -65,14 +70,15 @@ impl Console {
                     ConsoleFace::Web
                 },
                 accounts_read: CapabilityState {
-                    enabled: socket,
-                    disabled_reason: (!socket).then_some(DisabledReason::Configuration),
-                    remedy: (!socket).then_some(CapabilityRemedy::EnableWebAccountsReadAndRestart),
+                    enabled: accounts,
+                    disabled_reason: (!accounts).then_some(DisabledReason::Configuration),
+                    remedy: (!accounts)
+                        .then_some(CapabilityRemedy::EnableWebAccountsReadAndRestart),
                 },
                 config_read: CapabilityState {
-                    enabled: false,
-                    disabled_reason: Some(DisabledReason::NotCompiled),
-                    remedy: Some(CapabilityRemedy::UseMatchingBuild),
+                    enabled: config,
+                    disabled_reason: (!config).then_some(DisabledReason::Configuration),
+                    remedy: (!config).then_some(CapabilityRemedy::EnableWebConfigReadAndRestart),
                 },
                 configured_switches: ConfiguredSwitches {
                     web_accounts_read: false,
@@ -88,12 +94,15 @@ impl Console {
         context: HostRequestContext,
         request: HostRequest,
     ) -> HostReadTask<PlakExtension> {
-        if !matches!(context.principal, HostPrincipal::Socket(_)) {
-            return Box::pin(async {
-                Err(RequestRefusal::CapabilityDisabled {
-                    capability: ConsoleCapability::AccountsRead,
-                })
-            });
+        let accounts = is_account_request(&request);
+        let permitted = matches!(context.principal, HostPrincipal::Socket(_));
+        if !permitted {
+            let capability = if accounts {
+                ConsoleCapability::AccountsRead
+            } else {
+                ConsoleCapability::ConfigRead
+            };
+            return Box::pin(async move { Err(RequestRefusal::CapabilityDisabled { capability }) });
         }
         let this = Arc::clone(self);
         let runtime = self.runtime.clone();
@@ -126,11 +135,18 @@ impl Console {
         request: HostRequest,
         cancelled: Arc<AtomicBool>,
     ) -> Result<HostResponse, RequestRefusal> {
+        if !is_account_request(&request) {
+            return Ok(self
+                .read_definitions(context, request)
+                .await
+                .unwrap_or_else(refused));
+        }
         let deadline = Instant::now() + limits::admission().deadline;
         let selection = pages::Selection::from_request(&request);
         let (cursor, limit) = match &request {
             HostRequest::AccountsStatus { cursor, limit, .. }
             | HostRequest::AccountsUsage { cursor, limit, .. } => (cursor.as_deref(), *limit),
+            _ => unreachable!("definition requests have their own bounded reader"),
         };
         let limit = match limit.unwrap_or(limits::PAGE_ROWS) {
             value if (1..=limits::PAGE_ROWS).contains(&value) => {
@@ -176,6 +192,7 @@ impl Console {
                 self.usage(account_id, window, as_of, deadline, Arc::clone(&cancelled))
                     .await
             }
+            _ => unreachable!("definition requests have their own bounded reader"),
         };
         let response = match response {
             Ok(response) => response,
@@ -203,6 +220,13 @@ impl Console {
             .start(response, context, selection, revision, limit)
             .unwrap_or_else(refused))
     }
+}
+
+fn is_account_request(request: &HostRequest) -> bool {
+    matches!(
+        request,
+        HostRequest::AccountsStatus { .. } | HostRequest::AccountsUsage { .. }
+    )
 }
 
 struct Cancel {

@@ -3982,6 +3982,28 @@ transport has its own independent version. Protocol 5 adds explicit placement,
 bounded creation options, directory lifecycle and process-local draft identity.
 It does not change JSONL v1, canonical history or exported transcript rows.
 
+P6's private `host` family reads home account status/recorded usage,
+profiles, templates and allowlisted configuration without attaching or opening
+a session. `profiles_list/get`, `templates_list/get`, `config_get` and
+`console_metadata_get` require config-read capability. Exact listed logical
+IDs are not trimmed, aliased or interpreted as paths. Templates return withheld
+markers for hook/environment literals. Settings metadata comes from the product
+registry; spec 07's host applicability is distinct from publication scope.
+
+Definition snapshots include bounded config/profile/template bytes, comments,
+missing-file markers and built-in/build identity in generation-scoped opaque
+etags. Changed inputs refuse Busy rather than claiming a multi-file transaction.
+Reads cap files at 256 KiB, dependency bytes at 8 MiB and entries at 512; symlinks
+and non-regular input files are not followed. Responses cap at 256 KiB; stable
+principal/request/source-bound cursors expire after 30 s, with at most 100 rows
+per page. No cursor holds a SQLite transaction. A terminal truncated page is
+not a complete inventory. Cached/bundled model pages never fetch or repair a
+catalog, never confer admission, and leave an unknown capture time null.
+
+Same-user sockets are trusted for config reads by default. Existing remote
+settings/profile-default intents remain unchanged in P6; P7 owns their
+write-authority cut.
+
 Protocol 6 carries attachment-free product requests as
 `{"frame":"request","id":7,"op":{"op":"host","request":...}}` and
 private responses as `{"frame":"response","id":7,"outcome":{"ok":

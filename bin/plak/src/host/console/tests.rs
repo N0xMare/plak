@@ -124,3 +124,138 @@ fn raw_invalid_names_consume_the_account_scan_budget() -> Result<(), Box<dyn std
     assert!(cut);
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn definitions_and_metadata_need_no_attachment_and_cursors_do_not_cross_read_kinds()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    let paths = PlakPaths::explicit(root.path().join("absent"));
+    let state = root.path().join("state");
+    let console = Console::new(
+        paths.clone(),
+        state.clone(),
+        Some(tokio::runtime::Handle::current()),
+    );
+    let socket = context(HostPrincipal::Socket(7));
+    assert!(matches!(
+        console
+            .request(
+                context(HostPrincipal::Web("operator".into())),
+                HostRequest::ConfigGet {}
+            )
+            .await,
+        Err(RequestRefusal::CapabilityDisabled {
+            capability: ConsoleCapability::ConfigRead
+        })
+    ));
+    let response = console
+        .request(
+            socket.clone(),
+            HostRequest::ProfilesList {
+                cursor: None,
+                limit: Some(1),
+            },
+        )
+        .await
+        .map_err(|_| "profiles refused")?;
+    let HostResponse::ProfilesList { rows, page, .. } = response else {
+        return Err("profiles response".into());
+    };
+    assert_eq!(rows.len(), 1);
+    let profile = console
+        .request(
+            socket.clone(),
+            HostRequest::ProfilesGet {
+                id: rows[0].id.clone(),
+            },
+        )
+        .await
+        .map_err(|_| "profile refused")?;
+    assert!(matches!(profile, HostResponse::ProfilesGet { .. }));
+    if let Some(cursor) = page.next {
+        let response = console
+            .request(
+                socket.clone(),
+                HostRequest::TemplatesList {
+                    cursor: Some(cursor),
+                    limit: Some(1),
+                },
+            )
+            .await
+            .map_err(|_| "cursor refused outside product")?;
+        assert!(matches!(
+            response,
+            HostResponse::Refused {
+                reason: ReadRefusal::ValidationFailed { .. }
+            }
+        ));
+    }
+    let response = console
+        .request(
+            socket.clone(),
+            HostRequest::TemplatesList {
+                cursor: None,
+                limit: Some(1),
+            },
+        )
+        .await
+        .map_err(|_| "templates refused")?;
+    let HostResponse::TemplatesList { rows, .. } = response else {
+        return Err("templates response".into());
+    };
+    assert_eq!(rows.len(), 1);
+    assert!(matches!(
+        console
+            .request(
+                socket.clone(),
+                HostRequest::TemplatesGet {
+                    id: rows[0].id.clone()
+                }
+            )
+            .await
+            .map_err(|_| "template refused")?,
+        HostResponse::TemplatesGet { .. }
+    ));
+    assert!(matches!(
+        console
+            .request(socket.clone(), HostRequest::ConfigGet {})
+            .await
+            .map_err(|_| "config refused")?,
+        HostResponse::ConfigGet { .. }
+    ));
+    assert_metadata(&console, socket).await?;
+    assert!(!paths.home().exists());
+    assert!(!state.exists());
+    Ok(())
+}
+
+async fn assert_metadata(
+    console: &Arc<Console>,
+    socket: HostRequestContext,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let metadata = console
+        .request(
+            socket,
+            HostRequest::ConsoleMetadataGet {
+                account_id: None,
+                cursor: None,
+                limit: None,
+            },
+        )
+        .await
+        .map_err(|_| "metadata refused")?;
+    let HostResponse::ConsoleMetadata {
+        settings,
+        catalog,
+        needs_setup,
+        ..
+    } = metadata
+    else {
+        return Err("metadata response".into());
+    };
+    assert_eq!(settings.len(), 25);
+    assert_eq!(catalog.rows, Vec::new());
+    assert_eq!(catalog.account_id, None);
+    assert!(needs_setup);
+    Ok(())
+}

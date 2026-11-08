@@ -282,15 +282,6 @@ Console allowance reuse is 30 s and one-way from exact-fenced legacy reads;
 legacy reads remain fresh and retain their separate 60 s session-aging law.
 Provider reads have a 5 s deadline inside the 10 s console request budget.
 
-The attachment-free console's initial host limits are product defaults, not
-user configuration keys: 64 KiB per request before product payload decoding,
-2 requests in flight per connection, 4 per transport principal and 32 per
-host, a 10 s whole-request deadline, and 12 console messages/s with burst 12
-per principal across all its connections. Welcome and admission use the same
-immutable limits. Capacity/rate refusal keeps the connection open; expiry is
-`deadline_exceeded` and never causes an automatic retry. Session traffic keeps
-its separate existing transport budget.
-
 OpenRouter input admission uses the discovered context window minus the reserved
 output bound, lowered by eligible endpoint limits. It has no fixed 65,536-token
 input ceiling or implicit cost cap; `api.full_window` applies only to the direct
@@ -336,6 +327,55 @@ The workspace writer mode is fixed at `single_lease` and the Code Mode cell
 spawn budget is fixed at 8; neither is a config key any more, and a file that
 still carries `occupancy` or `max_agents_per_cell` gets the named removal
 error in §5.
+
+### Host console read applicability
+
+This home-only, read-only projection is distinct from `ConfigScope`'s
+Immediate/Epoch publication rule. `new_session` includes construction on a
+new session or an explicit rebind; exact reopen keeps construction-bound
+stored values. `next_attach` does not change a running turn. Telemetry limits
+are loaded when the per-home writer starts (`telemetry_sink::open_product_telemetry`);
+the host therefore needs a restart, and another producer needs a new writer
+or process. Explicit CLI `telemetry status` and `telemetry prune` instead read
+them on each command. Compaction is captured in `HostConfig` by
+`commands::host_config` on attach, not reread by each compaction check.
+
+| Key | Host applicability | Owning read rule |
+| --- | --- | --- |
+| `root.agent` | `new_session` | Genesis binding or explicit rebind. |
+| `root.composition` | `new_session` | Genesis binding or explicit rebind. |
+| `roster.working_set` | `new_session` | Epoch roster snapshot. |
+| `orchestration.subagents` | `new_session` | Epoch catalog authority. |
+| `orchestration.max_depth` | `new_session` | Epoch admission bounds. |
+| `orchestration.max_children` | `new_session` | Epoch admission bounds. |
+| `orchestration.max_nodes` | `new_session` | Epoch admission bounds. |
+| `orchestration.workspace_idle_seconds` | `new_session` | Epoch workspace policy. |
+| `orchestration.workspace_budget_mib` | `new_session` | Epoch workspace policy. |
+| `orchestration.child_retention_days` | `new_session` | Epoch workspace policy. |
+| `orchestration.child_retention_count` | `new_session` | Epoch workspace policy. |
+| `orchestration.max_attempts` | `new_session` | Epoch admission bounds. |
+| `orchestration.transient_resumes` | `new_session` | Epoch recovery bounds. |
+| `orchestration.max_concurrent_requests_per_account` | `next_attach` | Attachment installs budgets for subsequently built agents; existing agents keep their slots. |
+| `orchestration.require_review_evidence` | `new_session` | Epoch adoption policy. |
+| `turn.auto_continue` | `immediate` | Live idle-root wake policy. |
+| `turn.max_model_rounds` | `next_attach` | A running turn retains its admitted cap. |
+| `jobs.foreground_seconds` | `new_session` | Stored construction/rebind budgets. |
+| `jobs.max_runtime_hours` | `new_session` | Stored construction/rebind budgets. |
+| `api.full_window` | `new_session` | Stored construction/rebind window. |
+| `compaction.enabled` | `next_attach` | Attachment's captured HostConfig. |
+| `skills.enabled` | `new_session` | Stored construction/rebind tools. |
+| `telemetry.max_bytes` | `host_restart` | Per-home writer start; CLI per command. |
+| `telemetry.max_age_days` | `host_restart` | Per-home writer start; CLI per command. |
+| `host.resume_after_loss` | `next_attach` | Root attach/open and host start scan. |
+
+The attachment-free console's initial host limits are product defaults, not
+user configuration keys: 64 KiB per request before product payload decoding,
+2 requests in flight per connection, 4 per transport principal and 32 per
+host, a 10 s whole-request deadline, and 12 console messages/s with burst 12
+per principal across all its connections. Welcome and admission use the same
+immutable limits. Capacity/rate refusal keeps the connection open; expiry is
+`deadline_exceeded` and never causes an automatic retry. Session traffic keeps
+its separate existing transport budget.
 
 ### 3.2 A turn has no wall clock
 
