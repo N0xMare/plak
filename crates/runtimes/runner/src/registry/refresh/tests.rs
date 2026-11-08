@@ -79,7 +79,7 @@ async fn stop_debt_invalidates_an_inflight_probe_before_readiness_can_reopen() {
     std::fs::create_dir(home.path().join("workspace")).unwrap();
     let catalog = Arc::new(
         crate::WorkspaceCatalog::local(
-            &home.path().join("workspace"),
+            Some(&home.path().join("workspace")),
             &[],
             &home.path().join("product"),
         )

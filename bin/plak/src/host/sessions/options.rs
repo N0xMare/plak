@@ -47,12 +47,23 @@ impl ProductSessions {
         &self,
         row: &plakous::runner::RunnerRow,
     ) -> Result<wire::RunnerOptions, RequestRefusal> {
-        let recents = self
+        let mut recents = self
             .with_product(|store| store.recent_workspaces(&row.runner.runner_id))
             .map_err(unavailable)?
             .into_iter()
             .map(|(path, updated_at)| wire::RecentWorkspace { path, updated_at })
-            .collect();
+            .collect::<Vec<_>>();
+        if row.runner.runner_id == "local" {
+            let paths = self
+                .services
+                .paths()
+                .map_err(|error| unavailable(error.message()))?;
+            let catalog = plakous::runner::WorkspaceCatalog::local(None, &[], paths.home())
+                .map_err(|_| {
+                    unavailable("the product home is unavailable for local workspace discovery")
+                })?;
+            recents.retain(|recent| catalog.validate(&recent.path, true).is_ok());
+        }
         runner_views::options(row, &self.services.runners().rows(), recents).map_err(unavailable)
     }
 

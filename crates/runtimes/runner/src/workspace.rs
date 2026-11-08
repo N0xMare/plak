@@ -145,36 +145,43 @@ impl WorkspaceCatalog {
     }
 
     /// Local admission remains unrestricted outside the product home. Discovery
-    /// scans only startup plus recent-workspace parents; never `/`.
+    /// scans only an explicit default plus admitted recent-workspace parents;
+    /// never `/`. A serving host supplies no default of its own.
     ///
     /// # Errors
-    /// Refuses an invalid startup workspace or protected home.
+    /// Refuses an invalid explicit default or protected home. Invalid recents
+    /// are omitted rather than widening discovery or preventing service startup.
     pub fn local(
-        startup: &Path,
+        startup: Option<&Path>,
         recent: &[PathBuf],
         excluded: &Path,
     ) -> Result<Self, WorkspaceRefusal> {
         let excluded = canonical(excluded)?;
-        let startup = canonical(startup)?;
-        let mut bases = vec![startup.clone()];
-        for path in recent.iter().take(20) {
-            if let Some(parent) = path.parent().filter(|p| p.parent().is_some())
-                && let Ok(parent) = canonical(parent)
-                && !bases.contains(&parent)
-            {
-                bases.push(parent);
-            }
-        }
-        bases.retain(|base| base.parent().is_some() && !overlaps(base, &excluded));
-        let catalog = Self {
+        let startup = startup.map(canonical).transpose()?;
+        let mut catalog = Self {
             roots: None,
-            bases,
+            bases: Vec::new(),
             excluded,
-            default: Some(utf8(&startup)?),
+            default: startup.as_deref().map(utf8).transpose()?,
             copies: false,
             cache: Mutex::new(None),
         };
-        catalog.validate(&utf8(&startup)?, true)?;
+        if let Some(startup) = &startup {
+            catalog.validate(&utf8(startup)?, true)?;
+            catalog.bases.push(startup.clone());
+        }
+        for path in recent.iter().take(20) {
+            if utf8(path).is_ok_and(|path| catalog.validate(&path, true).is_ok())
+                && let Some(parent) = path.parent().filter(|p| p.parent().is_some())
+                && let Ok(parent) = canonical(parent)
+                && !catalog.bases.contains(&parent)
+            {
+                catalog.bases.push(parent);
+            }
+        }
+        catalog
+            .bases
+            .retain(|base| base.parent().is_some() && !overlaps(base, &catalog.excluded));
         Ok(catalog)
     }
 

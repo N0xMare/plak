@@ -19,7 +19,7 @@ fn local_stop_stays_pending_behind_the_live_reconciliation_barrier() {
     let roots = ProductStateRoots::with_doubles(product.clone(), home.path().join("state"))
         .with_runner_readiness(registry.clone(), "local");
     assert!(roots.runner_pending());
-    let catalog = Arc::new(WorkspaceCatalog::local(&workspace, &[], &product).unwrap());
+    let catalog = Arc::new(WorkspaceCatalog::local(Some(&workspace), &[], &product).unwrap());
     registry.ready_local(catalog, 0).unwrap();
     assert!(!roots.runner_pending());
     registry.begin_reconcile("local", 1);

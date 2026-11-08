@@ -259,7 +259,8 @@ fn discovery_bounds_depth_count_and_cache_without_changing_admission() {
             .validate(root.join("aaa").to_str().unwrap(), true)
             .is_ok()
     );
-    let local = WorkspaceCatalog::local(&root, &[protected.join("recent")], &protected).unwrap();
+    let local =
+        WorkspaceCatalog::local(Some(&root), &[protected.join("recent")], &protected).unwrap();
     assert_eq!(local.options().roots, None);
     assert_eq!(
         local.validate(protected.to_str().unwrap(), true),

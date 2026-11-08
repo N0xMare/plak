@@ -89,7 +89,10 @@ fn start_env(fixture: &Fixture, extra: &[&str], env: &[(&str, String)]) -> Host 
 
 /// [`start_env`], or `None` when the host ended before it served.
 fn try_start(fixture: &Fixture, extra: &[&str], env: &[(&str, String)]) -> Option<Host> {
-    let (child, lines) = spawn_env(fixture, extra, env);
+    serving_host(spawn_env(fixture, extra, env))
+}
+
+fn serving_host((child, lines): (Child, mpsc::Receiver<String>)) -> Option<Host> {
     let line = loop {
         let line = lines.recv_timeout(WAIT).ok()?;
         if line.starts_with("plak host: serving on ") {
@@ -106,6 +109,54 @@ fn try_start(fixture: &Fixture, extra: &[&str], env: &[(&str, String)]) -> Optio
         socket: PathBuf::from(socket),
         lines,
     })
+}
+
+#[test]
+fn a_host_launch_directory_containing_its_home_is_not_a_workspace_default() {
+    let Some(fixture) = fixture() else { return };
+    let mut child = Child::spawn(
+        fixture
+            .command()
+            .arg("host")
+            .current_dir(&fixture.root)
+            .env("HOME", &fixture.root)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped()),
+    );
+    let stderr = child.stderr.take().unwrap();
+    let (send, lines) = mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            let _ = send.send(line);
+        }
+    });
+    let mut host = serving_host((child, lines)).expect("host serves outside any workspace");
+    let mut client = Client::connect(&host);
+    let Outcome::Ok(Answer::Options { options }) =
+        client.request(1, Op::SessionOptions { workspace: None })
+    else {
+        panic!("options refused")
+    };
+    let local = options
+        .runners
+        .iter()
+        .find(|row| row.runner.runner_id == "local")
+        .unwrap();
+    assert_eq!(local.default_workspace, None);
+    assert!(
+        !local
+            .recent_workspaces
+            .iter()
+            .any(|recent| recent.path == fixture.root.to_str().unwrap())
+    );
+    assert!(
+        matches!(client.request(2, new_session(&fixture.home())), Outcome::Refused(
+        plakous_host_protocol::wire::RequestRefusal::PlacementRefused { reason, .. }
+    ) if matches!(*reason, plakous_host_protocol::wire::PlacementReason::WorkspaceRefused { kind: plakous_host_protocol::wire::WorkspaceRefusalKind::ProductHome, .. }))
+    );
+    assert_eq!(client.rows(3), []);
+    stop(&mut host);
 }
 
 /// The host fixture, or `None` where this platform's socket path limit is

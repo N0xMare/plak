@@ -6406,7 +6406,10 @@ Protocol 4 adds paired read-only `workspace.options`, `workspace.discover` and
 `workspace.validate`, stable `Hello.machine_id`, and same-owner
 `TransferAccepted.unpromoted [{call_key,pid}]`. Inspecting binds cannot read workspace
 options. Unknown machine evidence requires re-pair for remote placement, never a
-local-open refusal. Workspace metadata follows chapter 07 §3.7. The host reuses
+local-open refusal. `WorkspaceCatalog::local` takes an optional explicit default;
+a serving host supplies None, not its launch cwd. Invalid implicit recent paths
+are omitted from discovery, and explicit admission keeps its typed refusal.
+Workspace metadata follows chapter 07 §3.7. The host reuses
 one connection per pinned identity, with aliases as labels. Explicit facade
 `SessionRuntimeBinding::with_runner_services` pins backend and executor per node.
 

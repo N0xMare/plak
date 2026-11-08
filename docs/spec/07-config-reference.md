@@ -496,8 +496,10 @@ Effective roots, first-root default and copies support come from paired
 `workspace.options`, never ssh-reading configuration. `workspace.discover` is
 read-only: depth at most two, at most 200 sorted distinct checkouts, a five-second
 cache, bounded directory entries/metadata reads/deadline, and explicit truncation.
-Local discovery bases are startup plus recent-workspace parents, never `/`; this
-does not narrow local admission. Metadata is `{name, head, commit}` with tagged HEAD
+The host supplies no launch-directory default. Local discovery bases are admitted
+recent-workspace parents, never `/`; an embedder may additionally supply an explicit
+default. Invalid implicit recents are omitted, not discovery scope or startup
+authority. This does not narrow local admission. Metadata is `{name, head, commit}` with tagged HEAD
 `branch{name}`, `detached`, `unborn{name}` or `unavailable`. Gitdir, commondir and
 metadata symlinks must stay inside the admitted roots/bases and outside the product
 home. No Git executable, hooks, helpers, fetches or working-copy writes run.

@@ -303,7 +303,12 @@ the default `$HOME/.plak` is ever a project overlay. Nothing below the CLI edge 
 process working directory, so one process can hold the contexts of several
 workspaces, and nothing a face sends is resolved against it: a relative path
 on the command line (an export's `--out`, an import, `--ui`) is made
-absolute against the launch directory at the edge. What a host process
+absolute against the launch directory at the edge. The serving host never uses
+its own launch directory as a default workspace: local options have no implicit
+default and use only admitted recent workspaces plus explicit request probes.
+Invalid implicit recent paths are omitted with a fixed, path-free diagnostic,
+never a host startup failure; explicit creation still returns the typed refusal.
+What a host process
 shares across its sessions is home-wide, never a workspace's: one bound on
 running process starts (128) over every session's jobs, the per-account
 request budgets,

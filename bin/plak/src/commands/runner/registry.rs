@@ -223,12 +223,20 @@ pub(crate) fn prepare(services: &Services) -> CliResult<Prepared> {
         .filter_map(|(_, path)| seen.insert(path.clone()).then_some(path))
         .take(20)
         .collect::<Vec<_>>();
-    let local = WorkspaceCatalog::local(
-        paths.workspace().map_err(CliFailure::new)?,
-        &recents,
-        paths.home(),
-    )
-    .map_err(|error| CliFailure::new(format!("local workspace options: {error:?}")))?;
+    let empty = WorkspaceCatalog::local(None, &[], paths.home()).map_err(|_| {
+        CliFailure::new("the product home is unavailable for local workspace discovery")
+    })?;
+    tracing::info!(target: "plak.runner", "local workspace catalog ignores the process launch directory");
+    let recents = recents.into_iter().filter(|path| {
+        let admitted = path.to_str().is_some_and(|path| empty.validate(path, true).is_ok());
+        if !admitted {
+            tracing::warn!(target: "plak.runner", "inadmissible recent workspace omitted from local catalog");
+        }
+        admitted
+    }).collect::<Vec<_>>();
+    let local = WorkspaceCatalog::local(None, &recents, paths.home()).map_err(|_| {
+        CliFailure::new("the product home is unavailable for local workspace discovery")
+    })?;
     let services = services.with_runner_overlap(overlap_guard(paths)?);
     for runner in configured_runners(paths)? {
         services.runners().configure(runner);

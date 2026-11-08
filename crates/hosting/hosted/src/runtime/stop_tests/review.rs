@@ -57,7 +57,7 @@ impl Recorded {
         let protected = self.root.path().join("protected");
         std::fs::create_dir_all(&workspace).unwrap();
         std::fs::create_dir_all(&protected).unwrap();
-        Arc::new(WorkspaceCatalog::local(&workspace, &[], &protected).unwrap())
+        Arc::new(WorkspaceCatalog::local(Some(&workspace), &[], &protected).unwrap())
     }
 
     fn hold(&self) -> LeaseOnlyHead {

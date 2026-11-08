@@ -155,7 +155,7 @@ async fn a_resident_stopped_line_reopens_ready_while_its_runtime_stays_open() {
     let line = sessions.line_head_of(locator).await.unwrap().line();
     let stops = Arc::new(AtomicUsize::new(0));
     let client = line_runner(&workspace, line, stops.clone()).await;
-    let catalog = Arc::new(WorkspaceCatalog::local(&workspace, &[], paths.home()).unwrap());
+    let catalog = Arc::new(WorkspaceCatalog::local(Some(&workspace), &[], paths.home()).unwrap());
     let registry = services.runners();
     registry.configure(ConfiguredRunner {
         runner_id: "local".into(),
