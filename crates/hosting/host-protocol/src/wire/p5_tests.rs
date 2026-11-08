@@ -5,6 +5,28 @@ type Client = ClientFrame<Core>;
 type Host = HostFrame<Core>;
 
 #[test]
+fn rename_title_schema_requires_a_nullable_bounded_string() {
+    let schema = serde_json::to_value(schemars::schema_for!(Client)).unwrap();
+    let rename = schema["$defs"]["Op"]["oneOf"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|operation| operation["properties"]["op"]["const"] == "rename_session")
+        .unwrap();
+    let title = &rename["properties"]["title"];
+    assert_eq!(title["type"], serde_json::json!(["string", "null"]));
+    assert_eq!(title["minLength"], 1);
+    assert_eq!(title["maxLength"], 128);
+    assert!(
+        rename["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|field| field == "title")
+    );
+}
+
+#[test]
 fn attached_session_info_requires_runner_and_stays_outside_jsonl_history() {
     let info = crate::views::presentation::SessionInfoView {
         runner: RunnerLabel {

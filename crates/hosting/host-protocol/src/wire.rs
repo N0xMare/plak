@@ -333,7 +333,7 @@ pub enum Op<P: ProtocolExtension> {
         /// Null reveals the generated title again.
         #[serde(deserialize_with = "required_nullable_title")]
         #[schemars(required)]
-        #[schemars(length(min = 1, max = 128))]
+        #[schemars(schema_with = "nullable_title_schema")]
         title: Option<String>,
     },
     /// Reversible product visibility/read-only state, not runtime-history archival.
@@ -357,6 +357,13 @@ pub enum Op<P: ProtocolExtension> {
         /// The durable session id.
         session: String,
     },
+}
+
+fn nullable_title_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    let mut schema = <Option<String> as schemars::JsonSchema>::json_schema(generator);
+    schema.insert("minLength".into(), 1.into());
+    schema.insert("maxLength".into(), 128.into());
+    schema
 }
 
 fn required_nullable_title<'de, D: serde::Deserializer<'de>>(
