@@ -18,9 +18,11 @@ use crate::commands::host_config::{
 use crate::commands::session::seed_new_session_binding;
 use crate::commands::support::{join_host_worker_bounded, join_tui_host_worker};
 use crate::presentation::credential_locations_text;
+#[cfg(feature = "tui")]
 use crate::tui_launch::supervisor::{
     apply_tui_handoff, apply_tui_handoff_after_host, handle_tui_handoff, restore_former_attachment,
 };
+#[cfg(feature = "tui")]
 use crate::tui_launch::tui_presentation_values_with_backend;
 use plakous::agent::ReasoningEffort;
 use plakous::subscriptions::NativeLoginMode;
@@ -1180,6 +1182,7 @@ fn native_sections_with_checked_api_rows<'a>(
 }
 
 #[test]
+#[cfg(feature = "tui")]
 fn tui_catalog_discovery_requires_current_compatibility_and_ready_credentials() {
     let root = tempfile::tempdir().expect("temporary product home");
     let paths = product_paths::PlakPaths::explicit(root.path().to_path_buf());
@@ -1246,6 +1249,7 @@ fn tui_catalog_discovery_requires_current_compatibility_and_ready_credentials() 
     }
 }
 
+#[cfg(feature = "tui")]
 fn tui_test_locator(checkpoint: u8) -> plakous::sessions::SessionLocator {
     format!(
         "00000000-0000-0000-0000-000000000001/\
@@ -1257,6 +1261,7 @@ fn tui_test_locator(checkpoint: u8) -> plakous::sessions::SessionLocator {
 }
 
 #[test]
+#[cfg(feature = "tui")]
 fn new_launch_exact_selection_keeps_selected_binding_instead_of_defaults() {
     let root = tempfile::tempdir().expect("temporary product home");
     let paths = product_paths::PlakPaths::explicit(root.path().join("product"));
@@ -1627,6 +1632,7 @@ fn deferred_openrouter_target_attaches_without_catalog_membership_or_effort() {
 }
 
 #[test]
+#[cfg(feature = "tui")]
 fn recoverable_selected_attach_failure_restores_former_exact_attachment() {
     let root = tempfile::tempdir().expect("temporary product home");
     let paths = product_paths::PlakPaths::explicit(root.path().join("product"));
@@ -1689,6 +1695,7 @@ fn recoverable_selected_attach_failure_restores_former_exact_attachment() {
 }
 
 #[test]
+#[cfg(feature = "tui")]
 fn failed_in_process_resume_switch_keeps_last_attached_rollback_authority() {
     let root = tempfile::tempdir().expect("temporary product home");
     let paths = product_paths::PlakPaths::explicit(root.path().join("product"));
@@ -1756,6 +1763,7 @@ fn failed_in_process_resume_switch_keeps_last_attached_rollback_authority() {
 }
 
 #[test]
+#[cfg(feature = "tui")]
 fn exact_session_selection_preserves_record_and_refuses_workspace_mismatch() {
     let root = tempfile::tempdir().expect("temporary product home");
     let paths = product_paths::PlakPaths::explicit(root.path().join("product"));
@@ -1885,6 +1893,7 @@ fn tui_default_binding_fences_post_publication_durability_uncertainty() {
 }
 
 #[test]
+#[cfg(feature = "tui")]
 fn tui_catalog_failure_is_visible_without_partial_model_authority() {
     let root = tempfile::tempdir().expect("temporary product home");
     let paths = product_paths::PlakPaths::explicit(root.path().to_path_buf());
@@ -1915,6 +1924,7 @@ fn tui_catalog_failure_is_visible_without_partial_model_authority() {
 }
 
 #[test]
+#[cfg(feature = "tui")]
 fn tui_catalog_preserves_exact_facade_efforts_without_provider_or_model_inference() {
     let root = tempfile::tempdir().expect("temporary product home");
     let paths = product_paths::PlakPaths::explicit(root.path().to_path_buf());
@@ -2005,6 +2015,7 @@ fn tui_catalog_preserves_exact_facade_efforts_without_provider_or_model_inferenc
 }
 
 #[test]
+#[cfg(feature = "tui")]
 fn tui_catalog_fails_closed_for_non_displayable_facade_effort() {
     let root = tempfile::tempdir().expect("temporary product home");
     let paths = product_paths::PlakPaths::explicit(root.path().to_path_buf());
@@ -2037,6 +2048,7 @@ fn tui_catalog_fails_closed_for_non_displayable_facade_effort() {
 }
 
 #[test]
+#[cfg(feature = "tui")]
 fn tui_catalog_never_offers_models_without_an_exact_process_presentation_candidate() {
     let root = tempfile::tempdir().expect("temporary product home");
     let paths = product_paths::PlakPaths::explicit(root.path().to_path_buf());
@@ -2078,6 +2090,7 @@ fn tui_catalog_never_offers_models_without_an_exact_process_presentation_candida
 }
 
 #[test]
+#[cfg(feature = "tui")]
 fn tui_catalog_hides_provider_hidden_rows_and_disables_unqualified_code_mode_rows() {
     let root = tempfile::tempdir().expect("temporary product home");
     let paths = product_paths::PlakPaths::explicit(root.path().join("product"));
@@ -3409,6 +3422,7 @@ fn models_reports_unusable_credential_before_compatibility_prompt() {
 }
 
 #[test]
+#[cfg(feature = "tui")]
 fn drifted_model_is_disabled_in_picker_and_explained_in_models() {
     let root = tempfile::tempdir().unwrap();
     let paths = product_paths::PlakPaths::explicit(root.path().join("product"));

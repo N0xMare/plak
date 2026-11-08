@@ -63,7 +63,6 @@ pub(crate) const ROUTES: &[&ProductCapability] = &[
     &openrouter::OPENROUTER,
 ];
 
-#[cfg(feature = "tui")]
 pub(crate) fn oauth_accounts() -> impl Iterator<Item = &'static str> {
     ROUTES
         .iter()

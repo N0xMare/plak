@@ -21,6 +21,30 @@ fn plak_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_plak"))
 }
 
+#[cfg(not(feature = "tui"))]
+#[test]
+fn omitted_terminal_placement_refuses_before_creating_a_home_or_host() {
+    let root = tempfile::tempdir().unwrap();
+    let output = publication_command(
+        root.path(),
+        &[
+            "--runner",
+            "local",
+            "--workspace",
+            root.path().to_str().unwrap(),
+        ],
+    )
+    .output()
+    .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("compiled without feature `tui`"),
+        "{output:?}"
+    );
+    assert!(!root.path().join("home").exists());
+    assert!(!root.path().join("xdg").exists());
+}
+
 fn publication_command(root: &std::path::Path, args: &[&str]) -> Command {
     let mut command = Command::new(plak_bin());
     command

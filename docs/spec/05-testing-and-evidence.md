@@ -3640,6 +3640,13 @@ not move library evidence out of §3.1.
 
 ### 3.1 Offline fixture evidence
 
+In a build without `tui`,
+`cli_contract::omitted_terminal_placement_refuses_before_creating_a_home_or_host`
+executes the real placement launch grammar and verifies the typed missing
+capability error leaves the product home and subscription state absent.
+Terminal-only source harnesses are feature-gated; this does not remove the
+pure store, settings or runtime composition tests from reduced inventories.
+
 `host_skeleton::reload::a_host_refuses_requested_reload_without_any_client_or_redispatch`
 uses the real host and socket with idle and busy roots. After the only client
 disconnects, the host's pid owns the announcement and the service records a

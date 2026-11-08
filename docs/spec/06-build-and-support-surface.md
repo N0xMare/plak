@@ -510,6 +510,14 @@ The supported and shipped Plak is **default only**. Named variants are built
 and contract-tested in full, not shipped. Other combinations may compile;
 compilation does not establish support. Named variants also get closure
 witnesses in the static checker, without adding reduced compilation to check.
+An omitted terminal rejects placement launch with the same typed `tui`
+capability refusal as ordinary terminal launch, before creating a home or
+host. Product setting bounds and account remedies do not depend on terminal
+re-exports. Store/composition tests remain compilable without terminal
+features; actual terminal harnesses and picker/paint adapter tests require
+`tui`. All-feature versus minus-terminal test inventories include ignored
+tests and hold every other feature fixed; this inventory is not a claim that
+reduced products are supported.
 Only the `variants` group (full only) builds the three reduced named products,
 plus an admission fixture that omits TUI, clipboard, images, Python and MCP.
 Each distinct resolution builds its

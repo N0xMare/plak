@@ -205,9 +205,9 @@ pub const ROWS: &[SettingMeta] = &[
         key: SCROLL_LINES,
         label: "Scroll lines",
         kind: SettingKind::Int {
-            default: crate::config::DEFAULT_SCROLL_LINES,
-            min: crate::config::MIN_SCROLL_LINES,
-            max: crate::config::MAX_SCROLL_LINES,
+            default: super::DEFAULT_SCROLL_LINES,
+            min: super::MIN_SCROLL_LINES,
+            max: super::MAX_SCROLL_LINES,
         },
         owner: SettingOwner::ProductConfig,
         restart_required: false,

@@ -120,7 +120,7 @@ pub mod telemetry {
 mod observation_projection;
 #[cfg(feature = "otel")]
 mod otel_bridge;
-#[cfg(all(test, unix))]
+#[cfg(all(test, unix, feature = "tui"))]
 mod product_compaction_terminal_e2e_tests;
 #[cfg(test)]
 mod product_crash_tests;
@@ -130,7 +130,7 @@ pub mod product_doctor;
 mod product_onboarding;
 mod product_subscription_usage;
 mod product_telemetry;
-#[cfg(all(test, unix))]
+#[cfg(all(test, unix, feature = "tui"))]
 mod product_terminal_e2e_tests;
 #[doc(hidden)]
 pub mod shell;
@@ -221,7 +221,7 @@ pub(crate) use crate::presentation::CredentialState;
 pub(crate) use crate::presentation::PresentationBackend;
 #[cfg(feature = "tui")]
 use crate::presentation::TuiPresentationBundle;
-#[cfg(feature = "tui")]
+#[cfg(any(feature = "tui", test))]
 use crate::store::sessions as product_sessions;
 pub(crate) use plakous_hosted::agent as product_agent;
 pub(crate) use plakous_hosted::error::{CliFailure, CliFailureKind, CliResult, ProcessOutcome};
