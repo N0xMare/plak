@@ -193,7 +193,8 @@ fn complete_reconciliation(
 ) {
     // A live holder defers its stop, not other sessions' admission. Publish
     // Ready first, then retain one owned retry until the recorded debt settles.
-    registry.require_connection(id, pending);
+    // A serving host keeps its local daemon even after stop debt clears.
+    registry.require_connection(id, pending || id == "local");
     {
         let mut state = retries
             .lock()

@@ -4971,7 +4971,9 @@ exclusion. Standalone local placement remains direct and starts no local daemon.
   skipped under a live holder retains the required connection and one coalesced
   delayed retry on that same backoff, without holding the row below Ready. The
   retry bypasses the picker cache and settles the debt after release without a
-  new user action or link change; a settled pass clears it and resets the delay.
+  new user action or link change; a settled pass clears the stop debt and resets
+  the delay. The serving host still requires its local daemon connection, so idle
+  local admission retains daemon monitoring and redial.
   A refused owner
   floors file remains unavailable until the operator repairs its cause.
   Inspection, sweep and recorded-stop failures are structured `plak.runner`

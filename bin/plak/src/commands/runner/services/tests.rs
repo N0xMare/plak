@@ -281,5 +281,19 @@ async fn stopped_line_followup(branch_hold: bool) {
     .unwrap();
     assert_eq!(stops.load(Ordering::SeqCst), 1);
     assert!(calls.load(Ordering::SeqCst) > calls_before_release);
-    assert!(!registry.needs_connection("local"));
+    assert!(registry.needs_connection("local"));
+    assert!(!retries.lock().unwrap()["local"].pending_stops);
+    assert_eq!(retries.lock().unwrap()["local"].delay, 0);
+}
+
+#[test]
+fn a_settled_remote_stop_releases_its_deferred_connection_requirement() {
+    let registry = plakous::runner::RunnerRegistry::default();
+    registry.configure(ConfiguredRunner {
+        runner_id: "fixture".into(),
+        names: vec!["fixture".into()],
+    });
+    registry.require_connection("fixture", true);
+    complete_reconciliation(&registry, "fixture", false, &Arc::default());
+    assert!(!registry.needs_connection("fixture"));
 }

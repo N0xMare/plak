@@ -1345,7 +1345,9 @@ guard is a passing no-op-equivalence check, not a mutant kill. A resident-runtim
 and a branch-hold variant release their holder after the pass publishes Ready:
 the previously queued bounded-backoff retry must settle the stop exactly once
 without an explicit refresh, reconnect, command or restart. Repeated observations
-of the same pending debt cannot queue duplicate retries or reset the delay. The review driver
+of the same pending debt cannot queue duplicate retries or reset the delay.
+Settlement clears deferred remote connection requirements, but a serving host
+retains its intrinsic local-daemon requirement after the stop retry state clears. The review driver
 reseeds the head-free repair, fresh descendant-debt fence and release-ordering
 decisions; build failures and empty selections are not mutant kills.
 Neither an attachment nor a paid continuation is created by a stop.

@@ -5990,7 +5990,8 @@ placement readiness. A pass that skips recorded stop debt retains the runner's
 required-connection flag and one coalesced follow-up on the existing 1/2/5/15-second
 backoff. Ready stays open during that delay; when due, the owned pass bypasses the
 picker cache and re-drives the debt without a new user, link or restart trigger.
-Successful settlement clears that requirement and resets the retry delay. Stop
+Successful settlement clears the stop-debt requirement and resets the retry delay;
+a serving host still retains its intrinsic local-daemon connection requirement. Stop
 intent, runner protocol and binding encodings are unchanged.
 
 - **Frames.** A big-endian `u32` length, then one JSON value. Neither end
