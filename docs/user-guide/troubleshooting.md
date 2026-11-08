@@ -455,8 +455,8 @@ The session was written by a plak build whose stored format this build does not
 read. Plak never opens another build's state. 0.0.2 wrote export version 8,
 which this build refuses, so a 0.0.2 session cannot be carried in: finish it
 on 0.0.2, or start a new one. 0.0.2 state is left untouched for the 0.0.2
-binary. When the other build's export version is one this build imports (10
-or 11), run that build with `plak session export <id>` (an installed snapshot
+binary. When the other build's export version is one this build imports (11
+or 12), run that build with `plak session export <id>` (an installed snapshot
 under `~/.local/lib/plak/release/` or `~/.local/lib/plak/maintainer/`, or an
 older checkout), then run `plak session import <file>` with this build: you
 get a new session carried forward from the old one, with its full history.
@@ -734,8 +734,8 @@ Inspect paths with `plak doctor` and use `plak state prune-legacy` only when you
 no longer need the sessions in those older or newer builds. A `plak resume` of
 one of those sessions says it was created by an incompatible plak build and
 names `plak session export` / `plak session import`, the way to carry it into
-this build when that build's export version is one this build imports (10 or
-11; 0.0.2 wrote version 8, which is refused). Finish a 0.0.2 session on 0.0.2,
+this build when that build's export version is one this build imports (11 or
+12; 0.0.2 wrote version 8, which is refused). Finish a 0.0.2 session on 0.0.2,
 or start a new one. 0.0.2 state is left untouched for the 0.0.2 binary.
 
 ## `… was created by an incompatible plak build; move it aside to start fresh`

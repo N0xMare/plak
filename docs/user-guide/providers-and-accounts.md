@@ -351,7 +351,7 @@ This build runs Monty 1.2.0 in `plakous-py-host` on the cell protocol under
 adapter `plakous.monty-python-adapter.v9`. It refuses to reopen py-ptc roots
 and children recorded under any other engine contract, profile or presentation;
 there is no migration. Carry such a session with `plak session export` /
-`plak session import` when its export version is importable (10 or 11).
+`plak session import` when its export version is importable (11 or 12).
 
 `js-ptc` and `py-ptc` are one Plak-owned harness class: custom, non-default, one
 engine per agent. `exec_js` takes a JSON field `source` (an async module; emit
