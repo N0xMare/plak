@@ -4981,6 +4981,8 @@ It does not treat the public home as a model workspace or broaden admission.
 An auto-started service exits after five minutes with no connections,
 resident/opening/releasing sessions, startup continuations, pending stops or
 handoffs. Activity resets the whole interval; uncertainty prevents idle exit.
+An unserved durable continuation still blocks idle exit after a failed startup
+open; an empty resident table does not settle its handoff debt.
 It never evicts sessions to become idle. A foreground or unit-managed host
 persists. SIGHUP remains planned handoff, not a client reload signal.
 

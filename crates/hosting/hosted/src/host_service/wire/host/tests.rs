@@ -921,6 +921,27 @@ fn idle_exit_refuses_unreadable_state_pending_stops_and_a_resident_worker() {
     assert_eq!(fake.0.active_workers.load(Ordering::SeqCst), 0);
 }
 
+#[test]
+fn idle_exit_keeps_a_dormant_continuation_without_opening_it() {
+    let (host, fake) = host(&["s1"]);
+    fake.0.rows.lock().unwrap()[0].activity = SessionActivity::Continuing;
+    assert!(host.idle_exit_blocked());
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 0);
+    fake.0.refuse.lock().unwrap().insert(
+        "s1".into(),
+        RequestRefusal::SessionUnavailable {
+            detail: "startup open failed".into(),
+        },
+    );
+    assert!(host.slot("s1").resident().is_err());
+    assert!(matches!(host.slot("s1").peek(), SlotView::Dormant(_)));
+    assert!(host.idle_exit_blocked());
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
+    fake.0.rows.lock().unwrap()[0].activity = SessionActivity::Idle;
+    assert!(!host.idle_exit_blocked());
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
+}
+
 fn request<W: Write + Clone>(
     connection: &mut HostConnection<Core, W>,
     id: RequestId,

@@ -581,8 +581,8 @@ where
         self.lock().clone()
     }
 
-    /// Whether residents, opening/releasing workers or durable runner-stop
-    /// debt prevent an otherwise disconnected service from exiting idle.
+    /// Whether residents, opening/releasing workers, durable continuations or
+    /// runner-stop debt prevent a disconnected service from exiting idle.
     /// An unreadable directory is not evidence of idleness.
     #[must_use]
     pub fn idle_exit_blocked(&self) -> bool {
@@ -594,8 +594,10 @@ where
             return true;
         }
         self.sessions.rows(None, None, true).map_or(true, |rows| {
-            rows.iter()
-                .any(|row| self.sessions.runner_pending(&row.session))
+            rows.iter().any(|row| {
+                row.activity == SessionActivity::Continuing
+                    || self.sessions.runner_pending(&row.session)
+            })
         })
     }
 

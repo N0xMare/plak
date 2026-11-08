@@ -3706,6 +3706,10 @@ window on activity or kept work. Idle eligibility includes residents,
 opening/releasing workers, startup recovery and durable runner-stop debt; an
 unreadable directory is not proof of idleness. No test achieves idle exit by
 evicting a session.
+`idle_exit_keeps_a_dormant_continuation_without_opening_it` also prevents an
+unsuccessful startup open from making durable handoff debt look idle; checking
+eligibility neither opens the session nor evicts work, and clearing the durable
+continuation makes the dormant session idle-eligible again.
 
 `wire_transport::hosts::tests` distinguishes held kernel locks from stale pid
 text, discovers every live socket key, and refuses unsafe locks, directories
