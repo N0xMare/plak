@@ -28,12 +28,26 @@ def read_audit(raw: dict) -> tuple[set[int], dict]:
     pairs = []
     entries = raw['entries']
     requests = set()
+    closed = set()
+    attaches = set()
+    attachments: dict[int, set[int]] = {}
     for index, entry in enumerate(entries):
         frame = entry.get('frame', {})
         op = frame.get('op', {})
         intent = op.get('intent', {})
+        connection = entry.get('connection')
+        if entry.get('direction') == 'host' and frame.get('frame') == 'response':
+            answer = frame.get('outcome', {}).get('ok', {})
+            if (connection, frame.get('id')) in attaches and answer.get('answer') == 'attached':
+                attachments.setdefault(connection, set()).add(answer['attachment'])
         if entry.get('direction') != 'client':
             continue
+        if frame.get('frame') == 'bye':
+            closed.add(connection)
+        if op.get('op') == 'attach' and connection not in closed:
+            attaches.add((connection, frame.get('id')))
+        if op.get('op') == 'detach':
+            attachments.setdefault(connection, set()).discard(op.get('attachment'))
         kind, body = intent.get('kind'), intent.get('body')
         name = None
         expected_intent = None
@@ -53,6 +67,8 @@ def read_audit(raw: dict) -> tuple[set[int], dict]:
             expected_intent = {'kind': kind, 'body': {name: {'tree_id': tree}}}
         if name is None:
             continue
+        if connection in closed or op.get('attachment') not in attachments.get(connection, set()):
+            raise ValueError('legal read is not on a live attachment of this connection')
         assert name in LEGAL_READS
         request = frame.get('id')
         attachment = op.get('attachment')
@@ -180,6 +196,8 @@ def main() -> None:
         target = args.output / f'{document["fixture"]}.json'
         encoded = json.dumps(document, indent=2) + '\n'
         if args.check:
+            if audit_target.read_text() != audit_encoded:
+                raise SystemExit(f'reads audit differs from real client: {audit_target}')
             if target.read_text() != encoded:
                 raise SystemExit(f'control fixture differs from real client: {target}')
         else:

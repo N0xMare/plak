@@ -3750,12 +3750,16 @@ byte-identical complete capture. Directory, attach, new, prompt, stop, bye and
 their acknowledgements, the other pinned controls, barriers and reconnect/no-replay
 ordering remain exact, with generated identity aliases preserving correlations.
 A missing, extra or reordered required frame fails.
+Client-to-fixture equality, including the complete reads-audit, is checked
+at regeneration (`client_traces.py --check`) and in the private gate.
 
 Only three explicitly named read-only requests and their acknowledgements may
 interleave: `refresh_composer_chrome` (timer-driven chrome), `resync_transcript`
 (resync at a reconnect sequence boundary), and `list_agent_acknowledgements`
 (an acknowledgements read). Each complete request and its unique well-formed
-answer is validated in retained complete raw traffic. Separate real-bridge
+answer is validated in retained complete raw traffic. Trace
+validation rejects a legal read after that connection's bye or on an attachment
+not returned by a preceding attach on the same connection. Separate real-bridge
 assertions exercise every recorded legal read with unchanged session, queue,
 transcript and tree state and no provider dispatch. Every journey ends with
 exact equality between the face transcript and its durable view: resync must

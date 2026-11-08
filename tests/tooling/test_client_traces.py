@@ -2,13 +2,40 @@
 
 import importlib.util
 import copy
+import json
 from pathlib import Path
+import subprocess
+import sys
+import tempfile
 import unittest
 
 PATH = Path(__file__).resolve().parents[2] / 'tools/dev/client_traces.py'
 SPEC = importlib.util.spec_from_file_location('client_traces', PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+
+
+def attach_entries():
+    return [
+        {
+            'connection': 1,
+            'direction': 'client',
+            'frame': {
+                'frame': 'request',
+                'id': 1,
+                'op': {'op': 'attach'},
+            },
+        },
+        {
+            'connection': 1,
+            'direction': 'host',
+            'frame': {
+                'frame': 'response',
+                'id': 1,
+                'outcome': {'ok': {'answer': 'attached', 'attachment': 1}},
+            },
+        },
+    ]
 
 
 class ClientTraceTests(unittest.TestCase):
@@ -35,7 +62,8 @@ class ClientTraceTests(unittest.TestCase):
             'fixture': 'required',
             'session': 'source',
             'workspace': '/fixture',
-            'entries': [
+            'entries': attach_entries()
+            + [
                 request,
                 response,
                 {'barrier': 'answered'},
@@ -53,7 +81,7 @@ class ClientTraceTests(unittest.TestCase):
         }
         self.assertEqual(set(MODULE.LEGAL_READS), set(intents))
         for name, intent in intents.items():
-            for gap in range(len(raw['entries']) + 1):
+            for gap in range(2, len(raw['entries'])):
                 interleaved = copy.deepcopy(raw)
                 read = {
                     'connection': 1,
@@ -130,10 +158,10 @@ class ClientTraceTests(unittest.TestCase):
             'fixture': 'audit',
             'session': 'source',
             'workspace': '/fixture',
-            'entries': [read, other, {'barrier': 'answered'}, answer],
+            'entries': attach_entries() + [read, other, {'barrier': 'answered'}, answer],
         }
         excluded, audit = MODULE.read_audit(raw)
-        self.assertEqual(excluded, {0, 3})
+        self.assertEqual(excluded, {2, 5})
         self.assertEqual(
             audit['pairs'],
             [
@@ -147,9 +175,20 @@ class ClientTraceTests(unittest.TestCase):
             ],
         )
         retained = copy.deepcopy(other)
-        retained['frame']['id'] = 1
-        self.assertEqual(MODULE.normalize(raw)['entries'], [retained, {'barrier': 'answered'}])
-        for mutate in ('missing', 'duplicate', 'refused', 'malformed', 'wrong_connection'):
+        retained['frame']['id'] = 2
+        self.assertEqual(
+            MODULE.normalize(raw)['entries'], attach_entries() + [retained, {'barrier': 'answered'}]
+        )
+        for mutate in (
+            'missing',
+            'duplicate',
+            'refused',
+            'malformed',
+            'wrong_connection',
+            'after_bye',
+            'unknown_attachment',
+            'before_attach',
+        ):
             broken = copy.deepcopy(raw)
             if mutate == 'missing':
                 broken['entries'].pop()
@@ -158,11 +197,41 @@ class ClientTraceTests(unittest.TestCase):
             elif mutate == 'refused':
                 broken['entries'][-1]['frame']['outcome'] = {'err': 'refused'}
             elif mutate == 'malformed':
-                broken['entries'][0]['frame']['op']['blobs'] = ['unexpected']
-            else:
+                broken['entries'][2]['frame']['op']['blobs'] = ['unexpected']
+            elif mutate == 'wrong_connection':
                 broken['entries'][-1]['connection'] = 2
+            elif mutate == 'after_bye':
+                broken['entries'].insert(
+                    2, {'connection': 1, 'direction': 'client', 'frame': {'frame': 'bye'}}
+                )
+            elif mutate == 'unknown_attachment':
+                broken['entries'][2]['frame']['op']['attachment'] = 2
+            else:
+                broken['entries'] = broken['entries'][2:]
             with self.subTest(mutate=mutate), self.assertRaises(ValueError):
                 MODULE.normalize(broken)
+
+    def test_check_rejects_a_drifted_reads_audit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            recording = root / 'raw.json'
+            recording.write_text(
+                json.dumps(
+                    {
+                        'fixture': 'check',
+                        'session': 'source',
+                        'workspace': '/fixture',
+                        'entries': [],
+                    }
+                )
+            )
+            command = [sys.executable, str(PATH), '--output', str(root), str(recording)]
+            subprocess.run(command, check=True, capture_output=True)
+            subprocess.run(command + ['--check'], check=True, capture_output=True)
+            (root / 'check-reads-audit.json').write_text('{}\n')
+            result = subprocess.run(command + ['--check'], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('reads audit differs from real client', result.stderr)
 
     def test_control_order_identity_aliases_and_semantic_values_survive(self):
         first = '00000000-0000-4000-8000-000000000001'
