@@ -188,21 +188,9 @@ pub(in crate::tui) fn subject_tool_verb(
     kind: ActivityKind,
     subject: Option<&str>,
 ) -> ToolVerb {
-    let verb = tool_verb(name, kind);
-    if (verb == ToolVerb::Run && name != "exec_command")
-        || !matches!(
-            verb,
-            ToolVerb::Run
-                | ToolVerb::WaitProcess
-                | ToolVerb::ReadProcess
-                | ToolVerb::InputProcess
-                | ToolVerb::InterruptProcess
-                | ToolVerb::StopProcess
-        )
-    {
-        return verb;
-    }
-    process_subject_verb(subject.unwrap_or_default()).unwrap_or(verb)
+    operation_verb(plakous_host_protocol::views::ToolOperation::classify(
+        name, kind, subject,
+    ))
 }
 
 pub(in crate::tui) fn process_subject_verb(subject: &str) -> Option<ToolVerb> {
