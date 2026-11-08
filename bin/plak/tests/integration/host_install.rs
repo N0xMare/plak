@@ -116,19 +116,26 @@ fn wait_host_log(
 }
 
 #[cfg(feature = "test-hooks")]
-#[test]
-fn host_install_generated_command_serves_from_home_with_a_fake_manager() -> TestResult {
-    use super::offline_support::TestChild;
-    use std::process::Stdio;
-
-    let mut fixture = Fixture::new()?;
+fn host_argv(
+    fixture: &mut Fixture,
+    managed: bool,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     // Match the systemd default cwd and default product home, not a workspace.
     fixture.product = fixture.home.join(".plak");
-    success(&fixture.install(false)?);
     std::os::unix::fs::symlink(
         env!("CARGO_BIN_EXE_plak"),
         fixture.home.join(".local/bin/plak"),
     )?;
+    if managed {
+        running_manager(fixture)?;
+    }
+    success(&fixture.install(false)?);
+    let shell = fixture.home.join(".local/bin/login-shell");
+    std::fs::write(
+        &shell,
+        "#!/bin/sh\nprintf '%s' \"$HOME/.local/bin:/fixture/cargo/bin:/fixture/node/bin:/usr/local/bin:/usr/bin:/bin:/fixture/go/bin\"\n",
+    )?;
+    std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755))?;
     std::fs::create_dir_all(&fixture.product)?;
     std::fs::set_permissions(&fixture.product, std::fs::Permissions::from_mode(0o700))?;
     std::fs::write(
@@ -155,19 +162,71 @@ fn host_install_generated_command_serves_from_home_with_a_fake_manager() -> Test
     // including env -i and the installed stable link, without a real manager.
     let start = start
         .replace("%t", &fixture.root.path().to_string_lossy())
-        .replace("${INVOCATION_ID}", "fixture");
-    let argv = shell_words::split(&start)?;
+        .replace("${INVOCATION_ID}", "fixture")
+        .replace("${SHELL}", &shell.to_string_lossy())
+        .replace("${USER}", "fixture")
+        .replace("${LOGNAME}", "fixture");
+    Ok(shell_words::split(&start)?)
+}
+
+#[cfg(feature = "test-hooks")]
+fn running_manager(fixture: &Fixture) -> TestResult {
+    let manager = fixture.home.join(".local/bin/systemctl");
+    let script = std::fs::read_to_string(&manager)?.replace("offline", "running");
+    std::fs::write(manager, script)?;
+    let launcher = fixture.home.join(".local/bin/systemd-run");
+    let log = shell_words::quote(
+        &fixture
+            .root
+            .path()
+            .join("runner-manager.log")
+            .to_string_lossy(),
+    )
+    .into_owned();
+    std::fs::write(
+        &launcher,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > {log}\nenv >> {log}\nwhile [ \"$1\" != -- ]; do\ncase \"$1\" in --setenv=*) export \"${{1#--setenv=}}\";; esac\nshift\ndone\nshift\nsetsid \"$@\" </dev/null >/dev/null 2>&1 &\n"
+        ),
+    )?;
+    std::fs::set_permissions(launcher, std::fs::Permissions::from_mode(0o755))?;
+    Ok(())
+}
+
+#[cfg(feature = "test-hooks")]
+#[test]
+fn host_install_generated_command_serves_from_home_with_a_fake_manager() -> TestResult {
+    host_lifecycle(false)
+}
+
+#[cfg(feature = "test-hooks")]
+#[test]
+fn host_install_running_manager_places_the_daemon_outside_the_host_unit() -> TestResult {
+    host_lifecycle(true)
+}
+
+#[cfg(feature = "test-hooks")]
+fn host_lifecycle(managed: bool) -> TestResult {
+    use super::offline_support::TestChild;
+    use std::process::Stdio;
+    let mut fixture = Fixture::new()?;
+    let argv = host_argv(&mut fixture, managed)?;
     let log = fixture.root.path().join("host.log");
     let mut child = TestChild::spawn(
         Command::new(&argv[0])
             .args(&argv[1..])
             .current_dir(&fixture.home)
             .env("UNRELATED_SECRET", "must-not-be-copied")
+            .env("SHELL", fixture.home.join(".local/bin/login-shell"))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(std::fs::File::create(&log)?),
     );
-    wait_host_log(&log, &mut child, "plak host: serving on ")?;
+    let started = wait_host_log(&log, &mut child, "plak host: serving on ")?;
+    assert!(
+        started.contains("the login shell's PATH (7 entries)"),
+        "{started}"
+    );
     wait_host_log(&fixture.log, &mut child, "--user\nis-system-running\n")?;
     assert!(!std::fs::read_to_string(&fixture.log)?.contains("UNRELATED_SECRET"));
     // Finish the deferred start before testing stop, so teardown cannot race
@@ -187,6 +246,24 @@ fn host_install_generated_command_serves_from_home_with_a_fake_manager() -> Test
             "host exited before daemon readiness"
         );
         std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    if managed {
+        let placed = std::fs::read_to_string(fixture.root.path().join("runner-manager.log"))?;
+        assert!(
+            placed.starts_with("--user\n--collect\n--unit\nplak-runner-"),
+            "{placed}"
+        );
+        for value in [
+            format!("XDG_RUNTIME_DIR={}", fixture.root.path().display()),
+            format!(
+                "DBUS_SESSION_BUS_ADDRESS=unix:path={}/bus",
+                fixture.root.path().display()
+            ),
+            "INVOCATION_ID=fixture".into(),
+        ] {
+            assert!(placed.contains(&value), "{placed}");
+        }
+        assert!(!placed.contains("UNRELATED_SECRET"));
     }
     let pid = rustix::process::Pid::from_raw(i32::try_from(child.id())?).ok_or("invalid pid")?;
     rustix::process::kill_process(pid, rustix::process::Signal::USR1)?;
@@ -246,6 +323,50 @@ fn host_install_dry_run_touches_nothing_and_refuses_unsafe_flags() -> TestResult
 }
 
 #[test]
+fn host_install_refuses_ambiguous_home_and_config_search_paths() -> TestResult {
+    let fixture = Fixture::new()?;
+    for suffix in ["home=bad", "home:bad"] {
+        let output = fixture
+            .command()
+            .env("HOME", fixture.root.path().join(suffix))
+            .args(["--web", "unix:/socket", "--ui", "/ui", "--dry-run"])
+            .output()?;
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("HOME must not contain"));
+    }
+    let output = fixture
+        .command()
+        .env("XDG_CONFIG_HOME", fixture.root.path().join("elsewhere"))
+        .args(["--web", "unix:/socket", "--ui", "/ui", "--dry-run"])
+        .output()?;
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("XDG_CONFIG_HOME must resolve"));
+    assert!(!fixture.unit().exists());
+    assert!(!fixture.log.exists());
+    Ok(())
+}
+
+#[test]
+fn host_install_warns_for_missing_or_non_executable_stable_binary() -> TestResult {
+    let fixture = Fixture::new()?;
+    let missing = fixture.install(true)?;
+    success(&missing);
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("missing or not executable"));
+    let binary = fixture.home.join(".local/bin/plak");
+    std::fs::write(&binary, "#!/bin/sh\nexit 0\n")?;
+    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o644))?;
+    let not_executable = fixture.install(true)?;
+    success(&not_executable);
+    assert!(String::from_utf8_lossy(&not_executable.stderr).contains("missing or not executable"));
+    std::fs::set_permissions(binary, std::fs::Permissions::from_mode(0o755))?;
+    let executable = fixture.install(true)?;
+    success(&executable);
+    assert!(!String::from_utf8_lossy(&executable.stderr).contains("warning:"));
+    assert!(!fixture.unit().exists());
+    Ok(())
+}
+
+#[test]
 fn host_install_reports_manager_failure_without_removing_the_complete_unit() -> TestResult {
     let fixture = Fixture::new()?;
     std::fs::write(
@@ -292,6 +413,10 @@ fn host_install_reloads_only_after_atomic_creation_and_is_idempotent() -> TestRe
     let log = std::fs::read_to_string(&fixture.log)?;
     assert!(log.starts_with("--user\ndaemon-reload\n"), "{log}");
     assert!(!log.contains("UNRELATED_SECRET"));
+    assert!(
+        log.lines().any(|line| line == "PATH=/usr/bin:/bin"),
+        "{log}"
+    );
     assert!(!log.contains("enable"));
     let unit = std::fs::read_to_string(fixture.unit())?;
     assert!(unit.contains(&format!("{}/.local/bin/plak", fixture.home.display())));

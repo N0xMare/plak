@@ -19,7 +19,10 @@ only (chapter 02 §4.6). The required socket and UI paths have no defaults;
 relative paths, TCP listeners and `--dev-login` are refused. This adds no
 configuration keys. The unit uses `$HOME/.local/bin/plak` and pins the
 resolved `PLAK_HOME` selected at installation, independently of the invoking
-shell on later starts. It does not honor XDG_CONFIG_HOME for the unit path.
+shell on later starts. If XDG_CONFIG_HOME is set, it must resolve to
+`$HOME/.config`; a different unit search path is refused. HOME may contain
+neither `=` nor `:`. A missing or non-executable stable link produces a warning,
+not a refusal.
 Dry run prints without writing or contacting a manager. Exact re-installation
 is a no-op; edited, unrelated or symlinked units are never overwritten.
 

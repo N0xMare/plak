@@ -7,6 +7,9 @@ its matching sidecars. The unit always runs the stable `~/.local/bin/plak`
 link, so keep that installation current. Install the web UI build separately;
 its directory must contain `index.html` and `csp.json` as described in
 [the web endpoint spec](../spec/02-plak-product.md#45-the-web-endpoint).
+The installer warns, but does not refuse, if that stable link is missing or
+not executable. HOME cannot contain `=` or `:`. If you set XDG_CONFIG_HOME,
+it must resolve to `$HOME/.config`, where this unit is installed.
 
 Configure `[web] origin` to the exact HTTPS origin Tailscale Serve will publish,
 and `[web] allow` for the permitted tailnet logins. Tag the serving node
@@ -48,12 +51,21 @@ the installer does not request it. If daemon-reload fails, the complete unit
 remains in place; run `systemctl --user daemon-reload` before enabling it.
 
 The host starts with a curated environment, not the installer shell's API keys,
-proxy settings or test variables. Its PATH is
-`$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin`; configure credentials through
+proxy settings or test variables. It preserves systemd's SHELL, USER and
+LOGNAME so the host can ask the login shell for the PATH its session tools
+need, including language-toolchain directories. Its fallback PATH is
+`$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin`. The startup journal line
+reports whether the login shell answered. Configure credentials through
 Plak's normal account commands. The unit pins the selected product home.
+It runs without SSH_AUTH_SOCK and starts in the C locale (LANG and LC_*
+are not inherited). Configure remote runners with IdentityAgent or IdentityFile
+in ssh config rather than relying on an interactive shell's agent socket.
 systemd's runtime directory, bus address and invocation identity let the host
 place its process daemon outside the host's cgroup. Restarting the host hands
 sessions off and preserves promoted daemon jobs.
+For installation's daemon-reload call, systemctl is resolved to an absolute
+executable on your current PATH; the child gets fixed PATH `/usr/bin:/bin`
+and only HOME and the user-manager runtime-directory and bus variables.
 
 ## Upgrade, reload and logs
 

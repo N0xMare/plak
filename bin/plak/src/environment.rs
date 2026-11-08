@@ -23,7 +23,6 @@ pub(crate) fn inherited_home() -> Option<String> {
 /// Only the transport variables needed to reach the caller's user manager.
 pub(crate) fn user_manager_environment() -> Vec<(&'static str, std::ffi::OsString)> {
     [
-        ("PATH", std::env::var_os("PATH")),
         ("XDG_RUNTIME_DIR", std::env::var_os("XDG_RUNTIME_DIR")),
         (
             "DBUS_SESSION_BUS_ADDRESS",
@@ -33,6 +32,10 @@ pub(crate) fn user_manager_environment() -> Vec<(&'static str, std::ffi::OsStrin
     .into_iter()
     .filter_map(|(name, value)| value.map(|value| (name, value)))
     .collect()
+}
+
+pub(crate) fn xdg_config_home() -> Option<std::path::PathBuf> {
+    std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from)
 }
 
 /// The user's login shell, when `SHELL` names an absolute path.

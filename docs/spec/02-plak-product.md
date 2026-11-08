@@ -5038,22 +5038,34 @@ required, absolute UTF-8 paths without control characters; there are no
 socket or UI defaults. Install never accepts or emits `--dev-login` or a
 TCP listener. Other platforms refuse as not yet supported; this command
 does not install a launchd agent. It runs before product-store setup.
+HOME containing `=` or `:` is refused: neither executable assignment parsing
+nor PATH components may be ambiguous. A set XDG_CONFIG_HOME must resolve to
+`$HOME/.config`, or install refuses before writing, because the user manager
+would otherwise search a different unit directory. A missing or non-executable
+stable binary is warned about, without preventing installation or dry run.
 
 The generated unit executes the installed stable `$HOME/.local/bin/plak`
 link, not the invoking executable or a pinned snapshot, from `$HOME`.
 WorkingDirectory remains unset: systemd user services use `$HOME` by default.
 `/usr/bin/env -i` clears ambient variables. Only HOME, PLAK_HOME, a curated
 PATH (`$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin`), the systemd runtime
-directory and user-bus address, and the manager's INVOCATION_ID reach the
-host. Paths and systemd expansions are quoted separately. No API keys,
+directory and user-bus address, and the manager's SHELL, USER, LOGNAME and
+INVOCATION_ID reach the host. SHELL lets the host capture the login shell's
+PATH for session tools; the curated PATH is the fallback, not a replacement
+for that capture. Paths and systemd expansions are quoted separately. No API keys,
 test knobs or caller-shell variables are copied. The manager identity and
 user-bus environment preserve the separate `systemd-run --user` runner
 placement described above; host stop signals never kill that unit's jobs.
 SIGTERM hands off; ExecReload sends SIGUSR1 for UI-only reload.
+SSH_AUTH_SOCK and locale variables are not inherited: the service starts in
+the C locale. Remote runners need IdentityAgent or IdentityFile in ssh config.
 
 Install publishes the complete unit atomically without replacement, then
 runs only `systemctl --user daemon-reload` (bounded at five seconds). It
-never enables or starts the service or runs Tailscale. A generated marker
+resolves the first executable systemctl on the installer's PATH to an absolute
+path, then invokes it with HOME, fixed PATH `/usr/bin:/bin` and only the
+XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS transport variables forwarded.
+It never enables or starts the service or runs Tailscale. A generated marker
 and exact content identify an identical re-install, which is a no-op;
 symlinks, edited generated units and unrelated files are refused unchanged.
 A failed reload leaves the complete unit installed and reports the retry
@@ -5064,15 +5076,18 @@ the `loginctl enable-linger "$USER"` note for running without a login session,
 There is no uninstall command: disable with `systemctl --user disable --now
 plak-host.service`, remove the file, and run `systemctl --user daemon-reload`.
 
+Example generated service section for the paths shown in the golden:
+
 ```ini
 [Service]
-ExecStart=/usr/bin/env -i "HOME=%h" "PLAK_HOME=%h/.plak" "PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin" "XDG_RUNTIME_DIR=%t" "DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus" "INVOCATION_ID=${INVOCATION_ID}" %h/.local/bin/plak host --web unix:%h/.plak/host/web/web.sock --ui %h/.plak/web-ui
+ExecStart=/usr/bin/env -i "HOME=/home/user" "PLAK_HOME=/home/user/.plak" "PATH=/home/user/.local/bin:/usr/local/bin:/usr/bin:/bin" "SHELL=${SHELL}" "USER=${USER}" "LOGNAME=${LOGNAME}" "XDG_RUNTIME_DIR=%t" "DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus" "INVOCATION_ID=${INVOCATION_ID}" "/home/user/.local/bin/plak" "host" "--web" "unix:/home/user/.plak/host/web/web.sock" "--ui" "/home/user/.plak/web-ui"
 ExecReload=/bin/kill -USR1 $MAINPID
 KillMode=mixed
 KillSignal=SIGTERM
 TimeoutStopSec=90
 Restart=on-failure
 UMask=0077
+# WorkingDirectory is unset: the systemd user default is HOME.
 ```
 
 ## 5. The terminal interface

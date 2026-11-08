@@ -400,9 +400,9 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
         ("var_os", (("string", "HOME"),)),
         # The installer contacts only the selected user manager, never copies
         # the shell's environment into the installed host unit.
-        ("var_os", (("string", "PATH"),)),
         ("var_os", (("string", "XDG_RUNTIME_DIR"),)),
         ("var_os", (("string", "DBUS_SESSION_BUS_ADDRESS"),)),
+        ("var_os", (("string", "XDG_CONFIG_HOME"),)),
         ("var_os", (("string", "SHELL"),)),
         ("var_os", (("string", "PLAK_RELOAD_APPLY_ORCHESTRATION"),)),
     ],
@@ -542,7 +542,7 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
 ] = {
     # Explicit user-unit publication reloads definitions, never starts a unit.
     ("plak", "src/commands/host_install.rs"): [
-        ("std::process::Command", (("string", "systemctl"),)),
+        ("std::process::Command", (("identifier", "manager"),)),
     ],
     # A separate process group survives host loss; the daemon clears its environment.
     ("plak", "src/commands/runner/local/start.rs"): [

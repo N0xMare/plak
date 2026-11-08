@@ -29,6 +29,14 @@ pub(crate) fn run(args: &HostInstall, output: &mut dyn io::Write) -> CliResult<P
     let home = Path::new(&home);
     let paths = PlakPaths::from_env_in(None).map_err(CliFailure::new)?;
     let unit = render(home, paths.home(), args)?;
+    validate_config_home(home, crate::environment::xdg_config_home().as_deref())?;
+    let executable = home.join(".local/bin/plak");
+    if !is_executable(&executable) {
+        eprintln!(
+            "warning: {} is missing or not executable; install plak before starting the service",
+            executable.display()
+        );
+    }
     if args.dry_run {
         output.write_all(unit.as_bytes()).map_err(failed)?;
         return Ok(ProcessOutcome::Success);
@@ -94,6 +102,11 @@ fn quote(value: &str) -> String {
 
 fn render(home: &Path, product_home: &Path, args: &HostInstall) -> CliResult<String> {
     let home = path_text(home, "HOME")?;
+    if home.contains('=') || home.contains(':') {
+        return Err(CliFailure::new(
+            "HOME must not contain '=' or ':' for host service installation",
+        ));
+    }
     let product_home = path_text(product_home, "PLAK_HOME")?;
     let socket = args.web.strip_prefix("unix:").ok_or_else(|| {
         CliFailure::new("plak host install requires --web unix:<absolute socket>")
@@ -127,28 +140,38 @@ fn render(home: &Path, product_home: &Path, args: &HostInstall) -> CliResult<Str
         .collect::<Vec<_>>()
         .join(" ");
     Ok(format!(
-        "{MARKER}[Unit]\nDescription=Plak host\n\n[Service]\nExecStart=/usr/bin/env -i {environment} \"XDG_RUNTIME_DIR=%t\" \"DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus\" \"INVOCATION_ID=${{INVOCATION_ID}}\" {command}\nExecReload=/bin/kill -USR1 $MAINPID\nKillMode=mixed\nKillSignal=SIGTERM\nTimeoutStopSec=90\nRestart=on-failure\nUMask=0077\n# WorkingDirectory is unset: the systemd user default is HOME.\n\n[Install]\nWantedBy=default.target\n"
+        "{MARKER}[Unit]\nDescription=Plak host\n\n[Service]\nExecStart=/usr/bin/env -i {environment} \"SHELL=${{SHELL}}\" \"USER=${{USER}}\" \"LOGNAME=${{LOGNAME}}\" \"XDG_RUNTIME_DIR=%t\" \"DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus\" \"INVOCATION_ID=${{INVOCATION_ID}}\" {command}\nExecReload=/bin/kill -USR1 $MAINPID\nKillMode=mixed\nKillSignal=SIGTERM\nTimeoutStopSec=90\nRestart=on-failure\nUMask=0077\n# WorkingDirectory is unset: the systemd user default is HOME.\n\n[Install]\nWantedBy=default.target\n"
     ))
 }
 
 fn install_file(path: &Path, unit: &str) -> io::Result<bool> {
+    if matching_unit(path, unit)? {
+        return Ok(false);
+    }
+    publish_unit(path, unit)?;
+    Ok(true)
+}
+
+fn matching_unit(path: &Path, unit: &str) -> io::Result<bool> {
     match std::fs::symlink_metadata(path) {
         Ok(metadata) => {
-            if metadata.is_file()
-                && metadata.len() == unit.len() as u64
-                && unit.starts_with(MARKER)
-                && std::fs::read(path)? == unit.as_bytes()
-            {
-                return Ok(false);
+            if metadata.is_file() && metadata.len() == unit.len() as u64 {
+                let existing = std::fs::read(path)?;
+                if existing.starts_with(MARKER.as_bytes()) && existing == unit.as_bytes() {
+                    return Ok(true);
+                }
             }
-            return Err(io::Error::other(format!(
+            Err(io::Error::other(format!(
                 "refusing to overwrite {}: not the exact generated unit; disable and remove it manually first",
                 path.display()
-            )));
+            )))
         }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
     }
+}
+
+fn publish_unit(path: &Path, unit: &str) -> io::Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| io::Error::other("unit has no directory"))?;
@@ -163,12 +186,42 @@ fn install_file(path: &Path, unit: &str) -> io::Result<bool> {
         .persist_noclobber(path)
         .map_err(|error| error.error)?;
     std::fs::File::open(parent)?.sync_all()?;
-    Ok(true)
+    Ok(())
+}
+
+fn validate_config_home(home: &Path, configured: Option<&Path>) -> CliResult<()> {
+    let expected = home.join(".config");
+    if let Some(configured) = configured
+        && configured != expected
+        && !configured
+            .canonicalize()
+            .ok()
+            .zip(expected.canonicalize().ok())
+            .is_some_and(|(configured, expected)| configured == expected)
+    {
+        return Err(CliFailure::new(
+            "XDG_CONFIG_HOME must resolve to $HOME/.config so systemd can find plak-host.service",
+        ));
+    }
+    Ok(())
+}
+
+fn is_executable(path: &Path) -> bool {
+    std::fs::metadata(path)
+        .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+}
+
+fn resolve_manager() -> CliResult<std::path::PathBuf> {
+    let path = crate::environment::inherited_path().unwrap_or_else(|| "/usr/bin:/bin".into());
+    std::env::split_paths(&path).map(|directory| directory.join("systemctl"))
+        .find(|path| is_executable(path)).and_then(|path| path.canonicalize().ok())
+        .ok_or_else(|| CliFailure::new("unit written, but systemctl was not found on PATH; install it and run systemctl --user daemon-reload"))
 }
 
 fn reload_manager(home: &Path) -> CliResult<()> {
     use std::os::unix::process::CommandExt as _;
-    let mut command = std::process::Command::new("systemctl");
+    let manager = resolve_manager()?;
+    let mut command = std::process::Command::new(manager);
     command
         .args(["--user", "daemon-reload"])
         .env_clear()
