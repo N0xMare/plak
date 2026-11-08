@@ -112,8 +112,12 @@ A retired package stops at its last published version; that version is not yanke
 `plakd-wire-types` is the product's serialized extension vocabulary over
 `plakous-host-protocol`, not a command-layer SDK. It has no hosted, store,
 configuration or runtime dependency. Local appearance wrappers and executable
-reload probes remain in the product. Extraction preserves protocol 5 frames,
-the schema and serialized reload values byte-for-byte; it adds no version cut.
+reload probes remain in the product. For a given exact client protocol version
+(currently 6), DTO extraction preserves frame bytes, schema and serialized
+reload values byte-for-byte; the move itself adds no version cut.
+The external `tests/fixtures/host-protocol-consumer` compile fixture pins
+non-`Never` host payloads and an extension-free `Core` consumer with explicit
+generic envelopes. It verifies accessibility, not an additional support claim.
 
 **Repository-only (3)**
 

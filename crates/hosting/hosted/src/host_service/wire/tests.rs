@@ -485,7 +485,7 @@ fn an_attach_is_answered_before_its_events_and_numbers_them_from_one() {
     );
 }
 
-fn welcome() -> Welcome {
+fn welcome() -> Welcome<plakous_host_protocol::Core> {
     session_welcome("b".into(), 1, "s1".into(), root())
 }
 
@@ -1714,7 +1714,7 @@ fn a_lost_transcript_resyncs_its_holders_once_per_loss() {
 
 /// What one `quit` intent on the root attachment answers, and whether it
 /// asked the session to quit.
-fn quit_on_root(leave: Leave) -> (Option<Outcome>, bool) {
+fn quit_on_root(leave: Leave) -> (Option<Outcome<plakous_host_protocol::Core>>, bool) {
     let (actions, intents) = plakous_host_protocol::intent_channel::<plakous_host_protocol::Core>();
     let service = HostService::new(actions.clone(), root(), ATTACHMENT_CAPACITY)
         .with_nodes(std::sync::Arc::new(TreeNodes::new(root().tree_id)));

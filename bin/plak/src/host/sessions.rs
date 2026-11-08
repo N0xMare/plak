@@ -326,6 +326,16 @@ const fn environment_of(held_elsewhere: bool) -> SessionEnvironment {
 }
 
 impl HostSessions<PlakExtension> for ProductSessions {
+    fn host_read_limits(&self) -> plakous_hosted::host_service::wire::HostReadLimits {
+        super::host_read_limits()
+    }
+    fn welcome_extension(
+        &self,
+        _: &plakous_hosted::host_service::wire::HostPrincipal,
+        _: &plakous_hosted::host_service::wire::HostReadLimits,
+    ) -> <PlakExtension as plakous_host_protocol::ProtocolExtension>::WelcomeExtension {
+        None
+    }
     fn contains(&self, session: &str) -> Result<bool, String> {
         self.with_product(|store| store.session_exists(session))
     }

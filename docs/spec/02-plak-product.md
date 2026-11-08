@@ -3962,7 +3962,25 @@ explicit null. There is no negotiation or fallback to client 5. Product work
 is bounded and polled beside ordinary frames, so a pending read does not hold
 the frame loop or create a session worker. Connection departure cancels its
 waiting reads. Console admission can refuse `capability_disabled` or
-`rate_limited {retry_after_ms}` without closing the connection.
+`rate_limited {retry_after_ms}` without closing the connection. A request
+deadline answers `deadline_exceeded`, with no session, selector or detail:
+"the request took too long; retry". Clients never retry automatically. The
+expired future is removed and dropped, its permits released, and its late
+completion cannot publish another answer.
+
+The multi-session acceptor mints the verified socket uid or admitted web
+login before the handshake. Welcome and connection require that same
+principal; neither face nor a later setter supplies authority. One immutable
+product limits value feeds welcome and admission: 64 KiB before product
+payload decoding, 2 in flight per connection, 4 per principal and 32 per host,
+a 10 s whole-request deadline, and a principal-wide 12 messages/s bucket with
+burst 12. Console frames are classified before the web transport's separate
+legacy session-message close bucket. Capacity or rate refusal does not close
+the connection. Reconnect does not replenish the principal's burst. Completed
+or departing reads release both aggregate permits. Futures are polled only
+when enqueued or woken, with a real wake notification selected by both
+acceptors; the nearest read deadline is also selected. Request ids are unique
+across all pending host and session operations on a connection.
 
 Wire v2 is the framed protocol every frontend will speak to a host; it
 replaces the JSONL host of §4.3, which stays byte-identical until it is
@@ -4007,7 +4025,9 @@ verdicts) are addressed, the session profile and workspace chrome states.
   validates the reassembled snapshot as the host does before it emits one.
 - **Handshake.** The client's first frame is `hello` (protocol version,
   binary id and capabilities). The host answers `welcome` (version, binary id, host
-  generation, capabilities, and, as `session`, the session it serves: its
+  generation, capabilities, the required principal-specific `extension`
+  (explicit null for an extension-free or single-session host), and, as
+  `session`, the session it serves: its
   id, its tree id and its root node's address, which an attach to the root
   names; the tree id is the session's durable tree, not always the session
   id; a host of many sessions names none, below) or

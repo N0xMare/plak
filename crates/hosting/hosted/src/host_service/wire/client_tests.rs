@@ -129,7 +129,7 @@ impl Served {
 fn drive(
     connection: &mut WireConnection<Core, UnixStream>,
     lines: &Lines,
-    welcome: Welcome,
+    welcome: Welcome<Core>,
     out: &mut UnixStream,
     stop: &AtomicBool,
     paused: &AtomicBool,

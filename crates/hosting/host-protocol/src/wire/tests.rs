@@ -13,7 +13,7 @@ fn hello(proto: u32) -> Hello {
     }
 }
 
-fn welcome() -> Welcome {
+fn welcome() -> Welcome<Core> {
     Welcome {
         extension: None,
         proto: WIRE_VERSION,

@@ -36,6 +36,18 @@ pub(crate) const HANDOFF_DEADLINE: Duration = Duration::from_secs(60);
 /// stop: the socket, the lock and the runtime.
 const STOP_MARGIN: Duration = Duration::from_secs(5);
 
+fn host_read_limits() -> plakous_hosted::host_service::wire::HostReadLimits {
+    plakous_hosted::host_service::wire::HostReadLimits {
+        request_bytes: 64 * 1024,
+        per_connection: 2,
+        per_principal: 4,
+        host: 32,
+        deadline: Duration::from_secs(10),
+        messages_per_second: 12,
+        burst: 12,
+    }
+}
+
 fn startup_runtime() -> CliResult<(tokio::runtime::Runtime, tokio::signal::unix::Signal)> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)

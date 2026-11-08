@@ -189,6 +189,24 @@ impl Script {
 }
 
 impl HostSessions<Core> for Fake {
+    fn host_read_limits(&self) -> HostReadLimits {
+        HostReadLimits {
+            request_bytes: 64 * 1024,
+            per_connection: 2,
+            per_principal: 4,
+            host: 32,
+            deadline: Duration::from_secs(10),
+            messages_per_second: 12,
+            burst: 12,
+        }
+    }
+    fn welcome_extension(
+        &self,
+        _: &HostPrincipal,
+        _: &HostReadLimits,
+    ) -> Option<plakous_host_protocol::Never> {
+        None
+    }
     fn contains(&self, session: &str) -> Result<bool, String> {
         Ok(self
             .0
@@ -509,11 +527,21 @@ fn host_requests_reopen_only_after_actor_release_and_move_every_viewer() {
     for rebind in [false, true] {
         let (host, fake) = host(&["s1"]);
         let out = Out::default();
-        let mut connection = host.connect(out.clone(), Face::Remote, || false);
+        let mut connection = host.connect(
+            out.clone(),
+            Face::Remote,
+            HostPrincipal::Socket(501),
+            || false,
+        );
         request(&mut connection, 1, Op::Attach { node: node("s1") });
         let attachment = attached(&out.take(), 1);
         let other_out = Out::default();
-        let mut other = host.connect(other_out.clone(), Face::Remote, || false);
+        let mut other = host.connect(
+            other_out.clone(),
+            Face::Remote,
+            HostPrincipal::Socket(501),
+            || false,
+        );
         request(&mut other, 1, Op::Attach { node: node("s1") });
         let other_attachment = attached(&other_out.take(), 1);
         let op = if rebind {
@@ -557,7 +585,12 @@ fn host_requests_reopen_only_after_actor_release_and_move_every_viewer() {
 fn a_busy_actor_refuses_reopen_without_stopping_or_redispatching() {
     let (host, fake) = host(&["s1"]);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     let attachment = attached(&out.take(), 1);
     prompt(&mut connection, 2, attachment, "running");
@@ -819,7 +852,12 @@ fn directory_rows_count_live_and_held_children_without_counting_the_root() {
         .unwrap();
     let (host, _) = host(&[&id]);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 1, Op::Attach { node: node(&id) });
     attached(&out.take(), 1);
     let row = row_of(&host, &id);
@@ -874,7 +912,7 @@ fn request<W: Write + Clone>(
     connection.frame(Ok(line)).unwrap()
 }
 
-fn outcome(frames: &[HostFrame<Core>], id: RequestId) -> Outcome {
+fn outcome(frames: &[HostFrame<Core>], id: RequestId) -> Outcome<Core> {
     frames
         .iter()
         .find_map(|frame| match frame {
@@ -899,9 +937,14 @@ fn attached(frames: &[HostFrame<Core>], id: RequestId) -> AttachmentId {
 #[test]
 fn the_welcome_names_no_session_and_nothing_is_attached_by_default() {
     let (host, fake) = host(&["s1"]);
-    assert_eq!(host.welcome().session, None);
+    assert_eq!(host.welcome_for(&HostPrincipal::Socket(501)).session, None);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(
         &mut connection,
         1,
@@ -927,7 +970,12 @@ fn the_welcome_names_no_session_and_nothing_is_attached_by_default() {
 fn picker_progress_is_scoped_and_precedes_exactly_one_final_without_opening_a_session() {
     let (host, fake) = host(&["s1"]);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 7, Op::SessionOptions { workspace: None });
     let frames = out.take();
     assert_eq!(frames.len(), 3);
@@ -972,8 +1020,18 @@ fn directory_filters_precede_the_cap_and_watch_visibility_has_separate_caches() 
     fake.0.row_limit.store(1, Ordering::SeqCst);
     let active_out = Out::default();
     let all_out = Out::default();
-    let mut active = host.connect(active_out.clone(), Face::Remote, || false);
-    let mut all = host.connect(all_out.clone(), Face::Remote, || false);
+    let mut active = host.connect(
+        active_out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
+    let mut all = host.connect(
+        all_out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(
         &mut active,
         1,
@@ -1016,7 +1074,12 @@ fn an_archived_attach_serves_persisted_facts_without_a_runtime_and_refuses_every
     let (host, fake) = host(&["s1"]);
     fake.0.rows.lock().unwrap()[0].archived = true;
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     let attachment = attached(&out.take(), 1);
     assert_eq!(fake.0.opens.load(Ordering::SeqCst), 0);
@@ -1083,7 +1146,12 @@ fn an_archived_attach_serves_persisted_facts_without_a_runtime_and_refuses_every
 fn an_attach_opens_a_dormant_session_once_and_routes_by_tree() {
     let (host, fake) = host(&["s1", "s2"]);
     let out = Out::default();
-    let mut first = host.connect(out.clone(), Face::Remote, || false);
+    let mut first = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut first, 1, Op::Attach { node: node("s1") });
     request(&mut first, 2, Op::Attach { node: node("s1") });
     let frames = out.take();
@@ -1091,7 +1159,12 @@ fn an_attach_opens_a_dormant_session_once_and_routes_by_tree() {
     attached(&frames, 2);
     assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
     let other = Out::default();
-    let mut second = host.connect(other.clone(), Face::Remote, || false);
+    let mut second = host.connect(
+        other.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut second, 1, Op::Attach { node: node("s1") });
     attached(&other.take(), 1);
     assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
@@ -1138,7 +1211,12 @@ fn an_attach_goes_to_the_resident_session_of_its_tree() {
     drop(hold);
     assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 1, Op::Attach { node: node("tree") });
     attached(&out.take(), 1);
     assert_eq!(
@@ -1171,7 +1249,12 @@ fn an_attach_whose_session_does_not_open_is_refused_as_the_stores_say() {
         .unwrap()
         .insert("s1".into(), held.clone());
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     assert_eq!(outcome(&out.take(), 1), Outcome::Refused(held));
     assert!(connection.node.is_none());
@@ -1184,7 +1267,12 @@ fn an_attach_whose_session_does_not_open_is_refused_as_the_stores_say() {
 fn a_detach_lets_the_session_go() {
     let (host, _) = host(&["s1"]);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     let attachment = attached(&out.take(), 1);
     assert!(connection.node.is_some());
@@ -1204,7 +1292,12 @@ fn a_detach_lets_the_session_go() {
 fn a_connection_holds_at_most_one_host_attachment() {
     let (host, _) = host(&["s1"]);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(
         &mut connection,
         1,
@@ -1277,7 +1370,12 @@ fn directory(frames: &[HostFrame<Core>]) -> Vec<(u64, bool, Vec<SessionRow>)> {
 fn the_directory_sends_a_snapshot_then_the_rows_that_changed() {
     let (host, fake) = host(&["s1", "s2"]);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(
         &mut connection,
         1,
@@ -1295,7 +1393,12 @@ fn the_directory_sends_a_snapshot_then_the_rows_that_changed() {
     connection.flush().unwrap();
     assert_eq!(directory(&out.take()), Vec::new());
     let other = Out::default();
-    let mut worker = host.connect(other.clone(), Face::Remote, || false);
+    let mut worker = host.connect(
+        other.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut worker, 1, Op::Attach { node: node("s1") });
     let attachment = attached(&other.take(), 1);
     // The attach changed the host: the next flush reads again.
@@ -1353,7 +1456,12 @@ fn the_directory_sends_a_snapshot_then_the_rows_that_changed() {
 fn an_attachment_whose_session_ended_is_detached() {
     let (host, fake) = host(&["s1"]);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     let attachment = attached(&out.take(), 1);
     // The session ends on its own: its worker stops and its observations
@@ -1386,7 +1494,12 @@ fn an_attachment_whose_session_ended_is_detached() {
 fn new_session_answers_created_and_a_replay_answers_the_same() {
     let (host, fake) = host(&[]);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     let new = |id| Op::NewSession {
         runner: plakous_host_protocol::wire::RunnerLabel::local(),
         profile: None,
@@ -1415,7 +1528,12 @@ fn new_session_answers_created_and_a_replay_answers_the_same() {
 fn profile_creation_refuses_both_advanced_overrides_before_product_creation() {
     let (host, fake) = host(&[]);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     for model in [false, true] {
         request(
             &mut connection,
@@ -1449,8 +1567,18 @@ fn profile_creation_refuses_both_advanced_overrides_before_product_creation() {
 fn release_session_detaches_every_attachment_and_releases() {
     let (host, fake) = host(&["s1", "s2"]);
     let (one, two) = (Out::default(), Out::default());
-    let mut asker = host.connect(one.clone(), Face::Remote, || false);
-    let mut other = host.connect(two.clone(), Face::Remote, || false);
+    let mut asker = host.connect(
+        one.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
+    let mut other = host.connect(
+        two.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut asker, 1, Op::Attach { node: node("s1") });
     let mine = attached(&one.take(), 1);
     request(&mut other, 1, Op::Attach { node: node("s1") });
@@ -1519,7 +1647,12 @@ fn release_session_answers_resident_and_withdraws_when_nothing_releases() {
     fake.0.stay.store(true, Ordering::SeqCst);
     let host = SessionHost::with_release_wait(fake.clone(), Duration::from_millis(200));
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     attached(&out.take(), 1);
     request(
@@ -1567,11 +1700,21 @@ fn release_s1(connection: &mut HostConnection<Core, Out>, id: RequestId) {
 fn release_session_names_an_attachment_or_a_process_that_keeps_it() {
     let (host, _fake) = staying_host();
     let other = Out::default();
-    let mut attached_elsewhere = host.connect(other.clone(), Face::Remote, || false);
+    let mut attached_elsewhere = host.connect(
+        other.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut attached_elsewhere, 1, Op::Attach { node: node("s1") });
     attached(&other.take(), 1);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     release_s1(&mut connection, 1);
     assert_eq!(
         outcome(&out.take(), 1),
@@ -1604,7 +1747,12 @@ fn release_session_names_an_attachment_or_a_process_that_keeps_it() {
 fn an_attach_after_a_withdrawn_release_stays_attached() {
     let (host, _fake) = staying_host();
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     attached(&out.take(), 1);
     release_s1(&mut connection, 2);
@@ -1633,7 +1781,12 @@ fn an_attach_after_a_withdrawn_release_stays_attached() {
 fn release_session_of_a_releasing_session_answers_once_it_released() {
     let (host, fake) = host(&["s1"]);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     attached(&out.take(), 1);
     connection.leave();
@@ -1643,7 +1796,12 @@ fn release_session_of_a_releasing_session_answers_once_it_released() {
         let host = Arc::clone(&host);
         std::thread::spawn(move || {
             let out = Out::default();
-            let mut connection = host.connect(out.clone(), Face::Remote, || false);
+            let mut connection = host.connect(
+                out.clone(),
+                Face::Remote,
+                HostPrincipal::Socket(501),
+                || false,
+            );
             release_s1(&mut connection, 1);
             outcome(&out.take(), 1)
         })
@@ -1654,7 +1812,12 @@ fn release_session_of_a_releasing_session_answers_once_it_released() {
         std::thread::sleep(Duration::from_millis(5));
     }
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     release_s1(&mut connection, 2);
     assert_eq!(outcome(&out.take(), 2), Outcome::Ok(Answer::Released));
     assert!(
@@ -1674,7 +1837,12 @@ fn a_leaving_client_detaches_everything() {
     ] {
         let (host, _) = host(&["s1"]);
         let out = Out::default();
-        let mut connection = host.connect(out.clone(), Face::Remote, || false);
+        let mut connection = host.connect(
+            out.clone(),
+            Face::Remote,
+            HostPrincipal::Socket(501),
+            || false,
+        );
         request(&mut connection, 1, Op::Attach { node: node("s1") });
         request(
             &mut connection,
@@ -1696,7 +1864,12 @@ fn a_leaving_client_detaches_everything() {
 fn hand_off_all_releases_every_resident_session() {
     let (host, fake) = host(&["s1", "s2"]);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     connection.leave();
     let _dormant = host.slot("s2");
@@ -1742,7 +1915,12 @@ fn row_of(host: &SessionHost<Core>, session: &str) -> SessionRow {
 fn an_attach_in_the_served_tree_changes_nothing_on_the_host() {
     let (host, fake) = host(&["s1"]);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     attached(&out.take(), 1);
     let mut changes = host.changes();
@@ -1764,7 +1942,12 @@ fn an_attach_in_the_served_tree_changes_nothing_on_the_host() {
 fn a_refused_cross_tree_attach_keeps_the_attachment() {
     let (host, _) = host(&["s1", "s2"]);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     let attachment = attached(&out.take(), 1);
     // A node of s2's tree that is not its root: no such child.
@@ -1798,7 +1981,12 @@ fn a_refused_cross_tree_attach_keeps_the_attachment() {
 fn an_attachment_its_service_ended_lets_the_session_go() {
     let (host, fake) = host(&["s1"]);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     let attachment = attached(&out.take(), 1);
     let session = Arc::clone(&connection.node.as_ref().unwrap().session);
@@ -1833,7 +2021,12 @@ fn an_attachment_its_service_ended_lets_the_session_go() {
 fn a_busy_session_awaiting_an_approval_independently_needs_an_operator() {
     let (host, fake) = host(&["s1"]);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     let attachment = attached(&out.take(), 1);
     prompt(&mut connection, 2, attachment, "approve");
@@ -1880,7 +2073,12 @@ fn a_busy_session_awaiting_an_approval_independently_needs_an_operator() {
 fn stop_session_stops_the_attached_session() {
     let (host, fake) = host(&["s1", "s2"]);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     let stop = |session: &str| Op::StopSession {
         session: session.into(),
     };
@@ -1917,7 +2115,7 @@ fn stop_session_stops_the_attached_session() {
 }
 
 /// Flushes `connection` until request `id` is answered, within 10 s.
-fn answer(connection: &mut HostConnection<Core, Out>, out: &Out, id: RequestId) -> Outcome {
+fn answer(connection: &mut HostConnection<Core, Out>, out: &Out, id: RequestId) -> Outcome<Core> {
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut frames = Vec::new();
     loop {
@@ -1946,7 +2144,12 @@ fn a_stop_is_answered_after_its_attachment_ends() {
         // The stop settles only after the attachment ended.
         fake.0.hold_stops.store(true, Ordering::SeqCst);
         let out = Out::default();
-        let mut connection = host.connect(out.clone(), Face::Remote, || false);
+        let mut connection = host.connect(
+            out.clone(),
+            Face::Remote,
+            HostPrincipal::Socket(501),
+            || false,
+        );
         request(&mut connection, 1, Op::Attach { node: node("s1") });
         let attachment = attached(&out.take(), 1);
         request(
@@ -1981,7 +2184,12 @@ fn a_draining_stops_settle_wakes_the_connection() {
     let (host, fake) = host(&["s1"]);
     fake.0.hold_stops.store(true, Ordering::SeqCst);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     let attachment = attached(&out.take(), 1);
     request(
@@ -2027,7 +2235,12 @@ fn a_draining_stop_is_the_connections_one_in_flight() {
     let (host, fake) = host(&["s1"]);
     fake.0.hold_stops.store(true, Ordering::SeqCst);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     let stop = Op::StopSession {
         session: "s1".into(),
     };
@@ -2060,7 +2273,12 @@ fn a_leaving_client_lets_a_draining_stops_session_go() {
     fake.0.hold_stops.store(true, Ordering::SeqCst);
     let host = SessionHost::with_release_wait(fake.clone(), Duration::from_millis(500));
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     let attachment = attached(&out.take(), 1);
     request(
@@ -2073,7 +2291,12 @@ fn a_leaving_client_lets_a_draining_stops_session_go() {
     request(&mut connection, 3, Op::Detach { attachment });
     connection.leave();
     let other = Out::default();
-    let mut releasing = host.connect(other.clone(), Face::Remote, || false);
+    let mut releasing = host.connect(
+        other.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     release_s1(&mut releasing, 1);
     assert_eq!(outcome(&other.take(), 1), Outcome::Ok(Answer::Released));
 }
@@ -2084,7 +2307,12 @@ fn a_leaving_client_lets_a_draining_stops_session_go() {
 fn a_pending_session_request_is_not_attached_once_its_attachment_ends() {
     let (host, _fake) = host(&["s1"]);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     let attachment = attached(&out.take(), 1);
     request(
@@ -2116,7 +2344,12 @@ fn a_resident_sessions_row_names_no_holder_elsewhere() {
         });
     assert!(row_of(&host, "s1").hosted_elsewhere.is_some());
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     attached(&out.take(), 1);
     let row = row_of(&host, "s1");
@@ -2136,7 +2369,12 @@ fn a_rows_residency_follows_the_open_and_the_release() {
         let host = Arc::clone(&host);
         std::thread::spawn(move || {
             let out = Out::default();
-            let mut connection = host.connect(out.clone(), Face::Remote, || false);
+            let mut connection = host.connect(
+                out.clone(),
+                Face::Remote,
+                HostPrincipal::Socket(501),
+                || false,
+            );
             request(&mut connection, 1, Op::Attach { node: node("s1") });
             attached(&out.take(), 1);
             connection.leave();
@@ -2157,7 +2395,12 @@ fn a_rows_residency_follows_the_open_and_the_release() {
         let host = Arc::clone(&host);
         std::thread::spawn(move || {
             let out = Out::default();
-            let mut connection = host.connect(out.clone(), Face::Remote, || false);
+            let mut connection = host.connect(
+                out.clone(),
+                Face::Remote,
+                HostPrincipal::Socket(501),
+                || false,
+            );
             request(
                 &mut connection,
                 1,
@@ -2198,7 +2441,12 @@ fn a_rows_residency_follows_the_open_and_the_release() {
 fn a_blob_reaches_the_session_with_its_intent() {
     let (host, fake) = host(&["s1"]);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     let attachment = attached(&out.take(), 1);
     let mut intent = SessionIntent::<Core>::Prompt(plakous_host_protocol::Draft {
@@ -2248,7 +2496,12 @@ fn a_closed_host_opens_and_creates_nothing() {
     let dormant = host.slot("s1");
     assert_eq!(host.hand_off_all(Duration::from_secs(1)), Vec::new());
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     request(
         &mut connection,
@@ -2307,7 +2560,12 @@ struct Switched {
 fn switched() -> Switched {
     let (host, fake) = host(&["s1", "s9"]);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     attached(&out.take(), 1);
     let slot = host.slot("s1");
@@ -2483,7 +2741,12 @@ fn gated_open() -> (
         let host = Arc::clone(&host);
         std::thread::spawn(move || {
             let out = Out::default();
-            let mut connection = host.connect(out.clone(), Face::Remote, || false);
+            let mut connection = host.connect(
+                out.clone(),
+                Face::Remote,
+                HostPrincipal::Socket(501),
+                || false,
+            );
             request(&mut connection, 1, Op::Attach { node: node("s1") });
             let deadline = Instant::now() + Duration::from_secs(10);
             while connection.node.is_some() {
@@ -2517,7 +2780,12 @@ fn release_of_an_opening_session_waits_then_releases_it() {
         let entered = Arc::clone(&entered);
         std::thread::spawn(move || {
             let out = Out::default();
-            let mut connection = host.connect(out.clone(), Face::Remote, || false);
+            let mut connection = host.connect(
+                out.clone(),
+                Face::Remote,
+                HostPrincipal::Socket(501),
+                || false,
+            );
             entered.store(true, Ordering::SeqCst);
             release_session(&mut connection, 1, "s1");
             let answer = outcome(&out.take(), 1);
@@ -2570,7 +2838,12 @@ fn release_of_an_open_past_the_join_answers_resident() {
         let host = Arc::clone(&host);
         std::thread::spawn(move || {
             let out = Out::default();
-            let mut connection = host.connect(out.clone(), Face::Remote, || false);
+            let mut connection = host.connect(
+                out.clone(),
+                Face::Remote,
+                HostPrincipal::Socket(501),
+                || false,
+            );
             request(&mut connection, 1, Op::Attach { node: node("s1") });
             connection.leave();
         })
@@ -2585,7 +2858,12 @@ fn release_of_an_open_past_the_join_answers_resident() {
         let host = Arc::clone(&host);
         std::thread::spawn(move || {
             let out = Out::default();
-            let mut connection = host.connect(out.clone(), Face::Remote, || false);
+            let mut connection = host.connect(
+                out.clone(),
+                Face::Remote,
+                HostPrincipal::Socket(501),
+                || false,
+            );
             let started = Instant::now();
             release_session(&mut connection, 1, "s1");
             let answer = (outcome(&out.take(), 1), started.elapsed());
@@ -2621,7 +2899,12 @@ fn a_release_withdrawn_before_the_actors_mark_stays_resident() {
     *fake.0.rows.lock().unwrap() = vec![row("s1", 0)];
     let host = SessionHost::with_release_wait(fake.clone(), Duration::from_secs(1));
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     attached(&out.take(), 1);
     let count = fake.0.counts.lock().unwrap().get("s1").unwrap().clone();
@@ -2642,7 +2925,12 @@ fn a_release_withdrawn_before_the_actors_mark_stays_resident() {
         },
     );
     let out = Out::default();
-    let mut releasing = host.connect(out.clone(), Face::Remote, || false);
+    let mut releasing = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     release_session(&mut releasing, 1, "s1");
     assert_eq!(
         outcome(&out.take(), 1),
@@ -2702,7 +2990,12 @@ fn a_lost_output_during_release_withdraws_the_request() {
         bytes: Arc::default(),
         fail: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     };
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     request(
         &mut connection,

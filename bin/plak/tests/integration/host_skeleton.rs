@@ -217,7 +217,7 @@ impl Client {
 
     /// Sends request `id` and returns its outcome, skipping what comes
     /// before it.
-    fn request(&mut self, id: RequestId, op: Op<Core>) -> Outcome {
+    fn request(&mut self, id: RequestId, op: Op<Core>) -> Outcome<Core> {
         self.send(&ClientFrame::Request { id, op });
         loop {
             if let HostFrame::Response {
@@ -1295,7 +1295,7 @@ fn concurrent_replays_of_one_request_make_one_session() {
     let Some(fixture) = fixture() else { return };
     let host = start(&fixture);
     let socket = host.socket.clone();
-    let answers: Vec<Outcome> = std::thread::scope(|scope| {
+    let answers: Vec<Outcome<Core>> = std::thread::scope(|scope| {
         let replays: Vec<_> = (0..8)
             .map(|_| {
                 scope.spawn(|| {

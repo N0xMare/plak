@@ -1830,13 +1830,20 @@ Client protocol 6 carries attachment-free product reads outside session
 admission. Their context retains the socket's verified uid or the web gate's
 admitted login, a connection lifetime and the host generation. None is a
 client field; `Face::Remote` does not distinguish those authorities. A read
-without a transport-minted principal is refused before product work starts.
+cannot be constructed without its transport-minted principal. The acceptor
+creates it before the handshake; the welcome and connection take that same
+value. There is no later identity setter or authority inferred from face.
 Verified same-user socket principals are trusted for console access independent
 of web console switches; web principals remain gated by those switches.
 This does not make a socket a local execution face: local-only exec and reload
 intents are still refused when its face is remote.
-Product read futures are bounded per connection and dropped when it leaves;
-they cannot acquire a runtime merely by passing the wire routing gate.
+Product read futures hold both principal and host permits, in addition to the
+connection bound, and release them on completion, deadline or departure.
+Principal-wide rate admission precedes payload decoding and is independent
+of the web session-message close bucket; reconnect cannot refresh its burst.
+Deadlines drop the future and reject late completion, with no automatic retry.
+The same immutable product limits are supplied to welcome and enforcement.
+No read can acquire a runtime merely by passing the wire routing gate.
 
 `plak host` (chapter 02 §4.6) listens on `host/run/<state key>.sock` under
 the product home. Its authority is exactly the user's own:

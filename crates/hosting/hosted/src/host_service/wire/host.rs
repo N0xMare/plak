@@ -98,6 +98,15 @@ pub struct Creation<'a> {
 
 /// What a host of many sessions needs of its product's stores.
 pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
+    /// One immutable policy used by both welcome and console enforcement.
+    fn host_read_limits(&self) -> HostReadLimits;
+    /// Principal-specific capabilities, built before the handshake from the
+    /// same verified identity and limits later used by its connection.
+    fn welcome_extension(
+        &self,
+        principal: &HostPrincipal,
+        limits: &HostReadLimits,
+    ) -> P::WelcomeExtension;
     /// Begin attachment-free product work. Provider I/O belongs to the
     /// product's executor; this future is only polled, never awaited by the
     /// connection's frame loop. Dropping it cancels this connection's wait.
@@ -252,6 +261,7 @@ fn product_service_missing(operation: &str) -> RequestRefusal {
 
 /// The sessions one host serves.
 pub struct SessionHost<P: ProtocolExtension> {
+    admission: admission::Admission,
     next_connection: AtomicU64,
     drafts: super::super::drafts::DraftRegistry,
     sessions: Arc<dyn HostSessions<P>>,
@@ -310,7 +320,9 @@ where
         generation: u64,
     ) -> Arc<Self> {
         let (changes, _) = watch::channel(0);
+        let admission = admission::Admission::new(sessions.host_read_limits());
         Arc::new(Self {
+            admission,
             next_connection: AtomicU64::new(1),
             drafts: super::super::drafts::DraftRegistry::default(),
             sessions: Arc::new(sessions),
@@ -398,28 +410,60 @@ where
 
     /// The welcome every connection gets: it names no session.
     #[must_use]
-    pub fn welcome(&self) -> Welcome<P> {
-        host_welcome(self.binary_id.clone(), self.generation)
+    pub fn welcome_for(&self, principal: &HostPrincipal) -> Welcome<P> {
+        host_welcome(
+            self.binary_id.clone(),
+            self.generation,
+            self.sessions
+                .welcome_extension(principal, &self.admission.limits),
+        )
     }
 
     /// A new connection writing its frames to `out`, from a client its
     /// acceptor marked `face`; it ends once `stopped` turns true.
+    /// The acceptor supplies the same verified principal used for welcome.
+    /// ```
+    /// use plakous_host_protocol::Core;
+    /// use plakous_hosted::host_service::wire::{Face, HostPrincipal, SessionHost};
+    /// use std::sync::Arc;
+    /// fn verified(host: Arc<SessionHost<Core>>, verified_uid: u32) {
+    ///     let principal = HostPrincipal::Socket(verified_uid);
+    ///     let _welcome = host.welcome_for(&principal);
+    ///     let _connection = host.connect(std::io::sink(), Face::Remote, principal, || false);
+    /// }
+    /// ```
+    ///
+    /// A connection cannot be constructed without that identity:
+    /// ```compile_fail
+    /// use plakous_host_protocol::Core;
+    /// use plakous_hosted::host_service::wire::{Face, SessionHost};
+    /// use std::sync::Arc;
+    /// fn missing_identity(host: Arc<SessionHost<Core>>) {
+    ///     host.connect(std::io::sink(), Face::Remote, || false);
+    /// }
+    /// ```
     pub fn connect<W: Write + Clone>(
         self: &Arc<Self>,
         out: W,
         face: Face,
+        principal: HostPrincipal,
         stopped: impl Fn() -> bool + Send + Sync + 'static,
     ) -> HostConnection<P, W> {
         HostConnection {
             connection_id: self.next_connection.fetch_add(1, Ordering::Relaxed),
-            principal: None,
+            principal_budget: self.admission.principal(&principal),
+            login: match &principal {
+                HostPrincipal::Web(login) => Some(login.clone()),
+                HostPrincipal::Socket(_) => None,
+            },
+            principal,
+            read_ready: Arc::default(),
             host_reads: BTreeMap::new(),
             host: Arc::clone(self),
             host_changes: self.changes.subscribe(),
             out,
             face,
             stopped: Arc::new(stopped),
-            login: None,
             node: None,
             readonly: None,
             draining: None,
@@ -612,8 +656,10 @@ struct Watch {
 /// One connection to a host of many sessions.
 pub struct HostConnection<P: ProtocolExtension, W: Write> {
     connection_id: u64,
-    principal: Option<HostPrincipal>,
-    host_reads: BTreeMap<plakous_host_protocol::wire::RequestId, HostReadTask<P>>,
+    principal: HostPrincipal,
+    principal_budget: Arc<admission::PrincipalBudget>,
+    read_ready: Arc<reads::ReadyReads>,
+    host_reads: BTreeMap<plakous_host_protocol::wire::RequestId, reads::PendingRead<P>>,
     host: Arc<SessionHost<P>>,
     host_changes: watch::Receiver<u64>,
     out: W,
@@ -639,28 +685,12 @@ where
     HostFrame<P>: Serialize,
     ClientFrame<P>: DeserializeOwned,
 {
-    /// This connection, its transport having admitted `login`.
-    #[must_use]
-    pub fn identified(mut self, login: impl Into<String>) -> Self {
-        let login = login.into();
-        self.principal = Some(HostPrincipal::Web(login.clone()));
-        self.login = Some(login);
-        self
-    }
-
-    /// Mark a socket whose acceptor verified this same-user peer uid.
-    /// Console policy trusts this principal independently of web switches;
-    /// the face's local-only exec/reload restriction is unchanged.
-    #[must_use]
-    pub fn verified_socket(mut self, uid: u32) -> Self {
-        self.principal = Some(HostPrincipal::Socket(uid));
-        self
-    }
-
     /// Answers one client line; `false` once the client has left.
     ///
     /// An attach of a dormant session opens it first, so this can block
     /// for as long as that open takes.
+    /// Request ids must be unique across all pending operations of this
+    /// connection, including host reads and session operations.
     ///
     /// # Errors
     ///
@@ -670,6 +700,9 @@ where
             self.leave();
             return Ok(false);
         };
+        if let Some(reading) = self.preflight_host_read(&text)? {
+            return Ok(reading);
+        }
         let frame = match decode_line::<ClientFrame<P>>(&text) {
             // A second hello, a bye, or a line that is not a frame: the
             // client left.
@@ -1360,7 +1393,10 @@ where
         let host = &mut self.host_changes;
         let session = self.node.as_mut().map(|link| &mut link.changes);
         let draining = self.draining.as_mut().map(|link| &mut link.changes);
+        let deadline = self.host_reads.values().map(|read| read.deadline).min();
         let host_changed = tokio::select! {
+            () = self.read_ready.notify.notified() => false,
+            () = async { match deadline { Some(at) => tokio::time::sleep_until(at.into()).await, None => std::future::pending::<()>().await } } => false,
             _ = host.changed() => true,
             () = session_changed(session) => false,
             () = session_changed(draining) => false,
@@ -1428,7 +1464,9 @@ enum Forwarded<P: ProtocolExtension> {
 }
 
 mod reads;
+pub use admission::HostReadLimits;
 pub use reads::{HostPrincipal, HostReadTask, HostRequestContext};
+mod admission;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]

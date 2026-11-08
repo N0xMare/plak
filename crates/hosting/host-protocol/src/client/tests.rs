@@ -89,7 +89,7 @@ fn node(tree: &str) -> NodeAddress {
     }
 }
 
-fn welcome() -> Welcome {
+fn welcome() -> Welcome<Core> {
     Welcome {
         extension: None,
         proto: WIRE_VERSION,

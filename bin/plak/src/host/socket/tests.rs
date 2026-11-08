@@ -21,6 +21,16 @@ fn short_home() -> tempfile::TempDir {
 struct NoSessions;
 
 impl plakous_hosted::host_service::wire::HostSessions<PlakExtension> for NoSessions {
+    fn host_read_limits(&self) -> plakous_hosted::host_service::wire::HostReadLimits {
+        crate::host::host_read_limits()
+    }
+    fn welcome_extension(
+        &self,
+        _: &plakous_hosted::host_service::wire::HostPrincipal,
+        _: &plakous_hosted::host_service::wire::HostReadLimits,
+    ) -> <PlakExtension as plakous_host_protocol::ProtocolExtension>::WelcomeExtension {
+        None
+    }
     fn contains(&self, _: &str) -> Result<bool, String> {
         Ok(false)
     }

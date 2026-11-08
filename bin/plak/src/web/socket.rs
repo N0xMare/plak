@@ -250,9 +250,10 @@ async fn drive(socket: &mut Socket, served: &Arc<Served>, login: &str) -> Ended 
     let _ = lines.send(Ok(hello));
     drop(lines);
     let stop = served.stop;
+    let principal = plakous_hosted::host_service::wire::HostPrincipal::Web(login.to_owned());
     let admitted = handshake::<PlakExtension>(
         &first,
-        served.host.welcome(),
+        served.host.welcome_for(&principal),
         &mut outbox.clone(),
         &move || stop.stopped(),
     );
@@ -266,8 +267,9 @@ async fn drive(socket: &mut Socket, served: &Arc<Served>, login: &str) -> Ended 
     // authenticated: it may not exec or hand off the host's build.
     let mut connection = served
         .host
-        .connect(outbox.clone(), Face::Remote, move || stop.stopped())
-        .identified(login);
+        .connect(outbox.clone(), Face::Remote, principal, move || {
+            stop.stopped()
+        });
     let ended = attached(socket, served, &mut connection, &outbox, &mut pong).await;
     // Every way out detaches, so no session holds a dead attachment.
     connection.leave();
@@ -304,7 +306,7 @@ async fn attached(
                     Ok(line) => line,
                     Err(ended) => return ended,
                 };
-                if !rate.admit() {
+                if !Connection::is_host_request(&line) && !rate.admit() {
                     return Ended::Policy("message rate");
                 }
                 // An attach may open a session, which takes a while.

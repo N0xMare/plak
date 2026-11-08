@@ -129,9 +129,13 @@ pub fn session_welcome<P: ProtocolExtension>(
 /// binary `binary_id` in its process generation `host_generation`: it names
 /// no session, and the client finds them in the session directory.
 #[must_use]
-pub fn host_welcome<P: ProtocolExtension>(binary_id: String, host_generation: u64) -> Welcome<P> {
+pub fn host_welcome<P: ProtocolExtension>(
+    binary_id: String,
+    host_generation: u64,
+    extension: P::WelcomeExtension,
+) -> Welcome<P> {
     Welcome {
-        extension: Default::default(),
+        extension,
         proto: WIRE_VERSION,
         binary_id,
         host_generation,
@@ -1339,8 +1343,8 @@ mod session;
 mod slot;
 
 pub use host::{
-    ArchivedSessionView, Created, Creation, HostConnection, HostPrincipal, HostReadTask,
-    HostRequestContext, HostSessions, PickerProgress, SessionHost,
+    ArchivedSessionView, Created, Creation, HostConnection, HostPrincipal, HostReadLimits,
+    HostReadTask, HostRequestContext, HostSessions, PickerProgress, SessionHost,
 };
 pub use lines::{Line, LineSender, Lines, lines};
 pub use session::WireSession;

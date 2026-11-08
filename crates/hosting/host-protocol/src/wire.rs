@@ -63,7 +63,8 @@ pub use tool::WireToolItem;
 /// The wire protocol version; a peer with another is refused. 3 dropped
 /// `hello`'s locality; 4 lets a welcome name no session and adds the
 /// session directory's requests and frames; 5 adds explicit placement,
-/// directory lifecycle and process-lifetime draft admission identity.
+/// directory lifecycle and process-lifetime draft admission identity;
+/// 6 adds attachment-free host requests and principal-bound welcome extensions.
 pub const WIRE_VERSION: u32 = 6;
 
 /// The most bytes one line holds, newline included.
@@ -135,7 +136,7 @@ pub struct Hello {
     rename = "Welcome",
     bound = "P::WelcomeExtension: schemars::JsonSchema"
 )]
-pub struct Welcome<P: ProtocolExtension = crate::Core> {
+pub struct Welcome<P: ProtocolExtension> {
     /// Product capabilities for this connection; required even when null.
     #[serde(deserialize_with = "required_extension")]
     #[schemars(required)]
@@ -446,7 +447,7 @@ impl<P: ProtocolExtension> Op<P> {
     )
 )]
 #[schemars(rename = "Answer", bound = "P::HostResponse: schemars::JsonSchema")]
-pub enum Answer<P: ProtocolExtension = crate::Core> {
+pub enum Answer<P: ProtocolExtension> {
     /// Private attachment-free product response.
     Host {
         /// Product-owned closed response vocabulary.
@@ -547,6 +548,8 @@ pub enum RequestRefusal {
         /// Bounded delay before an explicit retry.
         retry_after_ms: u64,
     },
+    /// The request expired; late completion is discarded, never retried.
+    DeadlineExceeded,
     /// An identical submission still has no durable admission verdict.
     DraftPending {
         /// Submission identity, not an instruction to automatically resend.
@@ -665,7 +668,7 @@ pub enum ConsoleCapability {
     )
 )]
 #[schemars(rename = "Outcome", bound = "P::HostResponse: schemars::JsonSchema")]
-pub enum Outcome<P: ProtocolExtension = crate::Core> {
+pub enum Outcome<P: ProtocolExtension> {
     /// Done.
     Ok(Answer<P>),
     /// Refused.

@@ -212,7 +212,7 @@ fn hello(proto: u32) -> Client {
 }
 
 /// Attaches to `t1/<agent>` as request `id` and returns its outcome.
-fn attach(end: &mut End, id: u64, agent: &str) -> Outcome {
+fn attach(end: &mut End, id: u64, agent: &str) -> Outcome<Core> {
     end.send(&Client::Request {
         id,
         op: Op::Attach {

@@ -52,6 +52,7 @@ EXPECTED_SUPPORTED_PACKAGES = ("plakous-agent", "plakous", "plakous-model", "pla
 # from a manifest with no `[patch]` table at all.
 EMBEDDING_WORKFLOW_FIXTURES = (
     ("js-embedder", Path("tests/fixtures/js-embedder-consumer/Cargo.toml")),
+    ("host-protocol", Path("tests/fixtures/host-protocol-consumer/Cargo.toml")),
 )
 # Each embedding example, the exact facade features it selects, and whether it
 # runs to completion offline. `provider_direct` runs, says what it needs, and

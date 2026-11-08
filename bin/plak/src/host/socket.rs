@@ -315,17 +315,18 @@ async fn connection(
     let _ = first.send(hello);
     drop(first);
     let stop = Arc::clone(&stopped);
-    let admitted =
-        handshake::<PlakExtension>(&hellos, host.welcome(), &mut outbox.clone(), &move || {
-            stop()
-        });
+    let principal = plakous_hosted::host_service::wire::HostPrincipal::Socket(uid);
+    let admitted = handshake::<PlakExtension>(
+        &hellos,
+        host.welcome_for(&principal),
+        &mut outbox.clone(),
+        &move || stop(),
+    );
     if send(&mut write, &outbox).await.is_err() || !matches!(admitted, Ok(true)) {
         return;
     }
     let stop = Arc::clone(&stopped);
-    let mut connection = host
-        .connect(outbox.clone(), Face::Remote, move || stop())
-        .verified_socket(uid);
+    let mut connection = host.connect(outbox.clone(), Face::Remote, principal, move || stop());
     loop {
         // A flush may read the session directory from the stores.
         let flushed = tokio::task::block_in_place(|| connection.flush());

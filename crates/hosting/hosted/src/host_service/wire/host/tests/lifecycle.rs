@@ -73,7 +73,12 @@ fn lifecycle_slot_successor_releases_the_actor_through_its_predecessor_slot() {
 fn lifecycle_unknown_ids_do_not_allocate_slots_and_delete_drops_its_slot() {
     let (host, _) = host(&["s1"]);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(
         &mut connection,
         1,
@@ -110,7 +115,12 @@ fn lifecycle_slot_waits_for_worker_join_before_mutation() {
     let (host, fake) = host(&["s1"]);
     fake.0.linger.store(150, Ordering::SeqCst);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     attached(&out.take(), 1);
     request(
@@ -134,7 +144,12 @@ fn lifecycle_slot_waits_for_worker_join_before_mutation() {
 fn lifecycle_unarchive_noop_keeps_a_busy_actor_running() {
     let (host, fake) = host(&["s1"]);
     let out = Out::default();
-    let mut connection = host.connect(out.clone(), Face::Remote, || false);
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     let attachment = attached(&out.take(), 1);
     prompt(&mut connection, 2, attachment, "busy");
@@ -169,7 +184,12 @@ fn lifecycle_releases_the_resident_actor_before_archive_or_delete_without_reopen
     for delete in [false, true] {
         let (host, fake) = host(&["s1"]);
         let out = Out::default();
-        let mut connection = host.connect(out.clone(), Face::Remote, || false);
+        let mut connection = host.connect(
+            out.clone(),
+            Face::Remote,
+            HostPrincipal::Socket(501),
+            || false,
+        );
         request(&mut connection, 1, Op::Attach { node: node("s1") });
         let _attachment = attached(&out.take(), 1);
         assert_eq!(fake.0.active_workers.load(Ordering::SeqCst), 1);
@@ -199,7 +219,12 @@ fn lifecycle_busy_refusal_keeps_the_same_actor_and_never_calls_the_product() {
     for delete in [false, true] {
         let (host, fake) = host(&["s1"]);
         let out = Out::default();
-        let mut connection = host.connect(out.clone(), Face::Remote, || false);
+        let mut connection = host.connect(
+            out.clone(),
+            Face::Remote,
+            HostPrincipal::Socket(501),
+            || false,
+        );
         request(&mut connection, 1, Op::Attach { node: node("s1") });
         let attachment = attached(&out.take(), 1);
         prompt(&mut connection, 2, attachment, "busy");
