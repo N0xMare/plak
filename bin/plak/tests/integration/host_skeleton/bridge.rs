@@ -1,6 +1,8 @@
 //! The real stdio bridge carries the client's handshake and detaches without custody.
 
 use std::io::Read as _;
+use std::os::unix::fs::PermissionsExt as _;
+use std::time::{Duration, Instant};
 
 use super::*;
 
@@ -12,10 +14,19 @@ struct Bridge {
 
 impl Bridge {
     fn start(fixture: &Fixture) -> Self {
+        Self::configured(fixture, false, &[])
+    }
+
+    fn configured(fixture: &Fixture, auto_start: bool, environment: &[(&str, &str)]) -> Self {
+        let mut command = fixture.command();
+        command
+            .args(["host", "connect", "--stdio"])
+            .envs(environment.iter().copied());
+        if auto_start {
+            command.arg("--auto-start");
+        }
         let mut child = Child::spawn(
-            fixture
-                .command()
-                .args(["host", "connect", "--stdio"])
+            command
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped()),
@@ -84,6 +95,309 @@ impl Bridge {
             .unwrap();
         assert!(status.success(), "{diagnostics}");
     }
+}
+
+/// Owns only the serving process proved by this disposable home's held guard.
+struct StartedHome(PathBuf);
+
+impl StartedHome {
+    fn pid(&self) -> Option<rustix::process::Pid> {
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(self.0.join("host/host.lock"))
+            .ok()?;
+        if !matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock)) {
+            return None;
+        }
+        let line = std::fs::read_to_string(self.0.join("host/host.lock")).ok()?;
+        rustix::process::Pid::from_raw(line.split_whitespace().next()?.parse().ok()?)
+    }
+
+    fn host(&self) -> Host {
+        let socket = std::fs::read_dir(self.0.join("host/run"))
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.path())
+            .find(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == "sock")
+            })
+            .unwrap();
+        Host {
+            child: None,
+            socket,
+            lines: mpsc::channel().1,
+        }
+    }
+}
+
+impl Drop for StartedHome {
+    fn drop(&mut self) {
+        if let Some(pid) = self.pid() {
+            let _ = rustix::process::kill_process(pid, rustix::process::Signal::TERM);
+            let until = Instant::now() + WAIT;
+            while self.pid() == Some(pid) && Instant::now() < until {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            if self.pid() == Some(pid) {
+                let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+            }
+        }
+        let until = Instant::now() + WAIT;
+        while Instant::now() < until {
+            let Ok(log) = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(self.0.join("host/auto-start.log"))
+            else {
+                break;
+            };
+            if !matches!(log.try_lock(), Err(std::fs::TryLockError::WouldBlock)) {
+                break;
+            }
+            // A released service guard precedes process exit. Its log owner
+            // must also drain stderr and reap it before this fixture ends.
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        if !std::thread::panicking() {
+            let path = self.0.join("host/auto-start.log");
+            let remaining = opened_by(&path);
+            assert!(
+                remaining.is_empty(),
+                "detached log owner did not reap its host; log: {}",
+                std::fs::read_to_string(path).unwrap_or_default()
+            );
+        }
+    }
+}
+
+#[test]
+fn an_explicit_local_bridge_start_survives_its_callers_process_group_signal() {
+    let Some(fixture) = fixture() else { return };
+    let started = StartedHome(fixture.home());
+    let mut bridge = Bridge::configured(&fixture, true, &[]);
+    bridge.hello(WIRE_VERSION);
+    assert!(matches!(bridge.next(), HostFrame::Welcome(_)));
+    let host_pid = started.pid().expect("a kernel-held host guard");
+    let bridge_pid = rustix::process::Pid::from_raw(bridge.child.id().cast_signed()).unwrap();
+    rustix::process::kill_process_group(bridge_pid, rustix::process::Signal::INT).unwrap();
+    assert!(!bridge.child.wait().unwrap().success());
+    assert_eq!(started.pid(), Some(host_pid));
+    let host = started.host();
+    let mut reconnect = Client::connect(&host);
+    assert_eq!(reconnect.rows(1), []);
+    drop(reconnect);
+    let log = std::fs::metadata(fixture.home().join("host/auto-start.log")).unwrap();
+    assert_eq!(log.permissions().mode() & 0o777, 0o600);
+    assert!(log.len() <= 1024 * 1024);
+}
+
+#[test]
+fn concurrent_bridge_and_direct_starters_reach_one_host_generation() {
+    let Some(fixture) = fixture() else { return };
+    let started = StartedHome(fixture.home());
+    let mut first = Bridge::configured(&fixture, true, &[]);
+    let mut second = Bridge::configured(&fixture, true, &[]);
+    let mut direct = try_start(&fixture, &[], &[]);
+    first.hello(WIRE_VERSION);
+    second.hello(WIRE_VERSION);
+    let HostFrame::Welcome(first_welcome) = first.next() else {
+        panic!("first starter refused")
+    };
+    let HostFrame::Welcome(second_welcome) = second.next() else {
+        panic!("second starter refused")
+    };
+    assert_eq!(
+        first_welcome.host_generation,
+        second_welcome.host_generation
+    );
+    if let Some(host) = &direct {
+        assert_eq!(
+            started.pid().unwrap().as_raw_pid(),
+            host.child.as_ref().unwrap().id().cast_signed()
+        );
+    }
+    assert_eq!(
+        first.request(
+            1,
+            Op::ListSessions {
+                workspace: None,
+                runner: None,
+                include_archived: false
+            }
+        ),
+        Outcome::Ok(Answer::Sessions { rows: Vec::new() })
+    );
+    first.finish();
+    second.finish();
+    drop(started);
+    if let Some(host) = &mut direct {
+        assert!(host.child.as_mut().unwrap().wait().unwrap().success());
+    }
+}
+
+#[test]
+fn a_remote_or_unit_managed_bridge_never_starts_an_unmanaged_host() {
+    let Some(fixture) = fixture() else { return };
+    for unit in [false, true] {
+        let config = fixture.root.join("unit-config");
+        if unit {
+            std::fs::create_dir_all(config.join("systemd/user")).unwrap();
+            std::fs::write(config.join("systemd/user/plak-host.service"), "[Service]\n").unwrap();
+        }
+        let mut command = fixture.command();
+        command
+            .args(["host", "connect", "--stdio", "--auto-start"])
+            .env("XDG_CONFIG_HOME", &config)
+            .stdin(Stdio::null());
+        if !unit {
+            command.env("SSH_CONNECTION", "fixture remote session");
+        }
+        let output = command.output().unwrap();
+        assert!(!output.status.success());
+        assert!(
+            output.stdout.is_empty(),
+            "protocol stdout contains diagnostics"
+        );
+        let message = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            message.contains(if unit {
+                "systemctl --user start"
+            } else {
+                "local only"
+            }),
+            "{message}"
+        );
+        assert!(!fixture.home().join("host/host.lock").exists());
+    }
+}
+
+#[test]
+fn a_losing_starter_settles_before_its_parent_returns() {
+    let Some(fixture) = fixture() else { return };
+    let started = StartedHome(fixture.home());
+    let mut host = start(&fixture);
+    let output = fixture
+        .command()
+        .args(["host", "__start-auto"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, [] as [u8; 0]);
+    stop(&mut host);
+    // No delayed helper may claim the home after the winner was stopped.
+    drop(started);
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(fixture.home().join("host/host.lock"))
+        .unwrap();
+    assert!(file.try_lock().is_ok());
+}
+
+#[test]
+fn auto_started_key_resolution_ignores_caller_only_keys_and_names_its_resolver() {
+    for caller_only in [false, true] {
+        let Some(fixture) = fixture() else { return };
+        std::fs::write(fixture.home().join("agents/lead.toml"),
+            "account = \"openai\"\nmodel = \"gpt-6-luna\"\neffort = \"none\"\ncomposition = \"direct\"\n").unwrap();
+        let _started = StartedHome(fixture.home());
+        let environment = if caller_only {
+            vec![("OPENAI_API_KEY", "fixture-caller-only-key")]
+        } else {
+            Vec::new()
+        };
+        let mut bridge = Bridge::configured(&fixture, true, &environment);
+        bridge.hello(WIRE_VERSION);
+        assert!(matches!(bridge.next(), HostFrame::Welcome(_)));
+        let outcome = bridge.request(1, new_session(&fixture.workspace()));
+        let outcome = if let Outcome::Ok(Answer::Created { node, .. }) = outcome {
+            bridge.request(2, Op::Attach { node })
+        } else {
+            outcome
+        };
+        let text = format!("{outcome:?}");
+        assert!(text.contains("OPENAI_API_KEY"), "{text}");
+        assert!(
+            text.contains("effective key resolver") && text.contains("auto-started host"),
+            "{text}"
+        );
+        assert!(!text.contains("fixture-caller-only-key"));
+        assert_eq!(crash::dispatches(&fixture), 0);
+        bridge.finish();
+    }
+}
+
+#[test]
+fn a_target_only_key_is_resolved_in_the_existing_hosts_environment() {
+    let Some(fixture) = fixture() else { return };
+    std::fs::write(fixture.home().join("agents/lead.toml"),
+        "account = \"openai\"\nmodel = \"gpt-6-luna\"\neffort = \"none\"\ncomposition = \"direct\"\n").unwrap();
+    let mut host = start_env(
+        &fixture,
+        &[],
+        &[("OPENAI_API_KEY", "fixture-target-only-key".into())],
+    );
+    let mut bridge = Bridge::start(&fixture);
+    bridge.hello(WIRE_VERSION);
+    assert!(matches!(bridge.next(), HostFrame::Welcome(_)));
+    let Outcome::Ok(Answer::Created { node, .. }) =
+        bridge.request(1, new_session(&fixture.workspace()))
+    else {
+        panic!("the target resolver did not admit its configured account")
+    };
+    assert!(matches!(
+        bridge.request(2, Op::Attach { node }),
+        Outcome::Ok(Answer::Attached { .. })
+    ));
+    assert_eq!(crash::dispatches(&fixture), 0);
+    bridge.finish();
+    stop(&mut host);
+}
+
+#[test]
+fn an_auto_started_host_exits_after_five_empty_minutes_but_a_foreground_host_persists() {
+    let Some(fixture) = fixture() else { return };
+    let Some(foreground_fixture) = super::fixture() else {
+        return;
+    };
+    let mut foreground = start(&foreground_fixture);
+    let started = StartedHome(fixture.home());
+    let mut bridge = Bridge::configured(&fixture, true, &[]);
+    bridge.hello(WIRE_VERSION);
+    assert!(matches!(bridge.next(), HostFrame::Welcome(_)));
+    assert!(started.pid().is_some());
+    bridge.finish();
+    let empty = Instant::now();
+    while started.pid().is_some() {
+        assert!(
+            empty.elapsed() < Duration::from_secs(360),
+            "auto-started host did not idle-exit"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(
+        empty.elapsed() >= Duration::from_secs(299),
+        "host exited before the five-minute idle window"
+    );
+    assert!(
+        foreground
+            .child
+            .as_mut()
+            .unwrap()
+            .try_wait()
+            .unwrap()
+            .is_none()
+    );
+    let mut client = Client::connect(&foreground);
+    assert_eq!(client.rows(1), []);
+    drop(client);
+    stop(&mut foreground);
 }
 
 #[test]

@@ -142,6 +142,10 @@ pub mod telemetry_store;
 mod test_hooks;
 #[cfg(not(feature = "test-hooks"))]
 mod test_hooks {
+    #[allow(dead_code, reason = "only builds with the host select startup inputs")]
+    pub(crate) fn host_start_environment() -> Vec<(&'static str, std::ffi::OsString)> {
+        Vec::new()
+    }
     #[allow(dead_code, reason = "only the optional host dials its local runner")]
     pub(crate) fn runner_windows() -> plakous::runner::ClientWindows {
         plakous::runner::ClientWindows::default()
@@ -547,7 +551,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
         }
         command @ Command::Agent { .. } => return run_agent_command(&services, command),
         Command::Host(command) => return host::run_host_command(&services, &command),
-        Command::HostConnect => return host::connect_stdio(&services),
+        Command::HostConnect { auto_start } => return host::connect_stdio(&services, auto_start),
         Command::WireSchema => return wire_schema::print(&mut io::stdout().lock()),
         // The runner bridge owns raw stdin and stdout, so it runs before the
         // process takes their locks.
@@ -1295,7 +1299,7 @@ fn execute_command(
         | Command::Agent { .. }
         | Command::Host(_)
         | Command::HostInstall(_)
-        | Command::HostConnect
+        | Command::HostConnect { .. }
         | Command::WireSchema
         | Command::Help
         | Command::CommandHelp { .. }

@@ -336,14 +336,30 @@ impl TopCommand {
                 }))
             }
             Self::Host {
-                action: Some(HostAction::Connect { stdio }),
+                action: Some(HostAction::Connect { stdio, auto_start }),
                 ..
             } => {
                 if !stdio {
                     return Err("plak host connect requires --stdio".to_owned());
                 }
-                Ok(Command::HostConnect)
+                Ok(Command::HostConnect { auto_start })
             }
+            Self::Host {
+                action:
+                    Some(
+                        action @ (HostAction::StartAuto
+                        | HostAction::SuperviseAuto
+                        | HostAction::ServeAuto),
+                    ),
+                ..
+            } => Ok(Command::Host(crate::command::HostCommand {
+                start: match action {
+                    HostAction::StartAuto => crate::command::HostStart::Helper,
+                    HostAction::SuperviseAuto => crate::command::HostStart::Supervisor,
+                    _ => crate::command::HostStart::Detached,
+                },
+                ..crate::command::HostCommand::default()
+            })),
             Self::Host {
                 action: None,
                 web,
@@ -351,6 +367,7 @@ impl TopCommand {
                 dev_login,
                 idle_release,
             } => Ok(Command::Host(crate::command::HostCommand {
+                start: crate::command::HostStart::Foreground,
                 web: web.map(|listen| crate::command::HostWeb {
                     listen,
                     ui,

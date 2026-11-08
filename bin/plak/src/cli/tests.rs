@@ -7,7 +7,11 @@
 fn host_stdio_bridge_requires_transport_and_refuses_server_flags() {
     assert!(matches!(
         parse(args(&["host", "connect", "--stdio"])).unwrap(),
-        Command::HostConnect
+        Command::HostConnect { auto_start: false }
+    ));
+    assert!(matches!(
+        parse(args(&["host", "connect", "--stdio", "--auto-start"])).unwrap(),
+        Command::HostConnect { auto_start: true }
     ));
     for arguments in [
         vec!["host", "connect"],

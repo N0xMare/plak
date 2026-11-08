@@ -23,6 +23,6 @@ pub(crate) fn run_host_command(
     .into())
 }
 
-pub(crate) fn connect_stdio(services: &Services) -> CliResult<ProcessOutcome> {
+pub(crate) fn connect_stdio(services: &Services, _auto_start: bool) -> CliResult<ProcessOutcome> {
     run_host_command(services, &crate::command::HostCommand::default())
 }

@@ -176,7 +176,10 @@ fn admission_snapshot(
 }
 
 /// Restores offline pin evidence before any bind or local workspace admission.
-pub(crate) fn prepare(services: &Services) -> CliResult<Prepared> {
+pub(crate) fn prepare(
+    services: &Services,
+    startup: Option<&std::path::Path>,
+) -> CliResult<Prepared> {
     let paths = services.paths()?;
     let mut product = crate::store::ProductStore::open(paths)
         .map_err(|error| CliFailure::new(error.to_string()))?;
@@ -222,7 +225,7 @@ pub(crate) fn prepare(services: &Services) -> CliResult<Prepared> {
         .into_iter()
         .filter_map(|(_, path)| seen.insert(path.clone()).then_some(path))
         .collect::<Vec<_>>();
-    let local = WorkspaceCatalog::local(None, &recents, paths.home()).map_err(|_| {
+    let local = WorkspaceCatalog::local(startup, &recents, paths.home()).map_err(|_| {
         CliFailure::new("the product home is unavailable for local workspace discovery")
     })?;
     let omitted = recents

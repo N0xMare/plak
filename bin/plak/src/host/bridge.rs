@@ -10,9 +10,10 @@ use crate::{CliFailure, CliResult, ProcessOutcome, product_paths::PlakPaths};
 
 const DISCOVERY_WINDOW: Duration = Duration::from_secs(10);
 
-pub(super) fn connect(paths: &PlakPaths) -> CliResult<ProcessOutcome> {
+pub(super) fn connect(paths: &PlakPaths, auto_start: bool) -> CliResult<ProcessOutcome> {
     let deadline = Instant::now() + DISCOVERY_WINDOW;
     let key = crate::home::state::state_key();
+    let mut started = false;
     loop {
         let live = hosts::live_until(paths, deadline)?;
         if live.len() > 1 || live.iter().any(|host| host.key != key) {
@@ -31,15 +32,22 @@ pub(super) fn connect(paths: &PlakPaths) -> CliResult<ProcessOutcome> {
                 )));
             }
         }
-        if live.is_empty() && hosts::lock_holder(&hosts::home_lock(paths))?.is_none() {
+        if !started && live.is_empty() && hosts::lock_holder(&hosts::home_lock(paths))?.is_none() {
+            if auto_start {
+                super::starter::start(paths, deadline)?;
+                started = true;
+                continue;
+            }
             return Err(CliFailure::new(
                 "no running host for this home; start plak host or its user unit; no host or embedded session was started",
             ));
         }
         if Instant::now() >= deadline {
-            return Err(CliFailure::new(
-                "the host is starting or stopping; retry; no host or embedded session was started",
-            ));
+            return Err(CliFailure::new(if started {
+                "the auto-started host did not become ready; inspect host/auto-start.log in the public home; no embedded session was started"
+            } else {
+                "the host is starting or stopping; retry; no host or embedded session was started"
+            }));
         }
         std::thread::sleep(
             Duration::from_millis(25).min(deadline.saturating_duration_since(Instant::now())),
@@ -73,7 +81,10 @@ fn relay(mut stream: UnixStream) -> CliResult<ProcessOutcome> {
 fn forward(reader: &mut impl Read, writer: &mut impl Write) -> io::Result<()> {
     let mut buffer = [0_u8; 8192];
     loop {
-        let count = reader.read(&mut buffer)?;
+        let count = match reader.read(&mut buffer) {
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            result => result?,
+        };
         if count == 0 {
             return Ok(());
         }

@@ -36,7 +36,7 @@ fn inadmissible_local_recents_are_omitted_without_losing_admitted_choices() {
             .save(&mut record)
             .unwrap();
     }
-    let prepared = crate::commands::runner::registry::prepare(&services).unwrap();
+    let prepared = crate::commands::runner::registry::prepare(&services, None).unwrap();
     assert_eq!(prepared.local.options().default_workspace, None);
     prepared
         .services

@@ -18,11 +18,22 @@ pub(crate) struct HostInstall {
 /// `plak host`'s arguments.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct HostCommand {
+    pub(crate) start: HostStart,
     /// The web endpoint, when the host serves one.
     pub(crate) web: Option<HostWeb>,
     /// How long an idle session stays resident; the product's idle release
     /// when unset.
     pub(crate) idle_release: Option<std::time::Duration>,
+}
+
+/// Private stages of an explicitly selected detached start.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum HostStart {
+    #[default]
+    Foreground,
+    Helper,
+    Supervisor,
+    Detached,
 }
 
 /// `plak host --web`'s arguments, parsed by the web module when the host
@@ -346,7 +357,9 @@ pub(crate) enum Command {
     Host(HostCommand),
     HostInstall(HostInstall),
     /// A byte-transparent bridge to the home's existing host.
-    HostConnect,
+    HostConnect {
+        auto_start: bool,
+    },
     /// Hidden `plak wire schema`: this build's wire v2 JSON Schema.
     WireSchema,
 }
@@ -504,7 +517,7 @@ impl Command {
             | Self::RunPlatform { .. }
             | Self::ContinueSession { .. } => "run",
             Self::Agent { .. } => "agent",
-            Self::Host(_) | Self::HostInstall(_) | Self::HostConnect => "host",
+            Self::Host(_) | Self::HostInstall(_) | Self::HostConnect { .. } => "host",
             Self::WireSchema => "wire",
         }
     }
@@ -554,7 +567,7 @@ pub(crate) fn command_is_read_only(command: &Command) -> bool {
     matches!(
         command,
         Command::StatusAll
-            | Command::HostConnect
+            | Command::HostConnect { .. }
             | Command::AccountsList
             | Command::AuthStatus(_)
             | Command::Doctor

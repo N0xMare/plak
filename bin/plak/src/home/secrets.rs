@@ -69,6 +69,10 @@ pub fn require_api_key(paths: &PlakPaths, account: &str) -> plakous_hosted::erro
 /// Missing-key diagnostic names the provider, `plak key set`, and its environment variable.
 #[must_use]
 pub fn missing_api_key_message(account: &str) -> String {
+    missing_api_key_message_for(account, crate::environment::key_resolver())
+}
+
+fn missing_api_key_message_for(account: &str, resolver: crate::environment::KeyResolver) -> String {
     let (name, key_account) = match account {
         "openai" => ("OpenAI", "openai"),
         "xai-api" => ("xAI", "xai-api"),
@@ -76,12 +80,22 @@ pub fn missing_api_key_message(account: &str) -> String {
         "openrouter" => ("OpenRouter", "openrouter"),
         other => (other, other),
     };
-    match env_var_for_account(account) {
+    let fix = match env_var_for_account(account) {
         Some(env) => {
             format!("{name} API key is not set; run `plak key set {key_account}` or set {env}")
         }
         None => format!("{name} API key is not set; run `plak key set {key_account}`"),
-    }
+    };
+    let source = match resolver {
+        crate::environment::KeyResolver::Cli => "this CLI process (environment before file store)",
+        crate::environment::KeyResolver::Host => {
+            "the serving host process and its own environment (including its unit environment)"
+        }
+        crate::environment::KeyResolver::AutoHost => {
+            "the auto-started host; caller API-key variables are not inherited by its curated environment"
+        }
+    };
+    format!("{fix}; effective key resolver: {source}")
 }
 
 /// Resolve API key: environment wins over file store.

@@ -4,12 +4,13 @@ use super::{CliResult, RunnerClient, Services, finish_stops, install_reporter, s
 
 pub(crate) fn prepare(
     services: &Services,
+    startup: Option<&std::path::Path>,
 ) -> CliResult<(Services, std::sync::Arc<plakous::runner::WorkspaceCatalog>)> {
     let ownership = std::sync::Arc::new(super::super::ownership::RunnerOwnership::host(
         services.paths()?,
     )?);
     let services = services.with_runner_ownership(ownership);
-    let prepared = crate::commands::runner::registry::prepare(&services)?;
+    let prepared = crate::commands::runner::registry::prepare(&services, startup)?;
     let services = prepared.services;
     services.runners().require_connection("local", true);
     Ok((services, prepared.local))

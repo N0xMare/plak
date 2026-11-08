@@ -94,6 +94,8 @@ slow-timeout = { period = "300s", terminate-after = 2 }
 [profile.offline]
 default-filter = '''
 not (
+  test(an_auto_started_host_exits_after_five_empty_minutes_but_a_foreground_host_persists)
+  |
   test(foreground_awake_clock_excludes_suspend_then_expires_once)
   |
   test(a_daemon_exits_when_its_endpoint_disappears_or_is_replaced)
@@ -353,6 +355,8 @@ not (
 test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
+  test(an_auto_started_host_exits_after_five_empty_minutes_but_a_foreground_host_persists)
+  |
   test(foreground_awake_clock_excludes_suspend_then_expires_once)
   |
   test(a_daemon_exits_when_its_endpoint_disappears_or_is_replaced)

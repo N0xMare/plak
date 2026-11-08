@@ -146,7 +146,12 @@ fn an_admitted_connection_is_welcomed_to_the_directory_and_a_stop_ends_the_host(
     let principals = Arc::clone(&sessions.principals);
     let host = SessionHost::new(sessions, "0123456789ab", 7);
     let server = std::thread::spawn(move || {
-        runtime.block_on(bound.serve(&host, move || stopping.load(Ordering::Acquire)));
+        runtime.block_on(bound.serve(
+            &host,
+            move || stopping.load(Ordering::Acquire),
+            None,
+            Arc::new(AtomicBool::new(false)),
+        ));
         bound
     });
 
@@ -237,7 +242,12 @@ fn a_hello_of_another_version_is_refused() {
     let stopping = Arc::clone(&stop);
     let host = SessionHost::new(NoSessions::default(), "0123456789ab", 7);
     let server = std::thread::spawn(move || {
-        runtime.block_on(bound.serve(&host, move || stopping.load(Ordering::Acquire)));
+        runtime.block_on(bound.serve(
+            &host,
+            move || stopping.load(Ordering::Acquire),
+            None,
+            Arc::new(AtomicBool::new(false)),
+        ));
     });
     let mut client = std::os::unix::net::UnixStream::connect(&socket).unwrap();
     let mut reader = BufReader::new(client.try_clone().unwrap());

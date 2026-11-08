@@ -887,7 +887,7 @@ fn daemon_exit_wait_ignores_a_successor_and_a_startup_probe() {
 
 /// The processes that have `path` open, from their descriptor tables.
 #[cfg(target_os = "linux")]
-fn opened_by(path: &Path) -> Vec<i32> {
+pub(super) fn opened_by(path: &Path) -> Vec<i32> {
     std::fs::read_dir("/proc")
         .into_iter()
         .flatten()
@@ -905,7 +905,7 @@ fn opened_by(path: &Path) -> Vec<i32> {
 
 /// The processes that have `path` open, as `lsof` lists them.
 #[cfg(target_os = "macos")]
-fn opened_by(path: &Path) -> Vec<i32> {
+pub(super) fn opened_by(path: &Path) -> Vec<i32> {
     Command::new("lsof")
         .args(["-t", "--"])
         .arg(path)

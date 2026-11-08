@@ -580,7 +580,16 @@ enum HostAction {
     Connect {
         #[arg(long, required = true)]
         stdio: bool,
+        /// Start an absent local host, unless its user unit is installed.
+        #[arg(long)]
+        auto_start: bool,
     },
+    #[command(name = "__start-auto", hide = true)]
+    StartAuto,
+    #[command(name = "__supervise-auto", hide = true)]
+    SuperviseAuto,
+    #[command(name = "__serve-auto", hide = true)]
+    ServeAuto,
     /// Write the Linux systemd user unit without enabling or starting it.
     Install {
         #[arg(long, value_name = "unix:ABSOLUTE_PATH")]

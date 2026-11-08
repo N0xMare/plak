@@ -127,6 +127,8 @@ struct Script {
     queued: AtomicUsize,
     rows: Mutex<Vec<SessionRow>>,
     row_limit: AtomicUsize,
+    unreadable_rows: std::sync::atomic::AtomicBool,
+    pending_stops: std::sync::atomic::AtomicBool,
     opens: AtomicUsize,
     dormant_stops: AtomicUsize,
     stop_intents: AtomicUsize,
@@ -328,6 +330,9 @@ impl HostSessions<Core> for Fake {
         runner: Option<&str>,
         include_archived: bool,
     ) -> Result<Vec<SessionRow>, String> {
+        if self.0.unreadable_rows.load(Ordering::SeqCst) {
+            return Err("directory unavailable".into());
+        }
         Ok(self
             .0
             .rows
@@ -343,6 +348,10 @@ impl HostSessions<Core> for Fake {
             })
             .cloned()
             .collect())
+    }
+
+    fn runner_pending(&self, _session: &str) -> bool {
+        self.0.pending_stops.load(Ordering::SeqCst)
     }
 
     fn session_of(&self, node: &NodeAddress) -> Result<Option<String>, String> {
@@ -887,6 +896,29 @@ fn host(rows: &[&str]) -> (Arc<SessionHost<Core>>, Fake) {
         .map(|(at, session)| row(session, u64::try_from(at).unwrap()))
         .collect();
     (SessionHost::new(fake.clone(), "b1", 7), fake)
+}
+
+#[test]
+fn idle_exit_refuses_unreadable_state_pending_stops_and_a_resident_worker() {
+    let (host, fake) = host(&["s1"]);
+    assert!(!host.idle_exit_blocked());
+    fake.0.unreadable_rows.store(true, Ordering::SeqCst);
+    assert!(host.idle_exit_blocked());
+    fake.0.unreadable_rows.store(false, Ordering::SeqCst);
+    fake.0.pending_stops.store(true, Ordering::SeqCst);
+    assert!(host.idle_exit_blocked());
+    fake.0.pending_stops.store(false, Ordering::SeqCst);
+    let (session, hold) = host.slot("s1").resident().unwrap();
+    assert!(!session.ended());
+    assert!(host.idle_exit_blocked());
+    drop(hold);
+    let failures = host.hand_off_all(Duration::from_secs(2));
+    assert!(
+        failures.is_empty(),
+        "idle fixture did not hand off: {failures:?}"
+    );
+    assert!(!host.idle_exit_blocked());
+    assert_eq!(fake.0.active_workers.load(Ordering::SeqCst), 0);
 }
 
 fn request<W: Write + Clone>(

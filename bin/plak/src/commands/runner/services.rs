@@ -47,7 +47,13 @@ pub(crate) fn standalone(
         services.paths().map_err(StandaloneRunnerError::Setup)?,
     )?;
     let services = services.with_runner_ownership(std::sync::Arc::new(ownership));
-    let prepared = super::registry::prepare(&services).map_err(StandaloneRunnerError::Setup)?;
+    let startup = services
+        .paths()
+        .map_err(StandaloneRunnerError::Setup)?
+        .workspace()
+        .map_err(|message| StandaloneRunnerError::Setup(CliFailure::new(message)))?;
+    let prepared =
+        super::registry::prepare(&services, Some(startup)).map_err(StandaloneRunnerError::Setup)?;
     start_probes(&prepared.services, prepared.local, None, executor);
     Ok(prepared.services)
 }

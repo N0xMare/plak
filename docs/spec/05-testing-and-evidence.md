@@ -3649,6 +3649,27 @@ local-only reload intents before model work. The CLI contract
 host discovery leaves protocol stdout and the product home untouched. A build
 without `web` qualifies the corresponding typed capability refusal separately.
 
+The opt-in starter's real bridge fixtures prove that caller process-group
+signals do not reach its detached host, concurrent bridge/direct starters
+reach one host generation, and a held other key refuses without creating an
+auto-start log or sibling. Remote-shell and installed-unit cases refuse before
+startup. Caller-only and absent API keys fail in the auto-started resolver,
+while a target-only key admits through an existing host without sending any
+model prompt; diagnostics identify the resolver and never include values.
+Bounded-log tests also refuse non-private files and symlink targets without
+modifying them. `plakous-runner`'s
+`a_home_started_service_has_no_implicit_workspace_and_keeps_the_home_protected`
+keeps service discovery distinct from explicit workspace admission.
+
+`an_auto_started_host_exits_after_five_empty_minutes_but_a_foreground_host_persists`
+is a serial wall-clock fixture: it waits the real five-minute interval with no
+test-only lifetime override, checks ordinary host persistence beside it, and
+owns both hosts' cleanup. The pure idle-clock test separately resets the full
+window on activity or kept work. Idle eligibility includes residents,
+opening/releasing workers, startup recovery and durable runner-stop debt; an
+unreadable directory is not proof of idleness. No test achieves idle exit by
+evicting a session.
+
 `wire_transport::hosts::tests` distinguishes held kernel locks from stale pid
 text, discovers every live socket key, and refuses unsafe locks, directories
 and state-directory links. `host_skeleton::singleton` drives the real host:

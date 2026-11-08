@@ -403,6 +403,13 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
         ("var_os", (("string", "XDG_RUNTIME_DIR"),)),
         ("var_os", (("string", "DBUS_SESSION_BUS_ADDRESS"),)),
         ("var_os", (("string", "XDG_CONFIG_HOME"),)),
+        # Explicit unmanaged-host OS/tool allowlist; fixture inputs go through
+        # the existing test-hooks reader, never the caller's entire environment.
+        ("var_os", (("identifier", "name"),)),
+        ("var_os", (("string", "SSH_CONNECTION"),)),
+        ("var_os", (("string", "SSH_TTY"),)),
+        ("var_os", (("string", "SSH_CLIENT"),)),
+        ("var_os", (("string", "SYSTEMD_UNIT_PATH"),)),
         ("var_os", (("string", "SHELL"),)),
         ("var_os", (("string", "PLAK_RELOAD_APPLY_ORCHESTRATION"),)),
     ],
@@ -544,6 +551,11 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
     ("plak", "src/commands/host_install.rs"): [
         ("std::process::Command", (("identifier", "manager"),)),
     ],
+    # Explicit opt-in host starter and its log/reaping supervisor, all stages
+    # exec this build only; the launch clears and curates its environment.
+    ("plak", "src/host/starter.rs"): [
+        ("Command", (("identifier", "executable"),)),
+    ],
     # A separate process group survives host loss; the daemon clears its environment.
     ("plak", "src/commands/runner/local/start.rs"): [
         ("std::process::Command", (("punct", "&"), ("identifier", "executable"))),
@@ -640,6 +652,7 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
     ],
 }
 EXPECTED_PRODUCT_PROCESS_IMPORTS: dict[SourceKey, set[str]] = {
+    ("plak", "src/host/starter.rs"): {"Command", "Stdio"},
     # The host's ssh dial to a runner pipes its link through stdin/stdout.
     ("plak", "src/commands/runner/dial.rs"): {"Stdio"},
     ("plak", "src/product_doctor/jj_cli.rs"): {"Command", "Stdio"},

@@ -45,7 +45,7 @@ use crate::{product_agent, product_config, product_host, product_paths};
 pub(crate) const SELECTOR: &str = "offline-loopback-v1";
 
 mod runner;
-pub(crate) use runner::{runner_lease_clock, runner_windows};
+pub(crate) use runner::{host_start_environment, runner_lease_clock, runner_windows};
 
 #[allow(dead_code, reason = "headless builds do not start hosts")]
 pub(crate) fn runner_detached() -> bool {

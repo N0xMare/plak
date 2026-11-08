@@ -204,6 +204,8 @@ You can then start the TUI with `plak`. To configure multiple agents, use the [o
 | `plak` | Start an interactive TUI session in the current directory |
 | `plak run --account … --model … --effort … -- 'task'` | Run one non-interactive task |
 | `plak agent --account … --model … --effort …` | Start the long-lived JSONL host for programmatic control |
+| `plak host` | Serve this home's sessions on its private control socket; optionally add `--web` |
+| `plak host connect --stdio [--auto-start]` | Relay a programmatic client's wire frames to the host |
 | `plak resume [<uuid>]` | Resume in the TUI, using a picker or an exact session ID |
 | `plak run --session <uuid> -- 'followup'` | Continue an existing session from the CLI |
 | `plak models <account>` | Inspect the account's models |
@@ -211,6 +213,14 @@ You can then start the TUI with `plak`. To configure multiple agents, use the [o
 | `plak help` | Show command help |
 
 `plak agent` expects JSONL input; it is not the interactive TUI. See the [CLI reference](docs/user-guide/cli.md), [TUI guide](docs/user-guide/tui.md), and [JSONL/orchestration guide](docs/user-guide/agents-and-orchestration.md) for the full interfaces.
+
+Host and web serving are included in the default build. The stdio bridge does
+not consume its client's handshake or fall back to an embedded session.
+Only explicit local `--auto-start` permits starting an absent host; an installed
+user unit instead names its start command. Auto-started hosts omit caller API
+keys from their curated environment and idle-exit after five empty minutes.
+Bare `plak` keeps its attach-or-embedded behavior and never auto-starts a host.
+`plak run` and `plak agent` remain in-process.
 
 ## Documentation
 

@@ -15,9 +15,9 @@
 use std::collections::VecDeque;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use plakous_host_protocol::wire::{HandshakeRefusal, LineReader, WireError};
 use plakous_hosted::error::{CliFailure, CliResult};
@@ -118,11 +118,14 @@ impl Bound {
         &self,
         host: &Arc<SessionHost<PlakExtension>>,
         stopped: impl Fn() -> bool + Send + Sync + 'static,
+        mut idle: Option<super::idle::IdleExit>,
+        scanning: Arc<AtomicBool>,
     ) {
         let stopped: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(stopped);
         let mut tick = tokio::time::interval(STOP_POLL);
         let pending = Arc::new(AtomicUsize::new(0));
         let admitted = Arc::new(AtomicUsize::new(0));
+        let mut next_idle_check = Instant::now();
         loop {
             tokio::select! {
                 accepted = self.listener.accept() => {
@@ -132,6 +135,9 @@ impl Bound {
                     };
                     if !admits(stream.peer_cred().ok().map(|peer| peer.uid()), self.owner) {
                         continue;
+                    }
+                    if let Some(idle) = &mut idle {
+                        idle.activity();
                     }
                     if let Some(place) = Place::take(&pending, PENDING_LIMIT) {
                         let (host, stopped) = (Arc::clone(host), Arc::clone(&stopped));
@@ -144,6 +150,18 @@ impl Bound {
                 _ = tick.tick() => {
                     if stopped() {
                         return;
+                    }
+                    let now = Instant::now();
+                    if now >= next_idle_check && let Some(idle) = &mut idle {
+                        next_idle_check = now + Duration::from_secs(1);
+                        let blocked = pending.load(Ordering::Acquire) != 0
+                            || admitted.load(Ordering::Acquire) != 0
+                            || scanning.load(Ordering::Acquire)
+                            || tokio::task::block_in_place(|| host.idle_exit_blocked());
+                        if idle.expired(now, blocked) {
+                            eprintln!("plak host: auto-started service idle for five minutes; stopping");
+                            return;
+                        }
                     }
                 }
             }

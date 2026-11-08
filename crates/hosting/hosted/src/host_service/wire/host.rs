@@ -581,6 +581,24 @@ where
         self.lock().clone()
     }
 
+    /// Whether residents, opening/releasing workers or durable runner-stop
+    /// debt prevent an otherwise disconnected service from exiting idle.
+    /// An unreadable directory is not evidence of idleness.
+    #[must_use]
+    pub fn idle_exit_blocked(&self) -> bool {
+        if self
+            .slots()
+            .iter()
+            .any(|slot| !matches!(slot.peek(), SlotView::Dormant(_)))
+        {
+            return true;
+        }
+        self.sessions.rows(None, None, true).map_or(true, |rows| {
+            rows.iter()
+                .any(|row| self.sessions.runner_pending(&row.session))
+        })
+    }
+
     /// Changes whenever the host opened, released or created a session.
     #[must_use]
     pub fn changes(&self) -> watch::Receiver<u64> {

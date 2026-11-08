@@ -225,7 +225,7 @@ fn assert_requested_reload_refused(busy: bool) {
         format!(" (build {})", directory.binary)
     };
     let reason = format!(
-        "this session runs in plak host{build}; restarting the host moves it onto the installed build (plak host stop, or restart its unit)"
+        "this session runs in plak host{build}; restarting the host moves it onto the installed build (restart its user unit, or send SIGTERM for planned handoff and start plak host again)"
     );
     assert_eq!(written["reason"], reason);
     terminal.wait_screen("requested reload refused: this session runs in plak host");

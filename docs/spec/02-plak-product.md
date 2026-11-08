@@ -686,7 +686,7 @@ granted scope), not logged in, refreshing, quarantined or bound to another
 server, without contacting it.
 
 The four API-key accounts are `openai`, `xai-api`, `anthropic`, and `openrouter`.
-Chapter 04 §3.1 owns their resolution law — environment first, then
+Chapter 04 §3.1 owns their resolution law — the resolving process's environment first, then
 `~/.plak/secrets/<account>.key`, never a `.env` file — along with the store's
 permission enforcement, refresh generations and quarantine, route isolation,
 and redaction. Two consequences are product-visible. A variable that is set but
@@ -694,6 +694,15 @@ empty, oversized, or not valid Unicode is a hard error, never a silent
 fall-through to the file, because a broken environment must not quietly resolve
 to a different credential. And while the variable is set, `key set` and
 `key clear` refuse and say so, because writing the file would have no effect.
+
+This precedence belongs to the process resolving the key, not a connected
+client. Explicit CLI `key set` and `key clear` remain in-process and inspect
+their own environment. Host sessions use the serving host's environment;
+unit-managed hosts use their unit environment. An explicitly auto-started host
+does not inherit caller API-key variables (see §4.6). Missing-key diagnostics
+name the effective resolver and the relevant variable, never its value.
+Target-host key mutation and caller-versus-target write notices are not
+provided by the stdio bridge; no new wire operation is implied.
 
 Direct API sessions select `openai`, `anthropic`, or `xai-api`. The last name
 resolves the existing `xai` key slot and `XAI_API_KEY`; bare `xai` is
@@ -4938,10 +4947,11 @@ Adding a public stdio bridge for independent clients does not rewire this
 terminal. Bridge-only launch belongs to the later private client.
 The service refreshes native catalogs at startup without requiring a terminal.
 
-`plak host connect --stdio` is the public byte bridge for independent clients.
+`plak host connect --stdio [--auto-start]` is the public byte bridge for independent clients.
 It resolves the home and inspects all live state keys before connecting;
 another key or multiple keys is a refusal, not a silently selected service.
-It does not start a host or fall back to embedded execution. Its stdout is
+Without explicit `--auto-start` it does not start a host. It never falls back
+to embedded execution. Its stdout is
 protocol-only, with diagnostics on stderr. The client originates the single
 handshake through the relay; the bridge does not consume a second handshake.
 Each direction retains at most one 8 KiB copy buffer and flushes forwarded
@@ -4950,10 +4960,34 @@ client, not its host or session. A broken link is not automatically reconnected
 and no ambiguous input is replayed. The public TUI does not use this bridge;
 its current launch rule and direct hosted transport remain unchanged.
 
+Only proven absence and explicit local `--auto-start` permit an unmanaged
+start. SSH-session markers refuse such a start; the remote client does not
+supply the flag. An installed `plak-host.service` instead yields the unit-start
+remedy, never an unmanaged sibling. Concurrent bridge, direct and unit starts
+use the same home guard; readiness shares a ten-second discovery deadline.
+The starter clears the environment, preserving only the OS/home/locale/tool
+inputs listed in chapter 07 §1, plus the selected public home. It detaches
+from the caller's session and process group, uses the public home as cwd, and
+redirects stdin/stdout to null and stderr through a reaping supervisor to a
+private `host/auto-start.log`, capped at 1 MiB. Before its launching helper
+returns, the serving child must have claimed the home or exited after losing
+the claim. A pending loser cannot silently become a new host after the winner
+has already stopped. This private startup acknowledgement is not a wire
+handshake. The detached service has no
+implicit startup workspace: only recorded recent workspaces seed discovery,
+and every explicit workspace still validates outside the protected home.
+It does not treat the public home as a model workspace or broaden admission.
+
+An auto-started service exits after five minutes with no connections,
+resident/opening/releasing sessions, startup continuations, pending stops or
+handoffs. Activity resets the whole interval; uncertainty prevents idle exit.
+It never evicts sessions to become idle. A foreground or unit-managed host
+persists. SIGHUP remains planned handoff, not a client reload signal.
+
 A terminal connected to a host whose welcome binary id differs from the
 locally installed binary id shows a persistent, non-blocking notice naming
-both builds. Its remedy is to restart the host unit, or run `plak host stop`
-and start it again. The ids are read-only build facts; the terminal never
+both builds. Its remedy is to restart the host unit, or send SIGTERM for
+planned handoff and start it again. The ids are read-only build facts; the terminal never
 restarts the host. Its installed-build probe runs off the UI thread, without
 delaying the first frame. A result belongs only to its connection; reconnecting
 never inherits an old connection's notice or pending result. Matching builds

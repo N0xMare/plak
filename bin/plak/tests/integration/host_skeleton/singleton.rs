@@ -40,6 +40,30 @@ fn a_direct_start_refuses_a_kernel_held_other_key_before_starting_any_session() 
 }
 
 #[test]
+fn an_opt_in_bridge_refuses_another_key_instead_of_starting_a_sibling() {
+    let Some(fixture) = fixture() else { return };
+    let key = "r00.e00.p00.t00";
+    let _held = held(&fixture.home().join("state").join(key).join("host.lock"));
+    let output = fixture
+        .command()
+        .args(["host", "connect", "--stdio", "--auto-start"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let message = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        message.contains(key) && message.contains("no host was stopped"),
+        "{message}"
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "diagnostics reached protocol stdout"
+    );
+    assert!(!fixture.home().join("host/auto-start.log").exists());
+}
+
+#[test]
 fn a_direct_start_does_not_treat_a_home_guard_without_a_socket_as_absence() {
     let Some(fixture) = fixture() else { return };
     let _held = held(&fixture.home().join("host/host.lock"));

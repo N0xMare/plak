@@ -3,6 +3,22 @@
 use std::path::Path;
 use std::sync::Arc;
 
+#[allow(
+    dead_code,
+    reason = "only builds with the host start detached fixtures"
+)]
+pub(crate) fn host_start_environment() -> Vec<(&'static str, std::ffi::OsString)> {
+    [
+        "PLAK_TEST_RUNNER_DETACHED",
+        "PLAK_TEST_MODEL",
+        "PLAK_TEST_SCRIPT",
+        "PLAK_TEST_EVIDENCE",
+    ]
+    .into_iter()
+    .filter_map(|name| super::hook_environment(name).map(|value| (name, value)))
+    .collect()
+}
+
 #[allow(dead_code, reason = "only the optional host dials its local runner")]
 pub(crate) fn runner_windows() -> plakous::runner::ClientWindows {
     let window = super::selected()

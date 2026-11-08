@@ -7,6 +7,17 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ## Unreleased
 
+- Share serialized product wire types through the internal `plakd-wire-types`
+  crate without changing the wire schema or resetting terminal-local preferences.
+
+- Include host/web serving in default builds and qualify a transparent
+  `host connect --stdio` bridge. Explicit local auto-start uses a curated
+  environment, detached bounded logging and five-minute empty-service exit;
+  cross-key home guards prevent sibling hosts. Bare terminal launch is unchanged.
+
+- Let the serving host announce and refuse requested reloads without a
+  connected terminal; a client never consumes the host's request channel.
+
 - Preserve current terminal preferences when a stale product configuration
   snapshot is saved; explicit terminal-key edits still apply under the lock.
 

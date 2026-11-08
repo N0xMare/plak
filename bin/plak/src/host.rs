@@ -13,10 +13,12 @@
 
 mod console;
 mod bridge;
+mod idle;
 mod lock;
 mod requested_reload;
 mod sessions;
 mod socket;
+mod starter;
 
 pub(crate) const AVAILABLE: bool = true;
 
@@ -43,8 +45,8 @@ fn host_read_limits() -> plakous_hosted::host_service::wire::HostReadLimits {
     console::admission_limits()
 }
 
-pub(crate) fn connect_stdio(services: &Services) -> CliResult<ProcessOutcome> {
-    bridge::connect(services.paths()?)
+pub(crate) fn connect_stdio(services: &Services, auto_start: bool) -> CliResult<ProcessOutcome> {
+    bridge::connect(services.paths()?, auto_start)
 }
 
 fn startup_runtime() -> CliResult<(tokio::runtime::Runtime, tokio::signal::unix::Signal)> {
@@ -71,6 +73,16 @@ pub(crate) fn run_host_command(
     services: &Services,
     command: &HostCommand,
 ) -> CliResult<ProcessOutcome> {
+    match command.start {
+        crate::command::HostStart::Helper => return starter::helper(services.paths()?),
+        crate::command::HostStart::Supervisor => return starter::supervise(services.paths()?),
+        crate::command::HostStart::Foreground | crate::command::HostStart::Detached => {}
+    }
+    crate::environment::host::serving_keys(command.start == crate::command::HostStart::Detached);
+    serve_host(services, command)
+}
+
+fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOutcome> {
     // Arm reload before any startup I/O, even for a control-only host.
     let (runtime, reload) = startup_runtime()?;
     // A stop that arrives during the start still ends the
@@ -88,7 +100,7 @@ pub(crate) fn run_host_command(
     let entered = runtime.enter();
     let bound = socket::Bound::bind(&paths.host_socket(), &lock)?;
     drop(entered);
-    let (services, local) = runner::host::prepare(services)?;
+    let (services, local) = runner::host::prepare(services, None)?;
     let sessions = sessions::ProductSessions::new(
         &services,
         command.idle_release,
@@ -137,14 +149,23 @@ pub(crate) fn run_host_command(
         identity.instance,
         environment.describe(),
     );
-    scan(&host, owed, stop, &services, runtime.handle());
+    let scanning = Arc::new(std::sync::atomic::AtomicBool::new(!owed.is_empty()));
+    scan(
+        &host,
+        owed,
+        stop,
+        &services,
+        runtime.handle(),
+        Arc::clone(&scanning),
+    );
     let reload_requests = runtime.spawn(requested_reload::serve(
         Arc::clone(&host),
         services.paths()?.clone(),
     ));
     // The web endpoint serves beside the control socket and stops with it.
     let web = web.map(|web| runtime.spawn(web.serve()));
-    runtime.block_on(bound.serve(&host, move || stop.stopped()));
+    let idle = (command.start == crate::command::HostStart::Detached).then(idle::IdleExit::default);
+    runtime.block_on(bound.serve(&host, move || stop.stopped(), idle, scanning));
     reload_requests.abort();
     let _ = runtime.block_on(reload_requests);
     if let Some(web) = web {
@@ -160,13 +181,7 @@ pub(crate) fn run_host_command(
     bound.remove();
     // The handoff first closes the host: no session opens or is created
     // from then on.
-    let deadline = HANDOFF_DEADLINE.saturating_sub(STOP_MARGIN);
-    for (session, failure) in host.hand_off_all(deadline) {
-        eprintln!(
-            "plak host: session {session} was not handed off: {}",
-            failure.message()
-        );
-    }
+    hand_off(&host);
     eprintln!(
         "plak host: stopped in {} ms",
         stopping.elapsed().as_millis()
@@ -175,6 +190,16 @@ pub(crate) fn run_host_command(
     runtime.shutdown_timeout(Duration::from_secs(1));
     drop(home_lock);
     Ok(ProcessOutcome::Success)
+}
+
+fn hand_off(host: &SessionHost<crate::surface_protocol::PlakExtension>) {
+    let deadline = HANDOFF_DEADLINE.saturating_sub(STOP_MARGIN);
+    for (session, failure) in host.hand_off_all(deadline) {
+        eprintln!(
+            "plak host: session {session} was not handed off: {}",
+            failure.message()
+        );
+    }
 }
 
 /// This process's generation: it differs on every start.
@@ -196,6 +221,7 @@ fn scan(
     stop: crate::web::StopProbe,
     services: &Services,
     runtime: &tokio::runtime::Handle,
+    scanning: Arc<std::sync::atomic::AtomicBool>,
 ) {
     if owed.is_empty() {
         return;
@@ -241,6 +267,7 @@ fn scan(
                 false
             });
         }
+        scanning.store(false, std::sync::atomic::Ordering::Release);
     });
 }
 

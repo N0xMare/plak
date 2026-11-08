@@ -11,6 +11,13 @@ publishable to crates.io as one exact cohort and repository-only packages are
 not (spec 06 §1); uploading is a maintainer act, and a source checkout is a
 complete build.
 
+Host/web serving is supported in the default product. The public stdio bridge
+owns discovery and explicitly opted-in local startup; bare public `plak` keeps
+its current-key attach-or-embedded rule and never auto-starts a host. Do not
+rewire its direct hosted transport as part of the client split. Product wire
+DTOs belong in `plakd-wire-types`; handlers, credential resolution, settings
+metadata and runtime/store authority stay public and do not move into a client.
+
 ## First reading
 
 `docs/spec/` is the authority for current behavior; `docs/user-guide/` is the

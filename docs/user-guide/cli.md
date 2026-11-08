@@ -29,6 +29,37 @@ default. New sessions use the host's default profile; embedded `/new` remains
 payload-free and also uses the home default. A placement or workspace refusal
 creates no session.
 
+## A persistent host and the stdio bridge
+
+`plak host` serves the home's sessions in the foreground. Host/web serving is
+part of the default build; `--web` adds the web endpoint and `--ui` its validated
+static build. Run the host under its user unit or a multiplexer. Stop/restart
+it through that unit, or send SIGTERM for planned handoff. Only one host may
+serve a home, even across different state keys; an older running build must be
+stopped explicitly rather than silently replaced.
+
+Programmatic clients can use `plak host connect --stdio`. Stdout carries only
+wire frames; stderr carries connection diagnostics. The client supplies the
+handshake. Closing stdin detaches that client without stopping host sessions.
+An absent or incompatible host refuses; there is no embedded fallback and no
+automatic replay after a broken connection.
+
+The explicit local `--auto-start` option may start an absent unmanaged host.
+It refuses a remote-shell start and an installed `plak-host.service`, naming
+the unit-start command instead. The detached host uses the public home as cwd,
+has no implicit startup workspace, and writes a private bounded
+`host/auto-start.log`. It exits after five minutes without connections or kept
+work; ordinary foreground and unit hosts persist. Auto-start uses a curated
+OS/tool environment, not the caller's API-key variables. Configure stored keys
+with `plak key set`, or set variables in the environment of an explicitly
+started host/unit. Missing-key diagnostics name the resolving process.
+`key set`/`key clear` themselves still run locally and obey their own process's
+environment-first precedence; the bridge does not perform target-host writes.
+
+This does not change bare `plak`: it attaches to an existing current-key host,
+otherwise runs embedded, and never auto-starts a host. Its hosted transport
+stays direct. `run` and `agent` also remain in-process.
+
 ## Exit codes
 
 | Code | Meaning |

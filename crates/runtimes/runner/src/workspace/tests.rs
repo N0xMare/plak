@@ -338,3 +338,22 @@ fn roots_and_default_are_daemon_facts_and_gitfiles_inside_roots_work() {
         RepositoryHead::Detached
     );
 }
+
+#[test]
+fn a_home_started_service_has_no_implicit_workspace_and_keeps_the_home_protected() {
+    let home = tempfile::tempdir().unwrap();
+    let protected = directory(home.path(), "protected");
+    let workspace = directory(home.path(), "workspace");
+    let catalog = WorkspaceCatalog::local(None, &[], &protected).unwrap();
+    assert_eq!(catalog.options().default_workspace, None);
+    assert_eq!(catalog.options().roots, None);
+    assert_eq!(catalog.discover().workspaces, []);
+    assert_eq!(
+        catalog.validate(protected.to_str().unwrap(), true),
+        Err(WorkspaceRefusal::ProductHome)
+    );
+    assert_eq!(
+        catalog.validate(workspace.to_str().unwrap(), true),
+        Ok(workspace.to_str().unwrap().into())
+    );
+}

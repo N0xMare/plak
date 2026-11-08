@@ -49,6 +49,26 @@ same-user checks are independent of web authentication and static-UI options.
 The existing public TUI still uses its direct transport and current-key
 attach-or-embedded launch rule; this command does not change that default.
 
+The explicit local `--auto-start` flag permits a detached service only after
+absence is proved and no `plak-host.service` is installed in the user/runtime
+or standard system user-unit directories. The starter's fixed environment
+allowlist is `HOME`, `PATH` (default `/usr/bin:/bin` when unset), `SHELL`,
+`TMPDIR`, `LANG`, `LC_ALL`, `LC_CTYPE`, `LC_MESSAGES`, `LC_TIME`, `LC_NUMERIC`,
+`LC_COLLATE`, `LC_MONETARY`, `TZ`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`,
+`XDG_STATE_HOME`, `XDG_CONFIG_DIRS`, `XDG_DATA_DIRS`, `XDG_CACHE_HOME`,
+`XDG_RUNTIME_DIR` and `SSH_AUTH_SOCK`.
+`PLAK_HOME` is the resolved public home. No other caller environment reaches
+the service, including API-key variables and reload/product overrides.
+Unit detection also checks `SYSTEMD_UNIT_PATH` when set, without passing that
+manager override to the unmanaged host; ambiguous relative unit paths refuse.
+Test-hooks builds additionally carry only the isolated model/script/evidence
+and detached-runner fixture inputs, never arbitrary test knobs or credentials.
+The service cwd is the protected public home, not an implicit workspace;
+recent workspace parents seed discovery and no default workspace is invented.
+`host/auto-start.log` is a private bounded diagnostic, not configuration.
+Five-minute empty-service exit applies only to explicitly auto-started hosts;
+normal foreground and unit hosts persist (chapter 02 §4.6).
+
 Accounts accept a canonical `vertical[/name]` reference. A named selection uses
 only its own credential. Named aliases normalize before slot selection; bare
 default templates keep their existing stored spelling. The vertical determines

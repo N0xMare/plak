@@ -1012,7 +1012,7 @@ or foreign provenance with a local-login remedy. This is an accidental-copy
 guard, not a boundary against an operator who can rewrite the marker. One login
 per machine is required; credential directories must not be copied across hosts.
 
-API keys are files-first with environment precedence: the environment variable
+API keys are files-first with resolver-scoped environment precedence: the resolving process's variable
 wins (`OPENAI_API_KEY`, `XAI_API_KEY`, `ANTHROPIC_API_KEY`,
 `OPENROUTER_API_KEY`), then `<plak home>/secrets/<account>.key`, else unset. A
 variable that is set but empty, oversized, or not valid Unicode is a hard error
@@ -1021,6 +1021,14 @@ set, Plak **refuses** to write or clear the file, because doing so would have no
 effect. Key files are mode `0600` inside the `0700` `secrets/` directory. A key
 is never an argv value; the CLI prompts with masked input. **Plak never loads a
 `.env` file.**
+
+The serving host, not a connected client, resolves host-session credentials.
+Its unit environment is authoritative when unit-managed. An explicitly
+auto-started host receives an empty-then-curated environment, excluding all
+caller API-key variables; missing-key diagnostics name that effective resolver
+and the ignored variable without exposing values. Explicit CLI key writes
+remain in-process and retain their own environment-first refusal law. The
+bridge does not forward key mutations or add a credential-write wire operation.
 
 Named API keys use only `secrets/api/<vertical>/<name>.secret`, through the
 API SecretShelf, with 0700 directories and single-link regular files owned
@@ -1913,9 +1921,16 @@ the product home. Its authority is exactly the user's own:
   evidence as refusal. Socket connect attempts share a bounded discovery
   deadline, including a full listener backlog. The bridge never consumes a
   separate handshake or retries ambiguous accepted input. Without a running
-  host it refuses without creating a product home or embedded session.
+  host it refuses without creating a product home unless explicit local
+  `--auto-start` authorizes startup; it never starts an embedded session.
   EOF closes only this client attachment. Bridging does not grant local-only
   executable probes or reload intents: these remain `refused_for_role`.
+- Auto-start refuses SSH-session markers and an installed user host unit.
+  Its fixed environment allowlist (chapter 07 §1) excludes credentials and
+  arbitrary caller product/reload overrides. Detached helper groups isolate
+  caller signals; a separate reaping supervisor bounds stderr to a private
+  regular, owned, single-link, no-symlink 1 MiB log. The host still takes both home and
+  state-key locks before serving. No live socket or lock is unlinked to start.
 - Socket clients, including the TUI, check the private run directory,
   socket ownership and connected peer uid through the same client transport.
   A failed same-user check refuses, never embeds. The client welcome has a
