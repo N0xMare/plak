@@ -69,6 +69,26 @@ impl ProductSessions {
         })
     }
 
+    fn stop_roots(
+        &self,
+        record: &crate::store::sessions::SessionRecord,
+    ) -> CliResult<plakous_hosted::agent::ProductStateRoots> {
+        let context = if record.runner.is_some() {
+            self.services
+                .paths()?
+                .for_remote_workspace(&record.workspace_root)
+        } else {
+            self.services.paths()?.for_workspace(&record.workspace_root)
+        };
+        Ok(self.services.state_roots_for(&context)?.for_runner_stop(
+            self.services.runners().clone(),
+            record
+                .runner
+                .as_ref()
+                .map_or("local", |runner| runner.runner_id.as_str()),
+        ))
+    }
+
     fn with_product<T>(
         &self,
         read: impl FnOnce(&mut ProductStore) -> Result<T, String>,
@@ -397,20 +417,7 @@ impl HostSessions<PlakExtension> for ProductSessions {
                 holder.pid
             )));
         }
-        let context = if record.runner.is_some() {
-            self.services
-                .paths()?
-                .for_remote_workspace(&record.workspace_root)
-        } else {
-            self.services.paths()?.for_workspace(&record.workspace_root)
-        };
-        let roots = self.services.state_roots_on(
-            &context,
-            record
-                .runner
-                .as_ref()
-                .map_or("local", |runner| runner.runner_id.as_str()),
-        )?;
+        let roots = self.stop_roots(&record)?;
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -429,20 +436,7 @@ impl HostSessions<PlakExtension> for ProductSessions {
                 .session_records()?
                 .load(session)
                 .map_err(CliFailure::new)?;
-            let context = if record.runner.is_some() {
-                self.services
-                    .paths()?
-                    .for_remote_workspace(&record.workspace_root)
-            } else {
-                self.services.paths()?.for_workspace(&record.workspace_root)
-            };
-            self.services.state_roots_on(
-                &context,
-                record
-                    .runner
-                    .as_ref()
-                    .map_or("local", |runner| runner.runner_id.as_str()),
-            )
+            self.stop_roots(&record)
         })();
         roots.map_or(true, |roots| roots.runner_pending())
     }
