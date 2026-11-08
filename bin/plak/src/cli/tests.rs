@@ -4,6 +4,21 @@
 )]
 
 #[test]
+fn host_stdio_bridge_requires_transport_and_refuses_server_flags() {
+    assert!(matches!(
+        parse(args(&["host", "connect", "--stdio"])).unwrap(),
+        Command::HostConnect
+    ));
+    for arguments in [
+        vec!["host", "connect"],
+        vec!["host", "connect", "--stdio", "--web", "127.0.0.1:0"],
+        vec!["host", "--web", "127.0.0.1:0", "connect", "--stdio"],
+    ] {
+        assert!(parse(args(&arguments)).is_err(), "{arguments:?}");
+    }
+}
+
+#[test]
 fn unknown_cli_accounts_share_admission_wording_and_registered_aliases() {
     for verb in ["run", "agent"] {
         let mut arguments = vec![verb, "--account", "removed/work", "--model", "m"];

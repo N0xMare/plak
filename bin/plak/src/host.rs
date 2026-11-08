@@ -12,6 +12,7 @@
 //! session off and ends the process within [`HANDOFF_DEADLINE`].
 
 mod console;
+mod bridge;
 mod lock;
 mod requested_reload;
 mod sessions;
@@ -40,6 +41,10 @@ const STOP_MARGIN: Duration = Duration::from_secs(5);
 
 fn host_read_limits() -> plakous_hosted::host_service::wire::HostReadLimits {
     console::admission_limits()
+}
+
+pub(crate) fn connect_stdio(services: &Services) -> CliResult<ProcessOutcome> {
+    bridge::connect(services.paths()?)
 }
 
 fn startup_runtime() -> CliResult<(tokio::runtime::Runtime, tokio::signal::unix::Signal)> {

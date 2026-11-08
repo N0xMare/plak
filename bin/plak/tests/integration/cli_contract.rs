@@ -21,6 +21,44 @@ fn plak_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_plak"))
 }
 
+#[cfg(feature = "web")]
+#[test]
+fn a_stdio_bridge_without_a_host_does_not_create_a_home_or_embed() {
+    let root = tempfile::tempdir().unwrap();
+    let output = publication_command(root.path(), &["host", "connect", "--stdio"])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        output.stdout.is_empty(),
+        "diagnostics reached protocol stdout"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("no running host"),
+        "{output:?}"
+    );
+    assert!(!root.path().join("home").exists());
+    assert!(!root.path().join("xdg").exists());
+}
+
+#[cfg(not(feature = "web"))]
+#[test]
+fn an_omitted_host_bridge_reports_its_capability_without_creating_a_home() {
+    let root = tempfile::tempdir().unwrap();
+    let output = publication_command(root.path(), &["host", "connect", "--stdio"])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("compiled without feature `web`"),
+        "{output:?}"
+    );
+    assert!(!root.path().join("home").exists());
+}
+
 #[cfg(not(feature = "tui"))]
 #[test]
 fn omitted_terminal_placement_refuses_before_creating_a_home_or_host() {

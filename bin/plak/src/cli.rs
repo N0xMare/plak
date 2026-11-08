@@ -576,6 +576,11 @@ enum AccountAction {
 
 #[derive(Debug, clap::Subcommand)]
 enum HostAction {
+    /// Relay wire bytes to this home's host without consuming its handshake.
+    Connect {
+        #[arg(long, required = true)]
+        stdio: bool,
+    },
     /// Write the Linux systemd user unit without enabling or starting it.
     Install {
         #[arg(long, value_name = "unix:ABSOLUTE_PATH")]

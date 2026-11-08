@@ -547,6 +547,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
         }
         command @ Command::Agent { .. } => return run_agent_command(&services, command),
         Command::Host(command) => return host::run_host_command(&services, &command),
+        Command::HostConnect => return host::connect_stdio(&services),
         Command::WireSchema => return wire_schema::print(&mut io::stdout().lock()),
         // The runner bridge owns raw stdin and stdout, so it runs before the
         // process takes their locks.
@@ -1294,6 +1295,7 @@ fn execute_command(
         | Command::Agent { .. }
         | Command::Host(_)
         | Command::HostInstall(_)
+        | Command::HostConnect
         | Command::WireSchema
         | Command::Help
         | Command::CommandHelp { .. }

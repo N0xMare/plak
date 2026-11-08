@@ -3,11 +3,19 @@ plak host — serve sessions and install a user service
 USAGE:
   plak host [--web <unix:path|127.0.0.1:port>] [--ui <dir>]
   plak host install --web unix:<absolute socket> --ui <absolute dir> [--dry-run]
+  plak host connect --stdio
+  plak host --help
 
 The supported default build includes the host and web endpoint. A private
 same-user control socket serves the session directory; disconnecting a client
 does not stop its sessions. Bare plak attaches to a running host or runs
 embedded; it does not start a host.
+
+connect --stdio relays bytes to an existing host after same-user and
+all-state-key discovery. Its stdout is protocol-only; the client sends
+the handshake. It never starts a host or falls back to an embedded session.
+Closing stdin detaches this client without stopping host work. An active
+other-key host requires an explicit stop/upgrade, not a second service.
 
 --web adds the web endpoint; loopback development also requires --dev-login.
 --ui serves a validated static build with csp.json. SIGUSR1 reloads that build

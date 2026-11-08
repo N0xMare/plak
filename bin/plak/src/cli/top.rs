@@ -1,6 +1,6 @@
 use super::{
-    Command, NativeLoginMode, RunPrompt, StateAction, TopCommand, TreeAction, WireAction,
-    finish_agent, finish_continue_session, finish_run, parse_oauth_account,
+    Command, HostAction, NativeLoginMode, RunPrompt, StateAction, TopCommand, TreeAction,
+    WireAction, finish_agent, finish_continue_session, finish_run, parse_oauth_account,
 };
 
 impl TopCommand {
@@ -318,7 +318,7 @@ impl TopCommand {
             } => action.into_command(),
             Self::Host {
                 action:
-                    Some(super::HostAction::Install {
+                    Some(HostAction::Install {
                         web,
                         ui,
                         dry_run,
@@ -334,6 +334,15 @@ impl TopCommand {
                     ui,
                     dry_run,
                 }))
+            }
+            Self::Host {
+                action: Some(HostAction::Connect { stdio }),
+                ..
+            } => {
+                if !stdio {
+                    return Err("plak host connect requires --stdio".to_owned());
+                }
+                Ok(Command::HostConnect)
             }
             Self::Host {
                 action: None,

@@ -3640,6 +3640,15 @@ not move library evidence out of §3.1.
 
 ### 3.1 Offline fixture evidence
 
+`host_skeleton::bridge` uses the real public stdio bridge and host. Its single
+client-originated handshake reaches the server unchanged, including version
+refusals; EOF leaves a busy root alive with one physical provider dispatch,
+and a new attachment reaches the same root. A same-user bridge still refuses
+local-only reload intents before model work. The CLI contract
+`a_stdio_bridge_without_a_host_does_not_create_a_home_or_embed` proves absent
+host discovery leaves protocol stdout and the product home untouched. A build
+without `web` qualifies the corresponding typed capability refusal separately.
+
 `wire_transport::hosts::tests` distinguishes held kernel locks from stale pid
 text, discovers every live socket key, and refuses unsafe locks, directories
 and state-directory links. `host_skeleton::singleton` drives the real host:

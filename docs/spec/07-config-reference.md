@@ -42,6 +42,13 @@ absence from a missing socket or a pid line. Only one state-key host may run
 per home, including direct and unit starts. These private process locks are
 not session authority or an export carrier and introduce no format version.
 
+`plak host connect --stdio` uses the selected public home, not the client's
+working directory, for host discovery. It is a transparent wire relay with no
+separate handshake and no implicit host start or embedded fallback. Its
+same-user checks are independent of web authentication and static-UI options.
+The existing public TUI still uses its direct transport and current-key
+attach-or-embedded launch rule; this command does not change that default.
+
 Accounts accept a canonical `vertical[/name]` reference. A named selection uses
 only its own credential. Named aliases normalize before slot selection; bare
 default templates keep their existing stored spelling. The vertical determines

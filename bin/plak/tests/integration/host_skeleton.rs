@@ -1593,6 +1593,7 @@ fn a_stop_is_answered_after_its_attachment_detaches() {
     assert_eq!(answered[&5], Outcome::Ok(Answer::Detached));
 }
 
+mod bridge;
 mod crash;
 mod reload;
 mod requests;

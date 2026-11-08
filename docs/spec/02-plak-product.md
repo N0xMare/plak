@@ -4938,6 +4938,18 @@ Adding a public stdio bridge for independent clients does not rewire this
 terminal. Bridge-only launch belongs to the later private client.
 The service refreshes native catalogs at startup without requiring a terminal.
 
+`plak host connect --stdio` is the public byte bridge for independent clients.
+It resolves the home and inspects all live state keys before connecting;
+another key or multiple keys is a refusal, not a silently selected service.
+It does not start a host or fall back to embedded execution. Its stdout is
+protocol-only, with diagnostics on stderr. The client originates the single
+handshake through the relay; the bridge does not consume a second handshake.
+Each direction retains at most one 8 KiB copy buffer and flushes forwarded
+bytes promptly. Input EOF closes the socket's write half and detaches that
+client, not its host or session. A broken link is not automatically reconnected
+and no ambiguous input is replayed. The public TUI does not use this bridge;
+its current launch rule and direct hosted transport remain unchanged.
+
 A terminal connected to a host whose welcome binary id differs from the
 locally installed binary id shows a persistent, non-blocking notice naming
 both builds. Its remedy is to restart the host unit, or run `plak host stop`

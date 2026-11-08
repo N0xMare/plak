@@ -342,9 +342,11 @@ pub(crate) enum Command {
         /// supported).
         wire_v2: bool,
     },
-    /// Hidden `plak host`: the per-user host process.
+    /// `plak host`: the per-user host process.
     Host(HostCommand),
     HostInstall(HostInstall),
+    /// A byte-transparent bridge to the home's existing host.
+    HostConnect,
     /// Hidden `plak wire schema`: this build's wire v2 JSON Schema.
     WireSchema,
 }
@@ -502,7 +504,7 @@ impl Command {
             | Self::RunPlatform { .. }
             | Self::ContinueSession { .. } => "run",
             Self::Agent { .. } => "agent",
-            Self::Host(_) | Self::HostInstall(_) => "host",
+            Self::Host(_) | Self::HostInstall(_) | Self::HostConnect => "host",
             Self::WireSchema => "wire",
         }
     }
@@ -552,6 +554,7 @@ pub(crate) fn command_is_read_only(command: &Command) -> bool {
     matches!(
         command,
         Command::StatusAll
+            | Command::HostConnect
             | Command::AccountsList
             | Command::AuthStatus(_)
             | Command::Doctor

@@ -1905,8 +1905,17 @@ the product home. Its authority is exactly the user's own:
   removes a live socket or crosses a key on the operator's behalf.
 - The socket grants nothing the user's shell does not already have: any
   process of the user can already read and write the home. There is no
-  port and no network surface; a remote client reaches a host only through
-  the web endpoint's gate (§2.10).
+  socket port or unauthenticated network surface. An authenticated shell of
+  that user may relay it through `plak host connect --stdio`, including over
+  SSH; the bridge still verifies the socket directory, owner and connected
+  peer uid. The web endpoint retains its separate gate (§2.10).
+- The bridge discovers all live state keys and treats unreadable or ambiguous
+  evidence as refusal. Socket connect attempts share a bounded discovery
+  deadline, including a full listener backlog. The bridge never consumes a
+  separate handshake or retries ambiguous accepted input. Without a running
+  host it refuses without creating a product home or embedded session.
+  EOF closes only this client attachment. Bridging does not grant local-only
+  executable probes or reload intents: these remain `refused_for_role`.
 - Socket clients, including the TUI, check the private run directory,
   socket ownership and connected peer uid through the same client transport.
   A failed same-user check refuses, never embeds. The client welcome has a
