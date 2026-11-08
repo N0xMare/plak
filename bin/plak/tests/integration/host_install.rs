@@ -19,14 +19,14 @@ impl Fixture {
         let home = root.path().join("user");
         let product = root.path().join("home");
         let log = root.path().join("manager.log");
-        let bin = root.path().join("bin");
+        let bin = home.join(".local/bin");
         std::fs::create_dir(&home)?;
-        std::fs::create_dir(&bin)?;
+        std::fs::create_dir_all(&bin)?;
         let manager = bin.join("systemctl");
         std::fs::write(
             &manager,
             format!(
-                "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\nenv >> {}\n",
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" >> {}\nenv >> {}\nif [ \"$2\" = is-system-running ]; then printf 'offline\\n'; fi\n",
                 shell_words::quote(&log.to_string_lossy()),
                 shell_words::quote(&log.to_string_lossy())
             ),
@@ -49,7 +49,7 @@ impl Fixture {
             .env("PLAK_HOME", &self.product)
             .env(
                 "PATH",
-                format!("{}:/usr/bin:/bin", self.root.path().join("bin").display()),
+                format!("{}:/usr/bin:/bin", self.home.join(".local/bin").display()),
             )
             .env("UNRELATED_SECRET", "must-not-be-copied")
             .current_dir(self.root.path());
@@ -83,6 +83,108 @@ fn success(output: &Output) {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[cfg(feature = "test-hooks")]
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        super::offline_support::kill_home_local_runner(&self.product);
+    }
+}
+
+#[cfg(feature = "test-hooks")]
+fn wait_host_log(
+    path: &Path,
+    child: &mut super::offline_support::TestChild,
+    needle: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let until = std::time::Instant::now() + super::offline_support::WAIT;
+    loop {
+        let log = std::fs::read_to_string(path).unwrap_or_default();
+        if log.contains(needle) {
+            return Ok(log);
+        }
+        if let Some(status) = child.try_wait()? {
+            return Err(format!("host exited {status} before {needle}: {log}").into());
+        }
+        if std::time::Instant::now() >= until {
+            return Err(format!("host never reported {needle}: {log}").into());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+#[cfg(feature = "test-hooks")]
+#[test]
+fn host_install_generated_command_serves_from_home_with_a_fake_manager() -> TestResult {
+    use super::offline_support::TestChild;
+    use std::process::Stdio;
+
+    let mut fixture = Fixture::new()?;
+    // Match the systemd default cwd and default product home, not a workspace.
+    fixture.product = fixture.home.join(".plak");
+    success(&fixture.install(false)?);
+    std::os::unix::fs::symlink(
+        env!("CARGO_BIN_EXE_plak"),
+        fixture.home.join(".local/bin/plak"),
+    )?;
+    std::fs::create_dir_all(&fixture.product)?;
+    std::fs::set_permissions(&fixture.product, std::fs::Permissions::from_mode(0o700))?;
+    std::fs::write(
+        fixture.product.join("config.toml"),
+        "[web]\nallow = [\"owner@example.test\"]\norigin = \"https://example.test\"\n",
+    )?;
+    let ui = fixture.root.path().join("ui build");
+    std::fs::create_dir(&ui)?;
+    std::fs::write(
+        ui.join("index.html"),
+        "<!doctype html><title>fixture</title>",
+    )?;
+    std::fs::write(
+        ui.join("csp.json"),
+        r#"{"header":"default-src 'self'; frame-ancestors 'none'"}"#,
+    )?;
+    let unit = std::fs::read_to_string(fixture.unit())?;
+    assert!(!unit.contains("WorkingDirectory="));
+    let start = unit
+        .lines()
+        .find_map(|line| line.strip_prefix("ExecStart="))
+        .ok_or("unit has no ExecStart")?;
+    // Emulate only the manager's substitutions; execute the rendered argv,
+    // including env -i and the installed stable link, without a real manager.
+    let start = start
+        .replace("%t", &fixture.root.path().to_string_lossy())
+        .replace("${INVOCATION_ID}", "fixture");
+    let argv = shell_words::split(&start)?;
+    let log = fixture.root.path().join("host.log");
+    let mut child = TestChild::spawn(
+        Command::new(&argv[0])
+            .args(&argv[1..])
+            .current_dir(&fixture.home)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(std::fs::File::create(&log)?),
+    );
+    wait_host_log(&log, &mut child, "plak host: serving on ")?;
+    wait_host_log(&fixture.log, &mut child, "--user\nis-system-running\n")?;
+    let pid = rustix::process::Pid::from_raw(i32::try_from(child.id())?).ok_or("invalid pid")?;
+    rustix::process::kill_process(pid, rustix::process::Signal::USR1)?;
+    wait_host_log(&log, &mut child, "plak host: UI build reloaded")?;
+    rustix::process::kill_process(pid, rustix::process::Signal::TERM)?;
+    let until = std::time::Instant::now() + super::offline_support::WAIT;
+    loop {
+        if let Some(status) = child.try_wait()? {
+            assert!(status.success(), "{}", std::fs::read_to_string(&log)?);
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < until,
+            "host did not stop after SIGTERM"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(!fixture.root.path().join("web socket.sock").exists());
+    Ok(())
 }
 
 #[test]
@@ -126,7 +228,7 @@ fn host_install_dry_run_touches_nothing_and_refuses_unsafe_flags() -> TestResult
 fn host_install_reports_manager_failure_without_removing_the_complete_unit() -> TestResult {
     let fixture = Fixture::new()?;
     std::fs::write(
-        fixture.root.path().join("bin/systemctl"),
+        fixture.home.join(".local/bin/systemctl"),
         "#!/bin/sh\nexit 1\n",
     )?;
     let output = fixture.install(false)?;
