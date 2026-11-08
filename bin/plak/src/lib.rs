@@ -373,9 +373,6 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
     let launch = shell::home::launch_directory();
     let command = cli::parse(arguments)?.resolved_against(launch.as_deref());
     build_features::admit_command(&command)?;
-    if let Command::HostInstall(install) = &command {
-        return commands::host_install::run(install, &mut io::stdout().lock());
-    }
     #[cfg(feature = "test-hooks")]
     test_hooks::install().map_err(CliFailure::new)?;
 
@@ -417,6 +414,9 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
     let services = Services::from_env(Some(otel_extra_telemetry_sink), launch.as_deref());
     #[cfg(not(feature = "otel"))]
     let services = Services::from_env(None, launch.as_deref());
+    if let Command::HostInstall(install) = &command {
+        return commands::host_install::run(install, services.paths(), &mut io::stdout().lock());
+    }
     // Diagnostic setup must not recreate a local daemon's deleted home.
     if matches!(
         &command,

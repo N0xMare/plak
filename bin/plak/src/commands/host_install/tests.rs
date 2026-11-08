@@ -68,7 +68,7 @@ fn host_install_refuses_relative_dev_and_injected_paths() {
 #[cfg(not(target_os = "linux"))]
 #[test]
 fn host_install_refuses_unsupported_platform_before_reading_paths() {
-    let error = run(&args(), &mut Vec::new());
+    let error = run(&args(), Err(CliFailure::new("unread")), &mut Vec::new());
     assert!(error.is_err_and(|error| {
         error
             .to_string()
