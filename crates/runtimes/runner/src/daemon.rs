@@ -109,6 +109,7 @@ mod triple_tests {
         ];
         let mut keys = std::collections::BTreeSet::new();
         let mut live = Vec::new();
+        private_directory(&home.path().join("builds")).unwrap();
         for (number, version) in versions.iter().enumerate() {
             let directory = home.path().join("builds").join(triple_key(version));
             assert!(keys.insert(directory.clone()));
