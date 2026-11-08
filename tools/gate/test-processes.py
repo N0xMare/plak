@@ -53,7 +53,9 @@ class ProcessTable:
                     continue
         else:
             rows = subprocess.check_output(
-                ["ps", "-axww", "-o", "uid=,pid=,ppid=,lstart=,stat=,command="], text=True
+                ["ps", "-axww", "-o", "uid=,pid=,ppid=,lstart=,stat=,command="],
+                text=True,
+                env=dict(os.environ, LC_ALL="C"),
             )
             for row in rows.splitlines():
                 fields = row.split(maxsplit=9)
@@ -89,7 +91,7 @@ class ProcessTable:
                         "test process guard requires lsof on this platform"
                     ) from None
                 return False
-            except OSError as error:
+            except (OSError, subprocess.SubprocessError) as error:
                 if not self.warned:
                     print(f"test process inspection unavailable: {error}", file=sys.stderr)
                     self.warned = True
@@ -99,6 +101,27 @@ class ProcessTable:
 
     def candidates(self, root: Path) -> list[Process]:
         return [p for p in self.scan().values() if p.kind and self.inside(p, root)]
+
+    def occupied(self, root: Path) -> bool:
+        rows = self.scan()
+        # Cwd can change without a new process identity; deletion needs a fresh view.
+        self.cwd.clear()
+        if not sys.platform.startswith("linux"):
+            # All processes matter here, not just fixtures. Batch the cwd probe
+            # rather than running one system-wide lsof scan per process.
+            result = subprocess.run(
+                ["lsof", "-a", "-u", str(os.getuid()), "-d", "cwd", "-Fn"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            pid = None
+            for line in result.stdout.splitlines():
+                if line.startswith("p"):
+                    pid = int(line[1:])
+                elif line.startswith("n") and pid in rows:
+                    self.cwd[(pid, rows[pid].identity)] = line[1:]
+        return any(self.inside(p, root) for p in rows.values())
 
     def kill(self, process: Process) -> None:
         current = self.scan().get(process.pid)
@@ -164,7 +187,7 @@ def reap_leaks(root: Path, table: ProcessTable, *, settle: bool) -> bool:
     return True
 
 
-def reap_previous(base: Path, table: ProcessTable, *, remove: bool = False) -> None:
+def reap_previous(base: Path, table: ProcessTable) -> None:
     for root in base.glob("run-*"):
         try:
             if root.is_symlink() or not root.is_dir() or root.stat().st_uid != os.getuid():
@@ -178,13 +201,13 @@ def reap_previous(base: Path, table: ProcessTable, *, remove: bool = False) -> N
                     print(
                         "test processes left by a previous run: cleanup attempted", file=sys.stderr
                     )
-                if remove and not table.candidates(root):
+                if not table.occupied(root):
                     shutil.rmtree(root)
         except OSError:
             continue
 
 
-def run(args: list[str], root: Path, table: ProcessTable) -> int:
+def run(args: list[str], root: Path, table: ProcessTable, lock_fd: int) -> int:
     home = root / "plak-isolated-home"
     home.mkdir(mode=0o700)
     gitconfig = root / "gitconfig"
@@ -213,12 +236,20 @@ def run(args: list[str], root: Path, table: ProcessTable) -> int:
         signals += 1
         signal_child()
         # Do not spend a settle grace inside the supervisor's stop deadline.
-        reap_leaks(root, table, settle=False)
+        try:
+            reap_leaks(root, table, settle=False)
+        except (OSError, subprocess.SubprocessError, RuntimeError) as error:
+            print(f"test process cleanup unavailable: {error}", file=sys.stderr)
 
     watched = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGQUIT)
-    previous = {signum: signal.signal(signum, forward) for signum in watched}
+    previous = {
+        signum: signal.signal(signum, forward)
+        for signum in watched
+        if signal.getsignal(signum) != signal.SIG_IGN
+    }
     try:
-        child = subprocess.Popen(args, env=env, start_new_session=True)
+        os.set_inheritable(lock_fd, True)
+        child = subprocess.Popen(args, env=env, start_new_session=True, pass_fds=(lock_fd,))
         if interrupted is not None:
             signal_child()
         child.wait()
@@ -241,12 +272,12 @@ def main(args: list[str]) -> int:
     # must not be mistaken for an abandoned one before its lock is held.
     with (base / ".guard.lock").open("a") as publishing:
         fcntl.flock(publishing, fcntl.LOCK_EX)
-        reap_previous(base, table, remove=args == ["--check"])
+        reap_previous(base, table)
         if args == ["--check"]:
             return 0
         # Short nonces keep nested fixture homes within sockaddr_un limits.
         while True:
-            root = base / f"run-{os.getpid()}-{secrets.token_hex(2)}"
+            root = base / f"run-{os.getpid()}-{secrets.token_hex(1)}"
             try:
                 root.mkdir(mode=0o700)
                 break
@@ -255,12 +286,15 @@ def main(args: list[str]) -> int:
         lock = (root / "guard.lock").open("a")
         fcntl.flock(lock, fcntl.LOCK_EX)
     with lock:
-        return run(args[1:], root, table)
+        code = run(args[1:], root, table, lock.fileno())
+        if code == 0 and not table.occupied(root):
+            shutil.rmtree(root)
+        return code
 
 
 if __name__ == "__main__":
     try:
         raise SystemExit(main(sys.argv[1:]))
-    except (OSError, RuntimeError) as error:
+    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
         print(f"test process guard: {error}", file=sys.stderr)
         raise SystemExit(2) from None

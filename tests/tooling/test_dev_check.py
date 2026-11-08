@@ -167,6 +167,10 @@ with open(os.environ['GATE_CALLS'], 'a') as log:
                              target=os.environ.get('CARGO_BUILD_TARGET'),
                              target_dir=os.environ.get('CARGO_TARGET_DIR'),
                              plak_home=os.environ.get('PLAK_HOME'),
+                             home_mode=(os.stat(os.environ['PLAK_HOME']).st_mode & 0o777
+                                        if os.environ.get('PLAK_HOME') else None),
+                             git_contents=(Path(os.environ['GIT_CONFIG_GLOBAL']).read_text()
+                                           if os.environ.get('GIT_CONFIG_GLOBAL') else None),
                              rustdocflags=os.environ.get('RUSTDOCFLAGS'),
                              rustflags=os.environ.get('RUSTFLAGS'),
                              encoded_rustflags=os.environ.get('CARGO_ENCODED_RUSTFLAGS'),
@@ -368,7 +372,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
                 home and home.endswith('/plak-isolated-home'),
                 home,
             )
-            mode = os.stat(home).st_mode & 0o777
+            mode = lane['home_mode']
             self.assertEqual(mode, 0o700, home)
         for call in calls:
             if call['args'][:2] == ['nextest', 'run']:
@@ -887,7 +891,10 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
                 self.assertEqual(config.name, 'gitconfig')
                 if call.get('args', [])[:2] == ['nextest', 'run']:
                     self.assertTrue(config.parent.name.startswith('run-'), config)
-                self.assertEqual(config.read_text(), '')
+                if call.get('args', [])[:2] == ['nextest', 'run']:
+                    self.assertEqual(call['git_contents'], '')
+                else:
+                    self.assertEqual(config.read_text(), '')
                 self.assertEqual(call['git_nosystem'], '1')
         self.assertEqual((scratch / 'gitconfig').read_text(), '')
 

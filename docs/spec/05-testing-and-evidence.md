@@ -1997,16 +1997,22 @@ The guarded entry points are the Rust lanes in `tools/gate/dev-check.sh`,
 `just nextest`, and `just dev crash-sweep`. `tools/dev/coverage.sh` and
 `tools/perf/perf-smoke.sh` are not guarded.
 
-Each guarded invocation creates `TMPDIR/run-<pid>-<nonce>`, holds its run lock
-for its lifetime, and gives the child that directory as its test scratch and
-isolated home. Concurrent invocations never reap locked runs. At startup it
-reaps only unlocked earlier runs, reports those leftovers without failing the
-new command, and never resets a live run's files. A leak from the current run
+Each guarded invocation creates `TMPDIR/run-<pid>-<nonce>` with a two-hex-digit
+nonce, holds its run lock and passes that descriptor to the child, and gives
+the child that directory as its test scratch and isolated home. Concurrent
+invocations never reap locked runs, including when a child retains the lock
+after its guard dies. At every startup it reaps only unlocked earlier runs,
+reports those leftovers without failing the new command, and removes a run
+directory only when no same-user process has its cwd beneath it. A successful,
+leak-free command removes its own unoccupied run before releasing its lock;
+the guard never resets a live run's files. A leak from the current run
 fails that command. Only same-user hosts and runners inside its run directory
 (including deleted working directories), and their owned descendants, are
 signalled. Hosts stop before daemons and cleanup re-lists successors launched
-while a host dies. TERM, INT, HUP and QUIT are forwarded without preempting the
-child's cancellation grace; only a second signal escalates to KILL. Interrupted
+while a host dies. TERM, INT, HUP and QUIT are forwarded unless inherited as
+ignored (including HUP under `nohup`); ignored dispositions stay inherited by
+the child. Forwarding does not preempt the child's cancellation grace; only a
+second signal escalates to KILL. Interrupted
 cleanup skips the normal settle wait. The guard cannot clean up if it is itself
 SIGKILLed; an unlocked surviving run can be reaped by a later invocation.
 

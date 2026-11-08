@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -22,6 +23,209 @@ SPEC.loader.exec_module(MODULE)
 
 
 class TestProcessGuardTests(unittest.TestCase):
+    def test_ignored_hangup_stays_ignored_in_guard_and_child(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            script = (
+                "import signal, time; "
+                "assert signal.getsignal(signal.SIGHUP) == signal.SIG_IGN; "
+                "time.sleep(0.3)"
+            )
+            launcher = textwrap.dedent('''
+                import os, signal, sys
+                signal.signal(signal.SIGHUP, signal.SIG_IGN)
+                os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
+            ''')
+            child = subprocess.Popen(
+                [sys.executable, '-c', launcher, str(GUARD), '--', sys.executable, '-c', script],
+                env=dict(os.environ, TMPDIR=str(base)),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                deadline = time.monotonic() + 5
+                while not list(base.glob('run-*/gitconfig')):
+                    self.assertIsNone(child.poll())
+                    self.assertLess(time.monotonic(), deadline)
+                    time.sleep(0.01)
+                child.send_signal(signal.SIGHUP)
+                _, errors = child.communicate(timeout=5)
+                self.assertEqual(child.returncode, 0, errors)
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                child.communicate(timeout=5)
+
+    def test_child_keeps_run_locked_after_guard_is_killed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            script = textwrap.dedent(f'''
+                import os, pathlib, time
+                root = pathlib.Path(os.environ['TMPDIR'])
+                os.chdir(root)
+                pathlib.Path({str(base / 'ready')!r}).write_text(str(root) + '\\n' + str(os.getpid()))
+                deadline = time.monotonic() + 20
+                while not pathlib.Path({str(base / 'release')!r}).exists() and time.monotonic() < deadline:
+                    assert root.is_dir()
+                    time.sleep(0.02)
+            ''')
+            guard = subprocess.Popen(
+                [sys.executable, str(GUARD), '--', sys.executable, '-c', script],
+                env=dict(os.environ, TMPDIR=str(base)),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            pid = None
+            try:
+                deadline = time.monotonic() + 5
+                while not (base / 'ready').exists():
+                    self.assertLess(time.monotonic(), deadline)
+                    time.sleep(0.01)
+                name, recorded_pid = (base / 'ready').read_text().splitlines()
+                root, pid = Path(name), int(recorded_pid)
+                guard.kill()
+                guard.wait(timeout=5)
+                # The lock, not just cwd inspection, must survive the guard.
+                with (root / 'guard.lock').open('r+') as lock:
+                    with self.assertRaises(BlockingIOError):
+                        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                check = subprocess.run(
+                    [sys.executable, str(GUARD), '--check'],
+                    env=dict(os.environ, TMPDIR=str(base)),
+                    capture_output=True,
+                    timeout=5,
+                )
+                self.assertEqual(check.returncode, 0, check.stderr)
+                self.assertTrue(root.is_dir())
+                os.kill(pid, 0)
+            finally:
+                if pid is not None:
+                    try:
+                        os.killpg(pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                if guard.poll() is None:
+                    guard.kill()
+                guard.wait(timeout=5)
+
+    def test_free_run_with_non_fixture_cwd_is_not_removed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            root = base / 'run-old'
+            root.mkdir()
+            (root / 'guard.lock').touch()
+            table = MODULE.ProcessTable()
+            worker = MODULE.Process(410001, 1, 'worker', None)
+            with (
+                patch.object(table, 'scan', return_value={worker.pid: worker}),
+                patch.object(table, 'inside', return_value=True),
+            ):
+                MODULE.reap_previous(base, table)
+            self.assertTrue(root.is_dir())
+            with patch.object(table, 'scan', return_value={}):
+                MODULE.reap_previous(base, table)
+            self.assertFalse(root.exists())
+
+    def test_publication_cannot_be_observed_before_run_is_locked(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            created, attempted, inspected = threading.Event(), threading.Event(), threading.Event()
+            mkdir = Path.mkdir
+            errors = []
+
+            def paused_mkdir(path, *args, **kwargs):
+                mkdir(path, *args, **kwargs)
+                if path.name.startswith('run-'):
+                    created.set()
+                    self.assertTrue(attempted.wait(5))
+                    self.assertFalse(inspected.wait(0.2), 'partly published run was inspected')
+
+            def check():
+                try:
+                    self.assertTrue(created.wait(5))
+                    attempted.set()
+                    MODULE.main(['--check'])
+                except BaseException as error:
+                    errors.append(error)
+
+            def reaper(_base, _table):
+                if created.is_set():
+                    inspected.set()
+
+            with (
+                patch.dict(os.environ, TMPDIR=str(base)),
+                patch.object(MODULE, 'reap_previous', side_effect=reaper),
+                patch.object(MODULE, 'ProcessTable') as table,
+                patch.object(MODULE, 'run', return_value=0),
+                patch.object(Path, 'mkdir', paused_mkdir),
+            ):
+                table.return_value.occupied.return_value = False
+                thread = threading.Thread(target=check)
+                thread.start()
+                try:
+                    self.assertEqual(MODULE.main(['--', 'unused']), 0)
+                finally:
+                    thread.join(timeout=5)
+                self.assertFalse(thread.is_alive())
+                self.assertFalse(errors, errors)
+                self.assertTrue(inspected.is_set())
+
+    def test_macos_scan_uses_locale_independent_creation_times(self):
+        table = MODULE.ProcessTable()
+        with (
+            patch.object(MODULE.sys, 'platform', 'darwin'),
+            patch.object(MODULE.subprocess, 'check_output', return_value='') as ps,
+        ):
+            self.assertEqual(table.scan(), {})
+        self.assertEqual(ps.call_args.kwargs['env']['LC_ALL'], 'C')
+
+    def test_cleanup_subprocess_failure_does_not_abandon_interrupted_child(self):
+        handlers = {}
+
+        def install(signum, handler):
+            handlers[signum] = handler
+            return signal.SIG_DFL
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with (
+                (root / 'guard.lock').open('a') as lock,
+                patch.object(MODULE.signal, 'getsignal', return_value=signal.SIG_DFL),
+                patch.object(MODULE.signal, 'signal', side_effect=install),
+                patch.object(MODULE.subprocess, 'Popen') as popen,
+                patch.object(MODULE.os, 'killpg') as kill,
+                patch.object(
+                    MODULE, 'reap_leaks', side_effect=[subprocess.SubprocessError('probe'), False]
+                ),
+            ):
+                child = popen.return_value
+                child.poll.return_value = None
+                child.wait.side_effect = lambda: handlers[signal.SIGTERM](signal.SIGTERM, None)
+                self.assertEqual(
+                    MODULE.run(['unused'], root, MODULE.ProcessTable(), lock.fileno()), 143
+                )
+                child.wait.assert_called_once()
+                kill.assert_called_once_with(child.pid, signal.SIGTERM)
+
+    def test_short_run_name_keeps_fixture_socket_within_macos_limit(self):
+        # Maximum macOS pid and a full-width fixture ordinal and checkout checksum.
+        base = '/private/tmp/plak-test-501-4294967295'
+        socket = base + '/run-99999-ff/t1869f-ffffffff/home/host/runner/v3/run/runner.sock'
+        self.assertLessEqual(len(socket.encode()), 103)
+        with patch.object(MODULE.secrets, 'token_hex', return_value='ff') as nonce:
+            with (
+                tempfile.TemporaryDirectory() as temporary,
+                patch.dict(os.environ, TMPDIR=temporary),
+            ):
+                with (
+                    patch.object(MODULE, 'run', return_value=0),
+                    patch.object(MODULE, 'ProcessTable') as table,
+                ):
+                    table.return_value.occupied.return_value = False
+                    MODULE.main(['--', 'unused'])
+        nonce.assert_called_once_with(1)
+
     def test_stale_run_leak_is_reaped_without_failing_the_new_command(self):
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary).resolve()
@@ -47,6 +251,7 @@ class TestProcessGuardTests(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("previous run", result.stderr)
+                self.assertFalse(old.exists())
                 child.wait(timeout=5)
             finally:
                 if child.poll() is None:
@@ -133,6 +338,28 @@ class TestProcessGuardTests(unittest.TestCase):
         rows = {p.pid: p for p in (daemon, child, grandchild)}
         with patch.object(table, "scan", return_value=rows):
             self.assertEqual(table.descendants(daemon.pid), [grandchild, child])
+        killed = []
+        with (
+            patch.object(table, "scan", side_effect=lambda: dict(rows)),
+            patch.object(table, "inside", return_value=True),
+            patch.object(table, "kill", side_effect=lambda p: (killed.append(p), rows.pop(p.pid))),
+            patch.object(MODULE.time, "sleep"),
+        ):
+            self.assertTrue(MODULE.reap_leaks(Path('/scoped-fixture'), table, settle=False))
+        self.assertEqual(killed, [grandchild, child, daemon])
+
+    def test_reused_pid_is_never_signalled(self):
+        old = MODULE.Process(410001, 1, 'old', 'host')
+        new = MODULE.Process(old.pid, 1, 'new', 'host')
+        table = MODULE.ProcessTable()
+        with (
+            patch.object(table, 'scan', return_value={new.pid: new}),
+            patch.object(MODULE.os, 'kill') as kill,
+            patch.object(MODULE.os, 'killpg') as killpg,
+        ):
+            table.kill(old)
+        kill.assert_not_called()
+        killpg.assert_not_called()
 
     def test_hosts_are_killed_before_daemons_and_successors_are_relisted(self):
         # Entirely simulated process table: even mutants cannot signal the OS.
@@ -182,14 +409,16 @@ class TestProcessGuardTests(unittest.TestCase):
             with self.subTest(signum=signum), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 script = textwrap.dedent(f"""
-                    import pathlib, signal, time
+                    import os, pathlib, signal, time
                     def stop(signum, frame):
                         time.sleep(3)
                         pathlib.Path({str(root / 'cleaned')!r}).touch()
                         raise SystemExit(0)
                     signal.signal({int(signum)}, stop)
+                    pathlib.Path({str(root / 'pid')!r}).write_text(str(os.getpid()))
                     pathlib.Path({str(root / 'ready')!r}).touch()
-                    while True: time.sleep(1)
+                    deadline = time.monotonic() + 20
+                    while time.monotonic() < deadline: time.sleep(0.1)
                 """)
                 guarded = subprocess.Popen(
                     [sys.executable, str(GUARD), "--", sys.executable, "-c", script],
@@ -208,9 +437,14 @@ class TestProcessGuardTests(unittest.TestCase):
                     self.assertEqual(guarded.returncode, 128 + signum, errors)
                     self.assertTrue((root / "cleaned").exists())
                 finally:
+                    if (root / 'pid').exists():
+                        try:
+                            os.killpg(int((root / 'pid').read_text()), signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
                     if guarded.poll() is None:
                         guarded.kill()
-                    guarded.communicate()
+                    guarded.communicate(timeout=5)
 
     def test_each_command_gets_a_distinct_locked_tmpdir_and_negative_status_is_mapped(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -237,6 +471,7 @@ class TestProcessGuardTests(unittest.TestCase):
             self.assertTrue(
                 all(path.parent == base and path.name.startswith("run-") for path in roots)
             )
+            self.assertTrue(all(not path.exists() for path in roots))
             result = subprocess.run(
                 [
                     sys.executable,
@@ -300,7 +535,7 @@ class TestProcessGuardTests(unittest.TestCase):
             finally:
                 if guarded.poll() is None:
                     guarded.kill()
-                guarded.communicate()
+                guarded.communicate(timeout=5)
 
     def test_deleted_workspace_leak_fails_and_is_reaped(self):
         with tempfile.TemporaryDirectory() as temporary:
