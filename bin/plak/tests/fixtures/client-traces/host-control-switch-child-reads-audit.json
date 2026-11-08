@@ -42,7 +42,7 @@
           "intent": {
             "body": {
               "list_agent_acknowledgements": {
-                "tree_id": "51599e0e-06c2-5e4b-a75a-0bbeafd66ca6"
+                "tree_id": "3ae8325d-5f6c-5442-90ca-b3ee6f732e46"
               }
             },
             "kind": "extension"
@@ -188,7 +188,7 @@
           "intent": {
             "body": {
               "list_agent_acknowledgements": {
-                "tree_id": "b1a07e02-722c-5972-a062-2aad1792d2cc"
+                "tree_id": "290ea073-7ca7-5998-8d79-0fa611cbd3e9"
               }
             },
             "kind": "extension"
@@ -248,7 +248,7 @@
           "intent": {
             "body": {
               "list_agent_acknowledgements": {
-                "tree_id": "51599e0e-06c2-5e4b-a75a-0bbeafd66ca6"
+                "tree_id": "3ae8325d-5f6c-5442-90ca-b3ee6f732e46"
               }
             },
             "kind": "extension"
@@ -273,13 +273,43 @@
       "connection": 2,
       "request": {
         "frame": "request",
-        "id": 4,
+        "id": 3,
         "op": {
           "attachment": 1,
           "blobs": [],
           "intent": {
             "body": "refresh_composer_chrome",
             "kind": "extension"
+          },
+          "op": "intent"
+        }
+      },
+      "acknowledgement": {
+        "frame": "response",
+        "id": 3,
+        "outcome": {
+          "ok": {
+            "answer": "accepted",
+            "duplicate": false
+          }
+        }
+      }
+    },
+    {
+      "read": "resync_transcript",
+      "reason": "resync at a reconnect sequence boundary",
+      "connection": 2,
+      "request": {
+        "frame": "request",
+        "id": 4,
+        "op": {
+          "attachment": 1,
+          "blobs": [],
+          "intent": {
+            "body": {
+              "scope": "root"
+            },
+            "kind": "resync_transcript"
           },
           "op": "intent"
         }
@@ -296,19 +326,47 @@
       }
     },
     {
+      "read": "refresh_composer_chrome",
+      "reason": "timer-driven background chrome",
+      "connection": 2,
+      "request": {
+        "frame": "request",
+        "id": 7,
+        "op": {
+          "attachment": 1,
+          "blobs": [],
+          "intent": {
+            "body": "refresh_composer_chrome",
+            "kind": "extension"
+          },
+          "op": "intent"
+        }
+      },
+      "acknowledgement": {
+        "frame": "response",
+        "id": 7,
+        "outcome": {
+          "ok": {
+            "answer": "accepted",
+            "duplicate": false
+          }
+        }
+      }
+    },
+    {
       "read": "list_agent_acknowledgements",
       "reason": "acknowledgements read",
       "connection": 2,
       "request": {
         "frame": "request",
-        "id": 6,
+        "id": 8,
         "op": {
           "attachment": 1,
           "blobs": [],
           "intent": {
             "body": {
               "list_agent_acknowledgements": {
-                "tree_id": "51599e0e-06c2-5e4b-a75a-0bbeafd66ca6"
+                "tree_id": "3ae8325d-5f6c-5442-90ca-b3ee6f732e46"
               }
             },
             "kind": "extension"
@@ -318,7 +376,7 @@
       },
       "acknowledgement": {
         "frame": "response",
-        "id": 6,
+        "id": 8,
         "outcome": {
           "ok": {
             "answer": "accepted",

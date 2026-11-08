@@ -370,7 +370,12 @@ fn another_wire_version_refuses_with_a_remedy_instead_of_embedding() {
             });
         });
         let error = SocketFace::discover(&paths).err().unwrap();
-        assert!(error.message().contains("stop"), "{error}");
+        assert!(
+            error
+                .message()
+                .contains(crate::environment::HOST_RESTART_REMEDY),
+            "{error}"
+        );
         assert!(error.message().contains("run its build"), "{error}");
         assert!(error.message().contains("no embedded session"), "{error}");
         host.join().unwrap();

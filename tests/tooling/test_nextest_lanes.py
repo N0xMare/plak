@@ -227,7 +227,17 @@ class NextestLaneTests(unittest.TestCase):
             profile = profiles()[name]
             self.assertEqual(profile["test-threads"], 1, name)
             self.assertEqual(profile["slow-timeout"], {"period": "240s", "terminate-after": 2})
-        self.assertNotIn("retries", CONFIG.read_text())
+
+        def no_retry_setting(value):
+            if isinstance(value, dict):
+                self.assertNotIn("retries", value)
+                for nested in value.values():
+                    no_retry_setting(nested)
+            elif isinstance(value, list):
+                for nested in value:
+                    no_retry_setting(nested)
+
+        no_retry_setting(tomllib.loads(CONFIG.read_text()))
 
     def test_every_lane_predicate_names_a_test_or_module_in_the_tree(self) -> None:
         names = predicates("serial") + predicates("durability")

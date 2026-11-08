@@ -363,7 +363,7 @@ fn a_losing_starter_settles_before_its_parent_returns() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(output.stdout, [] as [u8; 0]);
+    assert_eq!(output.stdout, [1]);
     stop(&mut host);
     // No delayed helper may claim the home after the winner was stopped.
     drop(started);

@@ -35,14 +35,14 @@
       "connection": 1,
       "request": {
         "frame": "request",
-        "id": 6,
+        "id": 7,
         "op": {
           "attachment": 1,
           "blobs": [],
           "intent": {
             "body": {
               "list_agent_acknowledgements": {
-                "tree_id": "0e067c3b-d438-52bc-a319-ce4543f0077c"
+                "tree_id": "fc44bd26-7854-5294-8521-e1e5d3179b08"
               }
             },
             "kind": "extension"
@@ -52,7 +52,7 @@
       },
       "acknowledgement": {
         "frame": "response",
-        "id": 6,
+        "id": 7,
         "outcome": {
           "ok": {
             "answer": "accepted",
@@ -137,36 +137,6 @@
       "acknowledgement": {
         "frame": "response",
         "id": 4,
-        "outcome": {
-          "ok": {
-            "answer": "accepted",
-            "duplicate": false
-          }
-        }
-      }
-    },
-    {
-      "read": "resync_transcript",
-      "reason": "resync at a reconnect sequence boundary",
-      "connection": 2,
-      "request": {
-        "frame": "request",
-        "id": 5,
-        "op": {
-          "attachment": 1,
-          "blobs": [],
-          "intent": {
-            "body": {
-              "scope": "root"
-            },
-            "kind": "resync_transcript"
-          },
-          "op": "intent"
-        }
-      },
-      "acknowledgement": {
-        "frame": "response",
-        "id": 5,
         "outcome": {
           "ok": {
             "answer": "accepted",
@@ -181,14 +151,14 @@
       "connection": 2,
       "request": {
         "frame": "request",
-        "id": 7,
+        "id": 6,
         "op": {
           "attachment": 1,
           "blobs": [],
           "intent": {
             "body": {
               "list_agent_acknowledgements": {
-                "tree_id": "0e067c3b-d438-52bc-a319-ce4543f0077c"
+                "tree_id": "fc44bd26-7854-5294-8521-e1e5d3179b08"
               }
             },
             "kind": "extension"
@@ -198,7 +168,7 @@
       },
       "acknowledgement": {
         "frame": "response",
-        "id": 7,
+        "id": 6,
         "outcome": {
           "ok": {
             "answer": "accepted",
