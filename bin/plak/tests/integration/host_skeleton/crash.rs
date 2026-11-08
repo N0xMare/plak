@@ -13,7 +13,9 @@ use plakous_offline_crash_harness::evidence::{EvidenceKind, read_evidence};
 
 use super::*;
 
+pub(super) mod client_control;
 mod tui;
+mod wire;
 
 /// The physical provider dispatches the fixture has seen.
 pub(super) fn dispatches(fixture: &Fixture) -> usize {

@@ -1,0 +1,464 @@
+{
+  "fixture": "host-control-stop-root",
+  "source": "real public TUI capture",
+  "seed_session": "@uuid:0",
+  "entries": [
+    {
+      "connection": 1,
+      "opened": true
+    },
+    {
+      "connection": 1,
+      "direction": "client",
+      "frame": {
+        "binary_id": "unknown",
+        "caps": [],
+        "frame": "hello",
+        "proto": 5
+      }
+    },
+    {
+      "connection": 1,
+      "direction": "host",
+      "frame": {
+        "binary_id": "unknown",
+        "caps": [],
+        "frame": "welcome",
+        "host_generation": "@generation:0",
+        "proto": 5
+      }
+    },
+    {
+      "connection": 1,
+      "direction": "client",
+      "frame": {
+        "frame": "request",
+        "id": 1,
+        "op": {
+          "include_archived": false,
+          "op": "list_sessions"
+        }
+      }
+    },
+    {
+      "connection": 1,
+      "direction": "host",
+      "frame": {
+        "frame": "response",
+        "id": 1,
+        "outcome": {
+          "ok": {
+            "answer": "sessions",
+            "rows": [
+              {
+                "activity": "idle",
+                "activity_seq": 0,
+                "archived": false,
+                "differences": [
+                  "roster"
+                ],
+                "environment": "host",
+                "live_work": {
+                  "children": 0,
+                  "held_children": 0,
+                  "processes": 0
+                },
+                "needs_operator": false,
+                "node": {
+                  "agent_id": "@uuid:0",
+                  "tree_id": "@uuid:0"
+                },
+                "profile": "custom",
+                "residency": "dormant",
+                "runner": {
+                  "name": "local",
+                  "runner_id": "local"
+                },
+                "runner_status": {
+                  "status": "ready"
+                },
+                "session": "@uuid:0",
+                "title": "original source",
+                "updated_at": "@time",
+                "workspace": "@workspace"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "connection": 1,
+      "direction": "client",
+      "frame": {
+        "frame": "request",
+        "id": 2,
+        "op": {
+          "node": {
+            "agent_id": "@uuid:0",
+            "tree_id": "@uuid:0"
+          },
+          "op": "attach"
+        }
+      }
+    },
+    {
+      "connection": 1,
+      "direction": "host",
+      "frame": {
+        "frame": "response",
+        "id": 2,
+        "outcome": {
+          "ok": {
+            "answer": "attached",
+            "attachment": 1
+          }
+        }
+      }
+    },
+    {
+      "connection": 1,
+      "direction": "client",
+      "frame": {
+        "frame": "request",
+        "id": 3,
+        "op": {
+          "attachment": 1,
+          "blobs": [],
+          "intent": {
+            "kind": "open_topology_navigator"
+          },
+          "op": "intent"
+        }
+      }
+    },
+    {
+      "connection": 1,
+      "direction": "host",
+      "frame": {
+        "frame": "response",
+        "id": 3,
+        "outcome": {
+          "ok": {
+            "answer": "accepted",
+            "duplicate": false
+          }
+        }
+      }
+    },
+    {
+      "connection": 1,
+      "direction": "client",
+      "frame": {
+        "frame": "request",
+        "id": 4,
+        "op": {
+          "attachment": 1,
+          "blobs": [],
+          "intent": {
+            "kind": "promptable"
+          },
+          "op": "intent"
+        }
+      }
+    },
+    {
+      "connection": 1,
+      "direction": "host",
+      "frame": {
+        "frame": "response",
+        "id": 4,
+        "outcome": {
+          "ok": {
+            "answer": "accepted",
+            "duplicate": false
+          }
+        }
+      }
+    },
+    {
+      "barrier": "ready"
+    },
+    {
+      "connection": 1,
+      "direction": "client",
+      "frame": {
+        "frame": "request",
+        "id": 5,
+        "op": {
+          "attachment": 1,
+          "blobs": [],
+          "client_id": "@uuid:1",
+          "intent": {
+            "body": {
+              "images": [],
+              "text": "crash terminal original prompt"
+            },
+            "kind": "prompt"
+          },
+          "op": "intent"
+        }
+      }
+    },
+    {
+      "connection": 1,
+      "direction": "host",
+      "frame": {
+        "frame": "response",
+        "id": 5,
+        "outcome": {
+          "ok": {
+            "answer": "accepted",
+            "duplicate": false
+          }
+        }
+      }
+    },
+    {
+      "barrier": "answered"
+    },
+    {
+      "connection": 1,
+      "direction": "client",
+      "frame": {
+        "frame": "request",
+        "id": 6,
+        "op": {
+          "op": "stop_session",
+          "session": "@uuid:0"
+        }
+      }
+    },
+    {
+      "connection": 1,
+      "direction": "host",
+      "frame": {
+        "frame": "response",
+        "id": 6,
+        "outcome": {
+          "ok": {
+            "answer": "stopped",
+            "runner_pending": false
+          }
+        }
+      }
+    },
+    {
+      "barrier": "stopped"
+    },
+    {
+      "connection": 1,
+      "direction": "client",
+      "frame": {
+        "frame": "bye"
+      }
+    },
+    {
+      "connection": 1,
+      "eof": "host"
+    },
+    {
+      "connection": 1,
+      "eof": "client"
+    },
+    {
+      "barrier": "host-restarted"
+    },
+    {
+      "connection": 2,
+      "opened": true
+    },
+    {
+      "connection": 2,
+      "direction": "client",
+      "frame": {
+        "binary_id": "unknown",
+        "caps": [],
+        "frame": "hello",
+        "proto": 5
+      }
+    },
+    {
+      "connection": 2,
+      "direction": "host",
+      "frame": {
+        "binary_id": "unknown",
+        "caps": [],
+        "frame": "welcome",
+        "host_generation": "@generation:1",
+        "proto": 5
+      }
+    },
+    {
+      "connection": 2,
+      "direction": "client",
+      "frame": {
+        "frame": "request",
+        "id": 1,
+        "op": {
+          "include_archived": false,
+          "op": "list_sessions"
+        }
+      }
+    },
+    {
+      "connection": 2,
+      "direction": "host",
+      "frame": {
+        "frame": "response",
+        "id": 1,
+        "outcome": {
+          "ok": {
+            "answer": "sessions",
+            "rows": [
+              {
+                "activity": "idle",
+                "activity_seq": 7,
+                "archived": false,
+                "differences": [
+                  "roster"
+                ],
+                "environment": "host",
+                "live_work": {
+                  "children": 0,
+                  "held_children": 0,
+                  "processes": 0
+                },
+                "needs_operator": false,
+                "node": {
+                  "agent_id": "@uuid:0",
+                  "tree_id": "@uuid:0"
+                },
+                "profile": "custom",
+                "residency": "dormant",
+                "runner": {
+                  "name": "local",
+                  "runner_id": "local"
+                },
+                "runner_status": {
+                  "reason": {
+                    "phase": "reconcile",
+                    "reason": "runner_unreachable",
+                    "timed_out": false
+                  },
+                  "status": "blocked"
+                },
+                "session": "@uuid:0",
+                "title": "original source",
+                "updated_at": "@time",
+                "workspace": "@workspace"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "connection": 2,
+      "direction": "client",
+      "frame": {
+        "frame": "request",
+        "id": 2,
+        "op": {
+          "node": {
+            "agent_id": "@uuid:0",
+            "tree_id": "@uuid:0"
+          },
+          "op": "attach"
+        }
+      }
+    },
+    {
+      "connection": 2,
+      "direction": "host",
+      "frame": {
+        "frame": "response",
+        "id": 2,
+        "outcome": {
+          "ok": {
+            "answer": "attached",
+            "attachment": 1
+          }
+        }
+      }
+    },
+    {
+      "connection": 2,
+      "direction": "client",
+      "frame": {
+        "frame": "request",
+        "id": 3,
+        "op": {
+          "attachment": 1,
+          "blobs": [],
+          "intent": {
+            "kind": "open_topology_navigator"
+          },
+          "op": "intent"
+        }
+      }
+    },
+    {
+      "connection": 2,
+      "direction": "host",
+      "frame": {
+        "frame": "response",
+        "id": 3,
+        "outcome": {
+          "ok": {
+            "answer": "accepted",
+            "duplicate": false
+          }
+        }
+      }
+    },
+    {
+      "connection": 2,
+      "direction": "client",
+      "frame": {
+        "frame": "request",
+        "id": 4,
+        "op": {
+          "attachment": 1,
+          "blobs": [],
+          "intent": {
+            "kind": "promptable"
+          },
+          "op": "intent"
+        }
+      }
+    },
+    {
+      "connection": 2,
+      "direction": "host",
+      "frame": {
+        "frame": "response",
+        "id": 4,
+        "outcome": {
+          "ok": {
+            "answer": "accepted",
+            "duplicate": false
+          }
+        }
+      }
+    },
+    {
+      "barrier": "reconnected-without-replay"
+    },
+    {
+      "connection": 2,
+      "direction": "client",
+      "frame": {
+        "frame": "bye"
+      }
+    },
+    {
+      "connection": 2,
+      "eof": "host"
+    },
+    {
+      "connection": 2,
+      "eof": "client"
+    }
+  ]
+}

@@ -1,42 +1,35 @@
 //! The terminal observes host loss at each indexed host commit and opens
 //! the resident session again on the restarted host, without replaying input.
 
+use super::client_control::*;
 use super::*;
-use plak::wire_transport::PlakExtension;
-use plakous_host_protocol::client::{self, Transport};
 use std::fmt::Write as _;
 
-// Directory switching is driven by the terminal while the host owns the work.
+mod recording;
 
-fn review_rows(host: &Host) -> Vec<SessionRow> {
-    let stream = UnixStream::connect(&host.socket).unwrap();
-    stream.set_read_timeout(Some(WAIT)).unwrap();
-    let (send, receive, _) = client::connect_directory::<PlakExtension>(
-        Transport::new(stream.try_clone().unwrap(), stream),
-        Hello {
-            proto: WIRE_VERSION,
-            binary_id: "review".into(),
-            caps: Vec::new(),
-        },
-    )
-    .unwrap();
-    send.request_operation(Op::ListSessions {
-        workspace: None,
-        runner: None,
-        include_archived: false,
-    })
-    .unwrap();
-    match receive.recv_response(WAIT).unwrap().1 {
-        Outcome::Ok(Answer::Sessions { rows }) => rows,
-        other => panic!("{other:?}"),
-    }
-}
+// Directory switching is driven by the terminal while the host owns the work.
 
 /// [`drive`], with the terminal's own directory acts in the middle: after
 /// the answer (a busy root's stall, or a real running child) the TUI makes
 /// a session with `/new` (its own `new_session` and attach), switches back
 /// with `/resume <id>`, then stops the original.
 fn review_drive_switch(fixture: &Fixture, session: &str, cut: bool, child: bool) {
+    review_drive_recorded(
+        fixture,
+        session,
+        cut,
+        child,
+        &recording::Recording::default(),
+    );
+}
+
+fn review_drive_recorded(
+    fixture: &Fixture,
+    session: &str,
+    cut: bool,
+    child: bool,
+    recording: &recording::Recording,
+) {
     let mut terminal = super::super::super::offline_tui::attach_to_host(&fixture.root, session);
     let until = Instant::now() + WAIT;
     let mut step = 0;
@@ -54,24 +47,37 @@ fn review_drive_switch(fixture: &Fixture, session: &str, cut: bool, child: bool)
         let ready = screen.contains("%/") && screen.contains("/ commands");
         match step {
             0 if ready => {
+                recording.mark("ready");
                 terminal.send(b"crash terminal original prompt\r");
                 step = 1;
             }
             1 if screen.contains(ANSWER) && (!child || child_dispatches(fixture) > 0) => {
+                recording.mark("answered");
+                if recording.is_recording() {
+                    recording.mark("new-session-time-boundary");
+                    separate_session_timestamp(fixture, session);
+                }
                 terminal.send(b"/new\r");
                 step = 2;
             }
             2 if ready && !screen.contains(ANSWER) && !screen.contains(PREFIX) => {
+                recording.mark("new-session-ready");
                 terminal.send(format!("/resume {session}\r").as_bytes());
                 step = 3;
             }
             3 if screen.contains(ANSWER) => {
+                recording.mark("original-session-restored");
+                if recording.is_recording() {
+                    recording.mark("stop-time-boundary");
+                    separate_stop_timestamp(fixture);
+                }
                 terminal.send(b"/stop\r");
                 step = 4;
             }
             4 if screen.contains("session work stopped")
                 || screen.contains("stopped: the session's work ended") =>
             {
+                recording.mark("stopped");
                 terminal.quit();
                 return;
             }
@@ -85,7 +91,7 @@ fn review_drive_switch(fixture: &Fixture, session: &str, cut: bool, child: bool)
     }
 }
 
-fn review_pilot(child: bool) -> (Vec<Commit>, Signature) {
+pub(super) fn review_pilot(child: bool) -> (Vec<Commit>, Signature) {
     let baseline = fixture().unwrap();
     script(&baseline, child);
     let trace = baseline.root.join("trace.jsonl");
@@ -198,53 +204,25 @@ fn review_tui_host_restart_switch() {
     );
 }
 
-fn create(host: &Host, fixture: &Fixture) -> Option<String> {
-    let stream = UnixStream::connect(&host.socket).ok()?;
-    stream.set_read_timeout(Some(WAIT)).unwrap();
-    let (send, receive, _) = client::connect_directory::<PlakExtension>(
-        Transport::new(stream.try_clone().unwrap(), stream),
-        Hello {
-            proto: WIRE_VERSION,
-            binary_id: "crash-terminal".into(),
-            caps: Vec::new(),
-        },
-    )
-    .ok()?;
-    send.request_operation(Op::NewSession {
-        runner: plakous_host_protocol::wire::RunnerLabel::local(),
-        profile: None,
-        model: None,
-        workspace: fixture.workspace().display().to_string(),
-        template: None,
-        request_id: REQUEST.into(),
-    })?;
-    match receive.recv_response(WAIT).ok()?.1 {
-        Outcome::Ok(Answer::Created { session, .. }) => Some(session),
-        _ => None,
-    }
-}
-
-fn script(fixture: &Fixture, child: bool) {
-    if !child {
-        fixture.write_script(&busy_script());
-        return;
-    }
-    let child_script = fixture.root.join("child.json");
-    std::fs::write(&child_script, json!({"version": 1, "repeat_last_step": true, "steps": [{"stream": [{"text": "child working"}, {"stall": 30000}]}]}).to_string()).unwrap();
-    let mut root = spawning_script();
-    root["product_child_script"] = json!(child_script);
-    root["steps"].as_array_mut().unwrap().remove(1);
-    fixture.write_script(&root);
-    let config = fixture.home().join("config.toml");
-    let text = std::fs::read_to_string(&config)
-        .unwrap()
-        .replace("subagents = false", "subagents = true");
-    write_private(&config, &text);
-}
-
 /// Drives a live TUI until it answers and durably stops its work, or the
 /// cut ends the host. A failed handshake is plain terminal output too.
 fn drive(fixture: &Fixture, session: &str, cut: bool, child: bool) {
+    drive_recorded(
+        fixture,
+        session,
+        cut,
+        child,
+        &recording::Recording::default(),
+    );
+}
+
+fn drive_recorded(
+    fixture: &Fixture,
+    session: &str,
+    cut: bool,
+    child: bool,
+    recording: &recording::Recording,
+) {
     let mut terminal = super::super::super::offline_tui::attach_to_host(&fixture.root, session);
     let until = Instant::now() + WAIT;
     let mut prompted = false;
@@ -261,16 +239,19 @@ fn drive(fixture: &Fixture, session: &str, cut: bool, child: bool) {
             return;
         }
         if !prompted && screen.contains("%/") && screen.contains("/ commands") {
+            recording.mark("ready");
             terminal.send(b"crash terminal original prompt\r");
             prompted = true;
         }
         if !stopping && screen.contains(ANSWER) && (!child || child_dispatches(fixture) > 0) {
+            recording.mark("answered");
             terminal.send(b"/stop\r");
             stopping = true;
         }
         if screen.contains("session work stopped")
             || screen.contains("stopped: the session's work ended")
         {
+            recording.mark("stopped");
             terminal.quit();
             return;
         }
@@ -279,73 +260,71 @@ fn drive(fixture: &Fixture, session: &str, cut: bool, child: bool) {
     }
 }
 
-fn child_dispatches(fixture: &Fixture) -> usize {
-    read_evidence(fixture.root.join("child-evidence.jsonl"))
-        .unwrap()
-        .iter()
-        .filter(|record| record.kind == EvidenceKind::ProviderDispatched)
-        .count()
-}
-
-type Commit = (u64, String, u64);
-type Signature = Vec<(String, u64, String)>;
-
-fn wait_stopped_tree(fixture: &Fixture, host: &Host, session: &str, child: bool) {
-    use plakous_recursive_subagents::tree::TreeStore as _;
-    let until = Instant::now() + WAIT;
-    if child {
-        let node = review_rows(host)
-            .into_iter()
-            .find(|row| row.session == session)
-            .unwrap()
-            .node;
-        let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
-        let store =
-            plakous_recursive_subagents_store::SqliteTreeStore::open(&paths.subagents_database())
-                .unwrap();
-        loop {
-            let tree = store.load(&node.tree_id).unwrap().unwrap();
-            let tree = tree.rows();
-            if tree.state == plakous_recursive_subagents::tree::TreeAdmissionState::Interrupted
-                && tree.nodes().values().all(|node| {
-                    !node.active_turn
-                        && (node.agent_id == tree.root_agent_id
-                            || node.status
-                                == plakous_recursive_subagents::protocol::NodeStatus::Interrupted
-                            || node.status.is_finished())
-                })
+/// Regenerate the stimulus from the real client, never from invented ops.
+/// The private client gate compares its emitted control trace to the same
+/// normalized fixture; this raw artifact retains observations for auditing.
+#[test]
+#[ignore = "on-demand real-client trace capture"]
+fn capture_real_client_host_control_traces() {
+    let output = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/client-traces");
+    std::fs::create_dir_all(&output).unwrap();
+    for child in [false, true] {
+        for switching in [false, true] {
+            let fixture = fixture().unwrap();
+            cold_script(&fixture, child);
+            let mut host = start(&fixture);
+            let session = create(&host, &fixture).unwrap();
+            let recording = recording::Recording::default();
             {
-                break;
+                let _proxy = recording::Proxy::start(&host.socket, recording.clone());
+                if switching {
+                    review_drive_recorded(&fixture, &session, false, child, &recording);
+                } else {
+                    drive_recorded(&fixture, &session, false, child, &recording);
+                }
             }
-            assert!(
-                Instant::now() < until,
-                "the pilot's stopped tree never settled: {tree:?}"
-            );
-            std::thread::sleep(Duration::from_millis(10));
+            wait_stopped_tree(&fixture, &host, &session, child);
+            let before = dispatches(&fixture);
+            let children_before = if child { child_dispatches(&fixture) } else { 0 };
+            host.child.as_mut().unwrap().kill().unwrap();
+            host.child.take().unwrap().wait().unwrap();
+            let mut host = start(&fixture);
+            recording.mark("host-restarted");
+            {
+                let _proxy = recording::Proxy::start(&host.socket, recording.clone());
+                let mut terminal =
+                    super::super::super::offline_tui::attach_to_host(&fixture.root, &session);
+                terminal.wait_ready();
+                recording.mark("reconnected-without-replay");
+                terminal.quit();
+            }
+            assert_eq!(dispatches(&fixture), before);
+            if child {
+                assert_eq!(child_dispatches(&fixture), children_before);
+            }
+            let (interrupts, decisions) = root_record(&fixture, &session);
+            assert!(!interrupts.contains(&RootInterruptCause::Handoff));
+            assert_eq!(decisions, 0);
+            let entries = recording.entries();
+            wire::transcript::assert_recorded(&fixture, &session, &entries);
+            let document = json!({
+                "fixture": format!("host-control-{}-{}", if switching { "switch" } else { "stop" }, if child { "child" } else { "root" }),
+                "session": session,
+                "workspace": fixture.workspace(),
+                "entries": entries,
+            });
+            let path = output.join(format!(
+                "{}-raw.json",
+                document["fixture"].as_str().unwrap()
+            ));
+            std::fs::write(&path, serde_json::to_vec_pretty(&document).unwrap()).unwrap();
+            stop(&mut host);
+            eprintln!("real-client control trace: {}", path.display());
         }
     }
 }
 
-fn signature(trace: &Path) -> Signature {
-    let mut commits = std::fs::read_to_string(trace)
-        .unwrap()
-        .split_inclusive('\n')
-        .filter(|line| line.ends_with('\n'))
-        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
-        .filter(|row| row["indexed"] == true)
-        .map(|row| {
-            (
-                row["store"].as_str().unwrap().to_owned(),
-                row["store_ordinal"].as_u64().unwrap(),
-                row["label"].as_str().unwrap().to_owned(),
-            )
-        })
-        .collect::<Vec<_>>();
-    commits.sort();
-    commits
-}
-
-fn pilot(child: bool) -> (Vec<Commit>, Signature) {
+pub(super) fn pilot(child: bool) -> (Vec<Commit>, Signature) {
     let baseline = fixture().unwrap();
     script(&baseline, child);
     let trace = baseline.root.join("trace.jsonl");

@@ -18,6 +18,8 @@ TERMINAL_SHAPES = {
     "runner_new_owner_foreground": "host_skeleton::runner::a_foreground_host_cut_stops_at_transfer_and_records_unknown_once",
     "review_tui_host_restart_switch": "host_skeleton::crash::tui::review_tui_host_restart_switch",
     "tui_host_restart": "host_skeleton::crash::tui::tui_host_restart",
+    "wire_host_restart": "host_skeleton::crash::wire::cuts::wire_host_restart",
+    "wire_host_restart_switch": "host_skeleton::crash::wire::cuts::wire_host_restart_switch",
 }
 
 

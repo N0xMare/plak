@@ -473,6 +473,97 @@ fn the_stdio_bridge_does_not_consume_a_separate_handshake_or_mask_a_version_refu
 }
 
 #[test]
+fn bridge_eof_keeps_a_busy_root_and_running_child_without_transfer_or_redispatch() {
+    let Some(fixture) = fixture() else { return };
+    crash::client_control::script(&fixture, true);
+    let mut root = spawning_script();
+    root["product_child_script"] = json!(fixture.root.join("child.json"));
+    root["steps"][1] = json!({
+        "stream": [{"text": "bridge root waiting"}, {"stall": 300_000}]
+    });
+    fixture.write_script(&root);
+    let child_path = fixture.root.join("child.json");
+    let mut child: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&child_path).unwrap()).unwrap();
+    child["steps"][0]["stream"][1]["stall"] = json!(300_000);
+    std::fs::write(child_path, serde_json::to_vec(&child).unwrap()).unwrap();
+    let mut host = start(&fixture);
+    let mut bridge = Bridge::start(&fixture);
+    bridge.hello(WIRE_VERSION);
+    assert!(matches!(bridge.next(), HostFrame::Welcome(_)));
+    let Outcome::Ok(Answer::Created { session, node, .. }) =
+        bridge.request(1, new_session(&fixture.workspace()))
+    else {
+        panic!("no session")
+    };
+    let Outcome::Ok(Answer::Attached { attachment }) =
+        bridge.request(2, Op::Attach { node: node.clone() })
+    else {
+        panic!("no attachment")
+    };
+    assert_eq!(
+        bridge.request(
+            3,
+            Op::Intent {
+                client_id: Some(uuid::Uuid::new_v4().to_string().parse().unwrap()),
+                attachment,
+                intent: SessionIntent::Prompt(Draft::from("bridge busy root and child")),
+                blobs: Vec::new(),
+            }
+        ),
+        Outcome::Ok(Answer::Accepted { duplicate: false })
+    );
+    let mut observer = Client::connect(&host);
+    let until = Instant::now() + WAIT;
+    loop {
+        let rows = observer.rows(1);
+        if rows.iter().any(|row| {
+            row.session == session
+                && row.activity == SessionActivity::Busy
+                && row.live_work.children > 0
+        }) && crash::dispatches(&fixture) == 2
+            && crash::client_control::child_dispatches(&fixture) == 1
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < until,
+            "the running tree did not appear: {rows:?}"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let before = (
+        crash::dispatches(&fixture),
+        crash::client_control::child_dispatches(&fixture),
+    );
+    let holder = custody_pid(&fixture, &node.tree_id);
+    assert_eq!(holder, Some(host.child.as_ref().unwrap().id()));
+    bridge.finish();
+    let attachment = observer.attach(2, &node);
+    assert_eq!(custody_pid(&fixture, &node.tree_id), holder);
+    assert!(observer.rows(3).iter().any(|row| row.session == session
+        && row.activity == SessionActivity::Busy
+        && row.live_work.children > 0));
+    assert_eq!(
+        before,
+        (
+            crash::dispatches(&fixture),
+            crash::client_control::child_dispatches(&fixture)
+        )
+    );
+    let (interrupts, decisions) = root_record(&fixture, &session);
+    assert!(!interrupts.contains(&RootInterruptCause::Handoff));
+    assert_eq!(decisions, 0);
+    assert!(attachment > 0);
+    assert!(matches!(
+        observer.request(4, Op::StopSession { session }),
+        Outcome::Ok(Answer::Stopped { .. })
+    ));
+    drop(observer);
+    stop(&mut host);
+}
+
+#[test]
 fn the_stdio_bridge_keeps_same_user_clients_remote_for_local_only_reload_intents() {
     use plakd_wire_types::{PlakExtension, SurfaceIntent};
     let Some(fixture) = fixture() else { return };

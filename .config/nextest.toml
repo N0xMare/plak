@@ -140,6 +140,7 @@ not (
   | test(product_terminal_e2e_tests::)
   | test(product_runtime_e2e_tests::)
   | test(product_compaction_runtime_e2e_tests::)
+  | test(capture_real_client_host_control_traces)
   | test(run_app_paints_usage_decoration_through_the_wake_pipe)
   | test(lifecycle_tests::)
   | test(real_composition_quit_releases_nested_process)
@@ -268,6 +269,7 @@ not (
   | test(lifecycle_deletion_crash_cuts_finish_without_recovery_or_cascade)
   | test(tui_host_restart)
   | test(review_tui_host_restart_switch)
+  | test(wire_host_restart)
   | test(image_residency_crash_cuts_recover_without_redispatch)
   | test(released_leftover_terminal_recording_sigkill_cuts_preserve_no_signal_authority)
   | test(endpoint_fallback_receipt_cuts_recover_the_same_unpaid_target)
@@ -405,6 +407,7 @@ default-filter = '''
   | test(product_terminal_e2e_tests::)
   | test(product_runtime_e2e_tests::)
   | test(product_compaction_runtime_e2e_tests::)
+  | test(capture_real_client_host_control_traces)
   | test(run_app_paints_usage_decoration_through_the_wake_pipe)
   | test(lifecycle_tests::)
   | test(real_composition_quit_releases_nested_process)
@@ -539,6 +542,7 @@ default-filter = '''
   | test(lifecycle_deletion_crash_cuts_finish_without_recovery_or_cascade)
   | test(tui_host_restart)
   | test(review_tui_host_restart_switch)
+  | test(wire_host_restart)
   | test(image_residency_crash_cuts_recover_without_redispatch)
   | test(released_leftover_terminal_recording_sigkill_cuts_preserve_no_signal_authority)
   | test(endpoint_fallback_receipt_cuts_recover_the_same_unpaid_target)
@@ -627,6 +631,10 @@ default-filter = '''
 
 [[profile.default.overrides]]
 filter = 'test(tui_host_restart)'
+slow-timeout = { period = "600s", terminate-after = 2 }
+
+[[profile.default.overrides]]
+filter = 'test(wire_host_restart)'
 slow-timeout = { period = "600s", terminate-after = 2 }
 
 # Per-test timing: each lane writes target/nextest/<profile>/junit.xml

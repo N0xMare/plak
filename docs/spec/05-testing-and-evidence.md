@@ -3739,6 +3739,35 @@ extraction, including temporary reload values. Schema extraction is checked
 against raw `plak wire schema` output with an uninstalled executable and an
 empty identity cache, so both captures consistently report no binary identity.
 
+Public control successors derive their action fixtures from complete real-client
+traffic and replay them through the actual `plak host connect --stdio`
+executable. Qualification compares an exact required subsequence, not one
+byte-identical complete capture. Directory, attach, new, prompt, stop, bye and
+their acknowledgements, the other pinned controls, barriers and reconnect/no-replay
+ordering remain exact, with generated identity aliases preserving correlations.
+A missing, extra or reordered required frame fails.
+
+Only three explicitly named read-only requests and their acknowledgements may
+interleave: `refresh_composer_chrome` (timer-driven chrome), `resync_transcript`
+(resync at a reconnect sequence boundary), and `list_agent_acknowledgements`
+(an acknowledgements read). Each complete request and its unique well-formed
+answer is validated in retained complete raw traffic. Separate real-bridge
+assertions exercise every recorded legal read with unchanged session, queue,
+transcript and tree state and no provider dispatch. Every journey ends with
+exact equality between the face transcript and its durable view: resync must
+not conceal missing or duplicated content. Any other unpinned interleaving
+fails; adding to the legal-read set is a reviewed change. No scheduling,
+emission control or unbounded capture-variant collection replaces this rule.
+Typed face-transcript equality covers row content, order and multiplicity on
+both connections; live provisional row keys need not equal committed anchors.
+`wire_host_restart` and `wire_host_restart_switch` cover root and child twin
+pilots and every reached per-store commit cut. Their indexed signatures match
+the original terminal pilots, including labels, not just commit counts.
+Recovery reconnects without replaying input and checks durable stop, custody,
+no handoff/continuation and no extra root or child provider dispatch. These
+matrices are in the durability lane with the reviewed longer timeout; the
+original terminal matrices remain separate evidence.
+
 Protocol-4 attention is tested while busy; clients keep queueing with
 `follow_up`. Child counts exercise live, parked, completed and held-loss
 transitions. Dormant stops are replayed and reopened under `continue`,

@@ -1,0 +1,117 @@
+{
+  "fixture": "host-control-stop-root",
+  "pairs": [
+    {
+      "read": "refresh_composer_chrome",
+      "reason": "timer-driven background chrome",
+      "connection": 1,
+      "request": {
+        "frame": "request",
+        "id": 4,
+        "op": {
+          "attachment": 1,
+          "blobs": [],
+          "intent": {
+            "body": "refresh_composer_chrome",
+            "kind": "extension"
+          },
+          "op": "intent"
+        }
+      },
+      "acknowledgement": {
+        "frame": "response",
+        "id": 4,
+        "outcome": {
+          "ok": {
+            "answer": "accepted",
+            "duplicate": false
+          }
+        }
+      }
+    },
+    {
+      "read": "refresh_composer_chrome",
+      "reason": "timer-driven background chrome",
+      "connection": 1,
+      "request": {
+        "frame": "request",
+        "id": 7,
+        "op": {
+          "attachment": 1,
+          "blobs": [],
+          "intent": {
+            "body": "refresh_composer_chrome",
+            "kind": "extension"
+          },
+          "op": "intent"
+        }
+      },
+      "acknowledgement": {
+        "frame": "response",
+        "id": 7,
+        "outcome": {
+          "ok": {
+            "answer": "accepted",
+            "duplicate": false
+          }
+        }
+      }
+    },
+    {
+      "read": "refresh_composer_chrome",
+      "reason": "timer-driven background chrome",
+      "connection": 1,
+      "request": {
+        "frame": "request",
+        "id": 8,
+        "op": {
+          "attachment": 1,
+          "blobs": [],
+          "intent": {
+            "body": "refresh_composer_chrome",
+            "kind": "extension"
+          },
+          "op": "intent"
+        }
+      },
+      "acknowledgement": {
+        "frame": "response",
+        "id": 8,
+        "outcome": {
+          "ok": {
+            "answer": "accepted",
+            "duplicate": false
+          }
+        }
+      }
+    },
+    {
+      "read": "refresh_composer_chrome",
+      "reason": "timer-driven background chrome",
+      "connection": 2,
+      "request": {
+        "frame": "request",
+        "id": 4,
+        "op": {
+          "attachment": 1,
+          "blobs": [],
+          "intent": {
+            "body": "refresh_composer_chrome",
+            "kind": "extension"
+          },
+          "op": "intent"
+        }
+      },
+      "acknowledgement": {
+        "frame": "response",
+        "id": 4,
+        "outcome": {
+          "ok": {
+            "answer": "accepted",
+            "duplicate": false
+          }
+        }
+      }
+    }
+  ]
+}
