@@ -1355,7 +1355,7 @@ pub(super) fn settings_fixture() -> App {
     let mut app = App::new(launch_basic(), true);
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
-        SettingsView::default(),
+        SettingsView::default().into(),
     )));
     // Land on an Int row so the panel shows both the current value and the
     // schema default beside the description.

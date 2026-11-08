@@ -2,7 +2,7 @@
 
 This monorepo is **Plakous**, an embeddable single-agent multi-provider harness
 library, and **Plak**, the CLI/TUI that consumes only the public `plakous`
-facade and the Plakous crates above it. Plakous owns the loop, providers,
+facade and the host-layer crates above it. Plakous owns the loop, providers,
 profiles, auth, and admit/revalidate; Plak owns product UX. There is no second
 runtime in Plak and no multi-agent topology in Plakous L0 — L0 is exactly
 `plakous-model`, `plakous-tools`, `plakous-agent` and the `plakous` facade.
@@ -125,8 +125,8 @@ requests count too. Syntax and classification: spec 05 §2.8.
 Prompt renders are regenerated locally into the gitignored `target/prompt-renders/`
 and are **never committed**; correctness is pinned by sha256 tables in code.
 
-The workspace has 40 packages in three classes: supported (5),
-published-internal (32), repository-only (3). Publication and nameability
+The workspace has 41 packages in three classes: supported (5),
+published-internal (33), repository-only (3). Publication and nameability
 confer accessibility, not support.
 
 Packages declare the dependency features their Rust targets use rather than

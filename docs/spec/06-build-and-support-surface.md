@@ -82,7 +82,7 @@ provider qualification, recovery certification, or source compatibility.
 | Published internal | A necessary dependency and deliberate advanced-use implementation surface, released in the exact cohort, with no direct-use compatibility, qualification, or support promise |
 | Repository-only | Test, fixture, and crash-harness packages, kept outside the production dependency closure entirely and never published |
 
-The workspace holds 40 packages: five supported, 32 published internal, three
+The workspace holds 41 packages: five supported, 33 published internal, three
 repository-only.
 
 The root `[workspace].exclude` includes `.plak`, the local operator-state and
@@ -94,9 +94,9 @@ exclusion and continues to reject other unreviewed nested-package exclusions.
 
 `plakous`, `plakous-agent`, `plakous-model`, `plakous-tools`, `plak`.
 
-**Published internal (32)**
+**Published internal (33)**
 
-`plakous-host-protocol`, `plakous-workspace`, `plakous-recursive-subagents`,
+`plakd-wire-types`, `plakous-host-protocol`, `plakous-workspace`, `plakous-recursive-subagents`,
 `plakous-recursive-subagents-store`, `plakous-hosted`,
 `plakous-anthropic`, `plakous-attempt`, `plakous-auth`,
 `plakous-chat-completions`, `plakous-codex-code-mode-protocol`,
@@ -108,6 +108,12 @@ exclusion and continues to reject other unreviewed nested-package exclusions.
 `plakous-tool-search`, `plakous-tool-web`, `plakous-xai`.
 
 A retired package stops at its last published version; that version is not yanked.
+
+`plakd-wire-types` is the product's serialized extension vocabulary over
+`plakous-host-protocol`, not a command-layer SDK. It has no hosted, store,
+configuration or runtime dependency. Local appearance wrappers and executable
+reload probes remain in the product. Extraction preserves protocol 5 frames,
+the schema and serialized reload values byte-for-byte; it adds no version cut.
 
 **Repository-only (3)**
 

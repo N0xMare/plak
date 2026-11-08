@@ -611,7 +611,7 @@ pub(super) fn emit_settings(paths: &PlakPaths, events: &Sender<PlakExtension>) {
     match ProductConfig::load(paths) {
         Ok(config) => {
             let _ = events.send(ContentEvent::Extension(SurfaceObservation::SettingsView(
-                settings_view(&config),
+                settings_view(&config).into(),
             )));
         }
         Err(error) => {
@@ -785,7 +785,7 @@ pub(super) fn save_settings(
         Ok(config) => {
             let note = settings_saved_note(&current, &config, changes_root_binding);
             let _ = events.send(ContentEvent::Extension(
-                SurfaceObservation::SettingsViewApplied(settings_view(&config)),
+                SurfaceObservation::SettingsViewApplied(settings_view(&config).into()),
             ));
             let _ = events.send(ContentEvent::Row(TranscriptRow::info(
                 NoticeScope::Settings,
@@ -1154,11 +1154,11 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
             }
             SurfaceIntent::SaveSettings(update) => {
                 return SurfaceEffect {
-                    saved: save_settings(&self.paths, update, facts.catalog, events).map(|saved| {
-                        SurfaceSaved {
+                    saved: save_settings(&self.paths, update.into(), facts.catalog, events).map(
+                        |saved| SurfaceSaved {
                             root_template: saved.root_template_fact(),
-                        }
-                    }),
+                        },
+                    ),
                     ..SurfaceEffect::default()
                 };
             }

@@ -206,3 +206,101 @@ pub(super) fn credential_verdict(
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests;
+
+impl From<ReloadTarget> for plakd_wire_types::ReloadTarget {
+    fn from(value: ReloadTarget) -> Self {
+        Self {
+            executable: value.executable,
+            capacity: value.capacity.map(|value| Box::new((*value).into())),
+            capacity_error: value.capacity_error,
+            state_key: value.state_key,
+            probe: value.probe.map(Into::into),
+            reopen: value.reopen.map(|value| Box::new((*value).into())),
+            request: value.request.map(|value| Box::new((*value).into())),
+        }
+    }
+}
+
+impl From<plakd_wire_types::ReloadTarget> for ReloadTarget {
+    fn from(value: plakd_wire_types::ReloadTarget) -> Self {
+        Self {
+            executable: value.executable,
+            capacity: value.capacity.map(|value| Box::new((*value).into())),
+            capacity_error: value.capacity_error,
+            state_key: value.state_key,
+            probe: value.probe.map(Into::into),
+            reopen: value.reopen.map(|value| Box::new((*value).into())),
+            request: value.request.map(|value| Box::new((*value).into())),
+        }
+    }
+}
+
+impl From<CarryCapacityProbe> for plakd_wire_types::CarryCapacityProbe {
+    fn from(value: CarryCapacityProbe) -> Self {
+        Self {
+            route: value.route,
+            total_window: value.total_window,
+            admitted_input: value.admitted_input,
+            estimated_tokens: value.estimated_tokens,
+            messages: value.messages,
+        }
+    }
+}
+
+impl From<plakd_wire_types::CarryCapacityProbe> for CarryCapacityProbe {
+    fn from(value: plakd_wire_types::CarryCapacityProbe) -> Self {
+        Self {
+            route: value.route,
+            total_window: value.total_window,
+            admitted_input: value.admitted_input,
+            estimated_tokens: value.estimated_tokens,
+            messages: value.messages,
+        }
+    }
+}
+
+impl From<ReloadProbe> for plakd_wire_types::ReloadProbe {
+    fn from(value: ReloadProbe) -> Self {
+        Self {
+            state_key: value.state_key,
+            export_versions: value.export_versions,
+            config_error: value.config_error,
+            binary_id: value.binary_id,
+        }
+    }
+}
+
+impl From<plakd_wire_types::ReloadProbe> for ReloadProbe {
+    fn from(value: plakd_wire_types::ReloadProbe) -> Self {
+        Self {
+            state_key: value.state_key,
+            export_versions: value.export_versions,
+            config_error: value.config_error,
+            binary_id: value.binary_id,
+        }
+    }
+}
+
+impl From<ReopenProbe> for plakd_wire_types::ReopenProbe {
+    fn from(value: ReopenProbe) -> Self {
+        match value {
+            ReopenProbe::Opens => Self::Opens,
+            ReopenProbe::BindingChanged { change } => Self::BindingChanged { change },
+            ReopenProbe::Refused { reason } => Self::Refused { reason },
+            ReopenProbe::Unknown { reason } => Self::Unknown { reason },
+        }
+    }
+}
+
+impl From<plakd_wire_types::ReopenProbe> for ReopenProbe {
+    fn from(value: plakd_wire_types::ReopenProbe) -> Self {
+        match value {
+            plakd_wire_types::ReopenProbe::Opens => Self::Opens,
+            plakd_wire_types::ReopenProbe::BindingChanged { change } => {
+                Self::BindingChanged { change }
+            }
+            plakd_wire_types::ReopenProbe::Refused { reason } => Self::Refused { reason },
+            plakd_wire_types::ReopenProbe::Unknown { reason } => Self::Unknown { reason },
+        }
+    }
+}

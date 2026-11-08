@@ -1194,7 +1194,7 @@ fn toggling_group_tool_calls_replans_the_transcript_live() {
 
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
-        SettingsView::default(),
+        SettingsView::default().into(),
     )));
     let row = settings_row(crate::tui::settings_registry::GROUP_TOOL_CALLS);
     app.settings_menu.as_mut().expect("settings").selected = row;
@@ -1223,13 +1223,16 @@ fn toggling_group_tool_calls_replans_the_transcript_live() {
 
     // The applied snapshot keeps the ungrouped plan after the modal closes.
     app.apply_host_event(HostEvent::Extension(
-        SurfaceObservation::SettingsViewApplied(SettingsView {
-            tui: crate::tui_preferences::TuiPreferences {
-                group_tool_calls: false,
-                ..(SettingsView::default()).tui
-            },
-            ..SettingsView::default()
-        }),
+        SurfaceObservation::SettingsViewApplied(
+            SettingsView {
+                tui: crate::tui_preferences::TuiPreferences {
+                    group_tool_calls: false,
+                    ..(SettingsView::default()).tui
+                },
+                ..SettingsView::default()
+            }
+            .into(),
+        ),
     ));
     assert!(!app.render_prefs.group_tool_calls);
     let plans = crate::tui::blocks::plan_rows(&app.pane.blocks, app.render_prefs);
@@ -2203,7 +2206,7 @@ fn hover_reveals_without_moving_focus() {
     let mut app = App::new(launch_basic(), true);
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
-        SettingsView::default(),
+        SettingsView::default().into(),
     )));
     let mut terminal = Terminal::new(TestBackend::new(100, 34)).unwrap();
     terminal.draw(|frame| app.draw(frame)).unwrap();
@@ -2961,7 +2964,7 @@ fn the_scroll_lines_row_sets_the_wheel_notch() {
     app = App::new(launch, true);
     pin_clock(&mut app);
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
-        SettingsView::default(),
+        SettingsView::default().into(),
     )));
     app.mouse_scroll_queue = 0;
     app.last_wheel_at = None;
@@ -2980,7 +2983,7 @@ fn the_scroll_lines_row_sets_the_wheel_notch() {
     // The open draft previews before it is saved.
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
-        SettingsView::default(),
+        SettingsView::default().into(),
     )));
     app.settings_menu.as_mut().unwrap().draft.tui.scroll_lines = 10;
     assert_eq!(app.wheel_notch(false), 10);

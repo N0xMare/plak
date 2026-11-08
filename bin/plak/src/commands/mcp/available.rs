@@ -223,7 +223,10 @@ fn server_lines(
     id: &str,
     server: &McpServerConfig,
 ) -> CliResult<Vec<String>> {
-    Ok(server_configuration(paths, config, id, server)?.lines(id))
+    Ok(crate::surface_protocol::mcp_lines::server_lines(
+        &server_configuration(paths, config, id, server)?,
+        id,
+    ))
 }
 
 fn server_configuration(
@@ -314,7 +317,7 @@ fn list(paths: &PlakPaths) -> CliResult<String> {
     if lines.is_empty() {
         return Ok(format!(
             "{}\n",
-            crate::surface_protocol::McpOverview::NONE_CONFIGURED
+            crate::surface_protocol::mcp_lines::NONE_CONFIGURED
         ));
     }
     Ok(lines.iter().map(|line| format!("{line}\n")).collect())

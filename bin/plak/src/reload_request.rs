@@ -589,3 +589,27 @@ fn is_binary_id(value: &str) -> bool {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests;
+
+impl From<ReloadRequest> for plakd_wire_types::ReloadRequest {
+    fn from(value: ReloadRequest) -> Self {
+        Self {
+            version: value.version,
+            request_id: value.request_id,
+            session_id: value.session_id,
+            expect_binary: value.expect_binary,
+            nonce: value.nonce,
+        }
+    }
+}
+
+impl From<plakd_wire_types::ReloadRequest> for ReloadRequest {
+    fn from(value: plakd_wire_types::ReloadRequest) -> Self {
+        Self {
+            version: value.version,
+            request_id: value.request_id,
+            session_id: value.session_id,
+            expect_binary: value.expect_binary,
+            nonce: value.nonce,
+        }
+    }
+}

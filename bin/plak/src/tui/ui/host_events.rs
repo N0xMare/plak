@@ -1061,10 +1061,10 @@ impl App {
                 self.apply_build_status(newer_installed);
             }
             HostEvent::Extension(SurfaceObservation::ReloadRequested(request)) => {
-                self.apply_reload_request(request);
+                self.apply_reload_request(request.into());
             }
             HostEvent::Extension(SurfaceObservation::ReloadProbed { target, refusal }) => {
-                self.apply_reload_probed(Some((target.map(|target| *target), refusal)));
+                self.apply_reload_probed(Some((target.map(|target| (*target).into()), refusal)));
             }
             HostEvent::Extension(SurfaceObservation::ReloadProbeFailed) => {
                 self.apply_reload_probed(None);
@@ -1166,7 +1166,8 @@ impl App {
                 self.templates = rows;
                 self.mark_dirty();
             }
-            HostEvent::Extension(SurfaceObservation::SettingsView(mut snapshot)) => {
+            HostEvent::Extension(SurfaceObservation::SettingsView(snapshot)) => {
+                let mut snapshot: crate::config::SettingsView = snapshot.into();
                 self.settings_error = None;
                 snapshot.tui = self.preferences.clone();
                 self.settings_snapshot = Some(snapshot.clone());
@@ -1186,7 +1187,8 @@ impl App {
                 self.slash_open = false;
                 self.mark_dirty();
             }
-            HostEvent::Extension(SurfaceObservation::SettingsViewApplied(mut snapshot)) => {
+            HostEvent::Extension(SurfaceObservation::SettingsViewApplied(snapshot)) => {
+                let mut snapshot: crate::config::SettingsView = snapshot.into();
                 // Every row applies on change, so a confirmed write is
                 // not an exit. The tab stays exactly where the operator left
                 // it and only the persisted value moves under it.

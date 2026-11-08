@@ -52,7 +52,7 @@ fn fake_session(
                 .unwrap();
             observations
                 .send(SessionObservation::Extension(
-                    SurfaceObservation::SettingsView(SettingsView::default()),
+                    SurfaceObservation::SettingsView(SettingsView::default().into()),
                 ))
                 .unwrap();
         }
@@ -202,7 +202,7 @@ fn the_extension_codec_round_trips_and_keeps_terminal_preferences_local() {
     let mut view = SettingsView::default();
     view.tui.mouse = !view.tui.mouse;
     let observation: SessionObservation<PlakExtension> =
-        SessionObservation::Extension(SurfaceObservation::SettingsView(view.clone()));
+        SessionObservation::Extension(SurfaceObservation::SettingsView(view.clone().into()));
     let encoded = serde_json::to_value(&observation).unwrap();
     assert!(encoded["body"]["settings_view"].get("tui").is_none());
     let decoded: SessionObservation<PlakExtension> = serde_json::from_value(encoded).unwrap();
@@ -210,6 +210,7 @@ fn the_extension_codec_round_trips_and_keeps_terminal_preferences_local() {
         panic!("a settings view");
     };
     assert_eq!(received.product, view.product);
+    let received: SettingsView = received.into();
     assert_eq!(
         received.tui,
         crate::tui_preferences::TuiPreferences::default()

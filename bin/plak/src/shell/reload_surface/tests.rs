@@ -25,7 +25,9 @@ fn checked(channel: &ReloadChannel, session: Option<&str>) -> Option<ReloadReque
         HostEvent::Extension(SurfaceObservation::BuildStatus { .. })
     ));
     match received.try_recv() {
-        Ok(HostEvent::Extension(SurfaceObservation::ReloadRequested(request))) => Some(request),
+        Ok(HostEvent::Extension(SurfaceObservation::ReloadRequested(request))) => {
+            Some(request.into())
+        }
         Ok(other) => panic!("{other:?}"),
         Err(_) => None,
     }

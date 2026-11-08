@@ -3921,6 +3921,11 @@ latency, and nothing else. Prompt text never reaches a span.
 
 ### 4.4 Wire v2
 
+`plakd-wire-types` owns the serialized product extension DTOs and their
+protocol classification, over `plakous-host-protocol`. Product handlers,
+configuration, local appearance wrappers and reload-file/probe authority stay
+outside that crate. Moving these types changes neither wire bytes nor schema.
+
 On protocol 5, directory attention is independent of activity:
 `needs_operator` means an unresolved approval or credential wait on any
 node, or a pending context-capacity decision, even while a turn runs.

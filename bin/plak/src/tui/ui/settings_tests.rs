@@ -17,7 +17,7 @@ fn resetting_terminal_integer_and_theme_preferences_persists_locally() {
     let mut app = App::new(launch, true);
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
-        SettingsView::default(),
+        SettingsView::default().into(),
     )));
     for key_name in [
         crate::tui::settings_registry::SCROLL_LINES,
@@ -37,7 +37,7 @@ fn resetting_terminal_integer_and_theme_preferences_persists_locally() {
             assert_eq!(app.theme, crate::tui::Theme::dark());
         }
         app.apply_host_event(HostEvent::Extension(
-            SurfaceObservation::SettingsViewApplied(SettingsView::default()),
+            SurfaceObservation::SettingsViewApplied(SettingsView::default().into()),
         ));
         assert_eq!(
             app.settings_menu.as_ref().unwrap().draft.tui.scroll_lines,
@@ -67,9 +67,9 @@ fn wire_settings_views_never_replace_local_preferences_and_edits_persist_locally
         app.pending_open_settings = true;
         let received = SettingsView::default();
         app.apply_host_event(HostEvent::Extension(if applied {
-            SurfaceObservation::SettingsViewApplied(received)
+            SurfaceObservation::SettingsViewApplied(received.into())
         } else {
-            SurfaceObservation::SettingsView(received)
+            SurfaceObservation::SettingsView(received.into())
         }));
         assert_eq!(app.persisted_theme, SettingsTheme::CatppuccinLatte);
         assert_eq!(app.theme.id, theme_for(SettingsTheme::CatppuccinLatte).id);
@@ -82,7 +82,7 @@ fn wire_settings_views_never_replace_local_preferences_and_edits_persist_locally
         "terminal-only edits never go to the host"
     );
     app.apply_host_event(HostEvent::Extension(
-        SurfaceObservation::SettingsViewApplied(SettingsView::default()),
+        SurfaceObservation::SettingsViewApplied(SettingsView::default().into()),
     ));
     assert_eq!(app.persisted_theme, SettingsTheme::CatppuccinMocha);
     assert_eq!(
@@ -105,7 +105,7 @@ fn a_failed_local_preference_save_is_inline_and_never_sent_to_the_host() {
     let mut app = App::new(launch, true);
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
-        SettingsView::default(),
+        SettingsView::default().into(),
     )));
     app.settings_menu.as_mut().unwrap().draft.tui.mouse = false;
     assert!(app.persist_settings().is_none());
@@ -147,7 +147,7 @@ fn settings_rows_focus_on_click_and_activate_on_double_click() {
     let mut app = App::new(launch_basic(), true);
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
-        SettingsView::default(),
+        SettingsView::default().into(),
     )));
     let backend = TestBackend::new(120, 40);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -222,7 +222,7 @@ fn a_theme_choice_previews_on_click_and_applies_on_double_click() {
     let mut app = App::new(launch_basic(), true);
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
-        SettingsView::default(),
+        SettingsView::default().into(),
     )));
     app.settings_menu.as_mut().unwrap().selected =
         settings_row(crate::tui::settings_registry::THEME);
@@ -269,7 +269,7 @@ fn hovering_a_chooser_choice_leaves_no_browse_hover_behind() {
     let mut app = App::new(launch_basic(), true);
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
-        SettingsView::default(),
+        SettingsView::default().into(),
     )));
     app.settings_menu.as_mut().unwrap().selected =
         settings_row(crate::tui::settings_registry::THEME);
@@ -300,7 +300,7 @@ fn a_single_click_on_the_focused_settings_row_only_keeps_focus() {
     let mut app = App::new(launch_basic(), true);
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
-        SettingsView::default(),
+        SettingsView::default().into(),
     )));
     let motion = settings_row(crate::tui::settings_registry::REDUCED_MOTION);
     app.settings_menu.as_mut().unwrap().selected = motion;
@@ -332,7 +332,7 @@ fn theme_preview_and_revert_cover_all_six_themes() {
     let mut app = App::new(launch_basic(), true);
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
-        SettingsView::default(),
+        SettingsView::default().into(),
     )));
     let theme_row = settings_row(crate::tui::settings_registry::THEME);
     app.settings_menu.as_mut().unwrap().selected = theme_row;
@@ -509,7 +509,8 @@ fn cancelled_theme_preview_restores_persisted_theme() {
                 ..(SettingsView::default()).product
             },
             ..SettingsView::default()
-        },
+        }
+        .into(),
     )));
     app.settings_menu.as_mut().expect("settings").selected =
         settings_row(crate::tui::settings_registry::THEME);
@@ -553,7 +554,8 @@ fn settings_rendering_rows_drive_the_renderer() {
                 ..(SettingsView::default()).tui
             },
             ..SettingsView::default()
-        },
+        }
+        .into(),
     )));
     assert!(!app.render_prefs.show_thinking);
     assert!(!app.render_prefs.group_tool_calls);
@@ -583,7 +585,7 @@ fn opening_a_settings_sub_pane_paints_on_the_same_frame() {
         let mut app = App::new(launch_basic(), true);
         app.pending_open_settings = true;
         app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
-            SettingsView::default(),
+            SettingsView::default().into(),
         )));
         app.settings_menu.as_mut().expect("settings").selected = settings_row(key_name);
 
@@ -661,7 +663,7 @@ fn every_settings_row_applies_on_change_and_persists_immediately() {
     let mut app = App::new(launch_basic(), true);
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
-        SettingsView::default(),
+        SettingsView::default().into(),
     )));
     let mut terminal = Terminal::new(TestBackend::new(100, 40)).unwrap();
 
@@ -730,7 +732,7 @@ fn a_refused_settings_change_is_stated_inline_and_keeps_the_tab_open() {
     let mut app = App::new(launch_basic(), true);
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
-        SettingsView::default(),
+        SettingsView::default().into(),
     )));
     app.apply_host_event(HostEvent::Extension(
         SurfaceObservation::SettingsSaveFailed("config.toml is read-only".into()),
@@ -752,7 +754,7 @@ fn a_refused_settings_change_is_stated_inline_and_keeps_the_tab_open() {
         ..SettingsView::default()
     };
     app.apply_host_event(HostEvent::Extension(
-        SurfaceObservation::SettingsViewApplied(applied),
+        SurfaceObservation::SettingsViewApplied(applied.into()),
     ));
     assert_eq!(app.control_tab, Some(super::ControlTab::Settings));
     assert_eq!(
@@ -772,7 +774,7 @@ fn late_settings_acknowledgement_stays_inert_after_control_center_closes() {
     let mut app = App::new(launch_basic(), true);
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
-        SettingsView::default(),
+        SettingsView::default().into(),
     )));
     app.close_control_center();
     let applied = SettingsView {
@@ -783,7 +785,7 @@ fn late_settings_acknowledgement_stays_inert_after_control_center_closes() {
         ..SettingsView::default()
     };
     app.apply_host_event(HostEvent::Extension(
-        SurfaceObservation::SettingsViewApplied(applied),
+        SurfaceObservation::SettingsViewApplied(applied.into()),
     ));
     assert!(app.settings_menu.is_none(), "closed Settings stays inert");
     assert!(
@@ -799,7 +801,7 @@ fn late_settings_acknowledgement_stays_inert_after_control_center_closes() {
         ..SettingsView::default()
     };
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
-        newer,
+        newer.into(),
     )));
     assert!(
         app.settings_menu.is_none(),
@@ -867,9 +869,9 @@ fn settings_reset_is_taken_from_the_live_draft_at_confirm() {
             },
         };
         let observation = if applied {
-            SurfaceObservation::SettingsViewApplied(changed.clone())
+            SurfaceObservation::SettingsViewApplied(changed.clone().into())
         } else {
-            SurfaceObservation::SettingsView(changed.clone())
+            SurfaceObservation::SettingsView(changed.clone().into())
         };
         app.apply_host_event(HostEvent::Extension(observation));
         assert!(

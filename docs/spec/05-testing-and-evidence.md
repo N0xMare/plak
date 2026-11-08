@@ -3629,6 +3629,10 @@ not move library evidence out of §3.1.
 The real wire settings client saves runtime settings with nondefault terminal
 preferences in the host configuration. Skipped appearance fields never travel
 in that request, and the durable `[tui]` values remain unchanged.
+Product DTO contract examples decode and re-encode unchanged before and after
+extraction, including temporary reload values. Schema extraction is checked
+against raw `plak wire schema` output with an uninstalled executable and an
+empty identity cache, so both captures consistently report no binary identity.
 
 Protocol-4 attention is tested while busy; clients keep queueing with
 `follow_up`. Child counts exercise live, parked, completed and held-loss

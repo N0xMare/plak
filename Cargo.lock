@@ -3893,6 +3893,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 name = "plak"
 version = "0.0.3"
 dependencies = [
+ "plakd-wire-types",
  "arboard",
  "base64 0.22.1",
  "bytes",
@@ -3945,6 +3946,16 @@ dependencies = [
  "uuid",
  "vt100",
  "zeroize",
+]
+
+[[package]]
+name = "plakd-wire-types"
+version = "0.0.3"
+dependencies = [
+ "plakous-host-protocol",
+ "schemars",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -436,7 +436,7 @@ impl SocketFace {
                 .events
                 .push_back(HostEvent::Extension(
                     crate::surface_protocol::SurfaceObservation::ReloadProbed {
-                        target: target.map(Box::new),
+                        target: target.map(|target| Box::new(target.into())),
                         refusal,
                     },
                 ));

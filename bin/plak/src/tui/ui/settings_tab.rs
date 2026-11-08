@@ -91,7 +91,9 @@ impl App {
             }
         }
         self.mark_dirty();
-        product_changed.then_some(UserAction::Extension(SurfaceIntent::SaveSettings(update)))
+        product_changed.then_some(UserAction::Extension(SurfaceIntent::SaveSettings(
+            update.into(),
+        )))
     }
 
     /// A click on a chooser's choice focuses and previews it; a double-click

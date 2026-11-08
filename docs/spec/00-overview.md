@@ -25,7 +25,8 @@ Plakous agents and compose them, but each agent stays an isolated single-agent
 runtime, and multi-agent composition does not enter L0 without a change to this
 chapter.
 
-Every other `crates/**` package is a Plakous library in one of two positions.
+Except for the product-owned `plakd-wire-types`, every other `crates/**`
+package is a Plakous library in one of two positions.
 **Below the facade** — transports, kernels, providers, the store, the engines,
 the harness packs and prompts — composed behind the facade. Plak and the
 host-layer libraries reach these through the facade; direct package nameability
@@ -35,8 +36,13 @@ does not confer a support promise. **Above the facade** — `plakous-host-protoc
 `plakous` and each other and are never re-exported by it. The facade is the only
 L0 complete-workflow surface.
 
+`plakd-wire-types` occupies the existing `host` layer and depends on
+`plakous-host-protocol` for serialized product extension vocabulary. It owns
+no product handlers, configuration, persistence or runtime authority.
+
 The product is one binary crate, `bin/plak`. It composes the crates above the
-facade and holds every product opinion.
+facade and owns product policy and execution; its serialized extension
+vocabulary is shared through `plakd-wire-types`.
 
 | Position | Owns | Does not own |
 | --- | --- | --- |
@@ -57,7 +63,7 @@ Publication and Rust nameability confer accessibility, not support. A published
 package carries no direct-use compatibility, qualification, or support promise
 unless it is in the supported class.
 
-The workspace contains 40 packages: five supported, 32 published internal
+The workspace contains 41 packages: five supported, 33 published internal
 (the vendored `plakous-codex-code-mode-protocol` among them), and three
 repository-only. The supported and published-internal packages are publishable
 to crates.io as one exact cohort; the repository-only packages set
@@ -131,6 +137,7 @@ classes and directory policy.
 | `plakous-tool-plan` | `crates/harness/tool-plan` | `harness` | The `PlanState` port, `update_plan`, and the id-merge `todo_write` lowering, behind `ToolPack` |
 | `plakous` | `crates/plakous` | `facade` | Public facade: curated re-exports, session workflows, feature closures. The only dependency a complete-workflow embedder needs, and the only L0 complete-workflow surface |
 | `plakous-host-protocol` | `crates/hosting/host-protocol` | `host` | Provider-neutral host wire types shared by the hosted session and the product: session intents and observations, their bounded channels, the typed views, the topology wire vocabulary, the presentation limits, and the JSONL projection |
+| `plakd-wire-types` | `crates/hosting/plakd-wire-types` | `host` | Serialized product DTOs and extension classification over the host protocol; no settings, store, probe or mailbox authority |
 | `plakous-workspace` | `crates/orchestration/workspace` | `host` | Agent workspaces over `git`/`jj`: detect, mint, seal, adopt, unmint, and the git-redirect fence |
 | `plakous-recursive-subagents` | `crates/orchestration/recursive-subagents` | `host` | One durable agent tree per root session, its epoch, its tools and their model-visible text, and its hub |
 | `plakous-recursive-subagents-store` | `crates/orchestration/recursive-subagents-store` | `host` | That tree's durable store, over its own `subagents.sqlite3` |

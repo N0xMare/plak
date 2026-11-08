@@ -29,6 +29,7 @@ path = "src/main.rs"
 doc = false
 
 [dependencies]
+plakd-wire-types.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 plakous-hosted = { workspace = true, default-features = false }
 plakous-recursive-subagents.workspace = true

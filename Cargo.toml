@@ -9,6 +9,7 @@ exclude = [
 members = [
     "bin/plak",
     "crates/hosting/host-protocol",
+    "crates/hosting/plakd-wire-types",
     "crates/hosting/hosted",
     "crates/plakous",
     "crates/core/agent",
@@ -142,6 +143,7 @@ plakous-chat-completions = { version = "0.0.3", path = "crates/protocols/chat-co
 plakous-compose = { version = "0.0.3", path = "crates/harness/compose", default-features = false }
 plakous-exchange = { version = "0.0.3", path = "crates/protocols/exchange", default-features = false }
 plakous-host-protocol = { version = "0.0.3", path = "crates/hosting/host-protocol", default-features = false }
+plakd-wire-types = { version = "0.0.3", path = "crates/hosting/plakd-wire-types", default-features = false }
 plakous-hosted = { version = "0.0.3", path = "crates/hosting/hosted", default-features = false }
 plakous-http = { version = "0.0.3", path = "crates/common/http", default-features = false }
 plakous-mcp = { version = "0.0.3", path = "crates/harness/mcp", default-features = false }
@@ -208,6 +210,7 @@ plakous = ["plakous-exchange", "plakous-responses"]
 # Credential dispatch uses the neutral classified gate without owning its vocabulary.
 plakous-auth = ["plakous-model"]
 plak = [
+    "plakd-wire-types",
     "plakous-host-protocol",
     "plakous-hosted",
     # The `test-hooks` edge only; see the production-dependencies note above.
@@ -216,6 +219,7 @@ plak = [
     "plakous-recursive-subagents-store",
 ]
 plakous-workspace = ["plakous-host-protocol"]
+plakd-wire-types = ["plakous-host-protocol"]
 plakous-recursive-subagents = ["plakous-host-protocol", "plakous-workspace"]
 plakous-hosted = ["plakous-host-protocol", "plakous-recursive-subagents", "plakous-workspace"]
 # The store edge is optional and pinned to the repository-only commit-trace gate.
@@ -251,6 +255,7 @@ vendor = ["published-internal"]
 
 [workspace.metadata.plakous.production-dependencies]
 plak = [
+    "plakd-wire-types",
     "arboard",
     "base64",
     # `web` only, with futures-util, http-body-util, hyper, hyper-util, ring
@@ -307,6 +312,7 @@ plak = [
     "zeroize",
 ]
 plakous-host-protocol = ["base64", "schemars", "serde", "serde_json", "uuid"]
+plakd-wire-types = ["plakous-host-protocol", "schemars", "serde"]
 plakous-workspace = ["futures", "gix", "jj-lib", "plakous-host-protocol", "pollster", "rustix", "serde", "sha2", "tempfile", "tokio"]
 plakous-recursive-subagents = [
     "futures-util",

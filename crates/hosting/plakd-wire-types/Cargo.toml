@@ -1,0 +1,30 @@
+[package]
+name = "plakd-wire-types"
+description = "Product wire DTOs for Plak hosts and clients"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/plakd-wire-types"
+readme = "README.md"
+keywords = ["agent", "protocol", "wire"]
+categories = ["development-tools"]
+exclude.workspace = true
+
+[package.metadata.plakous]
+layer = "host"
+class = "published-internal"
+neutral = false
+
+[dependencies]
+plakous-host-protocol.workspace = true
+serde = { workspace = true, features = ["derive"] }
+schemars.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

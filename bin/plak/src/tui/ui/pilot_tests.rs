@@ -110,7 +110,7 @@ fn settings_app() -> App {
     let mut app = App::new(launch_basic(), true);
     app.open_control_tab(super::ControlTab::Settings);
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
-        SettingsView::default(),
+        SettingsView::default().into(),
     )));
     app
 }
@@ -236,7 +236,7 @@ fn settings_actions_are_derived_from_the_visible_registry_rows() {
     app.dispatch_pilot_action(PilotAction::OpenSettings)
         .unwrap();
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
-        SettingsView::default(),
+        SettingsView::default().into(),
     )));
     let ids = action_ids(&app);
     for meta in settings_registry::ROWS {
@@ -319,7 +319,7 @@ fn higher_priority_overlay_hides_settings_actions_and_private_text() {
     app.dispatch_pilot_action(PilotAction::OpenSettings)
         .unwrap();
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
-        SettingsView::default(),
+        SettingsView::default().into(),
     )));
     app.settings_error = Some("PRIVATE_SETTINGS_ERROR".to_owned());
     app.info_overlay = Some((
@@ -343,7 +343,7 @@ fn settings_subpanes_do_not_advertise_browse_actions() {
     app.dispatch_pilot_action(PilotAction::OpenSettings)
         .unwrap();
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
-        SettingsView::default(),
+        SettingsView::default().into(),
     )));
     let row = settings_registry::ROWS
         .iter()
@@ -382,7 +382,7 @@ fn typed_settings_story_toggles_persists_and_restores_composer_owner() {
         Some(UserAction::Extension(SurfaceIntent::OpenSettings))
     );
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
-        SettingsView::default(),
+        SettingsView::default().into(),
     )));
     assert_eq!(app.semantic_snapshot().owner, "settings");
 
@@ -407,7 +407,7 @@ fn typed_settings_story_toggles_persists_and_restores_composer_owner() {
     );
 
     app.apply_host_event(HostEvent::Extension(
-        SurfaceObservation::SettingsViewApplied(SettingsView::default()),
+        SurfaceObservation::SettingsViewApplied(SettingsView::default().into()),
     ));
     let applied = app.semantic_snapshot();
     assert_eq!(
@@ -816,7 +816,7 @@ fn every_control_tab_and_terminal_owner_has_a_closed_action_table() {
         app.open_control_tab(tab);
         if tab == super::ControlTab::Settings {
             app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
-                SettingsView::default(),
+                SettingsView::default().into(),
             )));
         }
         let actions = app.legal_pilot_actions();

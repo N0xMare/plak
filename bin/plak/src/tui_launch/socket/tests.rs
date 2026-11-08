@@ -442,7 +442,7 @@ fn save_settings_over_the_socket_preserves_terminal_preferences() {
             panic!("not save_settings")
         };
         assert_eq!(
-            decoded.tui,
+            crate::surface_protocol::SettingsView::from(decoded.clone()).tui,
             crate::tui_preferences::TuiPreferences::default()
         );
         let (events, observed) = crate::surface_protocol::host_event_channel();
@@ -483,8 +483,10 @@ fn save_settings_over_the_socket_preserves_terminal_preferences() {
     let face = SocketFace::discover(&paths).unwrap().unwrap();
     face.select(Some(SESSION)).unwrap();
     assert_eq!(event(&face), HostEvent::SetBusy(false));
-    face.send(UserAction::Extension(SurfaceIntent::SaveSettings(update)))
-        .unwrap();
+    face.send(UserAction::Extension(SurfaceIntent::SaveSettings(
+        update.into(),
+    )))
+    .unwrap();
     assert!(matches!(
         event(&face),
         HostEvent::Extension(SurfaceObservation::SettingsViewApplied(_))

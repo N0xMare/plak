@@ -84,7 +84,7 @@ impl ReloadChannel {
         }
         if let Some(offered) = channel.offered.clone() {
             let _ = events.send(ContentEvent::Extension(
-                SurfaceObservation::ReloadRequested(offered),
+                SurfaceObservation::ReloadRequested(offered.into()),
             ));
         }
     }
@@ -205,7 +205,7 @@ pub(super) fn probe(
                 in_flight,
             );
             answer.send(SurfaceObservation::ReloadProbed {
-                target: target.map(Box::new),
+                target: target.map(|target| Box::new(target.into())),
                 refusal,
             });
         });

@@ -541,7 +541,7 @@ fn every_product_intent_uses_immutable_phase_facts_and_bounded_observations() {
             let intent = match intent_index {
                 0 => SurfaceIntent::OpenConfigFile,
                 1 => SurfaceIntent::OpenSettings,
-                2 => SurfaceIntent::SaveSettings(settings_view(&config)),
+                2 => SurfaceIntent::SaveSettings(settings_view(&config).into()),
                 3 => SurfaceIntent::OpenUsage,
                 _ => unreachable!(),
             };
@@ -799,7 +799,7 @@ fn refused_product_save_returns_no_binding_effect_and_preserves_the_file() {
     update.product.default_model = Some("unadmitted-model".into());
     let (events, received) = host_event_sink();
     let effect = ProductSurface::new(paths.clone()).dispatch(
-        SurfaceIntent::SaveSettings(update),
+        SurfaceIntent::SaveSettings(update.into()),
         SurfaceFacts {
             session: None,
             phase: SurfacePhase::Busy,
@@ -1657,7 +1657,8 @@ fn settings_save_uses_exact_ready_catalog_not_effort_name_heuristics() {
                 ..(crate::surface_protocol::SettingsUpdate::default()).product
             },
             ..crate::surface_protocol::SettingsUpdate::default()
-        },
+        }
+        .into(),
     )))
     .unwrap();
     tx.send(UserAction::Extension(SurfaceIntent::SaveSettings(
@@ -1677,7 +1678,8 @@ fn settings_save_uses_exact_ready_catalog_not_effort_name_heuristics() {
                 ..(crate::surface_protocol::SettingsUpdate::default()).product
             },
             ..crate::surface_protocol::SettingsUpdate::default()
-        },
+        }
+        .into(),
     )))
     .unwrap();
     drop(tx);
