@@ -193,7 +193,12 @@ in a change; amend the chapter that owns them.
   the changes, install the tested maintainer snapshot (`just install maintainer`)
   with matching sidecars, and report its binary ID. Do not interrupt a running
   session; a running TUI shows `new build installed · /reload`, and
-  `/reload` resumes the session on the new build. Automated
+  `/reload` resumes the session on the new build. When the session runs in a
+  `plak host` with its tools on a paired runner, the host and the runner must
+  share one source revision: point the runner's `command` at a dedicated link
+  that `just install maintainer` does not move, install the same commit on both
+  machines, settle running work, advance the runner link and restart the host
+  together, and report the client, host and runner binary IDs. Automated
   checks do not substitute for a maintainer's TUI review.
 - A change to public semantics, crate boundaries, persistence or wire formats,
   security boundaries, or supported platforms MUST update the owning
