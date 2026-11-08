@@ -7,6 +7,9 @@ use plakous_hosted::error::{CliFailure, CliResult};
 
 use crate::home::paths::PlakPaths;
 
+#[cfg(any(test, feature = "web"))]
+mod host;
+
 #[derive(Debug)]
 pub(crate) enum StandaloneRunnerError {
     ImportThroughRunningHost,
@@ -46,23 +49,6 @@ pub(crate) struct RunnerOwnership {
 impl RunnerOwnership {
     pub(crate) fn is_standalone(&self) -> bool {
         self.standalone
-    }
-
-    #[cfg(any(test, feature = "web"))]
-    pub(crate) fn host(paths: &PlakPaths) -> CliResult<Self> {
-        let file = lock_file(paths)?;
-        file.try_lock_shared().map_err(|error| match error {
-            TryLockError::WouldBlock => CliFailure::new(
-                "a standalone runner operation owns this home; retry after it finishes",
-            ),
-            TryLockError::Error(error) => {
-                CliFailure::new(format!("runner ownership lock: {error}"))
-            }
-        })?;
-        Ok(Self {
-            standalone: false,
-            _lock: file,
-        })
     }
 
     pub(crate) fn standalone(paths: &PlakPaths) -> Result<Self, StandaloneRunnerError> {
