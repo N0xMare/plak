@@ -8,6 +8,8 @@ mod hosted;
 pub(crate) mod socket;
 pub(crate) mod supervisor;
 
+pub(crate) const HOST_RESUME_SUPPORTED: bool = true;
+
 use std::io::{self, IsTerminal as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::time::Instant;

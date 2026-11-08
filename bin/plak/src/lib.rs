@@ -608,7 +608,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             let verdict = match services.paths() {
                 Ok(paths) => carry::reload_probe(paths),
                 Err(error) => carry::ReloadProbe {
-                    host_resume: cfg!(feature = "tui"),
+                    host_resume: tui_launch::HOST_RESUME_SUPPORTED,
                     state_key: home::state::state_key(),
                     export_versions: carry::IMPORTABLE_VERSIONS.to_vec(),
                     config_error: Some(error.message().to_owned()),

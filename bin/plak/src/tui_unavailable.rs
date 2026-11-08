@@ -1,5 +1,7 @@
 use crate::{CliResult, ProcessOutcome, shell::services::Services};
 
+pub(crate) const HOST_RESUME_SUPPORTED: bool = false;
+
 pub(crate) fn launch_host_tui(
     services: &Services,
     session_id: Option<String>,
