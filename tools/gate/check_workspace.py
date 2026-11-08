@@ -1704,7 +1704,6 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             'FileCallJournal',
             'RunnerClient',
             'RunnerServices',
-            'RunnerLeaseClock',
             'protocol',
         },
         'tools': {'runner::RunnerBackend'},
@@ -1970,6 +1969,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         },
     },
     ('plak', 'src/lib.rs'): {'runner': {'RunnerServices', 'RunnerLeaseClock', 'ClientWindows'}},
+    ('plak', 'src/test_hooks/runner.rs'): {'runner': {'RunnerLeaseClock', 'ClientWindows'}},
     ('plak', 'src/commands/runner/registry.rs'): {
         'runner': {
             'AdmissionSnapshot',

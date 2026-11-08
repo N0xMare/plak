@@ -5,6 +5,7 @@ use super::*;
 
 fn remote(fixture: &Fixture) -> (ChildRunner, String, String) {
     use std::fmt::Write as _;
+    use std::io::Read as _;
     use std::os::unix::fs::PermissionsExt as _;
     let script = job_script(fixture, false);
     fixture.write_script(&script);
@@ -17,7 +18,7 @@ fn remote(fixture: &Fixture) -> (ChildRunner, String, String) {
     let bin = fixture.root.join("ssh-bin");
     std::fs::create_dir(&bin).unwrap();
     let ssh = bin.join("ssh");
-    std::fs::write(&ssh, format!("#!/bin/sh\nwhile [ \"$1\" != -- ]; do shift; done\nshift\nshift\nif [ \"$3\" = connect ]; then echo $$ >> '{}'; fi\nexport PLAK_HOME='{home}'\nexec \"$@\"\n", fixture.root.join("ssh-bridges").display())).unwrap();
+    std::fs::write(&ssh, format!("#!/bin/sh\nn=0\nwhile [ \"$1\" != -- ]; do [ \"$n\" -lt 64 ] || exit 1; n=$((n + 1)); shift; done\nshift\nshift\nif [ \"$3\" = connect ]; then echo $$ >> '{}'; fi\nexport PLAK_HOME='{home}'\nexec \"$@\"\n", fixture.root.join("ssh-bridges").display())).unwrap();
     std::fs::set_permissions(&ssh, std::fs::Permissions::from_mode(0o700)).unwrap();
     let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
     let config = fixture.home().join("config.toml");
@@ -37,11 +38,15 @@ fn remote(fixture: &Fixture) -> (ChildRunner, String, String) {
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
-    let mut line = String::new();
-    BufReader::new(bridge.stdout.take().unwrap())
-        .read_line(&mut line)
-        .unwrap();
-    let plakous::runner::protocol::RunnerFrame::Hello(hello) = serde_json::from_str(&line).unwrap()
+    let mut output = bridge.stdout.take().unwrap();
+    let mut prefix = [0; 4];
+    output.read_exact(&mut prefix).unwrap();
+    let length = usize::try_from(u32::from_be_bytes(prefix)).unwrap();
+    assert!(length <= plakous::runner::protocol::frame::MAX_FRAME_BYTES);
+    let mut body = vec![0; length];
+    output.read_exact(&mut body).unwrap();
+    let plakous::runner::protocol::RunnerFrame::Hello(hello) =
+        plakous::runner::protocol::frame::decode(&body).unwrap()
     else {
         panic!("no runner hello")
     };
