@@ -369,6 +369,15 @@ fn an_unreachable_user_manager_falls_back_to_a_detached_runner() {
             ("PATH", format!("{}:/usr/bin:/bin", bin.display())),
         ],
     );
+    // The local daemon starts after the host serves; wait for its manager call.
+    let deadline = std::time::Instant::now() + WAIT;
+    while !marker.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the user manager was never asked"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     assert_eq!(std::fs::read_to_string(marker).unwrap(), "called");
     stop(&mut host);
 }
