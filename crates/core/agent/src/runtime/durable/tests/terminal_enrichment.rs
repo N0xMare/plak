@@ -6,7 +6,6 @@ async fn historical_terminal_replay_refuses_non_enrichment_usage_changes() -> Te
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
     let model = artifact_test_model(0, 88_400)?;
-    model.unknown_outcome_from_call.store(0, Ordering::Release);
     let (registry, _) = session_update_registry(SessionUpdateFixtureMode::Active)?;
     let make = || session_update_builder(workspace.clone(), model.clone(), registry.clone());
     let sessions = DurableSessionRuntime::current(
@@ -17,7 +16,7 @@ async fn historical_terminal_replay_refuses_non_enrichment_usage_changes() -> Te
     let agent = sessions.create("create:historical-usage", make()?).await?;
     let command = CommandId::new("root:historical-usage")?;
     let original = agent
-        .start(command.clone(), "unknown request")
+        .start(command.clone(), "completed request")
         .await?
         .into_turn()
         .ok_or("original turn")?
@@ -25,10 +24,10 @@ async fn historical_terminal_replay_refuses_non_enrichment_usage_changes() -> Te
         .await?;
     assert!(matches!(
         original.outcome(),
-        TurnResultOutcome::RecoveryRequired(_)
+        TurnResultOutcome::Completed(_)
     ));
     let checkpoint = original.checkpoint().clone();
-    let _ = agent.shutdown().await;
+    agent.shutdown().await?;
 
     for tamper in [false, true] {
         let reader = historical_reader(
@@ -40,7 +39,7 @@ async fn historical_terminal_replay_refuses_non_enrichment_usage_changes() -> Te
         let reply = reader
             .command(TurnCommand::Start {
                 command_id: command.clone(),
-                input: "unknown request".into(),
+                input: "completed request".into(),
             })
             .await?;
         if tamper {
