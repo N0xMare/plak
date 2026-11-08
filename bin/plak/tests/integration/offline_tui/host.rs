@@ -150,9 +150,7 @@ fn a_host_tui_fixture_reaps_its_host_and_daemon_on_drop_and_panic() {
             assert!(pids.len() >= 2, "the fixture must own a real daemon");
             *observed.lock().unwrap() = Some((fixture.root.clone(), pids));
             assert!(fixture.home().join("host/runner").is_dir());
-            if panic {
-                panic!("fixture failure after readiness");
-            }
+            assert!(!panic, "fixture failure after readiness");
         });
         assert_eq!(result.is_err(), panic);
         let observed = root.lock().unwrap();

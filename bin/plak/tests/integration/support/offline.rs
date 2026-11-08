@@ -61,9 +61,7 @@ fn a_fixture_child_is_reaped_when_readiness_panics_or_times_out() {
         let result = std::panic::catch_unwind(move || {
             let child = TestChild::spawn(Command::new("sh").args(["-c", "sleep 60 & wait"]));
             *observed.lock().unwrap() = Some(child.id());
-            if panic {
-                panic!("readiness refused");
-            }
+            assert!(!panic, "readiness refused");
             // Returning before startup succeeded must still reap the group.
         });
         assert_eq!(result.is_err(), panic);
