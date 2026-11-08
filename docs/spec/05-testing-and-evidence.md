@@ -3626,6 +3626,10 @@ not move library evidence out of §3.1.
 
 ### 3.1 Offline fixture evidence
 
+The real wire settings client saves runtime settings with nondefault terminal
+preferences in the host configuration. Skipped appearance fields never travel
+in that request, and the durable `[tui]` values remain unchanged.
+
 Protocol-4 attention is tested while busy; clients keep queueing with
 `follow_up`. Child counts exercise live, parked, completed and held-loss
 transitions. Dormant stops are replayed and reopened under `continue`,

@@ -21,6 +21,88 @@ use super::offline_support::*;
 
 const ANSWER: &str = "the wire client answer";
 
+#[test]
+fn a_real_wire_runtime_settings_save_preserves_nondefault_terminal_preferences() {
+    use std::io::Write as _;
+    let fixture = Fixture::new(&json!({"version":1,"steps":[]}));
+    let config_path = fixture.home().join("config.toml");
+    std::fs::OpenOptions::new().append(true).open(&config_path).unwrap()
+        .write_all(b"\n[tui]\ntheme = \"catppuccin-latte\"\nmouse = false\nscroll_lines = 9\nshow_thinking = false\ngroup_tool_calls = false\nreduced_motion = true\n").unwrap();
+    let before: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    let mut child = fixture
+        .command()
+        .args(["agent", "--wire", "v2"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let transport =
+        client::Transport::new(child.stdout.take().unwrap(), child.stdin.take().unwrap());
+    let (sender, receiver, _) = client::connect::<PlakExtension>(
+        transport,
+        Hello {
+            proto: WIRE_VERSION,
+            binary_id: "settings-wire-test".into(),
+            caps: Vec::new(),
+        },
+    )
+    .unwrap();
+    sender
+        .send(SessionIntent::Extension(
+            serde_json::from_value(json!("open_settings")).unwrap(),
+        ))
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut settings = loop {
+        let left = deadline
+            .checked_duration_since(Instant::now())
+            .expect("settings timed out");
+        if let SessionObservation::Extension(extension) = receiver.recv_timeout(left).unwrap() {
+            let extension = serde_json::to_value(extension).unwrap();
+            if let Some(view) = extension.get("settings_view") {
+                break view.clone();
+            }
+        }
+    };
+    settings["product"]["compaction"] = json!(false);
+    let request = SessionIntent::<PlakExtension>::Extension(
+        serde_json::from_value(json!({"save_settings": settings})).unwrap(),
+    );
+    assert!(!serde_json::to_string(&request).unwrap().contains("\"tui\""));
+    sender.send(request).unwrap();
+    loop {
+        let left = deadline
+            .checked_duration_since(Instant::now())
+            .expect("save timed out");
+        if let SessionObservation::Extension(extension) = receiver.recv_timeout(left).unwrap() {
+            let extension = serde_json::to_value(extension).unwrap();
+            if let Some(view) = extension.get("settings_view_applied") {
+                assert_eq!(view["product"]["compaction"], json!(false));
+                break;
+            }
+            if let Some(reason) = extension.get("settings_save_failed") {
+                panic!("save refused: {reason}");
+            }
+        }
+    }
+    let after: toml::Value =
+        toml::from_str(&std::fs::read_to_string(config_path).unwrap()).unwrap();
+    assert_eq!(after["tui"], before["tui"]);
+    assert_eq!(after["compaction"]["enabled"], toml::Value::Boolean(false));
+    drop((sender, receiver));
+    let until = Instant::now() + Duration::from_secs(30);
+    while child.try_wait().unwrap().is_none() {
+        assert!(
+            Instant::now() < until,
+            "agent did not leave after its client"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(child.wait().unwrap().success());
+}
+
 /// A client connects through the welcome, sends a prompt the session runs
 /// on the offline model, receives the answer's stream and the turn's end,
 /// and leaves with a bye, which ends `plak agent`.
