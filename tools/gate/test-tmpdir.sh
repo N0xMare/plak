@@ -52,10 +52,18 @@ shared_dir() {
   local base="$1" dir
   [[ -d "$base" && ! -L "$base" && -w "$base" ]] || return 1
   [[ "$(physical "$base")" == "$base" ]] || return 1
-  dir="$base/plak-test-$(id -u)-$(printf '%s' "$root" | cksum | cut -d' ' -f1)"
+  if [[ "$system" == Darwin ]]; then
+    # Socket paths also contain a per-run directory and isolated build state.
+    # Include the uid in the checksum rather than spending path bytes on it.
+    local checksum
+    checksum="$(printf '%s\n%s' "$(id -u)" "$root" | cksum | cut -d' ' -f1)"
+    dir="$base/$(printf '%08x' "$checksum")"
+  else
+    dir="$base/plak-test-$(id -u)-$(printf '%s' "$root" | cksum | cut -d' ' -f1)"
+  fi
   if ((fresh)) && [[ -d "$dir" && ! -L "$dir" ]]; then
     # Run directories are lock-owned; test-processes.py reaps only free ones.
-    find "$dir" -mindepth 1 -maxdepth 1 ! -name 'run-*' ! -name '.guard.lock' -exec rm -rf -- {} +
+    find "$dir" -mindepth 1 -maxdepth 1 ! -name 'r*' ! -name '.guard.lock' -exec rm -rf -- {} +
   fi
   mkdir -m 700 "$dir" 2>/dev/null || true
   [[ -d "$dir" && ! -L "$dir" && -O "$dir" ]] || return 1

@@ -1997,8 +1997,11 @@ The guarded entry points are the Rust lanes in `tools/gate/dev-check.sh`,
 `just nextest`, and `just dev crash-sweep`. `tools/dev/coverage.sh` and
 `tools/perf/perf-smoke.sh` are not guarded.
 
-Each guarded invocation creates `TMPDIR/run-<pid>-<nonce>` with a two-hex-digit
-nonce, holds its run lock and passes that descriptor to the child, and gives
+On macOS the default per-checkout base is `/private/tmp/<8hex>`, keyed by a
+checksum of the UID and physical checkout path, with the same ownership,
+0700-mode and symlink checks as the shared scratch selector. Each guarded
+invocation creates `TMPDIR/r<base36-pid><2hex-nonce>`, holds its run lock and
+passes that descriptor to the child, and gives
 the child that directory as its test scratch and isolated home. Concurrent
 invocations never reap locked runs, including when a child retains the lock
 after its guard dies. At every startup it reaps only unlocked earlier runs,
@@ -2015,6 +2018,9 @@ the child. Forwarding does not preempt the child's cancellation grace; only a
 second signal escalates to KILL. Interrupted
 cleanup skips the normal settle wait. The guard cannot clean up if it is itself
 SIGKILLed; an unlocked surviving run can be reaped by a later invocation.
+The tooling socket-budget check reserves at least 12 bytes below macOS's
+103-byte path limit for the current runner-build, home-local, host-control,
+web and remote fixture suffixes, including maximum PID and fixture-ordinal widths.
 
 UI reload evidence keeps a real session WebSocket open across `SIGUSR1`,
 checks the replacement policy and continued wire service, and rejects an

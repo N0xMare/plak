@@ -890,7 +890,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
                 self.assertTrue(config.is_relative_to(scratch.resolve()), config)
                 self.assertEqual(config.name, 'gitconfig')
                 if call.get('args', [])[:2] == ['nextest', 'run']:
-                    self.assertTrue(config.parent.name.startswith('run-'), config)
+                    self.assertTrue(config.parent.name.startswith('r'), config)
                 if call.get('args', [])[:2] == ['nextest', 'run']:
                     self.assertEqual(call['git_contents'], '')
                 else:
@@ -1124,7 +1124,9 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
             return [
                 {
                     key: '<run>/' + Path(value).name
-                    if key in ('plak_home', 'git_global') and value and '/run-' in value
+                    if key in ('plak_home', 'git_global')
+                    and value
+                    and Path(value).parent.name.startswith('r')
                     else value
                     for key, value in call.items()
                 }

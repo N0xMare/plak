@@ -29,6 +29,15 @@ def role(command: str) -> str | None:
     return match[1] if match else None
 
 
+def run_name(pid: int, nonce: str) -> str:
+    digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+    encoded = ""
+    while pid:
+        pid, digit = divmod(pid, 36)
+        encoded = digits[digit] + encoded
+    return f"r{encoded or '0'}{nonce}"
+
+
 class ProcessTable:
     def __init__(self):
         self.cwd: dict[tuple[int, str], str | None] = {}
@@ -72,6 +81,10 @@ class ProcessTable:
         if key not in self.cwd:
             try:
                 if sys.platform.startswith("linux"):
+                    # Credentials/dumpability can change after the process scan.
+                    # A protected proc link may belong to a different uid.
+                    if os.lstat(f"/proc/{process.pid}/cwd").st_uid != os.getuid():
+                        return False
                     cwd = os.readlink(f"/proc/{process.pid}/cwd")
                 else:
                     result = subprocess.run(
@@ -188,7 +201,7 @@ def reap_leaks(root: Path, table: ProcessTable, *, settle: bool) -> bool:
 
 
 def reap_previous(base: Path, table: ProcessTable) -> None:
-    for root in base.glob("run-*"):
+    for root in base.glob("r*"):
         try:
             if root.is_symlink() or not root.is_dir() or root.stat().st_uid != os.getuid():
                 continue
@@ -277,7 +290,7 @@ def main(args: list[str]) -> int:
             return 0
         # Short nonces keep nested fixture homes within sockaddr_un limits.
         while True:
-            root = base / f"run-{os.getpid()}-{secrets.token_hex(1)}"
+            root = base / run_name(os.getpid(), secrets.token_hex(1))
             try:
                 root.mkdir(mode=0o700)
                 break

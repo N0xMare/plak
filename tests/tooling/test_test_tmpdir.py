@@ -40,7 +40,16 @@ class TestTmpdirSelectorTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return Path(result.stdout.strip()), result.stderr
 
-    def per_checkout_name(self):
+    def per_checkout_name(self, system="Darwin"):
+        if system == "Darwin":
+            digest = subprocess.run(
+                ["cksum"],
+                input=f"{os.getuid()}\n{self.checkout}",
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.split()[0]
+            return f"{int(digest):08x}"
         digest = subprocess.run(
             ["cksum"], input=str(self.checkout), capture_output=True, text=True, check=True
         ).stdout.split()[0]
@@ -52,7 +61,7 @@ class TestTmpdirSelectorTests(unittest.TestCase):
                 selected, stderr = self.select(
                     "--system", system, "--shared-root", str(self.shared)
                 )
-                self.assertEqual(selected, self.shared / self.per_checkout_name())
+                self.assertEqual(selected, self.shared / self.per_checkout_name(system))
                 self.assertEqual(stat.S_IMODE(selected.stat().st_mode), 0o700)
                 self.assertFalse(selected.is_symlink())
                 self.assertEqual(stderr, "")
@@ -83,7 +92,7 @@ class TestTmpdirSelectorTests(unittest.TestCase):
                 if not usable:
                     continue
                 selected, _ = self.select("--system", system)
-                self.assertEqual(selected, shared_root / self.per_checkout_name())
+                self.assertEqual(selected, shared_root / self.per_checkout_name(system))
                 shutil.rmtree(selected)
 
     def test_symlinked_shared_paths_fall_back_to_the_checkout(self):

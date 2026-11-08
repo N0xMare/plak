@@ -3,6 +3,7 @@
 import fcntl
 import importlib.util
 import os
+import re
 from pathlib import Path
 import signal
 import subprocess
@@ -13,6 +14,7 @@ import threading
 import time
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[2]
 GUARD = ROOT / "tools/gate/test-processes.py"
@@ -45,7 +47,7 @@ class TestProcessGuardTests(unittest.TestCase):
             )
             try:
                 deadline = time.monotonic() + 5
-                while not list(base.glob('run-*/gitconfig')):
+                while not list(base.glob('r*/gitconfig')):
                     self.assertIsNone(child.poll())
                     self.assertLess(time.monotonic(), deadline)
                     time.sleep(0.01)
@@ -112,7 +114,7 @@ class TestProcessGuardTests(unittest.TestCase):
     def test_free_run_with_non_fixture_cwd_is_not_removed(self):
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)
-            root = base / 'run-old'
+            root = base / 'rold'
             root.mkdir()
             (root / 'guard.lock').touch()
             table = MODULE.ProcessTable()
@@ -136,7 +138,7 @@ class TestProcessGuardTests(unittest.TestCase):
 
             def paused_mkdir(path, *args, **kwargs):
                 mkdir(path, *args, **kwargs)
-                if path.name.startswith('run-'):
+                if path.name.startswith('r'):
                     created.set()
                     self.assertTrue(attempted.wait(5))
                     self.assertFalse(inspected.wait(0.2), 'partly published run was inspected')
@@ -209,27 +211,82 @@ class TestProcessGuardTests(unittest.TestCase):
                 kill.assert_called_once_with(child.pid, signal.SIGTERM)
 
     def test_short_run_name_keeps_fixture_socket_within_macos_limit(self):
-        # Maximum macOS pid and a full-width fixture ordinal and checkout checksum.
-        base = '/private/tmp/plak-test-501-4294967295'
-        socket = base + '/run-99999-ff/t1869f-ffffffff/home/host/runner/v3/run/runner.sock'
-        self.assertLessEqual(len(socket.encode()), 103)
+        # Cover full-width checksum/ordinal and the maximum macOS pid (99999).
+        pid = 99999
+        run = MODULE.run_name(pid, 'ff')
+        self.assertEqual(run, 'r255rff')
+        base = Path('/private/tmp/ffffffff') / run
+        fixture = f'e{pid:x}-ffffffff'
+        home = f'{fixture}/home'
+        protocol = int(
+            re.search(
+                r'PROTOCOL_VERSION: u32 = (\d+)',
+                (ROOT / 'crates/common/runner-protocol/src/lib.rs').read_text(),
+            )[1]
+        )
+        daemon = (ROOT / 'crates/runtimes/runner/src/daemon.rs').read_text()
+        width = int(re.search(r'digest\[\.\.(\d+)\]', daemon)[1]) * 2
+        triple = f'v{protocol}-' + 'f' * width
+        # Read literal directory components from the production layout so an
+        # added intermediate directory increases the computed budget too.
+        paths = (ROOT / 'bin/plak/src/commands/runner/home.rs').read_text()
+        runner = paths.split('impl RunnerHome {', 1)[1]
+
+        def joins(source, name):
+            body = re.search(rf'fn {name}\([^{{]*\{{(.*?)\n[ ]{{0,4}}\}}', source, re.S)
+            self.assertIsNotNone(body, name)
+            parts = re.findall(r'\.join\("([^\"]+)"\)', body[1])
+            self.assertTrue(parts, name)
+            return '/'.join(parts)
+
+        runner_root = joins(runner, 'of')
+        builds = joins(runner, 'build_directory')
+        run_directory = joins(runner, 'run_directory')
+        command = (ROOT / 'bin/plak/src/commands/runner.rs').read_text()
+        socket_file = joins(command, 'checked_socket')
+        machine_socket = f'{runner_root}/{builds}/{triple}/{run_directory}/{socket_file}'
+        suffixes = [
+            f'{home}/{machine_socket}',
+            f'{home}/host/runner/v{protocol}/run/runner.sock',
+            f'{home}/host/run/r00.e00.p00.t00.sock',
+            f'{fixture}/web/plak.sock',
+            f'rh-{fixture}/{machine_socket}',
+            f'{fixture}/run/runner.sock',
+        ]
+        for suffix in suffixes:
+            with self.subTest(suffix=suffix):
+                self.assertGreaterEqual(103 - len(os.fsencode(base / suffix)), 12)
         with patch.object(MODULE.secrets, 'token_hex', return_value='ff') as nonce:
             with (
                 tempfile.TemporaryDirectory() as temporary,
                 patch.dict(os.environ, TMPDIR=temporary),
             ):
                 with (
-                    patch.object(MODULE, 'run', return_value=0),
+                    patch.object(MODULE, 'run', return_value=0) as execute,
                     patch.object(MODULE, 'ProcessTable') as table,
+                    patch.object(MODULE.os, 'getpid', return_value=pid),
                 ):
                     table.return_value.occupied.return_value = False
                     MODULE.main(['--', 'unused'])
+                    self.assertEqual(execute.call_args.args[1].name, run)
         nonce.assert_called_once_with(1)
+
+    def test_foreign_owned_proc_link_is_not_read_or_reported(self):
+        process = MODULE.Process(410001, 1, 'before', 'host')
+        table = MODULE.ProcessTable()
+        with (
+            patch.object(MODULE.sys, 'platform', 'linux'),
+            patch.object(MODULE.os, 'lstat', return_value=SimpleNamespace(st_uid=os.getuid() + 1)),
+            patch.object(MODULE.os, 'readlink') as read,
+        ):
+            self.assertFalse(table.inside(process, Path('/scoped-fixture')))
+        read.assert_not_called()
+        self.assertFalse(table.warned)
 
     def test_stale_run_leak_is_reaped_without_failing_the_new_command(self):
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary).resolve()
-            old = base / "run-old"
+            old = base / "rold"
             old.mkdir()
             (old / "guard.lock").touch()
             (old / "host").write_text("sleep 60 & wait\n")
@@ -395,7 +452,7 @@ class TestProcessGuardTests(unittest.TestCase):
     def test_previous_runs_are_reaped_without_failing_or_touching_a_locked_run(self):
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary).resolve()
-            stale, active = base / "run-old", base / "run-live"
+            stale, active = base / "rold", base / "rlive"
             stale.mkdir()
             active.mkdir()
             (stale / "guard.lock").touch()
@@ -470,7 +527,7 @@ class TestProcessGuardTests(unittest.TestCase):
                 roots.append(Path(result.stdout.strip()))
             self.assertNotEqual(*roots)
             self.assertTrue(
-                all(path.parent == base and path.name.startswith("run-") for path in roots)
+                all(path.parent == base and path.name.startswith("r") for path in roots)
             )
             self.assertTrue(all(not path.exists() for path in roots))
             result = subprocess.run(
