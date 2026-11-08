@@ -249,7 +249,7 @@ mod tests {
         let version = plakous_runner_protocol::VersionTriple::current("rev", "release");
         assert_eq!(
             super::prologue(&version, "wss://a/", "host")?,
-            b"plak-dial/1\x00\x00\x00\x03\x00\x00\x00\x08wss://a/\x00\x00\x00\x04host"
+            b"plak-dial/1\x00\x00\x00\x04\x00\x00\x00\x08wss://a/\x00\x00\x00\x04host"
         );
         Ok(())
     }
