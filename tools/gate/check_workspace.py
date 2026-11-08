@@ -398,6 +398,11 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
         # a PATH runner.toml leaves unset (spec 04 §2.9).
         ("var_os", (("string", "PATH"),)),
         ("var_os", (("string", "HOME"),)),
+        # The installer contacts only the selected user manager, never copies
+        # the shell's environment into the installed host unit.
+        ("var_os", (("string", "PATH"),)),
+        ("var_os", (("string", "XDG_RUNTIME_DIR"),)),
+        ("var_os", (("string", "DBUS_SESSION_BUS_ADDRESS"),)),
         ("var_os", (("string", "SHELL"),)),
         ("var_os", (("string", "PLAK_RELOAD_APPLY_ORCHESTRATION"),)),
     ],
@@ -535,6 +540,10 @@ EXPECTED_PRODUCT_GENERATED_MACROS: dict[SourceKey, tuple[str, ...]] = {
 EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
     SourceKey, list[tuple[str, tuple[tuple[str, str], ...]]]
 ] = {
+    # Explicit user-unit publication reloads definitions, never starts a unit.
+    ("plak", "src/commands/host_install.rs"): [
+        ("std::process::Command", (("string", "systemctl"),)),
+    ],
     # A separate process group survives host loss; the daemon clears its environment.
     ("plak", "src/commands/runner/local/start.rs"): [
         ("std::process::Command", (("punct", "&"), ("identifier", "executable"))),

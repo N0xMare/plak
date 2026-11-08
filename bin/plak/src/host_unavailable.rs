@@ -4,6 +4,8 @@ use plakous_hosted::error::{CliFailure, CliResult, ProcessOutcome};
 
 use crate::shell::services::Services;
 
+pub(crate) const AVAILABLE: bool = false;
+
 /// Refuses: this build has no host.
 ///
 /// # Errors

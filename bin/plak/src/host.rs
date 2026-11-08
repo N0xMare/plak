@@ -15,6 +15,8 @@ mod lock;
 mod sessions;
 mod socket;
 
+pub(crate) const AVAILABLE: bool = true;
+
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
