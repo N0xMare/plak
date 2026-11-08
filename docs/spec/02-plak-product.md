@@ -4816,6 +4816,11 @@ a welcome with binary id `unknown` shows no build notice. A source-checkout
 host without a manifest or cached identity may report `unknown` while its
 background hash is pending; welcome never waits for that hash.
 
+All control and optional web endpoints must bind before runner probes may start
+the home-local daemon. An endpoint startup refusal leaves no new daemon behind
+and never stops an already-existing daemon or its jobs. Runner readiness still
+settles asynchronously after endpoint binding, before local admission.
+
 - **One per home and state key.** Before anything else it takes an exclusive
   lock on `state/<key>/host.lock` and holds it for its life; the file names
   its pid and binary id. A second `plak host` of the same home and state key

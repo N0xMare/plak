@@ -4,9 +4,7 @@ use super::{CliResult, RunnerClient, Services, finish_stops, install_reporter, s
 
 pub(crate) fn prepare(
     services: &Services,
-    environment: &super::super::environment::HostEnvironment,
-    runtime: &tokio::runtime::Runtime,
-) -> CliResult<Services> {
+) -> CliResult<(Services, std::sync::Arc<plakous::runner::WorkspaceCatalog>)> {
     let ownership = std::sync::Arc::new(super::super::ownership::RunnerOwnership::host(
         services.paths()?,
     )?);
@@ -14,17 +12,26 @@ pub(crate) fn prepare(
     let prepared = crate::commands::runner::registry::prepare(&services)?;
     let services = prepared.services;
     services.runners().require_connection("local", true);
+    Ok((services, prepared.local))
+}
+
+/// Starts daemon probes only after every host endpoint has bound successfully.
+pub(crate) fn start(
+    services: &Services,
+    local: std::sync::Arc<plakous::runner::WorkspaceCatalog>,
+    environment: &super::super::environment::HostEnvironment,
+    runtime: &tokio::runtime::Runtime,
+) {
     let environment = environment.clone();
     start_probes(
-        &services,
-        prepared.local,
+        services,
+        local,
         Some(std::sync::Arc::new(move |services, catalog, runtime| {
             let environment = environment.clone();
             Box::pin(async move { bind_local(&services, catalog, &environment, &runtime).await })
         })),
         runtime.handle(),
     );
-    Ok(services)
 }
 
 async fn bind_local(

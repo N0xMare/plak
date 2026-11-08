@@ -307,7 +307,18 @@ impl Drop for Fixture {
         if std::thread::panicking() || self.preserve.load(Ordering::Relaxed) {
             return;
         }
-        let _ = std::fs::remove_dir_all(&self.root);
+        let deadline = Instant::now() + WAIT;
+        loop {
+            match std::fs::remove_dir_all(&self.root) {
+                Ok(()) => break,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+                Err(error) => {
+                    assert!(Instant::now() < deadline, "fixture cleanup failed: {error}");
+                    kill_home_local_runner(&self.home());
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+            }
+        }
     }
 }
 
@@ -339,67 +350,137 @@ pub(super) fn kill_local_daemon_only(home: &Path) {
 
 /// Reaps this fixture's local daemon and the process groups below it.
 pub(super) fn kill_home_local_runner(home: &Path) {
-    let versions = home.join("host/runner");
-    for version in std::fs::read_dir(versions).into_iter().flatten().flatten() {
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let (daemons, starting) = home_local_runner_processes(home);
+        if daemons.is_empty() && !starting {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "a home-local daemon outlived fixture cleanup"
+        );
+        for daemon in daemons {
+            kill_daemon_tree(daemon);
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// The inherited log descriptor identifies a pending spawn before runner.lock exists.
+pub(super) fn home_local_runner_processes(home: &Path) -> (Vec<i32>, bool) {
+    let mut daemons = Vec::new();
+    let mut starting = false;
+    for version in std::fs::read_dir(home.join("host/runner"))
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        for pid in opened_by(&version.path().join("serve.log")) {
+            let output = Command::new("ps")
+                .args(["-p", &pid.to_string(), "-o", "args="])
+                .output()
+                .unwrap();
+            let command = String::from_utf8_lossy(&output.stdout);
+            let words = command.split_whitespace().collect::<Vec<_>>();
+            if words
+                .windows(3)
+                .any(|words| words == ["runner", "serve", "--local"])
+            {
+                daemons.push(pid);
+            } else {
+                starting = true;
+            }
+        }
         for lock in std::fs::read_dir(version.path().join("run"))
             .into_iter()
             .flatten()
             .flatten()
         {
-            if lock.path().extension().is_none_or(|ext| ext != "lock") {
-                continue;
-            }
-            let deadline = Instant::now() + WAIT;
-            loop {
-                let daemons = daemon_openers(&lock.path());
-                if daemons.is_empty() {
-                    break;
-                }
-                assert!(
-                    Instant::now() < deadline,
-                    "a home-local daemon outlived fixture cleanup"
-                );
-                for daemon in daemons {
-                    let output = Command::new("ps")
-                        .args(["-axo", "pid=,ppid="])
-                        .output()
-                        .expect("process tree");
-                    let pairs = String::from_utf8_lossy(&output.stdout)
-                        .lines()
-                        .filter_map(|line| {
-                            let mut columns = line.split_whitespace();
-                            Some((
-                                columns.next()?.parse::<i32>().ok()?,
-                                columns.next()?.parse::<i32>().ok()?,
-                            ))
-                        })
-                        .collect::<Vec<_>>();
-                    let mut owned = vec![daemon];
-                    let mut index = 0;
-                    while index < owned.len() {
-                        let parent = owned[index];
-                        owned.extend(
-                            pairs
-                                .iter()
-                                .filter(|(_, ppid)| *ppid == parent)
-                                .map(|(pid, _)| *pid),
-                        );
-                        index += 1;
-                    }
-                    for pid in owned
-                        .into_iter()
-                        .rev()
-                        .filter_map(rustix::process::Pid::from_raw)
-                    {
-                        let _ =
-                            rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
-                        let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
-                    }
-                }
-                std::thread::sleep(Duration::from_millis(20));
+            if lock.path().extension().is_some_and(|ext| ext == "lock") {
+                daemons.extend(daemon_openers(&lock.path()));
             }
         }
     }
+    daemons.sort_unstable();
+    daemons.dedup();
+    (daemons, starting)
+}
+
+fn kill_daemon_tree(daemon: i32) {
+    let output = Command::new("ps")
+        .args(["-axo", "pid=,ppid="])
+        .output()
+        .expect("process tree");
+    let pairs = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut columns = line.split_whitespace();
+            Some((
+                columns.next()?.parse::<i32>().ok()?,
+                columns.next()?.parse::<i32>().ok()?,
+            ))
+        })
+        .collect::<Vec<_>>();
+    let mut owned = vec![daemon];
+    let mut index = 0;
+    while index < owned.len() {
+        let parent = owned[index];
+        owned.extend(
+            pairs
+                .iter()
+                .filter(|(_, ppid)| *ppid == parent)
+                .map(|(pid, _)| *pid),
+        );
+        index += 1;
+    }
+    for pid in owned
+        .into_iter()
+        .rev()
+        .filter_map(rustix::process::Pid::from_raw)
+    {
+        let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+        let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
+    }
+}
+
+#[test]
+fn fixture_cleanup_reaps_a_daemon_spawn_before_its_lock_is_published() {
+    let fixture = Fixture::new(&json!({"version": 1}));
+    let root = fixture.root.clone();
+    let home = fixture.home();
+    let version = home.join("host/runner/pending");
+    std::fs::create_dir_all(&version).unwrap();
+    let log = std::fs::File::create(version.join("serve.log")).unwrap();
+    let mut command = Command::new("/bin/sh");
+    command
+        .args([
+            "-c",
+            "printf 'ready\\n' >&2; read gate; exec \"$@\"",
+            "pending-runner",
+        ])
+        .arg(fixture.command().get_program())
+        .args(["runner", "serve", "--local"])
+        .env("PLAK_HOME", &home)
+        .stdin(Stdio::piped())
+        .stdout(log)
+        .stderr(Stdio::piped());
+    let mut child = TestChild::spawn(&mut command);
+    drop(command);
+    let mut ready = String::new();
+    BufReader::new(child.stderr.take().unwrap())
+        .read_line(&mut ready)
+        .unwrap();
+    assert_eq!(ready.trim(), "ready");
+    assert!(!version.join("run/runner.lock").exists());
+    assert!(
+        home_local_runner_processes(&home)
+            .0
+            .contains(&child.id().cast_signed())
+    );
+    drop(fixture);
+    assert!(!child.wait().unwrap().success());
+    assert!(!root.exists());
 }
 
 #[test]

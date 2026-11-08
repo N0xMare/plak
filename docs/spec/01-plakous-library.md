@@ -6314,7 +6314,10 @@ The at-most-once law across restarts:
   transfers the line to the session's newer owner, so its exit never stops a
   line it did not open. `plak host` runs
   `plakous_hosted::runner_adoption::readopt_lines` before recovering its
-  home-local runner journal or serving clients. Only process verbs reach
+  home-local runner journal or serving clients. The host binds every control and
+  optional web endpoint before starting daemon probes, so an endpoint refusal
+  cannot spawn a detached daemon. It never stops a pre-existing daemon on a
+  startup refusal. Only process verbs reach
   that journal; the sweep reconciles starts before recovery settles their
   answered keys. A
   host re-adopts its lines by holding each line's head lease-only (§5.1),

@@ -77,7 +77,7 @@ pub(crate) fn run_host_command(
     let entered = runtime.enter();
     let bound = socket::Bound::bind(&paths.host_socket(), &lock)?;
     drop(entered);
-    let services = runner::host::prepare(services, &environment, &runtime)?;
+    let (services, local) = runner::host::prepare(services)?;
     let sessions = sessions::ProductSessions::new(
         &services,
         command.idle_release,
@@ -115,6 +115,7 @@ pub(crate) fn run_host_command(
         }));
         None
     };
+    runner::host::start(&services, local, &environment, &runtime);
     eprintln!(
         "plak host: serving on {} (host {}, instance {}); tools get {}",
         bound.path().display(),

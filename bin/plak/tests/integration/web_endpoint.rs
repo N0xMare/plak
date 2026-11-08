@@ -650,6 +650,19 @@ fn a_live_socket_is_never_replaced() {
     assert!(!served, "a second endpoint started on a live socket");
     let status = second.child.take().unwrap().wait().unwrap();
     assert!(!status.success());
+    // No daemon kickoff is permitted before all endpoints bind. In particular,
+    // there can be no late runner.lock publication after this host has exited.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(250);
+    loop {
+        let (daemons, starting) = home_local_runner_processes(&other.home());
+        assert_eq!(daemons, [] as [i32; 0]);
+        assert!(!starting, "a refused host left a daemon spawn in flight");
+        assert!(!other.home().join("host/runner").exists());
+        if std::time::Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     assert!(web.socket.exists());
     assert_eq!(page(&web, Some(LOGIN), HOST).status, 200);
 }
