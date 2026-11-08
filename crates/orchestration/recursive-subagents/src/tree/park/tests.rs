@@ -160,6 +160,13 @@ fn an_ending_park_refuses_mail_and_ignores_an_interrupt() {
         tree.interrupt_running_descendants().unwrap(),
         [] as [String; 0]
     );
+    assert_eq!(
+        tree.interrupt_running_descendants_for(InterruptCause::Stopped)
+            .unwrap(),
+        [] as [String; 0]
+    );
+    assert_eq!(tree.node(&child).unwrap().status, NodeStatus::Running);
+    assert_eq!(tree.attempt(&child).unwrap().status, AttemptStatus::Running);
     assert!(tree.is_park_ending(&child));
     tree.unpark_child(&child);
     assert!(!tree.mark_park_ending(&child), "only a parked child ends");

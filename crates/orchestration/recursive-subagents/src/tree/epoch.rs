@@ -344,9 +344,12 @@ impl ProductAgentTree {
             let parked = self.is_parked(&id) && !self.is_park_ending(&id);
             let owned = self.has_turn_owner(&id)
                 && (cause != super::InterruptCause::Handoff || self.assignment_started(&id));
+            let unadmitted = cause == super::InterruptCause::Stopped
+                && !self.is_park_ending(&id)
+                && !self.assignment_started(&id);
             if let Some(node) = self.nodes.get(&id)
                 && id != root
-                && (owned || parked || cause == super::InterruptCause::Stopped)
+                && (owned || parked || unadmitted)
                 && node.status == NodeStatus::Running
             {
                 self.record_operator_intent(

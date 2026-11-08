@@ -407,7 +407,9 @@ fn a_session_stop_interrupts_an_unadmitted_spawn_and_reopen_never_hands_it_off()
     assert!(!tree.node(&child).unwrap().active_turn);
     assert!(tree.node(&child).unwrap().session_locator.is_none());
     assert_eq!(tree.record_handoff().unwrap(), Vec::<String>::new());
+    let mut tree = ProductAgentTree::reopen(tree.to_persisted());
     assert_eq!(tree.node(&child).unwrap().status, NodeStatus::Running);
+    assert_eq!(tree.attempt(&child).unwrap().status, AttemptStatus::Running);
     assert_eq!(
         tree.interrupt_running_descendants_for(InterruptCause::Stopped)
             .unwrap(),
@@ -425,6 +427,15 @@ fn a_session_stop_interrupts_an_unadmitted_spawn_and_reopen_never_hands_it_off()
         NodeStatus::Interrupted
     );
     assert_eq!(reopened.loss_continuation(&child), None);
+    assert_eq!(reopened.recovery_owed_targets(), [] as [String; 0]);
+    assert_eq!(
+        reopened.parked_reopen_targets(),
+        [] as [(String, String, String); 0]
+    );
+    assert_eq!(
+        reopened.recovery_need(&child).unwrap(),
+        RecoveryNeed::NotRequired
+    );
     assert_eq!(reopened.record_handoff().unwrap(), Vec::<String>::new());
 }
 
