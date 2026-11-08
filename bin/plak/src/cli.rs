@@ -477,8 +477,10 @@ enum TopCommand {
     /// The per-user host process: one per home and state key, serving
     /// every session of the home on a private control socket (maintainer
     /// builds).
-    #[command(hide = true)]
+    #[command(hide = true, args_conflicts_with_subcommands = true)]
     Host {
+        #[command(subcommand)]
+        action: Option<HostAction>,
         /// Also serve the sessions' wire v2 at `/wire`, and the web UI, on
         /// `unix:<path>` (the `tailscale serve unix:` deployment) or, in dev
         /// mode, `127.0.0.1:<port>`.
@@ -570,6 +572,21 @@ enum AccountAction {
         account: String,
         #[arg(long = "yes")]
         confirmed: bool,
+    },
+}
+
+#[derive(Debug, clap::Subcommand)]
+enum HostAction {
+    /// Write the Linux systemd user unit without enabling or starting it.
+    Install {
+        #[arg(long, value_name = "unix:ABSOLUTE_PATH")]
+        web: String,
+        #[arg(long, value_name = "ABSOLUTE_DIR")]
+        ui: std::path::PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long, hide = true, num_args = 0..=1, default_missing_value = "")]
+        dev_login: Option<String>,
     },
 }
 

@@ -1,0 +1,15 @@
+plak host — serve sessions and install a user service
+
+USAGE:
+  plak host [--web <unix:path|127.0.0.1:port>] [--ui <dir>]
+  plak host install --web unix:<absolute socket> --ui <absolute dir> [--dry-run]
+
+The host requires a build with feature web. Service installation currently
+supports Linux systemd user units only. Both install paths are explicit and
+absolute; --dev-login is never accepted by install.
+
+Install writes ~/.config/systemd/user/plak-host.service and reloads the user
+manager. It never enables or starts a service. An identical unit is a no-op;
+any other existing unit is refused. --dry-run prints the unit without changes.
+
+See docs/user-guide/host-service.md for setup, upgrades, logs and removal.

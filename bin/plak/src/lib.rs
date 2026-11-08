@@ -373,6 +373,9 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
     let launch = shell::home::launch_directory();
     let command = cli::parse(arguments)?.resolved_against(launch.as_deref());
     build_features::admit_command(&command)?;
+    if let Command::HostInstall(install) = &command {
+        return commands::host_install::run(install, &mut io::stdout().lock());
+    }
     #[cfg(feature = "test-hooks")]
     test_hooks::install().map_err(CliFailure::new)?;
 
@@ -1290,6 +1293,7 @@ fn execute_command(
         | Command::HostResume { .. }
         | Command::Agent { .. }
         | Command::Host(_)
+        | Command::HostInstall(_)
         | Command::WireSchema
         | Command::Help
         | Command::CommandHelp { .. }

@@ -5031,14 +5031,48 @@ started through the user manager, so a host stop or restart leaves its jobs
 running until they end or reach their caps; the daemon exits after its idle
 period. Embedded mode keeps direct process calls and exit = stop.
 
+**Service installation.** `plak host install --web unix:<absolute socket>
+--ui <absolute dir> [--dry-run]` installs a Linux systemd **user** unit at
+`$HOME/.config/systemd/user/plak-host.service`, mode 0644. Both paths are
+required, absolute UTF-8 paths without control characters; there are no
+socket or UI defaults. Install never accepts or emits `--dev-login` or a
+TCP listener. Other platforms refuse as not yet supported; this command
+does not install a launchd agent. It runs before product-store setup.
+
+The generated unit executes the installed stable `$HOME/.local/bin/plak`
+link, not the invoking executable or a pinned snapshot, from `$HOME`.
+`/usr/bin/env -i` clears ambient variables. Only HOME, PLAK_HOME, a curated
+PATH (`$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin`), the systemd runtime
+directory and user-bus address, and the manager's INVOCATION_ID reach the
+host. Paths and systemd expansions are quoted separately. No API keys,
+test knobs or caller-shell variables are copied. The manager identity and
+user-bus environment preserve the separate `systemd-run --user` runner
+placement described above; host stop signals never kill that unit's jobs.
+SIGTERM hands off; ExecReload sends SIGUSR1 for UI-only reload.
+
+Install publishes the complete unit atomically without replacement, then
+runs only `systemctl --user daemon-reload` (bounded at five seconds). It
+never enables or starts the service or runs Tailscale. A generated marker
+and exact content identify an identical re-install, which is a no-op;
+symlinks, edited generated units and unrelated files are refused unchanged.
+A failed reload leaves the complete unit installed and reports the retry
+remedy. `--dry-run` prints the unit and creates no files or manager calls.
+After installation it prints `systemctl --user enable --now plak-host.service`,
+the `loginctl enable-linger "$USER"` note for running without a login session,
+`tailscale serve --bg unix:<socket>` (shell-quoted), and the journalctl command.
+There is no uninstall command: disable with `systemctl --user disable --now
+plak-host.service`, remove the file, and run `systemctl --user daemon-reload`.
+
 ```ini
 [Service]
-ExecStart=%h/.local/bin/plak host --web unix:%h/.plak/host/web/web.sock --ui %h/.plak/web-ui
+ExecStart=/usr/bin/env -i "HOME=%h" "PLAK_HOME=%h/.plak" "PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin" "XDG_RUNTIME_DIR=%t" "DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus" "INVOCATION_ID=${INVOCATION_ID}" %h/.local/bin/plak host --web unix:%h/.plak/host/web/web.sock --ui %h/.plak/web-ui
 ExecReload=/bin/kill -USR1 $MAINPID
 KillMode=mixed
 KillSignal=SIGTERM
 TimeoutStopSec=90
 Restart=on-failure
+UMask=0077
+WorkingDirectory=%h
 ```
 
 ## 5. The terminal interface

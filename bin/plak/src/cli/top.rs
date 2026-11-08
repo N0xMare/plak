@@ -317,6 +317,26 @@ impl TopCommand {
                 action: Some(action),
             } => action.into_command(),
             Self::Host {
+                action:
+                    Some(super::HostAction::Install {
+                        web,
+                        ui,
+                        dry_run,
+                        dev_login,
+                    }),
+                ..
+            } => {
+                if dev_login.is_some() {
+                    return Err("plak host install never accepts --dev-login".into());
+                }
+                Ok(Command::HostInstall(crate::command::HostInstall {
+                    web,
+                    ui,
+                    dry_run,
+                }))
+            }
+            Self::Host {
+                action: None,
                 web,
                 ui,
                 dev_login,

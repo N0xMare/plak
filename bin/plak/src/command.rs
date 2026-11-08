@@ -8,6 +8,13 @@ use plakous::subscriptions::{NativeLoginMode, NativeProvider};
 use crate::{CliFailureKind, product_config};
 use plakous_hosted::account::AccountRef;
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct HostInstall {
+    pub(crate) web: String,
+    pub(crate) ui: PathBuf,
+    pub(crate) dry_run: bool,
+}
+
 /// `plak host`'s arguments.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct HostCommand {
@@ -337,6 +344,7 @@ pub(crate) enum Command {
     },
     /// Hidden `plak host`: the per-user host process.
     Host(HostCommand),
+    HostInstall(HostInstall),
     /// Hidden `plak wire schema`: this build's wire v2 JSON Schema.
     WireSchema,
 }
@@ -494,7 +502,7 @@ impl Command {
             | Self::RunPlatform { .. }
             | Self::ContinueSession { .. } => "run",
             Self::Agent { .. } => "agent",
-            Self::Host(_) => "host",
+            Self::Host(_) | Self::HostInstall(_) => "host",
             Self::WireSchema => "wire",
         }
     }

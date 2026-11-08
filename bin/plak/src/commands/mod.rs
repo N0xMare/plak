@@ -10,6 +10,7 @@ pub mod application;
 pub mod catalog;
 pub(crate) mod doctor;
 pub mod host_config;
+pub(crate) mod host_install;
 pub mod login;
 pub(crate) mod login_flow;
 mod login_host;

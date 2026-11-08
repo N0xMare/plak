@@ -34,6 +34,7 @@ const COMMAND_PAGES: &[(&str, &str)] = &[
     ("secret", include_str!("../../help/secret.txt")),
     ("mcp", include_str!("../../help/mcp.txt")),
     ("runner", include_str!("../../help/runner.txt")),
+    ("host", include_str!("../../help/host.txt")),
     ("run", include_str!("../../help/run.txt")),
     ("agent", include_str!("../../help/agent.txt")),
     ("resume", include_str!("../../help/resume.txt")),

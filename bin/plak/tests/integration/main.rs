@@ -4,6 +4,8 @@ mod cli_contract;
 #[cfg(all(feature = "test-hooks", feature = "maintainer"))]
 mod crash_sweep;
 mod diagnostics_contract;
+#[cfg(all(target_os = "linux", feature = "web"))]
+mod host_install;
 #[cfg(all(feature = "test-hooks", feature = "web"))]
 mod host_skeleton;
 #[cfg(feature = "test-hooks")]
