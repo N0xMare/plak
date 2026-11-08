@@ -227,7 +227,7 @@ pub async fn serve_socket(
                     Ok(false) => break Ok(()),
                     Err(error) if !reported_unknown => {
                         use std::io::Write as _;
-                        let _ = writeln!(std::io::stderr(), "runner endpoint could not be inspected; keeping it alive: {error}");
+                        let _ = writeln!(io::stderr(), "runner endpoint could not be inspected; keeping it alive: {error}");
                         reported_unknown = true;
                     }
                     Ok(true) | Err(_) => {}
