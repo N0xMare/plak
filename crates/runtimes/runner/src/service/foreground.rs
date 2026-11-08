@@ -89,7 +89,11 @@ impl RunnerService {
                 None
             };
             if guard.is_some()
-                && (!service.instance_authority(&host, &instance)
+                && (service
+                    .inner
+                    .closing
+                    .load(std::sync::atomic::Ordering::Acquire)
+                    || !service.instance_authority(&host, &instance)
                     || !lock(&service.inner.tables).held_by(&host, &instance, &owner))
             {
                 return Err(lost_process_owner());

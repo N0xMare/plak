@@ -8,6 +8,7 @@
 //! version triple, so two builds never answer each other's hosts.
 
 use std::io;
+use std::os::unix::fs::MetadataExt as _;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -196,7 +197,9 @@ pub async fn serve_socket(
     }
     let listener = UnixListener::bind(socket)?;
     set_mode(socket, 0o600)?;
+    let endpoint = std::fs::symlink_metadata(socket)?;
     let owner = owner_uid(directory)?;
+    let mut connections = tokio::task::JoinSet::new();
     let mut idle_since: Option<Instant> = None;
     let mut tick = tokio::time::interval(Duration::from_millis(500));
     let result = loop {
@@ -210,10 +213,14 @@ pub async fn serve_socket(
                 if stream.peer_cred().is_ok_and(|peer| peer.uid() == owner) {
                     idle_since = None;
                     let service = service.clone();
-                    tokio::spawn(async move { service.serve_connection(stream).await });
+                    connections.spawn(async move { service.serve_connection(stream).await });
                 }
             }
+            _ = connections.join_next(), if !connections.is_empty() => {}
             _ = tick.tick() => {
+                if !same_endpoint(socket, &endpoint) {
+                    break Ok(());
+                }
                 if !service.is_idle() {
                     idle_since = None;
                 } else if idle_since.get_or_insert_with(Instant::now).elapsed() >= idle_grace {
@@ -224,9 +231,19 @@ pub async fn serve_socket(
     };
     // The socket goes before the lock: a daemon that takes the lock next
     // finds no socket of this one.
-    let _ = std::fs::remove_file(socket);
+    connections.abort_all();
+    while connections.join_next().await.is_some() {}
+    service.shutdown().await;
+    if same_endpoint(socket, &endpoint) {
+        let _ = std::fs::remove_file(socket);
+    }
     drop(lock);
     result
+}
+
+fn same_endpoint(socket: &Path, original: &std::fs::Metadata) -> bool {
+    std::fs::symlink_metadata(socket)
+        .is_ok_and(|current| current.dev() == original.dev() && current.ino() == original.ino())
 }
 
 async fn take_lock(lock: &std::fs::File, socket: &Path) -> Result<(), DaemonError> {
@@ -380,6 +397,56 @@ fn owner_uid(directory: &Path) -> io::Result<u32> {
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
     use super::*;
+
+    fn service(root: &Path) -> RunnerService {
+        RunnerService::new(
+            plakous_tools::ExecutionEnvironment::host(
+                plakous_tools::ExecutionEnvironmentScope::Run(
+                    "00000000-0000-0000-0000-000000000001".parse().unwrap(),
+                ),
+                root,
+                ".",
+                plakous_tools::ExecutionEnvironmentConfig::default(),
+            )
+            .unwrap(),
+            crate::RunnerIdentity {
+                runner_id: plakous_tools::RunnerId::new("endpoint-test").unwrap(),
+                version: VersionTriple::current("test", "debug"),
+                boot_id: "boot".into(),
+                binary_id: None,
+            },
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_daemon_exits_when_its_endpoint_disappears_or_is_replaced() {
+        for replacement in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let socket = root.path().join("run/runner.sock");
+            let serving = serve_socket(service(root.path()), &socket, Duration::from_secs(300));
+            tokio::pin!(serving);
+            tokio::select! {
+                biased;
+                result = &mut serving => panic!("daemon ended before binding: {result:?}"),
+                () = async { while !socket.exists() { tokio::task::yield_now().await; } } => {}
+            }
+            // An open connection prevents ordinary idle exit, even with no jobs.
+            let _connection = UnixStream::connect(&socket).await.unwrap();
+            let successor = if replacement {
+                std::fs::remove_file(&socket).unwrap();
+                Some(UnixListener::bind(&socket).unwrap())
+            } else {
+                std::fs::remove_dir_all(socket.parent().unwrap()).unwrap();
+                None
+            };
+            tokio::time::timeout(Duration::from_secs(5), &mut serving)
+                .await
+                .expect("unreachable daemon must exit")
+                .unwrap();
+            assert_eq!(socket.exists(), successor.is_some());
+        }
+    }
 
     #[tokio::test]
     async fn a_start_waits_out_a_concurrent_lock_probe() {

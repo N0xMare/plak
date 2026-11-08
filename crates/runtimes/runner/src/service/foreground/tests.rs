@@ -456,3 +456,66 @@ async fn line_inspection_distinguishes_foreground_jobs_and_terminal_work() {
     assert!(!status.foreground);
     assert_eq!(status.jobs["jobs"][0]["status"]["status"], "stopped");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn daemon_shutdown_joins_foreground_and_promoted_processes() {
+    for promoted in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let scope =
+            ExecutionEnvironmentScope::Run("00000000-0000-0000-0000-000000000001".parse().unwrap());
+        let (service, link) = queued_link(root.path(), scope).await;
+        let backend = link.backend();
+        let environment = runner_environment(
+            scope,
+            root.path(),
+            ".",
+            ExecutionEnvironmentConfig::default(),
+            backend.clone(),
+        )
+        .unwrap();
+        let owner = plakous_tools::LineOwner::new(
+            "00000000-0000-0000-0000-0000000000a1".parse().unwrap(),
+            1,
+            "00000000-0000-0000-0000-0000000000b1".parse().unwrap(),
+            1,
+        );
+        let sessions = RunnerSessions::new(&backend, &environment, owner);
+        let id = sessions
+            .start(
+                JoinedProcessStartRequest::new(
+                    JoinedProcessCommand::literal(
+                        "/bin/sh",
+                        ["-c".to_owned(), "read line".to_owned()],
+                    )
+                    .unwrap(),
+                    ".",
+                    Vec::new(),
+                    true,
+                    JoinedProcessTerminalMode::Pipes,
+                )
+                .unwrap(),
+                OperationContext::new(plakous_model::CancellationToken::new()).with_class(
+                    OperationClass::EffectCall {
+                        call_id: "00000000-0000-0000-0000-000000000001".parse().unwrap(),
+                        attempt_id: "00000000-0000-0000-0000-000000000002".parse().unwrap(),
+                    },
+                ),
+            )
+            .await
+            .unwrap();
+        if promoted {
+            sessions.promote(id).await.unwrap();
+        }
+        let local = lock(&service.inner.lines)
+            .values()
+            .next()
+            .unwrap()
+            .0
+            .clone();
+        let ids = local.active_session_ids();
+        assert_eq!(ids.len(), 1);
+        assert!(local.joined_terminal_status(ids[0]).is_none());
+        service.shutdown().await;
+        assert!(local.joined_terminal_status(ids[0]).is_some());
+    }
+}

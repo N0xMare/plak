@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -81,6 +81,7 @@ struct Inner {
     next_connection: AtomicU64,
     /// Connections open now, bound or not.
     open: AtomicU64,
+    closing: AtomicBool,
     next_stream: AtomicU64,
     /// Each running request's cancellation and yield, by its op key when it
     /// is keyed, so a replay that moved the key's request id still reaches
@@ -310,6 +311,7 @@ impl RunnerService {
                 workspace_catalog: options.workspace_catalog,
                 next_connection: AtomicU64::new(0),
                 open: AtomicU64::new(0),
+                closing: AtomicBool::new(false),
                 next_stream: AtomicU64::new(0),
                 running: Mutex::default(),
                 lines: Mutex::default(),
@@ -1066,6 +1068,36 @@ impl RunnerService {
                 terminate_later(hosted.handle.take());
             }
         }
+    }
+
+    /// Losing the endpoint ends the daemon, not merely a host's link lease.
+    pub(crate) async fn shutdown(&self) {
+        self.inner.closing.store(true, Ordering::Release);
+        for (_, connection) in std::mem::take(&mut *lock(&self.inner.hosts)) {
+            connection.closer.cancel();
+        }
+        for running in lock(&self.inner.running).values() {
+            running.cancellation.cancel();
+        }
+        let mut cleanup = tokio::task::JoinSet::new();
+        for (_, mut service) in std::mem::take(&mut *lock(&self.inner.services)) {
+            service.ends.close();
+            if let Some(handle) = service.handle.take() {
+                cleanup.spawn(async move {
+                    let _ = handle.terminate(Duration::from_secs(1)).await;
+                });
+            }
+        }
+        for (_, (sessions, _)) in std::mem::take(&mut *lock(&self.inner.lines)) {
+            cleanup.spawn_blocking(move || {
+                let _ = sessions.stop_foreground();
+                let _ = sessions.stop_jobs(
+                    plakous_tools::JobStopReason::SessionExit,
+                    Duration::from_secs(1),
+                );
+            });
+        }
+        while cleanup.join_next().await.is_some() {}
     }
 }
 

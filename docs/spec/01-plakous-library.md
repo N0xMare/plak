@@ -6207,7 +6207,12 @@ placement readiness. Stop intent, runner protocol and binding encodings are unch
   to start without unlinking or binding the first one's socket, and a socket
   found under the lock is a dead daemon's and is replaced. It exits after its
   idle grace with no connection, no service, no running or orphaned job and
-  no answer or tombstone a host has not acknowledged. The stdio bridge
+  no answer or tombstone a host has not acknowledged. Independently of idle
+  retention, removal or replacement of its socket (including deletion of its
+  home) begins daemon shutdown at its next 500 ms liveness tick. It closes its
+  connections and terminates its owned processes before returning; cleanup
+  never unlinks a replacement daemon's socket. Host link loss alone does not
+  trigger this shutdown or stop promoted jobs. The stdio bridge
   connects to it, or starts it once and waits for it to listen, and delivers
   everything the daemon sent, flushed, before it ends, even after the host's
   side ended first: a daemon that refuses a host's bind sends the refusal and
