@@ -4847,7 +4847,8 @@ chapter 04 §2.10; its keys are `[web]` (chapter 07 §3).
   reach the node. A socket already at the path is replaced only when nothing
   accepts on it; a live one is refused, and the process removes only the
   socket it bound. A `127.0.0.1` listener is dev mode only: it needs
-  `--dev-login`, warns at start, and its origin is
+  `--dev-login` (maintainer or test-hooks builds only; the default release
+  refuses it explicitly), warns at start, and its origin is
   `http://127.0.0.1:<port>`. The host binds it after its control socket, and
   a listener that cannot be bound stops the host before it serves; it prints
   `plak host: web on <listener>` before its start line, and stops serving
@@ -4954,7 +4955,7 @@ Without explicit `--auto-start` it does not start a host. It never falls back
 to embedded execution. Its stdout is
 protocol-only, with diagnostics on stderr. The client originates the single
 handshake through the relay; the bridge does not consume a second handshake.
-Each direction retains at most one 8 KiB copy buffer and flushes forwarded
+Each direction uses bounded fixed buffers (one 8 KiB copy buffer) and flushes forwarded
 bytes promptly. Input EOF closes the socket's write half and detaches that
 client, not its host or session. A broken link is not automatically reconnected
 and no ambiguous input is replayed. The public TUI does not use this bridge;
@@ -4964,7 +4965,10 @@ Only proven absence and explicit local `--auto-start` permit an unmanaged
 start. SSH-session markers refuse such a start; the remote client does not
 supply the flag. An installed `plak-host.service` instead yields the unit-start
 remedy, never an unmanaged sibling. Concurrent bridge, direct and unit starts
-use the same home guard; readiness shares a ten-second discovery deadline.
+use the same home guard; ordinary discovery has a ten-second deadline, while
+explicit startup allows thirty seconds for log-lock contention and readiness.
+A log-lock loser returns a distinct private acknowledgement: the bridge repeats
+discovery/start rather than mistaking the log holder for a serving host.
 The starter clears the environment, preserving only the OS/home/locale/tool
 inputs listed in chapter 07 §1, plus the selected public home. It detaches
 from the caller's session and process group, uses the public home as cwd, and
@@ -4983,6 +4987,13 @@ resident/opening/releasing sessions, startup continuations, pending stops or
 handoffs. Activity resets the whole interval; uncertainty prevents idle exit.
 An unserved durable continuation still blocks idle exit after a failed startup
 open; an empty resident table does not settle its handoff debt.
+Each second checks only in-memory blockers. An uncapped targeted durable check
+runs off the accept loop every thirty seconds and before an otherwise-expiring
+clock can exit. An unavailable or not-Ready paired runner keeps the host alive:
+uncertain runner-stop settlement is fail-safe, not proof of idleness. On expiry
+the host unlinks its socket before draining the nonblocking listen backlog.
+Any queued connection cancels exit, resets idle, and is served after rebind
+under the still-held home lock; otherwise discovery sees the held lock and retries.
 It never evicts sessions to become idle. A foreground or unit-managed host
 persists. SIGHUP remains planned handoff, not a client reload signal.
 
@@ -5305,7 +5316,9 @@ session. A missing or refused connection (a stale socket included) falls
 back to embedding only when the host lock is free; a starting or stopping
 host gets the bounded retry below. Once a connection answers, handshake failures refuse
 the launch; a different wire version names the remedies: stop the host
-with `plak host stop`, or run its build. It never embeds beside that peer.
+by sending SIGTERM to the plak host process, or running
+`systemctl --user restart plak-host.service` if it runs as the installed unit;
+or run its build. It never embeds beside that peer.
 
 A starting host re-asks a contended `host.lock` up to forty times, 5 ms apart, before
 refusing an existing holder. A momentary discovery probe therefore does not
@@ -5618,9 +5631,10 @@ home-scoped `tui.reload_requests = true` (chapter 07 §3).
 In host mode the service announces every resident session in
 `run/reload-requests/`, polls the channel and refuses requests without any
 client connected. Every request it takes is settled as `refused`, with the transcript note
-`requested reload refused: this session runs in plak host (build <host
-binary id>); restarting the host moves it onto the installed build (plak
-host stop, or restart its unit)`; the parenthetical is omitted when the
+``requested reload refused: this session runs in plak host (build <host
+binary id>); restarting the host moves it onto the installed build (send SIGTERM
+to the plak host process, or run `systemctl --user restart plak-host.service`
+if it runs as the installed unit)``; the build parenthetical is omitted when the
 host build is unknown. It never records `reloaded`, posts a continuation,
 redispatches work or hands the session off. A hand `/reload` still replaces
 only the client. Moving a hosted session to another build is a host restart

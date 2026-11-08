@@ -319,8 +319,7 @@ fn replay(
                     .assert_transcript(fixture, session)?;
             }
             let value = bindings.outgoing(&entry["frame"], "");
-            let frame: ClientFrame<plak::wire_transport::PlakExtension> =
-                serde_json::from_value(value)?;
+            let frame: ClientFrame<PlakExtension> = serde_json::from_value(value)?;
             connections
                 .get_mut(&id)
                 .unwrap()

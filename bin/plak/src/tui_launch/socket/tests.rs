@@ -185,8 +185,7 @@ fn the_outdated_host_notice_names_both_builds_and_only_a_host_level_remedy() {
     for expected in [
         "host build 123456abcdef",
         "installed build abcdef123456",
-        "restart the host unit",
-        "`plak host stop` and start it again",
+        crate::environment::HOST_RESTART_REMEDY,
         "/reload replaces only this client",
     ] {
         assert!(notice.contains(expected), "{notice}");

@@ -26,6 +26,9 @@ struct NoSessions {
 }
 
 impl plakous_hosted::host_service::wire::HostSessions<PlakExtension> for NoSessions {
+    fn durable_idle_exit_blocked(&self) -> bool {
+        false
+    }
     fn host_request(
         &self,
         context: plakous_hosted::host_service::wire::HostRequestContext,
@@ -133,7 +136,7 @@ fn an_admitted_connection_is_welcomed_to_the_directory_and_a_stop_ends_the_host(
         .enable_all()
         .build()
         .unwrap();
-    let bound = {
+    let mut bound = {
         let _entered = runtime.enter();
         Bound::bind(&socket, &lock).unwrap()
     };
@@ -234,7 +237,7 @@ fn a_hello_of_another_version_is_refused() {
         .enable_all()
         .build()
         .unwrap();
-    let bound = {
+    let mut bound = {
         let _entered = runtime.enter();
         Bound::bind(&socket, &lock).unwrap()
     };
@@ -317,4 +320,80 @@ fn places_are_capped() {
     drop(held);
     assert_eq!(count.load(Ordering::Acquire), 0);
     assert!(Place::take(&count, PENDING_LIMIT).is_some());
+}
+
+#[test]
+fn a_connection_queued_at_idle_expiry_is_welcomed_and_discovery_can_retry() {
+    let home = short_home();
+    let socket = home.path().join("host/run/expiry.sock");
+    let lock = HostLock::take(&home.path().join("host.lock"), "0123456789ab").unwrap();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    let entered = runtime.enter();
+    let mut bound = Bound::bind(&socket, &lock).unwrap();
+    let mut idle = super::super::idle::IdleExit::with_window(Duration::from_millis(1));
+    let now = Instant::now();
+    assert!(!idle.expired(now, false));
+    // Queue after the last ordinary accept, exactly as the clock expires.
+    let mut client = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+    assert!(idle.expired(now + Duration::from_millis(1), false));
+    let mut backlog = bound.retire_idle_listener().unwrap();
+    assert_eq!(backlog.len(), 1);
+    assert!(
+        socket.exists(),
+        "cancelled retirement must rebind under the lock"
+    );
+    idle.activity();
+    assert!(!idle.expired(now + Duration::from_millis(2), false));
+    client
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    send(
+        &mut client,
+        &ClientFrame::Hello(Hello {
+            proto: WIRE_VERSION,
+            binary_id: "expiry".into(),
+            caps: Vec::new(),
+        }),
+    );
+    let host = SessionHost::new(NoSessions::default(), "0123456789ab", 7);
+    let stop = Arc::new(AtomicBool::new(false));
+    let stopping = Arc::clone(&stop);
+    let place = Place::take(&Arc::new(AtomicUsize::new(0)), PENDING_LIMIT).unwrap();
+    let admitted = Arc::new(AtomicUsize::new(0));
+    let stream = backlog.pop().unwrap();
+    let serving = runtime.spawn(async move {
+        connection(
+            stream,
+            &host,
+            Arc::new(move || stopping.load(Ordering::Acquire)),
+            place,
+            &admitted,
+        )
+        .await;
+    });
+    assert!(matches!(
+        next(&mut BufReader::new(client)),
+        HostFrame::Welcome(_)
+    ));
+    stop.store(true, Ordering::Release);
+    runtime.block_on(serving).unwrap();
+    // With no backlog, discovery gets an absent path, never a connected EOF.
+    assert!(bound.retire_idle_listener().unwrap().is_empty());
+    assert_eq!(
+        std::os::unix::net::UnixStream::connect(&socket)
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::NotFound
+    );
+    assert!(matches!(
+        std::fs::File::open(home.path().join("host.lock"))
+            .unwrap()
+            .try_lock(),
+        Err(std::fs::TryLockError::WouldBlock)
+    ));
+    drop(entered);
 }

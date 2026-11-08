@@ -1,8 +1,8 @@
 # Run plak host as a service
 
 This setup uses a Linux systemd **user** service, never a system-wide unit.
-macOS service installation is not yet supported. Use an installed build with
-the `web` feature (`just install maintainer` for a source checkout), including
+macOS service installation is not yet supported. Use the default installed
+release product, which includes host/web serving, together with
 its matching sidecars. The unit always runs the stable `~/.local/bin/plak`
 link, so keep that installation current. Install the web UI build separately;
 its directory must contain `index.html` and `csp.json` as described in

@@ -186,6 +186,7 @@ class ClientTraceTests(unittest.TestCase):
             'malformed',
             'wrong_connection',
             'after_bye',
+            'after_host_bye',
             'unknown_attachment',
             'before_attach',
         ):
@@ -200,9 +201,14 @@ class ClientTraceTests(unittest.TestCase):
                 broken['entries'][2]['frame']['op']['blobs'] = ['unexpected']
             elif mutate == 'wrong_connection':
                 broken['entries'][-1]['connection'] = 2
-            elif mutate == 'after_bye':
+            elif mutate in ('after_bye', 'after_host_bye'):
                 broken['entries'].insert(
-                    2, {'connection': 1, 'direction': 'client', 'frame': {'frame': 'bye'}}
+                    2,
+                    {
+                        'connection': 1,
+                        'direction': 'host' if mutate == 'after_host_bye' else 'client',
+                        'frame': {'frame': 'bye'},
+                    },
                 )
             elif mutate == 'unknown_attachment':
                 broken['entries'][2]['frame']['op']['attachment'] = 2

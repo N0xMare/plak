@@ -56,6 +56,10 @@ pub(crate) enum WebAccess {
         origin: WebOrigin,
     },
     /// Dev mode on loopback: one configured login, no header trusted.
+    #[allow(
+        dead_code,
+        reason = "constructed only by the maintainer/test-hooks login module"
+    )]
     Dev { login: String, origin: WebOrigin },
 }
 

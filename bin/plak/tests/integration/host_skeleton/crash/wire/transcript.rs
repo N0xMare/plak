@@ -13,8 +13,7 @@ pub(super) struct FaceTranscript {
 
 impl FaceTranscript {
     pub(super) fn observe(&mut self, frame: &Value) -> io::Result<()> {
-        let observation: HostFrame<plak::wire_transport::PlakExtension> =
-            serde_json::from_value(frame.clone())?;
+        let observation: HostFrame<PlakExtension> = serde_json::from_value(frame.clone())?;
         match observation {
             HostFrame::Snapshot(page) if page.scope == TranscriptScope::Root => {
                 if self.attachment != Some(page.attachment) {

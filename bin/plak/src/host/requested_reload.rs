@@ -11,12 +11,12 @@ use crate::product_paths::PlakPaths;
 use crate::reload_request::{Listener, ReloadOutcome};
 use crate::surface_protocol::{HostEvent, PlakExtension};
 
-pub(super) async fn serve(host: Arc<SessionHost<PlakExtension>>, paths: PlakPaths) {
+pub(super) async fn serve(host: Arc<SessionHost<PlakExtension>>, paths: PlakPaths, binary: String) {
     let mut listeners = BTreeMap::<String, Listener>::new();
     let mut tick = tokio::time::interval(Duration::from_millis(250));
     loop {
         tick.tick().await;
-        tokio::task::block_in_place(|| poll(&host, &paths, &mut listeners));
+        tokio::task::block_in_place(|| poll(&host, &paths, &mut listeners, &binary));
     }
 }
 
@@ -24,6 +24,7 @@ fn poll(
     host: &SessionHost<PlakExtension>,
     paths: &PlakPaths,
     listeners: &mut BTreeMap<String, Listener>,
+    binary: &str,
 ) {
     let mut resident = BTreeSet::new();
     for slot in host.slots() {
@@ -48,14 +49,14 @@ fn poll(
         else {
             continue;
         };
-        let welcome = host.welcome();
-        let build = if welcome.binary_id.is_empty() || welcome.binary_id == "unknown" {
+        let build = if binary.is_empty() || binary == "unknown" {
             String::new()
         } else {
-            format!(" (build {})", welcome.binary_id)
+            format!(" (build {binary})")
         };
         let reason = format!(
-            "this session runs in plak host{build}; restarting the host moves it onto the installed build (restart its user unit, or send SIGTERM for planned handoff and start plak host again)"
+            "this session runs in plak host{build}; restarting the host moves it onto the installed build ({})",
+            crate::environment::HOST_RESTART_REMEDY
         );
         crate::reload_request::record(
             paths,

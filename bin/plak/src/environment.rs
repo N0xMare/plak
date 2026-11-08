@@ -2,6 +2,9 @@
 
 static HOST_KEY_RESOLVER: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
+#[allow(dead_code, reason = "only hosted transports render the restart remedy")]
+pub(crate) const HOST_RESTART_REMEDY: &str = "send SIGTERM to the plak host process, or run `systemctl --user restart plak-host.service` if it runs as the installed unit";
+
 #[derive(Clone, Copy)]
 pub(crate) enum KeyResolver {
     Cli,
@@ -91,6 +94,11 @@ pub(crate) mod host {
             "XDG_CACHE_HOME",
             "XDG_RUNTIME_DIR",
             "SSH_AUTH_SOCK",
+            "DBUS_SESSION_BUS_ADDRESS",
+            "USER",
+            "LOGNAME",
+            "SSL_CERT_FILE",
+            "SSL_CERT_DIR",
         ];
         let mut values: Vec<_> = INPUTS
             .iter()

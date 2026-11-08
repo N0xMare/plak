@@ -3,6 +3,64 @@ use super::*;
 struct NoAdmission;
 
 #[test]
+fn idle_debt_older_than_the_newest_256_rows_is_not_hidden() {
+    use plakous_hosted::sessions::projector::{
+        RootInterrupt, RootInterruptCause, RootLossIntent, RootStopAnchor,
+    };
+    let (_temporary, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+    let services = Services::for_home(paths.clone());
+    let mut store = ProductStore::open(&paths).unwrap();
+    let mut old = crate::store::sessions::SessionRecord::new(paths.home().to_owned());
+    old.updated_at_unix = 1;
+    old.runner = Some(plakous_hosted::sessions::RunnerDisplay {
+        name: "offline".into(),
+        runner_id: "offline-id".into(),
+        workspace_root: paths.home().to_owned(),
+        workspace_cwd: paths.home().to_owned(),
+    });
+    store.commit(&mut old).unwrap();
+    store
+        .write_root_loss_at_cursor(
+            &old.id,
+            &RootLossIntent::Interrupt(RootInterrupt {
+                anchor: RootStopAnchor::Turn {
+                    turn_id: "old-handoff".into(),
+                },
+                cause: RootInterruptCause::Handoff,
+            }),
+        )
+        .unwrap();
+    for number in 0..256 {
+        let mut recent = crate::store::sessions::SessionRecord::new(paths.home().to_owned());
+        recent.updated_at_unix = number + 2;
+        store.commit(&mut recent).unwrap();
+    }
+    assert!(
+        !store
+            .directory(None)
+            .unwrap()
+            .iter()
+            .any(|row| row.id == old.id)
+    );
+    assert!(store.idle_debt().unwrap().0);
+    store
+        .write_root_loss_at_cursor(
+            &old.id,
+            &RootLossIntent::Interrupt(RootInterrupt {
+                anchor: RootStopAnchor::Turn {
+                    turn_id: "old-handoff".into(),
+                },
+                cause: RootInterruptCause::Stopped,
+            }),
+        )
+        .unwrap();
+    assert!(!store.idle_debt().unwrap().0);
+    // A non-Ready placement on that same old row also blocks exit uncapped.
+    let product = ProductSessions::new(&services, None, None).unwrap();
+    assert!(product.durable_idle_exit_blocked());
+}
+
+#[test]
 fn archived_stop_is_a_read_only_noop_even_with_an_unreadable_runtime() {
     let (_temporary, paths) = crate::home::paths::PlakPaths::isolated_test_home();
     let services = Services::for_home(paths.clone());

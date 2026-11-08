@@ -587,6 +587,20 @@ impl HostSessions<PlakExtension> for ProductSessions {
         })
     }
 
+    fn durable_idle_exit_blocked(&self) -> bool {
+        self.with_product(ProductStore::idle_debt)
+            .map_or(true, |(continuing, runners)| {
+                continuing
+                    || runners.iter().any(|runner| {
+                        self.services.state_roots().map_or(true, |roots| {
+                            roots
+                                .for_runner_stop(self.services.runners().clone(), runner)
+                                .runner_pending()
+                        })
+                    })
+            })
+    }
+
     fn refusal(&self, session: &str, failure: &CliFailure) -> RequestRefusal {
         if let Some(refusal) = failure.wire_refusal() {
             return refusal.clone();

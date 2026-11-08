@@ -354,6 +354,18 @@ impl HostSessions<Core> for Fake {
         self.0.pending_stops.load(Ordering::SeqCst)
     }
 
+    fn durable_idle_exit_blocked(&self) -> bool {
+        self.0.unreadable_rows.load(Ordering::SeqCst)
+            || self.0.pending_stops.load(Ordering::SeqCst)
+            || self
+                .0
+                .rows
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|row| row.activity == SessionActivity::Continuing)
+    }
+
     fn session_of(&self, node: &NodeAddress) -> Result<Option<String>, String> {
         Ok(self
             .0

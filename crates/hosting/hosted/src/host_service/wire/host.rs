@@ -188,6 +188,13 @@ pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
         false
     }
 
+    /// Uncapped durable continuation and runner-stop debt check. Products
+    /// must not use their presentation directory limit to prove idleness.
+    /// Unavailable storage or runner readiness must return true.
+    fn durable_idle_exit_blocked(&self) -> bool {
+        true
+    }
+
     /// The refusal of an attach whose session did not open with `failure`:
     /// `tree_hosted_elsewhere` while another live host process holds its
     /// tree, `session_unavailable` with why otherwise.
@@ -583,22 +590,24 @@ where
 
     /// Whether residents, opening/releasing workers, durable continuations or
     /// runner-stop debt prevent a disconnected service from exiting idle.
-    /// An unreadable directory is not evidence of idleness.
+    /// Unreadable durable state is not evidence of idleness.
     #[must_use]
     pub fn idle_exit_blocked(&self) -> bool {
-        if self
-            .slots()
+        self.idle_residents_blocked() || self.durable_idle_exit_blocked()
+    }
+
+    /// Cheap in-memory blockers, safe to check on the accept loop each second.
+    #[must_use]
+    pub fn idle_residents_blocked(&self) -> bool {
+        self.slots()
             .iter()
             .any(|slot| !matches!(slot.peek(), SlotView::Dormant(_)))
-        {
-            return true;
-        }
-        self.sessions.rows(None, None, true).map_or(true, |rows| {
-            rows.iter().any(|row| {
-                row.activity == SessionActivity::Continuing
-                    || self.sessions.runner_pending(&row.session)
-            })
-        })
+    }
+
+    /// Durable eligibility; callers must run this off their accept/frame loop.
+    #[must_use]
+    pub fn durable_idle_exit_blocked(&self) -> bool {
+        self.sessions.durable_idle_exit_blocked()
     }
 
     /// Changes whenever the host opened, released or created a session.

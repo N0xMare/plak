@@ -28,7 +28,7 @@ use crate::product_config::ProductConfig;
 use crate::shell::services::Services;
 use crate::surface_protocol::PlakExtension;
 
-use auth::{WebAccess, WebOrigin};
+pub(crate) use auth::{WebAccess, WebOrigin};
 use listen::Listen;
 
 /// What every request to the endpoint shares.
@@ -156,10 +156,7 @@ fn access(
                 origin: WebOrigin::parse(origin)?,
             })
         }
-        (Listen::Loopback(address), Some(login)) => Ok(WebAccess::Dev {
-            login,
-            origin: WebOrigin::parse(&format!("http://{address}"))?,
-        }),
+        (Listen::Loopback(address), Some(login)) => crate::web_dev_login::access(address, login),
         (Listen::Unix(_), Some(_)) => Err(CliFailure::new(
             "plak host: --dev-login is for a loopback listener only",
         )),

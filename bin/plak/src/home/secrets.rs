@@ -80,11 +80,17 @@ fn missing_api_key_message_for(account: &str, resolver: crate::environment::KeyR
         "openrouter" => ("OpenRouter", "openrouter"),
         other => (other, other),
     };
-    let fix = match env_var_for_account(account) {
-        Some(env) => {
+    let fix = match (env_var_for_account(account), resolver) {
+        (Some(env), crate::environment::KeyResolver::AutoHost) => format!(
+            "{name} API key is not set; run `plak key set {key_account}`; caller variable {env} is ignored"
+        ),
+        (Some(env), crate::environment::KeyResolver::Host) => format!(
+            "{name} API key is not set; run `plak key set {key_account}` or set {env} in the host's or unit's environment"
+        ),
+        (Some(env), crate::environment::KeyResolver::Cli) => {
             format!("{name} API key is not set; run `plak key set {key_account}` or set {env}")
         }
-        None => format!("{name} API key is not set; run `plak key set {key_account}`"),
+        (None, _) => format!("{name} API key is not set; run `plak key set {key_account}`"),
     };
     let source = match resolver {
         crate::environment::KeyResolver::Cli => "this CLI process (environment before file store)",

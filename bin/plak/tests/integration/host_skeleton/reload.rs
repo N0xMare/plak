@@ -38,6 +38,29 @@ fn a_host_refuses_requested_reload_without_any_client_or_redispatch() {
         };
         fixture.write_script(&json!({"version":1,"steps":[step]}));
         let mut host = start(&fixture);
+        let mut probe = UnixStream::connect(&host.socket).unwrap();
+        probe.set_read_timeout(Some(WAIT)).unwrap();
+        probe
+            .write_all(
+                encode_line(&ClientFrame::<PlakExtension>::Hello(Hello {
+                    proto: WIRE_VERSION,
+                    binary_id: "reload-test".into(),
+                    caps: Vec::new(),
+                }))
+                .unwrap()
+                .as_bytes(),
+            )
+            .unwrap();
+        let mut welcome = String::new();
+        BufReader::new(probe).read_line(&mut welcome).unwrap();
+        let HostFrame::<PlakExtension>::Welcome(welcome) = decode_line(welcome.trim_end()).unwrap()
+        else {
+            panic!("not welcomed");
+        };
+        let build = match welcome.binary_id.as_str() {
+            "" | "unknown" => String::new(),
+            binary => format!(" (build {binary})"),
+        };
         let mut client = Client::connect(&host);
         let Outcome::Ok(Answer::Created { session, node, .. }) =
             client.request(1, new_session(&fixture.workspace()))
@@ -65,11 +88,11 @@ fn a_host_refuses_requested_reload_without_any_client_or_redispatch() {
         std::fs::rename(&path, channel.join(format!("{session}.request"))).unwrap();
         let outcome = wait_json(&channel.join(format!("{request}.outcome")));
         assert_eq!(outcome["outcome"], "refused");
-        assert!(
-            outcome["reason"]
-                .as_str()
-                .unwrap()
-                .starts_with("this session runs in plak host")
+        assert_eq!(
+            outcome["reason"],
+            format!(
+                "this session runs in plak host{build}; restarting the host moves it onto the installed build (send SIGTERM to the plak host process, or run `systemctl --user restart plak-host.service` if it runs as the installed unit)"
+            )
         );
         let mut later = Client::connect(&host);
         later.attach(1, &node);

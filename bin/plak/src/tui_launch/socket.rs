@@ -61,12 +61,13 @@ impl SocketFace {
         let (sender, receiver, welcome) = client::connect_directory::<PlakExtension>(transport, hello)
             .map_err(|error| match error {
                 client::ConnectError::HandshakeTimeout(_) => CliFailure::new(error.to_string()),
-                other => CliFailure::new(format!("the host handshake failed: {other}; stop the host with `plak host stop`, or run its build; no embedded session was started")),
+                other => CliFailure::new(format!("the host handshake failed: {other}; {}; or run its build; no embedded session was started", crate::environment::HOST_RESTART_REMEDY)),
             })?;
         if welcome.proto != WIRE_VERSION {
-            return Err(CliFailure::new(
-                "the host uses another wire version; stop it with `plak host stop`, or run its build; no embedded session was started",
-            ));
+            return Err(CliFailure::new(format!(
+                "the host uses another wire version; {}; or run its build; no embedded session was started",
+                crate::environment::HOST_RESTART_REMEDY
+            )));
         }
         Ok(Some(Arc::new(Self {
             sender,
@@ -517,7 +518,8 @@ impl SocketFace {
             "this session"
         };
         format!(
-            "{subject} runs in plak host{build}; restarting the host moves it onto the installed build (plak host stop, or restart its unit)"
+            "{subject} runs in plak host{build}; restarting the host moves it onto the installed build ({})",
+            crate::environment::HOST_RESTART_REMEDY
         )
     }
 
@@ -637,7 +639,8 @@ impl SocketFace {
 fn outdated_host_notice(host: Option<&str>, installed: Option<&str>) -> Option<String> {
     let (host, installed) = (host?, installed?);
     (host != installed).then(|| format!(
-        "host build {host} differs from installed build {installed}; restart the host unit, or run `plak host stop` and start it again; /reload replaces only this client"
+        "host build {host} differs from installed build {installed}; {}; /reload replaces only this client",
+        crate::environment::HOST_RESTART_REMEDY
     ))
 }
 

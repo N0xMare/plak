@@ -36,14 +36,14 @@ def read_audit(raw: dict) -> tuple[set[int], dict]:
         op = frame.get('op', {})
         intent = op.get('intent', {})
         connection = entry.get('connection')
+        if frame.get('frame') == 'bye':
+            closed.add(connection)
         if entry.get('direction') == 'host' and frame.get('frame') == 'response':
             answer = frame.get('outcome', {}).get('ok', {})
             if (connection, frame.get('id')) in attaches and answer.get('answer') == 'attached':
                 attachments.setdefault(connection, set()).add(answer['attachment'])
         if entry.get('direction') != 'client':
             continue
-        if frame.get('frame') == 'bye':
-            closed.add(connection)
         if op.get('op') == 'attach' and connection not in closed:
             attaches.add((connection, frame.get('id')))
         if op.get('op') == 'detach':

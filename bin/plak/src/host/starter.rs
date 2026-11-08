@@ -13,7 +13,7 @@ use crate::{CliFailure, CliResult, ProcessOutcome, product_paths::PlakPaths};
 
 const LOG_LIMIT: usize = 1024 * 1024;
 
-pub(super) fn start(paths: &PlakPaths, deadline: Instant) -> CliResult<()> {
+pub(super) fn start(paths: &PlakPaths, deadline: Instant) -> CliResult<bool> {
     if crate::environment::host::remote_shell() {
         return Err(CliFailure::new(
             "--auto-start is local only; start the remote host or its user unit explicitly",
@@ -31,14 +31,21 @@ pub(super) fn start(paths: &PlakPaths, deadline: Instant) -> CliResult<()> {
         .envs(inputs)
         .env("PLAK_HOME", paths.home())
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .process_group(0);
     let mut helper = command.spawn().map_err(failed)?;
     loop {
         if let Some(status) = helper.try_wait().map_err(failed)? {
             return if status.success() {
-                Ok(())
+                let mut acknowledgement = [0_u8; 1];
+                helper
+                    .stdout
+                    .take()
+                    .ok_or_else(|| CliFailure::new("missing helper acknowledgement"))?
+                    .read_exact(&mut acknowledgement)
+                    .map_err(failed)?;
+                Ok(acknowledgement == [1])
             } else {
                 Err(CliFailure::new("the detached host starter failed"))
             };
@@ -71,6 +78,7 @@ pub(super) fn helper(paths: &PlakPaths) -> CliResult<ProcessOutcome> {
         .ok_or_else(|| CliFailure::new("missing starter acknowledgement"))?
         .read_exact(&mut acknowledgement)
         .map_err(failed)?;
+    io::stdout().write_all(&acknowledgement).map_err(failed)?;
     Ok(ProcessOutcome::Success)
 }
 
@@ -80,7 +88,7 @@ pub(super) fn supervise(paths: &PlakPaths) -> CliResult<ProcessOutcome> {
     match log.try_lock() {
         Ok(()) => {}
         Err(std::fs::TryLockError::WouldBlock) => {
-            acknowledge();
+            acknowledge(0);
             return Ok(ProcessOutcome::Success);
         }
         Err(std::fs::TryLockError::Error(error)) => return Err(failed(error)),
@@ -95,7 +103,7 @@ pub(super) fn supervise(paths: &PlakPaths) -> CliResult<ProcessOutcome> {
         .spawn()
         .map_err(failed)?;
     let claimed = await_claim(paths, &mut child);
-    acknowledge();
+    acknowledge(1);
     let captured = if let Some(mut stderr) = child.stderr.take() {
         collect_log(&mut child, &mut stderr, &mut log)
     } else {
@@ -112,11 +120,11 @@ pub(super) fn supervise(paths: &PlakPaths) -> CliResult<ProcessOutcome> {
     }
 }
 
-fn acknowledge() {
+fn acknowledge(claimed: u8) {
     // The launching helper may already have reached its bounded deadline.
     // Its disappearance must not kill a host that already owns custody.
     let mut output = io::stdout().lock();
-    let _ = output.write_all(&[1]).and_then(|()| output.flush());
+    let _ = output.write_all(&[claimed]).and_then(|()| output.flush());
 }
 
 fn await_claim(paths: &PlakPaths, child: &mut std::process::Child) -> CliResult<()> {
@@ -279,7 +287,7 @@ fn refuse_installed_unit(
         match std::fs::symlink_metadata(&path) {
             Ok(_) => {
                 return Err(CliFailure::new(
-                    "plak-host.service is installed; use systemctl --user start plak-host.service; no unmanaged host was started",
+                    "plak-host.service is installed (its home was not inspected); check its configuration and use systemctl --user start plak-host.service if appropriate, or run plak host in the foreground for this home; no unmanaged host was started",
                 ));
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}

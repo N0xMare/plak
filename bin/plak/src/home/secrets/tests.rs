@@ -5,6 +5,19 @@ use std::ffi::OsStr;
 use tempfile::tempdir;
 
 #[test]
+fn missing_key_remedies_target_the_process_that_resolves_them() {
+    use crate::environment::KeyResolver;
+    let auto = missing_api_key_message_for("openai", KeyResolver::AutoHost);
+    assert!(auto.contains("run `plak key set openai`"));
+    assert!(auto.contains("caller variable OPENAI_API_KEY is ignored"));
+    assert!(!auto.contains("or set OPENAI_API_KEY"));
+    let host = missing_api_key_message_for("openai", KeyResolver::Host);
+    assert!(host.contains("set OPENAI_API_KEY in the host's or unit's environment"));
+    let cli = missing_api_key_message_for("openai", KeyResolver::Cli);
+    assert!(cli.contains("or set OPENAI_API_KEY; effective key resolver: this CLI process"));
+}
+
+#[test]
 fn named_api_keys_are_disjoint_from_defaults_siblings_and_generic_secrets() {
     let directory = tempdir().unwrap();
     let paths = PlakPaths::explicit(directory.path().join("home"));

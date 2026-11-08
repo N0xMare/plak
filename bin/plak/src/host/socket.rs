@@ -74,6 +74,11 @@ impl Bound {
     /// The path is too long for this platform, a directory cannot be made
     /// private, or the socket cannot be bound.
     pub(super) fn bind(path: &Path, _held: &HostLock) -> CliResult<Self> {
+        Self::bind_owned(path)
+    }
+
+    // The caller already owns this path under the home's live lock.
+    fn bind_owned(path: &Path) -> CliResult<Self> {
         use std::os::unix::fs::MetadataExt as _;
         check_length(path)?;
         let run = path
@@ -115,10 +120,10 @@ impl Bound {
     /// admitted one is served on a task of its own; a stop ends them as
     /// leaving clients.
     pub(super) async fn serve(
-        &self,
+        &mut self,
         host: &Arc<SessionHost<PlakExtension>>,
         stopped: impl Fn() -> bool + Send + Sync + 'static,
-        mut idle: Option<super::idle::IdleExit>,
+        idle: Option<super::idle::IdleExit>,
         scanning: Arc<AtomicBool>,
     ) {
         let stopped: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(stopped);
@@ -126,6 +131,7 @@ impl Bound {
         let pending = Arc::new(AtomicUsize::new(0));
         let admitted = Arc::new(AtomicUsize::new(0));
         let mut next_idle_check = Instant::now();
+        let mut idle = idle.map(super::idle::IdleGuard::new);
         loop {
             tokio::select! {
                 accepted = self.listener.accept() => {
@@ -157,15 +163,64 @@ impl Bound {
                         let blocked = pending.load(Ordering::Acquire) != 0
                             || admitted.load(Ordering::Acquire) != 0
                             || scanning.load(Ordering::Acquire)
-                            || tokio::task::block_in_place(|| host.idle_exit_blocked());
-                        if idle.expired(now, blocked) {
-                            eprintln!("plak host: auto-started service idle for five minutes; stopping");
-                            return;
+                            || host.idle_residents_blocked();
+                        if idle.expired(now, blocked, host).await {
+                            match self.retire_idle_listener() {
+                                Ok(backlog) if backlog.is_empty() => {
+                                    eprintln!("plak host: auto-started service idle for five minutes; stopping");
+                                    return;
+                                }
+                                Ok(backlog) => {
+                                    idle.activity();
+                                    for stream in backlog {
+                                        if !admits(stream.peer_cred().ok().map(|peer| peer.uid()), self.owner) {
+                                            continue;
+                                        }
+                                        if let Some(place) = Place::take(&pending, PENDING_LIMIT) {
+                                            let (host, stopped) = (Arc::clone(host), Arc::clone(&stopped));
+                                            let admitted = Arc::clone(&admitted);
+                                            tokio::spawn(async move {
+                                                connection(stream, &host, stopped, place, &admitted).await;
+                                            });
+                                        }
+                                    }
+                                }
+                                Err(error) => {
+                                    eprintln!("plak host: idle socket retirement failed: {error}");
+                                    idle.activity();
+                                }
+                            }
                         }
                     }
                 }
             }
         }
+    }
+
+    /// Hide discovery first, then drain the kernel backlog without waiting.
+    /// The home lock remains held throughout, including a cancelled exit's rebind.
+    fn retire_idle_listener(&mut self) -> CliResult<Vec<UnixStream>> {
+        use std::os::fd::AsFd as _;
+        let failed = |error| CliFailure::new(format!("cannot retire idle socket: {error}"));
+        let duplicate = self.listener.as_fd().try_clone_to_owned().map_err(failed)?;
+        let listener = std::os::unix::net::UnixListener::from(duplicate);
+        std::fs::remove_file(&self.path).map_err(failed)?;
+        let mut backlog = Vec::new();
+        loop {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    stream.set_nonblocking(true).map_err(failed)?;
+                    backlog.push(UnixStream::from_std(stream).map_err(failed)?);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(error) => return Err(failed(error)),
+            }
+        }
+        if !backlog.is_empty() {
+            *self = Self::bind_owned(&self.path)?;
+        }
+        Ok(backlog)
     }
 
     /// Removes the socket file when it is still the one this host bound.

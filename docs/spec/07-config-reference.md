@@ -56,9 +56,13 @@ allowlist is `HOME`, `PATH` (default `/usr/bin:/bin` when unset), `SHELL`,
 `TMPDIR`, `LANG`, `LC_ALL`, `LC_CTYPE`, `LC_MESSAGES`, `LC_TIME`, `LC_NUMERIC`,
 `LC_COLLATE`, `LC_MONETARY`, `TZ`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`,
 `XDG_STATE_HOME`, `XDG_CONFIG_DIRS`, `XDG_DATA_DIRS`, `XDG_CACHE_HOME`,
-`XDG_RUNTIME_DIR` and `SSH_AUTH_SOCK`.
+`XDG_RUNTIME_DIR`, `SSH_AUTH_SOCK`, `DBUS_SESSION_BUS_ADDRESS`, `USER`,
+`LOGNAME`, `SSL_CERT_FILE` and `SSL_CERT_DIR`.
 `PLAK_HOME` is the resolved public home. No other caller environment reaches
 the service, including API-key variables and reload/product overrides.
+Proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `ALL_PROXY`, including
+lowercase spellings) are excluded because they can contain credentials. To
+use them, run the host in the foreground, or set them in the unit's environment.
 Unit detection also checks `SYSTEMD_UNIT_PATH` when set, without passing that
 manager override to the unmanaged host; ambiguous relative unit paths refuse.
 Test-hooks builds additionally carry only the isolated model/script/evidence

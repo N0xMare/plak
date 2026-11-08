@@ -924,7 +924,12 @@ connections are open at once, a login holds at most 4 connections and 30
 upgrades a minute, and messages are rate limited. The logs never hold a
 cookie, the cookie key, or a frame's body.
 
-**Residual risks**, accepted for a maintainer endpoint and stated here:
+**Residual risks of the supported endpoint.** The default release supports the
+authenticated Unix-listener deployment, with these limits. `--dev-login` is
+not part of the supported release product: its loopback access implementation
+is compiled only in maintainer or test-hooks builds; default builds refuse it
+with an explicit build-capability diagnostic.
+
 - `ts.net` is a public suffix, so every node of a tailnet is one site to the
   browser; `SameSite=Strict` does not separate them. The exact `Origin`
   check is what stops another tailnet host's page.
@@ -1833,8 +1838,10 @@ running interactive session to reload onto the installed build (chapter 02
   trigger a continuation, redispatch or runtime handoff. The TUI's hand
   `/reload` replaces only the client, even with running
   processes; embedded reload's process refusal is unchanged. A persistent
-  build-mismatch notice names both builds and the host-level remedy (restart
-  its unit, or `plak host stop` and start again), without granting the TUI
+  build-mismatch notice names both builds and the shared host-level remedy:
+  "send SIGTERM to the plak host process, or run
+  `systemctl --user restart plak-host.service` if it runs as the installed unit",
+  without granting the TUI
   authority to restart the host. A request that replaces one the host has not yet taken gives the replaced one
   a `superseded` outcome. Outcomes nobody collected are pruned after seven
   days.

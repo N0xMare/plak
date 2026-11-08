@@ -47,7 +47,7 @@ impl Bridge {
         }
     }
 
-    fn send(&mut self, frame: &ClientFrame<Core>) {
+    fn send(&mut self, frame: &ClientFrame<PlakExtension>) {
         self.input
             .as_mut()
             .unwrap()
@@ -55,13 +55,13 @@ impl Bridge {
             .unwrap();
     }
 
-    fn next(&self) -> HostFrame<Core> {
+    fn next(&self) -> HostFrame<PlakExtension> {
         let line = self.lines.recv_timeout(WAIT).expect("bridge frame");
         decode_line(&line)
             .unwrap_or_else(|error| panic!("stdout was not protocol-only: {error}: {line}"))
     }
 
-    fn request(&mut self, id: RequestId, op: Op<Core>) -> Outcome {
+    fn request(&mut self, id: RequestId, op: Op<PlakExtension>) -> Outcome<PlakExtension> {
         self.send(&ClientFrame::Request { id, op });
         loop {
             if let HostFrame::Response {
@@ -170,6 +170,81 @@ impl Drop for StartedHome {
             );
         }
     }
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn a_curated_host_keeps_os_identity_bus_and_ca_inputs_but_not_proxy_variables() {
+    let Some(fixture) = fixture() else { return };
+    let started = StartedHome(fixture.home());
+    let preserved = [
+        ("DBUS_SESSION_BUS_ADDRESS", "unix:path=/fixture/bus"),
+        ("USER", "fixture-user"),
+        ("LOGNAME", "fixture-login"),
+        ("SSL_CERT_FILE", "/fixture/ca.pem"),
+        ("SSL_CERT_DIR", "/fixture/certs"),
+    ];
+    let proxies = [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        "all_proxy",
+    ];
+    let mut inputs = preserved.to_vec();
+    inputs.extend(proxies.iter().map(|&name| (name, "excluded-fixture-proxy")));
+    let mut bridge = Bridge::configured(&fixture, true, &inputs);
+    bridge.hello(WIRE_VERSION);
+    assert!(matches!(bridge.next(), HostFrame::Welcome(_)));
+    let pid = started.pid().unwrap().as_raw_nonzero().get();
+    let environment = std::fs::read(format!("/proc/{pid}/environ")).unwrap();
+    let fields: Vec<_> = environment.split(|&byte| byte == 0).collect();
+    for (name, value) in preserved {
+        assert!(
+            fields.contains(&format!("{name}={value}").as_bytes()),
+            "missing {name}"
+        );
+    }
+    for name in proxies {
+        assert!(
+            !fields
+                .iter()
+                .any(|field| field.starts_with(format!("{name}=").as_bytes())),
+            "inherited {name}"
+        );
+    }
+    bridge.finish();
+}
+
+#[test]
+fn a_log_lock_without_a_host_retries_past_ten_seconds() {
+    let Some(fixture) = fixture() else { return };
+    let started = StartedHome(fixture.home());
+    let directory = fixture.home().join("host");
+    std::fs::create_dir_all(&directory).unwrap();
+    let log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .read(true)
+        .open(directory.join("auto-start.log"))
+        .unwrap();
+    log.set_permissions(std::fs::Permissions::from_mode(0o600))
+        .unwrap();
+    log.lock().unwrap();
+    let mut bridge = Bridge::configured(&fixture, true, &[]);
+    bridge.hello(WIRE_VERSION);
+    std::thread::sleep(Duration::from_secs(11));
+    assert!(
+        bridge.child.try_wait().unwrap().is_none(),
+        "log holder is not a ready host"
+    );
+    drop(log);
+    assert!(matches!(bridge.next(), HostFrame::Welcome(_)));
+    bridge.finish();
+    assert!(started.pid().is_some());
 }
 
 #[test]

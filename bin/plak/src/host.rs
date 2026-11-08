@@ -11,8 +11,8 @@
 //! (spec 02 §4.4). A `SIGTERM` or `SIGINT` hands every resident
 //! session off and ends the process within [`HANDOFF_DEADLINE`].
 
-mod console;
 mod bridge;
+mod console;
 mod idle;
 mod lock;
 mod requested_reload;
@@ -98,7 +98,7 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
     let identity = plakous_recursive_subagents::tree::custody_host();
     let environment = environment::HostEnvironment::capture();
     let entered = runtime.enter();
-    let bound = socket::Bound::bind(&paths.host_socket(), &lock)?;
+    let mut bound = socket::Bound::bind(&paths.host_socket(), &lock)?;
     drop(entered);
     let (services, local) = runner::host::prepare(services, None)?;
     let sessions = sessions::ProductSessions::new(
@@ -110,7 +110,7 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
     // for what the last one left.
     let owed = sessions.owed()?;
     let console_switches = sessions.console_switches();
-    let host = SessionHost::new(sessions, binary, host_generation());
+    let host = SessionHost::new(sessions, binary.clone(), host_generation());
     let mut idle_reload = None;
     let web = if let Some(args) = &command.web {
         let bound_web = runtime.block_on(crate::web::WebEndpoint::bind(
@@ -161,6 +161,7 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
     let reload_requests = runtime.spawn(requested_reload::serve(
         Arc::clone(&host),
         services.paths()?.clone(),
+        binary,
     ));
     // The web endpoint serves beside the control socket and stops with it.
     let web = web.map(|web| runtime.spawn(web.serve()));

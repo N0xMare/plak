@@ -200,6 +200,15 @@ mod host;
 mod host;
 #[cfg(feature = "web")]
 mod web;
+#[cfg(all(feature = "web", any(feature = "maintainer", feature = "test-hooks")))]
+#[path = "web/dev_login.rs"]
+mod web_dev_login;
+#[cfg(all(
+    feature = "web",
+    not(any(feature = "maintainer", feature = "test-hooks"))
+))]
+#[path = "web/dev_login_unavailable.rs"]
+mod web_dev_login;
 mod wire_schema;
 
 /// Runs the repository-only TUI rendering benchmark.

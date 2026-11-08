@@ -64,6 +64,43 @@ pub struct DirectoryEntry {
 }
 
 impl ProductStore {
+    /// Only continuation candidates and distinct runner placements, uncapped.
+    /// No transcript, profile, runtime lease or presentation projection is read.
+    #[allow(
+        dead_code,
+        reason = "only the optional host needs idle debt eligibility"
+    )]
+    pub(crate) fn idle_debt(&mut self) -> Result<(bool, Vec<String>), String> {
+        let transaction = self
+            .connection
+            .unchecked_transaction()
+            .map_err(|e| e.to_string())?;
+        let candidates: Vec<String> = transaction
+            .prepare("SELECT DISTINCT s.id FROM sessions s JOIN host_intents i ON i.session_id=s.id WHERE s.archived=0 AND i.kind='interrupt_cause'")
+            .and_then(|mut statement| statement.query_map([], |row| row.get(0))?.collect())
+            .map_err(|e| e.to_string())?;
+        let mut continuing = false;
+        for id in candidates {
+            let intents =
+                super::views::intents_of(&transaction, &mut self.verified_submissions, &id)?;
+            let views = super::views::views_of(&transaction, &id)?
+                .unwrap_or_else(plakous_hosted::sessions::projector::SessionViews::empty);
+            if matches!(
+                plakous_hosted::runtime::root_standing_from_intents(&intents, &views),
+                plakous_hosted::runtime::RootStanding::Continuing { .. }
+            ) {
+                continuing = true;
+                break;
+            }
+        }
+        let runners = transaction
+            .prepare("SELECT DISTINCT COALESCE(json_extract(runner_display,'$.runner_id'),'local') FROM sessions WHERE archived=0")
+            .and_then(|mut statement| statement.query_map([], |row| row.get(0))?.collect())
+            .map_err(|e| e.to_string())?;
+        transaction.commit().map_err(|e| e.to_string())?;
+        Ok((continuing, runners))
+    }
+
     #[allow(
         dead_code,
         reason = "the optional hosting product reads exact session identities"

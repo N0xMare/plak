@@ -143,8 +143,7 @@ fn every_legal_raw_read_is_acknowledged_without_session_queue_transcript_or_tree
                 request["op"]["intent"]["body"]["list_agent_acknowledgements"]["tree_id"] =
                     json!(node.tree_id);
             }
-            let _: ClientFrame<plak::wire_transport::PlakExtension> =
-                serde_json::from_value(request.clone()).unwrap();
+            let _: ClientFrame<PlakExtension> = serde_json::from_value(request.clone()).unwrap();
             request["op"]["attachment"] = attachment.clone();
             let before = snapshot(&fixture);
             connection.send(&request).unwrap();

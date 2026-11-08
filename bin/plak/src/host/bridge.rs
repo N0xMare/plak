@@ -11,7 +11,12 @@ use crate::{CliFailure, CliResult, ProcessOutcome, product_paths::PlakPaths};
 const DISCOVERY_WINDOW: Duration = Duration::from_secs(10);
 
 pub(super) fn connect(paths: &PlakPaths, auto_start: bool) -> CliResult<ProcessOutcome> {
-    let deadline = Instant::now() + DISCOVERY_WINDOW;
+    let deadline = Instant::now()
+        + if auto_start {
+            Duration::from_secs(30)
+        } else {
+            DISCOVERY_WINDOW
+        };
     let key = crate::home::state::state_key();
     let mut started = false;
     loop {
@@ -34,13 +39,15 @@ pub(super) fn connect(paths: &PlakPaths, auto_start: bool) -> CliResult<ProcessO
         }
         if !started && live.is_empty() && hosts::lock_holder(&hosts::home_lock(paths))?.is_none() {
             if auto_start {
-                super::starter::start(paths, deadline)?;
-                started = true;
-                continue;
+                started = super::starter::start(paths, deadline)?;
+                if started {
+                    continue;
+                }
+            } else {
+                return Err(CliFailure::new(
+                    "no running host for this home; start plak host or its user unit; no host or embedded session was started",
+                ));
             }
-            return Err(CliFailure::new(
-                "no running host for this home; start plak host or its user unit; no host or embedded session was started",
-            ));
         }
         if Instant::now() >= deadline {
             return Err(CliFailure::new(if started {
