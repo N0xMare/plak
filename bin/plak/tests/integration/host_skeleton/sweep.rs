@@ -59,6 +59,11 @@ pub(crate) fn run(
                 answer,
                 &[],
             );
+        } else {
+            // Serving the directory does not admit a runner. The traced pilot
+            // must finish readoption and any recorded stop before shutdown;
+            // otherwise runtime cancellation can interrupt its trace writer.
+            runner::wait_local_runner_ready(&host);
         }
     }));
     if let Err(error) = driven {

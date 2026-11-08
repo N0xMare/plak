@@ -167,6 +167,7 @@ fn startup_acknowledges_answered_keys_and_empties_its_journal() {
     // No Ack is sent: startup must acknowledge every answered key.
     drop(stream);
     let mut host = start(&fixture);
+    wait_local_runner_ready(&host);
     assert!(
         journal.pending().unwrap().is_empty(),
         "startup left an answered key journaled"

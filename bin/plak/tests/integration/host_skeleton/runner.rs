@@ -2,6 +2,37 @@
 
 use super::*;
 
+/// Ready is published only after the ownership sweep, answered-key recovery,
+/// recorded stops and foreground cleanup have completed.
+pub(super) fn wait_local_runner_ready(host: &Host) {
+    let mut client = Client::connect(host);
+    let deadline = std::time::Instant::now() + WAIT;
+    loop {
+        let status = local_runner_status(&mut client);
+        if status == plakous_host_protocol::wire::RunnerStatus::Ready {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "local runner did not reconcile: {status:?}"
+        );
+        std::thread::yield_now();
+    }
+}
+
+fn local_runner_status(client: &mut Client) -> plakous_host_protocol::wire::RunnerStatus {
+    let outcome = client.request(90, Op::SessionOptions { workspace: None });
+    let Outcome::Ok(Answer::Options { options }) = outcome else {
+        panic!("runner options refused: {outcome:?}")
+    };
+    options
+        .runners
+        .into_iter()
+        .find(|row| row.runner.runner_id == "local")
+        .expect("the host always advertises local placement")
+        .status
+}
+
 mod foreground;
 mod pending_stop;
 mod recovery;

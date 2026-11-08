@@ -9,22 +9,14 @@ mod restored;
 fn a_broken_daemon_blocks_local_placement_without_terminating_the_host() {
     let Some(fixture) = fixture() else { return };
     let mut host = start(&fixture);
+    wait_local_runner_ready(&host);
     let version = plakous::runner::protocol::PROTOCOL_VERSION;
     let floors = fixture
         .home()
         .join(format!("host/runner/v{version}/owners.json"));
-    let deadline = std::time::Instant::now() + WAIT;
-    while !floors.exists() {
-        assert!(std::time::Instant::now() < deadline);
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    std::fs::write(
-        fixture
-            .home()
-            .join(format!("host/runner/v{version}/owners.json")),
-        "not owner floors",
-    )
-    .unwrap();
+    // An empty daemon has no owner floors until its first transfer. Corrupt
+    // the recorded location deliberately rather than waiting for a transfer.
+    std::fs::write(floors, "not owner floors").unwrap();
     kill_local_daemon_only(&fixture.home());
     // Keep failed-redial teardown from racing another detached child start.
     let lock = std::fs::OpenOptions::new()
@@ -70,6 +62,7 @@ fn a_transient_daemon_failure_keeps_the_redial_bound() {
             &[],
             &[("PLAK_TEST_RUNNER_DETACHED", detached.into())],
         );
+        wait_local_runner_ready(&host);
         let version = plakous::runner::protocol::PROTOCOL_VERSION;
         let socket = fixture
             .home()
@@ -85,6 +78,8 @@ fn a_transient_daemon_failure_keeps_the_redial_bound() {
 }
 
 fn wait_for_recovery_failure(fixture: &Fixture, host: &mut Host, detail: &str) {
+    use plakous_host_protocol::wire::{PlacementReason, RunnerPhase, RunnerStatus};
+    let mut client = Client::connect(host);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(25);
     let mut diagnostics = String::new();
     loop {
@@ -99,7 +94,19 @@ fn wait_for_recovery_failure(fixture: &Fixture, host: &mut Host, detail: &str) {
         if (diagnostics.contains("runner_recovery_failed") && diagnostics.contains(detail))
             || (log.contains("runner_recovery_failed") && log.contains(detail))
         {
-            return;
+            // Logs persist across restarts; require this host's live verdict,
+            // rather than accepting only a predecessor's matching diagnostic.
+            if matches!(
+                local_runner_status(&mut client),
+                RunnerStatus::Blocked {
+                    reason: PlacementReason::RunnerUnreachable {
+                        phase: RunnerPhase::Daemon,
+                        ..
+                    }
+                }
+            ) {
+                return;
+            }
         }
         assert!(
             std::time::Instant::now() < deadline,
@@ -259,6 +266,7 @@ fn manager_start_case(outcome: &str) {
             ("PATH", format!("{}:/usr/bin:/bin", bin.display())),
         ],
     );
+    wait_local_runner_ready(&host);
     assert_eq!(std::fs::read_to_string(counter).unwrap().trim(), "1");
     let lock = fixture.home().join(format!(
         "host/runner/v{}/run/runner.lock",
