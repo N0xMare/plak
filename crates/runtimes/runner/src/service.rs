@@ -1079,6 +1079,27 @@ impl RunnerService {
         for running in lock(&self.inner.running).values() {
             running.cancellation.cancel();
         }
+        self.stop_owned().await;
+        // A start may have passed its fence before closing was set. Let its
+        // cancellation/answer settle, then collect processes published late.
+        if tokio::time::timeout(Duration::from_secs(5), async {
+            while !lock(&self.inner.running).is_empty() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .is_err()
+        {
+            use std::io::Write as _;
+            let _ = writeln!(
+                std::io::stderr(),
+                "runner shutdown still has in-flight calls after its cleanup bound"
+            );
+        }
+        self.stop_owned().await;
+    }
+
+    async fn stop_owned(&self) {
         let mut cleanup = tokio::task::JoinSet::new();
         for (_, mut service) in std::mem::take(&mut *lock(&self.inner.services)) {
             service.ends.close();

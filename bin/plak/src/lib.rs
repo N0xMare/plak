@@ -414,6 +414,16 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
     let services = Services::from_env(Some(otel_extra_telemetry_sink), launch.as_deref());
     #[cfg(not(feature = "otel"))]
     let services = Services::from_env(None, launch.as_deref());
+    // Diagnostic setup must not recreate a local daemon's deleted home.
+    if matches!(
+        &command,
+        Command::Runner(commands::runner::RunnerCommand::ServeLocal)
+    ) && !std::fs::symlink_metadata(services.paths()?.home()).is_ok_and(|home| home.is_dir())
+    {
+        return Err(CliFailure::new(
+            "the home-local runner's product home no longer exists",
+        ));
+    }
     // Only a command that uses product state records a fresh binary id in the
     // home; inspection commands read the identity cache and never write it.
     if command_needs_product_state(&command)

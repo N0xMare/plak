@@ -331,7 +331,6 @@ fn stage_and_link(staged: &Path, path: &Path, bytes: &[u8]) -> std::io::Result<(
 /// Creates `directory` with mode 0700, or closes an existing one of this
 /// user's to everyone else.
 pub(crate) fn private_directory(directory: &Path) -> CliResult<()> {
-    use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
     let mut builder = std::fs::DirBuilder::new();
     builder.recursive(true);
     std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
@@ -342,6 +341,41 @@ pub(crate) fn private_directory(directory: &Path) -> CliResult<()> {
         ))
     };
     builder.create(directory).map_err(failed)?;
+    check_private_directory(directory)
+}
+
+/// Creates only descendants of an existing product home, never the home itself.
+pub(crate) fn private_below(home: &Path, directory: &Path) -> CliResult<()> {
+    check_private_directory(home)?;
+    let relative = directory
+        .strip_prefix(home)
+        .map_err(|error| CliFailure::new(error.to_string()))?;
+    let mut current = home.to_path_buf();
+    for part in relative.components() {
+        if !matches!(part, std::path::Component::Normal(_)) {
+            return Err(CliFailure::new("a runner directory must be below its home"));
+        }
+        current.push(part);
+        let mut builder = std::fs::DirBuilder::new();
+        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+        match builder.create(&current) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(CliFailure::new(error.to_string())),
+        }
+        check_private_directory(&current)?;
+    }
+    Ok(())
+}
+
+fn check_private_directory(directory: &Path) -> CliResult<()> {
+    use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+    let failed = |error: std::io::Error| {
+        CliFailure::new(format!(
+            "{} could not be made private: {error}",
+            directory.display()
+        ))
+    };
     let metadata = std::fs::symlink_metadata(directory).map_err(failed)?;
     if !metadata.is_dir() {
         return Err(CliFailure::new(format!(

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use super::{LocalRunnerHome, PlakPaths, private_directory};
+use super::{LocalRunnerHome, PlakPaths};
 
 pub(super) struct Starter {
     managed: Option<bool>,
@@ -27,7 +27,9 @@ impl Starter {
         paths: &PlakPaths,
         home: &LocalRunnerHome,
     ) -> std::io::Result<()> {
-        if self.requested || self.child.load(Ordering::Acquire) || !lock_free(&home.socket_path())?
+        if self.requested
+            || self.child.load(Ordering::Acquire)
+            || !lock_free(paths.home(), &home.socket_path())?
         {
             return Ok(());
         }
@@ -49,9 +51,10 @@ impl Starter {
     }
 }
 
-fn lock_free(socket: &Path) -> std::io::Result<bool> {
+fn lock_free(home: &Path, socket: &Path) -> std::io::Result<bool> {
     use std::os::unix::fs::OpenOptionsExt as _;
-    private_directory(
+    super::super::home::private_below(
+        home,
         socket
             .parent()
             .ok_or_else(|| std::io::Error::other("runner socket has no directory"))?,

@@ -201,12 +201,17 @@ pub async fn serve_socket(
     let owner = owner_uid(directory)?;
     let mut connections = tokio::task::JoinSet::new();
     let mut idle_since: Option<Instant> = None;
+    let mut reported_unknown = false;
     let mut tick = tokio::time::interval(Duration::from_millis(500));
     let result = loop {
         tokio::select! {
             accepted = listener.accept() => {
                 let stream = match accepted {
                     Ok((stream, _)) => stream,
+                    Err(error) if transient_accept(&error) => {
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                        continue;
+                    }
                     Err(error) => break Err(DaemonError::Io(error)),
                 };
                 // Only the runner's own user may speak to it.
@@ -218,8 +223,14 @@ pub async fn serve_socket(
             }
             _ = connections.join_next(), if !connections.is_empty() => {}
             _ = tick.tick() => {
-                if !same_endpoint(socket, &endpoint) {
-                    break Ok(());
+                match same_endpoint(socket, &endpoint) {
+                    Ok(false) => break Ok(()),
+                    Err(error) if !reported_unknown => {
+                        use std::io::Write as _;
+                        let _ = writeln!(std::io::stderr(), "runner endpoint could not be inspected; keeping it alive: {error}");
+                        reported_unknown = true;
+                    }
+                    Ok(true) | Err(_) => {}
                 }
                 if !service.is_idle() {
                     idle_since = None;
@@ -234,16 +245,35 @@ pub async fn serve_socket(
     connections.abort_all();
     while connections.join_next().await.is_some() {}
     service.shutdown().await;
-    if same_endpoint(socket, &endpoint) {
+    if matches!(same_endpoint(socket, &endpoint), Ok(true)) {
         let _ = std::fs::remove_file(socket);
     }
     drop(lock);
     result
 }
 
-fn same_endpoint(socket: &Path, original: &std::fs::Metadata) -> bool {
-    std::fs::symlink_metadata(socket)
-        .is_ok_and(|current| current.dev() == original.dev() && current.ino() == original.ino())
+fn same_endpoint(socket: &Path, original: &std::fs::Metadata) -> io::Result<bool> {
+    match std::fs::symlink_metadata(socket) {
+        Ok(current) => Ok(current.dev() == original.dev() && current.ino() == original.ino()),
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+            ) =>
+        {
+            Ok(false)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn transient_accept(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::Interrupted | io::ErrorKind::ConnectionAborted | io::ErrorKind::WouldBlock
+    ) || [rustix::io::Errno::MFILE, rustix::io::Errno::NFILE]
+        .iter()
+        .any(|code| Some(code.raw_os_error()) == error.raw_os_error())
 }
 
 async fn take_lock(lock: &std::fs::File, socket: &Path) -> Result<(), DaemonError> {
@@ -362,8 +392,12 @@ pub fn check_socket_path(socket: &Path) -> io::Result<()> {
 fn private_directory(directory: &Path) -> io::Result<()> {
     use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _, PermissionsExt as _};
     let mut builder = std::fs::DirBuilder::new();
-    builder.recursive(true).mode(0o700);
-    builder.create(directory)?;
+    builder.mode(0o700);
+    match builder.create(directory) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error),
+    }
     let metadata = std::fs::symlink_metadata(directory)?;
     if !metadata.is_dir() {
         return Err(io::Error::other(format!(
@@ -417,6 +451,70 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    #[test]
+    fn transient_accept_faults_do_not_end_the_daemon() {
+        for errno in [
+            rustix::io::Errno::MFILE,
+            rustix::io::Errno::NFILE,
+            rustix::io::Errno::INTR,
+            rustix::io::Errno::CONNABORTED,
+        ] {
+            assert!(transient_accept(&io::Error::from_raw_os_error(
+                errno.raw_os_error()
+            )));
+        }
+        assert!(!transient_accept(&io::Error::from(
+            io::ErrorKind::PermissionDenied
+        )));
+    }
+
+    #[tokio::test]
+    async fn an_unknown_endpoint_stat_does_not_stop_a_serving_daemon() {
+        use std::os::unix::fs::PermissionsExt as _;
+        if rustix::process::geteuid().is_root() {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let socket = root.path().join("run/runner.sock");
+        let serving = serve_socket(service(root.path()), &socket, Duration::from_secs(300));
+        tokio::pin!(serving);
+        tokio::select! {
+            result = &mut serving => panic!("daemon ended before binding: {result:?}"),
+            () = async { while !socket.exists() { tokio::task::yield_now().await; } } => {}
+        }
+        let _connection = UnixStream::connect(&socket).await.unwrap();
+        std::fs::set_permissions(
+            socket.parent().unwrap(),
+            std::fs::Permissions::from_mode(0o000),
+        )
+        .unwrap();
+        let stayed = tokio::time::timeout(Duration::from_millis(650), &mut serving)
+            .await
+            .is_err();
+        std::fs::set_permissions(
+            socket.parent().unwrap(),
+            std::fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        assert!(
+            stayed,
+            "an inaccessible endpoint is not evidence of deletion"
+        );
+        std::fs::remove_file(&socket).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), serving)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[test]
+    fn runner_directory_creation_cannot_resurrect_a_missing_parent() {
+        let root = tempfile::tempdir().unwrap();
+        let parent = root.path().join("missing-home");
+        assert!(private_directory(&parent.join("run")).is_err());
+        assert!(!parent.exists());
     }
 
     #[tokio::test]

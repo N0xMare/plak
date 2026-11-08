@@ -8,7 +8,7 @@ use std::time::Duration;
 use plakous::runner::{ClientWindows, ConnectError, FileCallJournal, RunnerClient};
 use plakous_hosted::error::{CliFailure, CliResult};
 
-use super::home::{LocalRunnerHome, private_directory};
+use super::home::LocalRunnerHome;
 use crate::home::paths::PlakPaths;
 
 /// Old protocols are inspected, never transferred or used for execution.
@@ -85,7 +85,7 @@ pub(crate) async fn dial(paths: &PlakPaths) -> CliResult<RunnerClient> {
     let home = LocalRunnerHome::of(paths);
     plakous::runner::daemon::check_socket_path(&home.socket_path())
         .map_err(|error| CliFailure::new(error.to_string()))?;
-    private_directory(home.root())?;
+    super::home::private_below(paths.home(), home.root())?;
     let journal = Arc::new(
         FileCallJournal::open(
             home.root()

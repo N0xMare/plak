@@ -6209,8 +6209,14 @@ placement readiness. Stop intent, runner protocol and binding encodings are unch
   idle grace with no connection, no service, no running or orphaned job and
   no answer or tombstone a host has not acknowledged. Independently of idle
   retention, removal or replacement of its socket (including deletion of its
-  home) begins daemon shutdown at its next 500 ms liveness tick. It closes its
-  connections and terminates its owned processes before returning; cleanup
+  home) begins daemon shutdown at its next 500 ms liveness tick. Only a missing
+  path (NotFound or NotADirectory) or a different device/inode proves loss;
+  other inspection errors mean unknown, are reported once, and keep it serving.
+  Transient accept failures (descriptor exhaustion, aborted connections and
+  interruption) retry without stopping jobs. Its socket directory may be created
+  only under an existing parent, never by recreating a missing home. It closes its
+  connections, fences starts, cancels and boundedly drains in-flight calls, and
+  takes a second cleanup snapshot before returning; cleanup
   never unlinks a replacement daemon's socket. Host link loss alone does not
   trigger this shutdown or stop promoted jobs. The stdio bridge
   connects to it, or starts it once and waits for it to listen, and delivers

@@ -212,9 +212,9 @@ async fn serve_local(paths: &PlakPaths) -> CliResult<()> {
     let home = LocalRunnerHome::of(paths);
     let socket = home.socket_path();
     daemon::check_socket_path(&socket).map_err(|error| CliFailure::new(error.to_string()))?;
-    private_directory(home.root())?;
+    home::private_below(paths.home(), home.root())?;
     let empty = home.empty_directory();
-    private_directory(&empty)?;
+    home::private_below(paths.home(), &empty)?;
     let scope = || -> CliResult<ExecutionEnvironmentScope> {
         Ok(ExecutionEnvironmentScope::Run(
             plakous::model::RunId::try_from(uuid::Uuid::new_v4())

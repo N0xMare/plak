@@ -195,6 +195,11 @@ async fn a_renewed_instance_cannot_run_a_queued_start_before_readopting_its_orph
     queued_start_loses_authority(2).await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_start_admitted_after_closing_is_refused() {
+    queued_start_loses_authority(3).await;
+}
+
 async fn queued_start_loses_authority(change: u8) {
     let root = tempfile::tempdir().unwrap();
     let scope =
@@ -222,6 +227,12 @@ async fn queued_start_loses_authority(change: u8) {
         .foreground
         .gate("home", &owner.line().to_string());
     let guard = gate.lock().await;
+    if change == 3 {
+        service
+            .inner
+            .closing
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
     let marker = root.path().join("must-not-start");
     let command = format!("printf started > '{}'", marker.display());
     let start = tokio::spawn(async move {
@@ -273,7 +284,7 @@ async fn queued_start_loses_authority(change: u8) {
             ),
             RunnerFrame::TransferAccepted { .. }
         ));
-    } else {
+    } else if change == 2 {
         // The late bind renews the instance lease, not its orphaned line.
         lock(&service.inner.tables).orphan("home", "before");
         assert!(service.instance_authority("home", "before"));
@@ -517,5 +528,213 @@ async fn daemon_shutdown_joins_foreground_and_promoted_processes() {
         assert!(local.joined_terminal_status(ids[0]).is_none());
         service.shutdown().await;
         assert!(local.joined_terminal_status(ids[0]).is_some());
+    }
+}
+
+#[tokio::test]
+async fn shutdown_stops_a_process_published_after_its_first_snapshot() {
+    let root = tempfile::tempdir().unwrap();
+    let scope =
+        ExecutionEnvironmentScope::Run("00000000-0000-0000-0000-000000000001".parse().unwrap());
+    let (service, link) = queued_link(root.path(), scope).await;
+    let backend = link.backend();
+    let environment = runner_environment(
+        scope,
+        root.path(),
+        ".",
+        ExecutionEnvironmentConfig::default(),
+        backend.clone(),
+    )
+    .unwrap();
+    let owner = plakous_tools::LineOwner::new(
+        "00000000-0000-0000-0000-0000000000a1".parse().unwrap(),
+        1,
+        "00000000-0000-0000-0000-0000000000b1".parse().unwrap(),
+        1,
+    );
+    let sessions = RunnerSessions::new(&backend, &environment, owner);
+    sessions
+        .start(
+            JoinedProcessStartRequest::new(
+                JoinedProcessCommand::literal("/bin/sh", ["-c".to_owned(), "read line".to_owned()])
+                    .unwrap(),
+                ".",
+                Vec::new(),
+                true,
+                JoinedProcessTerminalMode::Pipes,
+            )
+            .unwrap(),
+            OperationContext::new(plakous_model::CancellationToken::new()).with_class(
+                OperationClass::EffectCall {
+                    call_id: "00000000-0000-0000-0000-000000000001".parse().unwrap(),
+                    attempt_id: "00000000-0000-0000-0000-000000000002".parse().unwrap(),
+                },
+            ),
+        )
+        .await
+        .unwrap();
+    // Model a start that passed its fence but has not published its port yet.
+    let (key, port) = lock(&service.inner.lines).drain().next().unwrap();
+    let local = port.0.clone();
+    let ids = local.active_session_ids();
+    let pending = (
+        "home".into(),
+        super::super::RunKey::Request("publishing".into()),
+    );
+    let cancellation = plakous_model::CancellationToken::new();
+    lock(&service.inner.running).insert(
+        pending.clone(),
+        super::super::Running {
+            instance: "before".into(),
+            cancellation: cancellation.clone(),
+            preempt: tokio::sync::watch::channel(plakous_tools::ToolPreempt::default()).0,
+        },
+    );
+    let stopping = {
+        let service = service.clone();
+        tokio::spawn(async move { service.shutdown().await })
+    };
+    // On this single-thread runtime the empty first snapshot cannot yield;
+    // the cancellation wait resumes us only after shutdown starts its drain.
+    cancellation.cancelled().await;
+    lock(&service.inner.lines).insert(key, port);
+    lock(&service.inner.running).remove(&pending);
+    stopping.await.unwrap();
+    let ended = local.joined_terminal_status(ids[0]).is_some();
+    local.stop_foreground().unwrap();
+    assert!(
+        ended,
+        "a late-published process escaped the second snapshot"
+    );
+}
+
+async fn socket_link(
+    root: &std::path::Path,
+    scope: ExecutionEnvironmentScope,
+) -> (
+    RunnerService,
+    Arc<plakous_tools::internal::runner::RunnerBackend>,
+    std::path::PathBuf,
+    tokio::task::JoinHandle<Result<(), crate::daemon::DaemonError>>,
+) {
+    use plakous_tools::internal::runner::RunnerBackend;
+    let environment =
+        ExecutionEnvironment::host(scope, root, ".", ExecutionEnvironmentConfig::default())
+            .unwrap();
+    let version = VersionTriple::current("endpoint", "test");
+    let service = RunnerService::new(
+        environment,
+        RunnerIdentity {
+            runner_id: RunnerId::new("endpoint").unwrap(),
+            version: version.clone(),
+            boot_id: "boot".into(),
+            binary_id: None,
+        },
+    )
+    .unwrap();
+    let socket = root.join("run/runner.sock");
+    let serving = {
+        let (service, socket) = (service.clone(), socket.clone());
+        tokio::spawn(async move {
+            crate::daemon::serve_socket(service, &socket, Duration::from_secs(300)).await
+        })
+    };
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !socket.exists() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let stream = tokio::net::UnixStream::connect(&socket).await.unwrap();
+    let (client, hello) = crate::RunnerClient::connect(
+        stream,
+        Bind {
+            host_id: "home".into(),
+            host_instance: "before".into(),
+            version,
+            inspect: false,
+        },
+        ClientWindows::default(),
+    )
+    .await
+    .unwrap();
+    let backend = Arc::new(RunnerBackend::new(hello.descriptor, Arc::new(client)).unwrap());
+    (service, backend, socket, serving)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn endpoint_loss_joins_processes_started_through_its_socket() {
+    for promoted in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let scope =
+            ExecutionEnvironmentScope::Run("00000000-0000-0000-0000-000000000001".parse().unwrap());
+        let (service, backend, socket, serving) = socket_link(root.path(), scope).await;
+        let environment = runner_environment(
+            scope,
+            root.path(),
+            ".",
+            ExecutionEnvironmentConfig::default(),
+            backend.clone(),
+        )
+        .unwrap();
+        let owner = plakous_tools::LineOwner::new(
+            "00000000-0000-0000-0000-0000000000a1".parse().unwrap(),
+            1,
+            "00000000-0000-0000-0000-0000000000b1".parse().unwrap(),
+            1,
+        );
+        let sessions = RunnerSessions::new(&backend, &environment, owner);
+        let id = sessions
+            .start(
+                JoinedProcessStartRequest::new(
+                    JoinedProcessCommand::literal(
+                        "/bin/sh",
+                        ["-c".to_owned(), "read line".to_owned()],
+                    )
+                    .unwrap(),
+                    ".",
+                    Vec::new(),
+                    true,
+                    JoinedProcessTerminalMode::Pipes,
+                )
+                .unwrap(),
+                OperationContext::new(plakous_model::CancellationToken::new()).with_class(
+                    OperationClass::EffectCall {
+                        call_id: "00000000-0000-0000-0000-000000000001".parse().unwrap(),
+                        attempt_id: "00000000-0000-0000-0000-000000000002".parse().unwrap(),
+                    },
+                ),
+            )
+            .await
+            .unwrap();
+        if promoted {
+            sessions.promote(id).await.unwrap();
+        }
+        let local = lock(&service.inner.lines)
+            .values()
+            .next()
+            .unwrap()
+            .0
+            .clone();
+        let ids = local.active_session_ids();
+        assert_eq!(ids.len(), 1);
+        assert!(local.joined_terminal_status(ids[0]).is_none());
+        std::fs::remove_file(&socket).unwrap();
+        tokio::time::timeout(Duration::from_secs(10), serving)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let ended = local.joined_terminal_status(ids[0]).is_some();
+        // A killed mutant must not leave its deliberately live process behind.
+        local.stop_foreground().unwrap();
+        local
+            .stop_jobs(plakous_tools::JobStopReason::User, Duration::ZERO)
+            .unwrap();
+        assert!(
+            ended,
+            "endpoint loss returned while an owned process was still live"
+        );
     }
 }
