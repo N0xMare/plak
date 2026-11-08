@@ -187,6 +187,7 @@ class ClientTraceTests(unittest.TestCase):
             'wrong_connection',
             'after_bye',
             'after_host_bye',
+            'after_detach',
             'unknown_attachment',
             'before_attach',
         ):
@@ -208,6 +209,19 @@ class ClientTraceTests(unittest.TestCase):
                         'connection': 1,
                         'direction': 'host' if mutate == 'after_host_bye' else 'client',
                         'frame': {'frame': 'bye'},
+                    },
+                )
+            elif mutate == 'after_detach':
+                broken['entries'].insert(
+                    2,
+                    {
+                        'connection': 1,
+                        'direction': 'client',
+                        'frame': {
+                            'frame': 'request',
+                            'id': 3,
+                            'op': {'op': 'detach', 'attachment': 1},
+                        },
                     },
                 )
             elif mutate == 'unknown_attachment':
