@@ -293,6 +293,68 @@ mod tests {
     use std::time::Duration;
 
     #[test]
+    fn shared_large_snapshot_continuations_charge_bytes_once() {
+        let mut response = response();
+        let HostResponse::AccountsUsage { rows, .. } = &mut response else {
+            panic!("usage")
+        };
+        let mut row = rows[0].clone();
+        row.allowance.unavailable = Some(super::super::diagnostic(
+            "fixture",
+            None,
+            &"x".repeat(130_000),
+        ));
+        *rows = vec![row; 40];
+        let context = HostRequestContext {
+            principal: HostPrincipal::Socket(7),
+            connection_id: 1,
+            host_generation: 10,
+        };
+        let selection = Selection::from_request(&HostRequest::AccountsUsage {
+            account_id: None,
+            window: UsageWindow::Days7,
+            cursor: None,
+            limit: Some(1),
+        });
+        let mut pages = Pages::default();
+        let HostResponse::AccountsUsage {
+            page: Page {
+                next: Some(token), ..
+            },
+            ..
+        } = pages
+            .start(response, context.clone(), selection.clone(), [3; 32], 1)
+            .expect("first page")
+        else {
+            panic!("continuation")
+        };
+        let snapshot = Arc::clone(&pages.cursors[&token].snapshot);
+        assert!(snapshot.bytes > limits::DEPENDENCY_BYTES / 2);
+        assert!(snapshot.bytes <= limits::DEPENDENCY_BYTES);
+        // Keep two other mid-chain continuations alive while each token is
+        // consumed, so counting even the remaining cursors separately overflows.
+        for offset in [2, 3] {
+            pages.cursors.insert(
+                format!("shared-{offset}"),
+                Cursor {
+                    snapshot: Arc::clone(&snapshot),
+                    offset,
+                },
+            );
+        }
+        for token in [token, "shared-2".into(), "shared-3".into()] {
+            let resumed = pages
+                .resume(&token, &context, &selection, &[3; 32], 1)
+                .expect("shared snapshot must not become Busy");
+            assert!(matches!(resumed, HostResponse::AccountsUsage {
+                rows, page: Page { next: Some(_), .. }, ..
+            } if rows.len() == 1));
+            assert!(!pages.cursors.contains_key(&token));
+            assert_eq!(pages.cursors.len(), 3);
+        }
+    }
+
+    #[test]
     fn review_limit_one_pages_reach_the_end_of_a_forty_row_snapshot() {
         let mut response = response();
         let HostResponse::AccountsUsage { rows, .. } = &mut response else {
