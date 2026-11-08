@@ -281,6 +281,10 @@ async fn stopped_line_followup(branch_hold: bool) {
     .unwrap();
     assert_eq!(stops.load(Ordering::SeqCst), 1);
     assert!(calls.load(Ordering::SeqCst) > calls_before_release);
+    assert_local_stop_debt_retired(registry, &retries);
+}
+
+fn assert_local_stop_debt_retired(registry: &plakous::runner::RunnerRegistry, retries: &Retries) {
     assert!(registry.needs_connection("local"));
     assert!(!retries.lock().unwrap()["local"].pending_stops);
     assert_eq!(retries.lock().unwrap()["local"].delay, 0);
