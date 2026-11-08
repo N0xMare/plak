@@ -208,13 +208,19 @@ pub(in crate::runtime) fn started_tool_text(
     }
     .or_else(|| {
         observation.and_then(|item| {
-            crate::activity::tool_detail_text(
+            crate::activity::tool_detail_text_for(
+                name,
+                exposed_name,
                 Some(&redact_text_preview(item.arguments_preview())),
                 None,
             )
         })
     })
-    .or_else(|| info.map(|item| item.detail.clone()));
+    .or_else(|| {
+        info.and_then(|item| {
+            crate::activity::tool_detail_text_for(name, exposed_name, Some(&item.detail), None)
+        })
+    });
     StartedToolText { subject, detail }
 }
 
@@ -263,11 +269,18 @@ pub(crate) fn completed_tool_state(name: &str, result: Option<(bool, &str)>) -> 
 /// result preview. Spec 02 §5.4: readable text, never `Arguments:` / `Result:`
 /// JSON dumps.
 pub(crate) fn completed_tool_detail(
+    name: &str,
+    exposed_name: Option<&str>,
     started_detail: Option<&str>,
     preview: Option<&str>,
 ) -> Option<String> {
     preview.and_then(|preview| {
-        crate::activity::tool_detail_text(started_detail, Some(&redact_text_preview(preview)))
+        crate::activity::tool_detail_text_for(
+            name,
+            exposed_name,
+            started_detail,
+            Some(&redact_text_preview(preview)),
+        )
     })
 }
 
@@ -616,6 +629,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
             .as_ref()
             .map(|item| (item.succeeded(), item.preview()));
         let result_detail = completed_tool_detail(
+            &name,
+            prior
+                .as_ref()
+                .and_then(|activity| activity.exposed_name.as_deref()),
             prior
                 .as_ref()
                 .and_then(|activity| activity.detail.as_deref()),

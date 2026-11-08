@@ -128,6 +128,8 @@ struct Script {
     rows: Mutex<Vec<SessionRow>>,
     row_limit: AtomicUsize,
     opens: AtomicUsize,
+    dormant_stops: AtomicUsize,
+    stop_intents: AtomicUsize,
     /// Sessions whose open fails, with the failure.
     refuse: Mutex<BTreeMap<String, RequestRefusal>>,
     /// The fake sessions' observation senders, to end one.
@@ -381,7 +383,10 @@ impl HostSessions<Core> for Fake {
                 match intents.recv_timeout(Duration::from_millis(10)) {
                     Ok(delivery) => match &*delivery {
                         SessionIntent::Quit => break,
-                        SessionIntent::StopSession { ticket } => stops.push(*ticket),
+                        SessionIntent::StopSession { ticket } => {
+                            script.stop_intents.fetch_add(1, Ordering::SeqCst);
+                            stops.push(*ticket);
+                        }
                         SessionIntent::ReleaseForReopen { ticket, session } => {
                             if script.release_reopen(&intents, *ticket, session, &identity, active)
                             {
@@ -489,6 +494,7 @@ impl HostSessions<Core> for Fake {
     }
 
     fn stop_dormant(&self, session: &str) -> CliResult<()> {
+        self.0.dormant_stops.fetch_add(1, Ordering::SeqCst);
         let mut rows = self.0.rows.lock().unwrap();
         rows.iter_mut()
             .find(|row| row.session == session)
@@ -1061,6 +1067,12 @@ fn an_archived_attach_serves_persisted_facts_without_a_runtime_and_refuses_every
     request(&mut connection, 20, Op::Detach { attachment });
     assert_eq!(outcome(&out.take(), 20), Outcome::Ok(Answer::Detached));
     assert_eq!(fake.0.opens.load(Ordering::SeqCst), 0);
+    assert_eq!(fake.0.dormant_stops.load(Ordering::SeqCst), 0);
+    assert_eq!(fake.0.stop_intents.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        fake.0.rows.lock().unwrap()[0].activity,
+        SessionActivity::Idle
+    );
 }
 
 /// An attach of a dormant session's root opens it once and attaches it; a

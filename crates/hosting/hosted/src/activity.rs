@@ -142,13 +142,51 @@ const FILE_CONTENT_KEYS: [&str; 4] = ["content", "contents", "text", "file_text"
 /// Input that is not JSON is already human text and passes through unchanged.
 #[must_use]
 pub fn tool_detail_text(arguments: Option<&str>, result: Option<&str>) -> Option<String> {
+    detail_text(arguments.map(preview_text), result)
+}
+
+/// Render tool arguments with their route identity. Only process-control
+/// arguments are compacted; result previews always use the normal renderer.
+#[must_use]
+pub fn tool_detail_text_for(
+    name: &str,
+    exposed_name: Option<&str>,
+    arguments: Option<&str>,
+    result: Option<&str>,
+) -> Option<String> {
+    let arguments = arguments.map(|raw| {
+        use plakous_host_protocol::views::ToolOperation as O;
+        let operation = O::classify(
+            name,
+            exposed_name,
+            tool_activity_kind(name),
+            None,
+            Some(raw),
+        );
+        if matches!(
+            operation,
+            O::ReadProcess
+                | O::WaitProcess
+                | O::InputProcess
+                | O::InterruptProcess
+                | O::StopProcess
+        ) && let Ok(serde_json::Value::Object(fields)) = serde_json::from_str(raw)
+        {
+            return compact_process_arguments(&fields);
+        }
+        preview_text(raw)
+    });
+    detail_text(arguments, result)
+}
+
+fn detail_text(arguments: Option<String>, result: Option<&str>) -> Option<String> {
     if let Some(raw) = result
         && plakous_host_protocol::refusal::ToolRefusal::decode(raw)
             .is_some_and(|refusal| refusal.has_help())
     {
         return Some(raw.to_owned());
     }
-    let arguments = arguments.map(preview_text).filter(|text| !text.is_empty());
+    let arguments = arguments.filter(|text| !text.is_empty());
     let result = result.map(preview_text).filter(|text| !text.is_empty());
     match (arguments, result) {
         (None, None) => None,
@@ -281,9 +319,6 @@ fn object_text(fields: &serde_json::Map<String, serde_json::Value>) -> String {
     if let Some(content) = string_field(fields, &FILE_CONTENT_KEYS) {
         return content.trim_end().to_owned();
     }
-    if let Some(text) = compact_process_arguments(fields) {
-        return text;
-    }
     // `apply_patch { patch }` reads as the patch itself (§5.2 Edit rows).
     if let Some(patch) = string_field(fields, &PATCH_KEYS) {
         return patch.trim_end().to_owned();
@@ -309,9 +344,7 @@ fn object_text(fields: &serde_json::Map<String, serde_json::Value>) -> String {
 }
 
 // Retain process input/mode facts, not cursor or output-budget metadata.
-fn compact_process_arguments(
-    fields: &serde_json::Map<String, serde_json::Value>,
-) -> Option<String> {
+fn compact_process_arguments(fields: &serde_json::Map<String, serde_json::Value>) -> String {
     const IDS: &[&str] = &[
         "session_id",
         "bash_id",
@@ -323,20 +356,12 @@ fn compact_process_arguments(
         "task_ids",
     ];
     const CONTROLS: &[&str] = &["input", "chars", "yield_time_ms", "timeout_ms", "block"];
-    let process = (fields.len() == 1 && IDS.iter().any(|key| fields.contains_key(*key)))
-        || fields.contains_key("session_id")
-        || fields.contains_key("bash_id")
-        || (IDS.iter().any(|key| fields.contains_key(*key))
-            && CONTROLS.iter().any(|key| fields.contains_key(*key)));
-    if !process {
-        return None;
-    }
     let compact: serde_json::Map<_, _> = fields
         .iter()
         .filter(|(key, _)| IDS.contains(&key.as_str()) || CONTROLS.contains(&key.as_str()))
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
-    Some(serde_json::Value::Object(compact).to_string())
+    serde_json::Value::Object(compact).to_string()
 }
 
 /// Object keys that carry an `apply_patch` body.

@@ -655,9 +655,13 @@ fn compact_process_details_have_expanded_frame_goldens() {
             "sent interrupt",
         ),
     ] {
-        let detail =
-            plakous_hosted::activity::tool_detail_text(Some(arguments), Some("process output"))
-                .unwrap();
+        let detail = plakous_hosted::activity::tool_detail_text_for(
+            name,
+            None,
+            Some(arguments),
+            Some("process output"),
+        )
+        .unwrap();
         assert!(!detail.contains("cursor"));
         assert!(!detail.contains("max_output_bytes"));
         let mut row = tool_item("control", name);

@@ -1,6 +1,49 @@
 use super::*;
 
 #[test]
+fn review4_probe_compact_process_detail_keeps_non_process_facts() {
+    for arguments in [
+        r#"{"session_id":"abc","query":"find the bug"}"#,
+        r#"{"id":"42","timeout_ms":3000,"url":"https://example.test/read"}"#,
+    ] {
+        let detail = tool_detail_text_for("mcp__search__query", None, Some(arguments), None)
+            .expect("MCP detail");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&detail).expect("rendered JSON"),
+            serde_json::from_str::<serde_json::Value>(arguments).expect("argument JSON")
+        );
+        assert_eq!(
+            tool_detail_text(Some(arguments), None).expect("generic detail"),
+            detail
+        );
+    }
+    assert_eq!(
+        tool_detail_text(Some(r#"{"task_id":"t-9"}"#), None).as_deref(),
+        Some("t-9")
+    );
+    let result = r#"{"session_id":1,"status":"exited","exit_code":3}"#;
+    let detail = tool_detail_text_for("process_session_poll", None, None, Some(result))
+        .expect("process result");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&detail).expect("rendered JSON"),
+        serde_json::from_str::<serde_json::Value>(result).expect("result JSON")
+    );
+    let detail = tool_detail_text_for(
+        "process_session_write",
+        None,
+        Some(r#"{"session_id":1,"input":"\u0003","max_output_bytes":4096}"#),
+        Some(result),
+    )
+    .expect("combined detail");
+    assert!(detail.starts_with(r#"{"input":"\u0003","session_id":1}"#));
+    assert!(
+        detail.contains("status") && detail.contains("exited") && detail.contains("exit_code"),
+        "{detail}"
+    );
+    assert!(!detail.contains("max_output_bytes"));
+}
+
+#[test]
 fn shell_results_render_as_command_output_and_status() {
     let detail = tool_detail_text(
         Some(r#"{"command":"cargo test"}"#),

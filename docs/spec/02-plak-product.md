@@ -5962,6 +5962,9 @@ Process control arguments retain their structured input and polling mode in
 one compact JSON line, omitting cursor and output-budget metadata, rather than
 being reduced to a patch body or wait-only line, so
 live, completed and reconstructed rows classify identically.
+Compaction requires the tool's process-route identity and applies only to
+arguments. Result previews and non-process tools retain their normal detail
+projection; id-shaped fields alone never authorize dropping other facts.
 The same host-protocol function supplies live labels and row operations,
 including exposed-route defaults. Only a decoded argument object supplies
 facts: scalar detail and result text do not imply a default read.

@@ -44,7 +44,9 @@ fn sdk_uses_a_generic_tool_row_with_safely_fenced_code_and_output() {
         crate::activity::tool_activity_kind("run_py"),
         plakous_host_protocol::views::presentation::ActivityKind::Tool
     );
-    let detail = super::completed_tool_detail(started.detail.as_deref(), Some("finished")).unwrap();
+    let detail =
+        super::completed_tool_detail("run_py", None, started.detail.as_deref(), Some("finished"))
+            .unwrap();
     assert!(
         detail.contains("````python\nprint('```')\n````"),
         "{detail}"

@@ -49,8 +49,12 @@ pub(crate) fn projected_tool_row(
         exposed,
         CanonicalToolText {
             subject: projected_tool_subject(canonical, arguments),
-            detail: arguments
-                .and_then(|arguments| crate::activity::tool_detail_text(Some(arguments), None)),
+            detail: crate::activity::tool_detail_text_for(
+                canonical,
+                Some(exposed),
+                arguments,
+                None,
+            ),
             wait: wait_started(canonical, None, args.as_ref()),
         },
     )
@@ -63,7 +67,12 @@ pub(crate) fn settle_tool_row(
     wait_ids: Option<&[String]>,
 ) {
     tool.state = completed_tool_state(&tool.name, Some((succeeded, preview)));
-    if let Some(detail) = completed_tool_detail(tool.detail.as_deref(), Some(preview)) {
+    if let Some(detail) = completed_tool_detail(
+        &tool.name,
+        tool.exposed_name.as_deref(),
+        tool.detail.as_deref(),
+        Some(preview),
+    ) {
         tool.detail = Some(detail);
     }
     let value = serde_json::from_str::<serde_json::Value>(preview).ok();
