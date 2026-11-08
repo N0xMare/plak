@@ -161,12 +161,32 @@ fn host_install_generated_command_serves_from_home_with_a_fake_manager() -> Test
         Command::new(&argv[0])
             .args(&argv[1..])
             .current_dir(&fixture.home)
+            .env("UNRELATED_SECRET", "must-not-be-copied")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(std::fs::File::create(&log)?),
     );
     wait_host_log(&log, &mut child, "plak host: serving on ")?;
     wait_host_log(&fixture.log, &mut child, "--user\nis-system-running\n")?;
+    assert!(!std::fs::read_to_string(&fixture.log)?.contains("UNRELATED_SECRET"));
+    // Finish the deferred start before testing stop, so teardown cannot race
+    // a daemon that has not published its pid and socket yet.
+    let daemon = fixture.product.join(format!(
+        "host/runner/v{}/run/runner.sock",
+        plakous::runner::protocol::PROTOCOL_VERSION
+    ));
+    let until = std::time::Instant::now() + super::offline_support::WAIT;
+    while std::os::unix::net::UnixStream::connect(&daemon).is_err() {
+        assert!(
+            std::time::Instant::now() < until,
+            "daemon did not become ready"
+        );
+        assert!(
+            child.try_wait()?.is_none(),
+            "host exited before daemon readiness"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     let pid = rustix::process::Pid::from_raw(i32::try_from(child.id())?).ok_or("invalid pid")?;
     rustix::process::kill_process(pid, rustix::process::Signal::USR1)?;
     wait_host_log(&log, &mut child, "plak host: UI build reloaded")?;
