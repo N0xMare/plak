@@ -127,11 +127,20 @@ async fn stop(
             ))
         })
     };
+    release_after_settlement(roots, head, stopped).await
+}
+
+pub(super) async fn release_after_settlement(
+    roots: &ProductStateRoots,
+    head: LeaseOnlyHead,
+    stopped: CliResult<()>,
+) -> CliResult<()> {
+    // A pass that skipped this lease must be fenced before it can be released.
+    let retained = stopped.is_err() && roots.failed_runner_stop_settlement();
     let released = head
         .release()
         .await
         .map_err(|error| CliFailure::new(error.to_string()));
-    let retained = stopped.is_err() && roots.failed_runner_stop_settlement();
     released?;
     if let Err(error) = stopped {
         if !retained {

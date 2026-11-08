@@ -48,17 +48,16 @@ impl Recorded {
     }
 
     fn ready(&self) {
+        self.registry.ready_local(self.catalog(), 1).unwrap();
+        assert!(!self.roots.runner_pending());
+    }
+
+    fn catalog(&self) -> Arc<WorkspaceCatalog> {
         let workspace = self.root.path().join("ready-workspace");
         let protected = self.root.path().join("protected");
         std::fs::create_dir_all(&workspace).unwrap();
         std::fs::create_dir_all(&protected).unwrap();
-        self.registry
-            .ready_local(
-                Arc::new(WorkspaceCatalog::local(&workspace, &[], &protected).unwrap()),
-                1,
-            )
-            .unwrap();
-        assert!(!self.roots.runner_pending());
+        Arc::new(WorkspaceCatalog::local(&workspace, &[], &protected).unwrap())
     }
 
     fn hold(&self) -> LeaseOnlyHead {
@@ -110,6 +109,82 @@ impl Recorded {
             .commit_projection_views(&self.lost.id, &ViewWrites::between(&from, &to), &to.state)
             .unwrap();
     }
+}
+
+struct PausedProbe {
+    runtime: tokio::runtime::Runtime,
+    registry: RunnerRegistry,
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+    release: Arc<tokio::sync::Semaphore>,
+}
+
+impl PausedProbe {
+    fn new(case: &Recorded) -> Self {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let registry = case.registry.clone();
+        registry.run_probes_on(runtime.handle().clone());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let release = Arc::new(tokio::sync::Semaphore::new(0));
+        registry.probe_with(Arc::new({
+            let (calls, release, catalog) = (calls.clone(), release.clone(), case.catalog());
+            move |registry, _| {
+                let (calls, release, catalog) = (calls.clone(), release.clone(), catalog.clone());
+                Box::pin(async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    release.acquire().await.unwrap().forget();
+                    registry.ready_local(catalog, 1)
+                })
+            }
+        }));
+        registry.reconcile_when_available("local");
+        runtime.block_on(probe_until(|| calls.load(Ordering::SeqCst) == 1));
+        Self {
+            runtime,
+            registry,
+            calls,
+            release,
+        }
+    }
+
+    fn require_fresh_pass(&self) {
+        use std::sync::atomic::Ordering::SeqCst;
+        self.runtime.block_on(async {
+            self.release.add_permits(1);
+            probe_until(|| {
+                self.calls.load(SeqCst) == 2
+                    || self.registry.rows()[0].status == plakous::runner::RunnerStatus::Ready
+            })
+            .await;
+            assert_eq!(
+                self.calls.load(SeqCst),
+                2,
+                "stale pass published Ready over repaired or failed stop debt"
+            );
+            assert!(self.registry.services("local").is_err());
+        });
+    }
+
+    fn settle(&self) {
+        self.runtime.block_on(async {
+            self.release.add_permits(1);
+            probe_until(|| self.registry.rows()[0].status == plakous::runner::RunnerStatus::Ready)
+                .await;
+        });
+    }
+}
+
+async fn probe_until(predicate: impl Fn() -> bool) {
+    for _ in 0..10000 {
+        if predicate() {
+            return;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert!(predicate(), "probe did not reach its deterministic barrier");
 }
 
 struct CutAfterRootStop {
@@ -199,6 +274,7 @@ fn a_recorded_stop_cut_repairs_descendants_without_taking_the_head() {
         [] as [(String, String); 0]
     );
     let held = case.hold();
+    let probe = PausedProbe::new(&case);
     super::super::stop_dormant_session(&case.roots, &cut, &mut record)
         .block()
         .unwrap();
@@ -209,6 +285,36 @@ fn a_recorded_stop_cut_repairs_descendants_without_taking_the_head() {
         "pending acknowledgement lost descendant stop debt"
     );
     held.release().block().unwrap();
+    probe.require_fresh_pass();
+    probe.settle();
+}
+
+#[test]
+fn a_failed_settlement_fences_a_skipping_pass_before_releasing_its_head() {
+    use std::future::Future as _;
+    let case = Recorded::new();
+    case.ready();
+    let head = case.hold();
+    let probe = PausedProbe::new(&case);
+    let db = rusqlite::Connection::open(case.roots.runtime_database()).unwrap();
+    db.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let mut releasing = Box::pin(super::super::dormant_stop::release_after_settlement(
+        &case.roots,
+        head,
+        Err(crate::error::CliFailure::new("injected failed settlement")),
+    ));
+    probe.runtime.block_on(std::future::poll_fn(|cx| {
+        assert!(
+            releasing.as_mut().poll(cx).is_pending(),
+            "release did not wait for the store lock"
+        );
+        std::task::Poll::Ready(())
+    }));
+    // Release is still blocked: a skipping pass must already require a successor.
+    probe.require_fresh_pass();
+    db.execute_batch("COMMIT").unwrap();
+    probe.runtime.block_on(releasing).unwrap();
+    probe.settle();
 }
 
 #[test]

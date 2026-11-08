@@ -1336,10 +1336,14 @@ the already-recorded cancellation remains pending without changing its revision.
 Review cases also require refusal after a later accepted submission, on a Ready
 runner with a held head, and for a non-ownership open failure. A post-root-commit,
 pre-descendant-save injected failure cut followed by a head-held retry must repair
-descendant-stop rows. The real reconciliation callback must keep Ready closed
-when its readoption skipped this process's stop lease, then settle on a later
-pass after release. The review mutant driver reseeds each of these decisions;
-build failures and empty selections are not mutant kills.
+descendant-stop rows and invalidate a paused in-flight probe before a fresh pass
+can publish Ready. A failed Held-path settlement must fence before releasing its
+lease; a store-locked release and a paused skipping pass pin that ordering. A
+resident runtime with a recorded Stopped intent remains open across reconnect:
+its ownership must not block Ready for unrelated sessions. The removed held-debt
+guard is a passing no-op-equivalence check, not a mutant kill. The review driver
+reseeds the head-free repair, fresh descendant-debt fence and release-ordering
+decisions; build failures and empty selections are not mutant kills.
 Neither an attachment nor a paid continuation is created by a stop.
 
 Host serving is not a runner-readiness barrier. Daemon recovery fixtures use

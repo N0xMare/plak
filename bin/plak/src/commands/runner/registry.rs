@@ -321,7 +321,7 @@ mod tests {
             path
         });
         std::fs::write(paths.home().join("config.toml"), "[runners.alpha]\nssh='fixture'\ncommand='/bin/false'\n[runners.beta]\nssh='fixture'\ncommand='/bin/false'\n[runners.gamma]\nssh='fixture'\ncommand='/bin/false'\n").unwrap();
-        let machine = plakous::runner::machine_id().unwrap();
+        let machine = "fixture-machine".to_owned();
         for (name, id, root) in [
             ("alpha", "runner", &roots[1]),
             ("beta", "runner", &roots[0]),
@@ -343,8 +343,8 @@ mod tests {
             )
             .unwrap();
         }
-        let services =
-            Services::for_home(paths.clone()).with_runner_overlap(overlap_guard(&paths).unwrap());
+        let services = Services::for_home(paths.clone())
+            .with_runner_overlap(MachineOverlapGuard::new(Some(machine.clone()), []));
         let config = crate::product_config::ProductConfig::load(&paths).unwrap();
         let remote = Remote {
             id: "runner".into(),

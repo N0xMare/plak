@@ -110,7 +110,7 @@ async fn line_runner(
 }
 
 #[tokio::test]
-async fn a_held_local_stop_debt_prevents_ready_until_a_later_sweep_settles_it() {
+async fn a_resident_stopped_line_reopens_ready_while_its_runtime_stays_open() {
     use plakous_hosted::sessions::projector::{RootInterrupt, RootLossIntent, RootStopAnchor};
     use plakous_offline_crash_harness::protocol::CrashBoundary;
     use plakous_offline_crash_harness::{BoundaryController, runtime_binding};
@@ -137,7 +137,6 @@ async fn a_held_local_stop_debt_prevents_ready_until_a_later_sweep_settles_it() 
         panic!("not created")
     };
     let locator = session.locator();
-    session.release().await.unwrap();
     let mut record = crate::store::sessions::SessionRecord::new(workspace.clone());
     record.bind_plakous_locator(locator).unwrap();
     let records = services.session_records().unwrap();
@@ -154,10 +153,6 @@ async fn a_held_local_stop_debt_prevents_ready_until_a_later_sweep_settles_it() 
         )
         .unwrap();
     let line = sessions.line_head_of(locator).await.unwrap().line();
-    let held = sessions
-        .open_lease_only(&SessionOperationId::new("plak:stop:held").unwrap(), line)
-        .await
-        .unwrap();
     let stops = Arc::new(AtomicUsize::new(0));
     let client = line_runner(&workspace, line, stops.clone()).await;
     let catalog = Arc::new(WorkspaceCatalog::local(&workspace, &[], paths.home()).unwrap());
@@ -166,6 +161,7 @@ async fn a_held_local_stop_debt_prevents_ready_until_a_later_sweep_settles_it() 
         runner_id: "local".into(),
         names: vec!["local".into()],
     });
+    registry.ready_local(catalog.clone(), 1).unwrap();
     registry.require_connection("local", true);
     registry.run_probes_on(tokio::runtime::Handle::current());
     registry.probe_with(Arc::new({
@@ -182,12 +178,13 @@ async fn a_held_local_stop_debt_prevents_ready_until_a_later_sweep_settles_it() 
             })
         }
     }));
-    assert_ne!(
+    assert_eq!(
         registry.refresh(None).await.unwrap()[0].status,
         plakous::runner::RunnerStatus::Ready
     );
     assert_eq!(stops.load(Ordering::SeqCst), 0);
-    held.release().await.unwrap();
+    session.release().await.unwrap();
+    registry.reconcile_when_available("local");
     assert_eq!(
         registry.refresh(None).await.unwrap()[0].status,
         plakous::runner::RunnerStatus::Ready

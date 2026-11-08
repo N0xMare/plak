@@ -5979,10 +5979,11 @@ of which process owns a lease. An attempted settlement that fails always fences
 readiness and requests a fresh pass, even for an old intent on a Ready runner.
 New descendant debt repaired after a crash also requires a fresh pass; unchanged
 acknowledgements merely continue existing recovery. No per-line acknowledgement
-cache is retained. A sweep that skipped stop debt held in this process (or whose
-foreign holder cannot be proved) must retry rather than publish Ready. A proven
-foreign holder remains isolated from unrelated placement readiness. Stop intent,
-runner protocol and binding encodings are unchanged.
+cache is retained. A failed Held-path settlement fences the runner before releasing
+its lease: a concurrent pass that skipped that lease cannot reopen readiness in
+between. Resident and topology runtimes remain live owners of their own stop
+settlement; a reconnect pass may skip their held lines without blocking unrelated
+placement readiness. Stop intent, runner protocol and binding encodings are unchanged.
 
 - **Frames.** A big-endian `u32` length, then one JSON value. Neither end
   reads or writes a frame over 16 MiB; an answer that would exceed it is
