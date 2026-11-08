@@ -292,8 +292,35 @@ fn assert_headroom_result(result: &TurnResult, store: &TestCreateStore) -> TestR
 }
 
 #[tokio::test]
+#[ignore = "long-turn evidence: just soak (also run by just full)"]
 async fn ledger_retirement_5000_direct_batch_calls() -> TestResult {
     direct_batch_case(100, 50, None).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn ledger_retirement_low_threshold_direct_batches() -> TestResult {
+    if std::env::var_os("PLAK_TEST_LEDGER_BATCH_CHILD").is_none() {
+        let name = concat!(
+            module_path!(),
+            "::ledger_retirement_low_threshold_direct_batches"
+        )
+        .strip_prefix("plakous_agent::")
+        .ok_or("test name")?;
+        let output = std::process::Command::new(std::env::current_exe()?)
+            .args(["--exact", name, "--nocapture"])
+            .env("PLAK_TEST_LEDGER_BATCH_CHILD", "1")
+            .env("PLAK_TEST_LEDGER_RETIREMENT_HIGH_WATER", "16")
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return Ok(());
+    }
+    direct_batch_case(6, 6, None).await?;
     Ok(())
 }
 

@@ -11,12 +11,205 @@ pub(super) struct Commit {
     pub label: String,
     pub tables: Vec<String>,
     pub indexed: bool,
+    pub classes: Vec<String>,
+    pub retired: u64,
 }
 
 impl Commit {
     pub fn signature(&self) -> String {
         format!("{}:{}:{:?}", self.store, self.label, self.tables)
     }
+}
+
+/// Child and parent connections may interleave under the same store kind.
+/// Coverage must agree between twins, not metadata at each merged ordinal.
+pub(super) fn metadata_coverage(
+    commits: &[Commit],
+) -> std::collections::BTreeMap<
+    String,
+    (
+        std::collections::BTreeSet<String>,
+        std::collections::BTreeSet<u64>,
+    ),
+> {
+    let mut coverage = std::collections::BTreeMap::<
+        String,
+        (
+            std::collections::BTreeSet<String>,
+            std::collections::BTreeSet<u64>,
+        ),
+    >::new();
+    for commit in commits {
+        let (classes, counters) = coverage.entry(commit.store.clone()).or_default();
+        classes.extend(commit.classes.iter().cloned());
+        counters.insert(commit.retired);
+    }
+    coverage
+}
+
+#[test]
+fn twin_metadata_allows_interleaving_but_refuses_missing_classes() {
+    let pilot = (0..2)
+        .map(|index| Commit {
+            ordinal: index,
+            store: "runtime".into(),
+            store_index: index,
+            store_ordinal: index,
+            label: "commit".into(),
+            tables: Vec::new(),
+            indexed: true,
+            classes: vec![format!("change:{index}")],
+            retired: index,
+        })
+        .collect::<Vec<_>>();
+    let mut reordered = pilot.clone();
+    reordered.reverse();
+    assert_eq!(metadata_coverage(&pilot), metadata_coverage(&reordered));
+    reordered[0].classes.clear();
+    assert_ne!(metadata_coverage(&pilot), metadata_coverage(&reordered));
+}
+
+/// Cover every SQL publication, changed operation/state and retained anchor
+/// class seen in the twin pilot. Retirement witnesses also cover anchors at
+/// the actual counter increase, with neighbouring runtime publications cut.
+pub(super) fn representative_cuts(pilot: &[Commit]) -> Vec<usize> {
+    use std::collections::{BTreeMap, BTreeSet};
+    let mut previous = BTreeMap::new();
+    let mut retirements = BTreeSet::new();
+    let facts = pilot
+        .iter()
+        .enumerate()
+        .map(|(index, commit)| {
+            let mut classes = commit.classes.iter().cloned().collect::<BTreeSet<_>>();
+            classes.insert(format!(
+                "sql:{}:{}:{:?}",
+                commit.store, commit.label, commit.tables
+            ));
+            if commit.store == "runtime" && commit.label == "commit" {
+                let prior = previous
+                    .insert(commit.store.as_str(), commit.retired)
+                    .unwrap_or(0);
+                if commit.retired > prior {
+                    retirements.insert(index);
+                    classes.insert("retirement".into());
+                    classes.insert(
+                        if prior == 0 {
+                            "counter:starts"
+                        } else {
+                            "counter:increases"
+                        }
+                        .into(),
+                    );
+                    classes.extend(
+                        commit
+                            .classes
+                            .iter()
+                            .filter(|class| class.starts_with("anchor:"))
+                            .map(|class| format!("retirement:{class}")),
+                    );
+                }
+            }
+            classes
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        !retirements.is_empty(),
+        "retirement pilot did not retire evidence"
+    );
+    let mut uncovered = facts.iter().flatten().cloned().collect::<BTreeSet<_>>();
+    let mut selected = BTreeSet::new();
+    while !uncovered.is_empty() {
+        let index = facts
+            .iter()
+            .enumerate()
+            .max_by_key(|(index, classes)| {
+                (
+                    classes.intersection(&uncovered).count(),
+                    std::cmp::Reverse(*index),
+                )
+            })
+            .expect("nonempty pilot")
+            .0;
+        assert!(selected.insert(index), "uncovered publication class");
+        uncovered.retain(|class| !facts[index].contains(class));
+    }
+    for index in selected.clone().intersection(&retirements) {
+        if let Some(before) = (0..*index)
+            .rev()
+            .find(|other| pilot[*other].store == "runtime")
+        {
+            selected.insert(before);
+        }
+        if let Some(after) =
+            (*index + 1..pilot.len()).find(|other| pilot[*other].store == "runtime")
+        {
+            selected.insert(after);
+        }
+    }
+    for store in pilot
+        .iter()
+        .map(|commit| commit.store.as_str())
+        .collect::<BTreeSet<_>>()
+    {
+        selected.insert(
+            pilot
+                .iter()
+                .position(|commit| commit.store == store)
+                .expect("store start"),
+        );
+        selected.insert(
+            pilot
+                .iter()
+                .rposition(|commit| commit.store == store)
+                .expect("store end"),
+        );
+    }
+    assert!(
+        selected.len() <= 40,
+        "representative retirement cuts exceeded the bounded budget: {}",
+        selected.len()
+    );
+    selected.into_iter().collect()
+}
+
+#[test]
+fn representative_retirement_cuts_cover_classes_and_adjacent_publications() {
+    let pilot = (0..100)
+        .map(|index| Commit {
+            ordinal: index,
+            store: "runtime".into(),
+            store_index: index,
+            store_ordinal: index,
+            label: "commit".into(),
+            tables: vec!["heads".into()],
+            indexed: true,
+            classes: vec![
+                format!("change:{}", index % 5),
+                format!("anchor:{}", index % 3),
+            ]
+            .into_iter()
+            .chain((index >= 75).then(|| "anchor:late".into()))
+            .collect(),
+            retired: u64::from(index >= 50) + u64::from(index >= 80),
+        })
+        .collect::<Vec<_>>();
+    let selected = representative_cuts(&pilot);
+    let classes = selected
+        .iter()
+        .flat_map(|index| pilot[*index].classes.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        classes,
+        pilot
+            .iter()
+            .flat_map(|commit| commit.classes.clone())
+            .collect()
+    );
+    for index in [49, 50, 51, 79, 80, 81] {
+        assert!(selected.contains(&index));
+    }
+    assert!(selected.len() < 16);
+    assert_eq!(selected, representative_cuts(&pilot));
 }
 
 /// Only indexed commits advance a lifecycle; lease renewals are not progress.
@@ -41,6 +234,8 @@ fn lease_renewals_and_partial_rows_do_not_advance_lifecycle_progress() {
         label: "provider_outcome".into(),
         tables: Vec::new(),
         indexed: true,
+        classes: Vec::new(),
+        retired: 0,
     };
     let mut body = format!("{}\n", serde_json::to_string(&commit).expect("commit"));
     std::fs::write(&path, &body).expect("trace");
@@ -138,6 +333,8 @@ fn cross_store_interleaving_is_free_but_each_store_prefix_is_exact() {
         label: label.to_owned(),
         tables: Vec::new(),
         indexed: true,
+        classes: Vec::new(),
+        retired: 0,
     };
     let runtime = commit("runtime", 1, "commit");
     let product = commit("product", 2, "unlabelled");
@@ -165,6 +362,8 @@ fn unlabelled_table_changes_diverge_between_twin_pilots() {
         label: "unlabelled".to_owned(),
         tables: vec!["sessions".to_owned()],
         indexed: true,
+        classes: Vec::new(),
+        retired: 0,
     };
     let mut second = first.clone();
     second.tables = vec!["submissions".to_owned()];
@@ -181,6 +380,8 @@ fn a_cut_checks_each_store_tables_without_requiring_equal_progress() {
         label: "commit".to_owned(),
         tables: Vec::new(),
         indexed: true,
+        classes: Vec::new(),
+        retired: 0,
     };
     let mut unrelated = target.clone();
     unrelated.store = "product".to_owned();

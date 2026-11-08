@@ -458,11 +458,13 @@ fn assert_samples(probe: &SamplingProbe, agent: &Agent, cells: usize) -> TestRes
 }
 
 #[tokio::test]
+#[ignore = "long-turn evidence: just soak (also run by just full)"]
 async fn ledger_retirement_5000_real_leaf_calls_in_closed_cells_memory() -> TestResult {
     closed_cells_case(false, CELLS).await
 }
 
 #[tokio::test]
+#[ignore = "long-turn evidence: just soak (also run by just full)"]
 async fn ledger_retirement_5000_real_leaf_calls_in_closed_cells_sqlite() -> TestResult {
     closed_cells_case(true, CELLS).await
 }

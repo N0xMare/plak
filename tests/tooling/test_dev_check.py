@@ -768,9 +768,16 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
                 'nextest',
                 'nextest',
                 'nextest',
+                'nextest',
+                'nextest',
             ],
         )
         docs = [c for c in calls if c['args'][0] == 'doc']
+        soaks = [c for c in calls if '--run-ignored' in c['args']]
+        self.assertEqual(len(soaks), 2)
+        self.assertEqual(
+            soaks[0]['args'][-4:], ['--run-ignored', 'only', '-E', 'test(ledger_retirement_5000_)']
+        )
         self.assertTrue(all(doc['rustdocflags'] == '-D warnings' for doc in docs))
         for flag in ('--workspace', '--no-deps', '--all-features', '--locked'):
             self.assertIn(flag, docs[0]['args'])
@@ -1089,13 +1096,15 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertNotIn('clippy:packages', result.stdout)
         self.assertFalse(any(call['args'][0] == 'clippy' for call in calls))
 
-    def test_full_equals_every_group_in_canonical_order(self):
+    def test_full_adds_only_the_ignored_soak_to_every_group(self):
         full, full_calls, full_scripts = self.run_gate('--full')
         self.log.unlink()
         steps, step_calls, step_scripts = self.run_gate('--steps', ','.join(reversed(GROUPS)))
         self.assertEqual(full.returncode, 0, full.stderr)
         self.assertEqual(steps.returncode, 0, steps.stderr)
-        self.assertEqual(full_calls, step_calls)
+        soaks = [call for call in full_calls if '--run-ignored' in call['args']]
+        self.assertEqual(len(soaks), 2)
+        self.assertEqual([call for call in full_calls if call not in soaks], step_calls)
         self.assertEqual(full_scripts, step_scripts)
         headings = [line for line in full.stdout.splitlines() if line.startswith('== group:')]
         self.assertEqual(headings, [f'== group: {group} ==' for group in GROUPS])
@@ -1105,7 +1114,24 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.profiles(calls), ['serial'])
         self.assertIn('--test-threads=1', self.lanes(calls)[0]['args'])
+        self.assertNotIn('--run-ignored', self.lanes(calls)[0]['args'])
         self.assertEqual([c['args'][0] for c in calls if c['args'][0] != 'nextest'], ['test'])
+
+    def test_soak_runs_only_ignored_long_turn_evidence_with_real_workers(self):
+        result, calls, _ = self.run_gate('--soak')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.profiles(calls), ['serial', 'durability'])
+        self.assertEqual(
+            self.lanes(calls)[0]['args'][-4:],
+            ['--run-ignored', 'only', '-E', 'test(ledger_retirement_5000_)'],
+        )
+        self.assertEqual(
+            self.lanes(calls)[1]['args'][-4:],
+            ['--run-ignored', 'only', '-E', 'test(soak_ledger_retirement_)'],
+        )
+        self.assertEqual(
+            [call['args'][0] for call in calls if call['args'][0] != 'nextest'], ['test']
+        )
 
     def test_bad_step_groups_fail_before_builds(self):
         for groups in ('', 'static,typo', ',static', 'static,'):

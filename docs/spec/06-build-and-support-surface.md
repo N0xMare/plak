@@ -2030,6 +2030,10 @@ batch gate on the tree being installed.
 A release candidate or publication runs `just full` on both supported
 platforms, `just musl native` and `just musl container`, the full strict crash
 sweep, and the publish dry run.
+The full tier also runs the ignored 5,000-call and full indexed retirement
+soaks after its routine serial and durability tests. `just soak` selects that long evidence alone; ordinary check,
+platform and explicit serial groups keep the small retirement fixtures and
+exclude the soak (spec 05 §2.3).
 
 This does not weaken release requirements, nor claim that an unprotected branch
 is suitable for public collaboration. The desired remote settings are:

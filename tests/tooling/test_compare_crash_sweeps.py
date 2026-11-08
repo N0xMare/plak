@@ -32,6 +32,8 @@ def row(state="prepared", outcome="ABANDONED", repeat=1):
                 "ordinal": 1,
                 "label": "prepare",
                 "tables": [],
+                "classes": [],
+                "retired": 0,
             },
             {
                 "store": "product",
@@ -39,6 +41,8 @@ def row(state="prepared", outcome="ABANDONED", repeat=1):
                 "ordinal": 2,
                 "label": "projection",
                 "tables": ["sessions"],
+                "classes": [],
+                "retired": 0,
             },
         ],
     }
@@ -101,10 +105,26 @@ class CompareCrashSweepsTests(unittest.TestCase):
         del base["global_order"]
         self.assertEqual(COMPARE.compare([base], [base])["counts"]["matching"], 1)
 
+    def test_changed_publication_classes_or_counter_are_not_comparable(self):
+        for name, value in [("classes", ["change:effect:dispatched"]), ("retired", 1)]:
+            base = row()
+            tip = copy.deepcopy(base)
+            tip["global_order"][0][name] = value
+            report = COMPARE.compare([base], [tip])
+            self.assertFalse(report["matching"])
+            self.assertEqual(report["counts"]["floating"], 2)
+
     def test_bad_tip_rows_regress_even_with_different_or_missing_inputs(self):
         extra_commit = row(outcome="UNCLASSIFIED")
         extra_commit["global_order"].append(
-            {"store": "tree", "store_ordinal": 1, "label": "cursor", "tables": []}
+            {
+                "store": "tree",
+                "store_ordinal": 1,
+                "label": "cursor",
+                "tables": [],
+                "classes": [],
+                "retired": 0,
+            }
         )
         extra_commit["invariants"] = False
         pilot = dict(row(outcome="DIVERGENT"), store="pilot", store_ordinal=0)

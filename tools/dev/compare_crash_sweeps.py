@@ -30,12 +30,17 @@ def inputs(row):
     result = {}
     if row.get("global_order"):
         stores = defaultdict(list)
+        classes, counters = defaultdict(set), defaultdict(set)
         for commit in row["global_order"]:
             if commit.get("indexed", True):
                 stores[commit["store"]].append(
                     (commit["store_ordinal"], commit["label"], commit["tables"])
                 )
+                classes[commit["store"]].update(commit["classes"])
+                counters[commit["store"]].add(commit["retired"])
         result["prefix"] = {store: sorted(commits) for store, commits in stores.items()}
+        result["classes"] = {store: sorted(values) for store, values in classes.items()}
+        result["counters"] = {store: sorted(values) for store, values in counters.items()}
     before = row.get("before", {})
     if "ledger" in before:
         # Ledger facts use stable operation ordinals, kinds and states, not UUIDs.

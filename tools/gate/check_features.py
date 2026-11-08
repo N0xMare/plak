@@ -662,6 +662,8 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES = {
     # but the scripted factory belongs to the hosted test kit.
     ("plak", "test-hooks", "plakous-hosted/test-support"),
     ("plak", "test-hooks", "plakous-recursive-subagents-store/commit-trace"),
+    # Content-free checkpoint classes are a repository-only tracing seam.
+    ("plakous-store", "commit-trace", "plakous-agent/test-hooks"),
     (
         "plakous-recursive-subagents-store",
         "commit-trace",
@@ -729,7 +731,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-prompts": "b5355c6de6d0cc0d848eb5626b2bc7fb264d02ab34faa036453f8e3c2fa0f17d",
     "plakous-openrouter": "fc202257b7a1b3d0586e9d0df778bd1d578c8a6d06d6818e3d5feecc5961246c",
     "plakous-responses": "f565ee25c2e3227c43b269500077732e3fe06c06776e0e3610db0f508249a5ad",
-    "plakous-store": "6e755d259a663f5657443cd5c9f940f93e52fe7437f3f40d7047ba48ff5b526e",
+    "plakous-store": "8c3f348c1e31d2ad58af5c9af9a9d6b33e7be3d89a4633c234c48303464d3ee2",
     "plakous-tools": "211807dd473326d2a6d5e0a20824760c590383a0b6bd79d5170fc59d6465bc55",
     "plakous-xai": "4b452bb53d65262dff9cc74e58ac83bb0f89ab6ad2201299eb5a7ed1238b0158",
     "plakous-runner-protocol": "074927a7f911be39d35b2c5f498ead01b23a3d188dc5b7aa8fc1e29eef3fd1e9",

@@ -86,6 +86,8 @@ mod test_hooks;
 /// Without the gate's build, nothing is reported.
 #[cfg(not(feature = "test-hooks"))]
 mod test_hooks {
+    /// Repository tracing observations require the `test-hooks` capability.
+    pub mod commit_classes {}
     pub(crate) fn credential_wait_clear_refused(_: &dyn std::fmt::Debug) {}
 
     pub(crate) const fn working_prune_minimum(production: u64) -> u64 {
@@ -122,6 +124,7 @@ mod usage;
 /// Items in this namespace are deliberately nameable but are not part of the
 /// supported `plakous-agent` compatibility inventory.
 pub mod internal {
+    pub use crate::test_hooks::commit_classes as commit_trace;
     /// Selects a home-local transport without changing the runner binding.
     #[must_use]
     pub fn select_local_daemon(

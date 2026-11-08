@@ -1391,6 +1391,41 @@ membership (`default-filter`), thread count and slow timeout.
 | `serial` | Wall-clock budget tests (§2.3) | The serial lane: `tests-serial`, `just steps tests-serial` |
 | `durability` | Crash matrices and the sqlite SIGKILL campaign (§2.3) | The durability lane: `tests-durability`, `just steps tests-durability` |
 
+The three `ledger_retirement_5000_*` tests are ignored long-turn evidence, not
+routine serial work. `just soak` builds the real workers and selects those
+ignored tests and the four full indexed retirement matrices, with one test
+thread and the normal isolated test environment.
+It runs the 100-cell × 50-leaf fixture against memory and SQLite, plus 5,000
+direct batch calls, at production retirement thresholds. `just full` runs the
+same long evidence after the ordinary serial and durability tests. Check,
+platform, fast and explicit test groups never opt into ignored tests. To qualify long-turn evidence
+on demand, run:
+
+```sh
+just soak
+```
+
+Routine serial evidence keeps the low-threshold closed-cell/reopen fixtures for
+both stores, the small direct-batch fixture, and nested refusal/recovery cases.
+They still exercise retirement, charged headroom refusal and the authenticated
+counter without paying for 5,000 calls on every integration gate. Ignoring the
+large fixtures does not change the three profiles' membership partition; only
+the full tier and the soak recipe pass `--run-ignored only` with the narrow
+`test(ledger_retirement_5000_)` serial filter and
+`test(soak_ledger_retirement_)` durability filter. Other ignored measurements stay
+opt-in.
+
+Routine `durability_ledger_retirement_*` campaigns derive a deterministic set
+cover from twin-pilot publication metadata: every SQL signature, changed
+operation-kind/state class, and retained anchor kind/state and side of P must
+be covered. Anchor classes at authenticated counter increases are covered
+separately; selected retirement cuts include their neighbouring runtime
+publications. Each store's first and last publication is included. A campaign
+refuses a selection over 40 cuts instead of silently dropping coverage, and
+runs its selected cuts on four isolated workers. The ignored
+`soak_ledger_retirement_*` twins retain every indexed cut on one worker. Pilots,
+early relaunches, and the existing anchor/refusal/closure tests remain routine.
+
 Every profile is hermetic: no test in the workspace reaches a network or reads a
 credential. `just check` runs `offline` and `serial`; `just platform` and
 `just full` also run `durability`. All three lanes:
@@ -2064,10 +2099,12 @@ registered shape without cutting, so a change that makes any strict shape's
 per-store commit sequence differ between twins fails in the durability lane.
 The `ledger_retirement_closed_cells`, `ledger_retirement_interrupted_batch`,
 `ledger_retirement_live_child_process` and `ledger_retirement_yielded_cell`
-shapes cut every indexed publication: closed debt, interrupted slots, a parent
+shapes exercise closed debt, interrupted slots, a parent
 with both a live child and process, and a LocatorBound cell spanning rounds
 with delivered children below P. The corresponding
-`crash_sweep::durability_ledger_retirement_*` tests run each campaign separately;
+`crash_sweep::durability_ledger_retirement_*` tests run each bounded campaign separately;
+the ignored `crash_sweep::soak_ledger_retirement_*` tests cut every indexed
+publication on demand and in the full tier;
 `_pilots` and `_early_relaunches` check the special fixtures and initial cuts.
 Their twin pilots compare final operation ids/states and tagged counter bytes,
 alpha-renaming only independently minted root UUIDs after checking their binding.
@@ -3059,8 +3096,11 @@ The current scripted provider emits only local ToolCall blocks; a
 provider-hosted ToolCall final requires an additional output/owner dial.
 
 **Commit trace contract.** The repository-only `plakous-store/commit-trace`
+feature explicitly forwards `plakous-agent/test-hooks` for its read-only,
+content-free checkpoint classification bridge. The classifier is absent from
+default production builds. The
 feature is enabled by the offline-crash harness; `plak/test-hooks` directly
-forwards the tree store's own `commit-trace` feature and carries three pinned
+forwards the tree store's own `commit-trace` feature and carries four pinned
 edges; default and maintainer/release product builds contain no commit tracer.
 Plak's harness dev-dependency also enables runtime-only tracing in test builds
 without `test-hooks`; a sweep must require `cfg(feature="test-hooks")` to trace
@@ -3091,13 +3131,22 @@ WAL commit that writes frames appends and fsyncs exactly one JSON object followe
 by a newline. Frameless commits emit no line and advance no counter:
 
 ```json
-{"ordinal":1,"store":"runtime","store_index":1,"store_ordinal":1,"label":"commit","tables":[],"indexed":true}
+{"ordinal":1,"store":"runtime","store_index":1,"store_ordinal":1,"label":"commit","tables":[],"indexed":true,"classes":[],"retired":0}
 ```
 
 The exact fields are `ordinal` (nonnegative integer), `store` (`runtime`,
 `product`, `tree`), `store_index` (positive integer), `store_ordinal` (nonnegative
 integer), `label` (string), `tables`
-(sorted unique array of table-name strings), and `indexed` (boolean). No row
+(sorted unique array of table-name strings), `indexed` (boolean), `classes`
+(sorted unique content-free publication/anchor class strings), and `retired`
+(the authenticated retired-local-attempt count, zero for non-runtime-commit
+rows). Class metadata names kind/state transitions committed at that exact
+checkpoint and retained anchor classes on either side of P; live jobs are
+named without identities. SQL signatures retain their `(store, label, tables)`
+contract. Retirement twins also compare per-store class and counter-value
+coverage sets: concurrent child/parent connections need not interleave metadata
+at identical merged ordinals. Their final ledger facts and encoded counter must
+still agree. No row
 values, paths, timestamps, connection IDs, prompts or provider data are emitted.
 `store_index` counts all traced framed commits of that store kind across every
 connection in the process, starting at 1. `ordinal` counts **indexed** commits

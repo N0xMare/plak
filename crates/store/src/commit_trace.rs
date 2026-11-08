@@ -33,6 +33,7 @@ static CONNECTION_ID: AtomicU64 = AtomicU64::new(1);
 
 thread_local! {
     static LABEL: Cell<&'static str> = const { Cell::new("unlabelled") };
+    static CLASSES: RefCell<(Vec<String>, u64)> = const { RefCell::new((Vec::new(), 0)) };
     // rusqlite's WAL callback accepts a fn pointer, not a captured closure.
     // SQLite runs commit and WAL callbacks synchronously on the caller's thread.
     static PENDING: RefCell<Option<Pending>> = const { RefCell::new(None) };
@@ -57,6 +58,28 @@ pub fn label(name: &'static str) -> LabelGuard {
         previous: LABEL.replace(name),
         _thread: PhantomData,
     }
+}
+
+pub(crate) struct ClassesGuard((Vec<String>, u64));
+
+impl Drop for ClassesGuard {
+    fn drop(&mut self) {
+        CLASSES.with(|classes| *classes.borrow_mut() = std::mem::take(&mut self.0));
+    }
+}
+
+pub(crate) fn checkpoint_classes(
+    checkpoint: &plakous_agent::internal::CheckpointObjectBundle,
+) -> Result<ClassesGuard, plakous_agent::internal::SessionStoreError> {
+    let facts = if active() {
+        let checkpoint = checkpoint
+            .validated_checkpoint()
+            .map_err(|_| plakous_agent::internal::SessionStoreError::corrupt())?;
+        plakous_agent::internal::commit_trace::checkpoint_commit_classes(&checkpoint)
+    } else {
+        (Vec::new(), 0)
+    };
+    Ok(ClassesGuard(CLASSES.with(|classes| classes.replace(facts))))
 }
 
 /// Releases this thread's frameless commit claim at a completed operation boundary.
@@ -107,6 +130,7 @@ struct Context {
 struct Pending {
     context: Arc<Context>,
     label: &'static str,
+    classes: (Vec<String>, u64),
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -208,6 +232,7 @@ pub fn install(connection: &Connection, store: &'static str) -> rusqlite::Result
             *pending.borrow_mut() = Some(Pending {
                 context: commits.clone(),
                 label: LABEL.get(),
+                classes: CLASSES.with(|classes| classes.borrow().clone()),
             });
         });
         false
@@ -306,6 +331,8 @@ fn committed(wal: &Wal, pages: i32) {
             "label": pending.label,
             "tables": tables,
             "indexed": indexed,
+            "classes": if pending.label == "commit" { &pending.classes.0[..] } else { &[] },
+            "retired": if pending.label == "commit" { pending.classes.1 } else { 0 },
         });
         if serde_json::to_writer(&mut gate.file, &line).is_err()
             || gate.file.write_all(b"\n").is_err()

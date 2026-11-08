@@ -49,21 +49,45 @@ pub(super) fn configure_yielded(fixture: &Fixture) {
     // Closed prefix debt stays below this threshold until the yielded cell's
     // children are below a later P; continuation rounds then force its sweep.
     fixture.set_ledger_retirement_high_water(40);
-    let release = fixture.workspace().join("RETIREMENT_RELEASE");
+    let release = release_file(fixture);
     if release.exists() {
-        std::fs::remove_file(release).unwrap();
+        std::fs::remove_file(&release).unwrap();
     }
     let mut script: Value =
         serde_json::from_slice(&std::fs::read(fixture.script()).unwrap()).unwrap();
     if script["steps"][6]["output"]["cell"].is_null() {
         return;
     }
-    script["steps"][6]["output"]["cell"] = json!(
-        "await tools.exec_command({cmd:'printf delivered'}); await yield_control(); await tools.exec_command({cmd:'n=0; while test ! -f RETIREMENT_RELEASE; do [ $((n += 1)) -le 10000 ] || exit 1; sleep 0.01; done; printf joined',yield_time_ms:10000}); text('closed');"
+    // Forks share the admitted workspace, but release gates belong to each
+    // isolated cut. One replay must never release or reset another's process.
+    let command = format!(
+        "n=0; while test ! -f '{}'; do [ $((n += 1)) -le 10000 ] || exit 1; sleep 0.01; done; printf joined",
+        release.display().to_string().replace('\'', "'\\''")
     );
+    script["steps"][6]["output"]["cell"] = json!(format!(
+        "await tools.exec_command({{cmd:'printf delivered'}}); await yield_control(); await tools.exec_command({{cmd:{},yield_time_ms:10000}}); text('closed');",
+        serde_json::to_string(&command).unwrap()
+    ));
     script["steps"][7]["stream"] = json!([{"gate":{"file":fixture.root.join("delivered-child")}}]);
     script["steps"][21]["gate"] = json!({"file":fixture.root.join("yielded-retired")});
     fixture.write_script(&script);
+}
+
+fn release_file(fixture: &Fixture) -> std::path::PathBuf {
+    fixture.root.join("RETIREMENT_RELEASE")
+}
+
+#[test]
+fn parallel_yielded_cuts_do_not_reset_each_others_release_gate() {
+    let seed = Fixture::new(&yielded_script());
+    let first = seed.fork(&yielded_script());
+    let second = seed.fork(&yielded_script());
+    assert_eq!(first.workspace(), second.workspace());
+    configure_yielded(&first);
+    std::fs::write(release_file(&first), b"").unwrap();
+    configure_yielded(&second);
+    assert!(release_file(&first).exists());
+    assert!(!release_file(&second).exists());
 }
 
 #[test]
@@ -93,7 +117,7 @@ pub(super) fn yielded_lifecycle(
     if provider_dispatches(fixture) >= 22 {
         let frontier = summary::read_live_frontier(fixture);
         if yielded_group_survives_retirement(&frontier.ledger) {
-            std::fs::write(fixture.workspace().join("RETIREMENT_RELEASE"), b"").unwrap();
+            std::fs::write(release_file(fixture), b"").unwrap();
             std::fs::write(fixture.root.join("yielded-retired"), b"").unwrap();
         }
     }

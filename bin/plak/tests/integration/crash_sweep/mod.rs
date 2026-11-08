@@ -51,7 +51,55 @@ fn durability_ledger_retirement_interrupted_batch() {
 }
 
 fn retirement_cuts(shape: &str) {
-    run(&[shape], 1, 1, true, "retirement");
+    run(&[shape], 4, 1, true, "retirement-bounded");
+}
+
+#[test]
+#[ignore = "full indexed retirement evidence: just soak (also run by just full)"]
+fn soak_ledger_retirement_closed_cells() {
+    run(
+        &["ledger_retirement_closed_cells"],
+        1,
+        1,
+        true,
+        "retirement-full",
+    );
+}
+
+#[test]
+#[ignore = "full indexed retirement evidence: just soak (also run by just full)"]
+fn soak_ledger_retirement_interrupted_batch() {
+    run(
+        &["ledger_retirement_interrupted_batch"],
+        1,
+        1,
+        true,
+        "retirement-full",
+    );
+}
+
+#[test]
+#[ignore = "full indexed retirement evidence: just soak (also run by just full)"]
+fn soak_ledger_retirement_live_child_process() {
+    run(
+        &["ledger_retirement_live_child_process"],
+        1,
+        1,
+        true,
+        "retirement-full",
+    );
+}
+
+#[test]
+#[ignore = "full indexed retirement evidence: just soak (also run by just full)"]
+fn soak_ledger_retirement_yielded_cell() {
+    run(
+        &["ledger_retirement_yielded_cell"],
+        1,
+        1,
+        true,
+        "retirement-full",
+    );
 }
 
 #[test]
@@ -235,7 +283,15 @@ fn run(names: &[&str], jobs: usize, repeat: usize, strict: bool, run: &str) {
         };
     std::thread::scope(|scope| {
         for _ in 0..jobs {
-            scope.spawn(|| work_on(&work, &changed, &record, &timed));
+            scope.spawn(|| {
+                work_on(
+                    &work,
+                    &changed,
+                    &record,
+                    &timed,
+                    run == "retirement-bounded",
+                );
+            });
         }
     });
     if let Some(error) = work.into_inner().unwrap().aborted {
@@ -271,6 +327,7 @@ fn work_on<'a>(
     changed: &Condvar,
     record: &(dyn Fn(Value) + Sync),
     timed: &(dyn Fn(&str, &str, usize, Value, std::time::Instant) + Sync),
+    bounded: bool,
 ) {
     loop {
         let task = {
@@ -290,9 +347,9 @@ fn work_on<'a>(
             }
         };
         let begun = std::time::Instant::now();
-        let (follow, aborted) = match task {
+        let completed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match task {
             Task::Prepare { shape, iteration } => {
-                let prepared = prepare(shape, iteration, record);
+                let prepared = prepare(shape, iteration, record, bounded);
                 timed("prepare", shape, iteration, Value::Null, begun);
                 match prepared {
                     Ok(cuts) => (cuts, None),
@@ -311,7 +368,8 @@ fn work_on<'a>(
                 record(row);
                 (Vec::new(), None)
             }
-        };
+        }));
+        let (follow, aborted) = completed.unwrap_or_else(|error| (Vec::new(), Some(error)));
         let mut work = work.lock().unwrap();
         for task in follow.into_iter().rev() {
             work.tasks.push_front(task);
@@ -324,6 +382,35 @@ fn work_on<'a>(
     }
 }
 
+#[test]
+fn a_panicking_task_releases_the_pool_and_preserves_the_failure() {
+    let work = Mutex::new(Work {
+        tasks: VecDeque::from([Task::Prepare {
+            shape: "unknown-task-fixture",
+            iteration: 1,
+        }]),
+        running: 0,
+        aborted: None,
+    });
+    let changed = Condvar::new();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        work_on(
+            &work,
+            &changed,
+            &|_| {},
+            &|_, _, _, _, _| panic!("timing fault"),
+            false,
+        );
+    }));
+    assert!(
+        result.is_ok(),
+        "task panic escaped without settling the pool"
+    );
+    let work = work.into_inner().unwrap();
+    assert_eq!(work.running, 0);
+    assert!(work.aborted.is_some());
+}
+
 /// Sets up one shape and runs its twin pilot, returning its cuts. A divergent
 /// or failed pilot is recorded as the shape's one row; a failed setup ends
 /// the sweep, as a setup the harness cannot build is not a cut finding.
@@ -331,6 +418,7 @@ fn prepare<'a>(
     shape: &'a str,
     iteration: usize,
     record: &(dyn Fn(Value) + Sync),
+    bounded: bool,
 ) -> Result<Vec<Task<'a>>, Box<dyn std::any::Any + Send>> {
     let (seed, session) = std::panic::catch_unwind(|| driver::setup(shape))?;
     let baseline = summary::read_converged(&seed);
@@ -343,6 +431,17 @@ fn prepare<'a>(
             return Ok(Vec::new());
         }
     };
+    let indices = if bounded {
+        let indices = trace::representative_cuts(&pilot);
+        eprintln!(
+            "{shape}: {} representative cuts of {} indexed publications",
+            indices.len(),
+            pilot.len()
+        );
+        indices
+    } else {
+        (0..pilot.len()).collect()
+    };
     let prepared = Arc::new(Prepared {
         shape,
         iteration,
@@ -351,7 +450,8 @@ fn prepare<'a>(
         baseline,
         pilot,
     });
-    Ok((0..prepared.pilot.len())
+    Ok(indices
+        .into_iter()
         .map(|index| Task::Cut {
             prepared: Arc::clone(&prepared),
             index,

@@ -87,9 +87,11 @@ fn trace_json_lines_have_sorted_tables_and_global_and_store_ordinals() -> TestRe
     let lines = lines(root.path())?;
     assert_eq!(lines.len(), 4);
     for (index, line) in lines.iter().enumerate() {
-        assert_eq!(line.as_object().expect("object").len(), 7);
+        assert_eq!(line.as_object().expect("object").len(), 9);
         assert_eq!(line["ordinal"], index + 1);
         assert_eq!(line["indexed"], true);
+        assert_eq!(line["classes"], serde_json::json!([]));
+        assert_eq!(line["retired"], 0);
     }
     assert_eq!(lines[0]["tables"], serde_json::json!(["a", "b"]));
     assert_eq!(lines[0]["label"], "quote\"\\\n");

@@ -58,6 +58,7 @@ fn rollback_releases_only_its_own_pending_commit() -> std::io::Result<()> {
         *pending.borrow_mut() = Some(Pending {
             context: owner.clone(),
             label: "commit",
+            classes: (Vec::new(), 0),
         });
     });
     rolled_back(&other);
@@ -116,6 +117,7 @@ fn settlement_guard_releases_frameless_claim_after_unwind() -> std::io::Result<(
             *pending.borrow_mut() = Some(Pending {
                 context: context.clone(),
                 label: "commit",
+                classes: (Vec::new(), 0),
             });
         });
         panic!("test operation unwind");

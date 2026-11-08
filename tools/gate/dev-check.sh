@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Developer gate: check (default), fast iteration, platform, full.
 # Usage: tools/gate/dev-check.sh [--qual-container] [--fast [PACKAGE...] |
-#                            --platform | --full | --steps GROUP[,GROUP...]]
+#                            --platform | --full | --soak | --steps GROUP[,GROUP...]]
 # --steps selects exactly the named groups, in canonical order.
 # --qual-container is passed only by tools/musl/musl-check.sh (spec 06 section 7.5).
 set -euo pipefail
@@ -24,6 +24,7 @@ case "${1:-}" in
   --fast) tier=fast; selection=static,tests-parallel; shift; packages=("$@"); set -- ;;
   --platform) tier=platform; selection=$platform_groups; shift ;;
   --full) tier=full; selection="$(IFS=,; echo "${all_groups[*]}")"; shift ;;
+  --soak) tier=soak; selection=tests-serial,tests-durability; shift ;;
   --steps)
     tier=steps; selection="${2:-}"; shift
     if [[ $# -gt 0 ]]; then shift; fi ;;
@@ -567,10 +568,30 @@ run_group() {
       fi ;;
     tests-serial)
       echo "-- nextest: serial lane (profile serial, wall-clock budgets, one thread) --"
-      run_lane serial --test-threads=1 ;;
+      prepare_tests
+      local serial_status=0
+      if [[ "$tier" != soak ]]; then
+        run_lane serial --test-threads=1 || serial_status=$?
+      fi
+      if [[ "$tier" == full || "$tier" == soak ]]; then
+        echo "-- nextest: long-turn retirement soak (ignored evidence, one thread) --"
+        run_lane serial --test-threads=1 --run-ignored only \
+          -E 'test(ledger_retirement_5000_)' || serial_status=$?
+      fi
+      return "$serial_status" ;;
     tests-durability)
       echo "-- nextest: durability lane (profile durability, crash matrices, one thread) --"
-      run_lane durability --test-threads=1 ;;
+      prepare_tests
+      local durability_status=0
+      if [[ "$tier" != soak ]]; then
+        run_lane durability --test-threads=1 || durability_status=$?
+      fi
+      if [[ "$tier" == full || "$tier" == soak ]]; then
+        echo "-- nextest: full indexed retirement soak (ignored evidence, one thread) --"
+        run_lane durability --test-threads=1 --run-ignored only \
+          -E 'test(soak_ledger_retirement_)' || durability_status=$?
+      fi
+      return "$durability_status" ;;
     contracts)
       echo "== positive/negative public compile contracts =="
       python3 tools/gate/check_public_compile.py ;;

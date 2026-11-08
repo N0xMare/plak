@@ -387,6 +387,11 @@ pub(super) fn pilot(seed: &Fixture, session: &str, shape: &str) -> Vec<trace::Co
     );
     if shape.starts_with("ledger_retirement_") {
         assert_eq!(
+            trace::metadata_coverage(&pilots[0]),
+            trace::metadata_coverage(&pilots[1]),
+            "retirement twins differ in publication/anchor class or counter coverage"
+        );
+        assert_eq!(
             retirement_twins[0], retirement_twins[1],
             "retirement twins differ in final operation ids/states or encoded counter"
         );
@@ -524,6 +529,8 @@ fn capacity_cut_selection_uses_facts_not_transaction_ordinals() {
                 vec!["commit_receipts".to_owned()]
             },
             indexed: true,
+            classes: Vec::new(),
+            retired: 0,
         });
         let baseline = summary::Summary {
             ledger: json!([]),

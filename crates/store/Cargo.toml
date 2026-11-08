@@ -27,7 +27,7 @@ reason = "Existing lint and size debt, frozen at the counts on main; ratchet dow
 [features]
 default = []
 sqlite = ["dep:futures-channel", "dep:rusqlite", "dep:tracing", "dep:tokio"]
-commit-trace = ["sqlite", "rusqlite/hooks", "nix/signal", "dep:serde_json"]
+commit-trace = ["sqlite", "rusqlite/hooks", "nix/signal", "dep:serde_json", "plakous-agent/test-hooks"]
 perf-instrumentation = ["sqlite"]
 
 [dependencies]

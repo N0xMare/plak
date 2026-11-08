@@ -42,6 +42,10 @@ platform:
 full:
     tools/gate/dev-check.sh --full
 
+[doc("opt-in long-turn and full indexed retirement evidence (also included in full)")]
+soak:
+    tools/gate/dev-check.sh --soak
+
 # crates.io cohort: dry run by default (clean tree with `just full` evidence,
 # package and verify every crate); `--execute` uploads, with CARGO_REGISTRY_TOKEN.
 [doc("crates.io cohort dry run; --execute uploads")]

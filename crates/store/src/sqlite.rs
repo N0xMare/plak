@@ -1338,7 +1338,10 @@ impl SessionStore for SqliteSessionStore {
             let queued_at = Instant::now();
             return self.dispatch("commit", move |b| {
                 #[cfg(feature = "commit-trace")]
-                let _label = crate::commit_trace::label("commit");
+                let (_label, _classes) = (
+                    crate::commit_trace::label("commit"),
+                    crate::commit_trace::checkpoint_classes(r.checkpoint())?,
+                );
                 let queue_wait_ns = elapsed_ns(queued_at);
                 let (receipt, execution) =
                     b.retry_after_reclaim(|b| ops::commit_observed(b, &r))?;
@@ -1357,7 +1360,10 @@ impl SessionStore for SqliteSessionStore {
         }
         self.dispatch("commit", move |b| {
             #[cfg(feature = "commit-trace")]
-            let _label = crate::commit_trace::label("commit");
+            let (_label, _classes) = (
+                crate::commit_trace::label("commit"),
+                crate::commit_trace::checkpoint_classes(r.checkpoint())?,
+            );
             let receipt = b.retry_after_reclaim(|b| commit(b, &r))?;
             feed::trim(b, r.expected().session().session_id());
             Ok(receipt)
