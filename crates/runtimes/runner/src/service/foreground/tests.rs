@@ -653,14 +653,26 @@ async fn socket_link(
             crate::daemon::serve_socket(service, &socket, Duration::from_secs(300)).await
         })
     };
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while !socket.exists() {
-            tokio::task::yield_now().await;
+    // The socket file appears at bind(), before listen(); retry until the
+    // daemon accepts rather than racing that window.
+    let stream = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match tokio::net::UnixStream::connect(&socket).await {
+                Ok(stream) => break stream,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+                    ) =>
+                {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+                Err(error) => panic!("runner socket: {error}"),
+            }
         }
     })
     .await
     .unwrap();
-    let stream = tokio::net::UnixStream::connect(&socket).await.unwrap();
     let (client, hello) = crate::RunnerClient::connect(
         stream,
         Bind {
