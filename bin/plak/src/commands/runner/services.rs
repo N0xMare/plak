@@ -350,7 +350,8 @@ async fn check_ssh(destination: &str) -> Result<(), plakous::runner::PlacementFa
         phase: ProbePhase::Ssh,
         timed_out,
     };
-    let mut transport = crate::commands::runner::dial::ssh_command(destination, &["/bin/true"]);
+    // The remote login shell resolves `true`; `/bin/true` is absent on macOS.
+    let mut transport = crate::commands::runner::dial::ssh_command(destination, &["true"]);
     let transport = tokio::time::timeout(
         std::time::Duration::from_secs(10),
         transport
