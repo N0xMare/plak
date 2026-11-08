@@ -49,7 +49,7 @@ pub(crate) fn advice_text(advice: &RefusalAdvice, frontend: Frontend) -> String 
 pub(crate) fn tool_error_text(name: &str, raw: &str, context: RemedyContext<'_>) -> Option<String> {
     use plakous_host_protocol::refusal::ToolRefusal;
     use plakous_host_protocol::views::{ActivityKind, ToolOperation as O};
-    let operation = O::classify(name, ActivityKind::Tool, None, None);
+    let operation = O::classify(name, None, ActivityKind::Tool, None, None);
     if operation == O::Mcp {
         let parsed = plakous_host_protocol::views::presentation::McpCall::parse(name)?;
         return match ToolRefusal::decode(raw)? {

@@ -634,6 +634,47 @@ fn process_activity_stories_match_live_and_restored() {
 }
 
 #[test]
+fn compact_process_details_have_expanded_frame_goldens() {
+    for (story, name, arguments, verb) in [
+        (
+            "process-write-detail",
+            "process_session_write",
+            r#"{"session_id":1,"input":"hello\n","cursor":"omit","max_output_bytes":4096}"#,
+            "sent input",
+        ),
+        (
+            "process-poll-detail",
+            "process_session_poll",
+            r#"{"session_id":1,"timeout_ms":0,"cursor":"omit","max_output_bytes":4096}"#,
+            "read",
+        ),
+        (
+            "process-interrupt-detail",
+            "process_session_write",
+            r#"{"session_id":1,"input":"\u0003","disposition":"keep_open"}"#,
+            "sent interrupt",
+        ),
+    ] {
+        let detail =
+            plakous_hosted::activity::tool_detail_text(Some(arguments), Some("process output"))
+                .unwrap();
+        assert!(!detail.contains("cursor"));
+        assert!(!detail.contains("max_output_bytes"));
+        let mut row = tool_item("control", name);
+        row.subject = Some("1".into());
+        row.detail = Some(detail);
+        for width in [40, 120] {
+            let mut app = transcript_fixture();
+            app.apply_host_event(restore_snapshot(1, vec![TranscriptRow::Tool(row.clone())]));
+            app.toggle_tool_expand_at(0);
+            activity_frame(&mut app, "dark", width, story);
+            let plain = app.pane.transcript_cache.plain().join("\n");
+            assert!(plain.to_lowercase().contains(verb), "{story}: {plain}");
+        }
+    }
+}
+
+#[test]
 fn interrupted_activity_stories_match_live_and_restored() {
     let (theme_name, theme) = ("dark", crate::tui::Theme::dark());
     for state in ["interrupted", "cancelled"] {

@@ -93,7 +93,7 @@ fn canonical_and_native_process_writes_classify_input_bytes_not_subject_prose() 
         }
         let mut tool = item(name, ActivityKind::Process);
         tool.subject = Some("1".into());
-        tool.detail = Some("Ctrl-C".into());
+        tool.detail = Some("\u{3}".into());
         let persisted = serde_json::to_string(&tool).unwrap();
         let observation = SessionObservation::Row(TranscriptRow::Tool(tool));
         let frame: HostFrame<Core> = HostFrame::Event {
@@ -180,6 +180,21 @@ fn process_read_shapes_remain_reads_and_waits_do_not_become_input() {
         tool.subject = Some("1".into());
         tool.detail = Some(arguments.to_string());
         assert_eq!(WireToolItem::from(tool).operation, operation, "{name}");
+    }
+}
+
+#[test]
+fn scalar_detail_and_ctrl_c_prose_are_not_argument_objects() {
+    let mut tool = item("process_session_poll", ActivityKind::Process);
+    tool.exposed_name = Some("BashOutput".into());
+    tool.subject = Some("1".into());
+    tool.detail = Some("1".into());
+    assert_eq!(tool.operation(), ToolOperation::WaitProcess);
+    for detail in ["Ctrl-C", "\u{3}\noutput"] {
+        tool.name = "process_session_write".into();
+        tool.exposed_name = None;
+        tool.detail = Some(detail.into());
+        assert_eq!(tool.operation(), ToolOperation::InputProcess);
     }
 }
 

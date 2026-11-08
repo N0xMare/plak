@@ -80,6 +80,7 @@ impl ToolOperation {
     #[must_use]
     pub fn classify(
         name: &str,
+        exposed_name: Option<&str>,
         kind: ActivityKind,
         subject: Option<&str>,
         detail: Option<&str>,
@@ -90,7 +91,7 @@ impl ToolOperation {
         {
             return operation;
         }
-        if let Some(operation) = Self::process_detail(name, detail) {
+        if let Some(operation) = Self::process_detail(name, exposed_name, detail) {
             return operation;
         }
         if (operation == Self::Run && name != "exec_command")
@@ -109,83 +110,28 @@ impl ToolOperation {
         Self::process_subject(subject.unwrap_or_default()).unwrap_or(operation)
     }
 
-    fn process_detail(name: &str, detail: Option<&str>) -> Option<Self> {
-        match name {
-            "process_session_read" => return Some(Self::ReadProcess),
-            "process_session_interrupt" => return Some(Self::InterruptProcess),
-            "process_session_write"
-            | "write_stdin"
-            | "process_session_poll"
-            | "BashOutput"
-            | "get_command_or_subagent_output"
-            | "exec_command" => {}
-            _ => return None,
-        }
+    fn process_detail(
+        name: &str,
+        exposed_name: Option<&str>,
+        detail: Option<&str>,
+    ) -> Option<Self> {
         let detail = detail?;
-        if matches!(name, "process_session_write" | "write_stdin")
-            && matches!(detail.lines().next(), Some("Ctrl-C" | "\u{3}"))
+        if detail == "\u{3}"
+            && matches!(
+                exposed_name.unwrap_or(name),
+                "process_session_write" | "write_stdin"
+            )
         {
             return Some(Self::InterruptProcess);
         }
-        // Detail can append a result after the argument object. Decode just
-        // the first value, never infer input from result text or a substring.
+        // A result can follow the compact argument object. Only that first
+        // object supplies input facts; scalars and output prose never do.
         let arguments = serde_json::Deserializer::from_str(detail)
             .into_iter::<serde_json::Value>()
             .next()?
             .ok()?;
-        let reading = || {
-            arguments.get("block").and_then(serde_json::Value::as_bool) == Some(false)
-                || arguments
-                    .get("yield_time_ms")
-                    .or_else(|| arguments.get("timeout_ms"))
-                    .and_then(serde_json::Value::as_u64)
-                    == Some(0)
-        };
-        match name {
-            "process_session_write" | "write_stdin" => {
-                let key = if name == "write_stdin" {
-                    "chars"
-                } else {
-                    "input"
-                };
-                let other = if key == "chars" { "input" } else { "chars" };
-                let input = arguments
-                    .get(key)
-                    .or_else(|| arguments.get(other))?
-                    .as_str()?;
-                Some(if input == "\u{3}" {
-                    Self::InterruptProcess
-                } else if input.is_empty() {
-                    Self::WaitProcess
-                } else {
-                    Self::InputProcess
-                })
-            }
-            "process_session_poll" | "BashOutput" | "get_command_or_subagent_output" => {
-                let default_read = name != "BashOutput"
-                    && arguments.get("yield_time_ms").is_none()
-                    && arguments.get("timeout_ms").is_none();
-                Some(if reading() || default_read {
-                    Self::ReadProcess
-                } else {
-                    Self::WaitProcess
-                })
-            }
-            "exec_command"
-                if arguments.get("session_id").is_some()
-                    && arguments
-                        .get("cmd")
-                        .or_else(|| arguments.get("command"))
-                        .is_none() =>
-            {
-                Some(if reading() {
-                    Self::ReadProcess
-                } else {
-                    Self::WaitProcess
-                })
-            }
-            _ => None,
-        }
+        arguments.as_object()?;
+        Self::process_operation(name, exposed_name, &arguments)
     }
 
     /// The semantic operation carried by a host-authored process subject.
@@ -299,23 +245,23 @@ mod tests {
     #[test]
     fn canonical_topology_wins_before_kind_and_kind_before_generic_aliases() {
         assert_eq!(
-            ToolOperation::classify("wait_agent", ActivityKind::Agent, None, None),
+            ToolOperation::classify("wait_agent", None, ActivityKind::Agent, None, None),
             ToolOperation::WaitAgent
         );
         assert_eq!(
-            ToolOperation::classify("adopt_candidate", ActivityKind::Tool, None, None),
+            ToolOperation::classify("adopt_candidate", None, ActivityKind::Tool, None, None),
             ToolOperation::Adopt
         );
         assert_eq!(
-            ToolOperation::classify("read_file", ActivityKind::Compose, None, None),
+            ToolOperation::classify("read_file", None, ActivityKind::Compose, None, None),
             ToolOperation::Compose
         );
         assert_eq!(
-            ToolOperation::classify("unknown", ActivityKind::Tool, None, None),
+            ToolOperation::classify("unknown", None, ActivityKind::Tool, None, None),
             ToolOperation::Generic
         );
         assert_eq!(
-            ToolOperation::classify("mcp__docs__read", ActivityKind::Tool, None, None),
+            ToolOperation::classify("mcp__docs__read", None, ActivityKind::Tool, None, None),
             ToolOperation::Mcp
         );
         for name in [
@@ -327,9 +273,11 @@ mod tests {
             "process_session_start",
         ] {
             assert_eq!(
-                ToolOperation::classify(name, ActivityKind::Tool, None, None),
+                ToolOperation::classify(name, None, ActivityKind::Tool, None, None),
                 ToolOperation::Run
             );
         }
     }
 }
+
+mod process;

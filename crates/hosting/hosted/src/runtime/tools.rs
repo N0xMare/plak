@@ -17,34 +17,12 @@ pub(super) fn process_observation_label(
     exposed_name: Option<&str>,
     args: &serde_json::Value,
 ) -> Option<&'static str> {
-    if is_pi_wait(canonical_name, exposed_name, args) {
-        // Pi's `wait` is an await (300000 ms when `timeout_ms` is omitted);
-        // only an explicit zero is a snapshot read.
-        return Some(
-            if args.get("timeout_ms").and_then(serde_json::Value::as_u64) == Some(0) {
-                "process_session_read"
-            } else {
-                "process_session_wait"
-            },
-        );
-    }
-    exposed_name
-        .and_then(|name| process_label(name, args))
-        .or_else(|| process_label(canonical_name, args))
-}
-
-/// The canonical process poll identity every await presentation lowers onto.
-const PROCESS_POLL: &str = "process_session_poll";
-
-/// Pi's `wait`: presented as `wait` (or `wait_jobs`) over the process poll on
-/// a leaf, or as the tree's `wait` on a node granted agent tools. A history
-/// row knows only the presented name. A composition cell-wait marker spelled
-/// `wait` names a `cell_id`; pi's never does.
-fn is_pi_wait(canonical_name: &str, exposed_name: Option<&str>, args: &serde_json::Value) -> bool {
-    let shown = exposed_name.unwrap_or(canonical_name);
-    matches!(shown, "wait" | "wait_jobs")
-        && matches!(canonical_name, PROCESS_POLL | "wait" | "wait_jobs")
-        && args.get("cell_id").is_none()
+    plakous_host_protocol::views::ToolOperation::process_operation(
+        canonical_name,
+        exposed_name,
+        args,
+    )
+    .and_then(plakous_host_protocol::views::ToolOperation::process_label)
 }
 
 /// A composition cell-wait marker: its canonical identity is its own name.
@@ -53,77 +31,8 @@ fn is_cell_wait_marker(canonical_name: &str, exposed_name: &str) -> bool {
 }
 
 pub(super) fn process_label(name: &str, args: &serde_json::Value) -> Option<&'static str> {
-    let input = args
-        .get("input")
-        .or_else(|| args.get("chars"))
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    match name {
-        "process_session_start"
-        | "run_process"
-        | "run_terminal_cmd"
-        | "run_terminal_command"
-        | "Bash"
-        | "bash"
-        | "Shell" => Some("Shell"),
-        "exec_command"
-            if args
-                .get("cmd")
-                .or_else(|| args.get("command"))
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|cmd| !cmd.is_empty()) =>
-        {
-            Some("Shell")
-        }
-        "exec_command" => Some(
-            if args
-                .get("yield_time_ms")
-                .and_then(serde_json::Value::as_u64)
-                == Some(0)
-            {
-                "process_session_read"
-            } else {
-                "process_session_wait"
-            },
-        ),
-        "write_stdin" | "process_session_write" if input == "\u{3}" => {
-            Some("process_session_interrupt")
-        }
-        "write_stdin" | "process_session_write" if !input.is_empty() => {
-            Some("process_session_write")
-        }
-        "write_stdin" | "process_session_write" => Some("process_session_wait"),
-        "TaskStop" | "KillShell" | "kill_command_or_subagent" | "process_session_terminate" => {
-            Some("process_session_terminate")
-        }
-        // Pi's `stop {id}`; one naming a child reads as `interrupt_agent`.
-        "stop" if args.get("id").is_some() => Some("process_session_terminate"),
-        "BashOutput"
-            if args.get("block").and_then(serde_json::Value::as_bool) == Some(false)
-                || args
-                    .get("yield_time_ms")
-                    .and_then(serde_json::Value::as_u64)
-                    == Some(0) =>
-        {
-            Some("process_session_read")
-        }
-        "BashOutput" => Some("process_session_wait"),
-        "process_session_poll" | "get_command_or_subagent_output" => Some(
-            if args.get("block").and_then(serde_json::Value::as_bool) == Some(false)
-                || args
-                    .get("yield_time_ms")
-                    .or_else(|| args.get("timeout_ms"))
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(0)
-                    == 0
-            {
-                "process_session_read"
-            } else {
-                "process_session_wait"
-            },
-        ),
-        _ => None,
-    }
+    plakous_host_protocol::views::ToolOperation::process_operation(name, None, args)
+        .and_then(plakous_host_protocol::views::ToolOperation::process_label)
 }
 
 pub(super) fn process_ids(args: &serde_json::Value) -> Vec<String> {

@@ -20,7 +20,7 @@ pub fn tool_operation(
     name: &str,
     kind: ActivityKind,
 ) -> plakous_host_protocol::views::ToolOperation {
-    plakous_host_protocol::views::ToolOperation::classify(name, kind, None, None)
+    plakous_host_protocol::views::ToolOperation::classify(name, None, kind, None, None)
 }
 
 /// Canonical outer markers of a Plakous local-composition cell.
@@ -281,16 +281,8 @@ fn object_text(fields: &serde_json::Map<String, serde_json::Value>) -> String {
     if let Some(content) = string_field(fields, &FILE_CONTENT_KEYS) {
         return content.trim_end().to_owned();
     }
-    // Process controls must retain their input and polling mode through
-    // final-row reconstruction. The generic patch/wait renderers below
-    // would discard those facts (notably chars beside yield_time_ms).
-    if fields.contains_key("session_id")
-        && ["input", "chars", "yield_time_ms", "timeout_ms"]
-            .iter()
-            .any(|key| fields.contains_key(*key))
-    {
-        let value = serde_json::Value::Object(fields.clone());
-        return serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string());
+    if let Some(text) = compact_process_arguments(fields) {
+        return text;
     }
     // `apply_patch { patch }` reads as the patch itself (§5.2 Edit rows).
     if let Some(patch) = string_field(fields, &PATCH_KEYS) {
@@ -314,6 +306,37 @@ fn object_text(fields: &serde_json::Map<String, serde_json::Value>) -> String {
     expand_escaped_newlines(
         &serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string()),
     )
+}
+
+// Retain process input/mode facts, not cursor or output-budget metadata.
+fn compact_process_arguments(
+    fields: &serde_json::Map<String, serde_json::Value>,
+) -> Option<String> {
+    const IDS: &[&str] = &[
+        "session_id",
+        "bash_id",
+        "task_id",
+        "shell_id",
+        "id",
+        "ids",
+        "session_ids",
+        "task_ids",
+    ];
+    const CONTROLS: &[&str] = &["input", "chars", "yield_time_ms", "timeout_ms", "block"];
+    let process = (fields.len() == 1 && IDS.iter().any(|key| fields.contains_key(*key)))
+        || fields.contains_key("session_id")
+        || fields.contains_key("bash_id")
+        || (IDS.iter().any(|key| fields.contains_key(*key))
+            && CONTROLS.iter().any(|key| fields.contains_key(*key)));
+    if !process {
+        return None;
+    }
+    let compact: serde_json::Map<_, _> = fields
+        .iter()
+        .filter(|(key, _)| IDS.contains(&key.as_str()) || CONTROLS.contains(&key.as_str()))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    Some(serde_json::Value::Object(compact).to_string())
 }
 
 /// Object keys that carry an `apply_patch` body.

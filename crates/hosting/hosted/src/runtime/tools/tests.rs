@@ -8,6 +8,198 @@ use super::*;
 
 use crate::runtime::test_support::*;
 
+#[test]
+fn review3_probe_operation_matches_live_process_label_for_every_route() {
+    use plakous_host_protocol::views::ToolOperation as O;
+
+    let cases = [
+        (
+            "process_session_poll",
+            "process_session_poll",
+            "{}",
+            O::ReadProcess,
+        ),
+        (
+            "process_session_poll",
+            "process_session_poll",
+            r#"{"session_id":1,"timeout_ms":0}"#,
+            O::ReadProcess,
+        ),
+        (
+            "process_session_poll",
+            "process_session_poll",
+            r#"{"session_id":1,"timeout_ms":100}"#,
+            O::WaitProcess,
+        ),
+        (
+            "process_session_write",
+            "process_session_write",
+            r#"{"session_id":1,"input":"\u0003"}"#,
+            O::InterruptProcess,
+        ),
+        (
+            "process_session_write",
+            "process_session_write",
+            r#"{"session_id":1,"input":"hello\n"}"#,
+            O::InputProcess,
+        ),
+        (
+            "process_session_write",
+            "process_session_write",
+            r#"{"session_id":1,"input":""}"#,
+            O::WaitProcess,
+        ),
+        (
+            "process_session_start",
+            "exec_command",
+            r#"{"cmd":"sleep 30"}"#,
+            O::Run,
+        ),
+        (
+            "process_session_poll",
+            "exec_command",
+            r#"{"session_id":1}"#,
+            O::WaitProcess,
+        ),
+        (
+            "process_session_poll",
+            "exec_command",
+            r#"{"session_id":1,"yield_time_ms":0}"#,
+            O::ReadProcess,
+        ),
+        (
+            "process_session_poll",
+            "exec_command",
+            r#"{"session_id":1,"yield_time_ms":100}"#,
+            O::WaitProcess,
+        ),
+        (
+            "process_session_write",
+            "write_stdin",
+            r#"{"session_id":1,"chars":"\u0003","yield_time_ms":100}"#,
+            O::InterruptProcess,
+        ),
+        (
+            "process_session_write",
+            "write_stdin",
+            r#"{"session_id":1,"chars":"hello\n","yield_time_ms":100}"#,
+            O::InputProcess,
+        ),
+        (
+            "process_session_poll",
+            "write_stdin",
+            r#"{"session_id":1,"chars":""}"#,
+            O::WaitProcess,
+        ),
+        (
+            "process_session_poll",
+            "write_stdin",
+            r#"{"session_id":1,"chars":"","yield_time_ms":0}"#,
+            O::WaitProcess,
+        ),
+        (
+            "process_session_poll",
+            "write_stdin",
+            r#"{"session_id":1,"chars":"","yield_time_ms":100}"#,
+            O::WaitProcess,
+        ),
+        ("process_session_poll", "wait", "{}", O::WaitProcess),
+        (
+            "process_session_poll",
+            "wait",
+            r#"{"ids":["1"]}"#,
+            O::WaitProcess,
+        ),
+        (
+            "process_session_poll",
+            "wait",
+            r#"{"ids":["1"],"timeout_ms":0}"#,
+            O::ReadProcess,
+        ),
+        ("process_session_poll", "wait_jobs", "{}", O::WaitProcess),
+        (
+            "process_session_start",
+            "Bash",
+            r#"{"command":"sleep 30"}"#,
+            O::Run,
+        ),
+        (
+            "process_session_poll",
+            "BashOutput",
+            r#"{"bash_id":"1"}"#,
+            O::WaitProcess,
+        ),
+        (
+            "process_session_poll",
+            "BashOutput",
+            r#"{"bash_id":"1","block":false}"#,
+            O::ReadProcess,
+        ),
+        (
+            "process_session_poll",
+            "BashOutput",
+            r#"{"bash_id":"1","yield_time_ms":0}"#,
+            O::ReadProcess,
+        ),
+        (
+            "process_session_terminate",
+            "TaskStop",
+            r#"{"task_id":"1"}"#,
+            O::StopProcess,
+        ),
+        (
+            "process_session_poll",
+            "get_command_or_subagent_output",
+            r#"{"id":"1"}"#,
+            O::ReadProcess,
+        ),
+        (
+            "process_session_poll",
+            "get_command_or_subagent_output",
+            r#"{"id":"1","timeout_ms":100}"#,
+            O::WaitProcess,
+        ),
+        (
+            "process_session_terminate",
+            "kill_command_or_subagent",
+            r#"{"id":"1"}"#,
+            O::StopProcess,
+        ),
+        (
+            "process_session_terminate",
+            "stop",
+            r#"{"id":"1"}"#,
+            O::StopProcess,
+        ),
+    ];
+    assert_eq!(cases.len(), 28);
+    for (canonical, exposed, arguments, expected) in cases {
+        let args = serde_json::from_str(arguments).unwrap();
+        let label = process_observation_label(canonical, Some(exposed), &args).unwrap();
+        assert_eq!(
+            label,
+            expected.process_label().unwrap(),
+            "{exposed}: {arguments}"
+        );
+        let mut live =
+            crate::runtime::projected_tool_row("call", canonical, exposed, Some(arguments));
+        live.subject = Some(process_subject(label, &args, None, &[], None));
+        assert_eq!(live.operation(), expected, "live {exposed}: {live:?}");
+        crate::runtime::settle_tool_row(&mut live, true, "output", None);
+        assert_eq!(live.operation(), expected, "settled {exposed}: {live:?}");
+        let mut replayed =
+            crate::runtime::projected_tool_row("call", canonical, exposed, Some(arguments));
+        crate::runtime::settle_tool_row(&mut replayed, true, "output", None);
+        let restored: crate::sessions::ToolItem =
+            serde_json::from_str(&serde_json::to_string(&replayed).unwrap()).unwrap();
+        assert_eq!(
+            restored.operation(),
+            expected,
+            "replayed {exposed}: {restored:?}"
+        );
+    }
+}
+
 /// Pi's `wait {ids}` and `stop {id}` rows name their process ids, and a
 /// bare pi `wait` (a 300 s await by default) is labelled a wait, not a
 /// snapshot read.

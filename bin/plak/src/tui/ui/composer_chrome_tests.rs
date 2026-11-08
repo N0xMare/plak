@@ -1131,7 +1131,7 @@ fn canonical_process_write_hud_uses_input_detail_without_subject_prefix_or_overl
 
     for name in ["process_session_write", "write_stdin"] {
         for (detail, expected) in [
-            ("Ctrl-C", "sending interrupt"),
+            ("\u{3}", "sending interrupt"),
             (
                 if name == "write_stdin" {
                     r#"{"chars":"go\n"}"#

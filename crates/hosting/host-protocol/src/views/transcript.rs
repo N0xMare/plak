@@ -320,6 +320,7 @@ impl ToolItem {
         self.wire_operation.unwrap_or_else(|| {
             super::ToolOperation::classify(
                 &self.name,
+                self.exposed_name.as_deref(),
                 self.kind,
                 self.subject.as_deref(),
                 self.detail.as_deref(),
