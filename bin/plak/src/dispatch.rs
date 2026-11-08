@@ -280,8 +280,8 @@ pub(super) fn execute_session_list(
 ) -> CliResult<ProcessOutcome> {
     let paths = services.paths()?;
     let cwd = paths.workspace().map_err(CliFailure::new)?.to_path_buf();
-    let sessions = crate::store::ProductStore::open(paths)
-        .map_err(CliFailure::new)?
+    let sessions = store::ProductStore::open(paths)
+        .map_err(|error| CliFailure::new(error.to_string()))?
         .list_for_workspace_filtered(&cwd, include_archived)
         .map_err(CliFailure::new)?;
     if sessions.is_empty() {
@@ -302,13 +302,15 @@ pub(super) fn execute_session_list(
         for s in sessions {
             let n = product_session_log::count_events(&paths.session_home(), &s.id)
                 .map_or_else(|_| "—".to_owned(), |count| count.to_string());
-            let mut preview = match carry::carried_forward_label(&s) {
+            let preview = match carry::carried_forward_label(&s) {
                 Some(link) => format!("{} [{link}]", session_preview_line(&s)),
                 None => session_preview_line(&s),
             };
-            if s.archived {
-                preview.push_str(" [archived]");
-            }
+            let preview = if s.archived {
+                format!("[archived] {preview}")
+            } else {
+                preview
+            };
             table
                 .push([
                     s.id,

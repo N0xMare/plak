@@ -254,8 +254,10 @@ fn lifecycle_gc_refuses_archived_before_opening_runtime() -> TestResult {
 #[test]
 fn lifecycle_gc_all_reports_archived_sessions_as_skipped() -> TestResult {
     let mut f = fixture(false)?;
-    f.product.set_archived(&f.record.id, true)?;
+    f.tree.abandon_recovery_for_delete(&f.child_id).checked()?;
+    crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
     let services = crate::shell::services::Services::for_home(f.paths.clone());
+    lifecycle::archive_offline(&services, &f.record.id)?;
     let mut output = Vec::new();
     gc_sessions(&services, None, &mut output)?;
     let output = String::from_utf8(output)?;

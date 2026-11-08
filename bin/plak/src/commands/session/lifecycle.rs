@@ -129,32 +129,6 @@ impl std::fmt::Display for LifecycleError {
 impl std::error::Error for LifecycleError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::NotFound => f.write_str(
-                "the session was not found; refresh the session list and choose an existing id",
-            ),
-            Self::InvalidTitle { kind } => f.write_str(match kind {
-                InvalidTitleKind::Empty => {
-                    "the title is blank; supply a nonblank title or use --clear"
-                }
-                InvalidTitleKind::TooLong => {
-                    "the title is too long; use at most 128 Unicode characters and 512 UTF-8 bytes"
-                }
-                InvalidTitleKind::ControlCharacter => {
-                    "the title contains control characters; remove them before retrying"
-                }
-            }),
-            Self::Busy {
-                turn,
-                children,
-                processes,
-                state_unknown,
-                ..
-            } => write!(
-                f,
-                "the session has unfinished work (turn or continuation: {turn}, children: {}, processes: {}, activity unknown: {state_unknown}); resume or stop outstanding work, then retry",
-                children.join(", "),
-                processes.join(", ")
-            ),
             Self::Failure(error) => Some(error),
             Self::Refused(_) => None,
         }
@@ -184,6 +158,32 @@ impl LifecycleError {
 impl std::fmt::Display for LifecycleRefusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::NotFound => f.write_str(
+                "the session was not found; refresh the session list and choose an existing id",
+            ),
+            Self::InvalidTitle { kind } => f.write_str(match kind {
+                InvalidTitleKind::Empty => {
+                    "the title is blank; supply a nonblank title or use --clear"
+                }
+                InvalidTitleKind::TooLong => {
+                    "the title is too long; use at most 128 Unicode scalars and 512 UTF-8 bytes"
+                }
+                InvalidTitleKind::ControlCharacter => {
+                    "the title contains control characters; remove them before retrying"
+                }
+            }),
+            Self::Busy {
+                turn,
+                children,
+                processes,
+                state_unknown,
+                ..
+            } => write!(
+                f,
+                "the session has unfinished work (turn or continuation: {turn}, children: {}, processes: {}, activity unknown: {state_unknown}); resume or stop outstanding work, then retry",
+                children.join(", "),
+                processes.join(", ")
+            ),
             Self::Open => f.write_str("it is open in a running plak; close it there first"),
             Self::LiveTree { children, .. } => write!(
                 f,
@@ -192,7 +192,7 @@ impl std::fmt::Display for LifecycleRefusal {
             ),
             Self::RecoveryRequiredTree { children, .. } => write!(
                 f,
-                "its agent tree has child agents that need recovery ({}); resolve them first or delete with --abandon-children",
+                "its agent tree has child agents that need recovery ({}); recover them first, or delete with --abandon-children only if this session owns their tree",
                 children.join(", ")
             ),
             Self::ForkDependency { dependents, .. } => write!(
