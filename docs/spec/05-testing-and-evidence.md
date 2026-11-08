@@ -1321,7 +1321,12 @@ exempt. Load probes run at most `nproc / 2` hogs, each under `timeout` and
 Protocol-4 host row attention/counts and launcher fencing are hosted tests;
 static UI validation and atomic build snapshots are product unit tests.
 Directory stop tests distinguish resident actors from lease-only dormant
-stops: neither an attachment nor a paid continuation is created by a stop.
+targets with an unavailable runner: cancellation and child-wake suppression
+must be durable before the pending answer, repeat preserves the intent and
+revision, and recovery cannot dispatch the stopped turn. A separately owned
+probe already in flight cannot publish ready over newer stop debt; it must
+perform a fresh reconciliation before admitting work.
+Neither an attachment nor a paid continuation is created by a stop.
 
 Test code has one home per kind, and production behavior is never moved into
 test code to change density accounting.

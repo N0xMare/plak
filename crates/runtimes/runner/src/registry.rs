@@ -329,6 +329,9 @@ impl RunnerRegistry {
         }
         let mut entries = self.entries.write().unwrap_or_else(PoisonError::into_inner);
         let entry = entries.get_mut(id).ok_or_else(|| missing(id))?;
+        if entry.refresh.reconcile_again {
+            return Err(reconciling());
+        }
         if entry.row.runner.names.is_empty() {
             return Err(missing(id));
         }
@@ -368,6 +371,9 @@ impl RunnerRegistry {
         let discovery = catalog.discover();
         let mut entries = self.entries.write().unwrap_or_else(PoisonError::into_inner);
         let entry = entries.get_mut("local").ok_or_else(|| missing("local"))?;
+        if entry.refresh.reconcile_again {
+            return Err(reconciling());
+        }
         entry.row.status = RunnerStatus::Ready;
         entry.row.checked_at = Some(now);
         entry.row.blocked_since = None;
@@ -425,6 +431,30 @@ impl RunnerRegistry {
             now,
             false,
         );
+    }
+
+    /// Retains durable stop debt and queues a fresh owned reconciliation.
+    /// A probe already in flight cannot publish readiness over this debt.
+    pub fn reconcile_when_available(&self, id: &str) {
+        if let Some(entry) = self
+            .entries
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get_mut(id)
+        {
+            entry.required = true;
+            entry.refresh.reconcile_again = entry.refresh.active;
+            entry.refresh.invalidate_cache();
+        }
+        self.begin_reconcile(id, plakous_model::now_unix_secs());
+        if self
+            .executor
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_some()
+        {
+            self.queue_probe(id);
+        }
     }
 
     fn block(&self, id: &str, failure: PlacementFailure, now: u64, completed: bool) {

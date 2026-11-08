@@ -147,6 +147,64 @@ fn a_dormant_directory_stop_never_opens_or_dispatches_its_continuation() {
     }
 }
 
+#[test]
+fn a_dormant_stop_records_cancellation_before_an_unavailable_runners_settlement() {
+    use plakous::runner::{ConfiguredRunner, PlacementFailure, ProbePhase, RunnerRegistry};
+    let root = tempfile::tempdir().unwrap();
+    let lost =
+        release_a_running_root_turn(root.path(), Release::Lost, Cancel::Deaf, |config| config);
+    let before = dispatches(&lost.evidence);
+    let registry = RunnerRegistry::default();
+    registry.configure(ConfiguredRunner {
+        runner_id: "saved-runner".into(),
+        names: vec!["remote".into()],
+    });
+    registry.blocked(
+        "saved-runner",
+        PlacementFailure::RunnerUnreachable {
+            phase: ProbePhase::LinkLost,
+            timed_out: false,
+        },
+        1,
+    );
+    let roots = lost
+        .state_roots
+        .clone()
+        .for_runner_stop(registry.clone(), "saved-runner");
+    let mut record = lost.store.load(&lost.id).unwrap();
+    super::stop_dormant_session(&roots, lost.store.as_ref(), &mut record)
+        .block()
+        .unwrap();
+    assert!(roots.runner_pending());
+    assert!(registry.needs_connection("saved-runner"));
+    assert_eq!(
+        root_causes(&lost).last(),
+        Some(&RootInterruptCause::Stopped)
+    );
+    assert!(lost.store.load(&lost.id).unwrap().child_wake_suppressed);
+    let revision = lost.store.load(&lost.id).unwrap().store_revision;
+    super::stop_dormant_session(&roots, lost.store.as_ref(), &mut record)
+        .block()
+        .unwrap();
+    assert_eq!(lost.store.load(&lost.id).unwrap().store_revision, revision);
+    assert_eq!(dispatches(&lost.evidence), before);
+    let mut next = next_host(
+        root.path(),
+        &lost,
+        serde_json::json!([]),
+        Arc::clone(&lost.store),
+    );
+    next.session = lost.store.load(&lost.id).unwrap();
+    next.resume_after_loss = ResumeAfterLoss::Continue;
+    let seen = open_and_quit(next);
+    assert!(!seen.iter().any(held_notice));
+    assert_eq!(
+        dispatches(&lost.evidence),
+        before,
+        "recovery redispatched a stopped turn"
+    );
+}
+
 /// A stop of a root that holds its continuation after a loss records
 /// `stopped` on the loss's turn before it is settled, and a repeated stop
 /// records nothing more. The next open, under `continue`, holds nothing and

@@ -15,6 +15,53 @@ fn registry(count: usize) -> RunnerRegistry {
     registry
 }
 
+#[tokio::test(start_paused = true)]
+async fn stop_debt_invalidates_an_inflight_probe_before_readiness_can_reopen() {
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir(home.path().join("product")).unwrap();
+    std::fs::create_dir(home.path().join("workspace")).unwrap();
+    let catalog = Arc::new(
+        crate::WorkspaceCatalog::local(&home.path().join("workspace"), &[], &home.path().join("product")).unwrap(),
+    );
+    let registry = RunnerRegistry::default();
+    registry.configure(ConfiguredRunner {
+        runner_id: "local".into(),
+        names: vec!["local".into()],
+    });
+    registry.run_probes_on(tokio::runtime::Handle::current());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    registry.probe_with(Arc::new({
+        let (calls, release) = (calls.clone(), release.clone());
+        move |registry, _| {
+            let (calls, release, catalog) = (calls.clone(), release.clone(), catalog.clone());
+            Box::pin(async move {
+                calls.fetch_add(1, Ordering::SeqCst);
+                release.acquire().await.unwrap().forget();
+                registry.ready_local(catalog, 1)
+            })
+        }
+    }));
+    let refresh = tokio::spawn({
+        let registry = registry.clone();
+        async move { registry.refresh(None).await }
+    });
+    until(|| calls.load(Ordering::SeqCst) == 1).await;
+    registry.reconcile_when_available("local");
+    release.add_permits(1);
+    until(|| calls.load(Ordering::SeqCst) == 2).await;
+    assert!(
+        registry.services("local").is_err(),
+        "the stale probe reopened admission"
+    );
+    release.add_permits(1);
+    assert_eq!(
+        refresh.await.unwrap().unwrap()[0].status,
+        RunnerStatus::Ready
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
 #[test]
 fn dropping_a_request_executor_cannot_kill_the_process_owned_reconcile() {
     let owner = tokio::runtime::Builder::new_multi_thread()

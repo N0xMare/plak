@@ -20,7 +20,8 @@ pub type RunnerProbeFuture = Pin<Box<dyn Future<Output = Result<(), PlacementFai
 pub type RunnerProbe = dyn Fn(RunnerRegistry, String) -> RunnerProbeFuture + Send + Sync;
 
 pub(super) struct ProbeState {
-    active: bool,
+    pub(super) active: bool,
+    pub(super) reconcile_again: bool,
     admitted: Option<Instant>,
     completed: Option<Instant>,
     pub(super) phase: ProbePhase,
@@ -30,6 +31,7 @@ impl Default for ProbeState {
     fn default() -> Self {
         Self {
             active: false,
+            reconcile_again: false,
             admitted: None,
             completed: None,
             phase: ProbePhase::Queued,
@@ -153,7 +155,7 @@ impl RunnerRegistry {
             .collect()
     }
 
-    fn queue_probe(&self, id: &str) {
+    pub(super) fn queue_probe(&self, id: &str) {
         {
             let mut entries = self.entries.write().unwrap_or_else(PoisonError::into_inner);
             let Some(entry) = entries.get_mut(id) else {
@@ -204,66 +206,73 @@ impl RunnerRegistry {
             self.finish_probe(&id);
             return;
         };
-        if let Some(entry) = self
-            .entries
-            .write()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get_mut(&id)
-        {
-            entry.refresh.admitted = Some(Instant::now());
-        }
-        self.changed
-            .send_modify(|value| *value = value.wrapping_add(1));
-        let probe = self
-            .probe
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
-        let registry = self.clone();
-        let selected = id.clone();
-        let mut work = tokio::spawn(async move {
-            match probe {
-                Some(probe) => probe(registry, selected).await,
-                None => registry.refresh_connected(&selected).await,
+        loop {
+            if let Some(entry) = self
+                .entries
+                .write()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get_mut(&id)
+            {
+                entry.refresh.admitted = Some(Instant::now());
             }
-        });
-        let result = tokio::select! {
-            result = &mut work => result,
-            () = tokio::time::sleep(Duration::from_secs(25)) => {
-                let phase = self.entries.read().unwrap_or_else(PoisonError::into_inner).get(&id).map_or(ProbePhase::Reconcile, |entry| entry.refresh.phase);
-                self.blocked(&id, PlacementFailure::RunnerUnreachable {phase, timed_out: true}, now());
-                work.await
+            self.changed
+                .send_modify(|value| *value = value.wrapping_add(1));
+            let probe = self
+                .probe
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
+            let registry = self.clone();
+            let selected = id.clone();
+            let mut work = tokio::spawn(async move {
+                match probe {
+                    Some(probe) => probe(registry, selected).await,
+                    None => registry.refresh_connected(&selected).await,
+                }
+            });
+            let result = tokio::select! {
+                result = &mut work => result,
+                () = tokio::time::sleep(Duration::from_secs(25)) => {
+                    let phase = self.entries.read().unwrap_or_else(PoisonError::into_inner).get(&id).map_or(ProbePhase::Reconcile, |entry| entry.refresh.phase);
+                    self.blocked(&id, PlacementFailure::RunnerUnreachable {phase, timed_out: true}, now());
+                    work.await
+                }
+            };
+            match result {
+                Ok(Ok(())) => {}
+                Ok(Err(failure)) => self.blocked(&id, failure, now()),
+                Err(_) => self.blocked(
+                    &id,
+                    PlacementFailure::RunnerUnreachable {
+                        phase: ProbePhase::Reconcile,
+                        timed_out: false,
+                    },
+                    now(),
+                ),
             }
-        };
-        match result {
-            Ok(Ok(())) => {}
-            Ok(Err(failure)) => self.blocked(&id, failure, now()),
-            Err(_) => self.blocked(
-                &id,
-                PlacementFailure::RunnerUnreachable {
-                    phase: ProbePhase::Reconcile,
-                    timed_out: false,
-                },
-                now(),
-            ),
+            if !self.finish_probe(&id) {
+                break;
+            }
         }
-        self.finish_probe(&id);
         drop(permit);
     }
 
-    fn finish_probe(&self, id: &str) {
+    fn finish_probe(&self, id: &str) -> bool {
+        let mut again = false;
         if let Some(entry) = self
             .entries
             .write()
             .unwrap_or_else(PoisonError::into_inner)
             .get_mut(id)
         {
-            entry.refresh.active = false;
-            entry.refresh.completed = Some(Instant::now());
+            again = std::mem::take(&mut entry.refresh.reconcile_again);
+            entry.refresh.active = again;
+            entry.refresh.completed = (!again).then(Instant::now);
             entry.refresh.admitted = None;
         }
         self.changed
             .send_modify(|value| *value = value.wrapping_add(1));
+        again
     }
 
     async fn refresh_connected(&self, id: &str) -> Result<(), PlacementFailure> {

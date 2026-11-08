@@ -48,6 +48,7 @@ impl RunnerOwnership {
         self.standalone
     }
 
+    #[cfg(any(test, feature = "web"))]
     pub(crate) fn host(paths: &PlakPaths) -> CliResult<Self> {
         let file = lock_file(paths)?;
         file.try_lock_shared().map_err(|error| match error {

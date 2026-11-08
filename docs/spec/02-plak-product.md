@@ -4102,7 +4102,16 @@ verdicts) are addressed, the session profile and workspace chrome states.
   The synchronous opener retains its typed placement refusal as process-local
   error metadata; the host does not reconstruct refusals from rendered prose.
 - **Stop effects.** `stopped {runner_pending}` certifies durable host-side
-  cancellation. The flag is sampled after that commit from the session's
+  cancellation before physical runner settlement. Dormant cancellation uses
+  only the saved placement's non-admitting recovery ports, including when its
+  runner is blocked, unconfigured or has never bound. The root stop and child
+  wake suppression commit before any child/root process stop is attempted.
+  Unavailable settlement returns success with `runner_pending:true`; the
+  original durable intent keys remain owed across reconnect/restart. An owned
+  fresh reconciliation must finish before readiness reopens, even when a
+  previous picker probe was already in flight. No continuation is admitted to
+  settle this debt, and repeated stop does not mint a new stop intent.
+  The flag is sampled after that commit from the session's
   runner services: true means an unavailable link or reconciliation barrier
   leaves runner stop effects unresolved, never proof of process death. A
   reconnect/restart reconciles recorded stops without inventing another owner.
@@ -4162,8 +4171,10 @@ verdicts) are addressed, the session profile and workspace chrome states.
   A stop waiting on a slot that changes session is refused rather than
   silently redirected to its successor.
   Dormant async stop effects are bounded to half the negotiated root lease
-  period; an unfinished recorded stop is `session_unavailable`, not
-  `stopped`, and can be retried under a fresh fence.
+  period; after cancellation commits, an unfinished runner stop is
+  `stopped {runner_pending:true}` and remains owed under its original intent
+  while reconciliation takes a fresh fence. Durable-store or ownership
+  failures still refuse; no answer invents process termination.
   Another live holder is refused under the same authority checks as an open;
   an unknown session is `unknown_session`. Its answer comes even when the node attachment ends
   first: the session connection, and its hold on the session's residency,

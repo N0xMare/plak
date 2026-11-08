@@ -14,8 +14,9 @@ use plakous::sessions::SessionOperationId;
 /// head. No model, driver, attachment or continuation is constructed.
 ///
 /// # Errors
-/// Another owner holds the session, a durable write fails, or recorded
-/// runner effects have not settled. A refusal never claims termination.
+/// Another owner holds the session or a durable write fails. Success records
+/// cancellation; `ProductStateRoots::runner_pending` distinguishes runner debt
+/// from proven settlement. No continuation is admitted to finish a stop.
 pub async fn stop_dormant_session(
     roots: &ProductStateRoots,
     store: &dyn SessionRecordStore,
@@ -71,22 +72,36 @@ async fn stop(
         // strictly inside its lease; an unfinished recorded stop is retried
         // under a fresh fence, never answered as terminated.
         let budget = std::time::Duration::from_secs(sessions.lease_period_seconds()) / 2;
-        let stopped = tokio::time::timeout(budget, async {
-            let intent = record(roots, store, session).await?;
-            roots.finish_dormant_root_stop(&head, &intent).await
-        })
-        .await
-        .unwrap_or_else(|_| {
-            Err(CliFailure::new(
-                "the stop remains pending; runner effects did not settle within the lease budget",
-            ))
-        });
+        let recorded = record(roots, store, session).await;
+        let stopped = match recorded {
+            Ok(intent) if !roots.runner_pending() => tokio::time::timeout(budget, async {
+                roots
+                    .finish_child_process_stops(&session.node.tree_id)
+                    .await?;
+                roots.finish_dormant_root_stop(&head, &intent).await
+            })
+            .await
+            .unwrap_or_else(|_| {
+                Err(CliFailure::new(
+                    "runner stop settlement exceeded its lease budget",
+                ))
+            }),
+            Ok(_) => Err(CliFailure::new("runner stop settlement remains pending")),
+            Err(error) => {
+                let _ = head.release().await;
+                return Err(error);
+            }
+        };
         let released = head
             .release()
             .await
             .map_err(|error| CliFailure::new(error.to_string()));
-        stopped?;
         released?;
+        if let Err(error) = stopped {
+            if !roots.retain_runner_stop_debt() {
+                return Err(error);
+            }
+        }
     } else {
         record(roots, store, session).await?;
     }
@@ -103,6 +118,16 @@ async fn record(
             .write_host_controls(&session.id, true, None)
             .map_err(CliFailure::from)?;
     }
+    *session = store.load(&session.id).map_err(CliFailure::new)?;
+    if !session.pending_queue.is_empty()
+        && session.queue_drain_state != crate::sessions::QueueDrainState::RestoredPaused
+    {
+        session.queue_drain_state = crate::sessions::QueueDrainState::RestoredPaused;
+        store.save(session).map_err(CliFailure::from)?;
+    }
+    super::root_loss::stop_root_continuation(store, session, RootInterruptCause::Stopped)
+        .map_err(CliFailure::new)?;
+    let intent = root_stop_intent(roots, store, session).await?;
     let tree_store = roots.tree_store()?;
     if let Some(persisted) = tree_store
         .load(&session.node.tree_id)
@@ -119,19 +144,7 @@ async fn record(
             tree.acknowledge_revision(revision);
         }
     }
-    roots
-        .finish_child_process_stops(&session.node.tree_id)
-        .await?;
-    *session = store.load(&session.id).map_err(CliFailure::new)?;
-    if !session.pending_queue.is_empty()
-        && session.queue_drain_state != crate::sessions::QueueDrainState::RestoredPaused
-    {
-        session.queue_drain_state = crate::sessions::QueueDrainState::RestoredPaused;
-        store.save(session).map_err(CliFailure::from)?;
-    }
-    super::root_loss::stop_root_continuation(store, session, RootInterruptCause::Stopped)
-        .map_err(CliFailure::new)?;
-    root_stop_intent(roots, store, session).await
+    Ok(intent)
 }
 
 async fn root_stop_intent(

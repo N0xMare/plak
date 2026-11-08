@@ -501,6 +501,33 @@ impl ProductStateRoots {
         self
     }
 
+    /// Opens only the recorded placement's cancellation/recovery ports. This
+    /// does not admit a runtime or require a configured, ready runner.
+    #[must_use]
+    pub fn for_runner_stop(
+        mut self,
+        registry: plakous::runner::RunnerRegistry,
+        runner_id: &str,
+    ) -> Self {
+        if runner_id == "local" && registry.rows().is_empty() {
+            return self;
+        }
+        if runner_id != "local" {
+            self.local_daemon = None;
+            self.runner_services = None;
+            self.daemon_client = registry.client(runner_id);
+        }
+        self.with_runner_readiness(registry, runner_id)
+    }
+
+    pub(crate) fn retain_runner_stop_debt(&self) -> bool {
+        if let Some((registry, id)) = self.runner_readiness.as_deref() {
+            registry.reconcile_when_available(id);
+            return true;
+        }
+        false
+    }
+
     /// A durable stop must remain pending while its runner barrier/link is
     /// unavailable; this is not evidence that any remote process has ended.
     #[must_use]

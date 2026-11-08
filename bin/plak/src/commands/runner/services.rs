@@ -248,6 +248,11 @@ async fn refresh_existing(
         .await
         .map_err(|_| unavailable(ProbePhase::Discovery))?;
     let runner = services.runners().reconciliation_services(&remote.id)?;
+    if !services.runners().rows().iter().any(|row| {
+        row.runner.runner_id == remote.id && row.status == plakous::runner::RunnerStatus::Ready
+    }) {
+        reconcile_remote(services, &remote.id, &client).await?;
+    }
     services.runners().ready(
         &remote.id,
         client,
@@ -298,6 +303,41 @@ async fn bind_remote(
     .await
     .map_err(|_| unavailable(ProbePhase::Daemon, true))??;
     finish_remote_bind(services, remote, runtime, deadline, dialed).await
+}
+
+async fn reconcile_remote(
+    services: &Services,
+    id: &str,
+    client: &RunnerClient,
+) -> Result<(), plakous::runner::PlacementFailure> {
+    use plakous::runner::{PlacementFailure, ProbePhase};
+    let unavailable = |phase, timed_out| PlacementFailure::RunnerUnreachable { phase, timed_out };
+    services
+        .runners()
+        .begin_reconcile(id, services.now_unix_seconds());
+    let roots = services
+        .state_roots()
+        .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
+    let sessions = roots
+        .runtime_sessions()
+        .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
+    let (readopted, failures) =
+        plakous_hosted::runner_adoption::readopt_lines(client, &sessions, "plak:host:readopt")
+            .await
+            .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
+    if let Some(failure) = failures.iter().find(|failure| !failure.held_elsewhere) {
+        tracing::warn!(target: "plak.runner", phase = "sweep", line = %failure.line, error = %failure.reason, "runner_recovery_failed");
+        return Err(unavailable(ProbePhase::Reconcile, false));
+    }
+    let _ = client.recover().await;
+    finish_stops(services, client, &sessions, &readopted)
+        .await
+        .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
+    client
+        .reconcile_settled_foreground()
+        .await
+        .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
+    Ok(())
 }
 
 async fn check_ssh(destination: &str) -> Result<(), plakous::runner::PlacementFailure> {
@@ -361,35 +401,7 @@ async fn finish_remote_bind(
         .await
         .map_err(|_| unavailable(ProbePhase::Discovery, true))?
         .map_err(|_| unavailable(ProbePhase::Discovery, false))?;
-    services
-        .runners()
-        .begin_reconcile(&remote.id, services.now_unix_seconds());
-    let roots = services
-        .state_roots()
-        .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
-    let sessions = roots
-        .runtime_sessions()
-        .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
-    let (readopted, failures) = plakous_hosted::runner_adoption::readopt_lines(
-        &dialed.client,
-        &sessions,
-        "plak:host:readopt",
-    )
-    .await
-    .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
-    if let Some(failure) = failures.iter().find(|failure| !failure.held_elsewhere) {
-        tracing::warn!(target: "plak.runner", phase = "sweep", line = %failure.line, error = %failure.reason, "runner_recovery_failed");
-        return Err(unavailable(ProbePhase::Reconcile, false));
-    }
-    let _ = dialed.client.recover().await;
-    finish_stops(services, &dialed.client, &sessions, &readopted)
-        .await
-        .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
-    dialed
-        .client
-        .reconcile_settled_foreground()
-        .await
-        .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
+    reconcile_remote(services, &remote.id, &dialed.client).await?;
     let backend = plakous::tools::runner::RunnerBackend::new(
         dialed.hello.descriptor.clone(),
         std::sync::Arc::new(dialed.client.clone()),
