@@ -17,14 +17,14 @@ fn archived_stop_is_a_read_only_noop_even_with_an_unreadable_runtime() {
     let product = ProductSessions::new(&services, None, None).unwrap();
     product.stop_dormant(&record.id).unwrap();
     assert!(!product.runner_pending(&record.id));
-    assert!(
+    assert_eq!(
         services
             .session_records()
             .unwrap()
             .load_intents(&record.id)
             .unwrap()
-            .root_interrupts
-            .is_empty()
+            .root_interrupts,
+        []
     );
     assert_eq!(
         std::fs::read(paths.runtime_database()).unwrap(),

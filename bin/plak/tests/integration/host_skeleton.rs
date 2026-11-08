@@ -275,7 +275,7 @@ fn lifecycle_real_product_archive_delete_releases_idle_actor_without_reopen() {
             archived: true
         })
     );
-    assert!(admin.rows(5).is_empty());
+    assert_eq!(admin.rows(5), []);
     assert_eq!(
         admin.request(
             6,

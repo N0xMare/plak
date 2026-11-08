@@ -64,7 +64,10 @@ pub struct DirectoryEntry {
 }
 
 impl ProductStore {
-    #[cfg(feature = "web")]
+    #[allow(
+        dead_code,
+        reason = "the optional hosting product reads exact session identities"
+    )]
     pub(crate) fn session_exists(&self, session: &str) -> Result<bool, String> {
         self.connection
             .query_row(
