@@ -3973,8 +3973,13 @@ suppression is written first. That suppression is what refuses a child
 wake, until a later root turn is admitted: a prompt admits one and clears
 it, so a child result after the prompt wakes the root, and until then a
 child result does not. Then every running or held child is interrupted
-with cause `stopped`, as an embedded run's exit does. On a running root
-turn the children are signalled and not joined; the idle boundary joins
+with cause `stopped`, as an embedded run's exit does.
+This includes a child reserved for startup whose Start was never admitted:
+it must not remain `running` after a stop merely because it has no turn owner,
+park or loss continuation yet. Reopen retains the stopped interrupt and cannot
+hand that assignment off. Planned handoff still leaves unadmitted startup to
+its startup-recovery law rather than inventing a continuation.
+On a running root turn the children are signalled and not joined; the idle boundary joins
 the retirement. A child that has not retired within the host's release
 bound after the tree's stop records are durable does not fail the stop.
 The root's `interrupt{stopped}` is recorded next, and skipped when that

@@ -346,7 +346,7 @@ impl ProductAgentTree {
                 && (cause != super::InterruptCause::Handoff || self.assignment_started(&id));
             if let Some(node) = self.nodes.get(&id)
                 && id != root
-                && (owned || parked)
+                && (owned || parked || cause == super::InterruptCause::Stopped)
                 && node.status == NodeStatus::Running
             {
                 self.record_operator_intent(

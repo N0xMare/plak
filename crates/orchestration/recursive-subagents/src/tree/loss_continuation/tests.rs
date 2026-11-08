@@ -397,6 +397,37 @@ fn a_handoff_does_not_continue_a_stopped_child() {
     }
 }
 
+#[test]
+fn a_session_stop_interrupts_an_unadmitted_spawn_and_reopen_never_hands_it_off() {
+    let (_root, mut tree) = tree();
+    let child = tree
+        .spawn_agent("root", &spawn_req(), None)
+        .unwrap()
+        .agent_id;
+    assert!(!tree.node(&child).unwrap().active_turn);
+    assert!(tree.node(&child).unwrap().session_locator.is_none());
+    assert_eq!(tree.record_handoff().unwrap(), Vec::<String>::new());
+    assert_eq!(tree.node(&child).unwrap().status, NodeStatus::Running);
+    assert_eq!(
+        tree.interrupt_running_descendants_for(InterruptCause::Stopped)
+            .unwrap(),
+        vec![child.clone()]
+    );
+    assert_eq!(tree.node(&child).unwrap().status, NodeStatus::Interrupted);
+    assert_eq!(
+        view(&tree, &child).interrupt_cause,
+        Some(InterruptCauseView::Stopped)
+    );
+    let mut reopened = ProductAgentTree::reopen(tree.to_persisted());
+    reopened.apply_reopen_law();
+    assert_eq!(
+        reopened.node(&child).unwrap().status,
+        NodeStatus::Interrupted
+    );
+    assert_eq!(reopened.loss_continuation(&child), None);
+    assert_eq!(reopened.record_handoff().unwrap(), Vec::<String>::new());
+}
+
 /// One running child, and nothing else a handoff could select.
 fn one_running() -> (tempfile::TempDir, ProductAgentTree, String) {
     let (root, mut tree) = tree();
