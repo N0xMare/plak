@@ -12,6 +12,75 @@ use super::*;
 const SESSION: &str = "00000000-0000-4000-8000-000000000001";
 const NEXT: &str = "00000000-0000-4000-8000-000000000002";
 
+#[test]
+fn local_launch_without_workspace_probes_the_client_directory_and_keeps_admission() {
+    use plakous_host_protocol::wire::{
+        PlacementReason, RunnerLabel, WorkspaceOptions, WorkspaceRefusalKind,
+    };
+    for protected in [false, true] {
+        let (_root, paths) = paths();
+        let launch = if protected {
+            paths.home().to_path_buf()
+        } else {
+            paths.workspace().unwrap().to_path_buf()
+        };
+        let paths = paths.for_workspace(&launch);
+        let listener = UnixListener::bind(paths.host_socket()).unwrap();
+        let expected = launch.to_str().unwrap().to_owned();
+        let peer = thread::spawn(move || {
+            let mut peer = Peer::accept(&listener);
+            peer.send(HostFrame::Welcome(welcome()));
+            let mut options = placement_options();
+            options.runners[0].runner = RunnerLabel::local();
+            options.runners[0].default_workspace = Some("/not-the-client".into());
+            let (id, _) = peer.request();
+            peer.answer(
+                id,
+                Answer::Options {
+                    options: Box::new(options.clone()),
+                },
+            );
+            let (id, op) = peer.request();
+            assert!(
+                matches!(op, Op::SessionOptions { workspace: Some(ref probe) } if probe.runner.runner_id == "local" && probe.path == expected)
+            );
+            options.workspace = Some(if protected {
+                WorkspaceOptions::Refused {
+                    refusal: PlacementReason::WorkspaceRefused {
+                        kind: WorkspaceRefusalKind::ProductHome,
+                        canonical: None,
+                    },
+                }
+            } else {
+                WorkspaceOptions::Valid {
+                    canonical_path: expected,
+                    profiles: options.profiles.clone(),
+                    templates: Vec::new(),
+                    models: options.models.clone(),
+                }
+            });
+            peer.answer(
+                id,
+                Answer::Options {
+                    options: Box::new(options),
+                },
+            );
+        });
+        let face = SocketFace::discover(&paths).unwrap().unwrap();
+        let verdict = face.place(Some("local"), None);
+        if protected {
+            assert_eq!(verdict.unwrap_err().exit_code(), 2);
+            assert!(face.state().creation.is_none());
+        } else {
+            verdict.unwrap();
+            assert!(
+                matches!(face.new_session(), Op::NewSession { ref workspace, .. } if workspace == launch.to_str().unwrap())
+            );
+        }
+        peer.join().unwrap();
+    }
+}
+
 fn placement_options() -> plakous_host_protocol::wire::SessionOptions {
     use plakous_host_protocol::wire::{RunnerLabel, RunnerOptions, RunnerStatus, SessionOptions};
     let profiles = plakous_host_protocol::views::ProfilesView {

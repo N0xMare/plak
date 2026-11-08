@@ -157,22 +157,26 @@ impl WorkspaceCatalog {
         excluded: &Path,
     ) -> Result<Self, WorkspaceRefusal> {
         let excluded = canonical(excluded)?;
-        let startup = startup.map(canonical).transpose()?;
         let mut catalog = Self {
             roots: None,
             bases: Vec::new(),
             excluded,
-            default: startup.as_deref().map(utf8).transpose()?,
+            default: None,
             copies: false,
             cache: Mutex::new(None),
         };
-        if let Some(startup) = &startup {
-            catalog.validate(&utf8(startup)?, true)?;
-            catalog.bases.push(startup.clone());
+        if let Some(startup) = startup {
+            let admitted = catalog.validate(&utf8(startup)?, true)?;
+            catalog.bases.push(PathBuf::from(&admitted));
+            catalog.default = Some(admitted);
         }
-        for path in recent.iter().take(20) {
-            if utf8(path).is_ok_and(|path| catalog.validate(&path, true).is_ok())
-                && let Some(parent) = path.parent().filter(|p| p.parent().is_some())
+        let admitted = recent
+            .iter()
+            .filter(|path| utf8(path).is_ok_and(|path| catalog.validate(&path, true).is_ok()))
+            .take(20)
+            .collect::<Vec<_>>();
+        for path in admitted {
+            if let Some(parent) = path.parent().filter(|p| p.parent().is_some())
                 && let Ok(parent) = canonical(parent)
                 && !catalog.bases.contains(&parent)
             {

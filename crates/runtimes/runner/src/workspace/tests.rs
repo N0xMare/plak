@@ -90,6 +90,52 @@ fn checkout(parent: &Path, name: &str, head: &str) -> PathBuf {
 }
 
 #[test]
+fn inadmissible_recents_never_add_discovery_parents() {
+    let root = tempfile::tempdir().unwrap();
+    let missing_parent = directory(root.path(), "missing-parent");
+    checkout(&missing_parent, "unrelated", COMMIT);
+    let containing = directory(root.path(), "containing");
+    let home = directory(&containing, "home");
+    checkout(root.path(), "outside", COMMIT);
+    let admitted_parent = directory(root.path(), "admitted-parent");
+    let admitted = checkout(&admitted_parent, "recent", COMMIT);
+    let sibling = checkout(&admitted_parent, "sibling", COMMIT);
+    let catalog = WorkspaceCatalog::local(
+        None,
+        &[missing_parent.join("missing"), containing, admitted.clone()],
+        &home,
+    )
+    .unwrap();
+    assert_eq!(catalog.bases, [admitted_parent]);
+    let found = catalog
+        .discover()
+        .workspaces
+        .into_iter()
+        .map(|row| row.path)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        found,
+        [admitted.to_str().unwrap(), sibling.to_str().unwrap()]
+    );
+}
+
+#[test]
+fn explicit_local_defaults_preserve_typed_home_and_alias_refusals() {
+    let root = tempfile::tempdir().unwrap();
+    let home = directory(root.path(), "home");
+    assert!(matches!(
+        WorkspaceCatalog::local(Some(&home), &[], &home),
+        Err(WorkspaceRefusal::ProductHome)
+    ));
+    let workspace = directory(root.path(), "workspace");
+    let alias = root.path().join("alias");
+    std::os::unix::fs::symlink(&workspace, &alias).unwrap();
+    assert!(
+        matches!(WorkspaceCatalog::local(Some(&alias), &[], &home), Err(WorkspaceRefusal::NotCanonical { canonical }) if canonical == workspace.to_str().unwrap())
+    );
+}
+
+#[test]
 fn discovery_reports_closed_head_states_and_does_not_descend_into_checkouts() {
     let home = tempfile::tempdir().unwrap();
     let protected = directory(home.path(), "protected");

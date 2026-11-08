@@ -47,23 +47,33 @@ impl ProductSessions {
         &self,
         row: &plakous::runner::RunnerRow,
     ) -> Result<wire::RunnerOptions, RequestRefusal> {
-        let mut recents = self
-            .with_product(|store| store.recent_workspaces(&row.runner.runner_id))
-            .map_err(unavailable)?
-            .into_iter()
-            .map(|(path, updated_at)| wire::RecentWorkspace { path, updated_at })
-            .collect::<Vec<_>>();
-        if row.runner.runner_id == "local" {
+        let catalog = if row.runner.runner_id == "local" {
             let paths = self
                 .services
                 .paths()
                 .map_err(|error| unavailable(error.message()))?;
-            let catalog = plakous::runner::WorkspaceCatalog::local(None, &[], paths.home())
-                .map_err(|_| {
-                    unavailable("the product home is unavailable for local workspace discovery")
-                })?;
-            recents.retain(|recent| catalog.validate(&recent.path, true).is_ok());
-        }
+            Some(
+                plakous::runner::WorkspaceCatalog::local(None, &[], paths.home()).map_err(
+                    |_| {
+                        unavailable("the product home is unavailable for local workspace discovery")
+                    },
+                )?,
+            )
+        } else {
+            None
+        };
+        let recents = self
+            .with_product(|store| {
+                store.recent_workspaces(&row.runner.runner_id, |path| {
+                    catalog
+                        .as_ref()
+                        .is_none_or(|catalog| catalog.validate(path, true).is_ok())
+                })
+            })
+            .map_err(unavailable)?
+            .into_iter()
+            .map(|(path, updated_at)| wire::RecentWorkspace { path, updated_at })
+            .collect::<Vec<_>>();
         runner_views::options(row, &self.services.runners().rows(), recents).map_err(unavailable)
     }
 

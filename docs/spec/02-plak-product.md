@@ -5246,6 +5246,12 @@ carry returns the committed successor and its locator with that failure. The
 TUI selects that successor and names it in a repair notice, rather than
 remaining on the source and creating another successor at the next reload.
 
+For a host-mode launch with `--runner local` and no `--workspace`, the client
+probes its own launch directory as the workspace (§2.1), not the host's launch
+directory, a recent or the runner's default. The probe goes through normal
+workspace admission; launching inside the product home still receives the
+typed product-home refusal and creates no session.
+
 In host mode `/reload` probes and re-execs the terminal client only. It
 restores the terminal and detaches, then execs the installed client with
 the same session id; the session remains resident in the host, with no

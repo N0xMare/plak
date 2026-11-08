@@ -116,17 +116,28 @@ impl ProductStore {
     }
 
     /// Distinct committed workspaces of one runner, including archived records.
-    /// Group saved path bytes before limiting so busy workspaces cannot hide recents.
+    /// Group saved path bytes and apply admission before the twenty-row limit.
     ///
     /// # Errors
     /// The read failed or a stored timestamp does not decode.
-    pub fn recent_workspaces(&self, runner_id: &str) -> Result<Vec<(String, u64)>, String> {
+    pub fn recent_workspaces(
+        &self,
+        runner_id: &str,
+        mut admitted: impl FnMut(&str) -> bool,
+    ) -> Result<Vec<(String, u64)>, String> {
         let mut statement = self.connection.prepare(
-            "SELECT workspace_root,MAX(updated_at) AS newest FROM sessions WHERE COALESCE(json_extract(runner_display,'$.runner_id'),'local')=?1 GROUP BY workspace_root COLLATE BINARY ORDER BY newest DESC,workspace_root ASC LIMIT 20",
+            "SELECT workspace_root,MAX(updated_at) AS newest FROM sessions WHERE COALESCE(json_extract(runner_display,'$.runner_id'),'local')=?1 GROUP BY workspace_root COLLATE BINARY ORDER BY newest DESC,workspace_root ASC",
         ).map_err(|_|"could not query recent workspaces".to_owned())?;
         statement
-            .query_map([runner_id], |row| Ok((row.get(0)?, from_i64(row.get(1)?)?)))
+            .query_map([runner_id], |row| {
+                Ok((row.get::<_, String>(0)?, from_i64(row.get(1)?)?))
+            })
             .map_err(|_| "could not query recent workspaces".to_owned())?
+            .filter(|row| match row {
+                Ok((path, _)) => admitted(path),
+                Err(_) => true,
+            })
+            .take(20)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| "a recent workspace row is invalid".to_owned())
     }
@@ -447,12 +458,15 @@ mod tests {
                 100 + index,
             )
         }));
-        assert_eq!(store.recent_workspaces("local").unwrap(), expected);
         assert_eq!(
-            store.recent_workspaces("runner-a").unwrap(),
+            store.recent_workspaces("local", |_| true).unwrap(),
+            expected
+        );
+        assert_eq!(
+            store.recent_workspaces("runner-a", |_| true).unwrap(),
             [(remote_root.to_string_lossy().into_owned(), 9999)]
         );
-        assert_eq!(store.recent_workspaces("unknown").unwrap(), []);
+        assert_eq!(store.recent_workspaces("unknown", |_| true).unwrap(), []);
     }
 
     #[cfg(unix)]
@@ -505,7 +519,7 @@ mod tests {
         });
         store.commit(&mut remote_target).unwrap();
         assert_eq!(
-            store.recent_workspaces("runner-a").unwrap(),
+            store.recent_workspaces("runner-a", |_| true).unwrap(),
             [
                 (
                     actual.to_string_lossy().into_owned(),

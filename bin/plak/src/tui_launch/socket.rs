@@ -109,6 +109,7 @@ impl SocketFace {
             })?;
         let path = workspace
             .map(str::to_owned)
+            .or_else(|| (row.runner.runner_id == "local").then(|| self.workspace.clone()))
             .or_else(|| {
                 row.recent_workspaces
                     .first()

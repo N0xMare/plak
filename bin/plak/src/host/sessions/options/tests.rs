@@ -25,6 +25,17 @@ fn inadmissible_local_recents_are_omitted_without_losing_admitted_choices() {
             .save(&mut record)
             .unwrap();
     }
+    for index in 0..25 {
+        let mut record = crate::store::sessions::SessionRecord::new(
+            root.path().join(format!("missing-{index}")),
+        );
+        record.updated_at_unix += 100 + index;
+        services
+            .session_records()
+            .unwrap()
+            .save(&mut record)
+            .unwrap();
+    }
     let prepared = crate::commands::runner::registry::prepare(&services).unwrap();
     assert_eq!(prepared.local.options().default_workspace, None);
     prepared
