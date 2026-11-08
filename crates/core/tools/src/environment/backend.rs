@@ -331,6 +331,7 @@ impl fmt::Debug for EnvironmentVariableValue {
 /// Exact workspace authority supplied to a sealed backend.
 #[derive(Clone)]
 pub struct ExecutionWorkspace {
+    #[cfg(unix)]
     private_service_home: Option<Arc<PathBuf>>,
     root: Arc<PathBuf>,
     cwd: Arc<PathBuf>,
@@ -349,6 +350,7 @@ pub struct ExecutionWorkspace {
 impl ExecutionWorkspace {
     fn from_environment(environment: &ExecutionEnvironment) -> Self {
         Self {
+            #[cfg(unix)]
             private_service_home: environment.private_service_home.clone(),
             root: Arc::new(environment.root().to_path_buf()),
             cwd: Arc::new(environment.cwd().to_path_buf()),
