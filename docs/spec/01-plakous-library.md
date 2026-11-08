@@ -6178,6 +6178,9 @@ settlement occurs while that dispatch awaits an owner transfer.
   them. Termination failures keep cleanup pending for the next tick; the
   runner cannot idle-exit while a foreground process or cleanup remains.
   Owner-lease time is monotonic and excludes suspend on both supported platforms.
+  `RunnerOptions::lease_clock` optionally supplies that nondecreasing monotonic
+  time for controlled embedding/tests; absent, production uses `Instant`. This
+  does not change protocol or binding bytes.
 - **Daemon.** The daemon serves one `RunnerService` on a socket of mode 0600
   in a 0700 directory, named after the protocol version and a hash of the
   version triple, and closes a connection from another user before its hello.
