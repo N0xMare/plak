@@ -17,6 +17,8 @@ use plakous_host_protocol::client::Transport;
 pub use crate::surface_protocol::PlakExtension;
 
 pub(crate) mod discovery;
+mod refusal;
+pub(crate) use refusal::refusal;
 
 /// Forward a confirmed lifecycle mutation to the home's host when it owns the
 /// home. Absence is the only permission to consider the offline fenced path;
