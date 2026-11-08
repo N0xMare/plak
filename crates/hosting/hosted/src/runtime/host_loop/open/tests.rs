@@ -7,6 +7,24 @@ use super::*;
 use crate::surface_protocol::HostEvent;
 use plakous::agent::CommandId;
 
+#[test]
+fn live_holders_take_precedence_over_both_runner_inspection_refusals() {
+    for failure in [
+        CliFailure::local_runner_processes(),
+        CliFailure::local_runner_inspection("root", "locator", "missing"),
+    ] {
+        assert_eq!(name_inspection_holder(failure.clone(), None), failure);
+        let named = name_inspection_holder(failure, Some("live holder".into()));
+        assert_eq!(named.code(), Some("tree_hosted_elsewhere"));
+        assert_eq!(named.message(), "live holder");
+    }
+    let internal = CliFailure::new("unavailable transport");
+    assert_eq!(
+        name_inspection_holder(internal.clone(), Some("live holder".into())),
+        internal
+    );
+}
+
 fn unpublished_fixture(
     root: &std::path::Path,
 ) -> (

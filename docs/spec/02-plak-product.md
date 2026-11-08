@@ -4797,6 +4797,7 @@ when the host starts keeps its custody, and the per-tree
 
 Before a host-mode `/reload` detaches, the installed build's reload probe must
 advertise support for the private host-only resume marker. A build that does
+not compile the TUI never advertises that capability. A build that does
 not advertise it refuses in the TUI with an install-compatible-client remedy;
 the terminal stays attached, rather than execing an unsupported option or
 falling back to an embedded-capable resume command.
@@ -4984,10 +4985,12 @@ exclusion. Standalone local placement remains direct and starts no local daemon.
   start `plak host`, or see them with `plak runner ps`". It changes no job
   outcome and stops nothing. A live runtime holder's name takes precedence
   over that process refusal; process-free opens retain canonical lease expiry.
-  An unparseable recorded child locator or one whose head cannot be resolved
-  refuses with `local_runner_inspection` (exit 7), naming the child and locator
-  and asking the operator to repair its recorded session association before
-  retrying embedded open (`plak runner ps` inspects the daemon's jobs). It
+  An unparseable recorded child locator or an unresolvable root or child head
+  refuses with `local_runner_inspection` (exit 7), naming the node and locator.
+  Its remedy is to open it through `plak host` (start `plak host`, then attach),
+  or inspect daemon jobs with `plak runner ps`. `plak session delete` (with
+  `--abandon-children` when needed) is only a destructive last resort.
+  A live lease holder's name takes precedence over this inspection refusal. It
   never skips the child or opens the canonical session on incomplete inspection.
   When no daemon answers, the open proceeds.
 - **Tool environment.** It captures the login shell's `PATH` once at start,

@@ -31,7 +31,7 @@ pub enum CliFailureKind {
     HostedElsewhere,
     /// An embedded attachment cannot take a daemon-held process line.
     LocalRunnerProcesses,
-    /// An embedded attachment cannot resolve a recorded process-owning child.
+    /// An embedded attachment cannot resolve a recorded root or child process line.
     LocalRunnerInspection,
     /// A standalone import cannot bind runners while a host owns the home.
     ImportThroughRunningHost,
@@ -370,7 +370,7 @@ impl CliFailure {
         Self::classified(
             CliFailureKind::LocalRunnerInspection,
             format!(
-                "cannot inspect local-runner ownership for child {agent} (locator {locator}): {cause}; repair this child's recorded session association before retrying embedded open; inspect daemon jobs with `plak runner ps`"
+                "cannot inspect local-runner ownership for node {agent} (locator {locator}): {cause}; open it through `plak host` (start `plak host`, then attach), or inspect daemon jobs with `plak runner ps`; only as a destructive last resort, use `plak session delete` with `--abandon-children` when needed"
             ),
         )
     }

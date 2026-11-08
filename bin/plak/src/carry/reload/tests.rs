@@ -3,6 +3,14 @@ use plakous::agent::BindingChange;
 use plakous::subscriptions::NativeAuthStatus;
 
 #[test]
+fn host_resume_capability_matches_the_compiled_client() {
+    let root = tempfile::tempdir().unwrap();
+    let probe = reload_probe(&PlakPaths::explicit(root.path().join("home")));
+    let advertised = serde_json::to_value(probe).unwrap();
+    assert_eq!(advertised["host_resume"], cfg!(feature = "tui"));
+}
+
+#[test]
 fn the_probe_answers_unknown_rather_than_renew_a_login() {
     let fresh = || Some(false);
     let expiring = || Some(true);

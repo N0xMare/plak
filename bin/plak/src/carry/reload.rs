@@ -60,7 +60,7 @@ pub(crate) struct ReloadProbe {
 
 pub(crate) fn reload_probe(paths: &PlakPaths) -> ReloadProbe {
     ReloadProbe {
-        host_resume: true,
+        host_resume: cfg!(feature = "tui"),
         state_key: crate::home::state::state_key(),
         export_versions: IMPORTABLE_VERSIONS.to_vec(),
         config_error: crate::product_config::SessionPolicy::load(paths).err(),

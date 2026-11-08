@@ -74,17 +74,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
                 .state_roots
                 .refuse_daemon_tree(locator, &tree_id)
                 .await
-                .map_err(|failure| {
-                    // A process-free open still applies canonical lease expiry.
-                    // Only a D6 refusal yields to the live holder's name here.
-                    if failure.code() == Some("local_runner_processes")
-                        && let Some(holder) = holder
-                    {
-                        CliFailure::hosted_elsewhere(holder)
-                    } else {
-                        failure
-                    }
-                })?;
+                .map_err(|failure| name_inspection_holder(failure, holder))?;
         }
         let log = SessionLog::open(&config.home, &config.session.id).ok();
         let mut stderr_buf = Vec::new();
@@ -690,3 +680,16 @@ fn announce_omitted_tools<P: plakous_host_protocol::ProtocolExtension>(
 
 #[cfg(test)]
 mod tests;
+
+fn name_inspection_holder(failure: CliFailure, holder: Option<String>) -> CliFailure {
+    // A process-free open still applies canonical lease expiry.
+    if matches!(
+        failure.code(),
+        Some("local_runner_processes" | "local_runner_inspection")
+    ) && let Some(holder) = holder
+    {
+        CliFailure::hosted_elsewhere(holder)
+    } else {
+        failure
+    }
+}

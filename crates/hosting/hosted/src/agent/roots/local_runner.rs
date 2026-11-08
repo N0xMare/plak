@@ -63,10 +63,9 @@ impl ProductStateRoots {
                 CliFailure::new(format!("the local runner inspection failed: {error:?}"))
             })?;
             let sessions = self.runtime_sessions()?;
-            let head = sessions
-                .line_head_of(locator)
-                .await
-                .map_err(|error| CliFailure::new(error.to_string()))?;
+            let head = sessions.line_head_of(locator).await.map_err(|error| {
+                CliFailure::local_runner_inspection(tree_id, &locator.to_string(), error)
+            })?;
             let mut tree_lines = BTreeSet::from([head.line().to_string()]);
             if let Some(tree) = self
                 .tree_store()?

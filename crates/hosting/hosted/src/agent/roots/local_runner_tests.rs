@@ -59,8 +59,9 @@ async fn an_unresolvable_child_refuses_embedded_daemon_inspection_with_a_remedy(
         for expected in [
             &child.agent_id,
             &recorded,
-            "repair this child's recorded session association",
+            "open it through `plak host` (start `plak host`, then attach)",
             "plak runner ps",
+            "only as a destructive last resort",
         ] {
             assert!(failure.message().contains(expected), "{failure}");
         }
@@ -77,6 +78,13 @@ async fn an_unresolvable_child_refuses_embedded_daemon_inspection_with_a_remedy(
                 .as_deref(),
             Some(recorded.as_str())
         );
+        let root_failure = roots
+            .refuse_daemon_tree(missing, &tree_id)
+            .await
+            .unwrap_err();
+        assert_eq!(root_failure.code(), Some("local_runner_inspection"));
+        assert!(root_failure.message().contains(&tree_id));
+        assert!(root_failure.message().contains(&missing.to_string()));
         daemon.abort();
         let _ = daemon.await;
         std::fs::remove_file(inspection_socket(home.path())).unwrap();
@@ -122,7 +130,9 @@ fn inspection_daemon(home: &std::path::Path) -> tokio::task::JoinHandle<()> {
     )
     .unwrap();
     tokio::spawn(async move {
-        let (stream, _) = listener.accept().await.unwrap();
-        service.serve_connection(stream).await;
+        loop {
+            let (stream, _) = listener.accept().await.unwrap();
+            service.serve_connection(stream).await;
+        }
     })
 }
