@@ -105,7 +105,7 @@ fn dormant_steps(
     records.push(json!({"kind": "released"}));
     let woken = web.connect(session)?;
     woken.attached(web)?;
-    if web.said("plak host: opened session ") < 2 {
+    if !web.said("plak host: opened session ", 2) {
         return web.lost("served a released session without opening it");
     }
     records.push(json!({"kind": "woke"}));
@@ -209,14 +209,26 @@ impl Web {
         );
     }
 
-    /// How many stderr lines so far start with `prefix`.
-    fn said(&self, prefix: &str) -> usize {
-        self.stderr
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|line| line.starts_with(prefix))
-            .count()
+    /// Whether `count` stderr lines start with `prefix` within `WAIT`. The
+    /// reader thread can trail lines the host wrote before it answered.
+    fn said(&self, prefix: &str, count: usize) -> bool {
+        let deadline = Instant::now() + WAIT;
+        loop {
+            let said = self
+                .stderr
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|line| line.starts_with(prefix))
+                .count();
+            if said >= count {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     /// A connection through the gate, attached to `session`'s root.
