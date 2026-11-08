@@ -5988,11 +5988,19 @@ between. Resident and topology runtimes remain live owners of their own stop
 settlement; a reconnect pass may skip their held lines without blocking unrelated
 placement readiness. A pass that skips recorded stop debt retains the runner's
 required-connection flag and one coalesced follow-up on the existing 1/2/5/15-second
-backoff. Ready stays open during that delay; when due, the owned pass bypasses the
-picker cache and re-drives the debt without a new user, link or restart trigger.
+backoff, then every 15 seconds for as long as skipped debt remains. The due pass
+is stop-only: it tries each deduplicated line's lease without waiting for its
+holder, revalidates the current head and later accepted submissions under that
+lease, and applies only the idempotent recorded stop and terminal persistence.
+It never changes runner readiness or ordinary effect admission and never invokes
+a runner-wide sweep or fresh reconciliation. A busy holder merely re-arms the
+next period; release needs no user, link or restart trigger. Fresh failed
+settlement, repaired descendants and reconnect still use the full fresh fence.
 Successful settlement clears the stop-debt requirement and resets the retry delay;
 a serving host still retains its intrinsic local-daemon connection requirement. Stop
-intent, runner protocol and binding encodings are unchanged.
+intent, runner protocol and binding encodings are unchanged. An old completion
+may clear a connection requirement only while the row is Ready and no fresh
+reconciliation is pending; stop-only results cannot replace a newer retry snapshot.
 
 - **Frames.** A big-endian `u32` length, then one JSON value. Neither end
   reads or writes a frame over 16 MiB; an answer that would exceed it is

@@ -4969,9 +4969,12 @@ exclusion. Standalone local placement remains direct and starts no local daemon.
   not the host. Needed connections retry with 1, 2, 5 and then 15 second backoff;
   idle remote picker rows do not keep an SSH connection alive. Recorded stop debt
   skipped under a live holder retains the required connection and one coalesced
-  delayed retry on that same backoff, without holding the row below Ready. The
-  retry bypasses the picker cache and settles the debt after release without a
-  new user action or link change; a settled pass clears the stop debt and resets
+  delayed retry on that same backoff and then a steady 15-second cadence. The
+  retry is stop-only and never closes Ready or effect admission: it attempts the
+  skipped line's lease, revalidates the stop against its current head and any later
+  accepted submission under that lease, then stops and persists terminals there.
+  A held line re-arms without a runner-wide sweep. Release needs no new command,
+  picker read, reconnect or restart; a settled pass clears the stop debt and resets
   the delay. The serving host still requires its local daemon connection, so idle
   local admission retains daemon monitoring and redial.
   A refused owner

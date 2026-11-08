@@ -32,7 +32,7 @@ async fn bind_local(
     catalog: std::sync::Arc<plakous::runner::WorkspaceCatalog>,
     environment: &super::super::environment::HostEnvironment,
     runtime: &tokio::runtime::Handle,
-) -> Result<(RunnerClient, bool), plakous::runner::PlacementFailure> {
+) -> Result<(RunnerClient, Vec<super::LineId>), plakous::runner::PlacementFailure> {
     use plakous::runner::{PlacementFailure, ProbePhase};
     let unavailable = |phase| PlacementFailure::RunnerUnreachable {
         phase,

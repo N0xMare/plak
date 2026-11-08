@@ -207,6 +207,49 @@ async fn until(mut predicate: impl FnMut() -> bool) {
     );
 }
 
+#[test]
+fn a_stale_completion_cannot_clear_a_fresh_connection_requirement() {
+    let registry = registry(1);
+    registry
+        .entries
+        .write()
+        .unwrap()
+        .get_mut("runner-0")
+        .unwrap()
+        .row
+        .status = RunnerStatus::Ready;
+    registry.require_connection("runner-0", true);
+    registry
+        .entries
+        .write()
+        .unwrap()
+        .get_mut("runner-0")
+        .unwrap()
+        .refresh
+        .reconcile_again = true;
+    registry.require_connection("runner-0", false);
+    assert!(
+        registry.needs_connection("runner-0"),
+        "the Ready-to-blocked fence window lost its debt"
+    );
+    registry.reconcile_when_available("runner-0");
+    registry.require_connection("runner-0", false);
+    assert!(
+        registry.needs_connection("runner-0"),
+        "blocked reconciliation lost its debt"
+    );
+    registry
+        .entries
+        .write()
+        .unwrap()
+        .get_mut("runner-0")
+        .unwrap()
+        .row
+        .status = RunnerStatus::Ready;
+    registry.require_connection("runner-0", false);
+    assert!(!registry.needs_connection("runner-0"));
+}
+
 #[tokio::test(start_paused = true)]
 async fn shared_refresh_is_four_wide_cached_and_not_owned_by_a_cancelled_reader() {
     let registry = registry(6);

@@ -25,8 +25,9 @@ type LocalDial = dyn Fn(
         tokio::runtime::Handle,
     ) -> std::pin::Pin<
         Box<
-            dyn Future<Output = Result<(RunnerClient, bool), plakous::runner::PlacementFailure>>
-                + Send,
+            dyn Future<
+                    Output = Result<(RunnerClient, Vec<LineId>), plakous::runner::PlacementFailure>,
+                > + Send,
         >,
     > + Send
     + Sync;
@@ -87,10 +88,16 @@ fn start_probes(
                     .filter(|dialed| dialed.client.is_connected())
                     .map(|dialed| (dialed.client.clone(), dialed.hello.clone()));
                 if let Some((client, hello)) = connected {
-                    let result = refresh_existing(&services, &remote, client, hello).await;
+                    let result = refresh_existing(&services, &remote, client.clone(), hello).await;
                     match &result {
                         Ok(Some(pending)) => {
-                            complete_reconciliation(&registry, &id, *pending, &retries);
+                            complete_reconciliation(
+                                &services,
+                                &id,
+                                &client,
+                                pending.clone(),
+                                &retries,
+                            );
                         }
                         Err(plakous::runner::PlacementFailure::RunnerUnreachable { .. }) => {
                             retry_remote(registry, id, retries);
@@ -107,7 +114,7 @@ fn start_probes(
                             .lock()
                             .unwrap_or_else(std::sync::PoisonError::into_inner)
                             .insert(id.clone(), dialed);
-                        complete_reconciliation(&registry, &id, pending, &retries);
+                        complete_reconciliation(&services, &id, &client, pending, &retries);
                         watch_remote(registry, id, client, retries);
                         Ok(())
                     }
@@ -151,10 +158,10 @@ async fn probe_local(
     {
         return ready_local(registry, local, services.now_unix_seconds()).await;
     }
-    let result = dial(services, local, handle).await;
+    let result = dial(services.clone(), local, handle).await;
     match &result {
         Ok((client, pending)) => {
-            complete_reconciliation(&registry, &id, *pending, &retries);
+            complete_reconciliation(&services, &id, client, pending.clone(), &retries);
             if !was_connected {
                 watch_remote(registry, id, client.clone(), retries);
             }
@@ -177,35 +184,50 @@ async fn ready_local(
         })?
 }
 
+#[derive(Clone)]
+struct StopContext {
+    services: Services,
+    client: RunnerClient,
+}
+
 #[derive(Default)]
 struct Retry {
     delay: u64,
     scheduled: bool,
-    pending_stops: bool,
+    pending_stops: Vec<LineId>,
+    context: Option<StopContext>,
+    generation: u64,
 }
 type Retries = std::sync::Arc<std::sync::Mutex<BTreeMap<String, Retry>>>;
 
 fn complete_reconciliation(
-    registry: &plakous::runner::RunnerRegistry,
+    services: &Services,
     id: &str,
-    pending: bool,
+    client: &RunnerClient,
+    mut pending: Vec<LineId>,
     retries: &Retries,
 ) {
-    // A live holder defers its stop, not other sessions' admission. Publish
-    // Ready first, then retain one owned retry until the recorded debt settles.
-    // A serving host keeps its local daemon even after stop debt clears.
-    registry.require_connection(id, pending || id == "local");
+    let registry = services.runners();
+    pending.sort();
+    pending.dedup();
+    let deferred = !pending.is_empty();
+    registry.require_connection(id, deferred || id == "local");
     {
         let mut state = retries
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let retry = state.entry(id.into()).or_default();
+        retry.generation = retry.generation.wrapping_add(1);
         retry.pending_stops = pending;
-        if !pending {
+        retry.context = deferred.then(|| StopContext {
+            services: services.runner_probe_context(),
+            client: client.clone(),
+        });
+        if !deferred {
             retry.delay = 0;
         }
     }
-    if pending {
+    if deferred {
         retry_remote(registry.clone(), id.into(), retries.clone());
     }
 }
@@ -233,25 +255,136 @@ fn retry_remote(registry: plakous::runner::RunnerRegistry, id: String, retries: 
     };
     tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
-        let pending_stops = if let Some(retry) = retries
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get_mut(&id)
-        {
-            retry.scheduled = false;
-            retry.pending_stops
-        } else {
-            false
-        };
         let ready = registry.rows().iter().any(|row| {
             row.runner.runner_id == id && row.status == plakous::runner::RunnerStatus::Ready
         });
-        if registry.needs_connection(&id) && (pending_stops || !ready) {
-            // Bypass both the picker cache and the connected-Ready fast path.
-            registry.reconcile_when_available(&id);
-            let _ = registry.refresh(Some(&[id])).await;
+        if ready {
+            retry_stops(registry, id, retries).await;
+        } else {
+            if let Some(retry) = retries
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get_mut(&id)
+            {
+                retry.scheduled = false;
+            }
+            if registry.needs_connection(&id) {
+                // Only reconnect/fresh-debt recovery closes runner admission.
+                registry.reconcile_when_available(&id);
+                let _ = registry.refresh(Some(&[id])).await;
+            }
         }
     });
+}
+
+async fn retry_stops(registry: plakous::runner::RunnerRegistry, id: String, retries: Retries) {
+    let snapshot = {
+        let state = retries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.get(&id).map(|retry| {
+            (
+                retry.generation,
+                retry.pending_stops.clone(),
+                retry.context.clone(),
+            )
+        })
+    };
+    let Some((generation, pending, context)) = snapshot else {
+        return;
+    };
+    let remaining = if let Some(context) = context {
+        let services = context.services.with_runner_registry(registry.clone());
+        if let Ok(remaining) = stop_only_followup(&services, &context.client, &pending).await {
+            remaining
+        } else {
+            tracing::warn!(target: "plak.runner", runner_id = %id, "recorded_stop_retry_failed");
+            pending
+        }
+    } else {
+        Vec::new()
+    };
+    let (same_pass, deferred) = {
+        let mut state = retries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(retry) = state.get_mut(&id) else {
+            return;
+        };
+        let same_pass = retry.generation == generation;
+        if same_pass {
+            retry.pending_stops = remaining;
+            if retry.pending_stops.is_empty() {
+                retry.context = None;
+                retry.delay = 0;
+            }
+        }
+        retry.scheduled = false;
+        (same_pass, !retry.pending_stops.is_empty())
+    };
+    if same_pass {
+        registry.require_connection(&id, deferred || id == "local");
+    }
+    registry.progress(&id, plakous::runner::ProbePhase::Reconcile);
+    if deferred {
+        retry_remote(registry, id, retries);
+    }
+}
+
+async fn stop_only_followup(
+    services: &Services,
+    client: &RunnerClient,
+    pending: &[LineId],
+) -> CliResult<Vec<LineId>> {
+    use plakous::sessions::{AgentSessionsErrorKind, SessionOperationId};
+    let sessions = services.state_roots()?.runtime_sessions()?;
+    let mut remaining = Vec::new();
+    for &line in pending {
+        let operation = SessionOperationId::new(format!("plak:host:stop-retry:{line}"))
+            .map_err(|error| CliFailure::new(error.to_string()))?;
+        let head = match sessions.open_lease_only(&operation, line).await {
+            Ok(head) => head,
+            Err(error) if error.kind() == AgentSessionsErrorKind::NotFound => continue,
+            Err(_) => {
+                remaining.push(line);
+                continue;
+            }
+        };
+        // The later-submission and head checks run inside this line's lease.
+        // No driver, model, runner-wide sweep or readiness mutation is admitted.
+        let budget = std::time::Duration::from_secs(sessions.lease_period_seconds()) / 2;
+        let stopped = tokio::time::timeout(
+            budget,
+            stop_current_head(services, client, &sessions, &head),
+        )
+        .await;
+        let released = head.release().await;
+        if !matches!(stopped, Ok(Ok(()))) || released.is_err() {
+            remaining.push(line);
+        }
+    }
+    Ok(remaining)
+}
+
+async fn stop_current_head(
+    services: &Services,
+    client: &RunnerClient,
+    sessions: &AgentSessions,
+    head: &plakous::sessions::LeaseOnlyHead,
+) -> CliResult<()> {
+    let paths = services.paths()?;
+    let mut product = crate::store::ProductStore::open(paths)
+        .map_err(|error| CliFailure::new(error.to_string()))?;
+    let mut stops = BTreeMap::new();
+    for id in product.session_ids().map_err(CliFailure::new)? {
+        collect_stops(&mut product, paths, sessions, &id, &mut stops).await?;
+    }
+    if let Some(intent) = stops.get(&head.line()) {
+        plakous_hosted::runner_adoption::finish_recorded_stop_held(client, head, intent)
+            .await
+            .map_err(CliFailure::new)?;
+    }
+    Ok(())
 }
 
 fn watch_remote(
@@ -286,7 +419,7 @@ async fn refresh_existing(
     remote: &crate::commands::runner::registry::Remote,
     client: RunnerClient,
     hello: plakous::runner::protocol::Hello,
-) -> Result<Option<bool>, plakous::runner::PlacementFailure> {
+) -> Result<Option<Vec<LineId>>, plakous::runner::PlacementFailure> {
     use plakous::runner::{PlacementFailure, ProbePhase};
     let unavailable = |phase| PlacementFailure::RunnerUnreachable {
         phase,
@@ -341,7 +474,8 @@ async fn bind_remote(
     remote: &crate::commands::runner::registry::Remote,
     runtime: &tokio::runtime::Handle,
     client: Option<&RunnerClient>,
-) -> Result<(crate::commands::runner::dial::Dialed, bool), plakous::runner::PlacementFailure> {
+) -> Result<(crate::commands::runner::dial::Dialed, Vec<LineId>), plakous::runner::PlacementFailure>
+{
     use plakous::runner::{PlacementFailure, ProbePhase};
     let unavailable = |phase, timed_out| PlacementFailure::RunnerUnreachable { phase, timed_out };
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(25);
@@ -370,7 +504,7 @@ async fn reconcile_remote(
     services: &Services,
     id: &str,
     client: &RunnerClient,
-) -> Result<bool, plakous::runner::PlacementFailure> {
+) -> Result<Vec<LineId>, plakous::runner::PlacementFailure> {
     use plakous::runner::{PlacementFailure, ProbePhase};
     let unavailable = |phase, timed_out| PlacementFailure::RunnerUnreachable { phase, timed_out };
     services
@@ -432,7 +566,7 @@ async fn finish_remote_bind(
     runtime: &tokio::runtime::Handle,
     deadline: tokio::time::Instant,
     dialed: super::dial::Dialed,
-) -> Result<(super::dial::Dialed, bool), plakous::runner::PlacementFailure> {
+) -> Result<(super::dial::Dialed, Vec<LineId>), plakous::runner::PlacementFailure> {
     use plakous::runner::{PlacementFailure, ProbePhase};
     let unavailable = |phase, timed_out| PlacementFailure::RunnerUnreachable { phase, timed_out };
     install_reporter(&dialed.client);
@@ -487,7 +621,7 @@ async fn finish_stops(
     client: &RunnerClient,
     sessions: &AgentSessions,
     readopted: &[plakous_hosted::runner_adoption::Readopted],
-) -> CliResult<bool> {
+) -> CliResult<Vec<LineId>> {
     let paths = services.paths()?;
     let mut product = crate::store::ProductStore::open(paths)
         .map_err(|error| CliFailure::new(error.to_string()))?;
@@ -500,7 +634,7 @@ async fn finish_stops(
             "the local runner's lines could not be read: {error:?}"
         ))
     })?;
-    let mut pending = false;
+    let mut pending = Vec::new();
     for status in held {
         let line = match status.line.parse() {
             Ok(line) => line,
@@ -511,7 +645,7 @@ async fn finish_stops(
         };
         if let Some(intent) = stops.get(&line) {
             if !readopted.iter().any(|adopted| adopted.line == line) {
-                pending = true;
+                pending.push(line);
                 continue;
             }
             plakous_hosted::runner_adoption::finish_recorded_stop(client, sessions, line, intent)
@@ -547,11 +681,26 @@ async fn collect_stops(
         }
     }
     let intents = product.load_intents(id).map_err(CliFailure::new)?;
+    let views = product.load_views(id).map_err(CliFailure::new)?;
     let Some(stop) = intents
         .root_interrupts
         .iter()
         .max_by_key(|intent| (intent.anchor, intent.ordinal))
         .filter(|intent| intent.value.cause == RootInterruptCause::Stopped)
+        .filter(|stop| {
+            !intents.submissions.iter().any(|submission| {
+                intents
+                    .submission_anchors
+                    .get(&submission.command_id)
+                    .is_some_and(|anchor| *anchor >= stop.anchor)
+                    && views.as_ref().is_some_and(|views| {
+                        matches!(
+                            views.state.deliveries.get(&submission.command_id),
+                            Some(plakous_hosted::sessions::projector::Delivery::Accepted)
+                        )
+                    })
+            })
+        })
     else {
         return Ok(());
     };

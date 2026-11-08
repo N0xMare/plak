@@ -1998,7 +1998,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     },
     ('plak', 'src/commands/runner/home.rs'): {'runner': {'daemon', 'protocol'}},
     ('plak', 'src/commands/runner/services.rs'): {
-        'sessions': {'SessionLocator'},
+        'sessions': {'SessionLocator', 'LeaseOnlyHead', 'SessionOperationId', 'AgentSessionsErrorKind'},
         'runner': {
             'PlacementFailure',
             'ProbePhase',

@@ -575,13 +575,16 @@ impl RunnerRegistry {
     }
 
     /// Keeps a deferred continuation/stop eligible for reconnect without an
-    /// attached node. Clear after its owned reconciliation finishes.
+    /// attached node. Clearing after a completed pass cannot retire a newer
+    /// requirement while the row is blocked or fresh reconciliation is pending.
     pub fn require_connection(&self, id: &str, required: bool) {
         if let Some(entry) = self
             .entries
             .write()
             .unwrap_or_else(PoisonError::into_inner)
             .get_mut(id)
+            && (required
+                || (entry.row.status == RunnerStatus::Ready && !entry.refresh.reconcile_again))
         {
             entry.required = required;
         }

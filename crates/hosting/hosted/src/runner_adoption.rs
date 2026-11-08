@@ -165,6 +165,21 @@ pub async fn finish_recorded_stop(
     .map_err(|failure| failure.reason)
 }
 
+/// Finishes an idempotent recorded stop under the caller's line lease.
+/// The caller must hold that lease and revalidate the stop against the current
+/// head and any later accepted submission before this dispatch. The caller
+/// retains the lease and releases it after this future completes, on every path.
+///
+/// # Errors
+/// Owner transfer, stop dispatch or terminal persistence failed.
+pub async fn finish_recorded_stop_held(
+    client: &RunnerClient,
+    head: &plakous::sessions::LeaseOnlyHead,
+    intent: &str,
+) -> Result<Readopted, String> {
+    readopt_held(client, head, Some(intent)).await
+}
+
 async fn readopt_line(
     client: &RunnerClient,
     sessions: &AgentSessions,

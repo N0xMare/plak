@@ -1347,7 +1347,13 @@ the previously queued bounded-backoff retry must settle the stop exactly once
 without an explicit refresh, reconnect, command or restart. Repeated observations
 of the same pending debt cannot queue duplicate retries or reset the delay.
 Settlement clears deferred remote connection requirements, but a serving host
-retains its intrinsic local-daemon requirement after the stop retry state clears. The review driver
+retains its intrinsic local-daemon requirement after the stop retry state clears.
+A resident holder remains open for at least 20 seconds while Ready and non-read
+AdmittedLink dispatch remain continuously available; attempt counts pin the
+1/2/5/15-second ramp without full sweeps. Its release settles once and disarms.
+A later accepted submission during the delay suppresses the old stop after lease
+acquisition. Registry laws reject stale clearing in both the Ready-to-blocked
+fence window and an already-blocked fresh pass. The review driver
 reseeds the head-free repair, fresh descendant-debt fence and release-ordering
 decisions; build failures and empty selections are not mutant kills.
 Neither an attachment nor a paid continuation is created by a stop.
