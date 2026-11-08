@@ -5975,6 +5975,9 @@ intent. Retries of that same obligation coalesce with its active sweep instead
 of invalidating it; a different intent still fences an older pass. Completion
 of the same stop cannot reopen an already-ready barrier. These process-local
 keys do not change the persisted stop, runner protocol or binding encoding.
+A retry may acknowledge its already-durable cancellation while reconciliation
+holds the head lease, without taking that lease or changing its owner. A later
+accepted turn or successor invalidates that repeated-stop shortcut.
 
 - **Frames.** A big-endian `u32` length, then one JSON value. Neither end
   reads or writes a frame over 16 MiB; an answer that would exceed it is

@@ -437,7 +437,7 @@ impl RunnerRegistry {
 
     /// Retains durable stop debt and queues a fresh owned reconciliation.
     /// A probe already in flight cannot publish readiness over this debt.
-    pub fn reconcile_when_available(&self, id: &str) {
+    fn reconcile_when_available(&self, id: &str) {
         if let Some(entry) = self
             .entries
             .write()

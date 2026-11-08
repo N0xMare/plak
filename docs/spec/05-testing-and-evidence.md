@@ -1329,6 +1329,9 @@ perform a fresh reconciliation before admitting work.
 The paused-probe regression also retries the same line/intent during that fresh
 pass: retries must not dirty it again or prevent readiness. A distinct later
 intent still requires a new sweep. Removing that coalescing must fail the proof.
+The dormant-stop regression holds the root head during both a new and a repeated
+stop: the new cancellation refuses ownership without recording a stop, while
+the already-recorded cancellation remains pending without changing its revision.
 Neither an attachment nor a paid continuation is created by a stop.
 
 Host serving is not a runner-readiness barrier. Daemon recovery fixtures use

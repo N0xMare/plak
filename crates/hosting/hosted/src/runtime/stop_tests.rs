@@ -172,6 +172,26 @@ fn a_dormant_stop_records_cancellation_before_an_unavailable_runners_settlement(
         .clone()
         .for_runner_stop(registry.clone(), "saved-runner");
     let mut record = lost.store.load(&lost.id).unwrap();
+    let sessions = roots.runtime_sessions().unwrap();
+    let line = sessions
+        .line_head_of(record.plakous_locator.unwrap())
+        .block()
+        .unwrap();
+    let held = sessions
+        .open_lease_only(
+            &plakous::sessions::SessionOperationId::new("foreign:held").unwrap(),
+            line.line(),
+        )
+        .block()
+        .unwrap();
+    assert!(
+        super::stop_dormant_session(&roots, lost.store.as_ref(), &mut record)
+            .block()
+            .is_err(),
+        "a new cancellation bypassed ownership"
+    );
+    assert!(!root_causes(&lost).contains(&RootInterruptCause::Stopped));
+    held.release().block().unwrap();
     super::stop_dormant_session(&roots, lost.store.as_ref(), &mut record)
         .block()
         .unwrap();
@@ -183,9 +203,22 @@ fn a_dormant_stop_records_cancellation_before_an_unavailable_runners_settlement(
     );
     assert!(lost.store.load(&lost.id).unwrap().child_wake_suppressed);
     let revision = lost.store.load(&lost.id).unwrap().store_revision;
+    let sessions = roots.runtime_sessions().unwrap();
+    let line = sessions
+        .line_head_of(record.plakous_locator.unwrap())
+        .block()
+        .unwrap();
+    let held = sessions
+        .open_lease_only(
+            &plakous::sessions::SessionOperationId::new("reconcile:held").unwrap(),
+            line.line(),
+        )
+        .block()
+        .unwrap();
     super::stop_dormant_session(&roots, lost.store.as_ref(), &mut record)
         .block()
         .unwrap();
+    held.release().block().unwrap();
     assert_eq!(lost.store.load(&lost.id).unwrap().store_revision, revision);
     assert_eq!(dispatches(&lost.evidence), before);
     let mut next = next_host(

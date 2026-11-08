@@ -8,13 +8,14 @@ use crate::sessions::SessionRecord;
 use crate::sessions::projector::{
     RootInterrupt, RootInterruptCause, RootLossIntent, RootStopAnchor,
 };
-use plakous::sessions::SessionOperationId;
+use plakous::sessions::{AgentSessionsErrorKind, LeaseOnlyHead, SessionOperationId};
 
-/// Stops a dormant session under its tree custody and a lease-only root
-/// head. No model, driver, attachment or continuation is constructed.
+/// Stops new dormant work under tree custody and a lease-only root head.
+/// An already-durable pending cancellation needs no new head lease.
+/// No model, driver, attachment or continuation is constructed.
 ///
 /// # Errors
-/// Another owner holds the session or a durable write fails. Success records
+/// New cancellation cannot acquire ownership or a durable write fails. Success records
 /// cancellation; `ProductStateRoots::runner_pending` distinguishes runner debt
 /// from proven settlement. No continuation is admitted to finish a stop.
 pub async fn stop_dormant_session(
@@ -38,13 +39,19 @@ pub async fn stop_dormant_session(
     result.and(released)
 }
 
-async fn stop(
+enum StopHead {
+    Absent,
+    Pending,
+    Held(LeaseOnlyHead),
+}
+
+async fn stop_head(
     roots: &ProductStateRoots,
     store: &dyn SessionRecordStore,
-    session: &mut SessionRecord,
-) -> CliResult<()> {
+    session: &SessionRecord,
+) -> CliResult<StopHead> {
     let sessions = roots.runtime_sessions()?;
-    let head = if let Some(locator) = session.plakous_locator {
+    if let Some(locator) = session.plakous_locator {
         let line = sessions
             .line_head_of(locator)
             .await
@@ -54,60 +61,91 @@ async fn stop(
                 "the session has a successor; stop its current session instead",
             ));
         }
-        Some(
-            sessions
-                .open_lease_only(
-                    &SessionOperationId::new(format!("plak:stop:{}", session.id))
-                        .map_err(|error| CliFailure::new(error.to_string()))?,
-                    line.line(),
-                )
-                .await
-                .map_err(|error| CliFailure::new(error.to_string()))?,
-        )
-    } else {
-        None
-    };
-    if let Some(head) = head {
-        // A lease-only owner has no agent heartbeat. Keep the operation
-        // strictly inside its lease; an unfinished recorded stop is retried
-        // under a fresh fence, never answered as terminated.
-        let budget = std::time::Duration::from_secs(sessions.lease_period_seconds()) / 2;
-        let intent = match record(roots, store, session).await {
-            Ok(intent) => intent,
+        let reconciling = roots.runner_pending();
+        match sessions
+            .open_lease_only(
+                &SessionOperationId::new(format!("plak:stop:{}", session.id))
+                    .map_err(|error| CliFailure::new(error.to_string()))?,
+                line.line(),
+            )
+            .await
+        {
+            Ok(head) => Ok(StopHead::Held(head)),
             Err(error) => {
-                let _ = head.release().await;
-                return Err(error);
-            }
-        };
-        let stopped = if !roots.runner_pending() {
-            tokio::time::timeout(budget, async {
-                roots
-                    .finish_child_process_stops(&session.node.tree_id)
-                    .await?;
-                roots.finish_dormant_root_stop(&head, &intent).await
-            })
-            .await
-            .unwrap_or_else(|_| {
-                Err(CliFailure::new(
-                    "runner stop settlement exceeded its lease budget",
-                ))
-            })
-        } else {
-            Err(CliFailure::new("runner stop settlement remains pending"))
-        };
-        let line = head.line();
-        let released = head
-            .release()
-            .await
-            .map_err(|error| CliFailure::new(error.to_string()));
-        released?;
-        if let Err(error) = stopped {
-            if !roots.retain_runner_stop_debt(line, &intent) {
-                return Err(error);
+                // Repeating an already-durable cancellation must not compete
+                // with its recovery lease. A new stop cannot use this path.
+                if (reconciling || roots.runner_pending())
+                    && matches!(
+                        error.kind(),
+                        AgentSessionsErrorKind::Ownership | AgentSessionsErrorKind::Busy
+                    )
+                    && let Some(ordinal) = recorded_stop_ordinal(store, session)?
+                    && roots.retain_runner_stop_debt(
+                        line.line(),
+                        &format!("plak:stop:{}:{ordinal}", session.id),
+                    )
+                {
+                    return Ok(StopHead::Pending);
+                }
+                Err(CliFailure::new(error.to_string()))
             }
         }
     } else {
-        record(roots, store, session).await?;
+        Ok(StopHead::Absent)
+    }
+}
+
+async fn stop(
+    roots: &ProductStateRoots,
+    store: &dyn SessionRecordStore,
+    session: &mut SessionRecord,
+) -> CliResult<()> {
+    let head = match stop_head(roots, store, session).await? {
+        StopHead::Pending => return Ok(()),
+        StopHead::Absent => {
+            record(roots, store, session).await?;
+            return Ok(());
+        }
+        StopHead::Held(head) => head,
+    };
+    // A lease-only owner has no agent heartbeat. Keep the operation
+    // strictly inside its lease; an unfinished recorded stop is retried
+    // under a fresh fence, never answered as terminated.
+    let budget =
+        std::time::Duration::from_secs(roots.runtime_sessions()?.lease_period_seconds()) / 2;
+    let intent = match record(roots, store, session).await {
+        Ok(intent) => intent,
+        Err(error) => {
+            let _ = head.release().await;
+            return Err(error);
+        }
+    };
+    let stopped = if !roots.runner_pending() {
+        tokio::time::timeout(budget, async {
+            roots
+                .finish_child_process_stops(&session.node.tree_id)
+                .await?;
+            roots.finish_dormant_root_stop(&head, &intent).await
+        })
+        .await
+        .unwrap_or_else(|_| {
+            Err(CliFailure::new(
+                "runner stop settlement exceeded its lease budget",
+            ))
+        })
+    } else {
+        Err(CliFailure::new("runner stop settlement remains pending"))
+    };
+    let line = head.line();
+    let released = head
+        .release()
+        .await
+        .map_err(|error| CliFailure::new(error.to_string()));
+    released?;
+    if let Err(error) = stopped {
+        if !roots.retain_runner_stop_debt(line, &intent) {
+            return Err(error);
+        }
     }
     Ok(())
 }
@@ -151,11 +189,10 @@ async fn record(
     Ok(intent)
 }
 
-async fn root_stop_intent(
-    roots: &ProductStateRoots,
+fn recorded_stop_ordinal(
     store: &dyn SessionRecordStore,
     session: &SessionRecord,
-) -> CliResult<String> {
+) -> CliResult<Option<u32>> {
     let intents = store.load_intents(&session.id).map_err(CliFailure::new)?;
     let views = store.load_views(&session.id).map_err(CliFailure::new)?;
     let stopped = intents
@@ -177,8 +214,16 @@ async fn root_stop_intent(
                     })
             })
         });
-    let ordinal = if let Some(stopped) = stopped {
-        stopped.ordinal
+    Ok(stopped.map(|stop| stop.ordinal))
+}
+
+async fn root_stop_intent(
+    roots: &ProductStateRoots,
+    store: &dyn SessionRecordStore,
+    session: &SessionRecord,
+) -> CliResult<String> {
+    let ordinal = if let Some(ordinal) = recorded_stop_ordinal(store, session)? {
+        ordinal
     } else {
         let cursor = store
             .load_views(&session.id)
