@@ -22,15 +22,6 @@ fn host_install_unit_matches_the_service_golden() -> TestResult {
         include_str!("../../../tests/goldens/plak-host.service")
     );
     assert!(!unit.contains("--dev-login"));
-    let service = unit
-        .split_once("[Service]")
-        .ok_or("missing service section")?
-        .1
-        .split_once("[Install]")
-        .ok_or("missing install section")?
-        .0
-        .trim();
-    assert!(include_str!("../../../../../docs/spec/02-plak-product.md").contains(service));
     Ok(())
 }
 

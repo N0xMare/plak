@@ -186,7 +186,7 @@ fn running_manager(fixture: &Fixture) -> TestResult {
     std::fs::write(
         &launcher,
         format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > {log}\nenv >> {log}\nwhile [ \"$1\" != -- ]; do\ncase \"$1\" in --setenv=*) export \"${{1#--setenv=}}\";; esac\nshift\ndone\nshift\nsetsid \"$@\" </dev/null >/dev/null 2>&1 &\n"
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > {log}\nenv >> {log}\nn=0\nwhile [ \"$1\" != -- ] && [ $((n += 1)) -le 32 ]; do\ncase \"$1\" in --setenv=*) export \"${{1#--setenv=}}\";; esac\nshift\ndone\n[ \"$1\" = -- ] || exit 1\nshift\nsetsid \"$@\" </dev/null >/dev/null 2>&1 &\n"
         ),
     )?;
     std::fs::set_permissions(launcher, std::fs::Permissions::from_mode(0o755))?;

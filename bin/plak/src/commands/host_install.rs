@@ -193,11 +193,11 @@ fn validate_config_home(home: &Path, configured: Option<&Path>) -> CliResult<()>
     let expected = home.join(".config");
     if let Some(configured) = configured
         && configured != expected
-        && !configured
+        && configured
             .canonicalize()
             .ok()
             .zip(expected.canonicalize().ok())
-            .is_some_and(|(configured, expected)| configured == expected)
+            .is_none_or(|(configured, expected)| configured != expected)
     {
         return Err(CliFailure::new(
             "XDG_CONFIG_HOME must resolve to $HOME/.config so systemd can find plak-host.service",
