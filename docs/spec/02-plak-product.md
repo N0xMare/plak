@@ -1553,6 +1553,8 @@ Explicit archived-inclusive lists filter before applying row limits. An archived
 session is read-only until explicitly unarchived; inspection must not open its
 runtime, recover, drain its queue or execute a continuation. Rename, unarchive
 and guarded delete remain available. Repeating the archive state is a no-op.
+A stop addressed to an archived read-only attachment is also a no-op:
+it acknowledges `stopped {runner_pending:false}` without opening a runtime.
 Archive refuses a busy turn, any live child, a running process, a durable
 Continuing standing (including a handoff or held loss), queued prompts, pending
 submissions, or incomplete running-state evidence. Durable work is checked

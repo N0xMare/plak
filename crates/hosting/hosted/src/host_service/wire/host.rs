@@ -852,9 +852,9 @@ where
             .as_ref()
             .is_some_and(|link| link.session == session)
         {
-            return refused(RequestRefusal::SessionArchived {
-                session: session.to_owned(),
-            });
+            return Ok(Forwarded::Answered(Outcome::Ok(Answer::Stopped {
+                runner_pending: false,
+            })));
         }
         if self.draining.is_some()
             || self
