@@ -442,7 +442,7 @@ mod tests {
             };
             tokio::time::timeout(Duration::from_secs(5), &mut serving)
                 .await
-                .expect("unreachable daemon must exit")
+                .unwrap_or_else(|error| panic!("unreachable daemon must exit: {error}"))
                 .unwrap();
             assert_eq!(socket.exists(), successor.is_some());
         }
