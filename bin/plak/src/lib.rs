@@ -120,6 +120,8 @@ pub mod telemetry {
 mod observation_projection;
 #[cfg(feature = "otel")]
 mod otel_bridge;
+#[cfg(all(test, unix))]
+mod product_compaction_runtime_e2e_tests;
 #[cfg(all(test, unix, feature = "tui"))]
 mod product_compaction_terminal_e2e_tests;
 #[cfg(test)]
@@ -128,6 +130,8 @@ mod product_crash_tests;
 pub mod product_doctor;
 #[cfg(feature = "tui")]
 mod product_onboarding;
+#[cfg(all(test, unix))]
+mod product_runtime_e2e_tests;
 mod product_subscription_usage;
 mod product_telemetry;
 #[cfg(all(test, unix, feature = "tui"))]

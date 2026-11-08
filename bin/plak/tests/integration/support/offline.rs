@@ -1185,3 +1185,39 @@ impl ChildRunner {
         let _ = std::fs::remove_dir_all(&self.home);
     }
 }
+
+/// A tree turn: spawn a child, wait for it, adopt its candidate, answer.
+pub(super) fn tree_turn_script() -> Value {
+    json!({
+        "version": 1,
+        "tree": true,
+        "repeat_last_step": true,
+        "steps": [
+            {"output": {"tool": {"name": "spawn_agent", "arguments": {
+                "template": "implement",
+                "tier": "mutate",
+                "workspace": "fork",
+                "description": "offline scripted child",
+                "prompt": "make the offline scripted change",
+                "output_schema_json": "{\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"],\"additionalProperties\":false}"
+            }}}, "finish": "tool_calls"},
+            {"output": {"tool": {"name": "wait_agent", "arguments": {
+                "agent_ids": ["$result.agent_id"]
+            }}}, "finish": "tool_calls"},
+            {"output": {"tool": {"name": "adopt_candidate", "arguments": {
+                "candidate_id": "$result.candidate"
+            }}}, "finish": "tool_calls"},
+            {"output": {"text": "the child's work is adopted"}}
+        ]
+    })
+}
+
+/// Two tree turns, each spawning, waiting on and adopting one child.
+pub(super) fn two_tree_turns_script() -> Value {
+    let steps = tree_turn_script()["steps"].clone();
+    let mut second = steps.as_array().expect("steps").clone();
+    second[3] = json!({"output": {"text": "the second child's work is adopted"}});
+    let mut all = steps.as_array().expect("steps").clone();
+    all.extend(second);
+    json!({"version": 1, "tree": true, "durable_tree": true, "repeat_last_step": true, "steps": all})
+}

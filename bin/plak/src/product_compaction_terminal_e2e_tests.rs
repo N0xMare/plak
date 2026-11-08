@@ -19,13 +19,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use plakous::agent::{ReasoningEffort, TurnResultOutcome};
+use plakous::agent::ReasoningEffort;
 use plakous::application::ApplicationExecutor;
 use plakous::model::{ContentBlock, ContextStatusKind};
 use plakous::sessions::{
-    AgentSessions, ContextQuery, ContextStatusRequest, CreateSessionOutcome, CreateSessionRequest,
-    OpenSessionOutcome, OpenSessionRequest, SessionBackend, SessionContextStatusKind,
-    SessionOperationId,
+    AgentSessions, ContextQuery, ContextStatusRequest, OpenSessionOutcome, OpenSessionRequest,
+    SessionBackend, SessionContextStatusKind, SessionOperationId,
 };
 use plakous::subscriptions::NativeProvider;
 use plakous_offline_crash_harness::evidence::{EvidenceKind, read_evidence};
@@ -47,13 +46,9 @@ const CHILD_TEST: &str = "product_compaction_terminal_e2e_tests::compaction_term
 const WAIT: Duration = Duration::from_secs(45);
 const ROWS: u16 = 30;
 const COLS: u16 = 100;
-const PROMPTS: [&str; 3] = [
-    "compaction intent group alpha with deliberately substantial replaceable context AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-    "compaction intent group beta",
-    "compaction retained causal tail gamma",
-];
-const FOLLOWING_PROMPT: &str = "qz";
-const SUMMARY: &str = "older intent groups compacted";
+use crate::product_compaction_runtime_e2e_tests::{
+    FOLLOWING_PROMPT, PROMPTS, SUMMARY, calibrate_ceiling,
+};
 
 type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 
@@ -336,83 +331,6 @@ impl PtyChild {
         }
         Ok(self.terminal.lock().unwrap().raw.clone())
     }
-}
-
-fn exact_measurement(status: &plakous::model::ContextStatus) -> TestResult<u64> {
-    Ok(status
-        .measurement()
-        .ok_or("context status omitted its exact prepared measurement")?
-        .bound()
-        .upper_bound())
-}
-
-fn calibrate_ceiling(workspace: &Path, evidence: &Path, database: &Path) -> TestResult<u64> {
-    let controller = BoundaryController::quiet_from_evidence_path(CrashBoundary::None, evidence)?;
-    let sessions = AgentSessions::new(SessionBackend::sqlite(database)?)?;
-    let executor = ApplicationExecutor::new()?;
-    let CreateSessionOutcome::Created { session, .. } =
-        executor.block_on(sessions.create(CreateSessionRequest::new(
-            SessionOperationId::new("compact-pty-calibration:create")?,
-            compaction_runtime_binding_with_projected_input(
-                workspace,
-                controller.clone(),
-                10_000_000,
-            )?,
-        )))??
-    else {
-        return Err("calibration session creation returned an unknown outcome".into());
-    };
-    for prompt in &PROMPTS[..2] {
-        let result = executor
-            .block_on(async { session.agent().prompt(*prompt).await?.result().await })??;
-        if !matches!(result.outcome(), TurnResultOutcome::Completed(_)) {
-            return Err(
-                format!("calibration turn did not complete: {:?}", result.outcome()).into(),
-            );
-        }
-    }
-    let current = executor.block_on(sessions.context_status(ContextStatusRequest::new(
-        SessionOperationId::new("compact-pty-calibration:current-two")?,
-        session.locator(),
-        ContextQuery::Current,
-    )))??;
-    let SessionContextStatusKind::Available(current) = current.kind() else {
-        return Err("calibration current projection was unavailable".into());
-    };
-    let current_measurement = exact_measurement(current)?;
-    let pending = executor.block_on(sessions.context_status(ContextStatusRequest::new(
-        SessionOperationId::new("compact-pty-calibration:pending-third")?,
-        session.locator(),
-        ContextQuery::WithPendingUserInput(PROMPTS[2].to_owned().into()),
-    )))??;
-    let SessionContextStatusKind::Available(pending) = pending.kind() else {
-        return Err("calibration pending projection was unavailable".into());
-    };
-    let pending_measurement = exact_measurement(pending)?;
-    if pending_measurement <= current_measurement {
-        return Err("fixed pending prompt did not add measurable context pressure".into());
-    }
-    let ceiling = current_measurement + (pending_measurement - current_measurement) / 2;
-    let third =
-        executor.block_on(async { session.agent().prompt(PROMPTS[2]).await?.result().await })??;
-    if !matches!(third.outcome(), TurnResultOutcome::Completed(_)) {
-        return Err("calibration third turn did not complete".into());
-    }
-    let completed = executor.block_on(sessions.context_status(ContextStatusRequest::new(
-        SessionOperationId::new("compact-pty-calibration:completed-third")?,
-        session.locator(),
-        ContextQuery::Current,
-    )))??;
-    let SessionContextStatusKind::Available(completed) = completed.kind() else {
-        return Err("calibration completed projection was unavailable".into());
-    };
-    if exact_measurement(completed)? <= pending_measurement {
-        return Err(
-            "fixed completed group did not grow beyond its admitted pending projection".into(),
-        );
-    }
-    let _ = executor.block_on(session.release())??;
-    Ok(ceiling)
 }
 
 fn provider_dispatch_count(path: &Path) -> TestResult<usize> {

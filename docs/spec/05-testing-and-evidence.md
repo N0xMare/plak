@@ -3640,6 +3640,43 @@ not move library evidence out of §3.1.
 
 ### 3.1 Offline fixture evidence
 
+`product_runtime_e2e_tests` retains the former mixed terminal module's actual
+runtime cases without depending on the terminal feature: exact-resume
+publication, cross-profile history/queue and reverse switching, fast-lane and
+native-PTC/direct transitions, independent fork trees, refused/already-active
+forks, treeless-source seeding and stale-pause follow-up draining. Their
+durable/dispatch assertions are retained, not replaced by render assertions.
+They keep the original serial membership. Shared host/catalog fixtures remain
+test-only; terminal scenarios retain their separate PTY checks.
+
+`product_runtime_e2e_tests::exited_child_output_over_8192_commits_and_reopens_without_recovery_required`
+drives the actual process backend through start and poll, checks both successful
+tool rows and the answer, then opens the exact runtime locator with no extra
+provider dispatch. The terminal counterpart separately protects continuity.
+`product_compaction_runtime_e2e_tests::exact_overflow_compacts_reopens_and_continues_without_terminal`
+shares the exact projected-input calibration with the ignored PTY qualification.
+It checks current Fits versus pending WouldOverflow, scheduled workflow settlement,
+publication boundaries and distinct locators, retained causal history, exact reopen
+and subsequent input. Its physical dispatch counts are two, four and six; no
+effect dispatch occurs. It runs in the serial lane without the terminal feature;
+the ignored terminal qualification is not claimed as gated evidence.
+
+`observation_parity_tests::abandoned_open::abandoned_recovery_reaches_host_and_jsonl_once_without_persisting_a_duplicate`
+uses the same fenced-open fixture as the terminal row test, with and without
+a durable submission. Host and JSONL receive one recovery row; no duplicate
+is persisted. The UI test separately asserts snapshot-safe rendering.
+`offline_e2e::projection_parity::real_jsonl_rows_equal_exact_resume_rebuilt_from_deleted_views_without_redispatch`
+shares all six original terminal view-parity scripts, removes the saved views,
+and compares exact reopened rows and complete transcript with unchanged
+dispatch evidence. The retained terminal test separately checks presentation.
+`offline_e2e::reopen_probe::a_headless_reopen_probe_leaves_the_live_tree_unchanged_and_its_owner_keeps_saving`
+uses the original two-tree-turn script: read-only reopen probes neither take
+the live owner's lease nor change its revision/generation, and its next turn
+still saves successfully.
+`product_crash_tests::carry_law` no longer requires the terminal feature: its
+rebind/orchestration carry cuts still relaunch to one successor at the line
+head, including its ignored process-child fixture.
+
 `host_skeleton::bridge` uses the real public stdio bridge and host. Its single
 client-originated handshake reaches the server unchanged, including version
 refusals; EOF leaves a busy root alive with one physical provider dispatch,

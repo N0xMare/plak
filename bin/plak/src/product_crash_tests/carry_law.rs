@@ -5,7 +5,7 @@
 //! A relaunch settles the write-ahead intent and must show exactly one
 //! carried record at the line's head, with the source redirecting to it.
 
-#![cfg(all(unix, feature = "test-hooks", feature = "tui"))]
+#![cfg(all(unix, feature = "test-hooks"))]
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -23,6 +23,32 @@ const MODE: &str = "PLAK_CARRY_LAW_MODE";
 const PATH: &str = "PLAK_CARRY_LAW_PATH";
 const ROOT: &str = "PLAK_CARRY_LAW_ROOT";
 const CAUSE: &str = "binding changed; carried into a new session";
+
+fn named_state() -> std::collections::BTreeMap<String, serde_json::Value> {
+    std::collections::BTreeMap::from([
+        (
+            "progress".into(),
+            serde_json::json!({"done": ["read"], "next": "verify"}),
+        ),
+        ("counter".into(), serde_json::json!(7)),
+    ])
+}
+
+fn assert_named_state(paths: &PlakPaths, source: &str, successor: &str) -> TestResult {
+    for id in [source, successor] {
+        let record = crate::product_sessions::load_session(paths, id)?;
+        let exported = serde_json::to_value(
+            crate::carry::export_session(paths, &record)
+                .map_err(|error| std::io::Error::other(error.to_string()))?,
+        )?;
+        assert_eq!(exported["version"], 12);
+        assert_eq!(
+            exported["named_state"],
+            serde_json::to_value(named_state())?
+        );
+    }
+    Ok(())
+}
 
 struct Layout {
     home: PathBuf,
@@ -76,11 +102,21 @@ async fn setup(layout: &Layout, path: &str) -> TestResult {
     )?;
     let sessions = AgentSessions::new(SessionBackend::sqlite(paths.runtime_database())?)?;
     let CreateSessionOutcome::Created { session, .. } = sessions
-        .create(CreateSessionRequest::new(
-            SessionOperationId::new("carry-law:source")?,
-            plakous_offline_crash_harness::runtime_binding(&layout.workspace, controller)
-                .map_err(|error| -> Box<dyn std::error::Error> { error })?,
-        ))
+        .create(
+            CreateSessionRequest::new(
+                SessionOperationId::new("carry-law:source")?,
+                plakous_offline_crash_harness::runtime_binding(&layout.workspace, controller)
+                    .map_err(|error| -> Box<dyn std::error::Error> { error })?,
+            )
+            .with_history(
+                plakous::sessions::PortableSessionHistory::new(
+                    Vec::new(),
+                    "00".into(),
+                    plakous::model::ModelId::new("offline-loopback-v1")?,
+                )
+                .with_named_state(named_state())?,
+            ),
+        )
         .await?
     else {
         return Err("source was not created".into());
@@ -140,9 +176,10 @@ fn carry(layout: &Layout, path: &str) -> TestResult {
     let services = crate::shell::services::Services::for_home(paths);
     let mut record = services.session_records()?.load(&source_id(layout)?)?;
     if path == "reload" {
-        crate::carry::apply_on_reload(&services, &mut record).ok_or("no orchestration carry")?;
+        crate::carry::epoch::apply_on_reload(&services, &mut record)
+            .ok_or("no orchestration carry")?;
     } else {
-        crate::carry::rebind_session(&services, &record, CAUSE)
+        crate::carry::rebind::session::rebind_session(&services, &record, CAUSE)
             .map_err(|error| error.message().to_owned())?;
     }
     Err("the carry finished past its cut".into())
@@ -256,6 +293,7 @@ fn product_carry_cuts_relaunch_to_one_successor_at_the_line_head() -> TestResult
                 .collect::<Vec<_>>();
             assert_eq!(carried.len(), 1, "{scenario}: one carried record");
             let successor = carried[0];
+            assert_named_state(&paths, &source, &successor.id)?;
             assert!(
                 successor.carry_intent.is_none(),
                 "{scenario}: intent settled"

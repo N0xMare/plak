@@ -9,7 +9,7 @@
 
 mod document;
 #[cfg(any(test, feature = "tui"))]
-mod epoch;
+pub(crate) mod epoch;
 mod export;
 pub(crate) mod handoff;
 mod history;

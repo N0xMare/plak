@@ -63,6 +63,8 @@ use plakous_hosted::runtime::{
     HostConfig, ReadyPathTiming, ScriptedRuntimeFactory, spawn_host_worker,
 };
 
+pub(crate) mod abandoned_open;
+
 /// How long one scripted step may take before the oracle calls it a hang.
 const STEP_TIMEOUT: Duration = Duration::from_secs(60);
 

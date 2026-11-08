@@ -5578,6 +5578,88 @@ fn real_composition_quit_releases_nested_process() {
     );
 }
 
+fn reopen_owned_agent(fixture: &Fixture, session: &str, plan: &Value, answer: &str) {
+    let before = session_event_files(fixture);
+    assert_eq!(before.len(), 1);
+    fixture.write_script(plan);
+    let mut resumed = AgentProcess::start(fixture, &["--session", session]);
+    resumed.wait_for("ready", |record| record["kind"] == "ready");
+    resumed.send(&prompt_frame("continue the same owned session"));
+    resumed.wait_for("assistant_done", |record| {
+        record["kind"] == "assistant_done"
+    });
+    wait_for_last_turn_completed(fixture);
+    resumed.send(&quit_frame());
+    let outcome = resumed.finish();
+    assert!(outcome.status.success(), "{}", outcome.stderr);
+    outcome.assert_exactly_one_terminal_record();
+    assert_eq!(outcome.session_id(), session);
+    assert!(
+        outcome.assistant_text().iter().any(|text| text == answer),
+        "{}",
+        outcome.lines.join("\n")
+    );
+    assert_eq!(session_event_files(fixture), before);
+}
+
+#[test]
+fn real_composition_jsonl_quit_releases_nested_process_and_reopens_exactly() {
+    let fixture = Fixture::new(&code_mode_owned_script());
+    let mut guard = OwnedProcessGuard::default();
+    let mut agent = AgentProcess::start(&fixture, &[]);
+    let hello = agent.wait_for("hello", |record| record["kind"] == "hello");
+    let session = hello["session_id"].as_str().unwrap().to_owned();
+    agent.send(&prompt_frame("run the owned cell"));
+    wait_for_fixture_file(&fixture.workspace().join("owned.pid"));
+    guard.arm(&fixture.workspace());
+    agent.send(&quit_frame());
+    let outcome = agent.finish();
+    assert!(
+        matches!(outcome.status.code(), Some(0 | 130)),
+        "{}",
+        outcome.stderr
+    );
+    outcome.assert_exactly_one_terminal_record();
+    assert_owned_process_stopped(&fixture.workspace());
+    reopen_owned_agent(
+        &fixture,
+        &session,
+        &code_mode_script(&json!([
+            {"output": {"cell": TWO_NESTED_CALLS}, "finish": "tool_calls"},
+            {"output": {"text": "the composed answer"}}
+        ])),
+        "the composed answer",
+    );
+}
+
+#[test]
+fn real_promoted_jsonl_quit_stops_its_job_and_reopens_exactly() {
+    let mut plan = owned_process_script("job is running in background");
+    plan["steps"][0]["output"]["tool"]["arguments"]["yield_time_ms"] = json!(0);
+    let fixture = Fixture::new(&plan);
+    let mut guard = OwnedProcessGuard::default();
+    let mut agent = AgentProcess::start(&fixture, &[]);
+    let hello = agent.wait_for("hello", |record| record["kind"] == "hello");
+    let session = hello["session_id"].as_str().unwrap().to_owned();
+    agent.send(&prompt_frame("run the owned background job"));
+    wait_for_fixture_file(&fixture.workspace().join("owned.pid"));
+    guard.arm(&fixture.workspace());
+    agent.wait_for("assistant_done", |record| {
+        record["kind"] == "assistant_done"
+    });
+    agent.send(&quit_frame());
+    let outcome = agent.finish();
+    assert!(outcome.status.success(), "{}", outcome.stderr);
+    outcome.assert_exactly_one_terminal_record();
+    assert_owned_process_stopped(&fixture.workspace());
+    reopen_owned_agent(
+        &fixture,
+        &session,
+        &process_tool_answer_script("resumed owned process session"),
+        "resumed owned process session",
+    );
+}
+
 /// A clip inside a composed answer is announced once, for the answer.
 ///
 /// The composed answer carries every nested call's output and is the largest
@@ -9565,11 +9647,150 @@ mod durability {
     /// prompt. Both faces retain the failure evidence; accepting a new root
     /// does not depend on whether every child locator can be inspected.
     #[test]
-    fn durability_subagent_failure_wave_is_visible_on_both_faces() {
-        let jsonl_home = Fixture::new(&failure_wave_script());
+    fn durability_subagent_failure_wave_is_visible_on_terminal() {
         let tui_home = Fixture::new(&failure_wave_script());
-        jsonl_failure_wave(&jsonl_home);
         tui_failure_wave(&tui_home);
+    }
+
+    #[test]
+    fn durability_subagent_failure_wave_is_visible_on_jsonl() {
+        let jsonl_home = Fixture::new(&failure_wave_script());
+        jsonl_failure_wave(&jsonl_home);
+    }
+
+    #[test]
+    fn durability_jsonl_chain_tool_cancel_compact_quit_and_exact_resume() {
+        let fixture = Fixture::new(&chain_script());
+        let mut agent = AgentProcess::start(&fixture, &[]);
+        let hello = agent.wait_for("hello", |record| record["kind"] == "hello");
+        let session = hello["session_id"].as_str().unwrap().to_owned();
+        agent.send(&prompt_frame("do the tool then stall"));
+        wait_for_effect_then_next_dispatch(&fixture);
+        agent.send(&json!({"v": 1, "kind": "interrupt"}));
+        agent.wait_for("cancel settled", |record| {
+            record["kind"] == "turn_lifecycle" && record["phase"] == "cancelled"
+        });
+        agent.send(&prompt_frame("compact after the cancel"));
+        agent.wait_for("compacted answer", |record| {
+            record.to_string().contains(COMPACTED_ANSWER)
+        });
+        agent.wait_for_completed_turns(1);
+        let compact_rows = |agent: &AgentProcess| {
+            agent
+                .snapshot()
+                .iter()
+                .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                .filter(|record| record["activity_kind"] == "compact" && record["state"] == "done")
+                .count()
+        };
+        let before = compact_rows(&agent);
+        agent.send(&json!({"v": 1, "kind": "compact", "id": "chain-compact"}));
+        agent.wait_for("manual compact settled", |record| {
+            record["activity_kind"] == "compact"
+                && record["state"] == "done"
+                && compact_rows(&agent) > before
+        });
+        agent.send(&quit_frame());
+        let outcome = agent.finish();
+        assert!(outcome.status.success(), "{}", outcome.stderr);
+        outcome.assert_exactly_one_terminal_record();
+        assert!(
+            !outcome
+                .assistant_text()
+                .iter()
+                .any(|text| text.contains(CANCELLED_TEXT))
+        );
+        let events = session_events_for(&fixture, &session);
+        assert!(
+            events.contains("tool.completed") && events.contains("loopback_effect"),
+            "{events}"
+        );
+        let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
+        let views = plak::store::ProductStore::open(&paths)
+            .unwrap()
+            .load_views(&session)
+            .unwrap()
+            .unwrap();
+        assert!(views.state.workflows.values().any(|workflow| matches!(
+            workflow.settled,
+            Some(plakous_hosted::sessions::projector::WorkflowSettlement::Compacted { .. })
+        )));
+        let before = session_event_files(&fixture);
+        let dispatched = read_evidence(fixture.root.join("evidence.jsonl"))
+            .unwrap()
+            .iter()
+            .filter(|row| row.kind == EvidenceKind::ProviderDispatched)
+            .count();
+        fixture.write_script(&json!({"version": 1, "maximum_projected_input": 20_000,
+            "scheduled_compaction": true, "content_sensitive_projection": true,
+            "tool_result_bytes": 5_800, "fold": "accept", "steps": [{"output": {"text": RESUMED_ANSWER}}]}));
+        let mut resumed = AgentProcess::start(&fixture, &["--session", &session]);
+        resumed.wait_for("ready", |record| record["kind"] == "ready");
+        resumed.send(&quit_frame());
+        let resumed = resumed.finish();
+        assert!(resumed.status.success(), "{}", resumed.stderr);
+        resumed.assert_exactly_one_terminal_record();
+        assert_eq!(resumed.session_id(), session);
+        assert_eq!(session_event_files(&fixture), before);
+        assert_eq!(
+            read_evidence(fixture.root.join("evidence.jsonl"))
+                .unwrap()
+                .iter()
+                .filter(|row| row.kind == EvidenceKind::ProviderDispatched)
+                .count(),
+            dispatched
+        );
+        let show = show_session(&fixture, &session);
+        assert!(
+            show.status.success() && show.stdout.contains("quiescent"),
+            "{}\n{}",
+            show.stdout,
+            show.stderr
+        );
+        assert!(
+            !show.stdout.contains("recovery required"),
+            "{}",
+            show.stdout
+        );
+    }
+
+    #[test]
+    fn durability_jsonl_quit_during_child_retirement_keeps_recovery_visible() {
+        let fixture = Fixture::new(&retiring_child_script());
+        let mut agent = AgentProcess::start(&fixture, &[]);
+        let hello = agent.wait_for("hello", |record| record["kind"] == "hello");
+        let session = hello["session_id"].as_str().unwrap().to_owned();
+        agent.send(&prompt_frame("spawn and quit while it retires"));
+        wait_for_named_file(&fixture.root, "holding.txt");
+        agent.send(&json!({"v": 1, "kind": "interrupt"}));
+        agent.send(&quit_frame());
+        let outcome = agent.finish();
+        assert!(
+            matches!(outcome.status.code(), Some(0 | 130)),
+            "{}",
+            outcome.stderr
+        );
+        outcome.assert_exactly_one_terminal_record();
+        assert!(
+            !outcome
+                .assistant_text()
+                .iter()
+                .any(|text| text.contains(CANCELLED_TEXT))
+        );
+        let show = show_session(&fixture, &session);
+        assert!(
+            RECOVERY_VISIBLE_NODES
+                .iter()
+                .any(|status| show.stdout.contains(status)),
+            "{}\n{}",
+            show.stdout,
+            show.stderr
+        );
+        assert!(
+            !show.stdout.contains("Children       none"),
+            "{}",
+            show.stdout
+        );
     }
 }
 
@@ -9581,6 +9802,10 @@ mod cell_startup;
 mod custody_release;
 #[path = "offline_e2e/project_roster.rs"]
 mod project_roster;
+#[path = "offline_e2e/projection_parity.rs"]
+mod projection_parity;
+#[path = "offline_e2e/reopen_probe.rs"]
+mod reopen_probe;
 #[path = "offline_e2e/running_root_waits.rs"]
 mod running_root_waits;
 #[path = "offline_e2e/telemetry_measurement.rs"]

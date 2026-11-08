@@ -7,50 +7,7 @@ use super::*;
 use plak::home::paths::PlakPaths;
 use plak::store::session_records::{SessionRecordStore, SqliteSessionStore};
 
-const ANSWER: &str = "pilot parity answer";
-
-fn script(shape: &str) -> Value {
-    let final_step = json!({"output": {"text": ANSWER}, "finish": "stop"});
-    let tool_step = json!({"output": {"tool": {"name": "loopback_effect", "arguments": {}}}, "finish": "tool_calls"});
-    match shape {
-        "final_only" => json!({"version": 1, "steps": [final_step]}),
-        "direct_tool_then_final" => json!({"version": 1, "steps": [tool_step, final_step]}),
-        "hosted_tool_call_final" => json!({
-            "version": 1,
-            "hosted_tool_call_final": true,
-            "steps": [tool_step, final_step]
-        }),
-        "manual_compaction" => json!({
-            "version": 1,
-            "maximum_projected_input": 20_000,
-            "content_sensitive_projection": true,
-            "fold": "accept",
-            "steps": [
-                {"output": {"text": format!("pilot foldable seed {}", "detail ".repeat(800))}},
-                final_step
-            ]
-        }),
-        "in_turn_compaction" => json!({
-            "version": 1,
-            "maximum_projected_input": 40_000,
-            "scheduled_compaction": true,
-            "content_sensitive_projection": true,
-            "tool_result_bytes": 60_000,
-            "steps": [
-                {"output": {"text": "a".repeat(3_000)}, "usage": {}},
-                {"output": {"tool": {"name": "loopback_effect", "arguments": {}}},
-                 "finish": "tool_calls", "usage": {}},
-                {"output": {"text": "Summary of earlier work:\nthe first answer was given"}},
-                {"output": {"text": ANSWER}, "usage": {}}
-            ]
-        }),
-        "code_mode_cell_nested_then_final" => code_mode_script(&json!([
-            {"output": {"cell": TWO_NESTED_CALLS}, "finish": "tool_calls"},
-            {"output": {"text": ANSWER}}
-        ])),
-        other => panic!("no script for {other}"),
-    }
-}
+use super::projection_parity::{ANSWER, script};
 
 /// Launches the TUI under a fresh pilot directory and waits for its bound,
 /// idle composer.

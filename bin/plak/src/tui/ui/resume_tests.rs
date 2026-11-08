@@ -16,7 +16,6 @@ use crate::tui::presentation::ActivityKind;
 use crate::tui::{HostEvent, ResumeMenu, ResumeSessionEntry, SettingsView, UserAction};
 use crate::tui::{ResumeRow as _, SurfaceObservation};
 use crossterm::event::{KeyCode, MouseEventKind};
-use plakous_host_protocol::status::HostPhase;
 use plakous_host_protocol::views::transcript::{NoticeScope, ToolItem, TranscriptRow};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -823,76 +822,16 @@ fn every_control_center_tab_matches_reviewable_goldens_at_both_sizes() {
 #[test]
 fn abandoned_open_recovery_row_reaches_tui_and_jsonl_once() {
     use crate::agent_jsonl::project_host_event;
-    use crate::observation_parity_tests::{Fixture, Script};
+    use crate::observation_parity_tests::abandoned_open;
     use plakous_host_protocol::envelope::JsonlCorrelation;
-    use plakous_hosted::runtime::spawn_host_worker;
-    use plakous_hosted::sessions::QueueItem;
 
     for with_submission in [false, true] {
-        let fixture = Fixture::new(Script::Effect);
-        let mut config = fixture.host_config();
-        let store = config.store.clone();
-        let id = config.session.id.clone();
-        let (actions, events, worker) = spawn_host_worker(config).unwrap();
-        actions
-            .send(UserAction::Prompt("seed terminal".into()))
-            .unwrap();
-        let mut started = false;
-        loop {
-            let event = events
-                .recv_timeout(std::time::Duration::from_secs(30))
-                .unwrap();
-            if matches!(event, HostEvent::PromptStarted(_)) {
-                started = true;
-            }
-            if started
-                && matches!(event, HostEvent::Status { ref phase, .. } if matches!(phase, HostPhase::Idle))
-            {
-                break;
-            }
-        }
-        actions.send(UserAction::Quit).unwrap();
-        worker.join().unwrap().unwrap();
-        config = fixture.host_config();
-        config.session = store.load(&id).unwrap();
-        let source = config.session.plakous_locator.unwrap();
-        let database =
-            crate::home::paths::PlakPaths::explicit(config.product_home.clone()).runtime_database();
-        let executor = tokio::runtime::Runtime::new().unwrap();
-        executor
-            .block_on(plakous_offline_crash_harness::seed_fenced_code_cell(
-                &database,
-                source,
-                "face-fenced-root",
-                b"fenced face prompt",
-                false,
-            ))
-            .unwrap();
-        if with_submission {
-            let item = QueueItem::new("fenced face prompt");
-            config.session.pending_queue.push(item.clone());
-            let submission = plakous_hosted::sessions::projector::Submission {
-                command_id: "face-fenced-root".into(),
-                kind: plakous_hosted::sessions::projector::SubmissionKind::RootStart,
-                queue_item_id: item.id.clone(),
-                queue_item_revision: item.revision,
-                target_turn_id: None,
-                canonical_command: item.text.clone(),
-                submitted_at_ms: item.submitted_at_ms,
-            };
-            store
-                .save_submission(&mut config.session, &submission)
-                .unwrap();
-        }
-        store.save(&mut config.session).unwrap();
-        let (actions, events, worker) = spawn_host_worker(config).unwrap();
-        actions.send(UserAction::Quit).unwrap();
-        worker.join().unwrap().unwrap();
+        let recovered_open = abandoned_open::recover(with_submission);
         let mut app = App::new(launch_basic(), true);
         let mut jsonl_rows = 0;
         let mut recovered = 0;
         let mut trace = Vec::new();
-        for event in events.try_iter() {
+        for event in recovered_open.events.iter().cloned() {
             trace.push(format!("{event:?}"));
             if matches!(&event, HostEvent::Recovered { .. }) {
                 recovered += 1;
@@ -911,7 +850,7 @@ fn abandoned_open_recovery_row_reaches_tui_and_jsonl_once() {
         assert_eq!(app.pane.blocks.iter().filter(|block| matches!(
             block, ScrollBlock::System(text) if text.contains("recovered an interrupted turn")
         )).count(), 1, "the snapshot must neither erase nor duplicate the recovery row: {trace:#?}");
-        let record = store.load(&id).unwrap();
+        let record = recovered_open.record();
         assert_eq!(
             record
                 .transcript
