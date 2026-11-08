@@ -1826,6 +1826,18 @@ running interactive session to reload onto the installed build (chapter 02
 
 ### 4.7 The host socket is a same-user local channel
 
+Client protocol 6 carries attachment-free product reads outside session
+admission. Their context retains the socket's verified uid or the web gate's
+admitted login, a connection lifetime and the host generation. None is a
+client field; `Face::Remote` does not distinguish those authorities. A read
+without a transport-minted principal is refused before product work starts.
+Verified same-user socket principals are trusted for console access independent
+of web console switches; web principals remain gated by those switches.
+This does not make a socket a local execution face: local-only exec and reload
+intents are still refused when its face is remote.
+Product read futures are bounded per connection and dropped when it leaves;
+they cannot acquire a runtime merely by passing the wire routing gate.
+
 `plak host` (chapter 02 §4.6) listens on `host/run/<state key>.sock` under
 the product home. Its authority is exactly the user's own:
 

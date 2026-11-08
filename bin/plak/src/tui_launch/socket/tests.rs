@@ -214,8 +214,9 @@ fn paths() -> (tempfile::TempDir, product_paths::PlakPaths) {
     (root, paths)
 }
 
-fn welcome() -> Welcome {
+fn welcome() -> Welcome<PlakExtension> {
     Welcome {
+        extension: None,
         proto: WIRE_VERSION,
         binary_id: "fixture".into(),
         host_generation: 1,
@@ -268,7 +269,7 @@ impl Peer {
         (id, op)
     }
 
-    fn answer(&mut self, id: RequestId, answer: Answer) {
+    fn answer(&mut self, id: RequestId, answer: Answer<PlakExtension>) {
         self.send(HostFrame::Response {
             id,
             outcome: Outcome::Ok(answer),
@@ -363,6 +364,7 @@ fn another_wire_version_refuses_with_a_remedy_instead_of_embedding() {
                 })
             } else {
                 HostFrame::Welcome(Welcome {
+                    extension: None,
                     proto: WIRE_VERSION + 1,
                     ..welcome()
                 })
@@ -577,6 +579,7 @@ fn requested_reload_is_settled_locally_with_the_known_host_build_or_no_parenthet
         let host = thread::spawn(move || {
             let mut peer = Peer::accept(&listener);
             peer.send(HostFrame::Welcome(Welcome {
+                extension: None,
                 binary_id: binary.into(),
                 ..welcome()
             }));

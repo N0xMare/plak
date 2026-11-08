@@ -28,6 +28,7 @@ fn welcomed(listener: &UnixListener) -> (UnixStream, BufReader<UnixStream>) {
         })
     ));
     let welcome = HostFrame::<PlakExtension>::Welcome(Welcome {
+        extension: None,
         proto: WIRE_VERSION,
         binary_id: "fixture".into(),
         host_generation: 1,

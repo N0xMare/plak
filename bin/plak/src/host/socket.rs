@@ -270,6 +270,10 @@ async fn connection(
     pending: Place,
     admitted: &Arc<AtomicUsize>,
 ) {
+    let Ok(credentials) = stream.peer_cred() else {
+        return;
+    };
+    let uid = credentials.uid();
     let (read, mut write) = stream.into_split();
     let mut reader = Reader {
         read,
@@ -319,7 +323,9 @@ async fn connection(
         return;
     }
     let stop = Arc::clone(&stopped);
-    let mut connection = host.connect(outbox.clone(), Face::Remote, move || stop());
+    let mut connection = host
+        .connect(outbox.clone(), Face::Remote, move || stop())
+        .verified_socket(uid);
     loop {
         // A flush may read the session directory from the stores.
         let flushed = tokio::task::block_in_place(|| connection.flush());

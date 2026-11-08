@@ -173,6 +173,9 @@ pub struct PlakExtension;
 impl ProtocolExtension for PlakExtension {
     type Intent = SurfaceIntent;
     type Observation = SurfaceObservation;
+    type HostRequest = plakous_host_protocol::Never;
+    type HostResponse = plakous_host_protocol::Never;
+    type WelcomeExtension = Option<plakous_host_protocol::Never>;
 
     fn reads_usage(intent: &SurfaceIntent) -> bool {
         matches!(

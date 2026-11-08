@@ -1283,6 +1283,9 @@ fn saturated_snapshots_are_not_spent_and_a_queued_wait_survives_them() {
     impl ProtocolExtension for Ext {
         type Intent = Never;
         type Observation = Snap;
+        type HostRequest = Never;
+        type HostResponse = Never;
+        type WelcomeExtension = Option<Never>;
     }
 
     let (sender, receiver) = observation_channel::<Ext>();

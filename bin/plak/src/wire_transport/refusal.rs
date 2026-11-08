@@ -1,13 +1,14 @@
 //! Product wording and exit classes for authenticated host refusals.
 
 use plakous_host_protocol::wire::{
-    BindingRefusalKind, LifecycleReason, PlacementReason, RequestRefusal,
+    BindingRefusalKind, ConsoleCapability, LifecycleReason, PlacementReason, RequestRefusal,
 };
 use plakous_hosted::error::{CliFailure, CliFailureKind};
 
 pub(crate) fn refusal(reason: RequestRefusal) -> CliFailure {
     let kind = match &reason {
         RequestRefusal::Malformed { .. }
+        | RequestRefusal::CapabilityDisabled { .. }
         | RequestRefusal::BindingRefused { .. }
         | RequestRefusal::Unsupported { .. }
         | RequestRefusal::UnknownNode
@@ -25,6 +26,11 @@ pub(crate) fn refusal(reason: RequestRefusal) -> CliFailure {
         _ => CliFailureKind::Agent,
     };
     let text = match &reason {
+        RequestRefusal::CapabilityDisabled { capability } => match capability {
+            ConsoleCapability::AccountsRead => "account reads are disabled by this host".into(),
+            ConsoleCapability::ConfigRead => "configuration reads are disabled by this host".into(),
+        },
+        RequestRefusal::RateLimited { retry_after_ms } => format!("host console is busy; retry in {retry_after_ms} ms"),
         RequestRefusal::PlacementRefused { runner, reason } => format!("runner {}: {}", runner.name, placement(reason)),
         RequestRefusal::BindingRefused { kind } => match kind {
             BindingRefusalKind::UnknownProfile => "unknown profile; choose an exact profile id from the host's catalog",

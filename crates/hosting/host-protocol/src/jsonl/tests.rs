@@ -41,6 +41,9 @@ impl ObservationExtension for OpenOverlay {
 impl ProtocolExtension for Overlay {
     type Intent = OpenOverlay;
     type Observation = OpenOverlay;
+    type HostRequest = crate::Never;
+    type HostResponse = crate::Never;
+    type WelcomeExtension = Option<crate::Never>;
 }
 
 #[test]

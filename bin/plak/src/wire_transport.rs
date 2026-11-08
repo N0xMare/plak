@@ -26,7 +26,7 @@ pub(crate) use refusal::refusal;
 pub(crate) fn forward_lifecycle(
     paths: &crate::home::paths::PlakPaths,
     op: plakous_host_protocol::wire::Op<PlakExtension>,
-) -> crate::CliResult<Option<plakous_host_protocol::wire::Outcome>> {
+) -> crate::CliResult<Option<plakous_host_protocol::wire::Outcome<PlakExtension>>> {
     use plakous_host_protocol::client;
     use plakous_host_protocol::wire::{Hello, Op, WIRE_VERSION};
     use std::time::Duration;

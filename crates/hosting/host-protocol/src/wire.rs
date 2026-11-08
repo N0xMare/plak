@@ -64,7 +64,7 @@ pub use tool::WireToolItem;
 /// `hello`'s locality; 4 lets a welcome name no session and adds the
 /// session directory's requests and frames; 5 adds explicit placement,
 /// directory lifecycle and process-lifetime draft admission identity.
-pub const WIRE_VERSION: u32 = 5;
+pub const WIRE_VERSION: u32 = 6;
 
 /// The most bytes one line holds, newline included.
 pub const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
@@ -124,8 +124,23 @@ pub struct Hello {
 
 /// The host's answer to an admitted [`Hello`].
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct Welcome {
+#[serde(
+    deny_unknown_fields,
+    bound(
+        serialize = "P::WelcomeExtension: Serialize",
+        deserialize = "P::WelcomeExtension: DeserializeOwned"
+    )
+)]
+#[schemars(
+    rename = "Welcome",
+    bound = "P::WelcomeExtension: schemars::JsonSchema"
+)]
+pub struct Welcome<P: ProtocolExtension = crate::Core> {
+    /// Product capabilities for this connection; required even when null.
+    #[serde(deserialize_with = "required_extension")]
+    #[schemars(required)]
+    #[schemars(schema_with = "welcome_extension_schema::<P>")]
+    pub extension: P::WelcomeExtension,
     /// The host's [`WIRE_VERSION`].
     pub proto: u32,
     /// The host binary's build id.
@@ -139,6 +154,18 @@ pub struct Welcome {
     /// session directory ([`Op::ListSessions`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<WelcomeSession>,
+}
+
+fn required_extension<'de, D: serde::Deserializer<'de>, T: DeserializeOwned>(
+    deserializer: D,
+) -> Result<T, D::Error> {
+    T::deserialize(deserializer)
+}
+
+fn welcome_extension_schema<P: ProtocolExtension>(
+    generator: &mut schemars::SchemaGenerator,
+) -> schemars::Schema {
+    <P::WelcomeExtension as schemars::JsonSchema>::json_schema(generator)
 }
 
 /// The one session a connection serves, as its welcome names it.
@@ -185,7 +212,10 @@ pub enum HandshakeRefusal {
 ///
 /// [`HandshakeRefusal::VersionMismatch`] unless `hello.proto` is exactly
 /// [`WIRE_VERSION`].
-pub fn admit_hello(hello: &Hello, welcome: Welcome) -> Result<Welcome, HandshakeRefusal> {
+pub fn admit_hello<P: ProtocolExtension>(
+    hello: &Hello,
+    welcome: Welcome<P>,
+) -> Result<Welcome<P>, HandshakeRefusal> {
     if hello.proto != WIRE_VERSION {
         return Err(HandshakeRefusal::VersionMismatch {
             host: WIRE_VERSION,
@@ -208,6 +238,11 @@ pub fn admit_hello(hello: &Hello, welcome: Welcome) -> Result<Welcome, Handshake
 )]
 #[schemars(rename = "Op", bound = "P::Intent: schemars::JsonSchema")]
 pub enum Op<P: ProtocolExtension> {
+    /// Attachment-free product operation, routed outside session admission.
+    Host {
+        /// Product-owned closed request vocabulary.
+        request: P::HostRequest,
+    },
     /// Attach to a node.
     Attach {
         /// The node.
@@ -377,6 +412,7 @@ impl<P: ProtocolExtension> Op<P> {
     #[must_use]
     pub const fn name(&self) -> &'static str {
         match self {
+            Self::Host { .. } => "host",
             Self::Attach { .. } => "attach",
             Self::Detach { .. } => "detach",
             Self::Intent { .. } => "intent",
@@ -400,8 +436,22 @@ impl<P: ProtocolExtension> Op<P> {
 
 /// The answer to an admitted request.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(tag = "answer", rename_all = "snake_case", deny_unknown_fields)]
-pub enum Answer {
+#[serde(
+    tag = "answer",
+    rename_all = "snake_case",
+    deny_unknown_fields,
+    bound(
+        serialize = "P::HostResponse: Serialize",
+        deserialize = "P::HostResponse: DeserializeOwned"
+    )
+)]
+#[schemars(rename = "Answer", bound = "P::HostResponse: schemars::JsonSchema")]
+pub enum Answer<P: ProtocolExtension = crate::Core> {
+    /// Private attachment-free product response.
+    Host {
+        /// Product-owned closed response vocabulary.
+        response: P::HostResponse,
+    },
     /// Attached; the attach snapshot follows as events and pages.
     Attached {
         /// The new attachment.
@@ -487,6 +537,16 @@ pub enum Answer {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "refusal", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RequestRefusal {
+    /// This connection cannot use the requested product console capability.
+    CapabilityDisabled {
+        /// The neutral capability, not a provider or account selector.
+        capability: ConsoleCapability,
+    },
+    /// Console admission refused before starting work; connection stays open.
+    RateLimited {
+        /// Bounded delay before an explicit retry.
+        retry_after_ms: u64,
+    },
     /// An identical submission still has no durable admission verdict.
     DraftPending {
         /// Submission identity, not an instruction to automatically resend.
@@ -585,12 +645,29 @@ pub enum RequestRefusal {
     },
 }
 
+/// Closed attachment-free console read capabilities.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ConsoleCapability {
+    /// Account status and recorded usage reads.
+    AccountsRead,
+    /// Home definitions, settings and metadata reads.
+    ConfigRead,
+}
+
 /// A request's outcome.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum Outcome {
+#[serde(
+    rename_all = "snake_case",
+    bound(
+        serialize = "P::HostResponse: Serialize",
+        deserialize = "P::HostResponse: DeserializeOwned"
+    )
+)]
+#[schemars(rename = "Outcome", bound = "P::HostResponse: schemars::JsonSchema")]
+pub enum Outcome<P: ProtocolExtension = crate::Core> {
     /// Done.
-    Ok(Answer),
+    Ok(Answer<P>),
     /// Refused.
     Refused(RequestRefusal),
 }
@@ -684,7 +761,7 @@ pub enum ClientFrame<P: ProtocolExtension> {
 )]
 pub enum HostFrame<P: ProtocolExtension> {
     /// The handshake's answer.
-    Welcome(Welcome),
+    Welcome(Welcome<P>),
     /// The handshake was refused; the host closes.
     Refused(HandshakeRefusal),
     /// A request's outcome.
@@ -692,7 +769,7 @@ pub enum HostFrame<P: ProtocolExtension> {
         /// The request's id.
         id: RequestId,
         /// Its outcome.
-        outcome: Outcome,
+        outcome: Outcome<P>,
     },
     /// One observation on an attachment.
     Event {
@@ -1223,3 +1300,7 @@ mod tests;
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod p5_tests;
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "unit tests")]
+mod host_tests;

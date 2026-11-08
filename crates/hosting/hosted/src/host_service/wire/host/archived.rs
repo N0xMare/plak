@@ -18,7 +18,7 @@ where
         &mut self,
         node: &NodeAddress,
         text: &str,
-    ) -> CliResult<Option<Forwarded>> {
+    ) -> CliResult<Option<Forwarded<P>>> {
         let refused = |refusal| Some(Forwarded::Answered(Outcome::Refused(refusal)));
         let resident = self.host.lock().iter().find_map(|slot| match slot.peek() {
             SlotView::Resident(session) if session.root().tree_id == node.tree_id => {

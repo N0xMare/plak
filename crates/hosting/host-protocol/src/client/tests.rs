@@ -5,6 +5,75 @@ use super::*;
 use crate::Core;
 use crate::wire::{WIRE_VERSION, WelcomeSession, decode_line};
 
+#[test]
+fn product_host_responses_route_by_id_without_attaching_a_session() {
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    struct Reads;
+    impl ProtocolExtension for Reads {
+        type Intent = crate::Never;
+        type Observation = crate::Never;
+        type HostRequest = u8;
+        type HostResponse = u8;
+        type WelcomeExtension = Option<crate::Never>;
+    }
+
+    let (mut peer, client) = UnixStream::pair().unwrap();
+    peer.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+    let mut reader = BufReader::new(peer.try_clone().unwrap());
+    let transport = Transport::new(client.try_clone().unwrap(), client);
+    let connecting = thread::spawn(move || connect_directory::<Reads>(transport, hello()));
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    assert!(matches!(
+        decode_line::<ClientFrame<Reads>>(&line).unwrap(),
+        ClientFrame::Hello(_)
+    ));
+    peer.write_all(
+        encode_line(&HostFrame::<Reads>::Welcome(Welcome {
+            extension: None,
+            proto: WIRE_VERSION,
+            binary_id: "host".into(),
+            host_generation: 1,
+            caps: Vec::new(),
+            session: None,
+        }))
+        .unwrap()
+        .as_bytes(),
+    )
+    .unwrap();
+    let (sender, receiver, welcome) = connecting.join().unwrap().unwrap();
+    assert!(welcome.session.is_none());
+    let first = sender.request_operation(Op::Host { request: 1 }).unwrap();
+    let second = sender.request_operation(Op::Host { request: 2 }).unwrap();
+    for (id, request) in [(first, 1), (second, 2)] {
+        line.clear();
+        reader.read_line(&mut line).unwrap();
+        assert_eq!(
+            decode_line::<ClientFrame<Reads>>(&line).unwrap(),
+            ClientFrame::Request {
+                id,
+                op: Op::Host { request }
+            }
+        );
+    }
+    for (id, response) in [(second, 42), (first, 41)] {
+        peer.write_all(
+            encode_line(&HostFrame::<Reads>::Response {
+                id,
+                outcome: Outcome::Ok(Answer::Host { response }),
+            })
+            .unwrap()
+            .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(
+            receiver.recv_response(Duration::from_secs(3)).unwrap(),
+            (id, Outcome::Ok(Answer::Host { response }))
+        );
+    }
+    peer.shutdown(std::net::Shutdown::Both).unwrap();
+}
+
 fn hello() -> Hello {
     Hello {
         proto: WIRE_VERSION,
@@ -22,6 +91,7 @@ fn node(tree: &str) -> NodeAddress {
 
 fn welcome() -> Welcome {
     Welcome {
+        extension: None,
         proto: WIRE_VERSION,
         binary_id: "host".into(),
         host_generation: 1,
@@ -85,6 +155,7 @@ fn a_directory_client_selects_a_root_without_a_default_session() {
     let client = thread::spawn(move || connect_directory::<Core>(transport, hello()).unwrap());
     assert!(matches!(host.read(), ClientFrame::Hello(_)));
     host.send(&HostFrame::Welcome(Welcome {
+        extension: None,
         session: None,
         ..welcome()
     }));
@@ -150,6 +221,7 @@ fn directory_responses_keep_refusals_and_disconnect_is_terminal() {
     let client = thread::spawn(move || connect_directory::<Core>(transport, hello()).unwrap());
     assert!(matches!(host.read(), ClientFrame::Hello(_)));
     host.send(&HostFrame::Welcome(Welcome {
+        extension: None,
         session: None,
         ..welcome()
     }));
@@ -188,6 +260,7 @@ fn a_refused_selection_keeps_the_old_attachment_and_can_select_again() {
     let client = thread::spawn(move || connect_directory::<Core>(transport, hello()).unwrap());
     assert!(matches!(host.read(), ClientFrame::Hello(_)));
     host.send(&HostFrame::Welcome(Welcome {
+        extension: None,
         session: None,
         ..welcome()
     }));
@@ -258,6 +331,7 @@ fn the_welcome_deadline_interrupts_only_a_missing_welcome() {
             continue;
         }
         host.send(&HostFrame::Welcome(Welcome {
+            extension: None,
             session: None,
             ..welcome()
         }));
@@ -305,6 +379,7 @@ fn a_refused_hello_is_the_connect_error() {
 #[test]
 fn a_welcome_that_names_no_session_attaches_the_root_the_client_names() {
     let unnamed = || Welcome {
+        extension: None,
         session: None,
         ..welcome()
     };

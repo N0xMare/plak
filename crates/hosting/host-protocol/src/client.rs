@@ -46,6 +46,9 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// The connected sender, observation/response receiver and typed welcome.
+pub type Connected<P> = (WireSender<P>, WireReceiver<P>, Welcome<P>);
+
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -277,7 +280,7 @@ struct State<P: ProtocolExtension> {
     answers: VecDeque<SessionAnswer>,
     operations: BTreeSet<RequestId>,
     selections: BTreeMap<RequestId, NodeAddress>,
-    responses: VecDeque<(RequestId, Outcome)>,
+    responses: VecDeque<(RequestId, Outcome<P>)>,
     /// Intents sent on an attachment, by request id, until their verdict.
     sent: BTreeMap<RequestId, Sent<P>>,
     /// Intents waiting for the next attachment, in the order sent.
@@ -340,10 +343,7 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 ///
 /// The transport failing, a malformed frame, the host refusing the hello,
 /// or the host closing first.
-pub fn connect<P>(
-    transport: Transport,
-    hello: Hello,
-) -> Result<(WireSender<P>, WireReceiver<P>, Welcome), ConnectError>
+pub fn connect<P>(transport: Transport, hello: Hello) -> Result<Connected<P>, ConnectError>
 where
     P: ProtocolExtension,
     P::Intent: Serialize + DeserializeOwned + Send,
@@ -363,7 +363,7 @@ pub fn connect_to<P>(
     transport: Transport,
     hello: Hello,
     root: NodeAddress,
-) -> Result<(WireSender<P>, WireReceiver<P>, Welcome), ConnectError>
+) -> Result<Connected<P>, ConnectError>
 where
     P: ProtocolExtension,
     P::Intent: Serialize + DeserializeOwned + Send,
@@ -382,7 +382,7 @@ where
 pub fn connect_directory<P>(
     transport: Transport,
     hello: Hello,
-) -> Result<(WireSender<P>, WireReceiver<P>, Welcome), ConnectError>
+) -> Result<Connected<P>, ConnectError>
 where
     P: ProtocolExtension,
     P::Intent: Serialize + DeserializeOwned + Send,
@@ -396,7 +396,7 @@ fn connect_rooted<P>(
     hello: Hello,
     root: Option<NodeAddress>,
     directory: bool,
-) -> Result<(WireSender<P>, WireReceiver<P>, Welcome), ConnectError>
+) -> Result<Connected<P>, ConnectError>
 where
     P: ProtocolExtension,
     P::Intent: Serialize + DeserializeOwned + Send,
@@ -678,7 +678,7 @@ where
 impl<P: ProtocolExtension> WireReceiver<P> {
     /// The next answer to [`WireSender::request_operation`].
     #[must_use]
-    pub fn try_response(&self) -> Option<(RequestId, Outcome)> {
+    pub fn try_response(&self) -> Option<(RequestId, Outcome<P>)> {
         lock(&self.connection.inner.state).responses.pop_front()
     }
 
@@ -690,7 +690,7 @@ impl<P: ProtocolExtension> WireReceiver<P> {
     pub fn recv_response(
         &self,
         timeout: Duration,
-    ) -> Result<(RequestId, Outcome), RecvTimeoutError> {
+    ) -> Result<(RequestId, Outcome<P>), RecvTimeoutError> {
         let inner = &self.connection.inner;
         let deadline = Instant::now() + timeout;
         let mut state = lock(&inner.state);
@@ -951,7 +951,12 @@ impl<P: ProtocolExtension> Inner<P> {
     }
 
     /// Takes the host's answer to the root attach in flight.
-    fn attached(&self, state: &mut State<P>, id: RequestId, outcome: Outcome) -> std::io::Result<()>
+    fn attached(
+        &self,
+        state: &mut State<P>,
+        id: RequestId,
+        outcome: Outcome<P>,
+    ) -> std::io::Result<()>
     where
         P::Intent: Serialize,
     {
@@ -1064,7 +1069,7 @@ impl<P: ProtocolExtension> Inner<P> {
 
     /// Takes the host's verdict on the intent sent as `id`; whether the
     /// face has something new.
-    fn verdict(state: &mut State<P>, id: RequestId, outcome: Outcome) -> bool {
+    fn verdict(state: &mut State<P>, id: RequestId, outcome: Outcome<P>) -> bool {
         let Some(sent) = state.sent.remove(&id) else {
             return false;
         };
@@ -1086,7 +1091,7 @@ impl<P: ProtocolExtension> Inner<P> {
         }
     }
 
-    fn selected(&self, state: &mut State<P>, root: NodeAddress, outcome: &Outcome)
+    fn selected(&self, state: &mut State<P>, root: NodeAddress, outcome: &Outcome<P>)
     where
         P::Intent: Serialize,
     {

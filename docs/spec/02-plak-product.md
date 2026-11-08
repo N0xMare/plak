@@ -3947,10 +3947,22 @@ saved placement, decorated by the host. Clients pair the existing product
 workspace text with this label; a child never borrows its root's placement.
 This is in-process chrome, not a persisted/exported field or a JSONL v1 event.
 
-The client protocol number is **5**. It must match exactly; the runner
+The client protocol number is **6**. It must match exactly; the runner
 transport has its own independent version. Protocol 5 adds explicit placement,
 bounded creation options, directory lifecycle and process-local draft identity.
 It does not change JSONL v1, canonical history or exported transcript rows.
+
+Protocol 6 carries attachment-free product requests as
+`{"frame":"request","id":7,"op":{"op":"host","request":...}}` and
+private responses as `{"frame":"response","id":7,"outcome":{"ok":
+{"answer":"host","response":...}}}`. These payloads belong to the product
+extension, not SessionIntent, observations, transcripts or model tools.
+Welcome has a required `extension` field; an extension-free host returns
+explicit null. There is no negotiation or fallback to client 5. Product work
+is bounded and polled beside ordinary frames, so a pending read does not hold
+the frame loop or create a session worker. Connection departure cancels its
+waiting reads. Console admission can refuse `capability_disabled` or
+`rate_limited {retry_after_ms}` without closing the connection.
 
 Wire v2 is the framed protocol every frontend will speak to a host; it
 replaces the JSONL host of §4.3, which stays byte-identical until it is
@@ -4001,8 +4013,7 @@ verdicts) are addressed, the session profile and workspace chrome states.
   id; a host of many sessions names none, below) or
   `refused` with `version_mismatch`, `malformed`, `busy` or `unavailable`
   (the session could not be opened, with why), and closes. The version must
-  match exactly; it is 4 (`WIRE_VERSION`; 3 dropped `hello`'s locality, 4
-  let a welcome name no session and added the session directory). The session opens before the welcome is sent, so any
+  match exactly; it is 6 (`WIRE_VERSION`), with no negotiation. The session opens before the welcome is sent, so any
   failure before dispatch, `plak agent --wire v2` included, is that
   `unavailable` frame and never a JSONL record. Its detail is the failure's
   own text only for an authenticated peer (stdio's parent process, a web

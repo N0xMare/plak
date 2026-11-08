@@ -13,6 +13,34 @@ pub trait ProtocolExtension: Clone + fmt::Debug + Eq + Send + Sync + 'static {
     type Intent: Clone + fmt::Debug + Eq + Send + 'static;
     /// Driver-owned observation payload.
     type Observation: ObservationExtension;
+    /// Attachment-free product request; never enters an agent mailbox.
+    type HostRequest: Clone
+        + fmt::Debug
+        + Eq
+        + Send
+        + serde::Serialize
+        + serde::de::DeserializeOwned
+        + schemars::JsonSchema
+        + 'static;
+    /// Private product response, addressed by the original request id.
+    type HostResponse: Clone
+        + fmt::Debug
+        + Eq
+        + Send
+        + serde::Serialize
+        + serde::de::DeserializeOwned
+        + schemars::JsonSchema
+        + 'static;
+    /// Face-effective product capabilities included in the handshake.
+    type WelcomeExtension: Clone
+        + fmt::Debug
+        + Default
+        + Eq
+        + Send
+        + serde::Serialize
+        + serde::de::DeserializeOwned
+        + schemars::JsonSchema
+        + 'static;
 
     /// Whether `intent` asks for the usage view, which a node's attachment
     /// reads as that node's ([`SessionIntent::ReadTopologyNodeUsage`]).
@@ -84,6 +112,9 @@ impl ObservationExtension for Never {
 impl ProtocolExtension for Core {
     type Intent = Never;
     type Observation = Never;
+    type HostRequest = Never;
+    type HostResponse = Never;
+    type WelcomeExtension = Option<Never>;
 }
 
 /// Typed intents a driver sends to the hosted session (today the TUI, the

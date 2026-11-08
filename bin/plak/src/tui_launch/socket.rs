@@ -205,7 +205,7 @@ impl SocketFace {
         ))
     }
 
-    fn call(&self, op: Op<PlakExtension>) -> CliResult<Answer> {
+    fn call(&self, op: Op<PlakExtension>) -> CliResult<Answer<PlakExtension>> {
         let id = self
             .sender
             .request_operation(op)

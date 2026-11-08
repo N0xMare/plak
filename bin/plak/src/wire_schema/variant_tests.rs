@@ -29,6 +29,39 @@ struct Schema {
 }
 
 impl Schema {
+    /// A Never extension makes its enclosing required-field branch
+    /// uninhabited. It has no example, rather than a null example.
+    fn inhabited(&self, schema: &Value) -> bool {
+        if schema == &Value::Bool(false) || schema.get("not") == Some(&json!({})) {
+            return false;
+        }
+        if let Some(target) = schema.get("$ref").and_then(Value::as_str) {
+            return self.inhabited(self.def(target.trim_start_matches("#/$defs/")));
+        }
+        if let Some(values) = schema.get("enum").and_then(Value::as_array) {
+            return !values.is_empty();
+        }
+        for key in ["oneOf", "anyOf"] {
+            if let Some(branches) = schema.get(key).and_then(Value::as_array) {
+                return branches.iter().any(|branch| self.inhabited(branch));
+            }
+        }
+        if let Some(parts) = schema.get("allOf").and_then(Value::as_array)
+            && !parts.iter().all(|part| self.inhabited(part))
+        {
+            return false;
+        }
+        schema
+            .get("required")
+            .and_then(Value::as_array)
+            .is_none_or(|required| {
+                required
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .all(|key| self.inhabited(&schema["properties"][key]))
+            })
+    }
+
     fn new() -> Self {
         let document = document();
         Self {
@@ -46,7 +79,13 @@ impl Schema {
     fn variants(&self, name: &str) -> Vec<Value> {
         let def = self.def(name);
         if let Some(branches) = def.get("oneOf").or_else(|| def.get("anyOf")) {
-            return branches.as_array().unwrap().clone();
+            return branches
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|branch| self.inhabited(branch))
+                .cloned()
+                .collect();
         }
         def["enum"]
             .as_array()
@@ -73,7 +112,9 @@ impl Schema {
         for key in ["oneOf", "anyOf"] {
             if let Some(branches) = schema.get(key).and_then(Value::as_array) {
                 let null = branches.iter().find(|branch| branch["type"] == "null");
-                let other = branches.iter().find(|branch| branch["type"] != "null");
+                let other = branches
+                    .iter()
+                    .find(|branch| branch["type"] != "null" && self.inhabited(branch));
                 let chosen = match (filled, other, null) {
                     (true, Some(branch), _) | (false, Some(branch), None) => {
                         self.instance(branch, depth + 1)
@@ -380,7 +421,7 @@ fn every_frame_decodes_from_its_line() {
             let kind = kind_of(&branch);
             let inner = schema.instance(&branch, 0);
             let value = json!({ wrap: inner });
-            let checked = serde_json::from_value::<Outcome>(value.clone())
+            let checked = serde_json::from_value::<Outcome<PlakExtension>>(value.clone())
                 .map_err(|error| format!("{error}: {value}"))
                 .and_then(|outcome| host_round_trips(&HostFrame::Response { id: 1, outcome }));
             if let Err(error) = checked {

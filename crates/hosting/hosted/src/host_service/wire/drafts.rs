@@ -51,7 +51,7 @@ impl<P: ProtocolExtension, W: Write> WireConnection<P, W> {
         attachment: AttachmentId,
         intent: &SessionIntent<P>,
         client_id: Option<ClientDraftId>,
-    ) -> Result<Option<ClientDraftId>, Outcome> {
+    ) -> Result<Option<ClientDraftId>, Outcome<P>> {
         let Some(registry) = &self.drafts else {
             return Ok(None);
         };

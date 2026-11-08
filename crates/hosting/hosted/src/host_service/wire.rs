@@ -105,13 +105,14 @@ fn root_of(
 /// `root`, from the host binary `binary_id` in its process generation
 /// `host_generation`.
 #[must_use]
-pub fn session_welcome(
+pub fn session_welcome<P: ProtocolExtension>(
     binary_id: String,
     host_generation: u64,
     session_id: String,
     root: NodeAddress,
-) -> Welcome {
+) -> Welcome<P> {
     Welcome {
+        extension: Default::default(),
         proto: WIRE_VERSION,
         binary_id,
         host_generation,
@@ -128,8 +129,9 @@ pub fn session_welcome(
 /// binary `binary_id` in its process generation `host_generation`: it names
 /// no session, and the client finds them in the session directory.
 #[must_use]
-pub const fn host_welcome(binary_id: String, host_generation: u64) -> Welcome {
+pub fn host_welcome<P: ProtocolExtension>(binary_id: String, host_generation: u64) -> Welcome<P> {
     Welcome {
+        extension: Default::default(),
         proto: WIRE_VERSION,
         binary_id,
         host_generation,
@@ -167,7 +169,7 @@ where
 /// A lost output.
 pub fn handshake<P: ProtocolExtension>(
     lines: &Lines,
-    welcome: Welcome,
+    welcome: Welcome<P>,
     stdout: &mut dyn Write,
     stopped: &dyn Fn() -> bool,
 ) -> CliResult<bool>
@@ -181,7 +183,7 @@ where
 /// [`handshake`] with the hello due within `wait`.
 fn handshake_within<P: ProtocolExtension>(
     lines: &Lines,
-    welcome: Welcome,
+    welcome: Welcome<P>,
     stdout: &mut dyn Write,
     stopped: &dyn Fn() -> bool,
     wait: Duration,
@@ -299,7 +301,7 @@ pub struct WireConnection<P: ProtocolExtension, W: Write> {
     /// The client correlation of the attachment's current answer window.
     window: Option<String>,
     /// Responses decided outside their request's frame.
-    settled: Vec<(RequestId, Outcome)>,
+    settled: Vec<(RequestId, Outcome<P>)>,
     next_mail: u64,
     /// The session request in flight: its frame's id, its client's id and
     /// the attachment that asked.
@@ -854,9 +856,12 @@ where
 
     /// The request's outcome, or `None` for a child's mail, answered once
     /// the mail is written.
-    fn request(&mut self, id: RequestId, op: Op<P>) -> Option<Outcome> {
+    fn request(&mut self, id: RequestId, op: Op<P>) -> Option<Outcome<P>> {
         let refused = |refusal| Some(Outcome::Refused(refusal));
         match op {
+            Op::Host { .. } => refused(RequestRefusal::Unsupported {
+                detail: "host product reads require a multi-session host".to_owned(),
+            }),
             Op::Ping => Some(Outcome::Ok(Answer::Pong)),
             op @ (Op::RetryAttach { .. } | Op::ResumeSession { .. } | Op::Rebind { .. }) => {
                 self.session_request(id, op)
@@ -949,7 +954,7 @@ where
         mut intent: SessionIntent<P>,
         blobs: &[String],
         client_id: Option<plakous_host_protocol::wire::ClientDraftId>,
-    ) -> Option<Outcome> {
+    ) -> Option<Outcome<P>> {
         let refused = |refusal| Some(Outcome::Refused(refusal));
         if self.attachment != Some(attachment) {
             return refused(RequestRefusal::NotAttached);
@@ -1036,7 +1041,7 @@ where
     /// once the session switched or refused it. A retry or a rebind reopens
     /// the session, which only a launcher that owns the session's host can
     /// do; this host serves one session, so it keeps it.
-    fn session_request(&mut self, id: RequestId, op: Op<P>) -> Option<Outcome> {
+    fn session_request(&mut self, id: RequestId, op: Op<P>) -> Option<Outcome<P>> {
         let (attachment, request_id, change) = match op {
             Op::RetryAttach {
                 attachment,
@@ -1093,7 +1098,7 @@ where
     /// this connection serves it, answered once the stop is durable
     /// ([`Self::settle_stop`]). It acts without an attachment, so it is
     /// logged with the connection's face and login.
-    fn stop_request(&mut self, id: RequestId, session: &str) -> Option<Outcome> {
+    fn stop_request(&mut self, id: RequestId, session: &str) -> Option<Outcome<P>> {
         let serves = self.served_session().as_deref() == Some(session);
         tracing::info!(
             target: "plak::host",
@@ -1334,8 +1339,8 @@ mod session;
 mod slot;
 
 pub use host::{
-    ArchivedSessionView, Created, Creation, HostConnection, HostSessions, PickerProgress,
-    SessionHost,
+    ArchivedSessionView, Created, Creation, HostConnection, HostPrincipal, HostReadTask,
+    HostRequestContext, HostSessions, PickerProgress, SessionHost,
 };
 pub use lines::{Line, LineSender, Lines, lines};
 pub use session::WireSession;
