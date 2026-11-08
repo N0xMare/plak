@@ -24,7 +24,8 @@ pub(crate) fn run(args: &HostInstall, output: &mut dyn io::Write) -> CliResult<P
             "plak host install requires a build with feature web",
         ));
     }
-    let home = std::env::var_os("HOME").ok_or_else(|| CliFailure::new("HOME is unavailable"))?;
+    let home = crate::environment::inherited_home()
+        .ok_or_else(|| CliFailure::new("HOME is unavailable or is not UTF-8"))?;
     let home = Path::new(&home);
     let paths = PlakPaths::from_env_in(None).map_err(CliFailure::new)?;
     let unit = render(home, paths.home(), args)?;
@@ -173,17 +174,10 @@ fn reload_manager(home: &Path) -> CliResult<()> {
         .args(["--user", "daemon-reload"])
         .env_clear()
         .env("HOME", home)
-        .env(
-            "PATH",
-            std::env::var_os("PATH").unwrap_or_else(|| "/usr/bin:/bin".into()),
-        )
+        .env("PATH", "/usr/bin:/bin")
+        .envs(crate::environment::user_manager_environment())
         .stdin(std::process::Stdio::null())
         .process_group(0);
-    for name in ["XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"] {
-        if let Some(value) = std::env::var_os(name) {
-            command.env(name, value);
-        }
-    }
     let mut child = command.spawn().map_err(failed)?;
     let until = Instant::now() + Duration::from_secs(5);
     loop {

@@ -20,6 +20,14 @@ pub(crate) fn inherited_home() -> Option<String> {
     std::env::var_os("HOME").and_then(|value| value.into_string().ok())
 }
 
+/// Only the transport variables needed to reach the caller's user manager.
+pub(crate) fn user_manager_environment() -> Vec<(&'static str, std::ffi::OsString)> {
+    ["PATH", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"]
+        .into_iter()
+        .filter_map(|name| std::env::var_os(name).map(|value| (name, value)))
+        .collect()
+}
+
 /// The user's login shell, when `SHELL` names an absolute path.
 pub(crate) fn login_shell() -> Option<String> {
     std::env::var_os("SHELL")
