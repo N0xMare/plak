@@ -538,14 +538,24 @@ async fn shutdown_stops_a_process_published_after_its_first_snapshot() {
         ExecutionEnvironmentScope::Run("00000000-0000-0000-0000-000000000001".parse().unwrap());
     let (service, link) = queued_link(root.path(), scope).await;
     let backend = link.backend();
-    let environment = runner_environment(
-        scope,
-        root.path(),
-        ".",
-        ExecutionEnvironmentConfig::default(),
-        backend.clone(),
-    )
-    .unwrap();
+    // Construction probes the runner synchronously. Keep the sole async
+    // thread driving its link while the blocking probe waits for answers.
+    let environment = {
+        let root = root.path().to_owned();
+        let backend = backend.clone();
+        tokio::task::spawn_blocking(move || {
+            runner_environment(
+                scope,
+                root,
+                ".",
+                ExecutionEnvironmentConfig::default(),
+                backend,
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap()
+    };
     let owner = plakous_tools::LineOwner::new(
         "00000000-0000-0000-0000-0000000000a1".parse().unwrap(),
         1,
@@ -596,10 +606,14 @@ async fn shutdown_stops_a_process_published_after_its_first_snapshot() {
     };
     // On this single-thread runtime the empty first snapshot cannot yield;
     // the cancellation wait resumes us only after shutdown starts its drain.
-    cancellation.cancelled().await;
-    lock(&service.inner.lines).insert(key, port);
-    lock(&service.inner.running).remove(&pending);
-    stopping.await.unwrap();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        cancellation.cancelled().await;
+        lock(&service.inner.lines).insert(key, port);
+        lock(&service.inner.running).remove(&pending);
+        stopping.await.unwrap();
+    })
+    .await
+    .unwrap();
     let ended = local.joined_terminal_status(ids[0]).is_some();
     local.stop_foreground().unwrap();
     assert!(
