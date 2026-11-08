@@ -520,9 +520,13 @@ impl ProductStateRoots {
         self.with_runner_readiness(registry, runner_id)
     }
 
-    pub(crate) fn retain_runner_stop_debt(&self) -> bool {
+    pub(crate) fn retain_runner_stop_debt(
+        &self,
+        line: plakous::model::LineId,
+        intent: &str,
+    ) -> bool {
         if let Some((registry, id)) = self.runner_readiness.as_deref() {
-            registry.reconcile_when_available(id);
+            registry.reconcile_stop_when_available(id, line, intent);
             return true;
         }
         false

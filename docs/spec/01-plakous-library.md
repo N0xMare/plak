@@ -5970,6 +5970,11 @@ lookup; an alias rename preserves an id, while removal/re-pair cannot retarget a
 existing record or its retained reconciliation client. Every final non-read dispatch
 rechecks terminal foreground cleanup under the settlement fence, including when
 settlement occurs while that dispatch awaits an owner transfer.
+A pending dormant stop signals reconciliation with its line and stable durable
+intent. Retries of that same obligation coalesce with its active sweep instead
+of invalidating it; a different intent still fences an older pass. Completion
+of the same stop cannot reopen an already-ready barrier. These process-local
+keys do not change the persisted stop, runner protocol or binding encoding.
 
 - **Frames.** A big-endian `u32` length, then one JSON value. Neither end
   reads or writes a frame over 16 MiB; an answer that would exceed it is

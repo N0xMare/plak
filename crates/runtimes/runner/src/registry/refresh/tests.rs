@@ -109,19 +109,30 @@ async fn stop_debt_invalidates_an_inflight_probe_before_readiness_can_reopen() {
         async move { registry.refresh(None).await }
     });
     until(|| calls.load(Ordering::SeqCst) == 1).await;
-    registry.reconcile_when_available("local");
+    let line = "00000000-0000-4000-8000-000000000001".parse().unwrap();
+    registry.reconcile_stop_when_available("local", line, "stop:1");
     release.add_permits(1);
     until(|| calls.load(Ordering::SeqCst) == 2).await;
     assert!(
         registry.services("local").is_err(),
         "the stale probe reopened admission"
     );
+    for _ in 0..3 {
+        registry.reconcile_stop_when_available("local", line, "stop:1");
+    }
     release.add_permits(1);
+    until(|| registry.rows()[0].status == RunnerStatus::Ready).await;
     assert_eq!(
         refresh.await.unwrap().unwrap()[0].status,
         RunnerStatus::Ready
     );
     assert_eq!(calls.load(Ordering::SeqCst), 2);
+    registry.reconcile_stop_when_available("local", line, "stop:1");
+    assert_eq!(registry.rows()[0].status, RunnerStatus::Ready);
+    registry.reconcile_stop_when_available("local", line, "stop:2");
+    until(|| calls.load(Ordering::SeqCst) == 3).await;
+    release.add_permits(1);
+    until(|| registry.rows()[0].status == RunnerStatus::Ready).await;
 }
 
 #[test]

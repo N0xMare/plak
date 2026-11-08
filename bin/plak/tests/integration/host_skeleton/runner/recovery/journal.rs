@@ -252,6 +252,7 @@ fn a_recorded_stop_of_a_predecessor_never_dispatches_on_its_successor_head() {
         next.release().await.unwrap();
     });
     let mut host = start(&fixture);
+    wait_local_runner_ready(&host);
     let (mut stream, _) = bind(&fixture);
     let owner = take_line(&fixture, &session, &mut stream);
     let request = Request {

@@ -1326,6 +1326,9 @@ must be durable before the pending answer, repeat preserves the intent and
 revision, and recovery cannot dispatch the stopped turn. A separately owned
 probe already in flight cannot publish ready over newer stop debt; it must
 perform a fresh reconciliation before admitting work.
+The paused-probe regression also retries the same line/intent during that fresh
+pass: retries must not dirty it again or prevent readiness. A distinct later
+intent still requires a new sweep. Removing that coalescing must fail the proof.
 Neither an attachment nor a paid continuation is created by a stop.
 
 Host serving is not a runner-readiness barrier. Daemon recovery fixtures use
@@ -1337,6 +1340,10 @@ pilot still requires process death after settlement. Failure fixtures require th
 current host's typed blocked verdict as well as the diagnostic, so a previous
 host's log cannot satisfy a restarted host's failure proof. Empty daemons may
 have no owner-floor file until their first ownership transfer.
+The predecessor-stop journal proof waits for readiness before its fixture takes
+the line lease; it must not race the host's legitimate lease-only sweep. These
+regressions run with the workspace all-feature artifact set used by durability,
+not only the product package's separate feature resolution.
 
 Runner authority shapes in the strict sweep own explicit process/link cuts,
 like the direct TUI restart shapes, rather than pretending their clocks are

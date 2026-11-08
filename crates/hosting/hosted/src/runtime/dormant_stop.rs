@@ -72,9 +72,15 @@ async fn stop(
         // strictly inside its lease; an unfinished recorded stop is retried
         // under a fresh fence, never answered as terminated.
         let budget = std::time::Duration::from_secs(sessions.lease_period_seconds()) / 2;
-        let recorded = record(roots, store, session).await;
-        let stopped = match recorded {
-            Ok(intent) if !roots.runner_pending() => tokio::time::timeout(budget, async {
+        let intent = match record(roots, store, session).await {
+            Ok(intent) => intent,
+            Err(error) => {
+                let _ = head.release().await;
+                return Err(error);
+            }
+        };
+        let stopped = if !roots.runner_pending() {
+            tokio::time::timeout(budget, async {
                 roots
                     .finish_child_process_stops(&session.node.tree_id)
                     .await?;
@@ -85,20 +91,18 @@ async fn stop(
                 Err(CliFailure::new(
                     "runner stop settlement exceeded its lease budget",
                 ))
-            }),
-            Ok(_) => Err(CliFailure::new("runner stop settlement remains pending")),
-            Err(error) => {
-                let _ = head.release().await;
-                return Err(error);
-            }
+            })
+        } else {
+            Err(CliFailure::new("runner stop settlement remains pending"))
         };
+        let line = head.line();
         let released = head
             .release()
             .await
             .map_err(|error| CliFailure::new(error.to_string()));
         released?;
         if let Err(error) = stopped {
-            if !roots.retain_runner_stop_debt() {
+            if !roots.retain_runner_stop_debt(line, &intent) {
                 return Err(error);
             }
         }
