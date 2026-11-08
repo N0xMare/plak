@@ -3522,11 +3522,17 @@ rule whose ordinal it is wins.
 | `400`, `401`, `429`, `500`, `502`, `503`, `529` | An in-memory HTTP/1.1 peer answers; nothing is resolved, connected or sent upstream. `retry-after=<s>` adds that header | That status, `content-type: application/json`, `x-plak-injected-fault`, and a body both error dialects read: `{"type":"error","error":{"type":…,"code":…,"message":…}}`, with `overloaded_error` for `529`, `rate_limit_error` for `429` and `authentication_error` for `401`. A token-path `400` exercises rejected refresh and credential parking without a live auth endpoint |
 | `xai-refusal` | The same in-memory peer | HTTP 403, `x-plak-injected-fault: 403`, and xAI's pre-generation usage-guideline refusal body `{"code":"permission-denied","error":"I'm sorry, I can't help with that request."}` |
 | `connect` | The exchange fails before resolution | `Failure(Connect, NotStarted, Io)`, as for a refused connection, but without connect-attempt counts; a real all-address refusal retains its IPv4/IPv6 attempt counts |
+| `hang` | Waits `seconds=<s>` before resolution, without DNS, a socket or upstream traffic; cancellation, dropping the request future, or the exchange deadline ends the wait early | `Failure(Connect, NotStarted, DeadlineExceeded)` when the wait or deadline expires; `Cancelled` on cancellation; no connection-use fact or connect-attempt counts |
 | `write-reset` | The exchange fails before resolution | `Failure(RequestWriteOrResponseHead, RequestIncomplete, Protocol)`, as for a peer that resets the connection while the request body is being written |
 | `record-rejected` | The exchange fails before resolution, with no upstream traffic | `Failure(RequestWriteOrResponseHead, RequestIncomplete, Protocol)`, cause `peer_rejected_record`, TLS `AlertReceived(20)`, HTTP/1.1; all kernels label it as corruption in transit and resend immediately on a fresh connection after the first physical failure |
 | `reset` | The real response passes until `after-events=<n>` SSE events (a blank line ends a block; a block of only `:` comment lines, such as a keep-alive, dispatches no event and does not count) or `after-bytes=<n>` bytes, cut exactly there | `Failure(ResponseBody, MayHaveTransmitted, Protocol)`, as for a peer that drops mid-body |
 | `eof` | The same cut, then a clean end of body | The end of body a closed stream gives |
 | `stall` | The same cut, then `seconds=<s>` of silence under the body's own timeouts and cancellation, then the rest | `DeadlineExceeded` if a body deadline expires first |
+
+`stall` connects to the real endpoint and pauses its real response, even with
+`after-events=0`. For an offline deadline qualification use, for example,
+`host=example.invalid,path=/usage,fault=hang,seconds=30`. `hang` and status
+faults such as `fault=401` are pre-connect and never contact the endpoint.
 
 For example, `PLAK_TEST_FAULTS='path=/v1/messages,nth=1,fault=record-rejected'`
 exercises the first-resend rule without uploading content. Like `write-reset`,
@@ -3534,7 +3540,7 @@ this synthetic pre-resolution failure has no connection-use fact; real TLS
 pool tests pin preserved fresh/reused facts and eviction of the rejected
 connection.
 
-`FaultPlan::parse` refuses an unknown field or fault, `nth=0`, a `stall` without
+`FaultPlan::parse` refuses an unknown field or fault, `nth=0`, a `hang` or `stall` without
 `seconds`, and fields that do not apply to the fault. A plan from the
 environment that does not parse fails every exchange before it starts with
 `Failure(Resolution, NotStarted, Internal)`, which no network event produces, so
@@ -3543,6 +3549,10 @@ the product may hold the stderr lock, and a library write would block.
 
 `crates/common/http/tests/faults.rs` proves each fault fires where its rule says
 and equals the real event: a refused connect, a peer that closes mid-body.
+The transport fault unit tests prove `hang` opens no socket and settles on
+cancellation or deadline. The product's `web_endpoint.rs` console fixture
+injects it into an allowance GET and retains recorded totals alongside the
+per-account deadline row.
 `multi_wire_loopback.rs` in `plakous-openrouter` runs each status and `connect`
 through a real turn and compares it with the loopback gateway answering the
 same way, and proves that `reset`, `eof` and `stall` after the first stream
@@ -3552,7 +3562,7 @@ a `write-reset` before acceptance. MCP servers reached over streamable HTTP
 use the same transport (chapter 01 §8.5), so a plan covers their traffic too;
 `tests/http.rs` in `plakous-mcp-fake-server` injects `connect` into one
 `tools/call` and proves it settles as a tool failure the server never saw.
-Injected statuses, `connect` and `write-reset` never reach a connection, so
+Injected statuses, `connect`, `hang` and `write-reset` never reach a connection, so
 their responses and failures name no `ConnectionUse`; stream faults ride a real
 connection, name it, and never return it to a pool.
 

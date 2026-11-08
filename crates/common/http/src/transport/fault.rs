@@ -13,15 +13,17 @@
 //! | `host=<host>` | Only requests to this origin host (any host when absent) |
 //! | `path=<prefix>` | Only requests whose path and query start with this |
 //! | `nth=<n>` | Only the n-th matching request, counting from 1 (every one when absent) |
-//! | `fault=<kind>` | `400`, `401`, `429`, `500`, `502`, `503`, `529`, `xai-refusal`, `connect`, `write-reset`, `record-rejected`, `reset`, `eof` or `stall` |
+//! | `fault=<kind>` | `400`, `401`, `429`, `500`, `502`, `503`, `529`, `xai-refusal`, `connect`, `hang`, `write-reset`, `record-rejected`, `reset`, `eof` or `stall` |
 //! | `retry-after=<secs>` | Status faults: send this `Retry-After` |
 //! | `after-events=<n>` / `after-bytes=<n>` | Stream faults: deliver this many SSE events (comment-only blocks such as keep-alives do not count) or bytes of the body first |
-//! | `seconds=<secs>` | `stall`: how long the body goes silent |
+//! | `seconds=<secs>` | `hang`: pre-connect wait; `stall`: how long the real body goes silent |
 //!
 //! Status faults answer from an in-memory peer before anything is resolved,
 //! connected or sent upstream; `xai-refusal` is an HTTP 403 carrying xAI's
 //! pre-generation usage-guideline refusal body. `connect` fails the exchange in the connect
-//! phase. `write-reset` fails it as a peer that resets the connection while
+//! phase. `hang` waits without resolving or connecting, then times out in the
+//! connect phase; cancellation and the exchange deadline bound the wait.
+//! `write-reset` fails it as a peer that resets the connection while
 //! the request is still being written does. `record-rejected` supplies the
 //! HTTP/1.1 TLS `bad_record_mac` proof without connecting or sending content.
 //! `reset` and `eof` let the real response through and then end its
@@ -76,6 +78,7 @@ enum Fault {
         retry_after: Option<u64>,
     },
     Connect,
+    Hang(Duration),
     WriteReset,
     RecordRejected,
     Invalid,
@@ -106,6 +109,7 @@ pub(super) enum Selected {
         retry_after: Option<u64>,
     },
     Connect,
+    Hang(Duration),
     WriteReset,
     RecordRejected,
     Invalid,
@@ -160,6 +164,7 @@ impl FaultPlan {
                         retry_after,
                     },
                     Fault::Connect => Selected::Connect,
+                    Fault::Hang(duration) => Selected::Hang(duration),
                     Fault::WriteReset => Selected::WriteReset,
                     Fault::RecordRejected => Selected::RecordRejected,
                     Fault::Invalid => Selected::Invalid,
@@ -252,6 +257,7 @@ fn parse_rule(rule: &str) -> Result<Rule, String> {
             retry_after,
         },
         "connect" => Fault::Connect,
+        "hang" => Fault::Hang(seconds.ok_or("`hang` needs `seconds`")?),
         "write-reset" => Fault::WriteReset,
         "record-rejected" => Fault::RecordRejected,
         "reset" | "eof" | "stall" => Fault::Stream {
@@ -274,13 +280,14 @@ fn parse_rule(rule: &str) -> Result<Rule, String> {
     if seconds.is_some()
         && !matches!(
             fault,
-            Fault::Stream {
-                action: StreamAction::Stall(_),
-                ..
-            }
+            Fault::Hang(_)
+                | Fault::Stream {
+                    action: StreamAction::Stall(_),
+                    ..
+                }
         )
     {
-        return Err("`seconds` applies to `stall` only".to_owned());
+        return Err("`seconds` applies to `hang` or `stall` only".to_owned());
     }
     Ok(Rule {
         host,
@@ -293,6 +300,15 @@ fn parse_rule(rule: &str) -> Result<Rule, String> {
 
 fn to_usize(value: u64) -> Result<usize, String> {
     usize::try_from(value).map_err(|_| format!("`{value}` is too large"))
+}
+
+pub(super) async fn injected_hang(duration: Duration, control: &ExchangeControl) -> Failure {
+    let kind = tokio::select! {
+        () = control.cancellation().cancelled() => ErrorKind::Cancelled,
+        () = tokio::time::sleep_until(control.deadline().into()) => ErrorKind::DeadlineExceeded,
+        () = tokio::time::sleep(duration) => ErrorKind::DeadlineExceeded,
+    };
+    Failure::new(Phase::Connect, TransmissionFact::NotStarted, kind)
 }
 
 /// A stream fault's progress through one response body.

@@ -4,6 +4,7 @@ fn fired(plan: &FaultPlan, host: &str, path: &str) -> Option<&'static str> {
     plan.select(host, path).map(|selected| match selected {
         Selected::Status { .. } => "status",
         Selected::Connect => "connect",
+        Selected::Hang(_) => "hang",
         Selected::WriteReset => "write-reset",
         Selected::RecordRejected => "record-rejected",
         Selected::Invalid => "invalid",
@@ -44,11 +45,102 @@ fn clones_share_counters() -> Result<(), FaultSpecError> {
 }
 
 #[test]
+fn hang_matches_host_path_and_shared_ordinal() -> Result<(), FaultSpecError> {
+    let plan = FaultPlan::parse("host=example.invalid,path=/usage,nth=2,fault=hang,seconds=30")?;
+    assert_eq!(fired(&plan, "other.invalid", "/usage"), None);
+    assert_eq!(fired(&plan, "example.invalid", "/models"), None);
+    assert_eq!(fired(&plan, "example.invalid", "/usage"), None);
+    assert_eq!(
+        fired(&plan.clone(), "EXAMPLE.INVALID", "/usage?x=1"),
+        Some("hang")
+    );
+    assert_eq!(fired(&plan, "example.invalid", "/usage"), None);
+    Ok(())
+}
+
+#[tokio::test]
+async fn hang_times_out_without_opening_a_socket() -> Result<(), Box<dyn std::error::Error>> {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let client = crate::Client::new(Limits::default())?
+        .with_faults(Some(FaultPlan::parse("fault=hang,seconds=0.05")?));
+    let request = crate::Request::new(
+        crate::Origin::parse(&format!("https://{}", listener.local_addr()?))?,
+        crate::Method::GET,
+        "/usage",
+        crate::HeaderMap::new(),
+        Bytes::new(),
+        client.limits(),
+    )?;
+    let started = std::time::Instant::now();
+    let execute = client.execute(
+        request,
+        ExchangeControl::new(started + Duration::from_secs(5)),
+    );
+    let failure = tokio::select! {
+        _ = listener.accept() => panic!("hang opened a socket"),
+        result = execute => result.err().ok_or("hang succeeded")?,
+    };
+    assert!(started.elapsed() >= Duration::from_millis(50));
+    assert_eq!(
+        (failure.phase(), failure.transmission(), failure.kind()),
+        (
+            Phase::Connect,
+            TransmissionFact::NotStarted,
+            ErrorKind::DeadlineExceeded
+        )
+    );
+    assert_eq!(failure.connection_use(), None);
+    assert_eq!(failure.connect_attempts(), None);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), listener.accept())
+            .await
+            .is_err()
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn hang_cancellation_and_deadline_end_the_wait() -> Result<(), Box<dyn std::error::Error>> {
+    let control = ExchangeControl::new(std::time::Instant::now() + Duration::from_secs(60));
+    let mut wait = Box::pin(injected_hang(Duration::from_secs(60), &control));
+    assert!(futures_util::poll!(&mut wait).is_pending());
+    control.cancellation().cancel();
+    let failure = tokio::time::timeout(Duration::from_secs(1), wait).await?;
+    assert_eq!(failure.kind(), ErrorKind::Cancelled);
+
+    let control = ExchangeControl::new(std::time::Instant::now() + Duration::from_millis(20));
+    let failure = tokio::time::timeout(
+        Duration::from_secs(1),
+        injected_hang(Duration::from_secs(60), &control),
+    )
+    .await?;
+    assert_eq!(failure.kind(), ErrorKind::DeadlineExceeded);
+    Ok(())
+}
+
+#[test]
 fn malformed_rules_name_the_rule_and_the_problem() {
     for (spec, reason) in [
         ("fault=418", "unknown fault `418`"),
         ("nth=0,fault=500", "`nth` counts from 1"),
         ("fault=stall", "`stall` needs `seconds`"),
+        ("fault=hang", "`hang` needs `seconds`"),
+        (
+            "fault=hang,seconds=-1",
+            "`seconds` needs a duration, not `-1`",
+        ),
+        (
+            "fault=hang,seconds=NaN",
+            "`seconds` needs a duration, not `NaN`",
+        ),
+        (
+            "fault=hang,seconds=1,after-events=0",
+            "`after-events`/`after-bytes` apply to stream faults only",
+        ),
+        (
+            "fault=hang,seconds=1,retry-after=1",
+            "`retry-after` applies to status faults only",
+        ),
         (
             "fault=reset,retry-after=1",
             "`retry-after` applies to status faults only",

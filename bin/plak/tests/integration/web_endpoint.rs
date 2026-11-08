@@ -75,6 +75,16 @@ fn launch_with(fixture: &Fixture, extra: &[&str]) -> (Web, bool) {
 
 /// [`launch_with`] on the web socket `socket`.
 fn launch_on(fixture: &Fixture, socket: &std::path::Path, extra: &[&str]) -> (Web, bool) {
+    launch_on_with_env(fixture, socket, extra, &[], CSP)
+}
+
+fn launch_on_with_env(
+    fixture: &Fixture,
+    socket: &std::path::Path,
+    extra: &[&str],
+    environment: &[(&str, &str)],
+    csp: &str,
+) -> (Web, bool) {
     let config = fixture.home().join("config.toml");
     let mut text = std::fs::read_to_string(&config).unwrap();
     if !text.contains("\n[web]\n") {
@@ -86,11 +96,12 @@ fn launch_on(fixture: &Fixture, socket: &std::path::Path, extra: &[&str]) -> (We
     }
     let ui = fixture.root.join("ui");
     std::fs::create_dir_all(&ui).unwrap();
-    std::fs::write(ui.join("csp.json"), format!(r#"{{"header": "{CSP}"}}"#)).unwrap();
+    std::fs::write(ui.join("csp.json"), format!(r#"{{"header": "{csp}"}}"#)).unwrap();
     std::fs::write(ui.join("index.html"), "<!doctype html>web").unwrap();
     WORKSPACE.with(|workspace| *workspace.borrow_mut() = fixture.workspace().display().to_string());
     let socket = socket.to_path_buf();
     let mut command = fixture.command();
+    command.envs(environment.iter().copied());
     command
         .arg("host")
         .arg("--web")
@@ -414,6 +425,108 @@ fn a_tailnet_client_attaches_prompts_and_reads_the_answer() {
     drop(again);
     interrupt_and_wait(&mut web);
     assert!(!web.socket.exists(), "the socket is removed on exit");
+}
+
+#[test]
+fn accounts_usage_hang_keeps_recorded_totals_and_returns_account_deadline() {
+    let fixture = Fixture::new(&json!({
+        "version": 1, "steps": [{"output": {"text": ANSWER}}]
+    }));
+    // Initialize the real telemetry schema using only the offline model.
+    let output = fixture
+        .command()
+        .env("PLAK_TEST_FAULTS", "fault=connect")
+        .args([
+            "run",
+            "--account",
+            "openai",
+            "--model",
+            "gpt-6-luna",
+            "--effort",
+            "none",
+            "--",
+            "record usage",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let database = std::fs::read_dir(fixture.home().join("telemetry"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "sqlite3")
+        })
+        .expect("telemetry database");
+    let connection = rusqlite::Connection::open(database).unwrap();
+    connection
+        .execute("UPDATE recording_evidence SET started_at_ms=0", [])
+        .unwrap();
+    connection.execute("INSERT INTO recorded_terminals VALUES('hang-fixture','session','branch',?1,'openrouter','123','4','0','0','0','2','2','7')",
+        [i64::try_from(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()).unwrap() - 1_000]).unwrap();
+    drop(connection);
+    let config = fixture.home().join("config.toml");
+    let mut text = std::fs::read_to_string(&config).unwrap();
+    write!(
+        text,
+        "\n[web]\nallow = [\"{LOGIN}\"]\norigin = \"{ORIGIN}\"\naccounts_read = true\n"
+    )
+    .unwrap();
+    write_private(&config, &text);
+    // The final catch-all also keeps a mistargeted request entirely offline.
+    let (mut web, ready) = launch_on_with_env(
+        &fixture,
+        &socket_dir(&fixture).join("plak.sock"),
+        &[],
+        &[
+            ("OPENROUTER_API_KEY", "offline-placeholder"),
+            (
+                "PLAK_TEST_FAULTS",
+                "host=openrouter.ai,path=/api/v1/key,nth=1,fault=hang,seconds=30;fault=connect",
+            ),
+        ],
+        "default-src 'self'; script-src 'self'; connect-src 'self'; require-trusted-types-for 'script'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'",
+    );
+    assert!(ready, "{:?}", web.lines.try_iter().collect::<Vec<_>>());
+    let mut socket = upgrade(&web, &cookie(&web));
+    send(
+        &mut socket,
+        &ClientFrame::Hello(Hello {
+            proto: WIRE_VERSION,
+            binary_id: "web-test".into(),
+            caps: Vec::new(),
+        }),
+    );
+    let welcome = next_frame(&mut socket);
+    assert_eq!(
+        welcome["extension"]["console"]["accounts_read"]["enabled"],
+        true
+    );
+    socket
+        .send(Message::text(
+            json!({"frame":"request","id":1,"op":{"op":"host","request":{
+                "request":"accounts_usage","account_id":"openrouter","window":"24h"
+            }}})
+            .to_string(),
+        ))
+        .unwrap();
+    let answer = response(&mut socket, 1);
+    let usage = &answer["ok"]["response"];
+    assert_eq!(usage["response"], "accounts_usage", "{answer}");
+    let row = &usage["rows"][0];
+    assert_eq!(row["account_id"], "openrouter", "{answer}");
+    assert_eq!(
+        row["allowance"]["unavailable"]["code"], "deadline",
+        "{answer}"
+    );
+    assert_eq!(row["recorded"]["calls"], "2", "{answer}");
+    assert_eq!(row["recorded"]["input_tokens"], "123", "{answer}");
+    drop(socket);
+    interrupt_and_wait(&mut web);
 }
 
 #[test]

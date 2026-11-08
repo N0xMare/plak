@@ -69,6 +69,9 @@ impl Client {
                 )
                 .with_io_cause(&std::io::Error::from(std::io::ErrorKind::ConnectionRefused)));
             }
+            Some(super::fault::Selected::Hang(duration)) => {
+                return Err(super::fault::injected_hang(duration, &control).await);
+            }
             Some(super::fault::Selected::WriteReset) => {
                 return Err(Failure::new(
                     Phase::RequestWriteOrResponseHead,
