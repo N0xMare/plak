@@ -2,6 +2,111 @@ use super::*;
 use crate::runtime::terminal::{DurableTerminalResultRecord, encode_terminal_result_record};
 
 #[tokio::test]
+async fn historical_terminal_replay_refuses_non_enrichment_usage_changes() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let model = artifact_test_model(0, 88_400)?;
+    model.unknown_outcome_from_call.store(0, Ordering::Release);
+    let (registry, _) = session_update_registry(SessionUpdateFixtureMode::Active)?;
+    let make = || session_update_builder(workspace.clone(), model.clone(), registry.clone());
+    let sessions = DurableSessionRuntime::current(
+        Arc::new(TestCreateStore::default()),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("lease")?,
+    )?;
+    let agent = sessions.create("create:historical-usage", make()?).await?;
+    let command = CommandId::new("root:historical-usage")?;
+    let original = agent
+        .start(command.clone(), "unknown request")
+        .await?
+        .into_turn()
+        .ok_or("original turn")?
+        .result()
+        .await?;
+    assert!(matches!(
+        original.outcome(),
+        TurnResultOutcome::RecoveryRequired(_)
+    ));
+    let checkpoint = original.checkpoint().clone();
+    let _ = agent.shutdown().await;
+
+    for tamper in [false, true] {
+        let reader = historical_reader(
+            &checkpoint,
+            execution_value_fixture(registry.clone(), workspace.clone())?,
+            &command,
+            tamper,
+        )?;
+        let reply = reader
+            .command(TurnCommand::Start {
+                command_id: command.clone(),
+                input: "unknown request".into(),
+            })
+            .await?;
+        if tamper {
+            let rejection = reply
+                .acknowledgement()
+                .rejection()
+                .ok_or("reader accepted changed usage")?;
+            assert_eq!(rejection.kind(), ControlErrorKind::Internal);
+            assert_eq!(
+                rejection.message(),
+                "historical terminal checkpoint carries a different result record"
+            );
+            assert!(reply.result().is_none());
+        } else {
+            assert!(reply.acknowledgement().rejection().is_none());
+            let result = reply
+                .result()
+                .ok_or("historical result")?
+                .clone()
+                .result()
+                .await?;
+            assert_eq!(result.usage(), original.usage());
+            assert_eq!(result.checkpoint().id(), checkpoint.id());
+        }
+        reader.shutdown().await?;
+    }
+    assert_eq!(
+        model.calls.load(Ordering::Acquire),
+        1,
+        "replay never dispatches"
+    );
+    Ok(())
+}
+
+fn historical_reader(
+    checkpoint: &RuntimeCheckpoint,
+    mut prepared: crate::runtime::PreparedAgent,
+    command: &CommandId,
+    tamper: bool,
+) -> TestResult<Agent> {
+    use crate::runtime::checkpoint::owner::PreparedCheckpoint;
+    use crate::runtime::continuation::rehydrate_runtime_indexes;
+
+    // Keep the historical checkpoint intact. Only the retained command
+    // index differs, as when replay reads a later terminal record.
+    let bundle = RuntimeCheckpointCodec::bundle(checkpoint, None)?;
+    prepared.authority = PreparedCheckpoint::new(Arc::new(checkpoint.clone()), bundle, None);
+    let (mut commands, next_command, next_operation) =
+        rehydrate_runtime_indexes(checkpoint, &BTreeMap::new(), false)?;
+    if tamper {
+        commands
+            .get_mut(command)
+            .ok_or("retained command")?
+            .terminal
+            .as_mut()
+            .ok_or("retained terminal")?
+            .usage
+            .record_model_operation(None)?;
+    }
+    prepared.initial_command_ledger = commands;
+    prepared.next_command_sequence = next_command;
+    prepared.next_operation_sequence = next_operation;
+    Ok(prepared.spawn())
+}
+
+#[tokio::test]
 async fn recovery_required_enrichment_replays_the_original_command() -> TestResult {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);

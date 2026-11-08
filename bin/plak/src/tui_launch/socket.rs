@@ -426,7 +426,11 @@ impl SocketFace {
             let key = crate::home::state::state_key();
             let refusal = target.as_ref().and_then(|target| {
                 if target.state_key.as_deref() == Some(key.as_str()) {
-                    target.refusal(&key)
+                    if target.probe.as_ref().is_some_and(|probe| probe.host_resume) {
+                        target.refusal(&key)
+                    } else {
+                        Some("reload refused: the installed build does not support host-only client reload; install a compatible client before retrying".to_owned())
+                    }
                 } else {
                     Some("reload refused: the installed client reads another state key; stop the host or run its build".to_owned())
                 }

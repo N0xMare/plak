@@ -4795,6 +4795,12 @@ face may attach the same session at once. An embedded TUI already running
 when the host starts keeps its custody, and the per-tree
 `tree_hosted_elsewhere` refusal is unchanged.
 
+Before a host-mode `/reload` detaches, the installed build's reload probe must
+advertise support for the private host-only resume marker. A build that does
+not advertise it refuses in the TUI with an install-compatible-client remedy;
+the terminal stays attached, rather than execing an unsupported option or
+falling back to an embedded-capable resume command.
+
 A terminal connected to a host whose welcome binary id differs from the
 locally installed binary id shows a persistent, non-blocking notice naming
 both builds. Its remedy is to restart the host unit, or run `plak host stop`
@@ -4978,6 +4984,11 @@ exclusion. Standalone local placement remains direct and starts no local daemon.
   start `plak host`, or see them with `plak runner ps`". It changes no job
   outcome and stops nothing. A live runtime holder's name takes precedence
   over that process refusal; process-free opens retain canonical lease expiry.
+  An unparseable recorded child locator or one whose head cannot be resolved
+  refuses with `local_runner_inspection` (exit 7), naming the child and locator
+  and asking the operator to repair its recorded session association before
+  retrying embedded open (`plak runner ps` inspects the daemon's jobs). It
+  never skips the child or opens the canonical session on incomplete inspection.
   When no daemon answers, the open proceeds.
 - **Tool environment.** It captures the login shell's `PATH` once at start,
   bounded at 5 s however the shell's startup files behave, as `plak runner

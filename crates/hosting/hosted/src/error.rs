@@ -31,6 +31,8 @@ pub enum CliFailureKind {
     HostedElsewhere,
     /// An embedded attachment cannot take a daemon-held process line.
     LocalRunnerProcesses,
+    /// An embedded attachment cannot resolve a recorded process-owning child.
+    LocalRunnerInspection,
     /// A standalone import cannot bind runners while a host owns the home.
     ImportThroughRunningHost,
 }
@@ -44,7 +46,7 @@ impl CliFailureKind {
             Self::Usage | Self::ImportThroughRunningHost => 2,
             Self::Auth => 3,
             Self::Agent | Self::RecoveryRequired => 5,
-            Self::HostedElsewhere | Self::LocalRunnerProcesses => 7,
+            Self::HostedElsewhere | Self::LocalRunnerProcesses | Self::LocalRunnerInspection => 7,
         }
     }
 }
@@ -360,6 +362,19 @@ impl CliFailure {
         )
     }
 
+    pub(crate) fn local_runner_inspection(
+        agent: &str,
+        locator: &str,
+        cause: impl std::fmt::Display,
+    ) -> Self {
+        Self::classified(
+            CliFailureKind::LocalRunnerInspection,
+            format!(
+                "cannot inspect local-runner ownership for child {agent} (locator {locator}): {cause}; repair this child's recorded session association before retrying embedded open; inspect daemon jobs with `plak runner ps`"
+            ),
+        )
+    }
+
     /// Internal failure with the default category.
     pub fn new(message: impl Into<String>) -> Self {
         Self::classified(CliFailureKind::Internal, message)
@@ -574,6 +589,7 @@ impl CliFailure {
         match self.kind {
             CliFailureKind::HostedElsewhere => Some("tree_hosted_elsewhere"),
             CliFailureKind::LocalRunnerProcesses => Some("local_runner_processes"),
+            CliFailureKind::LocalRunnerInspection => Some("local_runner_inspection"),
             CliFailureKind::ImportThroughRunningHost => Some("import_through_running_host"),
             _ => None,
         }

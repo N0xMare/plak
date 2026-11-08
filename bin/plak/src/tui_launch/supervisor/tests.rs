@@ -46,6 +46,7 @@ fn reload_handoff_reuses_the_tui_probe_verdict_without_reprobing() {
         executable: root.path().join("absent-plak"),
         state_key: Some(key.clone()),
         probe: Some(carry::ReloadProbe {
+            host_resume: true,
             state_key: key,
             export_versions: carry::IMPORTABLE_VERSIONS.to_vec(),
             config_error: Some("synthetic config refusal".to_owned()),

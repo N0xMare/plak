@@ -7,6 +7,10 @@ use crate::error::{CliFailure, CliResult};
 use plakous::runner::protocol::{Bind, PROTOCOL_VERSION, VersionTriple};
 use plakous::runner::{ClientWindows, ConnectError, RunnerClient};
 
+#[cfg(test)]
+#[path = "local_runner_tests.rs"]
+mod inspection_tests;
+
 impl ProductStateRoots {
     pub(crate) async fn refuse_daemon_tree(
         &self,
@@ -59,29 +63,29 @@ impl ProductStateRoots {
                 CliFailure::new(format!("the local runner inspection failed: {error:?}"))
             })?;
             let sessions = self.runtime_sessions()?;
-            let mut locators = vec![locator];
+            let head = sessions
+                .line_head_of(locator)
+                .await
+                .map_err(|error| CliFailure::new(error.to_string()))?;
+            let mut tree_lines = BTreeSet::from([head.line().to_string()]);
             if let Some(tree) = self
                 .tree_store()?
                 .load(tree_id)
                 .map_err(|error| CliFailure::new(error.to_string()))?
             {
-                for node in tree.rows().nodes().values() {
+                for (agent, node) in tree.rows().nodes() {
                     if let Some(recorded) = &node.session_locator {
-                        locators.push(
-                            recorded
-                                .parse::<plakous::sessions::SessionLocator>()
-                                .map_err(|error| CliFailure::new(error.to_string()))?,
-                        );
+                        let locator = recorded
+                            .parse::<plakous::sessions::SessionLocator>()
+                            .map_err(|error| {
+                                CliFailure::local_runner_inspection(agent, recorded, error)
+                            })?;
+                        let head = sessions.line_head_of(locator).await.map_err(|error| {
+                            CliFailure::local_runner_inspection(agent, recorded, error)
+                        })?;
+                        tree_lines.insert(head.line().to_string());
                     }
                 }
-            }
-            let mut tree_lines = BTreeSet::new();
-            for locator in locators {
-                let head = sessions
-                    .line_head_of(locator)
-                    .await
-                    .map_err(|error| CliFailure::new(error.to_string()))?;
-                tree_lines.insert(head.line().to_string());
             }
             if lines
                 .iter()

@@ -45,6 +45,9 @@ impl CarryCapacityProbe {
 
 #[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq, schemars::JsonSchema)]
 pub(crate) struct ReloadProbe {
+    /// Whether the client accepts the host-only resume marker.
+    #[serde(default)]
+    pub(crate) host_resume: bool,
     pub(crate) state_key: String,
     pub(crate) export_versions: Vec<u32>,
     pub(crate) config_error: Option<String>,
@@ -57,6 +60,7 @@ pub(crate) struct ReloadProbe {
 
 pub(crate) fn reload_probe(paths: &PlakPaths) -> ReloadProbe {
     ReloadProbe {
+        host_resume: true,
         state_key: crate::home::state::state_key(),
         export_versions: IMPORTABLE_VERSIONS.to_vec(),
         config_error: crate::product_config::SessionPolicy::load(paths).err(),

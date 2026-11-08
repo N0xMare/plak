@@ -15,6 +15,48 @@ fn installed_wrapper(fixture: &Fixture, body: &str) -> PathBuf {
     installed
 }
 
+#[test]
+fn an_older_installed_client_refuses_host_reload_before_detaching() {
+    let fixture = Fixture::with_mode(&tool_then_answer("resident through refusal"), Mode::Host);
+    let (image, _) = installed_client(&fixture);
+    start_image_host(&fixture, &image);
+    let output = image_command(&fixture, &image)
+        .args(["version", "--reload-probe"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let mut probe: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        probe.as_object_mut().unwrap().remove("host_resume"),
+        Some(Value::Bool(true))
+    );
+    let detached = fixture.root.join("unsupported-exec");
+    let installed = installed_wrapper(
+        &fixture,
+        &format!(
+            "if [ \"$1\" = version ] && [ \"$2\" = --reload-probe ]; then printf '%s' '{probe}'; exit 0; fi\nif [ \"$1\" = --host-resume ]; then touch '{}'; exit 2; fi",
+            detached.display(),
+        ),
+    );
+    let mut terminal = Terminal::spawn(&fixture, Launch::OnPath(&installed));
+    terminal.wait_ready();
+    terminal.send(b"keep this attachment\r");
+    terminal.wait_screen("resident through refusal");
+    terminal.wait_absent("Esc stop");
+    terminal.send(b"/reload\r");
+    terminal.wait_screen("does not support host-only client reload");
+    assert!(terminal.is_alive());
+    assert!(
+        !detached.exists(),
+        "an older client was execed after detaching"
+    );
+    assert_eq!(
+        Directory::connect(&fixture).rows()[0]["residency"],
+        "resident"
+    );
+    terminal.quit();
+}
+
 fn wait_for_file(path: &Path) {
     let until = Instant::now() + WAIT;
     while !path.exists() {
