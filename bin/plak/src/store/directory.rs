@@ -64,22 +64,29 @@ pub struct DirectoryEntry {
 }
 
 impl ProductStore {
-    /// Only continuation candidates and distinct runner placements, uncapped.
+    /// Recovery candidates are not bounded by the presentation directory.
+    #[allow(dead_code, reason = "only the optional host scans recovery candidates")]
+    pub(crate) fn continuation_candidates(&self) -> Result<Vec<String>, String> {
+        self.connection
+            .prepare("SELECT s.id FROM sessions s WHERE s.archived=0 AND EXISTS(SELECT 1 FROM host_intents i WHERE i.session_id=s.id AND i.kind='interrupt_cause') ORDER BY s.updated_at DESC,s.id ASC")
+            .and_then(|mut statement| statement.query_map([], |row| row.get(0))?.collect())
+            .map_err(|error| error.to_string())
+    }
+
+    /// Only continuation candidates and recorded stop placements, uncapped.
     /// No transcript, profile, runtime lease or presentation projection is read.
     #[allow(
         dead_code,
         reason = "only the optional host needs idle debt eligibility"
     )]
     pub(crate) fn idle_debt(&mut self) -> Result<(bool, Vec<String>), String> {
+        let candidates = self.continuation_candidates()?;
         let transaction = self
             .connection
             .unchecked_transaction()
             .map_err(|e| e.to_string())?;
-        let candidates: Vec<String> = transaction
-            .prepare("SELECT DISTINCT s.id FROM sessions s JOIN host_intents i ON i.session_id=s.id WHERE s.archived=0 AND i.kind='interrupt_cause'")
-            .and_then(|mut statement| statement.query_map([], |row| row.get(0))?.collect())
-            .map_err(|e| e.to_string())?;
         let mut continuing = false;
+        let mut runners = std::collections::BTreeSet::<String>::new();
         for id in candidates {
             let intents =
                 super::views::intents_of(&transaction, &mut self.verified_submissions, &id)?;
@@ -90,15 +97,36 @@ impl ProductStore {
                 plakous_hosted::runtime::RootStanding::Continuing { .. }
             ) {
                 continuing = true;
-                break;
+            }
+            let stopped = intents
+                .root_interrupts
+                .iter()
+                .max_by_key(|intent| (intent.anchor, intent.ordinal))
+                .filter(|intent| {
+                    intent.value.cause
+                        == plakous_hosted::sessions::projector::RootInterruptCause::Stopped
+                })
+                .is_some_and(|stop| {
+                    !intents.submissions.iter().any(|submission| {
+                        intents
+                            .submission_anchors
+                            .get(&submission.command_id)
+                            .is_some_and(|anchor| *anchor >= stop.anchor)
+                            && matches!(
+                                views.state.deliveries.get(&submission.command_id),
+                                Some(plakous_hosted::sessions::projector::Delivery::Accepted)
+                            )
+                    })
+                });
+            if stopped {
+                runners.insert(transaction.query_row(
+                    "SELECT COALESCE(json_extract(runner_display,'$.runner_id'),'local') FROM sessions WHERE id=?1",
+                    [&id], |row| row.get(0),
+                ).map_err(|error| error.to_string())?);
             }
         }
-        let runners = transaction
-            .prepare("SELECT DISTINCT COALESCE(json_extract(runner_display,'$.runner_id'),'local') FROM sessions WHERE archived=0")
-            .and_then(|mut statement| statement.query_map([], |row| row.get(0))?.collect())
-            .map_err(|e| e.to_string())?;
         transaction.commit().map_err(|e| e.to_string())?;
-        Ok((continuing, runners))
+        Ok((continuing, runners.into_iter().collect()))
     }
 
     #[allow(

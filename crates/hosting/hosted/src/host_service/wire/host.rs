@@ -588,14 +588,6 @@ where
         self.lock().clone()
     }
 
-    /// Whether residents, opening/releasing workers, durable continuations or
-    /// runner-stop debt prevent a disconnected service from exiting idle.
-    /// Unreadable durable state is not evidence of idleness.
-    #[must_use]
-    pub fn idle_exit_blocked(&self) -> bool {
-        self.idle_residents_blocked() || self.durable_idle_exit_blocked()
-    }
-
     /// Cheap in-memory blockers, safe to check on the accept loop each second.
     #[must_use]
     pub fn idle_residents_blocked(&self) -> bool {

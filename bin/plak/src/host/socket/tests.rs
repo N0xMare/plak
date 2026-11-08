@@ -21,13 +21,23 @@ fn short_home() -> tempfile::TempDir {
 
 /// Sessions as a test scripts them: none.
 #[derive(Default)]
-struct NoSessions {
+pub(in crate::host) struct NoSessions {
     principals: Arc<Mutex<Vec<HostPrincipal>>>,
+    durable: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
+}
+
+impl NoSessions {
+    pub(in crate::host) fn with_durable(check: impl Fn() -> bool + Send + Sync + 'static) -> Self {
+        Self {
+            durable: Some(Arc::new(check)),
+            ..Self::default()
+        }
+    }
 }
 
 impl plakous_hosted::host_service::wire::HostSessions<PlakExtension> for NoSessions {
     fn durable_idle_exit_blocked(&self) -> bool {
-        false
+        self.durable.as_ref().is_some_and(|check| check())
     }
     fn host_request(
         &self,
@@ -320,6 +330,170 @@ fn places_are_capped() {
     drop(held);
     assert_eq!(count.load(Ordering::Acquire), 0);
     assert!(Place::take(&count, PENDING_LIMIT).is_some());
+}
+
+#[test]
+fn serve_idle_expiry_hides_discovery_before_releasing_the_home_lock() {
+    for missing in [false, true] {
+        let home = short_home();
+        let socket = home.path().join("host/run/idle.sock");
+        let lock_path = home.path().join("host.lock");
+        let lock = HostLock::take(&lock_path, "idle").unwrap();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let mut bound = Bound::bind(&socket, &lock).unwrap();
+            if missing {
+                std::fs::remove_file(&socket).unwrap();
+            }
+            let host = SessionHost::new(NoSessions::default(), "idle", 7);
+            tokio::time::timeout(
+                Duration::from_secs(8),
+                bound.serve(
+                    &host,
+                    || false,
+                    Some(super::super::idle::IdleExit::with_window(
+                        Duration::from_millis(1),
+                    )),
+                    Arc::new(AtomicBool::new(false)),
+                ),
+            )
+            .await
+            .unwrap();
+            assert!(!socket.exists(), "serve returned before hiding discovery");
+            assert!(matches!(
+                std::fs::File::open(&lock_path).unwrap().try_lock(),
+                Err(std::fs::TryLockError::WouldBlock)
+            ));
+        });
+    }
+}
+
+#[test]
+fn serve_welcomes_a_connection_queued_before_the_expiry_tick() {
+    let home = short_home();
+    let socket = home.path().join("host/run/queued.sock");
+    let lock = HostLock::take(&home.path().join("host.lock"), "idle").unwrap();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    let mut bound = {
+        let _entered = runtime.enter();
+        Bound::bind(&socket, &lock).unwrap()
+    };
+    let checks = Arc::new(AtomicUsize::new(0));
+    let count = Arc::clone(&checks);
+    let sessions = NoSessions::with_durable(move || {
+        count.fetch_add(1, Ordering::AcqRel);
+        false
+    });
+    let host = SessionHost::new(sessions, "idle", 7);
+    let stop = Arc::new(AtomicBool::new(false));
+    let stopping = Arc::clone(&stop);
+    let (queued, receiver) = std::sync::mpsc::channel();
+    let did_queue = AtomicBool::new(false);
+    let server = std::thread::spawn(move || {
+        runtime.block_on(async {
+            tokio::time::timeout(
+                Duration::from_secs(10),
+                bound.serve(
+                    &host,
+                    move || {
+                        // This callback runs inside the tick arm, after select has
+                        // chosen expiry rather than the ordinary accept branch.
+                        if checks.load(Ordering::Acquire) >= 2
+                            && !did_queue.swap(true, Ordering::AcqRel)
+                        {
+                            let mut client =
+                                std::os::unix::net::UnixStream::connect(&socket).unwrap();
+                            client
+                                .set_read_timeout(Some(Duration::from_secs(5)))
+                                .unwrap();
+                            send(
+                                &mut client,
+                                &ClientFrame::Hello(Hello {
+                                    proto: WIRE_VERSION,
+                                    binary_id: "queued".into(),
+                                    caps: Vec::new(),
+                                }),
+                            );
+                            queued.send(client).unwrap();
+                        }
+                        stopping.load(Ordering::Acquire)
+                    },
+                    Some(super::super::idle::IdleExit::with_window(
+                        Duration::from_millis(1),
+                    )),
+                    Arc::new(AtomicBool::new(false)),
+                ),
+            )
+            .await
+            .unwrap();
+        });
+    });
+    let client = receiver.recv_timeout(Duration::from_secs(8)).unwrap();
+    assert!(matches!(
+        next(&mut BufReader::new(client)),
+        HostFrame::Welcome(_)
+    ));
+    stop.store(true, Ordering::Release);
+    server.join().unwrap();
+}
+
+#[test]
+fn a_failed_idle_rebind_is_an_error_not_an_invisible_live_listener() {
+    let home = short_home();
+    let socket = home.path().join("host/run/rebind.sock");
+    let lock = HostLock::take(&home.path().join("host.lock"), "idle").unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let _entered = runtime.enter();
+    let mut bound = Bound::bind(&socket, &lock).unwrap();
+    let _queued = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+    assert!(
+        bound
+            .retire_idle_listener_with(|_| Err(CliFailure::new("bind unavailable")))
+            .is_err()
+    );
+    assert!(!socket.exists());
+}
+
+#[test]
+fn serve_stops_on_idle_retirement_failure() {
+    let home = short_home();
+    let socket = home.path().join("host/run/failure.sock");
+    let lock = HostLock::take(&home.path().join("host.lock"), "idle").unwrap();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let mut bound = Bound::bind(&socket, &lock).unwrap();
+        std::fs::remove_file(&socket).unwrap();
+        std::fs::create_dir(&socket).unwrap();
+        let host = SessionHost::new(NoSessions::default(), "idle", 7);
+        tokio::time::timeout(
+            Duration::from_secs(8),
+            bound.serve(
+                &host,
+                || false,
+                Some(super::super::idle::IdleExit::with_window(
+                    Duration::from_millis(1),
+                )),
+                Arc::new(AtomicBool::new(false)),
+            ),
+        )
+        .await
+        .unwrap();
+    });
 }
 
 #[test]

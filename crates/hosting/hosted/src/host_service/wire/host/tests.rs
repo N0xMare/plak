@@ -913,23 +913,23 @@ fn host(rows: &[&str]) -> (Arc<SessionHost<Core>>, Fake) {
 #[test]
 fn idle_exit_refuses_unreadable_state_pending_stops_and_a_resident_worker() {
     let (host, fake) = host(&["s1"]);
-    assert!(!host.idle_exit_blocked());
+    assert!(!(host.idle_residents_blocked() || host.durable_idle_exit_blocked()));
     fake.0.unreadable_rows.store(true, Ordering::SeqCst);
-    assert!(host.idle_exit_blocked());
+    assert!(host.durable_idle_exit_blocked());
     fake.0.unreadable_rows.store(false, Ordering::SeqCst);
     fake.0.pending_stops.store(true, Ordering::SeqCst);
-    assert!(host.idle_exit_blocked());
+    assert!(host.durable_idle_exit_blocked());
     fake.0.pending_stops.store(false, Ordering::SeqCst);
     let (session, hold) = host.slot("s1").resident().unwrap();
     assert!(!session.ended());
-    assert!(host.idle_exit_blocked());
+    assert!(host.idle_residents_blocked());
     drop(hold);
     let failures = host.hand_off_all(Duration::from_secs(2));
     assert!(
         failures.is_empty(),
         "idle fixture did not hand off: {failures:?}"
     );
-    assert!(!host.idle_exit_blocked());
+    assert!(!(host.idle_residents_blocked() || host.durable_idle_exit_blocked()));
     assert_eq!(fake.0.active_workers.load(Ordering::SeqCst), 0);
 }
 
@@ -937,7 +937,7 @@ fn idle_exit_refuses_unreadable_state_pending_stops_and_a_resident_worker() {
 fn idle_exit_keeps_a_dormant_continuation_without_opening_it() {
     let (host, fake) = host(&["s1"]);
     fake.0.rows.lock().unwrap()[0].activity = SessionActivity::Continuing;
-    assert!(host.idle_exit_blocked());
+    assert!(host.durable_idle_exit_blocked());
     assert_eq!(fake.0.opens.load(Ordering::SeqCst), 0);
     fake.0.refuse.lock().unwrap().insert(
         "s1".into(),
@@ -947,10 +947,10 @@ fn idle_exit_keeps_a_dormant_continuation_without_opening_it() {
     );
     assert!(host.slot("s1").resident().is_err());
     assert!(matches!(host.slot("s1").peek(), SlotView::Dormant(_)));
-    assert!(host.idle_exit_blocked());
+    assert!(host.durable_idle_exit_blocked());
     assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
     fake.0.rows.lock().unwrap()[0].activity = SessionActivity::Idle;
-    assert!(!host.idle_exit_blocked());
+    assert!(!(host.idle_residents_blocked() || host.durable_idle_exit_blocked()));
     assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
 }
 

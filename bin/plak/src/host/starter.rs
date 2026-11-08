@@ -309,6 +309,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn await_claim_waits_for_an_unclaimed_child_to_exit() {
+        let (_root, paths) = PlakPaths::isolated_test_home();
+        let start = Instant::now();
+        let mut child = Command::new("sleep").arg("0.3").spawn().unwrap();
+        await_claim(&paths, &mut child).unwrap();
+        let elapsed = start.elapsed();
+        let exited = child.try_wait().unwrap().is_some();
+        child.wait().unwrap();
+        assert!(exited, "startup acknowledgement preceded child exit");
+        assert!(elapsed >= Duration::from_millis(300), "{elapsed:?}");
+    }
+
+    #[test]
+    fn await_claim_returns_while_the_lock_naming_the_child_is_held() {
+        let (_root, paths) = PlakPaths::isolated_test_home();
+        crate::commands::runner::private_directory(&paths.home().join("host")).unwrap();
+        let path = crate::wire_transport::hosts::home_lock(&paths);
+        let mut child = Command::new("python3")
+            .args(["-c", "import fcntl, os, sys; f=open(sys.argv[1], 'w'); os.chmod(sys.argv[1], 0o600); fcntl.flock(f, fcntl.LOCK_EX); f.write(str(os.getpid())+' fixture\\n'); f.flush(); sys.stdin.read()"])
+            .arg(&path)
+            .stdin(Stdio::piped())
+            .spawn().unwrap();
+        await_claim(&paths, &mut child).unwrap();
+        let live = child.try_wait().unwrap().is_none();
+        let holder = crate::wire_transport::hosts::lock_holder(&path).unwrap();
+        drop(child.stdin.take());
+        child.wait().unwrap();
+        assert!(live, "claim must not wait for the lock owner to exit");
+        assert!(holder.unwrap().starts_with(&format!("{} ", child.id())));
+    }
+
+    #[test]
     fn an_exited_child_is_reaped_without_waiting_for_stderr_eof() {
         let root = tempfile::tempdir().unwrap();
         let paths = PlakPaths::explicit(root.path().join("home"));

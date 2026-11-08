@@ -43,6 +43,8 @@ fn idle_debt_older_than_the_newest_256_rows_is_not_hidden() {
             .any(|row| row.id == old.id)
     );
     assert!(store.idle_debt().unwrap().0);
+    let product = ProductSessions::new(&services, None, None).unwrap();
+    assert_eq!(product.owed().unwrap(), vec![old.id.clone()]);
     store
         .write_root_loss_at_cursor(
             &old.id,
@@ -55,9 +57,26 @@ fn idle_debt_older_than_the_newest_256_rows_is_not_hidden() {
         )
         .unwrap();
     assert!(!store.idle_debt().unwrap().0);
-    // A non-Ready placement on that same old row also blocks exit uncapped.
-    let product = ProductSessions::new(&services, None, None).unwrap();
+    // Only the recorded stop, not an ordinary offline placement, blocks exit.
     assert!(product.durable_idle_exit_blocked());
+}
+
+#[test]
+fn an_offline_runner_without_recorded_stop_debt_does_not_pin_the_host() {
+    let (_temporary, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+    let services = Services::for_home(paths.clone());
+    let mut store = ProductStore::open(&paths).unwrap();
+    let mut record = crate::store::sessions::SessionRecord::new(paths.home().to_owned());
+    record.runner = Some(plakous_hosted::sessions::RunnerDisplay {
+        name: "offline".into(),
+        runner_id: "offline-id".into(),
+        workspace_root: paths.home().to_owned(),
+        workspace_cwd: paths.home().to_owned(),
+    });
+    store.commit(&mut record).unwrap();
+    assert_eq!(store.idle_debt().unwrap(), (false, Vec::new()));
+    let product = ProductSessions::new(&services, None, None).unwrap();
+    assert!(!product.durable_idle_exit_blocked());
 }
 
 #[test]

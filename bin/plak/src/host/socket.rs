@@ -187,7 +187,7 @@ impl Bound {
                                 }
                                 Err(error) => {
                                     eprintln!("plak host: idle socket retirement failed: {error}");
-                                    idle.activity();
+                                    return;
                                 }
                             }
                         }
@@ -200,11 +200,22 @@ impl Bound {
     /// Hide discovery first, then drain the kernel backlog without waiting.
     /// The home lock remains held throughout, including a cancelled exit's rebind.
     fn retire_idle_listener(&mut self) -> CliResult<Vec<UnixStream>> {
+        self.retire_idle_listener_with(Self::bind_owned)
+    }
+
+    fn retire_idle_listener_with(
+        &mut self,
+        bind: impl FnOnce(&Path) -> CliResult<Self>,
+    ) -> CliResult<Vec<UnixStream>> {
         use std::os::fd::AsFd as _;
         let failed = |error| CliFailure::new(format!("cannot retire idle socket: {error}"));
         let duplicate = self.listener.as_fd().try_clone_to_owned().map_err(failed)?;
         let listener = std::os::unix::net::UnixListener::from(duplicate);
-        std::fs::remove_file(&self.path).map_err(failed)?;
+        match std::fs::remove_file(&self.path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(failed(error)),
+        }
         let mut backlog = Vec::new();
         loop {
             match listener.accept() {
@@ -218,7 +229,7 @@ impl Bound {
             }
         }
         if !backlog.is_empty() {
-            *self = Self::bind_owned(&self.path)?;
+            *self = bind(&self.path)?;
         }
         Ok(backlog)
     }
@@ -434,4 +445,4 @@ async fn connection(
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]
-mod tests;
+pub(super) mod tests;

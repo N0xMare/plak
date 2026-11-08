@@ -94,6 +94,8 @@ slow-timeout = { period = "300s", terminate-after = 2 }
 [profile.offline]
 default-filter = '''
 not (
+  test(await_claim_waits_for_an_unclaimed_child_to_exit)
+  |
   test(an_auto_started_host_exits_after_five_empty_minutes_but_a_foreground_host_persists)
   | test(a_log_lock_without_a_host_retries_past_ten_seconds)
   |
@@ -362,6 +364,8 @@ not (
 test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
+  test(await_claim_waits_for_an_unclaimed_child_to_exit)
+  |
   test(an_auto_started_host_exits_after_five_empty_minutes_but_a_foreground_host_persists)
   | test(a_log_lock_without_a_host_retries_past_ten_seconds)
   |

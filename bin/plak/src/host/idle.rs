@@ -93,8 +93,108 @@ impl IdleGuard {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "controlled durable-check fixtures")]
 mod tests {
     use super::*;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    async fn finish_check(idle: &IdleGuard) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !idle.checking.as_ref().unwrap().is_finished() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn durable_debt_blocks_idle_across_several_windows() {
+        let flag = Arc::new(AtomicBool::new(true));
+        let read = Arc::clone(&flag);
+        let sessions = super::super::socket::tests::NoSessions::with_durable(move || {
+            read.load(Ordering::Acquire)
+        });
+        let host = plakous_hosted::host_service::wire::SessionHost::new(sessions, "idle", 7);
+        let mut idle = IdleGuard::new(IdleExit::with_window(Duration::from_millis(1)));
+        let start = Instant::now();
+        for window in 0..5 {
+            let now = start + Duration::from_secs(window * 31);
+            assert!(!idle.expired(now, false, &host).await);
+            finish_check(&idle).await;
+            assert!(!idle.expired(now, false, &host).await);
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn clearing_durable_debt_requires_a_completed_post_flip_check() {
+        let flag = Arc::new(AtomicBool::new(true));
+        let read = Arc::clone(&flag);
+        let (started, starts) = std::sync::mpsc::channel();
+        let (release, releases) = std::sync::mpsc::channel();
+        let releases = std::sync::Mutex::new(releases);
+        let sessions = super::super::socket::tests::NoSessions::with_durable(move || {
+            let blocked = read.load(Ordering::Acquire);
+            started.send(blocked).unwrap();
+            releases
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap();
+            blocked
+        });
+        let host = plakous_hosted::host_service::wire::SessionHost::new(sessions, "idle", 7);
+        let mut idle = IdleGuard::new(IdleExit::with_window(Duration::from_millis(1)));
+        let now = Instant::now();
+        assert!(!idle.expired(now, false, &host).await);
+        assert!(starts.recv_timeout(Duration::from_secs(5)).unwrap());
+        flag.store(false, Ordering::Release);
+        assert!(
+            !idle
+                .expired(now + Duration::from_secs(31), false, &host)
+                .await
+        );
+        release.send(()).unwrap();
+        finish_check(&idle).await;
+        assert!(
+            !idle
+                .expired(now + Duration::from_secs(31), false, &host)
+                .await
+        );
+        assert!(
+            !idle
+                .expired(now + Duration::from_secs(62), false, &host)
+                .await
+        );
+        assert!(!starts.recv_timeout(Duration::from_secs(5)).unwrap());
+        assert!(
+            !idle
+                .expired(now + Duration::from_secs(63), false, &host)
+                .await
+        );
+        release.send(()).unwrap();
+        finish_check(&idle).await;
+        assert!(
+            !idle
+                .expired(now + Duration::from_secs(63), false, &host)
+                .await
+        );
+        assert!(
+            !idle
+                .expired(now + Duration::from_secs(64), false, &host)
+                .await
+        );
+        assert!(!starts.recv_timeout(Duration::from_secs(5)).unwrap());
+        release.send(()).unwrap();
+        finish_check(&idle).await;
+        assert!(
+            idle.expired(now + Duration::from_secs(64), false, &host)
+                .await
+        );
+    }
 
     #[test]
     fn activity_and_kept_work_restart_the_entire_five_minute_window() {

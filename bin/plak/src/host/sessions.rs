@@ -46,6 +46,7 @@ pub(super) struct ProductSessions {
     product: Mutex<Option<ProductStore>>,
     tree: SqliteTreeStore,
     placement: Box<dyn Placement>,
+    idle_reason: Mutex<Option<&'static str>>,
 }
 
 struct DirectoryProfiles {
@@ -105,6 +106,7 @@ impl ProductSessions {
             idle_release,
             product: Mutex::new(None),
             tree,
+            idle_reason: Mutex::new(None),
         })
     }
 
@@ -299,7 +301,7 @@ const fn owes_open(standing: RootStanding, continue_losses: bool) -> bool {
 
 impl ProductSessions {
     /// The sessions the host-start scan opens (spec 02 §4.6), among the
-    /// directory's rows, newest first.
+    /// uncapped recovery candidates, newest first.
     ///
     /// # Errors
     ///
@@ -311,15 +313,14 @@ impl ProductSessions {
             == Some(crate::product_config::ResumeAfterLoss::Continue);
         let store = self.services.session_records()?;
         let entries = self
-            .with_product(|product| product.directory(None))
+            .with_product(|product| product.continuation_candidates())
             .map_err(CliFailure::new)?;
         Ok(entries
             .into_iter()
-            .filter(|entry| {
-                plakous_hosted::runtime::root_standing(store.as_ref(), &entry.id)
+            .filter(|id| {
+                plakous_hosted::runtime::root_standing(store.as_ref(), id)
                     .is_ok_and(|standing| owes_open(standing, continue_losses))
             })
-            .map(|entry| entry.id)
             .collect())
     }
 }
@@ -588,17 +589,32 @@ impl HostSessions<PlakExtension> for ProductSessions {
     }
 
     fn durable_idle_exit_blocked(&self) -> bool {
-        self.with_product(ProductStore::idle_debt)
-            .map_or(true, |(continuing, runners)| {
-                continuing
-                    || runners.iter().any(|runner| {
-                        self.services.state_roots().map_or(true, |roots| {
-                            roots
-                                .for_runner_stop(self.services.runners().clone(), runner)
-                                .runner_pending()
-                        })
+        let reason = match self.with_product(ProductStore::idle_debt) {
+            Err(_) => Some("durable state unreadable"),
+            Ok((true, _)) => Some("durable continuation"),
+            Ok((false, runners)) => runners
+                .iter()
+                .any(|runner| {
+                    self.services.state_roots().map_or(true, |roots| {
+                        roots
+                            .for_runner_stop(self.services.runners().clone(), runner)
+                            .runner_pending()
                     })
-            })
+                })
+                .then_some("recorded runner stop unsettled"),
+        };
+        let mut previous = self
+            .idle_reason
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if *previous != reason {
+            eprintln!(
+                "plak host: idle eligibility changed: {}",
+                reason.unwrap_or("durable debt clear")
+            );
+            *previous = reason;
+        }
+        reason.is_some()
     }
 
     fn refusal(&self, session: &str, failure: &CliFailure) -> RequestRefusal {

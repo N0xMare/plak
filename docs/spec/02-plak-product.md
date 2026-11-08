@@ -4989,11 +4989,17 @@ An unserved durable continuation still blocks idle exit after a failed startup
 open; an empty resident table does not settle its handoff debt.
 Each second checks only in-memory blockers. An uncapped targeted durable check
 runs off the accept loop every thirty seconds and before an otherwise-expiring
-clock can exit. An unavailable or not-Ready paired runner keeps the host alive:
-uncertain runner-stop settlement is fail-safe, not proof of idleness. On expiry
+clock can exit. Only runners with recorded stop debt block exit while unavailable
+or not Ready; an ordinary offline placement does not. Blocking reasons are
+content-free and logged once per change. The startup scan uses the same uncapped
+continuation candidates as idle eligibility, including records older than the
+newest 256 directory rows. Uncertain runner-stop settlement is fail-safe, not
+proof of idleness. On expiry
 the host unlinks its socket before draining the nonblocking listen backlog.
 Any queued connection cancels exit, resets idle, and is served after rebind
 under the still-held home lock; otherwise discovery sees the held lock and retries.
+An already-absent socket still drains its backlog. If retirement or rebind fails,
+the service stops rather than retaining the home lock without a discovery socket.
 It never evicts sessions to become idle. A foreground or unit-managed host
 persists. SIGHUP remains planned handoff, not a client reload signal.
 
