@@ -55,23 +55,62 @@ pub(crate) fn refusal(reason: RequestRefusal) -> CliFailure {
     CliFailure::classified(kind, text).with_wire_refusal(reason)
 }
 
-fn lifecycle(reason: &LifecycleReason) -> &'static str {
+fn lifecycle(reason: &LifecycleReason) -> String {
+    lifecycle_refusal(reason.clone()).to_string()
+}
+
+fn lifecycle_refusal(
+    reason: LifecycleReason,
+) -> crate::commands::session::lifecycle::LifecycleRefusal {
+    use crate::commands::session::lifecycle::{InvalidTitleKind, LifecycleRefusal as R};
     match reason {
-        LifecycleReason::NotFound => "not found",
-        LifecycleReason::InvalidTitle { .. } => {
-            "invalid title; use 1–128 Unicode characters without controls (at most 512 UTF-8 bytes)"
-        }
-        LifecycleReason::Busy { .. } => {
-            "work is still active or cannot be proved idle; stop it before retrying"
-        }
-        LifecycleReason::Open => "still open in another attachment; release it first",
-        LifecycleReason::LiveTree { .. } => "the tree has live children; stop them first",
-        LifecycleReason::RecoveryRequiredTree { .. } => {
-            "the tree requires recovery; recover it or explicitly delete with --abandon-children"
-        }
-        LifecycleReason::ForkDependency { .. } => {
-            "other sessions depend on this history; delete those sessions first (no cascade)"
-        }
+        LifecycleReason::NotFound => R::NotFound,
+        LifecycleReason::InvalidTitle { kind } => R::InvalidTitle {
+            kind: match kind {
+                plakous_host_protocol::wire::InvalidTitleKind::Empty => InvalidTitleKind::Empty,
+                plakous_host_protocol::wire::InvalidTitleKind::TooLong => InvalidTitleKind::TooLong,
+                plakous_host_protocol::wire::InvalidTitleKind::ControlCharacter => {
+                    InvalidTitleKind::ControlCharacter
+                }
+            },
+        },
+        LifecycleReason::Busy {
+            turn,
+            children,
+            children_truncated,
+            processes,
+            processes_truncated,
+            state_unknown,
+        } => R::Busy {
+            turn,
+            children,
+            children_truncated,
+            processes,
+            processes_truncated,
+            state_unknown,
+        },
+        LifecycleReason::Open => R::Open,
+        LifecycleReason::LiveTree {
+            children,
+            children_truncated,
+        } => R::LiveTree {
+            children,
+            children_truncated,
+        },
+        LifecycleReason::RecoveryRequiredTree {
+            children,
+            children_truncated,
+        } => R::RecoveryRequiredTree {
+            children,
+            children_truncated,
+        },
+        LifecycleReason::ForkDependency {
+            dependents,
+            dependents_truncated,
+        } => R::ForkDependency {
+            dependents,
+            dependents_truncated,
+        },
     }
 }
 
@@ -116,6 +155,33 @@ fn placement(reason: &PlacementReason) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lifecycle_host_refusals_share_product_prose_and_keep_exit_classes() {
+        let blank = refusal(RequestRefusal::SessionLifecycleRefused {
+            session: "session".into(),
+            reason: LifecycleReason::InvalidTitle {
+                kind: plakous_host_protocol::wire::InvalidTitleKind::Empty,
+            },
+        });
+        assert_eq!(blank.exit_code(), 2);
+        assert!(blank.message().contains("title is blank"));
+        assert!(blank.message().contains("--clear"));
+        let busy = refusal(RequestRefusal::SessionLifecycleRefused {
+            session: "session".into(),
+            reason: LifecycleReason::Busy {
+                turn: false,
+                children: vec!["child".into()],
+                children_truncated: false,
+                processes: Vec::new(),
+                processes_truncated: false,
+                state_unknown: true,
+            },
+        });
+        assert_eq!(busy.exit_code(), 5);
+        assert!(busy.message().contains("children: child"));
+        assert!(busy.message().contains("activity unknown: true"));
+    }
 
     #[test]
     fn host_refusals_keep_exit_classes_without_debug_text() {
