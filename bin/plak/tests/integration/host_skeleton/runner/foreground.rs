@@ -85,8 +85,11 @@ fn begin(fixture: &Fixture, window: u64) -> (Host, Client, String) {
         ),
         Outcome::Ok(Answer::Accepted { .. })
     ));
+    // The shell creates the marker before it writes its line.
     let deadline = std::time::Instant::now() + WAIT;
-    while !fixture.root.join("local-job.marker").exists() {
+    while !std::fs::read_to_string(fixture.root.join("local-job.marker"))
+        .is_ok_and(|marker| marker.ends_with('\n'))
+    {
         assert!(std::time::Instant::now() < deadline);
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
