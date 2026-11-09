@@ -130,13 +130,49 @@ pub const PLAK_PRODUCT_ASSIGNMENT_AGREEMENTS: &str = "Your turn is an assignment
 /// exactly once.
 pub const PLAK_PRODUCT_IDENTITY_ENVIRONMENT_MARKER: &str = "Workspace root:";
 
-/// One genesis environment sentence from resolved workspace paths.
+/// The workspace facts the environment sentence states: the resolved root
+/// and cwd, and the OS of the execution backend the node's tools run on.
+///
+/// The OS is the backend's, not this process's: a node whose tools run on a
+/// remote runner names the runner's OS (spec 02 §6.2).
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct PromptWorkspace<'a> {
+    root: &'a Path,
+    cwd: &'a Path,
+    operating_system: &'a str,
+}
+
+impl<'a> PromptWorkspace<'a> {
+    /// Facts for a workspace on a backend whose OS tag is `operating_system`:
+    /// the descriptor OS of the backend the node's tools run on.
+    #[must_use]
+    pub const fn new(root: &'a Path, cwd: &'a Path, operating_system: &'a str) -> Self {
+        Self {
+            root,
+            cwd,
+            operating_system,
+        }
+    }
+}
+
+impl std::fmt::Debug for PromptWorkspace<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PromptWorkspace")
+            .field("root", &"<redacted>")
+            .field("cwd", &"<redacted>")
+            .field("operating_system", &self.operating_system)
+            .finish()
+    }
+}
+
+/// One genesis environment sentence from resolved workspace facts.
 #[must_use]
-pub fn product_environment_sentence(workspace_root: &Path, cwd: &Path) -> String {
+pub fn product_environment_sentence(workspace: PromptWorkspace<'_>) -> String {
     PLAK_PRODUCT_ENVIRONMENT_TEMPLATE
-        .replace("{root}", &workspace_root.display().to_string())
-        .replace("{cwd}", &cwd.display().to_string())
-        .replace("{os}", std::env::consts::OS)
+        .replace("{root}", &workspace.root.display().to_string())
+        .replace("{cwd}", &workspace.cwd.display().to_string())
+        .replace("{os}", workspace.operating_system)
 }
 
 /// The word the environment block uses for a resolved reasoning effort.
@@ -443,12 +479,11 @@ impl ToolPack for ProductAgreementPack {
 /// Codex's turn context: the same facts, in Plakous's words, written once.
 #[must_use]
 pub fn product_identity_tail(
-    workspace_root: &Path,
-    cwd: &Path,
+    workspace: PromptWorkspace<'_>,
     selected_model: &str,
     selected_effort: Option<&str>,
 ) -> String {
-    let mut tail = product_environment_sentence(workspace_root, cwd);
+    let mut tail = product_environment_sentence(workspace);
     tail.push('\n');
     tail.push_str(&PLAK_PRODUCT_MODEL_IDENTITY_TEMPLATE.replace("{model}", selected_model));
     if let Some(effort) = selected_effort {
@@ -469,15 +504,14 @@ pub fn product_identity_tail(
 #[cfg(test)]
 #[must_use]
 pub fn product_target_identity_block(
-    workspace_root: &Path,
-    cwd: &Path,
+    workspace: PromptWorkspace<'_>,
     selected_model: &str,
     selected_effort: Option<&str>,
     contributions: &[PromptContribution],
 ) -> String {
     let mut block = format!(
         "{}\n\n{}",
-        product_identity_tail(workspace_root, cwd, selected_model, selected_effort),
+        product_identity_tail(workspace, selected_model, selected_effort),
         PLAK_PRODUCT_WORKING_AGREEMENTS
     );
     for contribution in contributions {

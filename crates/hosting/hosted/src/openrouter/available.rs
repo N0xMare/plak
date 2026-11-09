@@ -680,8 +680,7 @@ pub(crate) fn openrouter_product_profile(
     wire: ResolvedProtocol,
     literal_model: &str,
     subagents: bool,
-    workspace_root: &Path,
-    cwd: &Path,
+    workspace: plakous::prompts::identity::PromptWorkspace<'_>,
     surface: &CompiledSurface,
 ) -> CliResult<plakous::agent::HarnessProfileSpec> {
     crate::agent::build::api::api_product_profile(
@@ -691,8 +690,7 @@ pub(crate) fn openrouter_product_profile(
         wire,
         literal_model,
         subagents,
-        workspace_root,
-        cwd,
+        workspace,
         surface,
     )
 }

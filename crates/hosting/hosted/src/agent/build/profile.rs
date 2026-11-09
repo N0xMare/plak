@@ -28,8 +28,7 @@ pub(crate) fn selected_harness_profile(
     subagents: bool,
     composition: CompositionSelection,
     surface: &CompiledSurface,
-    workspace_root: &Path,
-    cwd: &Path,
+    workspace: plakous::prompts::identity::PromptWorkspace<'_>,
 ) -> CliResult<Option<HarnessProfileSpec>> {
     let effort = effort.into();
     if opening_durable_session {
@@ -77,8 +76,7 @@ pub(crate) fn selected_harness_profile(
         subagents,
         composition,
         surface,
-        workspace_root,
-        cwd,
+        workspace,
     )
     .map(Some)
 }
@@ -118,8 +116,7 @@ pub(in crate::agent) fn product_identity_profile(
     subagents: bool,
     composition: CompositionSelection,
     surface: &CompiledSurface,
-    workspace_root: &Path,
-    cwd: &Path,
+    workspace: plakous::prompts::identity::PromptWorkspace<'_>,
 ) -> CliResult<HarnessProfileSpec> {
     match provider {
         NativeProvider::Codex | NativeProvider::Xai | NativeProvider::Claude => {}
@@ -131,8 +128,7 @@ pub(in crate::agent) fn product_identity_profile(
         subagents,
         composition,
         surface,
-        workspace_root,
-        cwd,
+        workspace,
     )
 }
 
@@ -148,8 +144,7 @@ pub(crate) fn product_target_identity_profile(
     subagents: bool,
     composition: CompositionSelection,
     surface: &CompiledSurface,
-    workspace_root: &Path,
-    cwd: &Path,
+    workspace: plakous::prompts::identity::PromptWorkspace<'_>,
 ) -> CliResult<HarnessProfileSpec> {
     let profile_id = subagent_catalog_profile_id(profile.id().as_str(), subagents)?;
     let profile_id = match composition {
@@ -170,8 +165,7 @@ pub(crate) fn product_target_identity_profile(
         profile.base_instructions(),
         crate::prompt_inputs::prompt_composition(composition),
         surface,
-        workspace_root,
-        cwd,
+        workspace,
         selected_model,
         selected_effort.as_deref(),
     );

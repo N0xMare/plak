@@ -976,8 +976,11 @@ pub(crate) mod suite {
             extras.extends_beyond_skills(),
             composition,
             surface,
-            Path::new(SYNTHETIC_ROOT),
-            Path::new(SYNTHETIC_CWD),
+            plakous::prompts::identity::PromptWorkspace::new(
+                Path::new(SYNTHETIC_ROOT),
+                Path::new(SYNTHETIC_CWD),
+                std::env::consts::OS,
+            ),
         )
         .expect("harness profile")
         .expect("new session has a harness profile");
@@ -1005,8 +1008,11 @@ pub(crate) mod suite {
             wire,
             OPENROUTER_MODEL,
             !extras.is_empty(),
-            Path::new(SYNTHETIC_ROOT),
-            Path::new(SYNTHETIC_CWD),
+            plakous::prompts::identity::PromptWorkspace::new(
+                Path::new(SYNTHETIC_ROOT),
+                Path::new(SYNTHETIC_CWD),
+                std::env::consts::OS,
+            ),
             surface,
         )
         .expect("openrouter profile");
@@ -1273,8 +1279,11 @@ pub(crate) mod suite {
             provider.protocol(),
             spec.model,
             extras.extends_beyond_skills(),
-            Path::new(SYNTHETIC_ROOT),
-            Path::new(SYNTHETIC_CWD),
+            plakous::prompts::identity::PromptWorkspace::new(
+                Path::new(SYNTHETIC_ROOT),
+                Path::new(SYNTHETIC_CWD),
+                std::env::consts::OS,
+            ),
             surface,
         )
         .expect("API profile");

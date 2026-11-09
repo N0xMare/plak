@@ -1050,8 +1050,7 @@ fn product_profiles_identify_plak_and_the_exact_openrouter_target() {
             wire,
             "author/model-v1",
             false,
-            &root,
-            &cwd,
+            plakous::prompts::identity::PromptWorkspace::new(&root, &cwd, std::env::consts::OS),
             &pi_surface(),
         )
         .unwrap();
@@ -1099,8 +1098,7 @@ fn javascript_and_python_profiles_name_the_outer_schema_fields() {
         ResolvedProtocol::Chat,
         "author/model-v1",
         false,
-        &root,
-        &cwd,
+        plakous::prompts::identity::PromptWorkspace::new(&root, &cwd, std::env::consts::OS),
         &pi_surface(),
     )
     .unwrap();
@@ -1135,8 +1133,7 @@ fn javascript_and_python_profiles_name_the_outer_schema_fields() {
         ResolvedProtocol::Chat,
         "author/model-v1",
         false,
-        &root,
-        &cwd,
+        plakous::prompts::identity::PromptWorkspace::new(&root, &cwd, std::env::consts::OS),
         &pi_surface(),
     )
     .unwrap();
@@ -1172,8 +1169,7 @@ fn product_profile_enrolls_global_and_workspace_instructions() {
         ResolvedProtocol::Responses,
         "author/model-v1",
         false,
-        &root,
-        &cwd,
+        plakous::prompts::identity::PromptWorkspace::new(&root, &cwd, std::env::consts::OS),
         &pi_surface(),
     )
     .unwrap();
@@ -1217,8 +1213,7 @@ fn openrouter_javascript_and_python_enroll_agents_md() {
             ResolvedProtocol::Chat,
             "author/model-v1",
             false,
-            &root,
-            &cwd,
+            plakous::prompts::identity::PromptWorkspace::new(&root, &cwd, std::env::consts::OS),
             &pi_surface(),
         )
         .unwrap();

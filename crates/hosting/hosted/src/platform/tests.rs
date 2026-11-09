@@ -757,8 +757,11 @@ async fn pre_pack_openai_api_direct_session_reopen_fails_closed() {
         &plakous::prompts::bases::pi_base_instructions(surface.exposed_names()),
         crate::prompt_inputs::prompt_composition(CompositionSelection::Direct),
         &surface,
-        workspace.root(),
-        workspace.cwd(),
+        plakous::prompts::identity::PromptWorkspace::new(
+            workspace.root(),
+            workspace.cwd(),
+            std::env::consts::OS,
+        ),
         model,
         Some(plakous::prompts::identity::product_effort_label(
             ReasoningEffort::Low,
@@ -1063,8 +1066,11 @@ async fn pre_w3_b_grok_session_reopen_fails_closed() {
         &base,
         crate::prompt_inputs::prompt_composition(CompositionSelection::Direct),
         &surface,
-        workspace.root(),
-        workspace.cwd(),
+        plakous::prompts::identity::PromptWorkspace::new(
+            workspace.root(),
+            workspace.cwd(),
+            std::env::consts::OS,
+        ),
         model,
         Some(plakous::prompts::identity::product_effort_label(
             ReasoningEffort::Low,

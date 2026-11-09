@@ -2046,7 +2046,11 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     ('plakous-hosted', 'src/openrouter.rs'): {'runner': {'RunnerServices'}},
     ('plakous-hosted', 'src/skills.rs'): {'runner': {'RunnerServices'}},
     ('plakous-hosted', 'src/mcp_binding.rs'): {'runner': {'RunnerServices'}},
-    ('plakous-hosted', 'src/agent/build/policy.rs'): {'runner': {'RunnerServices'}},
+    # A node's explicit plan and prompt name the backend its tools run on.
+    ('plakous-hosted', 'src/agent/build/policy.rs'): {
+        'runner': {'RunnerServices'},
+        'tools': {'ExecutionBackendDescriptor'},
+    },
     ('plakous-hosted', 'src/agent/build/profile.rs'): {'runner': {'RunnerServices'}},
     ('plakous-hosted', 'src/agent/build/topology.rs'): {'runner': {'RunnerServices'}},
 }

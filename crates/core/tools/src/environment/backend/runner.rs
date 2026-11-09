@@ -613,6 +613,13 @@ impl RunnerBackend {
         &self.runner_id
     }
 
+    /// The runner's hello descriptor: the backend its tools run on, whose OS
+    /// may differ from this process's.
+    #[must_use]
+    pub const fn descriptor(&self) -> &ExecutionBackendDescriptor {
+        self.identity.descriptor()
+    }
+
     /// The link this backend sends through.
     #[must_use]
     pub fn link(&self) -> Arc<dyn RunnerLink> {

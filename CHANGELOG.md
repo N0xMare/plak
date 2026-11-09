@@ -11,6 +11,10 @@ one cross-build carrier (a build imports its own and the previous version).
   containment is checked against its own `linux` or `macos` tag, not the
   decoding process's OS, and a runner naming any other OS is refused.
 
+- Name the runner's OS in the prompt's environment sentence for a session whose
+  tools run on a remote runner. `plakous::prompts` takes a `PromptWorkspace`
+  (root, cwd, backend OS) in place of the root and cwd pair.
+
 - Share serialized product wire types through the internal `plakd-wire-types`
   crate without changing the wire schema or resetting terminal-local preferences.
 

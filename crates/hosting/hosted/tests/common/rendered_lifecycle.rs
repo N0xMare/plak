@@ -1830,8 +1830,11 @@ mod suite {
             false,
             ProductCompositionSelection::Direct,
             &lifecycle_surface(),
-            Path::new(SYNTHETIC_ROOT),
-            Path::new(SYNTHETIC_CWD),
+            plakous::prompts::identity::PromptWorkspace::new(
+                Path::new(SYNTHETIC_ROOT),
+                Path::new(SYNTHETIC_CWD),
+                std::env::consts::OS,
+            ),
         )
         .expect("effort profile")
         .expect("new session profile");
@@ -1845,8 +1848,11 @@ mod suite {
             false,
             ProductCompositionSelection::Direct,
             &lifecycle_surface(),
-            Path::new(SYNTHETIC_ROOT),
-            Path::new(SYNTHETIC_CWD),
+            plakous::prompts::identity::PromptWorkspace::new(
+                Path::new(SYNTHETIC_ROOT),
+                Path::new(SYNTHETIC_CWD),
+                std::env::consts::OS,
+            ),
         )
         .expect("effort profile")
         .expect("new session profile");

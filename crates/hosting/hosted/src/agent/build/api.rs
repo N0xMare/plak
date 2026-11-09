@@ -21,8 +21,8 @@ use plakous::tools::{
 
 use super::policy::{
     NATIVE_RUN_MODEL_CLEANUP_TIMEOUT, NATIVE_RUN_MODEL_OPERATION_TIMEOUT, SessionToolFence,
-    attach_codex_minimal, product_javascript_candidate_attachment, product_python_attachment,
-    session_tool_policy, stamped_workspace_policy,
+    attach_codex_minimal, node_backend_descriptor, product_javascript_candidate_attachment,
+    product_python_attachment, session_tool_policy, stamped_workspace_policy,
 };
 use super::profile::{enroll_product_instructions, subagent_catalog_profile_id};
 use super::tools::projection_target;
@@ -285,6 +285,7 @@ pub(crate) fn runtime_binding(
         .with_event_byte_capacity(16 * 1024 * 1024)
         .with_scheduled_compaction_enabled(spec.scheduled_compaction);
     if !spec.opening_durable_session {
+        let backend = node_backend_descriptor(spec.runner_services.as_ref());
         let profile = api_product_profile(
             &spec.account,
             spec.composition,
@@ -292,8 +293,11 @@ pub(crate) fn runtime_binding(
             spec.wire,
             spec.literal_model,
             spec.topology_extensions.extends_beyond_skills(),
-            workspace.root(),
-            workspace.cwd(),
+            plakous::prompts::identity::PromptWorkspace::new(
+                workspace.root(),
+                workspace.cwd(),
+                backend.operating_system(),
+            ),
             &surface,
         )?;
         let (profile, context_sources) = enroll_product_instructions(
@@ -359,8 +363,7 @@ pub(crate) fn api_product_profile(
     wire: ResolvedProtocol,
     literal_model: &str,
     subagents: bool,
-    workspace_root: &Path,
-    cwd: &Path,
+    workspace: plakous::prompts::identity::PromptWorkspace<'_>,
     surface: &CompiledSurface,
 ) -> CliResult<plakous::agent::HarnessProfileSpec> {
     let vertical = account.vertical();
@@ -386,8 +389,7 @@ pub(crate) fn api_product_profile(
         &api_base_instructions(vertical, composition, surface)?,
         crate::prompt_inputs::prompt_composition(composition),
         surface,
-        workspace_root,
-        cwd,
+        workspace,
         literal_model,
         selected_effort.as_deref(),
     );
@@ -578,8 +580,11 @@ mod tests {
                         false,
                         CompositionSelection::Direct,
                         &surface,
-                        root.path(),
-                        root.path(),
+                        plakous::prompts::identity::PromptWorkspace::new(
+                            root.path(),
+                            root.path(),
+                            std::env::consts::OS,
+                        ),
                     )
                     .unwrap()
                     .unwrap()
@@ -591,8 +596,11 @@ mod tests {
                         route.protocol.unwrap_or(ResolvedProtocol::Chat),
                         model.as_str(),
                         false,
-                        root.path(),
-                        root.path(),
+                        plakous::prompts::identity::PromptWorkspace::new(
+                            root.path(),
+                            root.path(),
+                            std::env::consts::OS,
+                        ),
                         &surface,
                     )
                     .unwrap()

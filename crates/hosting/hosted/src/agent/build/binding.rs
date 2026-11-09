@@ -8,9 +8,9 @@ use plakous_host_protocol::status::AttachFailure;
 use super::policy::{
     NATIVE_RUN_MODEL_CLEANUP_TIMEOUT, NATIVE_RUN_MODEL_OPERATION_TIMEOUT, RESPONSE_OUTPUT_CEILING,
     SessionToolFence, attach_codex_minimal, composition_is_js_ptc, composition_is_py_ptc,
-    composition_requests_native_ptc, install_occupancy_fence, observation_budget_cap_bytes,
-    product_javascript_candidate_attachment, product_python_attachment, session_tool_policy,
-    stamped_workspace_policy,
+    composition_requests_native_ptc, install_occupancy_fence, node_backend_descriptor,
+    observation_budget_cap_bytes, product_javascript_candidate_attachment,
+    product_python_attachment, session_tool_policy, stamped_workspace_policy,
 };
 use super::profile::{enroll_product_instructions, selected_harness_profile};
 use super::tools::{
@@ -1007,6 +1007,8 @@ pub(in crate::agent) async fn coding_session_runtime_binding_for(
         });
     }
 
+    // The prompt names this backend's OS.
+    let backend = node_backend_descriptor(state_roots.runner_services());
     // Exact reopen must not offer a freshly compiled product default as a
     // replacement for the reconstruction-complete plan in the checkpoint.
     // Plakous rehydrates that plan and still validates its model, tools,
@@ -1027,8 +1029,11 @@ pub(in crate::agent) async fn coding_session_runtime_binding_for(
             product_extensions.extends_beyond_skills(),
             composition,
             &surface,
-            workspace.root(),
-            workspace.cwd(),
+            plakous::prompts::identity::PromptWorkspace::new(
+                workspace.root(),
+                workspace.cwd(),
+                backend.operating_system(),
+            ),
         )?
     };
     if let Some(profile) = profile {

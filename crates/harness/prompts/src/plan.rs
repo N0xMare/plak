@@ -18,11 +18,9 @@
 //! family base's editing guidance, so no tier list or separate tool list can
 //! advertise an edit tool absent from Direct or nested composition.
 
-use std::path::Path;
-
 use plakous_tools::{CompiledSurface, PromptContribution};
 
-use crate::identity::{PLAK_PRODUCT_WORKING_AGREEMENTS, product_identity_tail};
+use crate::identity::{PLAK_PRODUCT_WORKING_AGREEMENTS, PromptWorkspace, product_identity_tail};
 use crate::ptc::PtcHarness;
 use crate::vocabulary::Composition;
 
@@ -51,15 +49,14 @@ impl PromptPlan {
     /// the paragraphs its compiled surface earned, in surface order.
     pub fn new(
         base: impl Into<String>,
-        workspace_root: &Path,
-        cwd: &Path,
+        workspace: PromptWorkspace<'_>,
         selected_model: &str,
         selected_effort: Option<&str>,
         contributions: Vec<PromptContribution>,
     ) -> Self {
         Self {
             base: base.into(),
-            identity: product_identity_tail(workspace_root, cwd, selected_model, selected_effort),
+            identity: product_identity_tail(workspace, selected_model, selected_effort),
             agreements: PLAK_PRODUCT_WORKING_AGREEMENTS,
             contributions,
         }
@@ -108,8 +105,7 @@ pub fn target_instructions(
     family_base: &str,
     composition: Composition,
     surface: &CompiledSurface,
-    workspace_root: &Path,
-    cwd: &Path,
+    workspace: PromptWorkspace<'_>,
     selected_model: &str,
     selected_effort: Option<&str>,
 ) -> String {
@@ -130,8 +126,7 @@ pub fn target_instructions(
     };
     let mut plan = PromptPlan::new(
         base,
-        workspace_root,
-        cwd,
+        workspace,
         selected_model,
         selected_effort,
         surface.contributions().to_vec(),

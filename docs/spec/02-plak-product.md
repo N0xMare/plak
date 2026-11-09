@@ -8552,6 +8552,15 @@ This harness runs the tools you call directly against this workspace. By default
 Commit or push only when the user asks.
 ```
 
+`{root}` and `{cwd}` are the node's resolved workspace paths, and `{os}` is the
+OS tag of the execution backend its tools run on (`linux` or `macos` for a
+runner): on a node placed on a remote runner (§3.1), the runner's descriptor
+OS, not the OS of the host process that renders the prompt; on the local
+runner, this process's OS. A child placed on the parent's runner gets the same
+tag. The tag is part of the rendered instructions, as the root and cwd are;
+it adds no binding input, since the workspace environment identity already
+records the backend's OS.
+
 The sentence about earlier messages exists because a session may have been
 bound to another model before: the current turn's instructions are what
 identify the model, and the transcript is history rather than identity.

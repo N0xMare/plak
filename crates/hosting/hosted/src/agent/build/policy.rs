@@ -292,6 +292,18 @@ pub(crate) fn session_tool_policy(fence: SessionToolFence) -> Arc<dyn ToolPolicy
     }
 }
 
+/// The descriptor of the backend a node's tools run on: the runner's for a
+/// remote placement, else the local runner's. The prompt states its OS and the
+/// node's explicit plan is compiled against it.
+pub(crate) fn node_backend_descriptor(
+    runner: Option<&plakous::runner::RunnerServices>,
+) -> plakous::tools::ExecutionBackendDescriptor {
+    runner.map_or_else(
+        plakous::tools::ExecutionBackendDescriptor::local_runner,
+        |runner| runner.backend().descriptor().clone(),
+    )
+}
+
 pub(crate) fn stamped_workspace_policy(
     physical_root: &Path,
     relative_cwd: &Path,
@@ -357,3 +369,5 @@ pub(crate) fn occupancy_session_fence(tier: crate::agent_tree_protocol::Tier) ->
 
 #[cfg(test)]
 mod observation_policy_tests;
+#[cfg(test)]
+mod runner_os_tests;

@@ -5993,6 +5993,14 @@ supplied explicitly to each node and facade binding. The host and a remote
 runner may use different supported operating systems. The hello descriptor is
 validated as the runner's platform data (§8.5), not as a claim about the host's
 platform; binding does not require OS equality.
+Current limit: the search pack still reads the host filesystem in two places
+on a remote placement. Directory listing (`search_repository` with
+`list_directory`, Grok `list_dir`) resolves and lists the host's same-spelled
+path, and context lines (`before_context`/`after_context`/`context`, Grok
+`-B`/`-A`/`-C`) not served from issued job output resolve each file on the host
+before reading it from the runner. Without the same path on the host they
+refuse; with it, a listing shows the host's entries. Moving both to the runner
+needs a runner wire extension.
 No production process-global runner selector exists. Registry composition pins
 owned probe/reconciliation tasks to its process executor; dropping a request
 executor cannot cancel them. The registry refreshes home
@@ -10977,6 +10985,22 @@ stays a `plakous-tools` helper. They break earlier embedders in these ways:
    output gains `runner_id`.
 4. A rebind or fork whose target names another runner is refused
    (`InvalidInput`, `BindingChange::Runner`).
+
+**Runner placement** (§8.4, §8.5) changes these facade signatures. The
+`plakous::prompts` assembler takes a `plakous::prompts::identity::PromptWorkspace`
+(the workspace root and cwd and the backend's OS tag, built with
+`PromptWorkspace::new`; its `Debug` redacts the paths) in place of the root and
+cwd pair: `identity::product_environment_sentence(workspace)`,
+`identity::product_identity_tail(workspace, model, effort)`,
+`plan::PromptPlan::new(base, workspace, model, effort, contributions)` and
+`plan::target_instructions(family_base, composition, surface, workspace, model,
+effort)`. `plakous::tools::ExecutionBackendDescriptor` is on the facade. They
+break earlier embedders in these ways:
+
+1. A caller of the prompt assembler names the backend's OS tag; the
+   environment sentence states it instead of the process's OS.
+2. A `Runner` descriptor naming an OS other than `linux` or `macos` no longer
+   decodes, and a runner whose hello names one is refused.
 
 `plakous::sessions::feed` is the change feed's public surface (§5.11):
 `FeedSeq`, `FeedCursor`, `FeedRecord`, `FeedChange`, `FeedFact` and its typed

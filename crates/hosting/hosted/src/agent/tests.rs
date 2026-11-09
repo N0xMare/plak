@@ -513,8 +513,7 @@ fn new_plan_enrolls_global_then_root_to_cwd_sources() {
         false,
         CompositionSelection::Direct,
         &direct_surface(NativeProvider::Codex),
-        &root,
-        &cwd,
+        plakous::prompts::identity::PromptWorkspace::new(&root, &cwd, std::env::consts::OS),
     )
     .expect("product profile");
 
@@ -581,8 +580,7 @@ fn javascript_and_python_overlays_enroll_agents_md() {
             false,
             composition,
             &direct_surface(NativeProvider::Codex),
-            &root,
-            &cwd,
+            plakous::prompts::identity::PromptWorkspace::new(&root, &cwd, std::env::consts::OS),
         )
         .expect("overlay profile")
         .expect("new overlay session profile");
@@ -623,8 +621,11 @@ fn absent_optional_instructions_preserve_base_only_profile() {
         false,
         CompositionSelection::FollowCatalog,
         &direct_surface(NativeProvider::Codex),
-        temporary.path(),
-        temporary.path(),
+        plakous::prompts::identity::PromptWorkspace::new(
+            temporary.path(),
+            temporary.path(),
+            std::env::consts::OS,
+        ),
     )
     .expect("product profile selection")
     .expect("new product session profile");
@@ -670,8 +671,7 @@ fn exact_resume_uses_the_durable_harness_plan_authority() {
         false,
         CompositionSelection::FollowCatalog,
         &direct_surface(NativeProvider::Codex),
-        &root,
-        &cwd,
+        plakous::prompts::identity::PromptWorkspace::new(&root, &cwd, std::env::consts::OS),
     )
     .expect("durable resume profile selection");
     assert!(
@@ -691,8 +691,7 @@ fn exact_resume_uses_the_durable_harness_plan_authority() {
         false,
         CompositionSelection::FollowCatalog,
         &direct_surface(NativeProvider::Codex),
-        &root,
-        &cwd,
+        plakous::prompts::identity::PromptWorkspace::new(&root, &cwd, std::env::consts::OS),
     )
     .expect("new-session profile selection")
     .expect("new sessions retain an explicit product plan");
@@ -711,8 +710,7 @@ fn subagent_enabled_catalog_suffix_is_valid() {
         true,
         CompositionSelection::Direct,
         &direct_surface(NativeProvider::Codex),
-        &root,
-        &cwd,
+        plakous::prompts::identity::PromptWorkspace::new(&root, &cwd, std::env::consts::OS),
     )
     .expect("subagent catalog profile");
     assert_eq!(
@@ -726,8 +724,7 @@ fn subagent_enabled_catalog_suffix_is_valid() {
         false,
         CompositionSelection::Direct,
         &direct_surface(NativeProvider::Codex),
-        &root,
-        &cwd,
+        plakous::prompts::identity::PromptWorkspace::new(&root, &cwd, std::env::consts::OS),
     )
     .expect("base catalog profile");
     assert_eq!(without.id().as_str(), "plakous.codex.coding.v1");
@@ -764,8 +761,7 @@ fn product_identity_is_exact_and_rebind_stable_across_provider_selections() {
             false,
             CompositionSelection::FollowCatalog,
             &direct_surface(provider),
-            &root,
-            &cwd,
+            plakous::prompts::identity::PromptWorkspace::new(&root, &cwd, std::env::consts::OS),
         )
         .expect("product profile selection")
         .expect("new product session profile");
@@ -850,8 +846,7 @@ fn code_mode_selection_uses_the_outer_and_nested_tool_contract() {
         false,
         CompositionSelection::FollowCatalog,
         &direct_surface(NativeProvider::Codex),
-        &root,
-        &cwd,
+        plakous::prompts::identity::PromptWorkspace::new(&root, &cwd, std::env::consts::OS),
     )
     .expect("Code Mode product profile")
     .expect("new Code Mode session profile");
@@ -879,8 +874,7 @@ fn code_mode_selection_uses_the_outer_and_nested_tool_contract() {
             false,
             CompositionSelection::FollowCatalog,
             &direct_surface(NativeProvider::Xai),
-            &root,
-            &cwd,
+            plakous::prompts::identity::PromptWorkspace::new(&root, &cwd, std::env::consts::OS),
         )
         .is_err()
     );
@@ -900,8 +894,7 @@ fn hub_harness_profile_does_not_prepend_spawn_class_cards() {
         true,
         CompositionSelection::FollowCatalog,
         &direct_surface(NativeProvider::Codex),
-        &root,
-        &cwd,
+        plakous::prompts::identity::PromptWorkspace::new(&root, &cwd, std::env::consts::OS),
     )
     .expect("profile")
     .expect("hub profile");
@@ -934,8 +927,7 @@ fn product_javascript_and_python_replace_direct_tool_catalog_instructions() {
             false,
             CompositionSelection::JsPtc,
             &direct_surface(provider),
-            &root,
-            &cwd,
+            plakous::prompts::identity::PromptWorkspace::new(&root, &cwd, std::env::consts::OS),
         )
         .expect("javascript profile")
         .expect("new javascript session profile");
@@ -984,8 +976,7 @@ fn product_javascript_and_python_replace_direct_tool_catalog_instructions() {
             false,
             CompositionSelection::PyPtc,
             &direct_surface(provider),
-            &root,
-            &cwd,
+            plakous::prompts::identity::PromptWorkspace::new(&root, &cwd, std::env::consts::OS),
         )
         .expect("python profile")
         .expect("new python session profile");
@@ -1759,8 +1750,11 @@ async fn fenced_direct_child_session_admits_its_projection_at_construction()
             true,
             composition,
             &node.surface,
-            workspace.root(),
-            workspace.cwd(),
+            plakous::prompts::identity::PromptWorkspace::new(
+                workspace.root(),
+                workspace.cwd(),
+                std::env::consts::OS,
+            ),
         )
         .expect("child profile")
         .expect("a fresh child compiles a plan");
@@ -4429,8 +4423,11 @@ async fn supergrok_hub_creates_and_reopens_on_every_fence() -> Result<(), Box<dy
                                 true,
                                 composition,
                                 &node.surface,
-                                workspace.root(),
-                                workspace.cwd(),
+                                plakous::prompts::identity::PromptWorkspace::new(
+                                    workspace.root(),
+                                    workspace.cwd(),
+                                    std::env::consts::OS,
+                                ),
                             )
                             .map_err(|e| format!("profile: {}", e.message()))?
                             .ok_or("no fresh profile")?;

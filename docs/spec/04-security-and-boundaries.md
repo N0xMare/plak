@@ -650,7 +650,9 @@ occupancy and configured pins under that lock, including standalone pair command
 local session roots and minted copies count, not only resident sessions; containment
 in either direction is overlap. Missing/unverifiable machine evidence refuses a
 remote bind with a re-pair remedy, never a local open. Remote canonical paths and
-physical root identity are read on that runner. Global instruction sources explicitly
+physical root identity are read on that runner. The search pack's directory
+listing and context-line path resolution are the current exception: they read
+the host's same-spelled path (chapter 01 §8.4). Global instruction sources explicitly
 use host authority rather than a path-prefix exception. A nonlocal node’s host-placed
 MCP gets a fresh empty private 0700 cwd outside/not containing the product home,
 never `$HOME` or the remote workspace spelling.

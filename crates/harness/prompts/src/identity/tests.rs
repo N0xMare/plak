@@ -9,11 +9,30 @@ fn product_environment_template_is_stable() {
 
 #[test]
 fn product_environment_sentence_uses_paths_and_os() {
-    let sentence = product_environment_sentence(Path::new("/repo"), Path::new("/repo/src"));
+    let sentence = product_environment_sentence(PromptWorkspace::new(
+        Path::new("/repo"),
+        Path::new("/repo/src"),
+        std::env::consts::OS,
+    ));
     assert!(sentence.contains("Workspace root: /repo"));
     assert!(sentence.contains("cwd: /repo/src"));
     assert!(sentence.contains(&format!("OS: {}.", std::env::consts::OS)));
     assert!(!sentence.starts_with(' '));
+}
+
+/// A node whose tools run on a remote runner names the runner's OS, whatever
+/// OS renders the prompt.
+#[test]
+fn product_environment_sentence_names_the_backend_os() {
+    for os in ["linux", "macos"] {
+        let workspace = PromptWorkspace::new(Path::new("/repo"), Path::new("/repo"), os);
+        assert_eq!(
+            product_environment_sentence(workspace),
+            format!("Workspace root: /repo. cwd: /repo. OS: {os}.")
+        );
+        let tail = product_identity_tail(workspace, "gpt-5", None);
+        assert!(tail.starts_with(&format!("Workspace root: /repo. cwd: /repo. OS: {os}.\n")));
+    }
 }
 
 #[test]
@@ -24,8 +43,11 @@ fn product_model_identity_template_is_stable() {
 #[test]
 fn product_target_identity_block_joins_environment_model_and_vcs() {
     let leaf = product_target_identity_block(
-        Path::new("/repo"),
-        Path::new("/repo/src"),
+        PromptWorkspace::new(
+            Path::new("/repo"),
+            Path::new("/repo/src"),
+            std::env::consts::OS,
+        ),
         "gpt-5",
         Some("high"),
         &earned_contributions(CodingPresentation::Codex, &["submit_result"]),
@@ -311,8 +333,11 @@ fn pi_spawner_paragraphs_name_wait_when_wait_agent_is_absent() {
 fn topology_paragraph_is_earned_by_the_compiled_tool_names() {
     let block = |names: &[&str]| {
         product_target_identity_block(
-            Path::new("/repo"),
-            Path::new("/repo/src"),
+            PromptWorkspace::new(
+                Path::new("/repo"),
+                Path::new("/repo/src"),
+                std::env::consts::OS,
+            ),
             "gpt-5",
             Some("high"),
             &earned_contributions(CodingPresentation::Codex, names),

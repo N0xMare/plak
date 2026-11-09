@@ -22,8 +22,7 @@ fn gpt6_assembly_uses_the_model_family_and_compiled_catalog() {
                 family_base,
                 composition,
                 &surface,
-                Path::new("/repo"),
-                Path::new("/repo"),
+                PromptWorkspace::new(Path::new("/repo"), Path::new("/repo"), std::env::consts::OS),
                 model,
                 Some("high"),
             )
@@ -95,8 +94,11 @@ fn marker_splice(
     contributions: &[PromptContribution],
 ) -> String {
     let identity = product_target_identity_block(
-        Path::new("/repo"),
-        Path::new("/repo/src"),
+        PromptWorkspace::new(
+            Path::new("/repo"),
+            Path::new("/repo/src"),
+            std::env::consts::OS,
+        ),
         "gpt-5",
         Some("high"),
         contributions,
@@ -117,8 +119,11 @@ fn assemble_reproduces_the_identity_block_for_every_scope() {
     for surface in surfaces() {
         let plan = PromptPlan::new(
             "",
-            Path::new("/repo"),
-            Path::new("/repo/src"),
+            PromptWorkspace::new(
+                Path::new("/repo"),
+                Path::new("/repo/src"),
+                std::env::consts::OS,
+            ),
             "gpt-5",
             Some("high"),
             surface.contributions().to_vec(),
@@ -126,8 +131,11 @@ fn assemble_reproduces_the_identity_block_for_every_scope() {
         assert_eq!(
             plan.assemble(),
             product_target_identity_block(
-                Path::new("/repo"),
-                Path::new("/repo/src"),
+                PromptWorkspace::new(
+                    Path::new("/repo"),
+                    Path::new("/repo/src"),
+                    std::env::consts::OS
+                ),
                 "gpt-5",
                 Some("high"),
                 surface.contributions()
@@ -141,8 +149,11 @@ fn assemble_reproduces_the_family_base_plus_identity_for_every_scope() {
     for surface in surfaces() {
         let plan = PromptPlan::new(
             "family base",
-            Path::new("/repo"),
-            Path::new("/repo/src"),
+            PromptWorkspace::new(
+                Path::new("/repo"),
+                Path::new("/repo/src"),
+                std::env::consts::OS,
+            ),
             "gpt-5",
             Some("high"),
             surface.contributions().to_vec(),
@@ -150,8 +161,11 @@ fn assemble_reproduces_the_family_base_plus_identity_for_every_scope() {
         let expected = format!(
             "family base\n\n{}",
             product_target_identity_block(
-                Path::new("/repo"),
-                Path::new("/repo/src"),
+                PromptWorkspace::new(
+                    Path::new("/repo"),
+                    Path::new("/repo/src"),
+                    std::env::consts::OS
+                ),
                 "gpt-5",
                 Some("high"),
                 surface.contributions()
@@ -181,8 +195,11 @@ fn with_base_reproduces_the_marker_splice_byte_for_byte() {
                 "family base",
                 composition,
                 &surface,
-                Path::new("/repo"),
-                Path::new("/repo/src"),
+                PromptWorkspace::new(
+                    Path::new("/repo"),
+                    Path::new("/repo/src"),
+                    std::env::consts::OS,
+                ),
                 "gpt-5",
                 Some("high"),
             );
@@ -205,8 +222,11 @@ fn a_direct_composition_keeps_the_family_base() {
             "family base",
             composition,
             &surface,
-            Path::new("/repo"),
-            Path::new("/repo/src"),
+            PromptWorkspace::new(
+                Path::new("/repo"),
+                Path::new("/repo/src"),
+                std::env::consts::OS,
+            ),
             "gpt-5",
             Some("high"),
         );
@@ -222,8 +242,7 @@ fn contributions_are_earned_by_the_compiled_tool_names() {
     let plan = |names: &[&str]| {
         PromptPlan::new(
             "",
-            Path::new("/r"),
-            Path::new("/r"),
+            PromptWorkspace::new(Path::new("/r"), Path::new("/r"), std::env::consts::OS),
             "m",
             Some("high"),
             surface(CodingPresentation::Codex, names)
@@ -266,8 +285,11 @@ fn a_ptc_hub_earns_the_topology_paragraph_from_the_callable_surface() {
         "family base",
         Composition::JavaScriptCell,
         &hub,
-        Path::new("/repo"),
-        Path::new("/repo/src"),
+        PromptWorkspace::new(
+            Path::new("/repo"),
+            Path::new("/repo/src"),
+            std::env::consts::OS,
+        ),
         "gpt-5",
         Some("high"),
     );
