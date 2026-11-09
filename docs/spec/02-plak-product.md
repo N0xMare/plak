@@ -4341,8 +4341,13 @@ verdicts) are addressed, the session profile and workspace chrome states.
   `draft_registry_full {limit:100000}` for new ids and duplicates still usable.
   Accepted/rejected/restored events may echo origin in optional event-envelope
   client_id, never stored/shared bodies. Refusal, edit, restore or pull-back
-  ends a submission identity. Do not automatically resend an unknown outcome;
-  a changed host_generation loses the registry and requires reconciliation
+  ends a submission identity. Do not automatically resend an unknown outcome.
+  While host_generation is unchanged, offer an explicit check/resend of the
+  same client_id, session, target and exact payload: `draft_pending` means
+  wait for a verdict, and `accepted {duplicate:true}` confirms admission
+  without enqueueing again. Do not mint a new id for that check. Reconnect
+  refreshes attachments and baselines, not effects. A changed host_generation
+  loses the registry and requires reconciliation
   against queue/row evidence, not a cross-restart exactly-once claim.
 - **Quit and stop.** A `quit` intent never ends a session that outlives its
   clients. On a child attachment it is that attachment's detach, on any
@@ -4813,10 +4818,21 @@ verdicts) are addressed, the session profile and workspace chrome states.
   in-process mailbox's (`backpressure` as saturated, `one_in_flight` as
   duplicate, `disconnected` or `not_attached` as disconnected,
   `refused_for_role` with its row, any other as refused); an intent no
-  attachment took within 30 seconds is given back as disconnected; one
-  sent with no verdict, because the connection ended first or none came
-  within 30 seconds, is given back as of unknown outcome: the host may yet
-  run it, so sending it again may run it twice. `settle` waits, bounded,
+  attachment took within 30 seconds is given back as disconnected. The
+  writer reserves a complete encoded intent/blob batch atomically under
+  fixed limits of 64 frames and 64 MiB, including the batch being written;
+  saturation returns never-sent backpressure, never a partial blob sequence.
+  The attachment-wait buffer separately holds at most 64 intents and 64 MiB
+  of serialized intent bodies. At the answer deadline or disconnect,
+  queued batches are withdrawn under the same lock that starts writes and
+  returned as never sent; they cannot land when a stalled pipe drains.
+  A batch whose write began (even partially), with no verdict because the
+  connection ended first or 30 seconds passed, has unknown outcome. It is
+  never automatically resent. `WireSender::send_draft` accepts a retained
+  client_id, exact intent and original host_generation for explicit
+  same-id check/resend; its response preserves `duplicate`/`draft_pending`.
+  Generation mismatch refuses that path; reconcile queue/row evidence.
+  `settle` waits, bounded,
   for every verdict. A session request names a client id of its own, and
   its settled answer is the new root or the refusal. One writer thread
   alone writes the transport, so neither the face nor the reader ever
@@ -4880,9 +4896,13 @@ chapter 04 §2.10; its keys are `[web]` (chapter 07 §3).
   optional trailing newline, at most 16 MiB, enforced while reading; a
   binary message, a message past the cap, no hello within 10 s, more than 20
   messages a second (burst 60), a pong 30 s late (the host pings every 15
-  s), or a client more than 8192 frames or 10 s per frame or ping behind ends
+  s), or a client more than 8192 frames or 64 MiB behind ends
   that connection with a close code and nothing else. `/wire` upgrades a
-  `GET` only. Each connection is a
+  `GET` only. Sending a pending batch or ping detaches only that client
+  after 10 s without any bytes accepted by the transport, or after a hard
+  30-minute total batch deadline even if bytes trickle through. Progress
+  within a large WebSocket frame renews the idle deadline; the whole frame
+  or attach baseline need not finish within 10 s. Each connection is a
   `plakous_hosted::host_service::wire::HostConnection` of the host; a
   connection that leaves, by `bye`, close, or any of the above, detaches,
   and its sessions run on for the next connection. A `quit` intent on a
@@ -5045,7 +5065,11 @@ settles asynchronously after endpoint binding, before local admission.
   remote face (§4.4): nothing on it execs or hands off the host's build. At
   most 16 connections wait for their hello at once; another is closed
   unanswered, and a failed accept is retried after 100 ms. A client that
-  leaves, or one a write waits on for 10 s, detaches; its sessions run on.
+  leaves, or one whose write makes no byte progress for 10 s, detaches;
+  its sessions run on. A pending batch retains the 64 MiB limit and a hard
+  30-minute total send bound. A large baseline that continues making byte
+  progress is not detached merely because the batch takes more than 10 s;
+  neither a slow nor a stalled client holds up another client's sends.
 - **Sessions.** A session opens in its own workspace's product context
   (§1), as `plak agent` opens it with no overrides, when a client first
   attaches it, and stays resident while anything keeps it (§4.4, residency

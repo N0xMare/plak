@@ -3650,6 +3650,16 @@ not move library evidence out of §3.1.
 
 ### 3.1 Offline fixture evidence
 
+Slow-link fixtures cover atomic client writer byte/frame reservations,
+withdrawal of an unwritten draft at the answer deadline followed by pipe
+drain and a single submission, and explicit same-id checks preserving
+`duplicate:true`/`draft_pending` with generation fencing. Paused-clock
+throttled pipes and a real WebSocket codec cover multi-minute large
+baselines, an unaffected healthy second writer, no-progress detachment and
+the hard total deadline despite continuing trickle progress. These tests
+use no live host or network service. Withdrawal and idle-deadline renewal
+are mutation targets; elapsed simulated time is not live bandwidth evidence.
+
 `product_runtime_e2e_tests` retains the former mixed terminal module's actual
 runtime cases without depending on the terminal feature: exact-resume
 publication, cross-profile history/queue and reverse switching, fast-lane and

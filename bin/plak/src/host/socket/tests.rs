@@ -11,6 +11,58 @@ use plakous_hosted::host_service::wire::HostPrincipal;
 
 use super::*;
 
+#[tokio::test(start_paused = true)]
+async fn slow_link_socket_stalled_reader_detaches_without_affecting_healthy_client() {
+    let (write, _unread) = tokio::io::duplex(1);
+    let mut write = ProgressIo::new(write);
+    let outbox = Outbox::default();
+    outbox.clone().write_all(&[42; 100]).unwrap();
+    let (healthy, mut reading) = tokio::io::duplex(64);
+    let mut healthy = ProgressIo::new(healthy);
+    let healthy_outbox = Outbox::default();
+    healthy_outbox.clone().write_all(b"healthy").unwrap();
+    let began = tokio::time::Instant::now();
+    let (stalled, delivered) = tokio::join!(
+        super::send(&mut write, &outbox),
+        super::send(&mut healthy, &healthy_outbox)
+    );
+    assert_eq!(stalled, Err(()));
+    assert_eq!(delivered, Ok(()));
+    assert_eq!(
+        tokio::time::Instant::now().duration_since(began),
+        super::super::send::IDLE
+    );
+    let mut received = [0; 7];
+    reading.read_exact(&mut received).await.unwrap();
+    assert_eq!(&received, b"healthy");
+}
+
+#[tokio::test(start_paused = true)]
+async fn slow_link_socket_large_baseline_completes_at_low_bandwidth() {
+    let baseline = vec![42; 2 * 1024 * 1024];
+    let outbox = Outbox::default();
+    outbox.clone().write_all(&baseline).unwrap();
+    let (write, mut read) = tokio::io::duplex(8192);
+    let mut write = ProgressIo::new(write);
+    let draining = tokio::spawn(async move {
+        let mut received = Vec::new();
+        let mut chunk = [0; 8192];
+        loop {
+            let count = read.read(&mut chunk).await.unwrap();
+            if count == 0 {
+                return received;
+            }
+            received.extend_from_slice(&chunk[..count]);
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    });
+    let began = tokio::time::Instant::now();
+    super::send(&mut write, &outbox).await.unwrap();
+    assert!(tokio::time::Instant::now().duration_since(began) > super::super::send::IDLE);
+    drop(write);
+    assert_eq!(draining.await.unwrap(), baseline);
+}
+
 fn mode(path: &Path) -> u32 {
     std::fs::metadata(path).unwrap().permissions().mode() & 0o777
 }

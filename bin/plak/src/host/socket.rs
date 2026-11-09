@@ -9,8 +9,8 @@
 //! answered with the host's welcome, which names no session, and then it
 //! is a `HostConnection` of the host (spec 02 §4.4, the session
 //! directory). It is a remote face: nothing on it execs or hands off the
-//! host's build. A client that leaves, or one that falls 10 s behind on a
-//! write, detaches; its sessions run on.
+//! host's build. A client that leaves, or whose write makes no byte
+//! progress for 10 s, detaches; its sessions run on.
 
 use std::collections::VecDeque;
 use std::io::Write;
@@ -24,11 +24,11 @@ use plakous_hosted::error::{CliFailure, CliResult};
 use plakous_hosted::host_service::wire::{
     Face, HELLO_DEADLINE, SessionHost, handshake, lines, refuse,
 };
-use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-use tokio::net::unix::OwnedWriteHalf;
+use tokio::io::{AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use tokio::net::{UnixListener, UnixStream};
 
 use super::lock::HostLock;
+use super::send::{MAX_PENDING_BYTES, ProgressIo};
 use crate::surface_protocol::PlakExtension;
 
 /// How often the accept loop and every connection look for a stop.
@@ -42,11 +42,6 @@ const CONNECTION_LIMIT: usize = 64;
 /// How long the accept loop waits after a failed accept (out of
 /// descriptors, say) before it tries again.
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
-/// How long one write may take to reach a slow client before it is
-/// dropped.
-const SEND_DEADLINE: Duration = Duration::from_secs(10);
-/// The most bytes waiting for one client before it is dropped as slow.
-const MAX_PENDING_BYTES: usize = 64 * 1024 * 1024;
 
 /// The longest socket path the platform's `sockaddr_un` holds, with its
 /// terminating NUL.
@@ -313,12 +308,17 @@ impl Write for Outbox {
 
 /// Sends what the connection wrote; `Err` when the client is gone or too
 /// slow.
-async fn send(write: &mut OwnedWriteHalf, outbox: &Outbox) -> Result<(), ()> {
+async fn send(write: &mut ProgressIo<impl AsyncWrite + Unpin>, outbox: &Outbox) -> Result<(), ()> {
     let bytes = outbox.take();
     if bytes.is_empty() {
         return Ok(());
     }
-    match tokio::time::timeout(SEND_DEADLINE, write.write_all(&bytes)).await {
+    match write
+        .progress
+        .clone()
+        .sending(write.write_all(&bytes))
+        .await
+    {
         Ok(Ok(())) => Ok(()),
         _ => Err(()),
     }
@@ -358,7 +358,8 @@ async fn connection(
         return;
     };
     let uid = credentials.uid();
-    let (read, mut write) = stream.into_split();
+    let (read, write) = stream.into_split();
+    let mut write = ProgressIo::new(write);
     let mut reader = Reader {
         read,
         lines: LineReader::default(),

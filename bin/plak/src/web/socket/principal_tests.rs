@@ -160,7 +160,7 @@ async fn web_drive_binds_the_verified_login_before_welcome_and_host_dispatch()
                             tokio::spawn(async move {
                                 if let Ok(upgraded) = upgrade.await {
                                     let mut socket = WebSocketStream::from_raw_socket(
-                                        TokioIo::new(upgraded),
+                                        ProgressIo::new(TokioIo::new(upgraded)),
                                         Role::Server,
                                         None,
                                     )

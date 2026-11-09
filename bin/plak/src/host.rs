@@ -16,6 +16,7 @@ mod console;
 mod idle;
 mod lock;
 mod requested_reload;
+pub(crate) mod send;
 mod sessions;
 mod socket;
 mod starter;

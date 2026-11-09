@@ -42,9 +42,11 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io::{Read, Write};
 use std::sync::mpsc::{self, RecvTimeoutError, TryRecvError};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
+
+mod writer;
 
 /// The connected sender, observation/response receiver and typed welcome.
 pub type Connected<P> = (WireSender<P>, WireReceiver<P>, Welcome<P>);
@@ -244,6 +246,7 @@ const BYE_LINE: &str = "{\"frame\":\"bye\"}\n";
 impl<P: ProtocolExtension> Drop for Connection<P> {
     fn drop(&mut self) {
         let _ = self.inner.write_line(BYE_LINE);
+        self.inner.outbox.finish();
     }
 }
 
@@ -252,7 +255,7 @@ type Notify = Arc<dyn Fn() + Send + Sync>;
 struct Inner<P: ProtocolExtension> {
     /// Encoded lines for the writer thread, which alone writes the
     /// transport: a large request never holds up the reader or the face.
-    outbox: mpsc::Sender<String>,
+    outbox: Arc<writer::Queue>,
     state: Mutex<State<P>>,
     changed: Condvar,
     notify: Mutex<Option<Notify>>,
@@ -264,11 +267,15 @@ struct Inner<P: ProtocolExtension> {
 struct Sent<P: ProtocolExtension> {
     intent: SessionIntent<P>,
     at: Instant,
+    ticket: Option<writer::Ticket>,
+    client_id: Option<crate::wire::ClientDraftId>,
+    report: bool,
 }
 
 struct State<P: ProtocolExtension> {
     next_request: RequestId,
     next_session_request: u64,
+    host_generation: u64,
     /// The root to attach: the welcome's, then each `moved` node's.
     root: NodeAddress,
     attachment: Option<AttachmentId>,
@@ -305,8 +312,8 @@ struct State<P: ProtocolExtension> {
 }
 
 impl<P: ProtocolExtension> State<P> {
-    /// Gives back every intent whose verdict is overdue at `now`: one never
-    /// sent is refused `disconnected`, one sent has an unknown outcome.
+    /// Gives back overdue intents, withdrawing queued writes before they
+    /// can land. Only a batch whose write began has an unknown outcome.
     fn expire(&mut self, now: Instant) {
         let overdue = |sent: &Sent<P>| now.duration_since(sent.at) >= ANSWER_DEADLINE;
         while self.unsent.front().is_some_and(overdue) {
@@ -325,15 +332,40 @@ impl<P: ProtocolExtension> State<P> {
             .collect();
         for id in late {
             if let Some(sent) = self.sent.remove(&id) {
-                self.refused
-                    .push_back(SendError::OutcomeUnknown(sent.intent));
+                self.refused.push_back(sent.unanswered());
             }
+        }
+    }
+}
+
+impl<P: ProtocolExtension> Sent<P> {
+    fn unanswered(self) -> SendError<P> {
+        if self.ticket.as_ref().is_none_or(writer::Ticket::withdraw) {
+            SendError::Refused(IntentSendError::Disconnected(self.intent))
+        } else {
+            SendError::OutcomeUnknown(self.intent)
         }
     }
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn is_draft<P: ProtocolExtension>(intent: &SessionIntent<P>) -> bool {
+    matches!(
+        intent,
+        SessionIntent::Prompt(_)
+            | SessionIntent::FollowUp(_)
+            | SessionIntent::Steer(_)
+            | SessionIntent::MailTopologyNode { .. }
+    )
+}
+
+impl<P: ProtocolExtension> Drop for Inner<P> {
+    fn drop(&mut self) {
+        self.outbox.close();
+    }
 }
 
 /// Connects over `transport`: says `hello`, takes the welcome and attaches
@@ -420,44 +452,17 @@ where
         (cancel, worker, timeout)
     });
     let mut lines = Lines::new(reader);
-    let (outbox, outgoing) = mpsc::channel();
-    let (mailbox, observations) = observation_channel();
-    let inner = Arc::new(Inner {
-        outbox,
-        state: Mutex::new(State {
-            next_request: 1,
-            next_session_request: 1,
-            root: NodeAddress {
-                tree_id: String::new(),
-                agent_id: String::new(),
-            },
-            attachment: None,
-            previous_attachment: None,
-            attaching: None,
-            mailbox: Some(mailbox),
-            answers: VecDeque::new(),
-            operations: BTreeSet::new(),
-            selections: BTreeMap::new(),
-            responses: VecDeque::new(),
-            sent: BTreeMap::new(),
-            unsent: VecDeque::new(),
-            refused: VecDeque::new(),
-            agent: None,
-            sessions: BTreeMap::new(),
-            attach_retried: false,
-            // Not yet having a baseline is not having lost one.
-            gaps: BTreeSet::new(),
-            snapshots: SnapshotAssembler::default(),
-            blobs: BlobAssembler::default(),
-            closed: false,
-            ended: None,
-        }),
-        changed: Condvar::new(),
-        notify: Mutex::new(None),
-        observations,
-    });
+    let inner = Inner::new();
     let writing = Arc::downgrade(&inner);
-    thread::spawn(move || write_lines(writer, &outgoing, &writing));
+    let outgoing = Arc::clone(&inner.outbox);
+    thread::spawn(move || {
+        if let Err(error) = outgoing.run(writer) {
+            outgoing.close();
+            if let Some(inner) = writing.upgrade() {
+                inner.close(format!("the transport failed to write: {error}"));
+            }
+        }
+    });
     inner
         .write(&ClientFrame::<P>::Hello(hello))
         .map_err(ConnectError::Io)?;
@@ -479,6 +484,7 @@ where
     };
     // A root the caller names is the one it asked for.
     let root = root.or_else(|| welcome.session.as_ref().map(|served| served.root.clone()));
+    lock(&inner.state).host_generation = welcome.host_generation;
     if root.is_none() && !directory {
         return Err(ConnectError::NoSession);
     }
@@ -497,6 +503,47 @@ where
         WireReceiver { connection },
         welcome,
     ))
+}
+
+impl<P: ProtocolExtension> Inner<P> {
+    fn new() -> Arc<Self> {
+        let (mailbox, observations) = observation_channel();
+        Arc::new(Self {
+            outbox: Arc::new(writer::Queue::default()),
+            state: Mutex::new(State {
+                next_request: 1,
+                next_session_request: 1,
+                host_generation: 0,
+                root: NodeAddress {
+                    tree_id: String::new(),
+                    agent_id: String::new(),
+                },
+                attachment: None,
+                previous_attachment: None,
+                attaching: None,
+                mailbox: Some(mailbox),
+                answers: VecDeque::new(),
+                operations: BTreeSet::new(),
+                selections: BTreeMap::new(),
+                responses: VecDeque::new(),
+                sent: BTreeMap::new(),
+                unsent: VecDeque::new(),
+                refused: VecDeque::new(),
+                agent: None,
+                sessions: BTreeMap::new(),
+                attach_retried: false,
+                // Not yet having a baseline is not having lost one.
+                gaps: BTreeSet::new(),
+                snapshots: SnapshotAssembler::default(),
+                blobs: BlobAssembler::default(),
+                closed: false,
+                ended: None,
+            }),
+            changed: Condvar::new(),
+            notify: Mutex::new(None),
+            observations,
+        })
+    }
 }
 
 impl<P: ProtocolExtension> WireSender<P>
@@ -562,17 +609,70 @@ where
             return Err(SendError::Refused(IntentSendError::Disconnected(intent)));
         }
         let sent = Sent {
+            client_id: is_draft(&intent).then(crate::wire::ClientDraftId::new),
             intent,
             at: Instant::now(),
+            ticket: None,
+            report: false,
         };
-        match state
+        if let Some(attachment) = state
             .attachment
             .filter(|_| state.attaching.is_none() && state.selections.is_empty())
         {
-            Some(attachment) => inner.write_intent(&mut state, attachment, sent),
-            None => state.unsent.push_back(sent),
+            inner.write_intent(&mut state, attachment, sent);
+        } else {
+            let bytes = state.unsent.iter().chain(std::iter::once(&sent)).try_fold(
+                0_usize,
+                |bytes, sent| {
+                    serde_json::to_vec(&sent.intent)
+                        .map(|encoded| bytes.saturating_add(encoded.len()))
+                },
+            );
+            if state.unsent.len() >= writer::MAX_FRAMES
+                || !matches!(bytes, Ok(bytes) if bytes <= writer::MAX_BYTES)
+            {
+                return Err(SendError::Refused(IntentSendError::Saturated(sent.intent)));
+            }
+            state.unsent.push_back(sent);
         }
         Ok(())
+    }
+
+    /// Explicitly submits or checks the exact same draft and `client_id`.
+    /// Retain both across reconnects. Never call automatically after an
+    /// unknown outcome. A changed generation returns `None`: reconcile
+    /// queue/row evidence instead. The response (including `duplicate:true`
+    /// or `draft_pending`) arrives on [`WireReceiver::try_response`].
+    /// `None` also means no current attachment or unsent backpressure.
+    #[must_use]
+    pub fn send_draft(
+        &self,
+        host_generation: u64,
+        client_id: crate::wire::ClientDraftId,
+        intent: SessionIntent<P>,
+    ) -> Option<RequestId> {
+        let inner = &self.connection.inner;
+        let mut state = lock(&inner.state);
+        if state.closed
+            || state.host_generation != host_generation
+            || state.attaching.is_some()
+            || !state.selections.is_empty()
+            || !is_draft(&intent)
+        {
+            return None;
+        }
+        let attachment = state.attachment?;
+        inner.write_intent(
+            &mut state,
+            attachment,
+            Sent {
+                intent,
+                at: Instant::now(),
+                ticket: None,
+                client_id: Some(client_id),
+                report: true,
+            },
+        )
     }
 
     /// Waits up to `timeout` for the host's verdict on every intent sent so
@@ -812,12 +912,7 @@ impl<P: ProtocolExtension> Inner<P> {
 
     /// Queues `line` for the writer thread; it never blocks.
     fn write_line(&self, line: &str) -> std::io::Result<()> {
-        self.outbox.send(line.to_owned()).map_err(|_| {
-            std::io::Error::new(
-                std::io::ErrorKind::BrokenPipe,
-                "the connection's writer stopped",
-            )
-        })
+        self.outbox.push(line.to_owned()).map(|_| ())
     }
 
     /// Ends the connection for `reason`: an intent sent and unanswered has
@@ -833,15 +928,14 @@ impl<P: ProtocolExtension> Inner<P> {
         let sent = std::mem::take(&mut state.sent);
         let unsent = std::mem::take(&mut state.unsent);
         state.refused.extend(
-            sent.into_values()
-                .map(|sent| SendError::OutcomeUnknown(sent.intent))
-                .chain(
-                    unsent
-                        .into_iter()
-                        .map(|sent| SendError::Refused(IntentSendError::Disconnected(sent.intent))),
-                ),
+            sent.into_values().map(Sent::unanswered).chain(
+                unsent
+                    .into_iter()
+                    .map(|sent| SendError::Refused(IntentSendError::Disconnected(sent.intent))),
+            ),
         );
         state.mailbox = None;
+        self.outbox.close();
         drop(state);
         self.changed.notify_all();
         self.wake();
@@ -849,21 +943,19 @@ impl<P: ProtocolExtension> Inner<P> {
 
     /// Writes `sent` as a request on `attachment`, its images as blobs just
     /// before it, and keeps it until its verdict.
-    fn write_intent(&self, state: &mut State<P>, attachment: AttachmentId, sent: Sent<P>)
+    fn write_intent(
+        &self,
+        state: &mut State<P>,
+        attachment: AttachmentId,
+        mut sent: Sent<P>,
+    ) -> Option<RequestId>
     where
         P::Intent: Serialize,
     {
         let id = state.next_request;
         state.next_request += 1;
         let mut intent = sent.intent.clone();
-        let client_id = matches!(
-            &intent,
-            SessionIntent::Prompt(_)
-                | SessionIntent::FollowUp(_)
-                | SessionIntent::Steer(_)
-                | SessionIntent::MailTopologyNode { .. }
-        )
-        .then(crate::wire::ClientDraftId::new);
+        let client_id = sent.client_id;
         let taken = take_images(&mut intent, &format!("r{id}"));
         let mut frames: Vec<ClientFrame<P>> =
             taken.chunks.into_iter().map(ClientFrame::Blob).collect();
@@ -878,14 +970,27 @@ impl<P: ProtocolExtension> Inner<P> {
         });
         // A transport whose writer stopped ends the connection, which gives
         // the intent back.
-        if self.write_all(&frames).is_ok() {
-            state.sent.insert(id, sent);
-        } else {
-            state
-                .refused
-                .push_back(SendError::Refused(IntentSendError::Disconnected(
-                    sent.intent,
-                )));
+        let encoded = frames
+            .iter()
+            .map(encode_line)
+            .collect::<Result<String, _>>()
+            .map_err(std::io::Error::other);
+        match encoded.and_then(|lines| self.outbox.reserve(lines, Some(sent.at + ANSWER_DEADLINE)))
+        {
+            Ok(ticket) => {
+                sent.ticket = Some(ticket);
+                state.sent.insert(id, sent);
+                Some(id)
+            }
+            Err(error) => {
+                let refusal = if error.kind() == std::io::ErrorKind::WouldBlock {
+                    IntentSendError::Saturated(sent.intent)
+                } else {
+                    IntentSendError::Disconnected(sent.intent)
+                };
+                state.refused.push_back(SendError::Refused(refusal));
+                None
+            }
         }
     }
 
@@ -1073,6 +1178,10 @@ impl<P: ProtocolExtension> Inner<P> {
         let Some(sent) = state.sent.remove(&id) else {
             return false;
         };
+        if sent.report {
+            state.responses.push_back((id, outcome));
+            return true;
+        }
         match outcome {
             Outcome::Ok(_) => {
                 match &sent.intent {
@@ -1213,26 +1322,6 @@ impl<P: ProtocolExtension> Inner<P> {
             HostFrame::Bye | HostFrame::Welcome(_) | HostFrame::Refused(_) => {
                 Err(std::io::Error::other("the host closed the connection"))
             }
-        }
-    }
-}
-
-/// Writes the connection's queued lines, in order, until every queue
-/// sender is gone; a transport that fails ends the connection.
-fn write_lines<P: ProtocolExtension>(
-    mut writer: Box<dyn Write + Send>,
-    lines: &mpsc::Receiver<String>,
-    inner: &Weak<Inner<P>>,
-) {
-    for line in lines {
-        if let Err(error) = writer
-            .write_all(line.as_bytes())
-            .and_then(|()| writer.flush())
-        {
-            if let Some(inner) = inner.upgrade() {
-                inner.close(format!("the transport failed to write: {error}"));
-            }
-            return;
         }
     }
 }

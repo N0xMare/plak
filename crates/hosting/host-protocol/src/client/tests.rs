@@ -5,6 +5,8 @@ use super::*;
 use crate::Core;
 use crate::wire::{WIRE_VERSION, WelcomeSession, decode_line};
 
+mod slow_link;
+
 #[test]
 fn product_host_responses_route_by_id_without_attaching_a_session() {
     #[derive(Clone, Debug, Eq, PartialEq)]

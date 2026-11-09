@@ -681,6 +681,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-hosted", "src/agent/roots.rs"): {"warn"},
     ("plak", "src/commands/runner/local.rs"): {"warn"},
     ("plak", "src/host.rs"): {"select"},
+    ("plak", "src/host/send.rs"): {"pin", "select"},
     ("plak", "src/host/sessions/options.rs"): {"pin", "select"},
     ("plak", "src/commands/runner/services.rs"): {"info", "select", "warn"},
     ("plak", "src/commands/runner/registry.rs"): {"info", "warn"},

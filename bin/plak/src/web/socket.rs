@@ -29,6 +29,7 @@ use tokio_tungstenite::tungstenite::protocol::{CloseFrame, Role, WebSocketConfig
 
 use super::Served;
 use super::auth::ConnectionSlot;
+use crate::host::send::{self as progress, MAX_PENDING_BYTES, ProgressIo};
 use crate::surface_protocol::PlakExtension;
 
 /// The RFC 6455 key suffix.
@@ -38,8 +39,6 @@ const STOP_POLL: Duration = Duration::from_millis(200);
 /// How often the host pings, and how long a ping may go unanswered.
 const PING_EVERY: Duration = Duration::from_secs(15);
 const PONG_DEADLINE: Duration = Duration::from_secs(30);
-/// How long one frame may take to reach a slow client before it is dropped.
-const SEND_DEADLINE: Duration = Duration::from_secs(10);
 /// The most frames waiting for one client before it is dropped as slow.
 const MAX_PENDING_FRAMES: usize = 8192;
 /// Client messages per second a connection may send, with this burst.
@@ -97,6 +96,7 @@ struct Pending {
     partial: Vec<u8>,
     lines: VecDeque<String>,
     overflowed: bool,
+    bytes: usize,
 }
 
 impl Outbox {
@@ -106,6 +106,7 @@ impl Outbox {
 
     fn take(&self) -> (VecDeque<String>, bool) {
         let mut pending = self.lock();
+        pending.bytes = 0;
         (std::mem::take(&mut pending.lines), pending.overflowed)
     }
 }
@@ -113,6 +114,15 @@ impl Outbox {
 impl Write for Outbox {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let mut pending = self.lock();
+        if pending
+            .bytes
+            .saturating_add(pending.partial.len())
+            .saturating_add(buf.len())
+            > MAX_PENDING_BYTES
+        {
+            pending.overflowed = true;
+            return Err(std::io::Error::other("the client fell behind"));
+        }
         pending.partial.extend_from_slice(buf);
         while let Some(end) = pending.partial.iter().position(|byte| *byte == b'\n') {
             let line: Vec<u8> = pending.partial.drain(..=end).collect();
@@ -123,6 +133,7 @@ impl Write for Outbox {
                 return Err(std::io::Error::other("the client fell behind"));
             }
             pending.lines.push_back(text);
+            pending.bytes += line.len();
         }
         Ok(buf.len())
     }
@@ -159,7 +170,7 @@ impl Rate {
     }
 }
 
-type Socket = WebSocketStream<TokioIo<Upgraded>>;
+type Socket = WebSocketStream<ProgressIo<TokioIo<Upgraded>>>;
 
 /// Serves one upgraded connection until it leaves, misbehaves, or the
 /// session ends.
@@ -167,8 +178,12 @@ pub(crate) async fn serve(upgraded: Upgraded, served: Arc<Served>, slot: Connect
     let config = WebSocketConfig::default()
         .max_message_size(Some(MAX_LINE_BYTES))
         .max_frame_size(Some(MAX_LINE_BYTES));
-    let mut socket =
-        WebSocketStream::from_raw_socket(TokioIo::new(upgraded), Role::Server, Some(config)).await;
+    let mut socket = WebSocketStream::from_raw_socket(
+        ProgressIo::new(TokioIo::new(upgraded)),
+        Role::Server,
+        Some(config),
+    )
+    .await;
     let reason = drive(&mut socket, &served, slot.login()).await;
     let code = match reason {
         Ended::Left | Ended::Stopping => CloseCode::Normal,
@@ -177,7 +192,7 @@ pub(crate) async fn serve(upgraded: Upgraded, served: Arc<Served>, slot: Connect
         Ended::Lost(_) => CloseCode::Away,
     };
     let _ = tokio::time::timeout(
-        SEND_DEADLINE,
+        progress::IDLE,
         socket.close(Some(CloseFrame {
             code,
             reason: "".into(),
@@ -231,14 +246,22 @@ async fn send_pending(socket: &mut Socket, outbox: &Outbox) -> Result<(), Ended>
     if overflowed {
         return Err(Ended::Lost("client fell behind"));
     }
-    for line in lines {
-        match tokio::time::timeout(SEND_DEADLINE, socket.send(Message::text(line))).await {
-            Ok(Ok(())) => {}
-            Ok(Err(_)) => return Err(Ended::Lost("send failed")),
-            Err(_) => return Err(Ended::Lost("client too slow")),
-        }
+    let progress = socket.get_ref().progress.clone();
+    match progress
+        .sending(async {
+            for line in lines {
+                socket
+                    .send(Message::text(line))
+                    .await
+                    .map_err(|_| Ended::Lost("send failed"))?;
+            }
+            Ok(())
+        })
+        .await
+    {
+        Ok(result) => result,
+        Err(()) => Err(Ended::Lost("client too slow")),
     }
-    Ok(())
 }
 
 async fn drive(socket: &mut Socket, served: &Arc<Served>, login: &str) -> Ended {
@@ -331,12 +354,12 @@ async fn attached(
                 }
                 // A peer that stopped reading must not hold the slot: the
                 // ping is bounded like every other send.
-                match tokio::time::timeout(SEND_DEADLINE, socket.send(Message::Ping(Bytes::new())))
+                match socket.get_ref().progress.clone().sending(socket.send(Message::Ping(Bytes::new())))
                     .await
                 {
                     Ok(Ok(())) => {}
                     Ok(Err(_)) => return Ended::Lost("ping failed"),
-                    Err(_) => return Ended::Lost("client too slow"),
+                    Err(()) => return Ended::Lost("client too slow"),
                 }
             }
         }
