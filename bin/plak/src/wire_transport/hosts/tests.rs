@@ -105,15 +105,21 @@ fn a_full_listener_backlog_is_bounded_and_never_treated_as_absence() {
     let path = paths.host_run_dir().join("blocked.sock");
     let listener = UnixListener::bind(&path).unwrap();
     rustix::net::listen(&listener, 1).unwrap();
+    // A live host holds its state key's kernel lock while it serves.
+    let _lock = held(&paths, "blocked", std::process::id());
     let mut clients = Vec::new();
     let mut saturated = false;
     for _ in 0..8 {
         match socket_until(&path, Instant::now() + Duration::from_millis(50)) {
             Ok(client) => clients.push(client),
             Err(error) => {
+                // Linux parks a connect on a full backlog until the deadline;
+                // macOS refuses it at once, like a stale socket.
                 assert!(matches!(
                     error.kind(),
-                    io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+                    io::ErrorKind::TimedOut
+                        | io::ErrorKind::WouldBlock
+                        | io::ErrorKind::ConnectionRefused
                 ));
                 saturated = true;
                 break;
@@ -124,5 +130,12 @@ fn a_full_listener_backlog_is_bounded_and_never_treated_as_absence() {
         saturated,
         "the unaccepted listener did not fill its backlog"
     );
-    assert!(live_until(&paths, Instant::now() + Duration::from_millis(25)).is_err());
+    // Either the deadline refuses, or the held lock still proves the host.
+    match live_until(&paths, Instant::now() + Duration::from_millis(25)) {
+        Err(_) => {}
+        Ok(hosts) => assert!(
+            hosts.iter().any(|host| host.key == "blocked"),
+            "a saturated host was treated as absent"
+        ),
+    }
 }
