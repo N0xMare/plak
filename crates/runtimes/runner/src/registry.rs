@@ -3,7 +3,6 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, PoisonError, RwLock};
 
-use plakous_tools::ExecutionBackend as _;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -227,14 +226,14 @@ impl RunnerRegistry {
 
     /// A held call's request for fresh reconciliation of a runner whose
     /// admission still read open when its link refused the call. Requests
-    /// coalesce on the runner's probe backoff (1, 2, 5, then 15 s): a
-    /// healthy link refusing repeatedly re-closes admission at most once
-    /// per backoff step, never in a loop.
-    fn request_reconciliation(&self, id: &str) {
+    /// coalesce on a 1, 2, 5, then 15 s backoff: a healthy link refusing
+    /// repeatedly re-closes admission at most once per backoff step. Answers
+    /// whether this request started a reconciliation.
+    fn request_reconciliation(&self, id: &str) -> bool {
         let due = {
             let mut entries = self.entries.write().unwrap_or_else(PoisonError::into_inner);
             let Some(entry) = entries.get_mut(id) else {
-                return;
+                return false;
             };
             entry
                 .refresh
@@ -243,6 +242,7 @@ impl RunnerRegistry {
         if due {
             self.reconcile_when_available(id);
         }
+        due
     }
 
     /// Pins separately owned probes/reconciliation to the serving executor.
@@ -403,8 +403,14 @@ impl RunnerRegistry {
             return Err(failure);
         }
         let client = connection.client;
-        if let Some(Connection::Remote(_, previous)) = &entry.connection {
-            if previous.backend().identity() == services.backend().identity() {
+        if let Some(Connection::Remote(previous_client, previous)) = &entry.connection {
+            // A rebinding of the same client to a runner presenting the same
+            // descriptor keeps the services its nodes hold, so their held
+            // calls are released rather than replaced. Each bind builds a
+            // fresh backend allocation, so allocation identity never matches.
+            if previous_client.same_client(&client)
+                && previous.backend().descriptor() == services.backend().descriptor()
+            {
                 services = previous.clone();
             } else {
                 // Nodes still holding the old services would wait on them
@@ -415,9 +421,9 @@ impl RunnerRegistry {
         let registry = self.downgrade();
         let runner = id.to_owned();
         services.request_reconciliation_with(move || {
-            if let Some(registry) = registry.upgrade() {
-                registry.request_reconciliation(&runner);
-            }
+            registry
+                .upgrade()
+                .is_some_and(|registry| registry.request_reconciliation(&runner))
         });
         services.set_available(true);
         entry.row.status = RunnerStatus::Ready;

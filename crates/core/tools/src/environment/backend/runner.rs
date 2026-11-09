@@ -426,9 +426,10 @@ impl RunnerCall {
     }
 
     /// Whether a placement hold may keep this call until its runner is
-    /// ready again (spec 01 §8.4): a model tool call's new effect of a
-    /// listed verb, which waits only before it is sent, or its read or
-    /// observation, which may also be sent again after a lost link.
+    /// ready again (spec 01 §8.4): under a model tool call's own key, a
+    /// process execution or start or a workspace mutation, which waits only
+    /// before it is sent, or a workspace or repository read, or that call's
+    /// process observation, which may also be read again after a lost link.
     /// Controls, tree steps, probes and the host's own calls never wait.
     #[must_use]
     pub(crate) fn holds_for_placement(&self) -> bool {
@@ -436,18 +437,15 @@ impl RunnerCall {
             return false;
         }
         match self.class {
-            RunnerClass::Effect { .. } => {
-                self.verb.is_read()
-                    || matches!(
-                        self.verb,
-                        RunnerVerb::ExecuteLiteralProcess
-                            | RunnerVerb::ProcessStart
-                            | RunnerVerb::MutateWorkspace
-                            | RunnerVerb::VcsEffect
-                            | RunnerVerb::ServiceSpawn
-                    )
-            }
-            RunnerClass::Observation { .. } => self.verb.is_read(),
+            RunnerClass::Effect { .. } => matches!(
+                self.verb,
+                RunnerVerb::ExecuteLiteralProcess
+                    | RunnerVerb::ProcessStart
+                    | RunnerVerb::MutateWorkspace
+                    | RunnerVerb::ReadWorkspace
+                    | RunnerVerb::QueryRepository
+            ),
+            RunnerClass::Observation { .. } => self.verb == RunnerVerb::ProcessPoll,
             _ => false,
         }
     }

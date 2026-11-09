@@ -217,6 +217,13 @@ impl RunnerClient {
         }
     }
 
+    /// Whether `other` is this client: one host's link to one runner,
+    /// whatever connection it is bound on now.
+    #[must_use]
+    pub fn same_client(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+
     /// Latest link state, not a continuous reachability promise.
     #[must_use]
     pub fn is_connected(&self) -> bool {
@@ -1157,12 +1164,13 @@ impl Inner {
         answer: oneshot::Sender<Result<Value, RunnerFailure>>,
     ) -> Result<u64, RunnerFailure> {
         let request_id = request.request_id.clone();
-        let (sender, instance, refusal) = {
+        let (sender, instance, refusal, connection) = {
             let state = lock(&self.state);
             (
                 state.sender.clone(),
                 state.instance.clone(),
                 state.refusal.clone().filter(ends_connection),
+                state.connection,
             )
         };
         let not_connected = || match &refusal {
@@ -1190,7 +1198,16 @@ impl Inner {
             _ => false,
         };
         let mut state = lock(&self.state);
-        let connection = state.connection;
+        if state.connection != connection {
+            // A rebinding while the call was journaled: the captured sender
+            // belongs to the old connection, which neither replays nor
+            // answers this request. It was never sent; send it afresh.
+            drop(state);
+            self.unclaim(journaled, &request_id);
+            return Err(RunnerFailure::NotSent(
+                "the runner rebound before the call was sent".into(),
+            ));
+        }
         state.pending.insert(
             request_id.clone(),
             Pending {

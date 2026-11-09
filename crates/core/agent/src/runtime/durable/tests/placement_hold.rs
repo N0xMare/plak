@@ -283,6 +283,13 @@ impl plakous_tools::ToolExecutor for HeldEffect {
 }
 
 fn held_effect_registry(tool: &Arc<HeldEffect>) -> TestResult<FrozenToolRegistry> {
+    let held = Arc::clone(tool);
+    effect_registry(held)
+}
+
+fn effect_registry(
+    executor: Arc<dyn plakous_tools::ToolExecutor>,
+) -> TestResult<FrozenToolRegistry> {
     let definition = ToolDefinition::new(
         ToolName::new("probe")?,
         "1.0.0",
@@ -298,8 +305,6 @@ fn held_effect_registry(tool: &Arc<HeldEffect>) -> TestResult<FrozenToolRegistry
         ToolConcurrency::Serial,
         ToolEffect::Mutating,
     )?;
-    let held = Arc::clone(tool);
-    let executor: Arc<dyn plakous_tools::ToolExecutor> = held;
     let mut registry = ToolRegistryBuilder::default();
     registry.register(ToolRegistration::new(
         RegisteredToolId::new("probe.registration")?,
@@ -531,5 +536,94 @@ async fn an_idle_compaction_parked_on_its_placement_observes_interruption() -> T
     assert_eq!(model.starts.load(Ordering::Acquire), 0);
     services.set_available(true);
     agent.shutdown().await?;
+    Ok(())
+}
+
+/// A mutating tool that runs until released, noting whether its call was
+/// cancelled meanwhile.
+struct GatedEffect {
+    release: Notify,
+    started: AtomicBool,
+    cancelled: AtomicBool,
+}
+
+impl plakous_tools::ToolExecutor for GatedEffect {
+    fn execute(
+        self: Arc<Self>,
+        _invocation: ToolInvocation,
+        context: plakous_tools::ToolContext,
+    ) -> plakous_tools::ToolFuture {
+        Box::pin(async move {
+            self.started.store(true, Ordering::Release);
+            tokio::select! {
+                () = self.release.notified() => {}
+                () = context.cancellation().cancelled() => {
+                    self.cancelled.store(true, Ordering::Release);
+                }
+            }
+            Err(ToolRuntimeError::new(
+                ToolRuntimeErrorKind::Execution,
+                "the gated effect ended",
+            ))
+        })
+    }
+}
+
+/// A transfer shutdown on an open placement leaves a running mutating tool
+/// to finish rather than cancelling it: only a hold ends it at shutdown.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn transfer_shutdown_lets_an_unheld_mutating_tool_finish() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let services = placed_services(directory.path())?;
+    let descriptor = durable_test_descriptor("test.route")?;
+    let model = Arc::new(
+        ArtifactModel::new(
+            descriptor.clone(),
+            artifact_authority(&descriptor, 1)?,
+            1,
+            148_000,
+            false,
+        )
+        .with_tool_first(),
+    );
+    let tool = Arc::new(GatedEffect {
+        release: Notify::new(),
+        started: AtomicBool::new(false),
+        cancelled: AtomicBool::new(false),
+    });
+    let gated = Arc::clone(&tool);
+    let builder = durable_decision_builder(workspace, model, effect_registry(gated)?)?
+        .tool_policy(Arc::new(AlwaysAllowPolicy))
+        .with_scheduled_compaction_enabled(false)
+        .with_runner_services(services.clone());
+    let sessions = DurableSessionRuntime::current(
+        Arc::new(TestCreateStore::default()),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("lease")?,
+    )?;
+    let agent = sessions
+        .create("create:placement-hold-transfer", builder)
+        .await?;
+    let _turn = agent.prompt("run until released").await?;
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while !tool.started.load(Ordering::Acquire) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await?;
+    let shutdown = {
+        let agent = agent.clone();
+        tokio::spawn(async move { crate::runtime::shutdown_for_transfer(&agent).await })
+    };
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!(
+        !tool.cancelled.load(Ordering::Acquire),
+        "shutdown waits for the tool"
+    );
+    assert!(!shutdown.is_finished());
+    tool.release.notify_one();
+    let _ = tokio::time::timeout(Duration::from_secs(30), shutdown).await??;
+    assert!(!tool.cancelled.load(Ordering::Acquire));
     Ok(())
 }

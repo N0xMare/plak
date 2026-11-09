@@ -128,6 +128,12 @@ impl Driver {
         let mut progress_open = true;
         let mut controls_open = true;
         let mut boundary_error = None;
+        let placement = self.tools.environment().placement_gate();
+        let held = || {
+            placement
+                .as_ref()
+                .is_some_and(plakous_tools::internal::runner::PlacementGate::is_held)
+        };
         let mut job_changes = self.job_sessions.job_terminal_changes();
         job_changes.mark_changed();
         let report = loop {
@@ -140,9 +146,13 @@ impl Driver {
                 () = command.cancellation.cancelled(), if boundary_error.is_none() => {
                     boundary_error = Some(cancelled_error());
                 }
-                // Shutdown reaches the running effect through its call's
-                // cancellation, so a held runner call ends unsent.
-                () = self.shutdown.cancelled(), if boundary_error.is_none() => {
+                // Shutdown leaves a running effect to finish (a transfer
+                // keeps what it started), except one held on its runner
+                // placement, which it ends unsent through the call's
+                // cancellation, then or once the hold begins.
+                () = held_at_shutdown(&self.shutdown, &held),
+                    if boundary_error.is_none() =>
+                {
                     command.cancellation.cancel();
                     boundary_error = Some(cancelled_error());
                 }
@@ -992,4 +1002,13 @@ fn effect_decision_slots(
         ));
     }
     Ok(slots)
+}
+
+/// Resolves once shutdown was requested and this node's runner placement
+/// holds new work: polled while shutdown waits for a running effect.
+async fn held_at_shutdown(shutdown: &plakous_model::CancellationToken, held: impl Fn() -> bool) {
+    shutdown.cancelled().await;
+    while !held() {
+        crate::executor::sleep(std::time::Duration::from_millis(100)).await;
+    }
 }

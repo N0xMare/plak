@@ -17,7 +17,7 @@ pub struct RunnerServices {
     reconcile: Reconcile,
 }
 
-type Reconcile = Arc<Mutex<Option<Arc<dyn Fn() + Send + Sync>>>>;
+type Reconcile = Arc<Mutex<Option<Arc<dyn Fn() -> bool + Send + Sync>>>>;
 
 /// Whether the placement admits new calls: its owner opens it after the
 /// first-bind/reconnect barrier, holds it while the link or that barrier is
@@ -99,7 +99,9 @@ impl RunnerServices {
 
     /// Installs how a held call asks its owner for a fresh reconciliation
     /// when the link refused it under an admission that still reads open.
-    pub fn request_reconciliation_with(&self, request: impl Fn() + Send + Sync + 'static) {
+    /// The request answers whether it acted; a coalesced request that did
+    /// not leaves the call to its own bounded recheck.
+    pub fn request_reconciliation_with(&self, request: impl Fn() -> bool + Send + Sync + 'static) {
         *self
             .reconcile
             .lock()
@@ -249,15 +251,12 @@ impl Hold {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .clone();
-            // Without an owner to ask, the same open admission is tried
-            // again only after a bounded backoff.
-            recheck = request.is_none().then(|| RECHECK[step]);
+            // Unless its owner reconciles afresh, the same open admission
+            // is tried again only after a bounded backoff: with no owner to
+            // ask, or one whose request was coalesced away.
+            let reconciling = current != revision || request.is_some_and(|request| request());
+            recheck = (!reconciling).then(|| RECHECK[step]);
             step = (step + 1).min(RECHECK.len() - 1);
-            if current == revision
-                && let Some(request) = request
-            {
-                request();
-            }
         }
     }
 

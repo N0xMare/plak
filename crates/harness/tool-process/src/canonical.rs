@@ -321,30 +321,46 @@ async fn promote_job(
     ))
 }
 
-/// Whether a promotion refused before it was sent is worth one more try: a
-/// runner placement lost just after the yield was decided refuses the
-/// promotion unsent, and the model's own observation then waits out the
-/// hold. Once it reads again, the promotion is retried rather than the
-/// still-running process terminated. Any other failure stands.
-async fn observed_after_refusal(
+/// What follows a refused promotion.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum AfterRefusal {
+    /// The refusal stands: the ordinary failure path applies.
+    Stands,
+    /// The process still runs once the hold released: promote again.
+    Retry,
+    /// The process ended during the hold: report its end.
+    Ended,
+}
+
+/// A runner placement lost just after the yield was decided refuses the
+/// promotion unsent. The model's own observation then waits out the hold,
+/// and once it reads again the promotion is retried, or the process's end
+/// reported, rather than the process terminated. Any other refusal stands.
+async fn after_refused_promotion(
     sessions: &JoinedProcessSessions,
     id: JoinedProcessSessionId,
     control: &OperationContext,
     failure: &plakous_tools::ExecutionBackendError,
-) -> Result<bool, ToolRuntimeError> {
+) -> Result<AfterRefusal, ToolRuntimeError> {
     if failure.kind() != plakous_tools::ExecutionBackendErrorKind::Io
         || !failure.proven_no_effect()
         || control.cancellation().is_cancelled()
     {
-        return Ok(false);
+        return Ok(AfterRefusal::Stands);
     }
     let backend = sessions.clone();
     let observer = control.clone();
-    Ok(process_backend(move || {
-        plakous_tools::internal::observe_process_tail(&backend, id, 1, 1, &observer)
-    })
-    .await
-    .is_ok())
+    Ok(
+        match process_backend(move || {
+            plakous_tools::internal::observe_process_tail(&backend, id, 1, 1, &observer)
+        })
+        .await
+        {
+            Ok(tail) if tail.status().is_terminal() => AfterRefusal::Ended,
+            Ok(_) => AfterRefusal::Retry,
+            Err(_) => AfterRefusal::Stands,
+        },
+    )
 }
 
 pub(crate) async fn process_backend<T: Send + 'static>(
@@ -510,7 +526,8 @@ impl ProcessSessionTools {
             {
                 let mut promotion = plakous_tools::internal::promote(&sessions, id);
                 if let Err(failure) = &promotion
-                    && observed_after_refusal(&sessions, id, &observation_control, failure).await?
+                    && after_refused_promotion(&sessions, id, &observation_control, failure).await?
+                        == AfterRefusal::Retry
                 {
                     promotion = plakous_tools::internal::promote(&sessions, id);
                 }
@@ -691,10 +708,23 @@ impl ProcessSessionTools {
                 .is_ok_and(|result| result.projection.session_id.is_some())
             {
                 let mut promotion = promote_job(&sessions, id).await?;
-                if let Err(failure) = &promotion
-                    && observed_after_refusal(&sessions, id, &observation_control, failure).await?
-                {
-                    promotion = promote_job(&sessions, id).await?;
+                if let Err(failure) = &promotion {
+                    match after_refused_promotion(&sessions, id, &observation_control, failure)
+                        .await?
+                    {
+                        AfterRefusal::Retry => promotion = promote_job(&sessions, id).await?,
+                        AfterRefusal::Ended => {
+                            return Self::report_held_end(
+                                environment,
+                                handle,
+                                max_output_bytes,
+                                result,
+                                &observation_control,
+                            )
+                            .await;
+                        }
+                        AfterRefusal::Stands => {}
+                    }
                 }
                 if promotion.as_ref().is_err_and(|error| {
                     error.kind() == plakous_tools::ExecutionBackendErrorKind::ResourceLimit
@@ -727,6 +757,37 @@ impl ProcessSessionTools {
         .await;
         guard.disarm_or_terminate(result.is_ok()).await?;
         result
+    }
+
+    /// The end of a process that finished while a placement hold kept its
+    /// promotion: the yield's output, then what it wrote since, joined, as
+    /// one page within `max_output_bytes`.
+    async fn report_held_end(
+        environment: &plakous_tools::ExecutionEnvironment,
+        handle: u64,
+        max_output_bytes: usize,
+        yielded: Result<ProcessExecutionResult, ToolRuntimeError>,
+        control: &OperationContext,
+    ) -> Result<ProcessExecutionResult, ToolRuntimeError> {
+        let yielded = yielded?;
+        let mut ended = Self::observe_summarized(
+            environment,
+            handle,
+            0,
+            max_output_bytes,
+            JoinedProcessOutputCursor::new(yielded.cursor),
+            ObservationWait::PromotionHint,
+            control,
+        )
+        .await?;
+        // One page over both parts keeps the report within the call's
+        // output budget.
+        let mut page = HeadTailPage::new(max_output_bytes);
+        page.push(&yielded.projection.output);
+        page.push(&ended.projection.output);
+        ended.truncated |= yielded.truncated || page.omitted != 0;
+        ended.projection.output = page.finish();
+        Ok(ended)
     }
 
     pub(crate) async fn continue_foreground_until_promotable(

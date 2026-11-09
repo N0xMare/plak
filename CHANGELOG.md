@@ -7,6 +7,15 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ## Unreleased
 
+- Hold a live session's runner work while its placement is unreachable instead
+  of failing it: unsent tool effects and model reads wait for the reconnect
+  barrier and are sent once afterwards under their own key, a foreground
+  command's observation reads again at its cursor, an effect already sent is
+  observed past its window under its original key, and no new paid model
+  request is sent until release. Stop and refusal end the wait; the directory
+  shows the waiting root turn as needing the operator. No wire or format
+  change.
+
 - Bind a paired runner whose OS differs from the host's: a runner descriptor's
   containment is checked against its own `linux` or `macos` tag, not the
   decoding process's OS, and a runner naming any other OS is refused.

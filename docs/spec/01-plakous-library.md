@@ -212,7 +212,8 @@ in-process runtime retirement.
 
 `Agent` is a cheap cloneable command capability; mutable state stays private to
 one driver task. A weak handle does not keep the driver alive. `shutdown` is
-idempotent across clones, stops admitted work, joins owned model and tool
+idempotent across clones, stops admitting work, joins running mutating tools
+(ending only one held on its runner placement, §5.4) and owned model and tool
 resources, releases or records lease obligations, flushes required durability,
 and returns one shared cleanup result. Finalization attempts each remaining
 queued settlement and every owned cleanup stage even if an earlier dependency
@@ -2334,8 +2335,10 @@ same driver, turn, child attempt and runtime lease heartbeat, releases the
 request slot and dispatch gate, processes controls, and ends on exact-turn
 cancellation, shutdown, lease loss, release or refusal; an idle session
 workflow's parking also ends on its owner's cooperative interruption, as
-credential parking does. Shutdown also cancels a running mutating tool, so a
-runner call held inside it ends unsent. Hold time is accumulated separately
+credential parking does. Shutdown still waits for a running mutating tool,
+so a transfer keeps what it started, unless the node's placement is held then
+or becomes held while shutdown waits: shutdown then cancels the tool's call,
+so a runner call held inside it ends unsent. Hold time is accumulated separately
 from credential and slot waits, never overlapping them (a slot wait excludes
 the placement parking inside it),
 and excluded from the model operation deadline and from `ModelFinished`
@@ -6092,8 +6095,11 @@ readiness path.
 **Placement hold.** A placed runner's services carry one admission with a
 revision: open after the barrier above publishes Ready, held while the link or
 the barrier is down, refused when the placement itself is refused (pairing,
-version, identity, configuration) or its services are replaced because the
-backend identity changed. Every change advances the revision. The hold is
+version, identity, configuration) or its services are replaced. A rebinding
+of the same client to a runner presenting the same descriptor keeps the
+services its nodes hold, so their held calls are released; a different
+descriptor or a different client replaces them. Every change advances the
+revision. The hold is
 process-local and per node; it is not a durable turn, call or node state, and
 a host restart never resumes it (ordinary owner-loss recovery applies).
 
@@ -6101,11 +6107,12 @@ The authoritative cut is one `RunnerCall` at the admitted link, strictly
 outside the client's per-line foreground gate and owner-transfer lock, so the
 barrier can always run. Exactly these calls wait there, each sent under a
 model tool call's own context (its line owner and effect key): a process
-execution, process start or workspace mutation under that key; a workspace,
-repository, instruction or VCS read under it; and that tool call's own
-process observations (the foreground polls, tails and joins the process tool
-makes while it watches the process it started or polls). Service spawns are
-unkeyed and VCS effects are tree steps, so neither waits. Owner controls,
+execution, process start or workspace mutation under that key; a workspace or
+repository read under it; and that tool call's own process observations (the
+foreground polls, tails and joins the process tool makes while it watches the
+process it started or polls). Instruction and VCS reads are sent unkeyed,
+service spawns are unkeyed and VCS effects are tree steps, so none of them
+waits. Owner controls,
 recorded controls, foreground cleanup, tree steps, probes, the background
 change watch and every host-owned call fail fast under their existing rules,
 so Stop, process stop/write/promote, job stop and service termination never
@@ -6113,10 +6120,14 @@ join the wait. A waiting call is sent once the admission opens; on `NotSent`
 it waits for a revision other than the one it was sent under and sends the
 same call again (same verb, payload and key; a new transport request id). If
 the admission still reads open at that revision, it asks its owner for a fresh
-reconciliation; the registry coalesces those requests on a 1/2/5/15-second
-backoff, so a healthy link that keeps refusing never cycles a runner's
-admission. Services with no owner hook instead retry the same open admission
-after the same bounded backoff.
+reconciliation. The registry coalesces those requests on a 1/2/5/15-second
+backoff (starting over after a quiet minute), so a healthy link that keeps
+refusing re-closes the runner's admission at most once per backoff step. A
+call whose request was coalesced away, or whose services have no owner hook,
+retries the same open admission after the same bounded backoff, so no waiter
+depends on a reconciliation that was never started. A request found journaled
+across a rebinding, before its send, is `NotSent` and is sent afresh rather
+than on the old connection.
 A model read or observation answered `ReadInterrupted` is read again the same
 way at the same cursor; the cursor advances only when a result is consumed. No
 tool, nested cell or batch is retried to recover one call. A call possibly
@@ -6130,7 +6141,13 @@ ends every model effect that was sent on its now-lost link and is waiting for a
 rebinding: it is `OutcomeUnknown` at once and keeps its journal claim for
 keyed recovery. A foreground yield whose promotion the lost link refused
 before send does not terminate the process: the tool's observation waits out
-the hold and the promotion is tried once more after release. There is no
+the hold, then the promotion is tried once more, or, if the process ended
+meanwhile, the tool reports its end and exit status instead of a running
+handle. Two cases still end the process through the ordinary path: a
+promotion sent before the loss whose owner-control answer does not come
+within its 30 s window (its outcome is unknown, so the tool terminates and
+reports the failure), and a second loss between the release and the retried
+promotion, which refuses it again and is not retried a second time. There is no
 wall-clock cap: memory, queue and owner Stop bound the hold. Release is
 automatic after the barrier; a stale Ready never releases a newer loss, and a
 fixed unknown outcome (restart, `Spent`, `Expired`) closes its call through

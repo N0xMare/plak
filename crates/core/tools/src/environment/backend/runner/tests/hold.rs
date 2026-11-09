@@ -118,6 +118,7 @@ async fn a_call_not_sent_is_resent_under_its_key_only_after_a_fresh_release() {
         let requested = Arc::clone(&requested);
         services.request_reconciliation_with(move || {
             requested.fetch_add(1, Ordering::SeqCst);
+            true
         });
     }
     let call = tokio::spawn(
@@ -190,6 +191,8 @@ async fn controls_tree_steps_and_host_calls_never_wait_on_a_hold() {
         RunnerCall::new(RunnerVerb::ProcessStart, json!({}), &controlled),
         model_call(RunnerVerb::ProcessWrite),
         model_call(RunnerVerb::ProcessPromote),
+        model_call(RunnerVerb::ServiceSpawn),
+        model_call(RunnerVerb::VcsEffect),
     ];
     for call in calls {
         let verb = call.verb();
@@ -327,4 +330,26 @@ async fn the_driver_gate_reads_held_until_release_or_refusal() {
         .await
         .unwrap()
         .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_coalesced_reconciliation_request_never_strands_its_call() {
+    let link = Scripted::answering([Err(RunnerFailure::NotSent("no connection".into()))]);
+    let services = held_services(Arc::clone(&link));
+    // The owner coalesced this request away: it starts no reconciliation,
+    // so no fresh revision would ever come.
+    services.request_reconciliation_with(|| false);
+    let answer = tokio::time::timeout(
+        Duration::from_secs(10),
+        services
+            .backend()
+            .link()
+            .call(model_call(RunnerVerb::ExecuteLiteralProcess)),
+    )
+    .await
+    .unwrap();
+    answer.unwrap();
+    let sent = link.sent();
+    assert_eq!(sent.len(), 2);
+    assert_eq!(sent[0].2, sent[1].2, "the same call key");
 }

@@ -566,8 +566,11 @@ mod hold {
     {
         let sessions = RunnerSessions::from_link(link, environment, owner());
         let request = JoinedProcessStartRequest::new(
-            JoinedProcessCommand::literal("/bin/sh", ["-c".to_owned(), "touch marker".to_owned()])
-                .unwrap(),
+            JoinedProcessCommand::literal(
+                "/bin/sh",
+                ["-c".to_owned(), format!("touch marker{call}")],
+            )
+            .unwrap(),
             ".",
             Vec::new(),
             false,
@@ -621,12 +624,13 @@ mod hold {
             runner_id: "held".into(),
             names: vec!["held".into()],
         });
-        let services = |descriptor: serde_json::Value| {
+        let services_on = |client: &RunnerClient, descriptor: serde_json::Value| {
             RunnerServices::new(
                 Arc::new(RunnerBackend::new(descriptor, Arc::new(client.clone())).unwrap()),
                 tokio::runtime::Handle::current(),
             )
         };
+        let services = |descriptor: serde_json::Value| services_on(&client, descriptor);
         let first = services(hello.descriptor.clone());
         ready(&registry, &client, first.clone(), 1);
         registry.blocked(
@@ -641,24 +645,87 @@ mod hold {
         tokio::time::sleep(Duration::from_millis(150)).await;
         assert!(!held.is_finished(), "an unreachable placement holds");
 
-        let mut changed = hello.descriptor.clone();
-        changed["operating_system"] = if changed["operating_system"] == "linux" {
-            "macos".into()
-        } else {
-            "linux".into()
-        };
-        let second = services(changed);
-        ready(&registry, &client, second.clone(), 3);
+        // A redial binds a fresh backend allocation presenting the same
+        // descriptor on the same client: the held services are kept and
+        // released, so the held call is sent once.
+        ready(&registry, &client, services(hello.descriptor.clone()), 3);
+        tokio::time::timeout(Duration::from_secs(10), held)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        // The started process runs on the runner: wait for its marker.
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !root.path().join("marker1").exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(first.is_available());
+
+        registry.blocked(
+            "held",
+            PlacementFailure::RunnerUnreachable {
+                phase: ProbePhase::LinkLost,
+                timed_out: false,
+            },
+            4,
+        );
+        let held = start(first.backend().link(), &environment, 2);
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(!held.is_finished());
+        // Another client, as a fresh dial binds, replaces the services:
+        // their held calls end refused rather than stranded.
+        let (other, other_hello, other_serving) = linked(&environment).await;
+        let second = services_on(&other, other_hello.descriptor.clone());
+        ready(&registry, &other, second.clone(), 5);
         refused(held).await;
         assert!(second.is_available());
 
-        registry.blocked("held", PlacementFailure::RunnerNotPaired, 4);
-        refused(start(second.backend().link(), &environment, 2)).await;
+        registry.blocked("held", PlacementFailure::RunnerNotPaired, 6);
+        refused(start(second.backend().link(), &environment, 3)).await;
         assert!(
-            !root.path().join("marker").exists(),
+            !root.path().join("marker2").exists(),
             "nothing held was sent"
         );
+        assert!(!root.path().join("marker3").exists());
+        other.disconnect();
+        other_serving.abort();
         client.disconnect();
         serving.abort();
     }
+}
+
+#[test]
+fn held_calls_reconciliation_requests_coalesce_on_a_short_backoff() {
+    let start = Instant::now();
+    let mut state = ProbeState::default();
+    let at = |millis| start + Duration::from_millis(millis);
+    assert!(state.reconcile_request_due(at(0)), "the first acts at once");
+    assert!(
+        !state.reconcile_request_due(at(500)),
+        "coalesced within 1 s"
+    );
+    assert!(state.reconcile_request_due(at(1_000)));
+    assert!(
+        !state.reconcile_request_due(at(2_500)),
+        "coalesced within 2 s"
+    );
+    assert!(state.reconcile_request_due(at(3_000)));
+    assert!(
+        !state.reconcile_request_due(at(7_000)),
+        "coalesced within 5 s"
+    );
+    assert!(state.reconcile_request_due(at(8_000)));
+    assert!(
+        !state.reconcile_request_due(at(22_000)),
+        "coalesced within 15 s"
+    );
+    assert!(state.reconcile_request_due(at(23_000)));
+    assert!(
+        state.reconcile_request_due(at(84_000)),
+        "the backoff starts over"
+    );
+    assert!(!state.reconcile_request_due(at(84_500)));
 }
