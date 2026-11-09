@@ -7,8 +7,8 @@ use plakous_tools::ExecutionBackend as _;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    RunnerClient, RunnerServices, WorkspaceCatalog, WorkspaceDiscovery, WorkspaceOptions,
-    WorkspaceRefusal,
+    RunnerClient, RunnerConnectionRevision, RunnerServices, WorkspaceCatalog, WorkspaceDiscovery,
+    WorkspaceOptions, WorkspaceRefusal,
 };
 
 mod refresh;
@@ -309,13 +309,14 @@ impl RunnerRegistry {
     /// Publishes a fully reconciled connection. The caller must complete
     /// sweep → recover → recorded stops → settled-foreground reconciliation
     /// first. A read timeout must not cancel that separately owned work.
+    /// Capture `connection` before the pass; loss or rebind refuses publication.
     ///
     /// # Errors
     /// Rejects unknown ids or backend identity mismatch before publication.
     pub fn ready(
         &self,
         id: &str,
-        client: RunnerClient,
+        connection: RunnerConnectionRevision,
         mut services: RunnerServices,
         options: WorkspaceOptions,
         discovery: WorkspaceDiscovery,
@@ -335,6 +336,16 @@ impl RunnerRegistry {
         if entry.row.runner.names.is_empty() {
             return Err(missing(id));
         }
+        if !connection.is_current() {
+            let failure = PlacementFailure::RunnerUnreachable {
+                phase: ProbePhase::LinkLost,
+                timed_out: false,
+            };
+            services.set_available(false);
+            self.block_entry(id, entry, failure.clone(), now, true);
+            return Err(failure);
+        }
+        let client = connection.client;
         if let Some(Connection::Remote(_, previous)) = &entry.connection
             && previous.backend().identity() == services.backend().identity()
         {
@@ -487,27 +498,38 @@ impl RunnerRegistry {
             .unwrap_or_else(PoisonError::into_inner)
             .get_mut(id)
         {
-            entry.row.blocked_since.get_or_insert(now);
-            if let Some(Connection::Remote(_, services)) = &entry.connection {
-                services.set_available(false);
-            }
-            if completed {
-                entry.row.checked_at = Some(now);
-            }
-            entry.row.status = RunnerStatus::Blocked(failure);
-            let phase = match &entry.row.status {
-                RunnerStatus::Blocked(PlacementFailure::RunnerUnreachable { phase, .. }) => *phase,
-                _ => ProbePhase::Bind,
-            };
-            entry.refresh.phase = phase;
-            let _ = self.progress.send(RunnerProgress {
-                runner_id: id.into(),
-                phase,
-                row: Some(entry.row.clone()),
-            });
-            self.changed
-                .send_modify(|sequence| *sequence = sequence.wrapping_add(1));
+            self.block_entry(id, entry, failure, now, completed);
         }
+    }
+
+    fn block_entry(
+        &self,
+        id: &str,
+        entry: &mut Entry,
+        failure: PlacementFailure,
+        now: u64,
+        completed: bool,
+    ) {
+        entry.row.blocked_since.get_or_insert(now);
+        if let Some(Connection::Remote(_, services)) = &entry.connection {
+            services.set_available(false);
+        }
+        if completed {
+            entry.row.checked_at = Some(now);
+        }
+        entry.row.status = RunnerStatus::Blocked(failure);
+        let phase = match &entry.row.status {
+            RunnerStatus::Blocked(PlacementFailure::RunnerUnreachable { phase, .. }) => *phase,
+            _ => ProbePhase::Bind,
+        };
+        entry.refresh.phase = phase;
+        let _ = self.progress.send(RunnerProgress {
+            runner_id: id.into(),
+            phase,
+            row: Some(entry.row.clone()),
+        });
+        self.changed
+            .send_modify(|sequence| *sequence = sequence.wrapping_add(1));
     }
 
     fn connection(&self, id: &str) -> Result<Connection, PlacementFailure> {

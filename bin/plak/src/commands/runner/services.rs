@@ -427,6 +427,7 @@ async fn refresh_existing(
     hello: plakous::runner::protocol::Hello,
 ) -> Result<Option<Vec<LineId>>, plakous::runner::PlacementFailure> {
     use plakous::runner::{PlacementFailure, ProbePhase};
+    let connection = client.connection_revision();
     let unavailable = |phase| PlacementFailure::RunnerUnreachable {
         phase,
         timed_out: false,
@@ -454,7 +455,7 @@ async fn refresh_existing(
     };
     services.runners().ready(
         &remote.id,
-        client,
+        connection,
         runner,
         options,
         discovery,
@@ -574,6 +575,7 @@ async fn finish_remote_bind(
     dialed: super::dial::Dialed,
 ) -> Result<(super::dial::Dialed, Vec<LineId>), plakous::runner::PlacementFailure> {
     use plakous::runner::{PlacementFailure, ProbePhase};
+    let connection = dialed.client.connection_revision();
     let unavailable = |phase, timed_out| PlacementFailure::RunnerUnreachable { phase, timed_out };
     install_reporter(&dialed.client);
     services.runners().progress(&remote.id, ProbePhase::Bind);
@@ -611,7 +613,7 @@ async fn finish_remote_bind(
     .map_err(|_| unavailable(ProbePhase::Bind, false))?;
     services.runners().ready(
         &remote.id,
-        dialed.client.clone(),
+        connection,
         plakous::runner::RunnerServices::new(std::sync::Arc::new(backend), runtime.clone()),
         options,
         discovery,

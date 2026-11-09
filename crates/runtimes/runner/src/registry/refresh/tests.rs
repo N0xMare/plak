@@ -427,7 +427,7 @@ async fn aliases_and_concurrent_picker_refreshes_keep_the_original_same_instance
     registry
         .ready(
             "picker",
-            client.clone(),
+            client.connection_revision(),
             RunnerServices::new(backend, tokio::runtime::Handle::current()),
             catalog.options(),
             catalog.discover(),

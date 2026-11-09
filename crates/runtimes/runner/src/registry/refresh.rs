@@ -281,6 +281,7 @@ impl RunnerRegistry {
                 self.ready_local(catalog, now())?;
             }
             Connection::Remote(client, services) => {
+                let connection = client.connection_revision();
                 self.progress(id, ProbePhase::Options);
                 let options = client
                     .workspace_options()
@@ -291,7 +292,7 @@ impl RunnerRegistry {
                     .workspace_discover()
                     .await
                     .map_err(|_| unavailable(ProbePhase::Discovery))?;
-                self.ready(id, client, services, options, discovery, now())?;
+                self.ready(id, connection, services, options, discovery, now())?;
             }
         }
         Ok(())

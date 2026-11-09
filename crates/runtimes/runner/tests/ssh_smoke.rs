@@ -151,7 +151,7 @@ async fn remote_root() -> RemoteRoot {
     registry
         .ready(
             &hello.runner_id,
-            client.clone(),
+            client.connection_revision(),
             RunnerServices::new(backend, tokio::runtime::Handle::current()),
             options,
             discovery,

@@ -5147,6 +5147,15 @@ import RPC. Another standalone operation is a typed home-busy refusal. The kerne
 lock at `runners/runtime-owner.lock`, not a stale socket or PID string, owns this
 exclusion. Standalone local placement remains direct and starts no local daemon.
 
+Remote runner readiness captures the client's connection revision before the
+bind/reconciliation pass. Publication checks that revision and live connectivity
+under the registry entries write lock, without waiting for the link watcher.
+Loss after the final cleanup answer or a changed revision blocks the row and
+keeps services unavailable. Needed connections retry through the existing
+coalesced 1/2/5/15-second backoff; a fresh completed bind barrier must precede
+Ready and effect admission. A stale pass invalidated by new stop debt still
+refuses; failures block that runner, not the host.
+
 - **Local process daemon.** After binding its control socket, its independently owned local probe
   dials the home-local runner of this
   protocol, binds journaled to `host/runner/v<N>/calls/<state key>`, and

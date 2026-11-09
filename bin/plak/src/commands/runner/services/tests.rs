@@ -13,11 +13,36 @@ use std::sync::{
 };
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
+mod ready_fence;
+
 async fn line_runner(
     workspace: &std::path::Path,
     line: LineId,
     stops: Arc<AtomicUsize>,
 ) -> (RunnerClient, serde_json::Value) {
+    let (host, descriptor) = line_stream(workspace, line, stops);
+    let client = RunnerClient::connect_home_local(
+        host,
+        Bind {
+            host_id: "review".into(),
+            host_instance: "instance".into(),
+            version: VersionTriple::current("review", "test"),
+            inspect: false,
+        },
+        ClientWindows::default(),
+        None,
+    )
+    .await
+    .unwrap()
+    .0;
+    (client, descriptor)
+}
+
+fn line_stream(
+    workspace: &std::path::Path,
+    line: LineId,
+    stops: Arc<AtomicUsize>,
+) -> (tokio::io::DuplexStream, serde_json::Value) {
     let version = VersionTriple::current("review", "test");
     let service = RunnerService::with_options(
         ExecutionEnvironment::host(
@@ -94,21 +119,7 @@ async fn line_runner(
             }
         }
     });
-    let client = RunnerClient::connect_home_local(
-        host,
-        Bind {
-            host_id: "review".into(),
-            host_instance: "instance".into(),
-            version,
-            inspect: false,
-        },
-        ClientWindows::default(),
-        None,
-    )
-    .await
-    .unwrap()
-    .0;
-    (client, descriptor)
+    (host, descriptor)
 }
 
 #[tokio::test]
@@ -259,7 +270,7 @@ impl StopHarness {
         registry
             .ready(
                 "review",
-                client.clone(),
+                client.connection_revision(),
                 runner,
                 fixture.catalog.options(),
                 plakous::runner::WorkspaceDiscovery::default(),
@@ -288,11 +299,12 @@ impl StopHarness {
                 );
                 Box::pin(async move {
                     calls.fetch_add(1, Ordering::SeqCst);
+                    let connection = client.connection_revision();
                     let pending = reconcile_remote(&services, &id, &client).await?;
                     let runner = registry.reconciliation_services(&id)?;
                     registry.ready(
                         &id,
-                        client.clone(),
+                        connection,
                         runner,
                         catalog.options(),
                         plakous::runner::WorkspaceDiscovery::default(),

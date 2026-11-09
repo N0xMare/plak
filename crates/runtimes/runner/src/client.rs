@@ -110,6 +110,22 @@ pub struct RunnerClient {
     inner: Arc<Inner>,
 }
 
+/// Connection captured before a readiness pass; a rebind invalidates the pass.
+pub struct RunnerConnectionRevision {
+    pub(crate) client: RunnerClient,
+    connection: u64,
+}
+
+impl RunnerConnectionRevision {
+    pub(crate) fn is_current(&self) -> bool {
+        let state = lock(&self.client.inner.state);
+        state.connection == self.connection
+            && state.sender.is_some()
+            && state.refusal.is_none()
+            && !state.closer.is_cancelled()
+    }
+}
+
 struct Inner {
     foreground: foreground::Calls,
     connected: tokio::sync::Notify,
@@ -187,6 +203,15 @@ struct LineTransfer {
 }
 
 impl RunnerClient {
+    /// Captures the connection before reconciliation for readiness publication.
+    #[must_use]
+    pub fn connection_revision(&self) -> RunnerConnectionRevision {
+        RunnerConnectionRevision {
+            client: self.clone(),
+            connection: lock(&self.inner.state).connection,
+        }
+    }
+
     /// Latest link state, not a continuous reachability promise.
     #[must_use]
     pub fn is_connected(&self) -> bool {
