@@ -23,12 +23,36 @@ fn workspace_facts_name_the_backend_os_and_runner() -> Result<(), Box<dyn std::e
         expected
     );
 
+    // A runner descriptor for the other supported OS decodes when its
+    // containment is that OS's, whatever this process runs on; a crossed
+    // containment claim and an unsupported runner OS are refused.
+    let (os, filesystem, crossed) = if std::env::consts::OS == "linux" {
+        (
+            "macos",
+            "HostPathPolicyOnly",
+            "LinuxDescriptorRelativeNoFollow",
+        )
+    } else {
+        (
+            "linux",
+            "LinuxDescriptorRelativeNoFollow",
+            "HostPathPolicyOnly",
+        )
+    };
     let mut other: serde_json::Value = serde_json::to_value(&host)?;
-    other["operating_system"] = "freebsd".into();
-    let other: ExecutionBackendDescriptor = serde_json::from_value(other)?;
-    let bytes = stable_workspace_environment_bytes(&workspace, &other)?;
+    other["operating_system"] = os.into();
+    other["containment"]["filesystem"] = filesystem.into();
+    let decoded: ExecutionBackendDescriptor = serde_json::from_value(other.clone())?;
+    let bytes = stable_workspace_environment_bytes(&workspace, &decoded)?;
     let prefix = b"plakous-agent/workspace-environment-v2\0".len();
-    assert!(bytes[prefix..].starts_with(b"freebsd\0local\0host-path-policy-only\0"));
+    let mut facts = os.as_bytes().to_vec();
+    facts.extend_from_slice(b"\0local\0host-path-policy-only\0");
+    assert!(bytes[prefix..].starts_with(&facts));
+    other["containment"]["filesystem"] = crossed.into();
+    assert!(serde_json::from_value::<ExecutionBackendDescriptor>(other.clone()).is_err());
+    other["operating_system"] = "freebsd".into();
+    other["containment"]["filesystem"] = "HostPathPolicyOnly".into();
+    assert!(serde_json::from_value::<ExecutionBackendDescriptor>(other).is_err());
     Ok(())
 }
 

@@ -13,6 +13,16 @@ pub(super) fn line_stream(
     starts: Arc<AtomicUsize>,
     cleanups: Arc<AtomicUsize>,
 ) -> (tokio::io::DuplexStream, Hello) {
+    line_stream_for_os(services, close_after_cleanup, starts, cleanups, None)
+}
+
+pub(super) fn line_stream_for_os(
+    services: &Services,
+    close_after_cleanup: bool,
+    starts: Arc<AtomicUsize>,
+    cleanups: Arc<AtomicUsize>,
+    operating_system: Option<&str>,
+) -> (tokio::io::DuplexStream, Hello) {
     let paths = services.paths().unwrap();
     let workspace = paths.workspace().unwrap();
     let catalog =
@@ -40,7 +50,16 @@ pub(super) fn line_stream(
         },
     )
     .unwrap();
-    let hello = service.hello().clone();
+    let mut hello = service.hello().clone();
+    if let Some(os) = operating_system {
+        hello.descriptor["operating_system"] = os.into();
+        hello.descriptor["containment"]["filesystem"] = if os == "linux" {
+            "LinuxDescriptorRelativeNoFollow"
+        } else {
+            "HostPathPolicyOnly"
+        }
+        .into();
+    }
     let mut stub = Stub {
         instance: hello.instance.clone(),
         options,

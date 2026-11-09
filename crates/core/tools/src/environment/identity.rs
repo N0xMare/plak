@@ -336,29 +336,21 @@ pub struct ExecutionContainmentDescriptor {
 }
 
 impl ExecutionContainmentDescriptor {
-    pub(super) const fn linux_host() -> Self {
+    fn host_for_platform(operating_system: &str) -> Self {
         Self {
-            filesystem: FilesystemContainment::LinuxDescriptorRelativeNoFollow,
+            filesystem: if operating_system == "linux" {
+                FilesystemContainment::LinuxDescriptorRelativeNoFollow
+            } else {
+                FilesystemContainment::HostPathPolicyOnly
+            },
             process: ProcessContainment::InheritsHostAuthority,
             network: NetworkContainment::InheritsHostAuthority,
         }
     }
 
-    pub(super) fn current_host() -> Self {
-        if cfg!(target_os = "linux") {
-            Self::linux_host()
-        } else {
-            Self {
-                filesystem: FilesystemContainment::HostPathPolicyOnly,
-                process: ProcessContainment::InheritsHostAuthority,
-                network: NetworkContainment::InheritsHostAuthority,
-            }
-        }
-    }
-
-    pub(super) const fn deterministic_fake() -> Self {
+    fn fake_for_platform(operating_system: &str) -> Self {
         Self {
-            filesystem: current_filesystem_containment(),
+            filesystem: Self::host_for_platform(operating_system).filesystem,
             process: ProcessContainment::DeterministicFake,
             network: NetworkContainment::Denied,
         }
@@ -380,14 +372,6 @@ impl ExecutionContainmentDescriptor {
     #[must_use]
     pub const fn network(self) -> NetworkContainment {
         self.network
-    }
-}
-
-const fn current_filesystem_containment() -> FilesystemContainment {
-    if cfg!(target_os = "linux") {
-        FilesystemContainment::LinuxDescriptorRelativeNoFollow
-    } else {
-        FilesystemContainment::HostPathPolicyOnly
     }
 }
 
@@ -423,10 +407,7 @@ impl ExecutionBackendDescriptor {
     /// process's OS. It is comparison data, not authority.
     #[must_use]
     pub fn local_runner() -> Self {
-        let mut descriptor =
-            Self::local_runner_for_platform(std::env::consts::OS, HostPathFormat::current());
-        descriptor.containment = ExecutionContainmentDescriptor::current_host();
-        descriptor
+        Self::local_runner_for_platform(std::env::consts::OS, HostPathFormat::current())
     }
 
     pub(super) fn deterministic_fake() -> Self {
@@ -436,7 +417,7 @@ impl ExecutionBackendDescriptor {
             semantic_revision: ExecutionBackendSemanticRevision::deterministic_fake(),
             operating_system: std::env::consts::OS.to_owned(),
             path_format: HostPathFormat::current(),
-            containment: ExecutionContainmentDescriptor::deterministic_fake(),
+            containment: ExecutionContainmentDescriptor::fake_for_platform(std::env::consts::OS),
         }
     }
 
@@ -450,11 +431,7 @@ impl ExecutionBackendDescriptor {
             semantic_revision: ExecutionBackendSemanticRevision::host(),
             operating_system: operating_system.to_owned(),
             path_format,
-            containment: if operating_system == "linux" {
-                ExecutionContainmentDescriptor::linux_host()
-            } else {
-                ExecutionContainmentDescriptor::current_host()
-            },
+            containment: ExecutionContainmentDescriptor::host_for_platform(operating_system),
         }
     }
 
@@ -496,6 +473,9 @@ impl ExecutionBackendDescriptor {
     }
 }
 
+/// The OS tags a runner descriptor may name: the supported runner platforms.
+const RUNNER_OPERATING_SYSTEMS: [&str; 2] = ["linux", "macos"];
+
 impl<'de> Deserialize<'de> for ExecutionBackendDescriptor {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -509,16 +489,23 @@ impl<'de> Deserialize<'de> for ExecutionBackendDescriptor {
             }
         };
         let expected_containment = match wire.kind {
-            ExecutionBackendKind::Runner => ExecutionContainmentDescriptor::current_host(),
+            ExecutionBackendKind::Runner => {
+                ExecutionContainmentDescriptor::host_for_platform(&wire.operating_system)
+            }
             ExecutionBackendKind::DeterministicFake => {
-                ExecutionContainmentDescriptor::deterministic_fake()
+                ExecutionContainmentDescriptor::fake_for_platform(&wire.operating_system)
             }
         };
-        let runner_named = match wire.kind {
-            ExecutionBackendKind::Runner => wire.runner_id.is_some(),
+        // A runner names its runner and runs on a supported runner platform,
+        // so its OS tag, which the prompt states, is a closed set.
+        let runner_admitted = match wire.kind {
+            ExecutionBackendKind::Runner => {
+                wire.runner_id.is_some()
+                    && RUNNER_OPERATING_SYSTEMS.contains(&wire.operating_system.as_str())
+            }
             ExecutionBackendKind::DeterministicFake => wire.runner_id.is_none(),
         };
-        if !runner_named
+        if !runner_admitted
             || wire.semantic_revision != expected_revision
             || !is_platform_tag(&wire.operating_system)
             || !wire.path_format.is_compatible_with(&wire.operating_system)

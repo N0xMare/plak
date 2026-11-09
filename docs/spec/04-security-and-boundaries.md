@@ -491,6 +491,19 @@ A finer descriptor reports three independent axes:
 | Process | inherits host authority | inherits host authority |
 | Network | inherits host authority | inherits host authority |
 
+For a remote runner, these axes describe the runner's OS and authority, not
+the receiving host's. A runner's `operating_system` is `linux` or `macos`, the
+supported runner platforms; a runner naming another tag is refused at bind.
+Descriptor validation derives the required filesystem axis from the
+descriptor's `operating_system` (`linux` versus `macos`, or another tag a
+deterministic fake names), and rejects mismatched claims even when they match
+the receiver's OS.
+The process and network axes still require inherited authority for a runner;
+deterministic fakes instead require simulated processes and denied network,
+with filesystem semantics derived from their own OS tag too. A decoded tag is
+comparison data, not proof of authority or admission of an unsupported process
+or evaluator platform (chapter 00).
+
 The process and network rows cover service processes as well: a service runs
 in its own process group under the same host backend and reports the same
 `Host` descriptor; only its lifetime (group termination and join) is owned.

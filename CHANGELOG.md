@@ -7,6 +7,10 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ## Unreleased
 
+- Bind a paired runner whose OS differs from the host's: a runner descriptor's
+  containment is checked against its own `linux` or `macos` tag, not the
+  decoding process's OS, and a runner naming any other OS is refused.
+
 - Share serialized product wire types through the internal `plakd-wire-types`
   crate without changing the wire schema or resetting terminal-local preferences.
 

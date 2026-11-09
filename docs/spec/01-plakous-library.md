@@ -5988,7 +5988,11 @@ only through its hidden `plakous::runner` module). It also holds the runner
 daemon, which serves one runner on a private socket, and the stdio bridge a
 host reaches it through (`plak runner`, chapter 02 §3.1). An unavailable remote
 root-identity probe refuses a new effect as proven-no-effect I/O unavailability,
-not identity drift, and never inspects the host filesystem. Runner authority is supplied explicitly to each node and facade binding.
+not identity drift, and never inspects the host filesystem. Runner authority is
+supplied explicitly to each node and facade binding. The host and a remote
+runner may use different supported operating systems. The hello descriptor is
+validated as the runner's platform data (§8.5), not as a claim about the host's
+platform; binding does not require OS equality.
 No production process-global runner selector exists. Registry composition pins
 owned probe/reconciliation tasks to its process executor; dropping a request
 executor cannot cancel them. The registry refreshes home
@@ -6898,13 +6902,22 @@ refuses `local` as its identity. Other runners are named by the identity their
 own home records. `RunnerId::new` accepts `local` today, since no daemon or
 pairing exists yet to enforce either rule. The runner is inside the environment
 digest (descriptor digest format 5) and the descriptor wire encoding carries
-`runner_id`. Decoding a `Runner` descriptor checks its containment against this
-process's platform rather than the descriptor's own operating system, so a
-descriptor written for another platform does not decode here; deriving the
-expected containment from the wire's operating system is required before a
-descriptor crosses a process boundary. The in-process joined process service
-requires the local runner's direct backend; a runner environment's service is
-its runner arm (below).
+`runner_id`. A `Runner` descriptor's `operating_system` is `linux` or `macos`,
+the supported runner platforms; any other tag does not decode, so a runner
+whose hello names one is refused at bind. Decoding a descriptor derives its
+expected filesystem containment from the descriptor's own `operating_system`:
+`linux` requires descriptor-relative no-follow containment; `macos`, and any
+other platform tag a deterministic fake names, require host path policy only
+(chapter 04 §2.3). Process and network containment must match the backend
+kind: a runner descriptor requires inherited host process and network
+authority; deterministic fakes simulate processes and deny network. Crossed
+containment claims are refused, independently of the decoding process's OS.
+Path-format compatibility is likewise checked against the descriptor's OS;
+semantic revisions are implementation-wide, not OS-specific. Decoding platform
+data grants no execution authority and does not expand the supported process
+or evaluator platforms in chapter 00. The in-process joined
+process service requires the local runner's direct backend; a runner
+environment's service is its runner arm (below).
 
 The runner seam, `plakous_tools::internal::runner` (unsupported and hidden), is
 the host end of runner execution. `RunnerBackend` is a sealed execution backend

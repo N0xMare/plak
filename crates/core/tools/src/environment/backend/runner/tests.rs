@@ -14,6 +14,56 @@ use crate::{
 mod services;
 mod special_files;
 
+#[test]
+fn runner_backend_accepts_each_os_and_rejects_crossed_containment() {
+    struct NoCalls;
+    impl RunnerLink for NoCalls {
+        fn call(&self, _: RunnerCall) -> RunnerCallFuture {
+            panic!("descriptor admission must not call the runner")
+        }
+    }
+    for (os, filesystem, crossed) in [
+        (
+            "macos",
+            "HostPathPolicyOnly",
+            "LinuxDescriptorRelativeNoFollow",
+        ),
+        (
+            "linux",
+            "LinuxDescriptorRelativeNoFollow",
+            "HostPathPolicyOnly",
+        ),
+    ] {
+        let mut wire = serde_json::to_value(ExecutionBackendDescriptor::local_runner()).unwrap();
+        wire["runner_id"] = json!("remote");
+        wire["operating_system"] = json!(os);
+        wire["containment"]["filesystem"] = json!(filesystem);
+        let backend = RunnerBackend::new(wire.clone(), Arc::new(NoCalls)).unwrap();
+        assert_eq!(backend.identity().descriptor().operating_system(), os);
+        let persisted = serde_json::to_value(backend.identity().descriptor()).unwrap();
+        assert_eq!(persisted, wire);
+        assert_eq!(
+            serde_json::from_value::<ExecutionBackendDescriptor>(persisted).unwrap(),
+            *backend.identity().descriptor()
+        );
+        wire["containment"]["filesystem"] = json!(crossed);
+        assert!(RunnerBackend::new(wire.clone(), Arc::new(NoCalls)).is_err());
+        wire["containment"]["filesystem"] = json!(filesystem);
+        wire["path_format"] = json!("WindowsUtf8");
+        assert!(RunnerBackend::new(wire.clone(), Arc::new(NoCalls)).is_err());
+        wire["path_format"] = json!("UnixUtf8");
+        wire["semantic_revision"] = json!(999);
+        assert!(RunnerBackend::new(wire, Arc::new(NoCalls)).is_err());
+    }
+    // A runner on an unsupported platform is refused, consistent containment
+    // or not: the OS tag the prompt states is linux or macos.
+    let mut wire = serde_json::to_value(ExecutionBackendDescriptor::local_runner()).unwrap();
+    wire["runner_id"] = json!("remote");
+    wire["operating_system"] = json!("freebsd");
+    wire["containment"]["filesystem"] = json!("HostPathPolicyOnly");
+    assert!(RunnerBackend::new(wire, Arc::new(NoCalls)).is_err());
+}
+
 /// A link that answers each call by serving it from `runner`, in process.
 struct DirectLink {
     runner: ExecutionEnvironment,
@@ -82,14 +132,26 @@ async fn remote_workspace_identity_never_requires_a_host_path_and_local_bytes_st
         serde_json::to_vec(old.descriptor()).unwrap(),
         serde_json::to_vec(probed.descriptor()).unwrap()
     );
-    let descriptor = runner_descriptor(&direct, RunnerId::new("remote-probe").unwrap()).unwrap();
-    let backend = Arc::new(RunnerBackend::new(descriptor, Arc::new(RemoteProbe)).unwrap());
     let absent = root.path().join("remote-only");
     assert!(!absent.exists());
-    let remote = runner_environment(scope(), &absent, ".", config(), backend).unwrap();
-    assert_eq!(remote.descriptor().root_object().device(), 123);
-    assert_eq!(remote.descriptor().root_object().inode(), 456);
-    assert!(remote.matches_descriptor(remote.descriptor()));
+    for (os, filesystem) in [
+        ("macos", "HostPathPolicyOnly"),
+        ("linux", "LinuxDescriptorRelativeNoFollow"),
+    ] {
+        let mut descriptor =
+            runner_descriptor(&direct, RunnerId::new("remote-probe").unwrap()).unwrap();
+        descriptor["operating_system"] = json!(os);
+        descriptor["containment"]["filesystem"] = json!(filesystem);
+        let backend = Arc::new(RunnerBackend::new(descriptor, Arc::new(RemoteProbe)).unwrap());
+        let remote = runner_environment(scope(), &absent, ".", config(), backend).unwrap();
+        assert_eq!(remote.descriptor().root_object().device(), 123);
+        assert_eq!(remote.descriptor().root_object().inode(), 456);
+        let bytes = serde_json::to_vec(remote.descriptor()).unwrap();
+        let restored = serde_json::from_slice(&bytes).unwrap();
+        assert!(remote.matches_descriptor(&restored));
+        assert_eq!(bytes, serde_json::to_vec(&restored).unwrap());
+        assert_eq!(restored.backend().operating_system(), os);
+    }
     assert!(!absent.exists());
 }
 

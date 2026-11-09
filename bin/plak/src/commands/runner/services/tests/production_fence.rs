@@ -1,6 +1,7 @@
 use super::*;
 use plakous::runner::protocol::Hello;
 use plakous::runner::{PlacementFailure, ProbePhase, RunnerStatus};
+use plakous::tools::ExecutionBackend as _;
 use std::cell::RefCell;
 use std::time::Duration;
 
@@ -26,6 +27,68 @@ async fn ready_fence_production_bind_eof_schedules_one_redial() {
 #[tokio::test]
 async fn ready_fence_production_bind_requires_capture_before_reconciliation() {
     production_cut(false, true).await;
+}
+
+#[tokio::test]
+async fn production_bind_accepts_mixed_os_hello_after_reconciliation() {
+    for os in ["macos", "linux"] {
+        let mut fixture = stopped_runtime().await;
+        fixture.session.take().unwrap().release().await.unwrap();
+        let starts = Arc::new(AtomicUsize::new(0));
+        let cleanups = Arc::new(AtomicUsize::new(0));
+        let (stream, hello) = stub::line_stream_for_os(
+            &fixture.services,
+            false,
+            starts.clone(),
+            cleanups.clone(),
+            Some(os),
+        );
+        let (client, received) = RunnerClient::connect(
+            stream,
+            Bind {
+                host_id: "fixture".into(),
+                host_instance: "fixture".into(),
+                version: hello.version.clone(),
+                inspect: false,
+            },
+            ClientWindows::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(received.descriptor, hello.descriptor);
+        stub::seed_cleanup(&fixture.services, &client, fixture.line).await;
+        configure_remote(&fixture.services, &hello);
+        let registry = fixture.services.runners();
+        registry.configure(ConfiguredRunner {
+            runner_id: "fixture".into(),
+            names: vec!["fixture".into()],
+        });
+        registry.require_connection("fixture", true);
+        let pass = Arc::new(Pass {
+            client: client.clone(),
+            hello,
+            starts,
+            cleanups,
+            count: AtomicUsize::new(0),
+            rebind_after_cleanup: false,
+        });
+        let retries = start_probes_with_dial(
+            &fixture.services,
+            fixture.catalog.clone(),
+            None,
+            &tokio::runtime::Handle::current(),
+            pass.remote_dial(),
+        );
+        let rows = registry.refresh(None).await.unwrap();
+        assert_eq!(rows[0].status, RunnerStatus::Ready);
+        assert_eq!(pass.cleanups.load(Ordering::SeqCst), 1);
+        assert_eq!(pass.count.load(Ordering::SeqCst), 1);
+        assert_eq!(retries.lock().unwrap()["fixture"].delay, 0);
+        assert!(!retries.lock().unwrap()["fixture"].scheduled);
+        let runner = registry.services("fixture").unwrap().unwrap();
+        assert_eq!(runner.backend().identity().operating_system(), os);
+        client.disconnect();
+    }
 }
 
 #[cfg(feature = "web")]

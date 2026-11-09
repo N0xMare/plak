@@ -156,6 +156,62 @@ fn the_host_backend_is_the_local_runner() -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
+#[test]
+fn descriptor_containment_is_platform_data_not_decoder_authority() {
+    for (os, format, filesystem) in [
+        (
+            "linux",
+            HostPathFormat::UnixUtf8,
+            FilesystemContainment::LinuxDescriptorRelativeNoFollow,
+        ),
+        (
+            "macos",
+            HostPathFormat::UnixUtf8,
+            FilesystemContainment::HostPathPolicyOnly,
+        ),
+        (
+            "windows",
+            HostPathFormat::WindowsUtf8,
+            FilesystemContainment::HostPathPolicyOnly,
+        ),
+        (
+            "unknown",
+            HostPathFormat::OtherUtf8,
+            FilesystemContainment::HostPathPolicyOnly,
+        ),
+    ] {
+        let runner = ExecutionBackendDescriptor::local_runner_for_platform(os, format);
+        assert_eq!(runner.containment().filesystem(), filesystem);
+        for fake in [false, true] {
+            let mut wire = serde_json::to_value(&runner).unwrap();
+            if fake {
+                wire["kind"] = "DeterministicFake".into();
+                wire.as_object_mut().unwrap().remove("runner_id");
+                wire["semantic_revision"] =
+                    serde_json::to_value(ExecutionBackendSemanticRevision::deterministic_fake())
+                        .unwrap();
+                wire["containment"]["process"] = "DeterministicFake".into();
+                wire["containment"]["network"] = "Denied".into();
+            }
+            // A runner runs only on a supported runner platform; a fake's OS
+            // tag is any platform tag.
+            if !fake && !matches!(os, "linux" | "macos") {
+                assert!(serde_json::from_value::<ExecutionBackendDescriptor>(wire).is_err());
+                continue;
+            }
+            let decoded: ExecutionBackendDescriptor = serde_json::from_value(wire.clone()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), wire);
+            wire["containment"]["filesystem"] = if os == "linux" {
+                "HostPathPolicyOnly"
+            } else {
+                "LinuxDescriptorRelativeNoFollow"
+            }
+            .into();
+            assert!(serde_json::from_value::<ExecutionBackendDescriptor>(wire).is_err());
+        }
+    }
+}
+
 /// A runner backend must name its runner and the fake must not; runner ids
 /// are lowercase identifiers.
 #[test]
