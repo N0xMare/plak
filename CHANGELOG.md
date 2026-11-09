@@ -20,6 +20,10 @@ one cross-build carrier (a build imports its own and the previous version).
   execution-environment change. `compile_explicit_runtime_profile` takes the
   backend's `ExecutionBackendDescriptor`, now on the facade.
 
+- Move image sniffing and attachment/tool-result normalization into the internal
+  `plakous-image` crate, so a client without the facade shares the one
+  implementation. Outputs are byte-identical; no wire or format change.
+
 - Share serialized product wire types through the internal `plakd-wire-types`
   crate without changing the wire schema or resetting terminal-local preferences.
 

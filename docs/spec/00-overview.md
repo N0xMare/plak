@@ -29,11 +29,13 @@ Except for the product-owned `plakd-wire-types`, every other `crates/**`
 package is a Plakous library in one of two positions.
 **Below the facade** — transports, kernels, providers, the store, the engines,
 the harness packs and prompts — composed behind the facade. Plak and the
-host-layer libraries reach these through the facade; direct package nameability
+host-layer libraries reach these through the facade, apart from the one
+recorded exception below; direct package nameability
 does not confer a support promise. **Above the facade** — `plakous-host-protocol`,
 `plakous-workspace`, `plakous-recursive-subagents`,
 `plakous-recursive-subagents-store`, and `plakous-hosted` — which consume only
-`plakous` and each other and are never re-exported by it. The facade is the only
+`plakous` and each other, except for `plakous-hosted`'s recorded edge to the
+common `plakous-image` (chapter 06 §3), and are never re-exported by it. The facade is the only
 L0 complete-workflow surface.
 
 `plakd-wire-types` occupies the existing `host` layer and depends on
@@ -63,7 +65,7 @@ Publication and Rust nameability confer accessibility, not support. A published
 package carries no direct-use compatibility, qualification, or support promise
 unless it is in the supported class.
 
-The workspace contains 41 packages: five supported, 33 published internal
+The workspace contains 42 packages: five supported, 34 published internal
 (the vendored `plakous-codex-code-mode-protocol` among them), and three
 repository-only. The supported and published-internal packages are publishable
 to crates.io as one exact cohort; the repository-only packages set
@@ -114,6 +116,7 @@ classes and directory policy.
 | `plakous-auth` | `crates/common/auth` | `common` | Provider-neutral auth foundations: secret containers, OAuth pins and workflow, callback binding, credential metadata, durable private storage |
 | `plakous-runner-protocol` | `crates/common/runner-protocol` | `common` | Runner protocol v3: length-prefixed JSON frames, the hello and bind handshake, request classes, owner transfer and answers |
 | `plakous-runner-dial` | `crates/common/runner-dial` | `common` | Portable Noise IK, pairing proofs, offers, fingerprint confirmation and transport framing; no product caller or I/O |
+| `plakous-image` | `crates/common/image` | `common` | The one image sniffer (re-exported by `plakous-tools`), the attachment count and per-message byte budget, and, under `normalize`, the one attachment and tool-result normalizer and image-file reader: decode, bound, downscale and re-encode, clipboard RGBA, the 64 MiB unread refusal; no runtime, and it reads only a caller-named file |
 | `plakous-cell` | `crates/runtimes/cell` | `engine` | Cell protocol (`plakous-cell-protocol.v2`), worker client and session for isolated interpreter workers; never links an interpreter |
 | `plakous-js-runtime` | `crates/runtimes/js-runtime` | `engine` | QuickJS runtime for the `plakous-js-host` binary and opt-in library embedding |
 | `plakous-py-worker` | `crates/runtimes/py-worker` | `engine` | The `plakous-py-host` cell worker: the pinned upstream Monty interpreter and its child state machine driven in process on the cell protocol, the JSON/Monty value codec, nested-call batching and acceptance, worker-side refusal strings |

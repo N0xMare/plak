@@ -1792,18 +1792,14 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "ToolResultUpdateBlock",
         },
     },
-    # Prompt images: the library's admission bounds and its one sniffer,
-    # checked before a draft is queued and to render chips.
+    # Prompt images: the library's admission bounds, asserted equal to the
+    # attachment bounds of `plakous-image`.
     ("plakous-hosted", "src/attachments.rs"): {
         "agent": {
             "MAX_USER_IMAGES",
             "MAX_USER_IMAGE_BYTES",
             "MAX_USER_MESSAGE_BYTES",
         },
-        "tools": {"ImageSniffError", "sniff_image"},
-    },
-    ("plakous-hosted", "src/attachments/normalize.rs"): {
-        "tools": {"ImageSniffError", "sniff_image"},
     },
     # Workspace image reads install only the decoder. The agent derives the
     # route, model and image-input fact from the bound provider configuration.
@@ -4048,6 +4044,58 @@ def validate_neutral_dependencies(workspace: Workspace) -> list[str]:
     return errors
 
 
+IMAGE_LEAF = "plakous-image"
+
+
+def validate_image_leaf(workspace: Workspace) -> list[str]:
+    """Keep `plakous-image` a workspace leaf that L0 links without features.
+
+    `plakous-tools` reaches it under a recorded core edge exception. The
+    exception stays harmless only while the leaf names no workspace package
+    and the tool contracts take it without default features or any feature,
+    so the decoder and anything a later edit adds stay out of L0's closure.
+    """
+    image = workspace.packages.get(IMAGE_LEAF)
+    tools = workspace.packages.get("plakous-tools")
+    if image is None or tools is None:
+        return [f"{IMAGE_LEAF} and plakous-tools must both be workspace members"]
+    errors = [
+        f"{IMAGE_LEAF}: depends on workspace package {dependency['name']!r}; "
+        "the image leaf names no workspace package"
+        for dependency in image.metadata.get("dependencies", [])
+        if dependency["name"] in workspace.packages
+    ]
+    edges = [
+        dependency
+        for dependency in tools.metadata.get("dependencies", [])
+        if dependency["name"] == IMAGE_LEAF
+    ]
+    if len(edges) != 1:
+        errors.append(f"plakous-tools: expected exactly one {IMAGE_LEAF} dependency")
+    for dependency in edges:
+        if (
+            dependency.get("kind") is not None
+            or dependency.get("target") is not None
+            or dependency.get("optional")
+            or dependency.get("uses_default_features")
+            or dependency.get("features")
+        ):
+            errors.append(
+                f"plakous-tools: {IMAGE_LEAF} must be a plain normal dependency with "
+                "default-features = false and no features"
+            )
+    features = tools.manifest.get("features", {})
+    for feature, members in sorted(features.items() if isinstance(features, dict) else []):
+        for member in members if isinstance(members, list) else []:
+            target = str(member).split("/", 1)[0].removeprefix("dep:").rstrip("?")
+            if target == IMAGE_LEAF:
+                errors.append(
+                    f"plakous-tools: feature {feature!r} enables {member!r}; the tool "
+                    f"contracts take {IMAGE_LEAF} without features"
+                )
+    return errors
+
+
 def validate_neutral_sources(package_name: str, sources: dict[str, str]) -> list[str]:
     """Forbid provider and product-account names in a neutral package's sources."""
     errors: list[str] = []
@@ -4705,6 +4753,7 @@ PORTABLE_CRATES = (
     "plakous-model",
     "plakous-runner-protocol",
     "plakous-runner-dial",
+    "plakous-image",
     "plakous-tools",
     "plakous-agent",
 )
@@ -5713,6 +5762,7 @@ def _check_workspace() -> int:
     errors.extend(validate_production_dependencies(workspace))
     errors.extend(validate_facade_features(workspace))
     errors.extend(validate_neutral_dependencies(workspace))
+    errors.extend(validate_image_leaf(workspace))
 
     root_license = (ROOT / "LICENSE").read_text(encoding="utf-8")
     for name, package in sorted(packages.items()):

@@ -82,7 +82,7 @@ provider qualification, recovery certification, or source compatibility.
 | Published internal | A necessary dependency and deliberate advanced-use implementation surface, released in the exact cohort, with no direct-use compatibility, qualification, or support promise |
 | Repository-only | Test, fixture, and crash-harness packages, kept outside the production dependency closure entirely and never published |
 
-The workspace holds 41 packages: five supported, 33 published internal, three
+The workspace holds 42 packages: five supported, 34 published internal, three
 repository-only.
 
 The root `[workspace].exclude` includes `.plak`, the local operator-state and
@@ -94,14 +94,14 @@ exclusion and continues to reject other unreviewed nested-package exclusions.
 
 `plakous`, `plakous-agent`, `plakous-model`, `plakous-tools`, `plak`.
 
-**Published internal (33)**
+**Published internal (34)**
 
 `plakd-wire-types`, `plakous-host-protocol`, `plakous-workspace`, `plakous-recursive-subagents`,
 `plakous-recursive-subagents-store`, `plakous-hosted`,
 `plakous-anthropic`, `plakous-attempt`, `plakous-auth`,
 `plakous-chat-completions`, `plakous-codex-code-mode-protocol`,
 `plakous-compose`, `plakous-exchange`,
-`plakous-http`, `plakous-cell`, `plakous-mcp`, `plakous-js-runtime`, `plakous-py-worker`, `plakous-messages`, `plakous-openai`,
+`plakous-http`, `plakous-image`, `plakous-cell`, `plakous-mcp`, `plakous-js-runtime`, `plakous-py-worker`, `plakous-messages`, `plakous-openai`,
 `plakous-openrouter`, `plakous-prompts`,
 `plakous-responses`, `plakous-runner`, `plakous-runner-protocol`, `plakous-runner-dial`, `plakous-store`,
 `plakous-tool-files`, `plakous-tool-plan`, `plakous-tool-process`,
@@ -143,7 +143,7 @@ explicit metadata. Directory placement never grants dependency permission.
 | Directory | Contents | Layer |
 | --- | --- | --- |
 | `crates/core/` | model, tools, agent | core |
-| `crates/common/` | attempt, http, auth, runner-protocol | common |
+| `crates/common/` | attempt, http, auth, runner-protocol, runner-dial, image | common |
 | `crates/runtimes/` | cell, js-runtime, py-worker, runner | engine |
 | `crates/protocols/` | Responses (with its shared dialect hosts), exchange, Messages, Chat | protocol |
 | `crates/providers/` | OpenAI, Anthropic, xAI, OpenRouter | provider |
@@ -162,7 +162,9 @@ The `harness` layer sits under the facade and depends on `core`, `common`,
 narrows that — `plakous-prompts` depends on no pack and no composition crate in
 production, so instruction text never acquires an opinion about which tools
 exist. The `host` layer sits above the facade and consumes only `plakous` and
-other `host` packages; nothing in it is re-exported by the facade. The
+other `host` packages, except for `plakous-hosted`'s recorded edge to the
+common `plakous-image` described below; nothing in it is re-exported by the
+facade. The
 `vendor` layer holds `plakous-codex-code-mode-protocol` alone; it depends on
 no workspace package. The `engine` layer may depend on it; the composition
 compiler's explicit `plakous-compose` exception is the only harness edge.
@@ -183,6 +185,24 @@ transport, parsing or provider admission into the facade. A separate narrow
 `plakous-auth` to `plakous-model` exception lets the credential HTTP adapter
 consume the one provider-neutral classified request gate. It does not put
 provider names, credentials or HTTP into the model crate.
+
+`plakous-image` (layer `common`) is the one image sniffer, the attachment
+count and per-message byte budget, and, under its `normalize` feature, the
+one image normalizer and image-file reader. Two recorded edge exceptions reach
+it: `plakous-tools` re-exports its sniffer as `plakous_tools::{sniff_image,
+ImageHeader, ImageSniffError}` and takes it with default features off and no
+feature, so no L0 crate links a decoder; and `plakous-hosted` names it
+directly, its `images` feature forwarding `plakous-image/normalize`, the
+single reviewed host feature edge below the facade besides the
+repository-only store tracer. Hosted keeps thin `DraftImage` wrappers and
+asserts at compile time that the image count, image byte bound and
+per-message budget equal `plakous-agent`'s admission constants. The workspace
+checker requires the crate to name no workspace package and the
+`plakous-tools` edge to stay featureless. A client product that does not
+link the facade depends on `plakous-image` alone, with chip text from
+`plakous-host-protocol::labelled_chip`. The crate has no runtime and reads
+only a caller-named file; its only external dependency is the optional
+`image` crate.
 
 `plakous-auth::api_key` is the common owner of injected API-key secrets,
 generation fingerprints, typed sources and the static source. The facade's
@@ -417,7 +437,8 @@ called out explicitly.
 | `plak`, `plakous-hosted` | `openai`, `anthropic`, `xai-api`, `openrouter` | Independently forward the API route (`xai-api` forwards facade `xai`); `openai` additionally requires `js` |
 | `plak`, `plakous-hosted` | `tui` | Default on; Plak's optional terminal presentation stack and interactive helpers. Hosted carries capability identity only, without a TUI dependency |
 | `plak`, `plakous-hosted` | `clipboard` | Default on; requires `tui` and `images`; Plak's optional clipboard libraries and image paste. Hosted carries capability identity |
-| `plak`, `plakous-hosted` | `images` | Default on; hosted image normalization and its optional `image` dependency; new attachments refuse without it, canonical history remains readable |
+| `plak`, `plakous-hosted` | `images` | Default on; hosted image normalization, forwarding `plakous-image/normalize` and its optional `image` dependency; new attachments refuse without it, canonical history remains readable |
+| `plakous-image` | `normalize` | Default on for direct use; decoding, downscaling and re-encoding through the `image` crate, and the image-file reader, in its `normalize` module. Without it sniffing, the bounds, the message budget, the dropped-path check and the error vocabulary remain; `plakous-tools` uses it that way |
 | `plak`, `plakous-hosted` | `js` | Default on; JavaScript/Code Mode admission, facade `composition`, and product JavaScript worker resolution |
 | `plak`, `plakous-hosted` | `python` | Default on; explicitly forwards facade `composition-python`, implies `js`, and selects Python worker resolution |
 | `plak`, `plakous-hosted` | `mcp` | Default on; forwards the facade client and selects active MCP commands/binding. Omission removes rmcp and the MCP transports while frozen records remain readable |
@@ -668,9 +689,9 @@ Clipboard image paste (`Ctrl+V`) uses `arboard` (image data only: AppKit on
 macOS, the pure-Rust X11 client `x11rb` on Linux, no Wayland feature), an
 optional `bin/plak` dependency selected by `clipboard`; on macOS this feature also selects
 `objc2`, `objc2-app-kit` (`NSPasteboard` only) and `objc2-foundation` to read
-a screenshot's PNG flavour without the TIFF decode. Attached images are normalized in
-`plakous-hosted` with the pure-Rust `image` crate (features `png`, `jpeg`,
-`gif`, `webp` only), selected by `images`. Defaults build for both supported targets, musl static
+a screenshot's PNG flavour without the TIFF decode. Attached images are normalized by
+`plakous-image` with the pure-Rust `image` crate (features `png`, `jpeg`,
+`gif`, `webp` only), which `plakous-hosted` selects under `images`. Defaults build for both supported targets, musl static
 included.
 `ratatui` does not appear anywhere in the `plakous-hosted` closure. The hosted
 crate depends on the tree store port through `plakous-recursive-subagents`;
@@ -1872,8 +1893,11 @@ the external `monty-proto` / `monty-types` / `monty-alloc` at
 
 `PORTABLE_CRATES` in `tools/gate/check_workspace.py` is the only portable-crate
 list: `plakous-model` and `plakous-runner-protocol` (closure `serde` and
-`serde_json`), then `plakous-runner-dial`, `plakous-tools` and `plakous-agent`. All five have
-portable defaults. A crate joins that tuple only in the change that makes its normal dependency
+`serde_json`), then `plakous-runner-dial`, `plakous-image`, `plakous-tools` and `plakous-agent`. All six have
+portable defaults. `plakous-image`'s default `normalize` closure is the
+pure-Rust `image` crate with its png, jpeg, gif and webp codecs; it is checked
+for the target with those defaults, and `plakous-tools` reaches it without
+features. A crate joins that tuple only in the change that makes its normal dependency
 closure pass the fence below and its library
 check clean for `wasm32-unknown-unknown`. Joining is not a supported-platform
 claim: `wasm32-unknown-unknown` stays an unsupported product target (section 2).

@@ -509,6 +509,32 @@ pub struct DraftImage {
     pub source_dimensions: Option<(u32, u32)>,
 }
 
+/// The chip an image is shown as: `label` is a file name or a media
+/// subtype, then the dimensions when known, the size, and the dimensions it
+/// was downscaled from: `[image: shot.png 2048x1324 1.9 MB, downscaled from
+/// 3456x2234]`.
+#[must_use]
+pub fn labelled_chip(
+    label: &str,
+    byte_len: usize,
+    dimensions: Option<(u32, u32)>,
+    source: Option<(u32, u32)>,
+) -> String {
+    let size = if byte_len < 1024 * 1024 {
+        format!("{} KB", byte_len.div_ceil(1024))
+    } else {
+        let tenths = (byte_len * 10).div_ceil(1024 * 1024);
+        format!("{}.{} MB", tenths / 10, tenths % 10)
+    };
+    let source = source.map_or_else(String::new, |(width, height)| {
+        format!(", downscaled from {width}x{height}")
+    });
+    match dimensions {
+        Some((width, height)) => format!("[image: {label} {width}x{height} {size}{source}]"),
+        None => format!("[image: {label} {size}{source}]"),
+    }
+}
+
 /// Image bytes as standard base64 text.
 mod base64_bytes {
     use base64::Engine as _;

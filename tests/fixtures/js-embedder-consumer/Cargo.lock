@@ -521,6 +521,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "plakous-image"
+version = "0.0.3"
+
+[[package]]
 name = "plakous-js-embedder-consumer"
 version = "0.0.0"
 dependencies = [
@@ -668,6 +672,7 @@ dependencies = [
  "filedescriptor",
  "globset",
  "ignore",
+ "plakous-image",
  "plakous-model",
  "portable-pty",
  "regex",

@@ -591,6 +591,7 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES = {
     ("plak", "tui", "plakous-hosted/tui"),
     ("plak", "clipboard", "plakous-hosted/clipboard"),
     ("plak", "images", "plakous-hosted/images"),
+    ("plakous-hosted", "images", "plakous-image/normalize"),
     ("plak", "js", "plakous-hosted/js"),
     ("plak", "js", "plakous/composition"),
     ("plak", "python", "plakous-hosted/python"),
@@ -706,6 +707,7 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES.update(
 )
 # Exact reviewed dependency and feature surfaces; path changes require review too.
 EXPECTED_SECURITY_SURFACE_DIGESTS = {
+    "plakous-image": "9e6162576ed3060fc3b358b2a80c4a9a70637fc66eed4dba218df54b7552adf0",
     "plakous-runner-dial": "adefe7b2eb4e12474b8bdadd4b62de1b4f74ba5ba6fd971854beea4a892ee48e",
     "plakous-py-worker": "12692a8c10a6033ffd8c99be9fd192fb9d76cbd41de571b36aabdc8720bebce5",
     "plakous-js-runtime": "fd22d2bf42bb470f5ed7ec3a852aa0472c1fdafa2ced4641a4a4f42c0a4bdd2a",
@@ -732,7 +734,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-openrouter": "fc202257b7a1b3d0586e9d0df778bd1d578c8a6d06d6818e3d5feecc5961246c",
     "plakous-responses": "f565ee25c2e3227c43b269500077732e3fe06c06776e0e3610db0f508249a5ad",
     "plakous-store": "f8f70a574e4a3d4d408946583fb499690e1657407957fc26aa26d67819cc4e18",
-    "plakous-tools": "211807dd473326d2a6d5e0a20824760c590383a0b6bd79d5170fc59d6465bc55",
+    "plakous-tools": "00089e845e23a837c363a8864113357b5bc802e0d6bce6ea18ad9c7b727c3b1d",
     "plakous-xai": "4b452bb53d65262dff9cc74e58ac83bb0f89ab6ad2201299eb5a7ed1238b0158",
     "plakous-runner-protocol": "074927a7f911be39d35b2c5f498ead01b23a3d188dc5b7aa8fc1e29eef3fd1e9",
     "plakous-runner": "130f9a6eb2ac3a7b05616389110a9659abf6178b42b317e84287aba4008f6b76",
@@ -1178,6 +1180,14 @@ def validate_feature_contracts(
                 "plakous-recursive-subagents-store",
                 "commit-trace",
                 "plakous-store/commit-trace",
+            ):
+                continue
+            # The hosted attachment normalizer is the common image crate,
+            # which client products use without the facade.
+            if (package, feature, edge) == (
+                "plakous-hosted",
+                "images",
+                "plakous-image/normalize",
             ):
                 continue
             if target != "plakous" and layers.get(target) != "host":

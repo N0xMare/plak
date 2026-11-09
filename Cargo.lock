@@ -4196,6 +4196,7 @@ dependencies = [
  "plakous-compose",
  "plakous-host-protocol",
  "plakous-http",
+ "plakous-image",
  "plakous-messages",
  "plakous-model",
  "plakous-offline-crash-harness",
@@ -4242,6 +4243,16 @@ dependencies = [
  "tokio-rustls",
  "webpki-roots",
  "zeroize",
+]
+
+[[package]]
+name = "plakous-image"
+version = "0.0.3"
+dependencies = [
+ "image",
+ "serde_json",
+ "sha2",
+ "tempfile",
 ]
 
 [[package]]
@@ -4686,6 +4697,7 @@ dependencies = [
  "globset",
  "ignore",
  "nix 0.28.0",
+ "plakous-image",
  "plakous-model",
  "plakous-runner-protocol",
  "portable-pty",

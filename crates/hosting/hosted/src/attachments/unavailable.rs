@@ -1,4 +1,4 @@
-use super::NormalizeError;
+use super::{ImageFileError, NormalizeError};
 
 pub fn normalize(
     _name: String,
@@ -20,10 +20,20 @@ pub fn normalize_rgba(
     Err(unavailable())
 }
 
+pub(super) fn read_image(
+    _path: &std::path::Path,
+) -> Result<plakous_host_protocol::DraftImage, ImageFileError> {
+    Err(ImageFileError::Unavailable(capability()))
+}
+
 fn unavailable() -> NormalizeError {
-    NormalizeError::Unavailable(crate::capabilities::CapabilityUnavailable {
+    NormalizeError::Unavailable(capability())
+}
+
+fn capability() -> crate::capabilities::CapabilityUnavailable {
+    crate::capabilities::CapabilityUnavailable {
         id: "images",
         kind: crate::capabilities::CapabilityKind::Surface,
         feature: "images",
-    })
+    }
 }

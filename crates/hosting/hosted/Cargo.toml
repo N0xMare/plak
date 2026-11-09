@@ -35,8 +35,8 @@ serde_json.workspace = true
 toml.workspace = true
 time = { version = "0.3", features = ["formatting", "local-offset"] }
 # Every attached image is decoded and, when over the bounds, downscaled and
-# re-encoded (png, jpeg, gif first frame, webp).
-image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"], optional = true }
+# re-encoded (png, jpeg, gif first frame, webp) under `images`.
+plakous-image.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
 tracing.workspace = true
 uuid = { workspace = true, features = ["v4"] }
@@ -56,6 +56,7 @@ plakous-messages.workspace = true
 plakous-model.workspace = true
 plakous-offline-crash-harness = { path = "../../../tests/harnesses/offline-crash" }
 plakous-http.workspace = true
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 plakous-openai.workspace = true
 plakous-openrouter = { workspace = true, features = ["test-clock"] }
 plakous-responses.workspace = true
@@ -81,7 +82,7 @@ js = ["plakous/composition"]
 web-fetch = ["plakous/web-fetch"]
 tui = []
 clipboard = ["tui", "images"]
-images = ["dep:image"]
+images = ["plakous-image/normalize"]
 python = ["js", "plakous/composition-python"]
 mcp = ["plakous/mcp"]
 git-cli = ["plakous-workspace/git-cli", "plakous-recursive-subagents/git-cli"]

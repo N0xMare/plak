@@ -150,6 +150,7 @@ RESPONSIBILITY_RULES: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
             ("plakous-runner", "src/"),
             ("plakous-runner-protocol", "src/"),
             ("plakous-http", "src/"),
+            ("plakous-image", "src/"),
             ("plakous-model", "src/"),
             ("plakous-tools", "src/"),
         ),

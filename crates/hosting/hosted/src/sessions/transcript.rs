@@ -4,6 +4,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use plakous_host_protocol::labelled_chip;
 use plakous_host_protocol::views::presentation::row_bytes;
 use plakous_host_protocol::views::transcript::{ToolItem, TranscriptItem, TranscriptRow};
 
@@ -42,27 +43,6 @@ pub(crate) fn image_chip(
         dimensions,
         None,
     )
-}
-
-fn labelled_chip(
-    label: &str,
-    byte_len: usize,
-    dimensions: Option<(u32, u32)>,
-    source: Option<(u32, u32)>,
-) -> String {
-    let size = if byte_len < 1024 * 1024 {
-        format!("{} KB", byte_len.div_ceil(1024))
-    } else {
-        let tenths = (byte_len * 10).div_ceil(1024 * 1024);
-        format!("{}.{} MB", tenths / 10, tenths % 10)
-    };
-    let source = source.map_or_else(String::new, |(width, height)| {
-        format!(", downscaled from {width}x{height}")
-    });
-    match dimensions {
-        Some((width, height)) => format!("[image: {label} {width}x{height} {size}{source}]"),
-        None => format!("[image: {label} {size}{source}]"),
-    }
 }
 
 /// [`image_chip`] of attached image bytes, as history will show it, plus

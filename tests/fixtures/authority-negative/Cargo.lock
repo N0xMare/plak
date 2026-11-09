@@ -1211,6 +1211,7 @@ dependencies = [
  "nix",
  "plakous",
  "plakous-host-protocol",
+ "plakous-image",
  "plakous-recursive-subagents",
  "plakous-workspace",
  "serde",
@@ -1242,6 +1243,10 @@ dependencies = [
  "webpki-roots",
  "zeroize",
 ]
+
+[[package]]
+name = "plakous-image"
+version = "0.0.3"
 
 [[package]]
 name = "plakous-mcp"
@@ -1488,6 +1493,7 @@ dependencies = [
  "filedescriptor",
  "globset",
  "ignore",
+ "plakous-image",
  "plakous-model",
  "portable-pty",
  "regex",

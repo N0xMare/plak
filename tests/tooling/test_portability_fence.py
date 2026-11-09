@@ -68,13 +68,14 @@ TOKIO = """\
 
 
 class PortabilityFenceTests(unittest.TestCase):
-    def test_the_portable_set_includes_the_runner_dial_core(self):
+    def test_the_portable_set_includes_the_runner_dial_and_image_cores(self):
         self.assertEqual(
             checker.PORTABLE_CRATES,
             (
                 "plakous-model",
                 "plakous-runner-protocol",
                 "plakous-runner-dial",
+                "plakous-image",
                 "plakous-tools",
                 "plakous-agent",
             ),
@@ -93,6 +94,7 @@ class PortabilityFenceTests(unittest.TestCase):
                 "plakous-model",
                 "plakous-runner-protocol",
                 "plakous-runner-dial",
+                "plakous-image",
                 "plakous-tools",
                 "plakous-agent",
             ],

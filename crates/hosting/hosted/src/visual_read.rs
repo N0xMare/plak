@@ -32,11 +32,9 @@ impl ImageNormalizer for HostedImageNormalizer {
 
 fn tool_normalize_error(error: NormalizeError) -> String {
     match error {
-        NormalizeError::Unfit => IMAGE_BUDGET.to_owned(),
+        NormalizeError::Image(plakous_image::NormalizeError::Unfit) => IMAGE_BUDGET.to_owned(),
         NormalizeError::Unavailable(_) => IMAGE_READS_UNAVAILABLE.to_owned(),
-        NormalizeError::NotAnImage(_)
-        | NormalizeError::Undecodable(_)
-        | NormalizeError::Malformed { .. } => UNSUPPORTED_IMAGE.to_owned(),
+        NormalizeError::Image(_) => UNSUPPORTED_IMAGE.to_owned(),
     }
 }
 

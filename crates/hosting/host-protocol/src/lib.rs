@@ -102,7 +102,7 @@ pub use channel::{
 };
 pub use intent::{
     ApprovalChoice, Core, Draft, DraftImage, Never, ObservationExtension, ProtocolExtension,
-    SessionIntent,
+    SessionIntent, labelled_chip,
 };
 pub use observation::{
     ContentObservation, ContextCapacityRecovery, ModelRetryNotice, PendingContinuation,

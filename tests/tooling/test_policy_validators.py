@@ -1365,7 +1365,7 @@ class RepositoryPolicyTests(unittest.TestCase):
 
     def test_every_package_carries_layer_metadata_and_the_tree_is_clean(self) -> None:
         workspace = self.workspace
-        self.assertEqual(len(workspace.packages), 41)
+        self.assertEqual(len(workspace.packages), 42)
         for validator in (
             workspace_policy.validate_package_metadata,
             workspace_policy.validate_layout,
@@ -1450,6 +1450,7 @@ class RepositoryPolicyTests(unittest.TestCase):
                 "plakous-mcp",
                 "plakous-py-worker",
                 "plakous-http",
+                "plakous-image",
                 "plakous-messages",
                 "plakous-openai",
                 "plakous-openrouter",
@@ -1468,7 +1469,64 @@ class RepositoryPolicyTests(unittest.TestCase):
         }
         actual = workspace_policy.package_classifications(self.workspace)
         self.assertEqual(actual, expected)
-        self.assertEqual(sum(map(len, actual.values())), 41)
+        self.assertEqual(sum(map(len, actual.values())), 42)
+
+    def test_the_image_leaf_has_no_workspace_dependency_and_l0_takes_it_bare(self) -> None:
+        self.assertEqual(workspace_policy.validate_image_leaf(self.workspace), [])
+
+        def with_package(name: str, **changes: object) -> object:
+            packages = dict(self.workspace.packages)
+            packages[name] = replace(packages[name], **changes)
+            return replace(self.workspace, packages=packages)
+
+        image = self.workspace.packages["plakous-image"]
+        leaky = with_package(
+            "plakous-image",
+            metadata={
+                **image.metadata,
+                "dependencies": [
+                    *image.metadata["dependencies"],
+                    {"name": "plakous-http", "kind": None, "features": []},
+                ],
+            },
+        )
+        errors = workspace_policy.validate_image_leaf(leaky)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("'plakous-http'", errors[0])
+
+        tools = self.workspace.packages["plakous-tools"]
+
+        def tools_edge(**changes: object) -> list[str]:
+            dependencies = [
+                {**dependency, **changes} if dependency["name"] == "plakous-image" else dependency
+                for dependency in tools.metadata["dependencies"]
+            ]
+            return workspace_policy.validate_image_leaf(
+                with_package(
+                    "plakous-tools", metadata={**tools.metadata, "dependencies": dependencies}
+                )
+            )
+
+        for changes in (
+            {"uses_default_features": True},
+            {"features": ["normalize"]},
+            {"optional": True},
+        ):
+            with self.subTest(changes=changes):
+                errors = tools_edge(**changes)
+                self.assertEqual(len(errors), 1)
+                self.assertIn("default-features = false and no features", errors[0])
+
+        forwarding = with_package(
+            "plakous-tools",
+            manifest={
+                **tools.manifest,
+                "features": {"decode": ["plakous-image/normalize"]},
+            },
+        )
+        errors = workspace_policy.validate_image_leaf(forwarding)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("'decode'", errors[0])
 
     def test_layers_and_neutral_packages_are_as_designed(self) -> None:
         by_layer = {
@@ -1509,6 +1567,7 @@ class RepositoryPolicyTests(unittest.TestCase):
                 "plakous-model",
                 "plakous-tools",
                 "plakous-agent",
+                "plakous-image",
                 "plakous-host-protocol",
                 "plakous-workspace",
                 "plakous-recursive-subagents",
@@ -1595,6 +1654,7 @@ class RepositoryPolicyTests(unittest.TestCase):
             edges["plakous-hosted"],
             {
                 "plakous-host-protocol",
+                "plakous-image",
                 "plakous-recursive-subagents",
                 "plakous",
                 "plakous-workspace",
@@ -1617,6 +1677,7 @@ class RepositoryPolicyTests(unittest.TestCase):
                 "plakous-compose": ("plakous-codex-code-mode-protocol",),
                 "plakous": ("plakous-exchange", "plakous-responses"),
                 "plakous-auth": ("plakous-model",),
+                "plakous-tools": ("plakous-image",),
                 "plak": (
                     "plakd-wire-types",
                     "plakous-host-protocol",
@@ -1630,6 +1691,7 @@ class RepositoryPolicyTests(unittest.TestCase):
                 ),
                 "plakous-hosted": (
                     "plakous-host-protocol",
+                    "plakous-image",
                     "plakous-recursive-subagents",
                     "plakous-workspace",
                 ),
@@ -3020,6 +3082,7 @@ class FeaturePolicyTests(unittest.TestCase):
                 "plakous-agent",
                 "plakous-compose",
                 "plakous-codex-code-mode-protocol",
+                "plakous-image",
                 "plakous-mcp",
                 "plakous-model",
                 "plakous-prompts",
@@ -3055,7 +3118,8 @@ class FeaturePolicyTests(unittest.TestCase):
         self.assertNotIn("plakous-openrouter", native)
         store = feature_policy.expected_closure("plakous-store", ("sqlite",), False, manifests)
         self.assertEqual(
-            store, {"plakous-store", "plakous-agent", "plakous-model", "plakous-tools"}
+            store,
+            {"plakous-store", "plakous-agent", "plakous-image", "plakous-model", "plakous-tools"},
         )
         cell = feature_policy.expected_closure("plakous-cell", (), False, manifests)
         self.assertEqual(cell, {"plakous-cell"})

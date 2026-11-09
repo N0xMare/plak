@@ -1093,6 +1093,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "plakous-image"
+version = "0.0.3"
+
+[[package]]
 name = "plakous-mcp"
 version = "0.0.3"
 dependencies = [
@@ -1309,6 +1313,7 @@ dependencies = [
  "filedescriptor",
  "globset",
  "ignore",
+ "plakous-image",
  "plakous-model",
  "portable-pty",
  "regex",

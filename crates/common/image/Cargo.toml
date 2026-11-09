@@ -1,0 +1,37 @@
+[package]
+name = "plakous-image"
+description = "Pure image sniffing and normalization into attachment and tool-result bounds"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/plakous-image"
+readme = "README.md"
+keywords = ["llm", "agent", "image"]
+categories = ["development-tools"]
+exclude.workspace = true
+
+[package.metadata.plakous]
+layer = "common"
+class = "published-internal"
+neutral = true
+
+[features]
+default = ["normalize"]
+# Decoding, downscaling and re-encoding (png, jpeg, gif first frame, webp),
+# and reading an image file to normalize it. Without it sniffing, the bounds,
+# the message budget and the error vocabulary remain.
+normalize = ["dep:image"]
+
+[dependencies]
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"], optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

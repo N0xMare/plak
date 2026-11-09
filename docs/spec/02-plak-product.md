@@ -8328,7 +8328,8 @@ fit); attach fewer or smaller images`. `plak run --image` (exit 2), a JSONL
 with the same sentence, counting its text as its JSON-escaped string; runtime
 admission remains the exact check (chapter 01 §3.1). Every attached image (a dropped or pasted path,
 `/image`, `Ctrl+V`, `plak run --image` and the JSONL `prompt.images`) passes
-one normalizer in `plakous-hosted`:
+one normalizer, `plakous-image`, which `plakous-hosted` wraps; a client that
+does not link the facade uses the same crate and constants:
 
 - An image whose long edge is at most 2048 px and whose bytes fit 3.75 MiB is
   sent byte-identical.
@@ -8339,8 +8340,10 @@ one normalizer in `plakous-hosted`:
   transparency composed over white. While the encoding is still over 3.75 MiB
   the long edge shrinks by a quarter and it is encoded again; a JPEG that does
   not fit at 64 px is refused.
-- A file over 64 MiB is refused unread, and decoding is bounded at 16384 px
-  per edge and 256 MiB of allocation.
+- Decoding is bounded at 16384 px per edge and 256 MiB of allocation.
+
+The image-file reader in `plakous-image` refuses a file over 64 MiB unread,
+naming the file, before any normalization.
 
 Terminal image rendering does not exist.
 
