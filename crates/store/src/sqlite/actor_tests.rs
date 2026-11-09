@@ -453,7 +453,8 @@ async fn shutdown_with_pending_vacuum_runs_only_one_checkpoint() -> TestResult {
                     )
                     .map_err(map_sqlite)?;
                 b.connection
-                    .trace_v2(TraceEventCodes::SQLITE_TRACE_STMT, Some(count_statement));
+                    .trace_v2(TraceEventCodes::SQLITE_TRACE_STMT, Some(count_statement))
+                    .map_err(map_sqlite)?;
                 WAL_CHECKPOINTS.with(|count| count.set(0));
                 VACUUM_STEPS.with(|count| count.set(0));
                 b.connection
@@ -480,7 +481,9 @@ async fn shutdown_with_pending_vacuum_runs_only_one_checkpoint() -> TestResult {
         .dispatch_read(
             "shutdown_with_pending_vacuum_runs_only_one_checkpoint",
             |b| {
-                b.connection.trace_v2(TraceEventCodes::empty(), None);
+                b.connection
+                    .trace_v2(TraceEventCodes::empty(), None::<fn(TraceEvent<'_>)>)
+                    .map_err(map_sqlite)?;
                 Ok((
                     b.connection
                         .pragma_query_value(None, "freelist_count", |r| r.get::<_, i64>(0))
@@ -522,7 +525,8 @@ async fn shutdown_with_pending_gc_leaves_candidates_and_counters_unchanged() -> 
                 ),
             )?;
             b.connection
-                .trace_v2(TraceEventCodes::SQLITE_TRACE_STMT, Some(count_statement));
+                .trace_v2(TraceEventCodes::SQLITE_TRACE_STMT, Some(count_statement))
+                .map_err(map_sqlite)?;
             WAL_CHECKPOINTS.with(|count| count.set(0));
             VACUUM_STEPS.with(|count| count.set(0));
             Ok(read_stats(&b.connection)?.objects())
@@ -537,7 +541,9 @@ async fn shutdown_with_pending_gc_leaves_candidates_and_counters_unchanged() -> 
         .dispatch_read(
             "shutdown_with_pending_gc_leaves_candidates_and_counters_unchanged",
             |b| {
-                b.connection.trace_v2(TraceEventCodes::empty(), None);
+                b.connection
+                    .trace_v2(TraceEventCodes::empty(), None::<fn(TraceEvent<'_>)>)
+                    .map_err(map_sqlite)?;
                 Ok((
                     read_stats(&b.connection)?.objects(),
                     gc::pending(&b.connection)?,
@@ -608,7 +614,8 @@ async fn traced_branch_load(
     store
         .dispatch_read("traced_branch_load", |b| {
             b.connection
-                .trace_v2(TraceEventCodes::SQLITE_TRACE_STMT, Some(count_statement));
+                .trace_v2(TraceEventCodes::SQLITE_TRACE_STMT, Some(count_statement))
+                .map_err(map_sqlite)?;
             STATEMENTS.with(|count| count.set(0));
             READ_OBJECTS.with(|read| read.set(false));
             Ok(())
@@ -617,7 +624,9 @@ async fn traced_branch_load(
     let loaded = store.load_branch(selector).await?;
     let (count, read_objects) = store
         .dispatch_read("traced_branch_load", |b| {
-            b.connection.trace_v2(TraceEventCodes::empty(), None);
+            b.connection
+                .trace_v2(TraceEventCodes::empty(), None::<fn(TraceEvent<'_>)>)
+                .map_err(map_sqlite)?;
             Ok((
                 STATEMENTS.with(std::cell::Cell::get),
                 READ_OBJECTS.with(std::cell::Cell::get),

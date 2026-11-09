@@ -90,6 +90,7 @@ hyper = "1"
 hyper-util = "0.1"
 ignore = "0.4"
 jsonwebtoken = { version = "=11.1.0", default-features = false }
+libsqlite3-sys = { version = "=0.39.0", default-features = false }
 ring = { version = "0.17.14", default-features = false, features = ["alloc", "std"] }
 proptest = { version = "1", default-features = false }
 regex = "1"
@@ -98,7 +99,7 @@ rustix = "1"
 nix = { version = "=0.28.0", default-features = false, features = ["resource"] }
 rustls = { version = "0.23.45", default-features = false }
 rquickjs = "0.12.1"
-rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
+rusqlite = { version = "=0.41.0", default-features = false, features = ["bundled"] }
 schemars = { version = "=1.2.2", default-features = false, features = ["derive", "std", "uuid1"] }
 secrecy = "0.10"
 serde = "1"

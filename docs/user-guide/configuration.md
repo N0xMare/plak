@@ -428,6 +428,11 @@ data. An `http` server is reached at its `url` (HTTPS, or plain HTTP only to
 `127.0.0.1` or `[::1]`); `bearer_secret` and `secret_headers` name stored
 secrets that are sent as `Authorization: Bearer` and as those headers.
 
+Incoming stdio messages are limited to 16 MiB per JSON-RPC line; oversized
+lines are discarded, so a call without a valid response times out. HTTP
+responses are limited to 64 MiB, with a 4 MiB limit per server-sent event.
+These are transport limits, before tool-result text spilling or prompt limits.
+
 An `http` server that uses OAuth takes `auth = "oauth"` instead of a bearer
 secret, and you log in to it once with `plak mcp login <id>`. The login is
 stored in your home's secrets, never in `config.toml`, and is used only for

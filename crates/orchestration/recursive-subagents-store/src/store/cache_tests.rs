@@ -69,10 +69,12 @@ impl Fixture {
         let counter = Arc::clone(&deleted);
         self.store
             .with_connection(|connection| {
-                connection.wal_hook(Some(|_, _| {
-                    COMMITS.with(|count| count.set(count.get() + 1));
-                    Ok(())
-                }));
+                connection
+                    .wal_hook(Some(|_: &mut rusqlite::hooks::Wal, _| {
+                        COMMITS.with(|count| count.set(count.get() + 1));
+                        Ok(())
+                    }))
+                    .unwrap();
                 connection
                     .update_hook(Some(move |action, _: &str, table: &str, _| {
                         if action == Action::SQLITE_DELETE && table == "agent_nodes" {

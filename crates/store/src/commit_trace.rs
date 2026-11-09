@@ -20,7 +20,8 @@ use std::time::Duration;
 
 use nix::sys::signal::{Signal, raise};
 use rusqlite::Connection;
-use rusqlite::hooks::{CheckpointMode, Wal};
+use rusqlite::hooks::Wal;
+use rusqlite::wal::CheckpointMode;
 
 /// JSONL destination; one fresh file per traced process.
 pub const TRACE_ENV: &str = "PLAK_TEST_COMMIT_TRACE";
@@ -34,7 +35,6 @@ static CONNECTION_ID: AtomicU64 = AtomicU64::new(1);
 thread_local! {
     static LABEL: Cell<&'static str> = const { Cell::new("unlabelled") };
     static CLASSES: RefCell<(Vec<String>, u64)> = const { RefCell::new((Vec::new(), 0)) };
-    // rusqlite's WAL callback accepts a fn pointer, not a captured closure.
     // SQLite runs commit and WAL callbacks synchronously on the caller's thread.
     static PENDING: RefCell<Option<Pending>> = const { RefCell::new(None) };
 }
@@ -182,7 +182,7 @@ pub(crate) fn active() -> bool {
 /// # Errors
 /// Returns `SQLite` hook registration errors. Invalid trace controls or trace I/O
 /// failure terminate the traced process with a divergence report (exit 86).
-pub fn install(connection: &Connection, store: &'static str) -> rusqlite::Result<bool> {
+pub fn install(connection: &mut Connection, store: &'static str) -> rusqlite::Result<bool> {
     let Some(path) = std::env::var_os(TRACE_ENV) else {
         return Ok(false);
     };
@@ -238,10 +238,10 @@ pub fn install(connection: &Connection, store: &'static str) -> rusqlite::Result
         false
     }))?;
     connection.rollback_hook(Some(move || rolled_back(&context)))?;
-    connection.wal_hook(Some(|wal, pages| {
+    connection.wal_hook(Some(|wal: &mut Wal, pages| {
         committed(wal, pages);
         Ok(())
-    }));
+    }))?;
     Ok(true)
 }
 
@@ -299,7 +299,7 @@ fn projector_only(store: &str, tables: &BTreeSet<String>) -> bool {
     !tables.is_empty() && tables.iter().all(|table| derived.contains(&table.as_str()))
 }
 
-fn committed(wal: &Wal, pages: i32) {
+fn committed(wal: &mut Wal, pages: i32) {
     let pending = PENDING
         .with(|pending| pending.borrow_mut().take())
         .unwrap_or_else(|| diverged("WAL callback without commit owner"));

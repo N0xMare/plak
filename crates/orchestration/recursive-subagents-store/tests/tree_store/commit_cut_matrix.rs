@@ -566,8 +566,7 @@ fn snapshot(tree: &ProductAgentTree) -> Value {
             .unwrap();
         let columns = statement
             .column_names()
-            .iter()
-            .map(ToString::to_string)
+            .map(str::to_owned)
             .collect::<Vec<_>>();
         if table == "agent_attempts" {
             assert!(!columns.iter().any(|column| column == "output_json"));

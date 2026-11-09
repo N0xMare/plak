@@ -161,7 +161,7 @@ SUPPORTED_COMPILE_FIXTURES = {
         "extra-dependencies": {
             "futures-util": "0.3.31",
             "rusqlite": {
-                "version": "=0.40.2",
+                "version": "=0.41.0",
                 "default-features": False,
                 "features": ["bundled"],
             },

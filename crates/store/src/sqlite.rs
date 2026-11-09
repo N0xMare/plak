@@ -97,10 +97,10 @@ use schema::*;
 /// The runtime store's schema version. Only this exact version opens.
 pub const SQLITE_SCHEMA_VERSION: i64 = 27;
 /// Reviewed `SQLite` release statically embedded by the workspace dependency.
-pub const BUNDLED_SQLITE_VERSION: &str = "3.53.2";
+pub const BUNDLED_SQLITE_VERSION: &str = "3.54.0";
 /// Upstream source identity of [`BUNDLED_SQLITE_VERSION`].
 pub const BUNDLED_SQLITE_SOURCE_ID: &str =
-    "2026-06-03 19:12:13 d6e03d8c777cfa2d35e3b60d8ec3e0187f3e9f99d8e2ee9cac695fd6fcdf1a24";
+    "2026-10-09 15:46:58 be8d059e9a49089ab2dce5ed26dd87aaf598fdc5fbe0b107c0dd758464bcd5e3";
 /// Security and concurrency options required from the reviewed bundled build.
 pub const BUNDLED_SQLITE_REQUIRED_COMPILE_OPTIONS: [&str; 4] = [
     "DEFAULT_FOREIGN_KEYS",
@@ -1016,13 +1016,26 @@ impl Backend {
             .map_err(map_sqlite)?
             > 0;
         #[cfg(feature = "commit-trace")]
-        let tracing = crate::commit_trace::install(&connection, "runtime").map_err(map_sqlite)?;
+        let (connection, tracing) = {
+            let mut connection = connection;
+            let tracing =
+                crate::commit_trace::install(&mut connection, "runtime").map_err(map_sqlite)?;
+            (connection, tracing)
+        };
         #[cfg(all(test, feature = "commit-trace"))]
-        if !tracing {
-            install_test_commit_hook(&connection);
-        }
+        let connection = {
+            let mut connection = connection;
+            if !tracing {
+                install_test_commit_hook(&mut connection);
+            }
+            connection
+        };
         #[cfg(all(test, not(feature = "commit-trace")))]
-        install_test_commit_hook(&connection);
+        let connection = {
+            let mut connection = connection;
+            install_test_commit_hook(&mut connection);
+            connection
+        };
         #[cfg(all(not(test), feature = "commit-trace"))]
         let _ = tracing;
         let gc_pending = gc::pending(&connection)?;
@@ -1553,7 +1566,7 @@ const CRASH_CUT_STAGE_ENV: &str = "PLAKOUS_SQLITE_TEST_CRASH_CUT";
 const CRASH_CUT_MARKER_ENV: &str = "PLAKOUS_SQLITE_TEST_CRASH_MARKER";
 
 #[cfg(test)]
-fn install_test_commit_hook(connection: &Connection) {
+fn install_test_commit_hook(connection: &mut Connection) {
     if test_crash_cut_requested("pre-commit-hook") {
         let _ = connection.commit_hook(Some(|| {
             test_crash_cut("pre-commit-hook");

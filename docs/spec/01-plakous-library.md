@@ -1677,6 +1677,11 @@ only record, ledger and checkpoint digests do.
 
 ### 5.2 SQLite
 
+The backend uses bundled SQLite 3.54.0 (dependency policy: chapter 06 §7).
+The SQLite engine version does not version application state: schema and
+epoch admission, canonical codecs and the export-document contract remain
+explicit boundaries, independent of SQLite's stable database/WAL format.
+
 The built-in durable backend is SQLite behind `SessionStore`: one database,
 one bounded blocking actor and connection, WAL, `synchronous=FULL` for every
 transaction except lease renewal and revival, explicit canonical codecs, and
@@ -2118,7 +2123,7 @@ current schema is an integrity refusal, never permission to replace state.
 A product keeps each build's store in its own versioned directory (chapter 02
 §2.5), so an unsupported schema there means a damaged or hand-placed file. The
 facade exposes `RUNTIME_STORE_SCHEMA_VERSION` and `RUNTIME_FORMAT_EPOCH` for
-that key. The bundled SQLite is 3.53.2 with reviewed
+that key. The bundled SQLite is 3.54.0 with reviewed
 compile options including `DEFAULT_FOREIGN_KEYS`, `ENABLE_API_ARMOR`,
 `THREADSAFE=1`, and `USE_URI`.
 
@@ -7757,6 +7762,11 @@ sampling nor elicitation: no server request reaches a model, and an
 `input_required` result to any request is a definite failure "elicitation is
 not supported".
 
+Stdio accepts at most 16 MiB per incoming JSON-RPC line, including its newline.
+An oversized line is discarded and logged without closing the connection;
+without a later valid response, the request reaches its existing timeout and
+an already dispatched call settles `OutcomeUnknown`.
+
 **MCP over HTTP.** An `McpHttpEndpoint` is an `https://` URL, or `http://` to
 exactly `127.0.0.1` or `[::1]` (`Origin::loopback_http`), with no credentials
 or fragment; literal headers; and secret header slots (`Bearer` sends
@@ -7772,8 +7782,11 @@ connection per entry, and the pool's transport client (`McpPool::with_http_clien
 default WebPKI), so a `fault-injection` build's `PLAK_TEST_FAULTS` plan covers MCP
 traffic (chapter 05 §2.8). Secret headers live only in that client, marked
 sensitive and zeroized with their last clone; rmcp never sees them. Server-sent
-events are framed by `plakous_http::sse` within 4 MiB per event; event ids and
-retry hints are not surfaced, so a broken request stream fails its call
+events are framed by `plakous_http::sse` within 4 MiB per event. Each HTTP
+response body is bounded to 64 MiB while reading, including JSON success and
+error responses; oversized bodies fail rather than truncate. The custom
+transport does not use rmcp's built-in HTTP clients' 16 MiB JSON / 64 KiB error
+limits. Event ids and retry hints are not surfaced, so a broken request stream fails its call
 instead of resuming or re-sending. The session id a legacy server issues is
 sent on every later request and deleted when the client closes; a 404 on it
 re-initializes the session and re-sends only the requests the server

@@ -92,7 +92,7 @@ production code.
 | `aarch64-apple-darwin` | Supported; process tools and evaluator workers run with host authority, without an OS sandbox (chapter 04) |
 | `x86_64-apple-darwin` | Not supported for process tools or Code Mode; fails closed |
 
-SQLite is statically embedded (3.53.2) with the reviewed compile options.
+SQLite is statically embedded (3.54.0) with the reviewed compile options.
 
 ## Crate map
 

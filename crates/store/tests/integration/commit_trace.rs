@@ -306,14 +306,14 @@ fn child_entry() -> TestResult {
     let root = Path::new(&root);
     match mode.as_str() {
         "inert" => {
-            let connection = database(root, "inert")?;
+            let mut connection = database(root, "inert")?;
             let calls = Arc::new(AtomicU64::new(0));
             let hook_calls = calls.clone();
             connection.commit_hook(Some(move || {
                 hook_calls.fetch_add(1, Ordering::Relaxed);
                 false
             }))?;
-            assert!(!install(&connection, "runtime")?);
+            assert!(!install(&mut connection, "runtime")?);
             connection.execute("INSERT INTO a(value) VALUES ('one')", [])?;
             assert_eq!(calls.load(Ordering::Relaxed), 1);
         }
@@ -329,8 +329,8 @@ fn child_entry() -> TestResult {
             run_frameless(root, mode == "frameless_thread", true)?;
         }
         "frameless_unwind" => {
-            let connection = database(root, "frameless")?;
-            install(&connection, "runtime")?;
+            let mut connection = database(root, "frameless")?;
+            install(&mut connection, "runtime")?;
             connection.execute("INSERT INTO a DEFAULT VALUES", [])?;
             let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let _settle = SettleGuard;
@@ -340,9 +340,9 @@ fn child_entry() -> TestResult {
                 panic!("operation unwind");
             }));
             assert!(panic.is_err());
-            let other = database(root, "other")?;
+            let mut other = database(root, "other")?;
             std::thread::spawn(move || -> rusqlite::Result<()> {
-                install(&other, "tree")?;
+                install(&mut other, "tree")?;
                 other.execute("INSERT INTO a DEFAULT VALUES", [])?;
                 Ok(())
             })
@@ -351,8 +351,8 @@ fn child_entry() -> TestResult {
         }
         "frameless_reentry" => run_frameless(root, false, false)?,
         "unindexed" => {
-            let connection = database(root, "unindexed")?;
-            install(&connection, "runtime")?;
+            let mut connection = database(root, "unindexed")?;
+            install(&mut connection, "runtime")?;
             for name in ["renew", "revive", "commit"] {
                 let _label = label(name);
                 connection.execute("INSERT INTO a DEFAULT VALUES", [])?;
@@ -361,8 +361,8 @@ fn child_entry() -> TestResult {
         "checkpoint" => run_checkpoint(root, false)?,
         "checkpoint_reader" => run_checkpoint(root, true)?,
         "rollback" => {
-            let connection = database(root, "rollback")?;
-            install(&connection, "runtime")?;
+            let mut connection = database(root, "rollback")?;
+            install(&mut connection, "runtime")?;
             connection.execute_batch("BEGIN; INSERT INTO a DEFAULT VALUES; ROLLBACK;")?;
             connection.execute("INSERT INTO b DEFAULT VALUES", [])?;
             connection.execute("INSERT INTO a DEFAULT VALUES", [])?;
@@ -407,17 +407,17 @@ fn runtime_frameless_operations_release_before_another_store_thread_commits() ->
 }
 
 fn run_frameless(root: &Path, other_thread: bool, explicitly_settle: bool) -> TestResult {
-    let connection = database(root, "frameless")?;
-    install(&connection, "runtime")?;
+    let mut connection = database(root, "frameless")?;
+    install(&mut connection, "runtime")?;
     connection.execute("INSERT INTO a DEFAULT VALUES", [])?;
     connection.execute_batch("BEGIN IMMEDIATE; SELECT * FROM a; COMMIT;")?;
     if explicitly_settle {
         settle();
     }
     if other_thread {
-        let other = database(root, "other")?;
+        let mut other = database(root, "other")?;
         std::thread::spawn(move || -> rusqlite::Result<()> {
-            install(&other, "runtime")?;
+            install(&mut other, "runtime")?;
             other.execute("INSERT INTO a DEFAULT VALUES", [])?;
             Ok(())
         })
@@ -430,8 +430,8 @@ fn run_frameless(root: &Path, other_thread: bool, explicitly_settle: bool) -> Te
 }
 
 fn run_checkpoint(root: &Path, hold_reader: bool) -> TestResult {
-    let connection = database(root, "checkpoint")?;
-    install(&connection, "runtime")?;
+    let mut connection = database(root, "checkpoint")?;
+    install(&mut connection, "runtime")?;
     let reader = Connection::open(root.join("checkpoint.sqlite3"))?;
     if hold_reader {
         reader.execute_batch("BEGIN; SELECT * FROM a;")?;
@@ -556,26 +556,26 @@ fn peer_runtime_create(root: &Path, clock: Arc<Clock>, request: CreateSession) -
 }
 
 fn run_format(root: &Path) -> TestResult {
-    let runtime = database(root, "runtime")?;
-    install(&runtime, "runtime")?;
+    let mut runtime = database(root, "runtime")?;
+    install(&mut runtime, "runtime")?;
     {
         let _label = label("quote\"\\\n");
         runtime.execute_batch("BEGIN; INSERT INTO b DEFAULT VALUES; INSERT INTO a DEFAULT VALUES; INSERT INTO w VALUES ('hidden'); COMMIT;")?;
     }
     runtime.execute("INSERT INTO a DEFAULT VALUES", [])?;
     for name in ["product", "tree"] {
-        let connection = database(root, name)?;
-        install(&connection, name)?;
+        let mut connection = database(root, name)?;
+        install(&mut connection, name)?;
         connection.execute("INSERT INTO a DEFAULT VALUES", [])?;
     }
     Ok(())
 }
 
 fn run_mixed(root: &Path, mode: &str) -> TestResult {
-    let runtime = database(root, "runtime")?;
-    let product = database(root, "product")?;
-    install(&runtime, "runtime")?;
-    install(&product, "product")?;
+    let mut runtime = database(root, "runtime")?;
+    let mut product = database(root, "product")?;
+    install(&mut runtime, "runtime")?;
+    install(&mut product, "product")?;
     for _ in 0..3 {
         let order = if mode == "mixed_runtime_first" {
             [&runtime, &product]
@@ -594,10 +594,10 @@ fn run_two_stores(root: &Path) -> TestResult {
     let barrier = Arc::new(Barrier::new(2));
     let workers: Vec<_> = connections
         .into_iter()
-        .map(|connection| {
+        .map(|mut connection| {
             let barrier = barrier.clone();
             std::thread::spawn(move || -> rusqlite::Result<()> {
-                install(&connection, "runtime")?;
+                install(&mut connection, "runtime")?;
                 barrier.wait();
                 for _ in 0..128 {
                     let _label = label("commit");

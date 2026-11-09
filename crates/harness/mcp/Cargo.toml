@@ -29,7 +29,7 @@ plakous-auth = { workspace = true, features = ["http-refresh"], optional = true 
 plakous-http = { workspace = true, optional = true }
 plakous-model.workspace = true
 plakous-tools.workspace = true
-rmcp = { version = "=3.5.1", default-features = false, features = ["client", "transport-async-rw", "transport-streamable-http-client"], optional = true }
+rmcp = { version = "=3.9.0", default-features = false, features = ["client", "transport-async-rw", "transport-streamable-http-client"], optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 sse-stream = { version = "0.2.5", optional = true }
@@ -47,7 +47,7 @@ client = [
 ]
 
 [dev-dependencies]
-rmcp = { version = "=3.5.1", default-features = false, features = ["client", "server", "transport-async-rw", "transport-streamable-http-client"] }
+rmcp = { version = "=3.9.0", default-features = false, features = ["client", "server", "transport-async-rw", "transport-streamable-http-client"] }
 tempfile.workspace = true
 tokio-util.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util", "time"] }

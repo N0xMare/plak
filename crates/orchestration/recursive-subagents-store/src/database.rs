@@ -269,8 +269,12 @@ impl SubagentsDatabase {
         let database = resolved_path(database)?;
         let connection = open_writer(&database, SCHEMA.noun).map_err(OpenError::unavailable)?;
         #[cfg(feature = "commit-trace")]
-        plakous_store::commit_trace::install(&connection, "tree")
-            .map_err(|_| OpenError::unavailable("could not install commit trace"))?;
+        let connection = {
+            let mut connection = connection;
+            plakous_store::commit_trace::install(&mut connection, "tree")
+                .map_err(|_| OpenError::unavailable("could not install commit trace"))?;
+            connection
+        };
         let database = Self { connection };
         database.readmit()?;
         Ok(database)

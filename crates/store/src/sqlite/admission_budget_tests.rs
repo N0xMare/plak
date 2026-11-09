@@ -171,7 +171,7 @@ fn measure(large: bool) -> TestResult<Metrics> {
     )?;
     let delta = fixture::bundle(&next, Some(request.initial()))?;
     b.connection
-        .trace_v2(TraceEventCodes::SQLITE_TRACE_PROFILE, Some(profile));
+        .trace_v2(TraceEventCodes::SQLITE_TRACE_PROFILE, Some(profile))?;
     METRICS.with(|metrics| *metrics.borrow_mut() = Metrics::default());
     assert!(
         usage(&b.connection, b.limits)?
@@ -183,7 +183,8 @@ fn measure(large: bool) -> TestResult<Metrics> {
         &mut b,
         &CommitCheckpoint::new(renewed, created.branch(), delta),
     )?;
-    b.connection.trace_v2(TraceEventCodes::empty(), None);
+    b.connection
+        .trace_v2(TraceEventCodes::empty(), None::<fn(TraceEvent<'_>)>)?;
     Ok(METRICS.with(|metrics| metrics.borrow().clone()))
 }
 

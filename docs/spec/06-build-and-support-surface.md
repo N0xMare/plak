@@ -1673,7 +1673,7 @@ reruns JJ tests against the lowest and highest supported binaries. The opt-in
 this is not a promise of compatibility with arbitrary custom backends or
 future repository formats.
 
-The MCP client (`plakous-mcp`) uses crates.io `rmcp =3.5.1` (Apache-2.0,
+The MCP client (`plakous-mcp`) uses crates.io `rmcp =3.9.0` (Apache-2.0,
 upstream MSRV 1.88, edition 2024), the reference Rust SDK of the protocol, so
 protocol-revision negotiation, the `initialize` and no-initialize lifecycles,
 cancellation and progress correlation are not re-implemented. Default features
@@ -1701,6 +1701,14 @@ enabled. The repository-only scripted server
 `transport-streamable-http-server` (serving through `hyper` directly), which
 pull `schemars`, `pastey`, `dyn-clone`, `async-trait`, `rand`, `tower-service`
 and `uuid` into the test graph only.
+
+The reviewed SDK fixes the OAuth resolved-address checks, removes the HTTP
+server's unbounded tool-schema cache, and bounds its built-in HTTP clients'
+JSON responses to 16 MiB and error bodies to 64 KiB. Those HTTP clients and
+the SDK OAuth implementation are not enabled here: the product's custom
+transport retains its 64 MiB response-body and 4 MiB SSE-event limits
+(chapter 01 §8.5). The SDK's stdio transport bounds each incoming JSON-RPC
+line to 16 MiB, discarding oversized lines without closing the connection.
 
 The Plak-run `fetch_url` (`plakous-tool-web`, feature `fetch`) converts HTML to
 Markdown with crates.io `htmd` 0.5.6 (Apache-2.0, edition 2024, no stated MSRV;
@@ -1835,8 +1843,18 @@ client or official native host binary is part of this execution path.
   and require exact canonical bytes on restore; the serializer receives no
   store, tool or interpreter authority. This adds a dependency edge, not a new
   package or a provider dependency in the neutral core.
-- SQLite is statically bundled through a pinned `rusqlite` with reviewed compile
-  options; there is no system SQLite dependency.
+- SQLite is statically bundled through `rusqlite =0.41.0` (MIT, upstream MSRV
+  1.89) and `libsqlite3-sys =0.39.0` (MIT, MSRV 1.88), bundling SQLite
+  3.54.0 with reviewed compile options; there is no system SQLite dependency.
+  This fixes the mismatched-page-size WAL memory disclosure. The bundled
+  build no longer enables `SQLITE_ENABLE_MEMORY_MANAGEMENT`; page-cache and
+  store limits remain explicit. SQLite's file format, store schemas, runtime
+  epoch, canonical codecs and session export version are unchanged.
+  The store's SQLite feature declares the exact sys pin too, so fresh consumer
+  resolutions retain the engine admitted by its exact runtime source-ID check.
+  Rusqlite's PRAGMA helpers validate names through `pragma_list` before
+  execution; admission's statement budget includes that fixed overhead and
+  remains independent of retained-history size.
 - Provider SDKs are absent from the production graph.
 - `syntect` (default syntaxes, `regex-fancy`, no HTML/themes dumps) is the
   TUI highlighter for Compose programs and markdown fences. It is a `plak`

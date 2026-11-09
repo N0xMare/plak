@@ -267,6 +267,113 @@ fn sent(error: McpHttpError) -> ServiceError {
     ))
 }
 
+async fn read_request(socket: &mut tokio::net::TcpStream) -> std::io::Result<()> {
+    use tokio::io::AsyncReadExt as _;
+
+    let mut request = Vec::new();
+    loop {
+        let mut byte = [0];
+        socket.read_exact(&mut byte).await?;
+        request.push(byte[0]);
+        if request.ends_with(b"\r\n\r\n") {
+            break;
+        }
+    }
+    let length: usize = String::from_utf8_lossy(&request)
+        .lines()
+        .find_map(|line| {
+            line.to_ascii_lowercase()
+                .strip_prefix("content-length:")
+                .map(str::trim)
+                .map(str::to_owned)
+        })
+        .ok_or_else(|| std::io::Error::other("missing length"))?
+        .parse()
+        .map_err(std::io::Error::other)?;
+    socket.read_exact(&mut vec![0; length]).await?;
+    Ok(())
+}
+
+async fn padded_response(
+    status: u16,
+    padding: usize,
+    content_length: bool,
+) -> Result<HttpResult<StreamableHttpPostResponse>, Box<dyn Error>> {
+    use tokio::io::AsyncWriteExt as _;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let url = format!("http://{}/mcp", listener.local_addr()?);
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await?;
+        read_request(&mut socket).await?;
+        let reply = if status == 200 {
+            r#"{"jsonrpc":"2.0","id":42,"result":{}}"#
+        } else {
+            r#"{"jsonrpc":"2.0","id":42,"error":{"code":-32603,"message":"failed"}}"#
+        };
+        let length = if content_length {
+            format!("Content-Length: {}\r\n", padding + reply.len())
+        } else {
+            String::new()
+        };
+        socket.write_all(format!("HTTP/1.1 {status} Reply\r\nContent-Type: application/json\r\n{length}Connection: close\r\n\r\n").as_bytes()).await?;
+        let chunk = vec![b' '; 64 * 1024];
+        let mut remaining = padding;
+        while remaining > 0 {
+            let size = remaining.min(chunk.len());
+            if socket.write_all(&chunk[..size]).await.is_err() {
+                return Ok::<_, std::io::Error>(());
+            }
+            remaining -= size;
+        }
+        // A limit rejection may close the socket before this last write.
+        let _ = socket.write_all(reply.as_bytes()).await;
+        Ok(())
+    });
+    let client = McpHttpEndpoint::new(&url)?.client(
+        &McpServerName::new("remote")?,
+        &Client::new(Limits::default())?,
+        Duration::from_secs(30),
+    )?;
+    let message = serde_json::from_value(serde_json::json!({
+        "jsonrpc":"2.0","id":42,"method":"tools/call","params":{"name":"test","arguments":{}}
+    }))?;
+    let result = client
+        .post_message(url.into(), message, None, None, HashMap::new())
+        .await;
+    server.await??;
+    Ok(result)
+}
+
+#[tokio::test]
+async fn custom_http_limits_preserve_large_json_and_correlated_errors() -> TestResult {
+    assert!(matches!(
+        padded_response(200, 17 * 1024 * 1024, true).await??,
+        StreamableHttpPostResponse::Json(ServerJsonRpcMessage::Response(_), _)
+    ));
+    assert!(matches!(
+        padded_response(500, 128 * 1024, false).await??,
+        StreamableHttpPostResponse::Json(ServerJsonRpcMessage::Error(_), _)
+    ));
+    Ok(())
+}
+
+#[tokio::test]
+async fn custom_http_rejects_oversized_declared_and_streamed_bodies() -> TestResult {
+    for content_length in [true, false] {
+        for status in [200, 500] {
+            let result =
+                padded_response(status, MAX_RESPONSE_BODY_BYTES + 1, content_length).await?;
+            assert!(matches!(
+                result,
+                Err(StreamableHttpError::Client(McpHttpError::Transport(failure)))
+                    if failure.kind() == ErrorKind::LimitExceeded(plakous_http::LimitKind::ResponseBodyBytes)
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[test]
 fn http_failures_classify_by_what_the_server_can_have_done() -> TestResult {
     let failure = |transmission, kind| {
@@ -320,7 +427,7 @@ fn http_failures_classify_by_what_the_server_can_have_done() -> TestResult {
     reason = "one HTTP error correlation and content-type matrix"
 )]
 async fn http_400_accepts_only_a_correlated_json_rpc_error() -> TestResult {
-    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    use tokio::io::AsyncWriteExt as _;
     for (status, content_type, session) in [
         (400, "application/json", None),
         (500, "application/json", None),
@@ -360,29 +467,7 @@ async fn http_400_accepts_only_a_correlated_json_rpc_error() -> TestResult {
             let url = format!("http://{}/mcp", listener.local_addr()?);
             let server = tokio::spawn(async move {
                 let (mut socket, _) = listener.accept().await?;
-                let mut request = Vec::new();
-                loop {
-                    let mut byte = [0];
-                    socket.read_exact(&mut byte).await?;
-                    request.push(byte[0]);
-                    if request.ends_with(b"\r\n\r\n") {
-                        break;
-                    }
-                }
-                let head = String::from_utf8_lossy(&request);
-                let length: usize = head
-                    .lines()
-                    .find_map(|line| {
-                        line.to_ascii_lowercase()
-                            .strip_prefix("content-length:")
-                            .map(str::trim)
-                            .map(str::to_owned)
-                    })
-                    .ok_or_else(|| std::io::Error::other("missing length"))?
-                    .parse()
-                    .map_err(std::io::Error::other)?;
-                let mut body = vec![0; length];
-                socket.read_exact(&mut body).await?;
+                read_request(&mut socket).await?;
                 let reply = reply.to_string();
                 socket.write_all(format!("HTTP/1.1 {status} Error\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}", reply.len()).as_bytes()).await
             });

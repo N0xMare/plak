@@ -240,7 +240,7 @@ type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 #[cfg(unix)]
 #[allow(
     clippy::needless_pass_by_value,
-    reason = "rusqlite trace_v2 requires this exact function-pointer signature"
+    reason = "rusqlite trace_v2 requires this exact callback signature"
 )]
 fn count_startup_query(event: TraceEvent<'_>) {
     if matches!(event, TraceEvent::Stmt(..)) {
@@ -365,6 +365,9 @@ fn crash_seed(base: u128) -> TestResult<CrashSeed> {
 #[tokio::test]
 async fn cold_start_query_count_is_constant_for_large_authoritative_history() -> TestResult {
     const COMMITS: u64 = 128;
+    // rusqlite validates each of the five shape PRAGMAs through pragma_list,
+    // adding two traced statements per PRAGMA, independent of history size.
+    const PRAGMA_VALIDATION_QUERIES: u64 = 2 * 5;
     let database = CrashDatabase::new()?;
     let seed = crash_seed(81_000)?;
     let store = SqliteSessionStore::open(&database.path)?;
@@ -405,7 +408,7 @@ async fn cold_start_query_count_is_constant_for_large_authoritative_history() ->
     let _guard = STARTUP_QUERY_TEST
         .lock()
         .map_err(|_| "startup query lock")?;
-    let connection = Connection::open(&database.path)?;
+    let mut connection = Connection::open(&database.path)?;
     connection.execute_batch(
         "PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF;
          PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;",
@@ -414,12 +417,12 @@ async fn cold_start_query_count_is_constant_for_large_authoritative_history() ->
     connection.trace_v2(
         TraceEventCodes::SQLITE_TRACE_STMT,
         Some(count_startup_query),
-    );
+    )?;
     verify_database(&connection)?;
-    connection.trace_v2(TraceEventCodes::empty(), None);
+    connection.trace_v2(TraceEventCodes::empty(), None::<fn(TraceEvent<'_>)>)?;
     let query_count = STARTUP_QUERY_COUNT.load(Ordering::Relaxed);
     assert!(
-        query_count <= 32,
+        query_count <= 32 + PRAGMA_VALIDATION_QUERIES,
         "cold-start authority validation executed {query_count} statements for {COMMITS} commits"
     );
     assert_eq!(head.revision().get(), COMMITS);

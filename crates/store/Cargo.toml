@@ -26,7 +26,7 @@ reason = "Existing lint and size debt, frozen at the counts on main; ratchet dow
 
 [features]
 default = []
-sqlite = ["dep:futures-channel", "dep:rusqlite", "dep:tracing", "dep:tokio"]
+sqlite = ["dep:futures-channel", "dep:libsqlite3-sys", "dep:rusqlite", "dep:tracing", "dep:tokio"]
 commit-trace = ["sqlite", "rusqlite/hooks", "nix/signal", "dep:serde_json", "plakous-agent/test-hooks"]
 perf-instrumentation = ["sqlite"]
 
@@ -36,6 +36,8 @@ serde_json = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 futures-channel = { workspace = true, optional = true }
 plakous-agent.workspace = true
+# Keep fresh consumer resolutions on the engine admitted by the runtime source pin.
+libsqlite3-sys = { workspace = true, optional = true }
 rusqlite = { workspace = true, optional = true }
 
 # The lease clock reads the boot clock, and the SQLite holder files use

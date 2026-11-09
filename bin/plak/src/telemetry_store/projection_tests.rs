@@ -116,10 +116,9 @@ fn rows(connection: &Connection) -> TestResult<serde_json::Value> {
         let mut query = connection.prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))?;
         let columns: Vec<_> = query
             .column_names()
-            .iter()
             .enumerate()
             .filter_map(|(index, name)| {
-                (table != "credential_refreshes" || *name != "account").then_some(index)
+                (table != "credential_refreshes" || name != "account").then_some(index)
             })
             .collect();
         let values = query

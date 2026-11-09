@@ -276,8 +276,14 @@ impl ProductStore {
         let connection = admission::open_writer(&database, SCHEMA.noun)
             .map_err(ProductStoreOpenError::unavailable)?;
         #[cfg(feature = "test-hooks")]
-        plakous_offline_crash_harness::commit_trace::install(&connection, "product")
-            .map_err(|_| ProductStoreOpenError::unavailable("could not install commit trace"))?;
+        let connection = {
+            let mut connection = connection;
+            plakous_offline_crash_harness::commit_trace::install(&mut connection, "product")
+                .map_err(|_| {
+                    ProductStoreOpenError::unavailable("could not install commit trace")
+                })?;
+            connection
+        };
         let mut store = Self {
             connection,
             #[cfg(unix)]
