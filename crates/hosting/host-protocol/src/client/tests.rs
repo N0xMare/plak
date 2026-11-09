@@ -253,7 +253,7 @@ fn directory_responses_keep_refusals_and_disconnect_is_terminal() {
         receiver.recv_response(Duration::from_secs(5)),
         Err(RecvTimeoutError::Disconnected)
     );
-    assert!(sender.request_operation(Op::Ping).is_none());
+    assert!(sender.request_operation(Op::Ping).is_err());
 }
 
 #[test]
@@ -864,7 +864,10 @@ fn an_unanswered_send_has_an_unknown_outcome() {
     host.stream.shutdown(std::net::Shutdown::Both).unwrap();
     assert!(matches!(
         unsent(&receiver),
-        SendError::OutcomeUnknown(SessionIntent::Interrupt)
+        SendError::OutcomeUnknown {
+            intent: SessionIntent::Interrupt,
+            ..
+        }
     ));
     assert!(matches!(
         sender.send(SessionIntent::Interrupt),

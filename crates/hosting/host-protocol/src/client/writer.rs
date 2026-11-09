@@ -9,6 +9,8 @@ use std::time::Instant;
 
 pub(super) const MAX_BYTES: usize = 64 * 1024 * 1024;
 pub(super) const MAX_FRAMES: usize = 64;
+pub(super) const INTENT_BYTES: usize = MAX_BYTES - 1024 * 1024;
+pub(super) const INTENT_FRAMES: usize = MAX_FRAMES - 8;
 
 #[derive(Default)]
 pub(super) struct Queue {
@@ -32,6 +34,23 @@ struct Batch {
     deadline: Option<Instant>,
 }
 
+impl Pending {
+    fn withdraw_suffix(&mut self, start: usize) {
+        let mut index = start;
+        while index < self.batches.len() {
+            if self.batches[index].deadline.is_none() {
+                index += 1;
+                continue;
+            }
+            if let Some(batch) = self.batches.remove(index) {
+                self.bytes -= batch.lines.len();
+                self.frames -= batch.frames;
+                *lock(&batch.status) = Status::Withdrawn;
+            }
+        }
+    }
+}
+
 enum Status {
     Queued,
     Writing,
@@ -51,7 +70,7 @@ impl Ticket {
             return false;
         };
         let mut pending = lock(&queue.pending);
-        let mut status = lock(&self.status);
+        let status = lock(&self.status);
         if !matches!(*status, Status::Queued) {
             return matches!(*status, Status::Withdrawn);
         }
@@ -62,12 +81,21 @@ impl Ticket {
         else {
             return false;
         };
-        if let Some(batch) = pending.batches.remove(index) {
-            pending.bytes -= batch.lines.len();
-            pending.frames -= batch.frames;
+        drop(status);
+        if pending.batches[index].deadline.is_none() {
+            if let Some(batch) = pending.batches.remove(index) {
+                pending.bytes -= batch.lines.len();
+                pending.frames -= batch.frames;
+                *lock(&batch.status) = Status::Withdrawn;
+            }
+        } else {
+            pending.withdraw_suffix(index);
         }
-        *status = Status::Withdrawn;
         true
+    }
+
+    pub(super) fn withdrawn(&self) -> bool {
+        matches!(*lock(&self.status), Status::Withdrawn)
     }
 }
 
@@ -89,12 +117,21 @@ impl Queue {
                 "the writer stopped",
             ));
         }
-        if pending.bytes.saturating_add(lines.len()) > MAX_BYTES
-            || pending.frames.saturating_add(frames) > MAX_FRAMES
+        let (bytes_limit, frames_limit) = if deadline.is_some() {
+            (INTENT_BYTES, INTENT_FRAMES)
+        } else {
+            (MAX_BYTES, MAX_FRAMES)
+        };
+        if pending.bytes.saturating_add(lines.len()) > bytes_limit
+            || pending.frames.saturating_add(frames) > frames_limit
         {
             return Err(io::Error::new(
                 io::ErrorKind::WouldBlock,
-                "the writer is full",
+                if deadline.is_some() {
+                    "the intent writer is full"
+                } else {
+                    "the control writer is full"
+                },
             ));
         }
         let status = Arc::new(Mutex::new(Status::Queued));
@@ -127,7 +164,11 @@ impl Queue {
         self.changed.notify_all();
     }
 
-    pub(super) fn run(&self, mut writer: Box<dyn Write + Send>) -> io::Result<()> {
+    pub(super) fn run(
+        &self,
+        mut writer: Box<dyn Write + Send>,
+        written: impl Fn(),
+    ) -> io::Result<()> {
         loop {
             let batch = {
                 let mut pending = lock(&self.pending);
@@ -140,18 +181,18 @@ impl Queue {
                 if pending.closed || (pending.finishing && pending.batches.is_empty()) {
                     return Ok(());
                 }
+                if pending
+                    .batches
+                    .front()
+                    .and_then(|batch| batch.deadline)
+                    .is_some_and(|deadline| Instant::now() >= deadline)
+                {
+                    pending.withdraw_suffix(0);
+                    continue;
+                }
                 let Some(batch) = pending.batches.pop_front() else {
                     continue;
                 };
-                if batch
-                    .deadline
-                    .is_some_and(|deadline| Instant::now() >= deadline)
-                {
-                    *lock(&batch.status) = Status::Withdrawn;
-                    pending.bytes -= batch.lines.len();
-                    pending.frames -= batch.frames;
-                    continue;
-                }
                 *lock(&batch.status) = Status::Writing;
                 batch
             };
@@ -161,6 +202,8 @@ impl Queue {
             *lock(&batch.status) = Status::Written;
             pending.bytes -= batch.lines.len();
             pending.frames -= batch.frames;
+            drop(pending);
+            written();
         }
     }
 }

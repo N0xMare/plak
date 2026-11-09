@@ -641,7 +641,10 @@ fn an_unanswered_new_session_has_unknown_outcome_and_is_never_replayed() {
         Instant::now().checked_sub(DEADLINE).unwrap();
     assert!(matches!(
         face.try_unsent(),
-        Some(client::SendError::OutcomeUnknown(UserAction::NewSession))
+        Some(client::SendError::OutcomeUnknown {
+            intent: UserAction::NewSession,
+            ..
+        })
     ));
     drop(face);
     host.join().unwrap();
@@ -789,7 +792,10 @@ fn transport_loss_settles_new_and_stop_immediately_without_forgetting_new_identi
     }
     assert!(matches!(
         face.try_unsent(),
-        Some(client::SendError::OutcomeUnknown(UserAction::NewSession))
+        Some(client::SendError::OutcomeUnknown {
+            intent: UserAction::NewSession,
+            ..
+        })
     ));
     assert!(format!("{:?}", event(&face)).contains("stop outcome unknown"));
     assert_eq!(face.take_new_request().as_deref(), Some(request.as_str()));

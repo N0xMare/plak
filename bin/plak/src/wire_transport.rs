@@ -57,9 +57,9 @@ pub(crate) fn forward_lifecycle(
             "host lifecycle handshake failed: {error}; no offline mutation attempted"
         ))
     })?;
-    let id = sender
-        .request_operation(op)
-        .ok_or_else(|| crate::CliFailure::new("host disconnected; lifecycle outcome unknown"))?;
+    let id = sender.request_operation(op).map_err(|error| {
+        crate::CliFailure::new(format!("host lifecycle request not sent: {error}"))
+    })?;
     let (answered, outcome) = receiver
         .recv_response(Duration::from_secs(90))
         .map_err(|error| {

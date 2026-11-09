@@ -116,7 +116,8 @@ pub(super) fn create(host: &Host, fixture: &Fixture) -> Option<String> {
         workspace: fixture.workspace().display().to_string(),
         template: None,
         request_id: REQUEST.into(),
-    })?;
+    })
+    .ok()?;
     let Outcome::Ok(Answer::Created { session, .. }) = receive.recv_response(WAIT).ok()?.1 else {
         return None;
     };
@@ -125,7 +126,8 @@ pub(super) fn create(host: &Host, fixture: &Fixture) -> Option<String> {
     send.request_operation(Op::RenameSession {
         session: session.clone(),
         title: Some("original source".to_owned()),
-    })?;
+    })
+    .ok()?;
     matches!(
         receive.recv_response(WAIT).ok()?.1,
         Outcome::Ok(Answer::Renamed { .. })

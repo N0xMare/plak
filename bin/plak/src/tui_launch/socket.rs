@@ -25,6 +25,7 @@ pub struct SocketFace {
     workspace: String,
     paths: product_paths::PlakPaths,
     host_binary: Option<String>,
+    host_generation: u64,
     state: Arc<Mutex<State>>,
 }
 
@@ -78,6 +79,7 @@ impl SocketFace {
                 .to_string_lossy()
                 .into_owned(),
             paths: paths.clone(),
+            host_generation: welcome.host_generation,
             host_binary: (!welcome.binary_id.is_empty() && welcome.binary_id != "unknown")
                 .then_some(welcome.binary_id),
             state: Arc::default(),
@@ -209,7 +211,7 @@ impl SocketFace {
         let id = self
             .sender
             .request_operation(op)
-            .ok_or_else(|| CliFailure::new("the host disconnected"))?;
+            .map_err(|error| CliFailure::new(format!("host control request not sent: {error}")))?;
         let (answered, outcome) = self
             .receiver
             .recv_response(DEADLINE)
@@ -349,24 +351,34 @@ impl SocketFace {
     pub(super) fn rebind(&self, cause: String) -> CliResult<()> {
         self.sender
             .request_session(client::SessionChange::Rebind(cause))
-            .ok_or_else(|| CliFailure::new("the host disconnected before rebind"))?;
+            .map_err(|error| CliFailure::new(format!("host rebind not sent: {error}")))?;
         Ok(())
     }
 
     pub(crate) fn stop_session(&self, session: &str) -> bool {
-        let mut state = self.state();
-        let Some(id) = self.sender.request_operation(Op::StopSession {
+        let id = match self.sender.request_operation(Op::StopSession {
             session: session.to_owned(),
-        }) else {
-            return false;
+        }) {
+            Ok(id) => id,
+            Err(error) => {
+                self.note(format!("stop request not sent: {error}"));
+                return false;
+            }
         };
-        state.pending.insert(id, (None, Instant::now()));
+        self.state().pending.insert(id, (None, Instant::now()));
         true
     }
 
     pub(super) fn list_sessions(&self) -> CliResult<()> {
         self.request(UserAction::ResumeSession { id: None }, self.list())
-            .map_err(|_| CliFailure::new("the host disconnected before listing sessions"))
+            .map_err(|error| {
+                CliFailure::new(match error {
+                    UserActionSendError::Saturated(_) => {
+                        "host control backpressure before listing sessions"
+                    }
+                    _ => "the host disconnected before listing sessions",
+                })
+            })
     }
 
     #[allow(clippy::result_large_err, reason = "return the user's unsent action")]
@@ -376,8 +388,12 @@ impl SocketFace {
         op: Op<PlakExtension>,
     ) -> Result<(), UserActionSendError> {
         let mut state = self.state();
-        let Some(id) = self.sender.request_operation(op) else {
-            return Err(UserActionSendError::Disconnected(action));
+        let id = match self.sender.request_operation(op) {
+            Ok(id) => id,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                return Err(UserActionSendError::Saturated(action));
+            }
+            Err(_) => return Err(UserActionSendError::Disconnected(action)),
         };
         state.pending.insert(id, (Some(action), Instant::now()));
         Ok(())
@@ -492,7 +508,11 @@ impl SocketFace {
                     if self.attach(session, node).is_err() {
                         self.state()
                             .unsent
-                            .push_back(client::SendError::OutcomeUnknown(action));
+                            .push_back(client::SendError::OutcomeUnknown {
+                                intent: action,
+                                client_id: None,
+                                host_generation: self.host_generation,
+                            });
                     }
                 }
                 Outcome::Ok(Answer::Sessions { rows }) => self.sessions(action, rows),
@@ -587,9 +607,11 @@ impl SocketFace {
         for id in expired {
             if let Some((action, _)) = state.pending.remove(&id) {
                 match action {
-                    Some(action) => state
-                        .unsent
-                        .push_back(client::SendError::OutcomeUnknown(action)),
+                    Some(action) => state.unsent.push_back(client::SendError::OutcomeUnknown {
+                        intent: action,
+                        client_id: None,
+                        host_generation: self.host_generation,
+                    }),
                     None => state
                         .events
                         .push_back(HostEvent::Row(TranscriptRow::warning(

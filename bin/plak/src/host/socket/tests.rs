@@ -12,6 +12,37 @@ use plakous_hosted::host_service::wire::HostPrincipal;
 use super::*;
 
 #[tokio::test(start_paused = true)]
+async fn slow_link_stop_preempts_a_progressing_host_send() {
+    let (write, mut read) = tokio::io::duplex(8192);
+    let mut write = ProgressIo::new(write);
+    let outbox = Outbox::default();
+    outbox
+        .clone()
+        .write_all(&vec![42; 2 * 1024 * 1024])
+        .unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stopping = Arc::clone(&stop);
+    let reader = tokio::spawn(async move {
+        let mut chunk = [0; 8192];
+        while read.read(&mut chunk).await.unwrap_or(0) != 0 {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    });
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        stopping.store(true, Ordering::Release);
+    });
+    let began = tokio::time::Instant::now();
+    assert_eq!(
+        super::send(&mut write, &outbox, || stop.load(Ordering::Acquire)).await,
+        Err(())
+    );
+    assert!(began.elapsed() <= Duration::from_millis(2050));
+    drop(write);
+    reader.await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
 async fn slow_link_socket_stalled_reader_detaches_without_affecting_healthy_client() {
     let (write, _unread) = tokio::io::duplex(1);
     let mut write = ProgressIo::new(write);
@@ -23,8 +54,8 @@ async fn slow_link_socket_stalled_reader_detaches_without_affecting_healthy_clie
     healthy_outbox.clone().write_all(b"healthy").unwrap();
     let began = tokio::time::Instant::now();
     let (stalled, delivered) = tokio::join!(
-        super::send(&mut write, &outbox),
-        super::send(&mut healthy, &healthy_outbox)
+        super::send(&mut write, &outbox, || false),
+        super::send(&mut healthy, &healthy_outbox, || false)
     );
     assert_eq!(stalled, Err(()));
     assert_eq!(delivered, Ok(()));
@@ -57,7 +88,7 @@ async fn slow_link_socket_large_baseline_completes_at_low_bandwidth() {
         }
     });
     let began = tokio::time::Instant::now();
-    super::send(&mut write, &outbox).await.unwrap();
+    super::send(&mut write, &outbox, || false).await.unwrap();
     assert!(tokio::time::Instant::now().duration_since(began) > super::super::send::IDLE);
     drop(write);
     assert_eq!(draining.await.unwrap(), baseline);

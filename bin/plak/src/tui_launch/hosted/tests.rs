@@ -131,9 +131,10 @@ fn lost_new(selected: bool) {
     }
     assert!(matches!(
         previous.try_unsent(),
-        Some(plakous_host_protocol::client::SendError::OutcomeUnknown(
-            UserAction::NewSession
-        ))
+        Some(plakous_host_protocol::client::SendError::OutcomeUnknown {
+            intent: UserAction::NewSession,
+            ..
+        })
     ));
     let face = reconnect(&paths, &previous).unwrap();
     assert_eq!(

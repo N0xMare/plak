@@ -22,15 +22,30 @@ impl Progress {
         *self.0.lock().unwrap_or_else(PoisonError::into_inner) = Instant::now();
     }
 
+    #[cfg(test)]
     pub(crate) async fn sending<T>(&self, send: impl Future<Output = T>) -> Result<T, ()> {
+        self.stoppable(send, || false).await
+    }
+
+    pub(crate) async fn stoppable<T>(
+        &self,
+        send: impl Future<Output = T>,
+        stopped: impl Fn() -> bool,
+    ) -> Result<T, ()> {
         self.mark();
         let end = Instant::now() + TOTAL;
         tokio::pin!(send);
         loop {
+            if stopped() {
+                return Err(());
+            }
             let last = *self.0.lock().unwrap_or_else(PoisonError::into_inner);
             tokio::select! {
                 biased;
                 () = tokio::time::sleep_until(end) => return Err(()),
+                () = tokio::time::sleep(Duration::from_millis(50)) => {
+                    if stopped() { return Err(()); }
+                }
                 result = &mut send => return Ok(result),
                 () = tokio::time::sleep_until(last + IDLE) => {
                     let last = *self.0.lock().unwrap_or_else(PoisonError::into_inner);

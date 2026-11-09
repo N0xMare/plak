@@ -4342,11 +4342,13 @@ verdicts) are addressed, the session profile and workspace chrome states.
   Accepted/rejected/restored events may echo origin in optional event-envelope
   client_id, never stored/shared bodies. Refusal, edit, restore or pull-back
   ends a submission identity. Do not automatically resend an unknown outcome.
-  While host_generation is unchanged, offer an explicit check/resend of the
-  same client_id, session, target and exact payload: `draft_pending` means
+  While host_generation is unchanged, the shared client library exposes an
+  explicit check/resend of the same client_id, session, target and exact
+  payload: `draft_pending` means
   wait for a verdict, and `accepted {duplicate:true}` confirms admission
-  without enqueueing again. Do not mint a new id for that check. Reconnect
-  refreshes attachments and baselines, not effects. A changed host_generation
+  without enqueueing again. The TUI/web check gesture follows separately;
+  this is not yet a product UI action. Do not mint a new id for that check.
+  Reconnect refreshes attachments and baselines, not effects. A changed host_generation
   loses the registry and requires reconciliation
   against queue/row evidence, not a cross-restart exactly-once claim.
 - **Quit and stop.** A `quit` intent never ends a session that outlives its
@@ -4820,26 +4822,44 @@ verdicts) are addressed, the session profile and workspace chrome states.
   `refused_for_role` with its row, any other as refused); an intent no
   attachment took within 30 seconds is given back as disconnected. The
   writer reserves a complete encoded intent/blob batch atomically under
-  fixed limits of 64 frames and 64 MiB, including the batch being written;
-  saturation returns never-sent backpressure, never a partial blob sequence.
-  The attachment-wait buffer separately holds at most 64 intents and 64 MiB
-  of serialized intent bodies. At the answer deadline or disconnect,
+  fixed limits of 64 frames and 64 MiB, including the batch being written.
+  Intents use at most 56 frames and 63 MiB, reserving eight frames and
+  1 MiB for attach/detach, transcript-open and other control requests;
+  controls may use the full cap. Control overflow is `WouldBlock`, never
+  disconnected: request APIs return the error without queueing a frame.
+  Internal control overflow is observable through `try_control_error` and
+  defers a fresh root attach until the progressing writer frees capacity.
+  It does not end the connection. Intent saturation returns never-sent
+  backpressure, never a partial blob sequence.
+  The attachment-wait buffer separately holds at most 56 intents and 63 MiB
+  of serialized intent bodies, counted once before taking the state lock.
+  At the answer deadline or disconnect,
   queued batches are withdrawn under the same lock that starts writes and
   returned as never sent; they cannot land when a stalled pipe drains.
+  Deadline withdrawal removes the entire queued intent suffix in FIFO
+  order (including later intents not yet due), preserving control frames.
+  An already writing batch is not withdrawn, nor is its later suffix merely
+  because that active batch expires.
   A batch whose write began (even partially), with no verdict because the
   connection ended first or 30 seconds passed, has unknown outcome. It is
-  never automatically resent. `WireSender::send_draft` accepts a retained
+  never automatically resent. `OutcomeUnknown` carries the exact intent,
+  optional client_id and originating host_generation, also for ordinary
+  `send`, so library faces can retain identity. `WireSender::send_draft` accepts a retained
   client_id, exact intent and original host_generation for explicit
-  same-id check/resend; its response preserves `duplicate`/`draft_pending`.
+  same-id check/resend; host responses on `try_response` preserve
+  `duplicate`/`draft_pending`. Check expiry/disconnect instead arrives on
+  `try_unsent`. A check that returns `None` was never queued and produces
+  no additional saturation refusal there.
   Generation mismatch refuses that path; reconcile queue/row evidence.
   `settle` waits, bounded,
   for every verdict. A session request names a client id of its own, and
   its settled answer is the new root or the refusal. One writer thread
   alone writes the transport, so neither the face nor the reader ever
   waits on a write, however large. A root attach refused `backpressure` is
-  asked once more. An unreadable or unknown
-  frame, a mid-stream `welcome`, `refused` or `bye`, a root attach refused
-  anything else, or a transport that fails ends the connection: the
+  asked once more. Other attach refusals are returned as responses and
+  warnings, keeping the previous attachment when available. An unreadable
+  or unknown frame, a mid-stream `welcome`, `refused` or `bye`, or a
+  transport that fails ends the connection: the
   receiver reports the disconnect once drained, with why. The client is one
   connection; a new one is a new connect. `wire_transport::host_socket`
   checks the path for a clear error, then the connected peer's uid
@@ -4908,6 +4928,10 @@ chapter 04 §2.10; its keys are `[web]` (chapter 07 §3).
   and its sessions run on for the next connection. A `quit` intent on a
   root attachment detaches it as well (§4.4, quit and stop). A login holds
   at most 4 connections and opens at most 30 a minute.
+  After a send lasting at least one 15 s heartbeat interval, an outstanding
+  pong deadline is re-armed. Buffered
+  client text/control frames are polled before overdue heartbeat ticks,
+  so a pong buffered during the send cannot lose a select race to timeout.
 - **Static files.** `--ui <dir>` must hold `csp.json`
   (`{"header": "...", "report_only_header": "..."}`, the second optional),
   whose `header` must carry `frame-ancestors 'none'`; without `--ui` only
@@ -5070,6 +5094,14 @@ settles asynchronously after endpoint binding, before local admission.
   30-minute total send bound. A large baseline that continues making byte
   progress is not detached merely because the batch takes more than 10 s;
   neither a slow nor a stalled client holds up another client's sends.
+  Sending checks host stop at most every 50 ms and abandons the connection
+  on stop, including idle-exit stop; the hard batch bound cannot delay the
+  planned 55 s session handoff. The WebSocket sender obeys the same stop
+  rule. Client frames on that same connection are processed only after
+  its current send completes (or the transport is abandoned); a progressing
+  large baseline can therefore delay intent answers beyond the client's
+  30 s deadline. Such a write has unknown outcome, not permission to mint
+  another submission id. Other connections remain independent.
 - **Sessions.** A session opens in its own workspace's product context
   (§1), as `plak agent` opens it with no overrides, when a client first
   attaches it, and stays resident while anything keeps it (§4.4, residency

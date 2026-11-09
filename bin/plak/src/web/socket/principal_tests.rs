@@ -33,6 +33,17 @@ struct NoSessions {
     principals: Arc<Mutex<Vec<HostPrincipal>>>,
     opens: Arc<AtomicUsize>,
 }
+
+pub(super) fn empty_host() -> Arc<SessionHost<PlakExtension>> {
+    SessionHost::new(
+        NoSessions {
+            principals: Arc::default(),
+            opens: Arc::default(),
+        },
+        "fixture",
+        1,
+    )
+}
 impl HostSessions<PlakExtension> for NoSessions {
     fn host_read_limits(&self) -> HostReadLimits {
         HostReadLimits {

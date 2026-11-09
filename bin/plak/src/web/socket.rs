@@ -9,7 +9,8 @@ mod principal_tests;
 use std::collections::VecDeque;
 use std::io::Write;
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tokio::time::Instant;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
@@ -224,7 +225,10 @@ impl Ended {
 }
 
 /// The next text message, or how the connection ended instead.
-async fn next_text(socket: &mut Socket, pong: &mut Option<Instant>) -> Result<String, Ended> {
+async fn next_text<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
+    socket: &mut WebSocketStream<S>,
+    pong: &mut Option<Instant>,
+) -> Result<String, Ended> {
     loop {
         match socket.next().await {
             Some(Ok(Message::Text(text))) => {
@@ -241,25 +245,33 @@ async fn next_text(socket: &mut Socket, pong: &mut Option<Instant>) -> Result<St
 }
 
 /// Sends what the connection wrote; `Err` when the client is too slow.
-async fn send_pending(socket: &mut Socket, outbox: &Outbox) -> Result<(), Ended> {
+async fn send_pending<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
+    socket: &mut WebSocketStream<ProgressIo<S>>,
+    outbox: &Outbox,
+    stop: super::StopProbe,
+) -> Result<(), Ended> {
     let (lines, overflowed) = outbox.take();
     if overflowed {
         return Err(Ended::Lost("client fell behind"));
     }
     let progress = socket.get_ref().progress.clone();
     match progress
-        .sending(async {
-            for line in lines {
-                socket
-                    .send(Message::text(line))
-                    .await
-                    .map_err(|_| Ended::Lost("send failed"))?;
-            }
-            Ok(())
-        })
+        .stoppable(
+            async {
+                for line in lines {
+                    socket
+                        .send(Message::text(line))
+                        .await
+                        .map_err(|_| Ended::Lost("send failed"))?;
+                }
+                Ok(())
+            },
+            || stop.stopped(),
+        )
         .await
     {
         Ok(result) => result,
+        Err(()) if stop.stopped() => Err(Ended::Stopping),
         Err(()) => Err(Ended::Lost("client too slow")),
     }
 }
@@ -283,7 +295,7 @@ async fn drive(socket: &mut Socket, served: &Arc<Served>, login: &str) -> Ended 
         &mut outbox.clone(),
         &move || stop.stopped(),
     );
-    if let Err(ended) = send_pending(socket, &outbox).await {
+    if let Err(ended) = send_pending(socket, &outbox, served.stop).await {
         return ended;
     }
     if !matches!(admitted, Ok(true)) {
@@ -305,8 +317,8 @@ async fn drive(socket: &mut Socket, served: &Arc<Served>, login: &str) -> Ended 
 type Connection = HostConnection<PlakExtension, Outbox>;
 
 /// Serves an admitted connection until it ends.
-async fn attached(
-    socket: &mut Socket,
+async fn attached<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
+    socket: &mut WebSocketStream<ProgressIo<S>>,
     served: &Served,
     connection: &mut Connection,
     outbox: &Outbox,
@@ -317,16 +329,24 @@ async fn attached(
     let mut rate = Rate::new();
     loop {
         // A flush may read the session directory from the stores.
-        if tokio::task::block_in_place(|| connection.flush()).is_err() {
+        if connection_work(|| connection.flush()).is_err() {
             return Ended::Lost("client fell behind");
         }
-        if let Err(ended) = send_pending(socket, outbox).await {
+        let began = Instant::now();
+        if let Err(ended) = send_pending(socket, outbox, served.stop).await {
             return ended;
+        }
+        if began.elapsed() >= PING_EVERY {
+            if let Some(sent) = pong {
+                *sent = Instant::now();
+            }
+            pinger.reset();
         }
         if served.stop.stopped() {
             return Ended::Stopping;
         }
         tokio::select! {
+            biased;
             message = next_text(socket, pong) => {
                 let line = match message {
                     Ok(line) => line,
@@ -336,9 +356,9 @@ async fn attached(
                     return Ended::Policy("message rate");
                 }
                 // An attach may open a session, which takes a while.
-                if !tokio::task::block_in_place(|| connection.frame(Ok(line))).unwrap_or(false) {
+                if !connection_work(|| connection.frame(Ok(line))).unwrap_or(false) {
                     let _ = connection.flush();
-                    let _ = send_pending(socket, outbox).await;
+                    let _ = send_pending(socket, outbox, served.stop).await;
                     return Ended::Left;
                 }
             }
@@ -354,14 +374,29 @@ async fn attached(
                 }
                 // A peer that stopped reading must not hold the slot: the
                 // ping is bounded like every other send.
-                match socket.get_ref().progress.clone().sending(socket.send(Message::Ping(Bytes::new())))
+                match socket.get_ref().progress.clone().stoppable(socket.send(Message::Ping(Bytes::new())), || served.stop.stopped())
                     .await
                 {
                     Ok(Ok(())) => {}
                     Ok(Err(_)) => return Ended::Lost("ping failed"),
+                    Err(()) if served.stop.stopped() => return Ended::Stopping,
                     Err(()) => return Ended::Lost("client too slow"),
                 }
             }
         }
     }
 }
+
+fn connection_work<T>(run: impl FnOnce() -> T) -> T {
+    #[cfg(test)]
+    if tokio::runtime::Handle::current().runtime_flavor()
+        == tokio::runtime::RuntimeFlavor::CurrentThread
+    {
+        return run();
+    }
+    tokio::task::block_in_place(run)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]
+mod slow_link_tests;

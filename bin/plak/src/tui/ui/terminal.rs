@@ -626,7 +626,7 @@ pub(super) fn drain_host_events(
                 row,
                 action: intent,
             },
-            SendError::OutcomeUnknown(intent) => Unsent::Unknown(intent),
+            SendError::OutcomeUnknown { intent, .. } => Unsent::Unknown(intent),
         });
     }
     app.rearm_due(app.now());

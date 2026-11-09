@@ -3659,6 +3659,13 @@ baselines, an unaffected healthy second writer, no-progress detachment and
 the hard total deadline despite continuing trickle progress. These tests
 use no live host or network service. Withdrawal and idle-deadline renewal
 are mutation targets; elapsed simulated time is not live bandwidth evidence.
+Review regressions cover reserved control headroom and coalesced attach
+retry on control overflow, FIFO suffix withdrawal, a mid-write unknown
+outcome retaining draft identity while a later line survives, and single
+signalling of check saturation. Paused-clock tests drive the actual web
+attachment loop through a throttled baseline with an outstanding ping;
+they also cover the web outbox byte cap/reset and stop during send. Control
+headroom, pong re-arming and FIFO suffix withdrawal are mutation targets.
 
 `product_runtime_e2e_tests` retains the former mixed terminal module's actual
 runtime cases without depending on the terminal feature: exact-resume

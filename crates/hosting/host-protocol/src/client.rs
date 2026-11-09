@@ -12,8 +12,9 @@
 //! Snapshot pages are assembled and event images restored before the face
 //! sees them.
 //!
-//! A face sends with [`WireSender`], which never blocks: an intent goes as
-//! a request on the current attachment, or waits in the client for the
+//! A face sends with [`WireSender`], whose intent submission never blocks:
+//! an intent goes as
+//! a request on the current attachment, or waits in a bounded buffer for the
 //! next one while it re-attaches. The host's refusal, or no verdict within
 //! [`ANSWER_DEADLINE`], comes back on the receiver with the intent
 //! ([`WireReceiver::try_unsent`], [`SendError`]). [`WireSender::settle`]
@@ -23,7 +24,9 @@
 //!
 //! One writer thread alone writes the transport, from a queue of encoded
 //! lines: the reader thread and the face never block on a write, so a
-//! large request does not hold up what the host says meanwhile.
+//! large request does not hold up what the host says meanwhile. Intent
+//! batches leave fixed control headroom; internal control overflow defers
+//! a fresh attachment without ending a progressing connection.
 //!
 //! What the face has not taken waits in an observation mailbox with the
 //! session's own rules ([`crate::observation_channel`]): a state supersedes
@@ -167,8 +170,16 @@ pub enum SendError<P: ProtocolExtension> {
     },
     /// It was sent, but no verdict came: the connection ended first, or
     /// none came within [`ANSWER_DEADLINE`]. The host may yet take it, so
-    /// sending it again may run it twice.
-    OutcomeUnknown(SessionIntent<P>),
+    /// sending it with a new identity may run it twice. Retain these fields
+    /// for an explicit [`WireSender::send_draft`] check in the same generation.
+    OutcomeUnknown {
+        /// The exact submitted payload.
+        intent: SessionIntent<P>,
+        /// Identity for an explicit same-id check, when this was a draft.
+        client_id: Option<crate::wire::ClientDraftId>,
+        /// Process generation in which the write began.
+        host_generation: u64,
+    },
 }
 
 impl<P: ProtocolExtension> SendError<P> {
@@ -177,7 +188,7 @@ impl<P: ProtocolExtension> SendError<P> {
     pub fn into_intent(self) -> SessionIntent<P> {
         match self {
             Self::Refused(refused) => refused.into_action(),
-            Self::RefusedForRole { intent, .. } | Self::OutcomeUnknown(intent) => intent,
+            Self::RefusedForRole { intent, .. } | Self::OutcomeUnknown { intent, .. } => intent,
         }
     }
 
@@ -270,6 +281,8 @@ struct Sent<P: ProtocolExtension> {
     ticket: Option<writer::Ticket>,
     client_id: Option<crate::wire::ClientDraftId>,
     report: bool,
+    bytes: usize,
+    host_generation: u64,
 }
 
 struct State<P: ProtocolExtension> {
@@ -292,6 +305,9 @@ struct State<P: ProtocolExtension> {
     sent: BTreeMap<RequestId, Sent<P>>,
     /// Intents waiting for the next attachment, in the order sent.
     unsent: VecDeque<Sent<P>>,
+    unsent_bytes: usize,
+    control_retry: bool,
+    control_error: Option<String>,
     /// Intents the host did not take, for the face.
     refused: VecDeque<SendError<P>>,
     /// The agent transcript the face opened on the attachment, which a
@@ -316,25 +332,33 @@ impl<P: ProtocolExtension> State<P> {
     /// can land. Only a batch whose write began has an unknown outcome.
     fn expire(&mut self, now: Instant) {
         let overdue = |sent: &Sent<P>| now.duration_since(sent.at) >= ANSWER_DEADLINE;
-        while self.unsent.front().is_some_and(overdue) {
-            if let Some(sent) = self.unsent.pop_front() {
+        let ids: Vec<_> = self.sent.keys().copied().collect();
+        let mut suffix = false;
+        for id in ids {
+            if !self.sent.get(&id).is_some_and(|sent| {
+                overdue(sent) || sent.ticket.as_ref().is_some_and(writer::Ticket::withdrawn)
+            }) {
+                continue;
+            }
+            if let Some(sent) = self.sent.remove(&id) {
+                let error = sent.unanswered();
+                suffix |= matches!(error, SendError::Refused(_));
+                self.refused.push_back(error);
+            }
+        }
+        if suffix || self.unsent.front().is_some_and(overdue) {
+            for sent in self.take_unsent() {
                 self.refused
                     .push_back(SendError::Refused(IntentSendError::Disconnected(
                         sent.intent,
                     )));
             }
         }
-        let late: Vec<RequestId> = self
-            .sent
-            .iter()
-            .filter(|(_, sent)| overdue(sent))
-            .map(|(id, _)| *id)
-            .collect();
-        for id in late {
-            if let Some(sent) = self.sent.remove(&id) {
-                self.refused.push_back(sent.unanswered());
-            }
-        }
+    }
+
+    fn take_unsent(&mut self) -> VecDeque<Sent<P>> {
+        self.unsent_bytes = 0;
+        std::mem::take(&mut self.unsent)
     }
 }
 
@@ -343,7 +367,11 @@ impl<P: ProtocolExtension> Sent<P> {
         if self.ticket.as_ref().is_none_or(writer::Ticket::withdraw) {
             SendError::Refused(IntentSendError::Disconnected(self.intent))
         } else {
-            SendError::OutcomeUnknown(self.intent)
+            SendError::OutcomeUnknown {
+                intent: self.intent,
+                client_id: self.client_id,
+                host_generation: self.host_generation,
+            }
         }
     }
 }
@@ -456,7 +484,11 @@ where
     let writing = Arc::downgrade(&inner);
     let outgoing = Arc::clone(&inner.outbox);
     thread::spawn(move || {
-        if let Err(error) = outgoing.run(writer) {
+        if let Err(error) = outgoing.run(writer, || {
+            if let Some(inner) = writing.upgrade() {
+                inner.retry_control();
+            }
+        }) {
             outgoing.close();
             if let Some(inner) = writing.upgrade() {
                 inner.close(format!("the transport failed to write: {error}"));
@@ -528,6 +560,9 @@ impl<P: ProtocolExtension> Inner<P> {
                 responses: VecDeque::new(),
                 sent: BTreeMap::new(),
                 unsent: VecDeque::new(),
+                unsent_bytes: 0,
+                control_retry: false,
+                control_error: None,
                 refused: VecDeque::new(),
                 agent: None,
                 sessions: BTreeMap::new(),
@@ -551,22 +586,29 @@ where
     P::Intent: Serialize,
 {
     /// Sends an existing wire operation without waiting. Its response is
-    /// returned by [`WireReceiver::try_response`]. `None` means disconnected.
-    #[must_use]
-    pub fn request_operation(&self, op: Op<P>) -> Option<RequestId> {
+    /// returned by [`WireReceiver::try_response`].
+    ///
+    /// # Errors
+    ///
+    /// `WouldBlock` means control backpressure, not disconnection; `BrokenPipe`
+    /// means the connection's writer ended. No frame was queued on error.
+    pub fn request_operation(&self, op: Op<P>) -> std::io::Result<RequestId> {
         let inner = &self.connection.inner;
         let mut state = lock(&inner.state);
         if state.closed {
-            return None;
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "the connection ended",
+            ));
         }
         let id = state.next_request;
         state.next_request += 1;
         state.operations.insert(id);
-        if inner.write(&ClientFrame::Request { id, op }).is_err() {
+        if let Err(error) = inner.write(&ClientFrame::Request { id, op }) {
             state.operations.remove(&id);
-            return None;
+            return Err(error);
         }
-        Some(id)
+        Ok(id)
     }
 
     /// Attaches a root selected from the session directory. This switches
@@ -576,7 +618,8 @@ where
     ///
     /// # Errors
     ///
-    /// The connection's writer stopped.
+    /// `WouldBlock` means the control queue is full; other errors mean the
+    /// writer stopped or encoding failed. An overflow never disconnects.
     pub fn attach_to(&self, root: NodeAddress) -> std::io::Result<RequestId> {
         let inner = &self.connection.inner;
         let mut state = lock(&inner.state);
@@ -596,13 +639,19 @@ where
     ///
     /// # Errors
     ///
-    /// The intent back, [`IntentSendError::Disconnected`], when the
-    /// connection is gone and it was never sent.
+    /// The never-sent intent: disconnected when the connection ended,
+    /// saturated when the attachment-wait buffer is full, or refused when
+    /// encoding fails. On an attachment, writer saturation arrives instead
+    /// through [`WireReceiver::try_unsent`].
     #[allow(
         clippy::result_large_err,
         reason = "the refusal hands the rejected intent back so the caller can restore it"
     )]
     pub fn send(&self, intent: SessionIntent<P>) -> Result<(), SendError<P>> {
+        let bytes = match serde_json::to_vec(&intent) {
+            Ok(encoded) => encoded.len(),
+            Err(_) => return Err(SendError::Refused(IntentSendError::Refused(intent))),
+        };
         let inner = &self.connection.inner;
         let mut state = lock(&inner.state);
         if state.closed {
@@ -614,6 +663,8 @@ where
             at: Instant::now(),
             ticket: None,
             report: false,
+            bytes,
+            host_generation: state.host_generation,
         };
         if let Some(attachment) = state
             .attachment
@@ -621,18 +672,12 @@ where
         {
             inner.write_intent(&mut state, attachment, sent);
         } else {
-            let bytes = state.unsent.iter().chain(std::iter::once(&sent)).try_fold(
-                0_usize,
-                |bytes, sent| {
-                    serde_json::to_vec(&sent.intent)
-                        .map(|encoded| bytes.saturating_add(encoded.len()))
-                },
-            );
-            if state.unsent.len() >= writer::MAX_FRAMES
-                || !matches!(bytes, Ok(bytes) if bytes <= writer::MAX_BYTES)
+            if state.unsent.len() >= writer::INTENT_FRAMES
+                || state.unsent_bytes.saturating_add(bytes) > writer::INTENT_BYTES
             {
                 return Err(SendError::Refused(IntentSendError::Saturated(sent.intent)));
             }
+            state.unsent_bytes += sent.bytes;
             state.unsent.push_back(sent);
         }
         Ok(())
@@ -643,7 +688,9 @@ where
     /// unknown outcome. A changed generation returns `None`: reconcile
     /// queue/row evidence instead. The response (including `duplicate:true`
     /// or `draft_pending`) arrives on [`WireReceiver::try_response`].
-    /// `None` also means no current attachment or unsent backpressure.
+    /// `None` also means no current attachment or unsent backpressure; no
+    /// second saturation refusal is queued. Deadline/disconnect outcomes
+    /// arrive on [`WireReceiver::try_unsent`], carrying this identity.
     #[must_use]
     pub fn send_draft(
         &self,
@@ -662,6 +709,7 @@ where
             return None;
         }
         let attachment = state.attachment?;
+        let generation = state.host_generation;
         inner.write_intent(
             &mut state,
             attachment,
@@ -671,6 +719,8 @@ where
                 ticket: None,
                 client_id: Some(client_id),
                 report: true,
+                bytes: 0,
+                host_generation: generation,
             },
         )
     }
@@ -698,10 +748,13 @@ where
     }
 
     /// Asks the host for `change` and returns the request's id; its
-    /// [`SessionAnswer`] arrives on the receiver. `None` once the
-    /// connection is gone or no attachment came in time.
-    #[must_use]
-    pub fn request_session(&self, change: SessionChange) -> Option<String> {
+    /// [`SessionAnswer`] arrives on the receiver.
+    ///
+    /// # Errors
+    ///
+    /// `WouldBlock` is control backpressure, `TimedOut` means no attachment
+    /// arrived in time, and `BrokenPipe` means the connection ended.
+    pub fn request_session(&self, change: SessionChange) -> std::io::Result<String> {
         let request_id = {
             let mut state = lock(&self.connection.inner.state);
             let request_id = format!("request-{}", state.next_session_request);
@@ -728,24 +781,26 @@ where
             };
             vec![ClientFrame::Request { id, op }]
         })?;
-        Some(request_id)
+        Ok(request_id)
     }
 
     /// Writes the frames `build` makes for the current attachment and the
     /// next request id, once there is an attachment; the session request
-    /// `session`'s [`SessionAnswer`] arrives on the receiver. `None` when
-    /// the connection is gone or no attachment came in time.
+    /// `session`'s [`SessionAnswer`] arrives on the receiver.
     fn request(
         &self,
         session: String,
         build: impl FnOnce(AttachmentId, RequestId) -> Vec<ClientFrame<P>>,
-    ) -> Option<RequestId> {
+    ) -> std::io::Result<RequestId> {
         let inner = &self.connection.inner;
         let deadline = Instant::now() + ANSWER_DEADLINE;
         let mut state = lock(&inner.state);
         let attachment = loop {
             if state.closed {
-                return None;
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "the connection ended",
+                ));
             }
             if let Some(attachment) = state
                 .attachment
@@ -753,7 +808,14 @@ where
             {
                 break attachment;
             }
-            let left = deadline.checked_duration_since(Instant::now())?;
+            let left = deadline
+                .checked_duration_since(Instant::now())
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "no attachment before the deadline",
+                    )
+                })?;
             state = inner
                 .changed
                 .wait_timeout(state, left)
@@ -767,11 +829,11 @@ where
         // written without the state lock, so the reader thread goes on
         // reading while a large request is written.
         drop(state);
-        if inner.write_all(&build(attachment, id)).is_err() {
+        if let Err(error) = inner.write_all(&build(attachment, id)) {
             lock(&inner.state).sessions.remove(&id);
-            return None;
+            return Err(error);
         }
-        Some(id)
+        Ok(id)
     }
 }
 
@@ -780,6 +842,13 @@ impl<P: ProtocolExtension> WireReceiver<P> {
     #[must_use]
     pub fn try_response(&self) -> Option<(RequestId, Outcome<P>)> {
         lock(&self.connection.inner.state).responses.pop_front()
+    }
+
+    /// A deferred internal control write hit the full control budget.
+    /// The connection stays open and retries a fresh attach as space frees.
+    #[must_use]
+    pub fn try_control_error(&self) -> Option<String> {
+        lock(&self.connection.inner.state).control_error.take()
     }
 
     /// Waits for an operation's next response.
@@ -841,8 +910,8 @@ impl<P: ProtocolExtension> WireReceiver<P> {
 
     /// The next intent sent with this connection that the host did not
     /// take, oldest first: refused, never sent (the connection ended, or no
-    /// attachment came within [`ANSWER_DEADLINE`]), or sent with no verdict
-    /// within [`ANSWER_DEADLINE`].
+    /// attachment came within [`ANSWER_DEADLINE`]), a withdrawn queued
+    /// suffix, or a write begun with no verdict within [`ANSWER_DEADLINE`].
     #[must_use]
     pub fn try_unsent(&self) -> Option<SendError<P>> {
         let mut state = lock(&self.connection.inner.state);
@@ -926,7 +995,7 @@ impl<P: ProtocolExtension> Inner<P> {
         }
         state.attachment = None;
         let sent = std::mem::take(&mut state.sent);
-        let unsent = std::mem::take(&mut state.unsent);
+        let unsent = state.take_unsent();
         state.refused.extend(
             sent.into_values().map(Sent::unanswered).chain(
                 unsent
@@ -975,14 +1044,21 @@ impl<P: ProtocolExtension> Inner<P> {
             .map(encode_line)
             .collect::<Result<String, _>>()
             .map_err(std::io::Error::other);
-        match encoded.and_then(|lines| self.outbox.reserve(lines, Some(sent.at + ANSWER_DEADLINE)))
-        {
+        let deadline = (!matches!(
+            sent.intent,
+            SessionIntent::OpenAgentTranscript { .. } | SessionIntent::CloseAgentTranscript
+        ))
+        .then_some(sent.at + ANSWER_DEADLINE);
+        match encoded.and_then(|lines| self.outbox.reserve(lines, deadline)) {
             Ok(ticket) => {
                 sent.ticket = Some(ticket);
                 state.sent.insert(id, sent);
                 Some(id)
             }
             Err(error) => {
+                if sent.report {
+                    return None;
+                }
                 let refusal = if error.kind() == std::io::ErrorKind::WouldBlock {
                     IntentSendError::Saturated(sent.intent)
                 } else {
@@ -1035,6 +1111,15 @@ impl<P: ProtocolExtension> Inner<P> {
             };
             let delivered = match taken {
                 Ok(delivered) => delivered,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    let mut state = lock(&self.state);
+                    state.control_error = Some(error.to_string());
+                    state.control_retry = true;
+                    drop(state);
+                    self.retry_control();
+                    self.wake();
+                    continue;
+                }
                 Err(error) => {
                     ended = error.to_string();
                     break;
@@ -1052,6 +1137,16 @@ impl<P: ProtocolExtension> Inner<P> {
         let notify = lock(&self.notify).clone();
         if let Some(notify) = notify {
             notify();
+        }
+    }
+
+    fn retry_control(&self)
+    where
+        P::Intent: Serialize,
+    {
+        let mut state = lock(&self.state);
+        if state.control_retry && !state.closed {
+            state.control_retry = self.attach_again(&mut state).is_err();
         }
     }
 
@@ -1085,7 +1180,7 @@ impl<P: ProtocolExtension> Inner<P> {
                         },
                     })?;
                 }
-                for sent in std::mem::take(&mut state.unsent) {
+                for sent in state.take_unsent() {
                     self.write_intent(state, attachment, sent);
                 }
                 Ok(())
@@ -1106,7 +1201,7 @@ impl<P: ProtocolExtension> Inner<P> {
             Outcome::Refused(refusal) => {
                 state.attachment = state.previous_attachment.take();
                 if let Some(attachment) = state.attachment {
-                    for sent in std::mem::take(&mut state.unsent) {
+                    for sent in state.take_unsent() {
                         self.write_intent(state, attachment, sent);
                     }
                 }
@@ -1213,7 +1308,7 @@ impl<P: ProtocolExtension> Inner<P> {
             state.gaps.insert(TranscriptScope::Root);
         }
         if let Some(attachment) = state.attachment {
-            for sent in std::mem::take(&mut state.unsent) {
+            for sent in state.take_unsent() {
                 self.write_intent(state, attachment, sent);
             }
         }

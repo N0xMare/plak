@@ -110,7 +110,14 @@ fn a_draft_with_no_verdict_says_the_session_may_still_run_it() {
     let mut app = App::new(launch_basic(), true);
     let draft = UserAction::Prompt("maybe sent".into());
     sent(&mut app, &draft);
-    drain(&mut app, vec![SendError::OutcomeUnknown(draft)]);
+    drain(
+        &mut app,
+        vec![SendError::OutcomeUnknown {
+            intent: draft,
+            client_id: None,
+            host_generation: 1,
+        }],
+    );
     assert_eq!(app.input, "maybe sent");
     assert!(blocks_contain(&app, "the session may still run this"));
 }
@@ -131,7 +138,11 @@ fn background_intents_are_armed_again_silently_after_a_pause() {
             SendError::Refused(UserActionSendError::Saturated(UserAction::Extension(
                 SurfaceIntent::RefreshComposerChrome,
             ))),
-            SendError::OutcomeUnknown(UserAction::Extension(SurfaceIntent::RereadUsage)),
+            SendError::OutcomeUnknown {
+                intent: UserAction::Extension(SurfaceIntent::RereadUsage),
+                client_id: None,
+                host_generation: 1,
+            },
             SendError::RefusedForRole {
                 row: "transcript".into(),
                 intent: UserAction::OpenAgentTranscript {

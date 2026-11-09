@@ -308,7 +308,11 @@ impl Write for Outbox {
 
 /// Sends what the connection wrote; `Err` when the client is gone or too
 /// slow.
-async fn send(write: &mut ProgressIo<impl AsyncWrite + Unpin>, outbox: &Outbox) -> Result<(), ()> {
+async fn send(
+    write: &mut ProgressIo<impl AsyncWrite + Unpin>,
+    outbox: &Outbox,
+    stopped: impl Fn() -> bool,
+) -> Result<(), ()> {
     let bytes = outbox.take();
     if bytes.is_empty() {
         return Ok(());
@@ -316,7 +320,7 @@ async fn send(write: &mut ProgressIo<impl AsyncWrite + Unpin>, outbox: &Outbox) 
     match write
         .progress
         .clone()
-        .sending(write.write_all(&bytes))
+        .stoppable(write.write_all(&bytes), stopped)
         .await
     {
         Ok(Ok(())) => Ok(()),
@@ -386,13 +390,13 @@ async fn connection(
                     detail: format!("no hello within {} ms", HELLO_DEADLINE.as_millis()),
                 },
             );
-            let _ = send(&mut write, &outbox).await;
+            let _ = send(&mut write, &outbox, &*stopped).await;
             return;
         }
     };
     let Some(place) = Place::take(admitted, CONNECTION_LIMIT) else {
         let _ = refuse::<PlakExtension>(&mut outbox.clone(), HandshakeRefusal::Busy);
-        let _ = send(&mut write, &outbox).await;
+        let _ = send(&mut write, &outbox, &*stopped).await;
         return;
     };
     drop(pending);
@@ -407,7 +411,7 @@ async fn connection(
         &mut outbox.clone(),
         &move || stop(),
     );
-    if send(&mut write, &outbox).await.is_err() || !matches!(admitted, Ok(true)) {
+    if send(&mut write, &outbox, &*stopped).await.is_err() || !matches!(admitted, Ok(true)) {
         return;
     }
     let stop = Arc::clone(&stopped);
@@ -415,7 +419,7 @@ async fn connection(
     loop {
         // A flush may read the session directory from the stores.
         let flushed = tokio::task::block_in_place(|| connection.flush());
-        if flushed.is_err() || send(&mut write, &outbox).await.is_err() || stopped() {
+        if flushed.is_err() || send(&mut write, &outbox, &*stopped).await.is_err() || stopped() {
             break;
         }
         if let Some(line) = reader.queued.pop_front() {
@@ -423,7 +427,7 @@ async fn connection(
             let reading = tokio::task::block_in_place(|| connection.frame(line));
             if !matches!(reading, Ok(true)) {
                 let _ = connection.flush();
-                let _ = send(&mut write, &outbox).await;
+                let _ = send(&mut write, &outbox, &*stopped).await;
                 break;
             }
             continue;
