@@ -142,7 +142,7 @@ struct Entry {
 #[derive(Clone)]
 enum Connection {
     Remote(RunnerClient, RunnerServices),
-    Local(Arc<WorkspaceCatalog>),
+    Local(Arc<WorkspaceCatalog>, Option<RunnerClient>),
 }
 
 /// Process-owned registry: aliases of one id share one existing client and link
@@ -368,14 +368,37 @@ impl RunnerRegistry {
         Ok(())
     }
 
-    /// Marks local ready only after the home-local process daemon has bound
-    /// and reconciled. Workspace reads remain direct on the host.
+    /// Marks direct local placement ready, without a process-daemon connection.
+    /// Hosts using a home-local daemon publish through [`Self::ready_local_daemon`].
     ///
     /// # Errors
     /// Local must have been explicitly configured first.
     pub fn ready_local(
         &self,
         catalog: Arc<WorkspaceCatalog>,
+        now: u64,
+    ) -> Result<(), PlacementFailure> {
+        self.publish_local(catalog, None, now)
+    }
+
+    /// Publishes home-local daemon readiness only for the connection captured
+    /// before reconciliation. Direct local placement has no daemon barrier.
+    ///
+    /// # Errors
+    /// Refuses an unknown local row, stale pass, or lost/rebound daemon link.
+    pub fn ready_local_daemon(
+        &self,
+        catalog: Arc<WorkspaceCatalog>,
+        connection: RunnerConnectionRevision,
+        now: u64,
+    ) -> Result<(), PlacementFailure> {
+        self.publish_local(catalog, Some(connection), now)
+    }
+
+    fn publish_local(
+        &self,
+        catalog: Arc<WorkspaceCatalog>,
+        connection: Option<RunnerConnectionRevision>,
         now: u64,
     ) -> Result<(), PlacementFailure> {
         let options = catalog.options();
@@ -385,12 +408,23 @@ impl RunnerRegistry {
         if entry.refresh.reconcile_again {
             return Err(reconciling());
         }
+        if connection.as_ref().is_some_and(|link| !link.is_current()) {
+            let failure = PlacementFailure::RunnerUnreachable {
+                phase: ProbePhase::LinkLost,
+                timed_out: false,
+            };
+            self.block_entry("local", entry, failure.clone(), now, true);
+            return Err(failure);
+        }
         entry.row.status = RunnerStatus::Ready;
         entry.row.checked_at = Some(now);
         entry.row.blocked_since = None;
         entry.row.options = Some(options);
         entry.row.discovery = discovery;
-        entry.connection = Some(Connection::Local(catalog));
+        entry.connection = Some(Connection::Local(
+            catalog,
+            connection.map(|link| link.client),
+        ));
         let _ = self.progress.send(RunnerProgress {
             runner_id: "local".into(),
             phase: ProbePhase::Reconcile,
@@ -545,6 +579,12 @@ impl RunnerRegistry {
                         timed_out: false,
                     })
                 }
+                Some(Connection::Local(_, Some(client))) if !client.is_connected() => {
+                    Err(PlacementFailure::RunnerUnreachable {
+                        phase: ProbePhase::LinkLost,
+                        timed_out: false,
+                    })
+                }
                 connection => connection.clone().ok_or_else(reconciling),
             },
             RunnerStatus::Unknown => Err(reconciling()),
@@ -561,7 +601,7 @@ impl RunnerRegistry {
         self.refresh_configuration()?;
         Ok(match self.connection(id)? {
             Connection::Remote(_, services) => Some(services),
-            Connection::Local(_) => None,
+            Connection::Local(_, _) => None,
         })
     }
 
@@ -653,7 +693,7 @@ impl RunnerRegistry {
             .unwrap_or_else(PoisonError::into_inner)
             .get("local")
             .and_then(|entry| match &entry.connection {
-                Some(Connection::Local(catalog)) => Some(catalog.clone()),
+                Some(Connection::Local(catalog, _)) => Some(catalog.clone()),
                 _ => None,
             })
     }
@@ -685,7 +725,7 @@ impl RunnerRegistry {
         let root = validate(connection.clone(), path, true).await?;
         let services = match connection {
             Connection::Remote(_, services) => Some(services),
-            Connection::Local(_) => None,
+            Connection::Local(_, _) => None,
         };
         Ok(BoundWorkspace {
             runner_id: id.into(),
@@ -719,7 +759,7 @@ async fn validate(
             phase: ProbePhase::Options,
             timed_out: false,
         })?,
-        Connection::Local(catalog) => {
+        Connection::Local(catalog, _) => {
             let path = path.to_owned();
             tokio::task::spawn_blocking(move || catalog.validate(&path, require_canonical))
                 .await

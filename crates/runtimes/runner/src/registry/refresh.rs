@@ -169,7 +169,12 @@ impl RunnerRegistry {
                     _ => false,
                 };
             let failed = matches!(entry.row.status, super::RunnerStatus::Blocked(_));
-            let disconnected = matches!(&entry.connection, Some(Connection::Remote(client, _)) if !client.is_connected());
+            let disconnected = match &entry.connection {
+                Some(Connection::Remote(client, _) | Connection::Local(_, Some(client))) => {
+                    !client.is_connected()
+                }
+                _ => false,
+            };
             if entry.refresh.active
                 || (entry
                     .refresh
@@ -277,9 +282,12 @@ impl RunnerRegistry {
 
     async fn refresh_connected(&self, id: &str) -> Result<(), PlacementFailure> {
         match self.connection(id)? {
-            Connection::Local(catalog) => {
-                self.ready_local(catalog, now())?;
-            }
+            Connection::Local(catalog, client) => match client {
+                Some(client) => {
+                    self.ready_local_daemon(catalog, client.connection_revision(), now())?;
+                }
+                None => self.ready_local(catalog, now())?,
+            },
             Connection::Remote(client, services) => {
                 let connection = client.connection_revision();
                 self.progress(id, ProbePhase::Options);

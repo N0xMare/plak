@@ -6021,8 +6021,9 @@ intent, runner protocol and binding encodings are unchanged. An old completion
 may clear a connection requirement only while the row is Ready and no fresh
 reconciliation is pending; stop-only results cannot replace a newer retry snapshot.
 
-Remote registry readiness captures the client's connection revision before the
-first-bind/reconciliation pass. Under the registry entries write lock, the
+Remote and home-local daemon readiness capture the client's connection revision
+before the first-bind/reconciliation pass, including before line re-adoption.
+Under the registry entries write lock, the
 first-bind barrier opens only if that revision is still current and the client
 is connected, in addition to rejecting a pass invalidated by fresh reconciliation
 debt. Loss after the last cleanup answer still blocks the row and keeps services
@@ -6030,6 +6031,8 @@ unavailable, even before the link watcher starts. The failed pass uses the exist
 coalesced 1/2/5/15-second redial path for needed connections; a rebind must complete
 the ordered barrier again before Ready. This publication fence is not a promise
 of subsequent reachability and does not replace dispatch-time admission checks.
+Direct local placement has no daemon connection and retains its separate
+readiness path.
 
 - **Frames.** A big-endian `u32` length, then one JSON value. Neither end
   reads or writes a frame over 16 MiB; an answer that would exceed it is

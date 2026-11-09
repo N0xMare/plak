@@ -13,6 +13,7 @@ use std::sync::{
 };
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
+pub(super) mod production_fence;
 mod ready_fence;
 
 async fn line_runner(

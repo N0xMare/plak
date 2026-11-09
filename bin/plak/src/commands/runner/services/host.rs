@@ -1,6 +1,6 @@
 //! Home-local daemon binding for the serving host.
 
-use super::{CliResult, RunnerClient, Services, finish_stops, install_reporter, start_probes};
+use super::{CliResult, RunnerClient, Services, install_reporter, start_probes};
 
 pub(crate) fn prepare(
     services: &Services,
@@ -85,25 +85,23 @@ async fn bind_local(
         .await
         .map_err(|_| unavailable(ProbePhase::Reconcile))?;
     plakous_hosted::runner_adoption::report_obsolete_lines(&sessions, obsolete).await;
-    let (readopted, failures) =
-        plakous_hosted::runner_adoption::readopt_lines(&client, &sessions, "plak:host:readopt")
-            .await
-            .map_err(|_| unavailable(ProbePhase::Reconcile))?;
-    if failures.iter().any(|failure| !failure.held_elsewhere) {
-        return Err(unavailable(ProbePhase::Reconcile));
-    }
-    let _ = client.recover().await;
-    let pending = finish_stops(services, &client, &sessions, &readopted)
-        .await
-        .map_err(|_| unavailable(ProbePhase::Reconcile))?;
-    client
-        .reconcile_settled_foreground()
-        .await
-        .map_err(|_| unavailable(ProbePhase::Reconcile))?;
+    finish_local_bind(services, catalog, client).await
+}
+
+pub(super) async fn finish_local_bind(
+    services: &Services,
+    catalog: std::sync::Arc<plakous::runner::WorkspaceCatalog>,
+    client: RunnerClient,
+) -> Result<(RunnerClient, Vec<super::LineId>), plakous::runner::PlacementFailure> {
+    let connection = client.connection_revision();
+    let pending = super::reconcile_remote(services, "local", &client).await?;
     let registry = services.runners().clone();
     let now = services.now_unix_seconds();
-    tokio::task::spawn_blocking(move || registry.ready_local(catalog, now))
+    tokio::task::spawn_blocking(move || registry.ready_local_daemon(catalog, connection, now))
         .await
-        .map_err(|_| unavailable(ProbePhase::Discovery))??;
+        .map_err(|_| plakous::runner::PlacementFailure::RunnerUnreachable {
+            phase: plakous::runner::ProbePhase::Discovery,
+            timed_out: false,
+        })??;
     Ok((client, pending))
 }

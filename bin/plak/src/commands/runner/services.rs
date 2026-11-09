@@ -32,6 +32,16 @@ type LocalDial = dyn Fn(
     > + Send
     + Sync;
 
+type RemoteDial = dyn Fn(
+        Services,
+        super::registry::Remote,
+        tokio::runtime::Handle,
+        Option<RunnerClient>,
+    ) -> std::pin::Pin<Box<dyn Future<Output = RemoteBind> + Send>>
+    + Send
+    + Sync;
+type RemoteBind = Result<(super::dial::Dialed, Vec<LineId>), plakous::runner::PlacementFailure>;
+
 pub(crate) fn standalone(
     services: &Services,
     executor: &tokio::runtime::Handle,
@@ -64,12 +74,31 @@ fn start_probes(
     environment: Option<std::sync::Arc<LocalDial>>,
     runtime: &tokio::runtime::Handle,
 ) {
+    start_probes_with_dial(
+        services,
+        local,
+        environment,
+        runtime,
+        std::sync::Arc::new(|services, remote, handle, client| {
+            Box::pin(async move { bind_remote(&services, &remote, &handle, client.as_ref()).await })
+        }),
+    );
+}
+
+fn start_probes_with_dial(
+    services: &Services,
+    local: std::sync::Arc<plakous::runner::WorkspaceCatalog>,
+    environment: Option<std::sync::Arc<LocalDial>>,
+    runtime: &tokio::runtime::Handle,
+    dial: std::sync::Arc<RemoteDial>,
+) -> Retries {
     services.runners().run_probes_on(runtime.clone());
     let transports = std::sync::Arc::new(std::sync::Mutex::new(BTreeMap::<
         String,
         crate::commands::runner::dial::Dialed,
     >::new()));
     let retries: Retries = std::sync::Arc::default();
+    let retry_state = retries.clone();
     let context = services.runner_probe_context();
     let handle = runtime.clone();
     services
@@ -81,6 +110,7 @@ fn start_probes(
             let local = local.clone();
             let environment = environment.clone();
             let handle = handle.clone();
+            let dial = dial.clone();
             Box::pin(async move {
                 if id == "local" {
                     return probe_local(registry, services, local, environment, handle, retries)
@@ -113,7 +143,7 @@ fn start_probes(
                     return result.map(|_| ());
                 }
                 let client = registry.client(&id);
-                match bind_remote(&services, &remote, &handle, client.as_ref()).await {
+                match dial(services.clone(), remote, handle, client).await {
                     Ok((dialed, pending)) => {
                         let client = dialed.client.clone();
                         transports
@@ -140,6 +170,7 @@ fn start_probes(
     runtime.spawn(async move {
         let _ = registry.refresh(None).await;
     });
+    retry_state
 }
 
 async fn probe_local(
@@ -152,17 +183,21 @@ async fn probe_local(
 ) -> Result<(), plakous::runner::PlacementFailure> {
     let id = "local".to_owned();
     let Some(dial) = environment else {
-        return ready_local(registry, local, services.now_unix_seconds()).await;
+        return ready_local(registry, local, None, services.now_unix_seconds()).await;
     };
-    let was_connected = services
-        .local_runner_client()
-        .is_some_and(|client| client.is_connected());
+    let client = services.local_runner_client();
+    let was_connected = client.as_ref().is_some_and(RunnerClient::is_connected);
     if was_connected
         && registry.rows().iter().any(|row| {
             row.runner.runner_id == id && row.status == plakous::runner::RunnerStatus::Ready
         })
     {
-        return ready_local(registry, local, services.now_unix_seconds()).await;
+        let result =
+            ready_local(registry.clone(), local, client, services.now_unix_seconds()).await;
+        if result.is_err() {
+            retry_remote(registry, id, retries);
+        }
+        return result;
     }
     let result = dial(services.clone(), local, handle).await;
     match &result {
@@ -180,14 +215,19 @@ async fn probe_local(
 async fn ready_local(
     registry: plakous::runner::RunnerRegistry,
     catalog: std::sync::Arc<plakous::runner::WorkspaceCatalog>,
+    client: Option<RunnerClient>,
     now: u64,
 ) -> Result<(), plakous::runner::PlacementFailure> {
-    tokio::task::spawn_blocking(move || registry.ready_local(catalog, now))
-        .await
-        .map_err(|_| plakous::runner::PlacementFailure::RunnerUnreachable {
-            phase: plakous::runner::ProbePhase::Discovery,
-            timed_out: false,
-        })?
+    let connection = client.as_ref().map(RunnerClient::connection_revision);
+    tokio::task::spawn_blocking(move || match connection {
+        Some(connection) => registry.ready_local_daemon(catalog, connection, now),
+        None => registry.ready_local(catalog, now),
+    })
+    .await
+    .map_err(|_| plakous::runner::PlacementFailure::RunnerUnreachable {
+        phase: plakous::runner::ProbePhase::Discovery,
+        timed_out: false,
+    })?
 }
 
 #[derive(Clone)]
@@ -539,6 +579,8 @@ async fn reconcile_remote(
         .reconcile_settled_foreground()
         .await
         .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
+    #[cfg(test)]
+    tests::production_fence::after_cleanup(client).await;
     Ok(pending)
 }
 
