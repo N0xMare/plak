@@ -138,7 +138,7 @@ pub(crate) fn conflict(hosts: &[LiveHost]) -> CliFailure {
 /// A held kernel lock proves activity even when the diagnostic pid is stale.
 /// A free lock proves nothing is held, even when its text names a live pid.
 pub(crate) fn lock_holder(path: &Path) -> CliResult<Option<String>> {
-    use rustix::fs::{FileType, Mode, OFlags};
+    use rustix::fs::{Mode, OFlags};
     let fd = match rustix::fs::open(
         path,
         OFlags::RDWR | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
@@ -150,7 +150,7 @@ pub(crate) fn lock_holder(path: &Path) -> CliResult<Option<String>> {
     };
     let mut file = File::from(fd);
     let metadata = file.metadata().map_err(failed)?;
-    if FileType::from_raw_mode(metadata.mode()) != FileType::RegularFile
+    if !metadata.file_type().is_file()
         || metadata.uid() != rustix::process::geteuid().as_raw()
         || metadata.mode() & 0o077 != 0
         || metadata.len() > MAX_HOLDER_BYTES
