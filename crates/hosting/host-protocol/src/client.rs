@@ -1291,6 +1291,7 @@ impl<P: ProtocolExtension> Inner<P> {
         P::Intent: Serialize,
     {
         if let Outcome::Ok(Answer::Attached { attachment }) = outcome {
+            state.clear_control_retry();
             state.root = root;
             state.agent = None;
             state.attachment = Some(*attachment);

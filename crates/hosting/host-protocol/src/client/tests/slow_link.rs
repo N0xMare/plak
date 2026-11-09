@@ -210,6 +210,64 @@ fn slow_link_transcript_overflow_replays_open_on_current_attachment() {
 }
 
 #[test]
+fn slow_link_completed_selection_supersedes_pending_transcript_recovery() {
+    let (mut host, sender, receiver, gate, writing) = gated();
+    sender
+        .send(SessionIntent::OpenAgentTranscript {
+            agent_id: "a1".into(),
+        })
+        .unwrap();
+    let (open, _) = host.request();
+    host.send(&HostFrame::Response {
+        id: open,
+        outcome: Outcome::Ok(Answer::Accepted { duplicate: false }),
+    });
+    assert!(sender.settle(Duration::from_secs(3)));
+    host.send(&HostFrame::ResyncRequired { attachment: 1 });
+    let (recovery, op) = host.request();
+    assert_eq!(op, Op::Attach { node: node("t1") });
+    let selection = sender.attach_to(node("chosen")).unwrap();
+    assert_eq!(
+        host.request(),
+        (
+            selection,
+            Op::Attach {
+                node: node("chosen")
+            }
+        )
+    );
+    let _last = full_controls(&sender, &gate, &writing);
+    host.send(&HostFrame::Response {
+        id: recovery,
+        outcome: Outcome::Ok(Answer::Attached { attachment: 2 }),
+    });
+    pending_control(
+        &sender,
+        |control| matches!(control, Control::OpenTranscript(agent) if agent == "a1"),
+    );
+    host.send(&HostFrame::Response {
+        id: selection,
+        outcome: Outcome::Ok(Answer::Attached { attachment: 3 }),
+    });
+    assert_eq!(
+        receiver.recv_response(Duration::from_secs(3)).unwrap().0,
+        selection
+    );
+    release(&gate);
+    for _ in 0..writer::MAX_FRAMES {
+        assert_eq!(host.request().1, Op::Ping);
+    }
+    let sentinel = sender.request_operation(Op::Ping).unwrap();
+    assert_eq!(
+        host.request(),
+        (sentinel, Op::Ping),
+        "completed selection must not reopen the old transcript or attach again"
+    );
+    assert!(receiver.try_control_error().is_none());
+    assert_eq!(receiver.ended(), None);
+}
+
+#[test]
 fn slow_link_overflow_notifies_waiters_and_queued_selection_clears_retry_state() {
     let (mut host, sender, receiver, gate, writing) = gated();
     let last = full_controls(&sender, &gate, &writing);

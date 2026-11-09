@@ -4831,8 +4831,9 @@ verdicts) are addressed, the session profile and workspace chrome states.
   retains the specific failed attach, detach or transcript-open control
   until the progressing writer frees capacity. A failed detach is replayed
   before attaching again; a transcript open is retried on the current
-  attachment, not by creating another one. Any queued attach clears stale
-  attach retry/error state, after first queueing any pending detach.
+  attachment, not by creating another one. Any successfully queued control
+  clears the retry/error state; a completed selection supersedes a pending
+  control retry. A queued attach first queues any pending detach.
   Overflow wakes control-state waiters even while the writer is stalled.
   It does not end the connection. Intent saturation returns never-sent
   backpressure, never a partial blob sequence.
