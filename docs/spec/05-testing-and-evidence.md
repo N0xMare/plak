@@ -2398,9 +2398,11 @@ that the host process and resident session survive it.
 The exact durability test `review_tui_host_restart_switch` adds the TUI's
 own `/new`, `/resume <original>` and `/stop` while a busy root or real child
 runs. Twin pilots pin every indexed per-store label. Both terminal shapes
-wait for the stopped child tree to become interrupted with no active turns
-before killing each pilot host. Their indexed cuts restart
-and reattach without redispatch, handoff or continuation;
+wait for the stop notice to appear in the read-only durable transcript before
+leaving, and for the stopped child tree to become interrupted with no active
+turns before killing each pilot host. The stop reply and live notice alone
+do not acknowledge the host loop's later notice-intent commit. Their indexed
+cuts restart and reattach without redispatch, handoff or continuation;
 the original remains unique, and at most its one newly created session
 also exists. The strict sweep registers this shape independently and the
 offline lane excludes it by name.
@@ -3812,6 +3814,11 @@ Recovery reconnects without replaying input and checks durable stop, custody,
 no handoff/continuation and no extra root or child provider dispatch. These
 matrices are in the durability lane with the reviewed longer timeout; the
 original terminal matrices remain separate evidence.
+In wire replay, the `stopped` barrier likewise waits for that durable stop
+notice before sending bye, in both pilots and cuts (a killed host ends the
+cut's wait). This pins the final notice-intent commit rather than racing the
+pilot's host kill against it. Twin signatures and every reached per-store
+prefix remain exact; only the cross-face parity comparison merges runs.
 
 Protocol-4 attention is tested while busy; clients keep queueing with
 `follow_up`. Child counts exercise live, parked, completed and held-loss

@@ -291,8 +291,11 @@ fn replay(
                     assert!(Instant::now() < until, "child never dispatched");
                     std::thread::sleep(Duration::from_millis(5));
                 }
-            } else if barrier == "stopped" && mode != ReplayMode::Cut {
-                wait_stopped_tree(fixture, host, session, child);
+            } else if barrier == "stopped" {
+                wait_stopped_notice(fixture, host, session, mode)?;
+                if mode != ReplayMode::Cut {
+                    wait_stopped_tree(fixture, host, session, child);
+                }
             } else if barrier == "reconnected-without-replay" {
                 connections
                     .get_mut(&2)
@@ -333,6 +336,23 @@ fn replay(
             let connection = connections.get_mut(&id).unwrap();
             connection.eof(mode)?;
         }
+    }
+    Ok(())
+}
+
+fn wait_stopped_notice(
+    fixture: &Fixture,
+    host: &mut Host,
+    session: &str,
+    mode: ReplayMode,
+) -> io::Result<()> {
+    let until = Instant::now() + WAIT;
+    while !stopped_notice_committed(fixture, session) {
+        if mode == ReplayMode::Cut && host.child.as_mut().unwrap().try_wait()?.is_some() {
+            return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
+        }
+        assert!(Instant::now() < until, "the stop notice was not committed");
+        std::thread::sleep(Duration::from_millis(10));
     }
     Ok(())
 }

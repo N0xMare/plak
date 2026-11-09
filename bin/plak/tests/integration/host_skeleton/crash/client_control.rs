@@ -207,6 +207,17 @@ pub(super) fn wait_stopped_tree(fixture: &Fixture, host: &Host, session: &str, c
     }
 }
 
+/// The stop reply and live notice precede the host loop's notice-intent save.
+/// Matrix drivers wait for that final commit before leaving or killing a pilot.
+pub(super) fn stopped_notice_committed(fixture: &Fixture, session: &str) -> bool {
+    let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
+    let record = plak::store::ProductStore::inspect_session_read_only(&paths, session).unwrap();
+    record.transcript.items().iter().any(|item| {
+        item.row.text()
+            == Some("stopped: the session's work ended, and nothing continues it until it is prompted again")
+    })
+}
+
 pub(super) fn signature(trace: &Path) -> Signature {
     let mut commits = std::fs::read_to_string(trace)
         .unwrap()

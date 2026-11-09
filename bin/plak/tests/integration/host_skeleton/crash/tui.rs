@@ -74,8 +74,9 @@ fn review_drive_recorded(
                 terminal.send(b"/stop\r");
                 step = 4;
             }
-            4 if screen.contains("session work stopped")
-                || screen.contains("stopped: the session's work ended") =>
+            4 if (screen.contains("session work stopped")
+                || screen.contains("stopped: the session's work ended"))
+                && stopped_notice_committed(fixture, session) =>
             {
                 recording.mark("stopped");
                 terminal.quit();
@@ -248,8 +249,9 @@ fn drive_recorded(
             terminal.send(b"/stop\r");
             stopping = true;
         }
-        if screen.contains("session work stopped")
-            || screen.contains("stopped: the session's work ended")
+        if (screen.contains("session work stopped")
+            || screen.contains("stopped: the session's work ended"))
+            && stopped_notice_committed(fixture, session)
         {
             recording.mark("stopped");
             terminal.quit();
