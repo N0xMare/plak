@@ -156,7 +156,7 @@ fn effect() -> plakous::tools::runner::RunnerCall {
 async fn assert_effect_blocked(runner: &RunnerServices, admitted: &AtomicUsize) {
     assert!(matches!(
         runner.backend().link().call(effect()).await,
-        Err(plakous::tools::runner::RunnerFailure::Unavailable(_))
+        Err(plakous::tools::runner::RunnerFailure::NotSent(_))
     ));
     assert_eq!(admitted.load(Ordering::SeqCst), 0);
 }

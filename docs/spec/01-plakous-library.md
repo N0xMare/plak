@@ -654,6 +654,10 @@ item (consume it on the first acknowledgement or a duplicate within the bound)
 before 4 further root turns finish, and treats `Reclaimed` as proof that the
 command was admitted and finished: it consumes the item and does not resend it.
 
+While a turn is parked on a held runner placement (§5.4), steering, follow-up
+and notices are still accepted and queued by the same driver; they apply at
+the next safe boundary after release and never release the hold themselves.
+
 ### 3.3 The closed turn procedure
 
 Before every provider operation the runtime revalidates the resolved plan,
@@ -679,6 +683,13 @@ allowed, and publish one result.
 Round and tool-call limits are checked before dispatch. A provider finish is
 interpreted by the owning protocol family; the neutral loop never infers
 provider-specific stop semantics.
+
+A held runner placement (§8.4) suspends the procedure only at its boundaries:
+before a request slot and before each paid dispatch (step 3), and at each
+unsent runner call of step 6. The same driver, turn and terminal remain;
+completed outcomes keep committing in source order, an exchange already
+dispatched finishes normally, and no round, Start, terminal or tool retry is
+created by holding or releasing.
 
 For a completed Responses response, explicit `end_turn: false` with no local
 tool call or refusal is an assistant continuation. The runtime durably records
@@ -738,6 +749,12 @@ resources to stop or for a declared forced-termination bound.
 Partial streamed output stays observable but does not advance canonical
 history. A possibly completed external effect remains `OutcomeUnknown`;
 cancellation MUST NOT relabel it as absent or retry it automatically.
+
+Cancellation reaches a turn parked on a held runner placement (§5.4, §8.4) at
+once and through its existing owner: the placement wait and every held runner
+call end without sending, controls never wait on the hold, and a held call
+already sent keeps its unknown outcome. Cancellation never releases the hold
+or opens a competing driver; release is the placement owner's alone.
 
 The admitted prompt stays in canonical history, which only appends (the one
 exception is a prompt withheld because it alone did not fit the window, §3.5). A turn
@@ -2306,6 +2323,22 @@ remain unexpired. Descriptor and context-admission expiry are still checked.
 No historical record or Working attempt is rewritten. Exactly one dispatch
 consumes the captured capability after readiness. A crash while parked therefore
 recovers under the existing Prepared, undispatched-operation rules (§5.5).
+
+Placement parking is the same kind of wait for a node placed on a runner whose
+placement is held (§8.4): its link is lost or its reconnect barrier has not yet
+published readiness. Before taking a request slot and again before each paid
+physical dispatch of a model round or compaction, the driver parks while the
+environment's placement gate reads held. It is in memory only, keeps the same
+driver, turn, child attempt and runtime lease heartbeat, releases the request
+slot and dispatch gate, processes controls, and ends on exact-turn
+cancellation, shutdown, lease loss, release or refusal. Hold time is
+accumulated separately from credential and slot waits, never overlapping them,
+and excluded from the model operation deadline and from `ModelFinished`
+elapsed. A model exchange already dispatched finishes and accounts normally; a
+final answer needing no further work may finish. Placement parking creates no
+event, terminal, Start, stop debt or persisted record; a host crash while
+parked recovers under the ordinary Prepared/Working rules (§5.5). A refused
+placement ends the wait without a model error; its calls refuse as §8.4 states.
 
 Exact reopen validates the recorded and fresh runtime admission evidence against
 their respective complete provider configurations. Credential generations may
@@ -6051,6 +6084,40 @@ of subsequent reachability and does not replace dispatch-time admission checks.
 Direct local placement has no daemon connection and retains its separate
 readiness path.
 
+**Placement hold.** A placed runner's services carry one admission with a
+revision: open after the barrier above publishes Ready, held while the link or
+the barrier is down, refused when the placement itself is refused (pairing,
+version, identity, configuration) or its services are replaced because the
+backend identity changed. Every change advances the revision. The hold is
+process-local and per node; it is not a durable turn, call or node state, and
+a host restart never resumes it (ordinary owner-loss recovery applies).
+
+The authoritative cut is one `RunnerCall` at the admitted link, strictly
+outside the client's per-line foreground gate and owner-transfer lock, so the
+barrier can always run. Only a model tool call's own calls wait there: a new
+effect of process execution, process start, workspace mutation, VCS effect or
+service spawn under its effect key, and its reads and process observations.
+Owner controls, recorded controls, foreground cleanup, tree steps, probes and
+every host-owned call fail fast under their existing rules, so Stop, process
+stop/write/promote, job stop and service termination never join the wait. A
+waiting call is sent once the admission opens; on `NotSent` it waits for a
+revision other than the one it was sent under and sends the same call again
+(same verb, payload and key; a new transport request id), asking its owner for
+a fresh reconciliation when the admission still reads open at that revision.
+A model read or observation answered `ReadInterrupted` is read again the same
+way at the same cursor; the cursor advances only when a result is consumed. No
+tool, nested cell or batch is retried to recover one call. A call possibly
+sent is never sent again under a new key. Before a re-send the host-side
+operation budget moves past the hold; a sent effect's transmitted deadline,
+digest and claim age never change. Cancellation ends a wait as `NotSent`, and a
+refused admission ends every wait with `Unavailable`; a call made under a
+refused admission refuses at once until a later Ready opens it. There is no
+wall-clock cap: memory, queue and owner Stop bound the hold. Release is
+automatic after the barrier; a stale Ready never releases a newer loss, and a
+fixed unknown outcome (restart, `Spent`, `Expired`) closes its call through
+the normal recovery-required path before Ready. The driver's placement parking
+(§5.4) keeps the hold from admitting new paid model work.
+
 - **Frames.** A big-endian `u32` length, then one JSON value. Neither end
   reads or writes a frame over 16 MiB; an answer that would exceed it is
   replaced by a `ResourceLimit` backend error that is not proven to have had
@@ -6313,13 +6380,27 @@ readiness path.
   are one build, every change to the runner's semantics (a holder, fence or
   key rule, a refusal's meaning, a journal or floors rule, a frame's meaning)
   bumps `PROTOCOL_VERSION`.
-- **Host link.** A call waits 30 s for an answer (120 s for an effect call),
-  then its outcome is unknown. Effect calls, owner controls, observations and
-  reads outstanding when the link is lost are replayed by key and digest on
-  the reconnection to the same runner instance; an unkeyed mutation, process
-  or service spawn outstanding then is `OutcomeUnknown`, since it has no key
-  to ask by. A call made with no link is unavailable and proven to have had
-  no effect. Streams end with their link.
+- **Host link.** On a healthy link a call waits 30 s for an answer (120 s
+  for an effect or tree call), then its outcome is unknown. Effect calls,
+  owner controls, observations and reads outstanding when the link is lost
+  are replayed by key and digest on the reconnection to the same runner
+  instance; an unkeyed mutation, process or service spawn outstanding then is
+  `OutcomeUnknown`, since it has no key to ask by. A model tool call's effect
+  window does not run while its link is lost: it restarts when the link is
+  bound again (which replays it under its original key, digest and first-claim
+  age), so a lost link alone never fixes its outcome as unknown at 120 s; a
+  runner restart, `Spent`, `Expired` or cancellation still does at once. An
+  unkeyed read or observation whose link was lost while it waited ends at its
+  window as `ReadInterrupted`, re-issuable rather than of unknown outcome;
+  any other caller maps it as unknown. This is host-side answer scheduling
+  only: frames, keys, holders, digests, Ack, replay age and runner retention
+  are unchanged. A call refused before it entered the transport for a
+  transient reason (no connection, a send failure, an owner transfer the
+  lost link left unanswered, a foreground cleanup awaiting the runner) is
+  `NotSent`; a refusal sending again cannot cure (the runner refused this
+  host, the call could not be journaled, the link never carries the verb) is
+  `Unavailable`. Both are proven to have had no effect; neither is inferred
+  from prose. Streams end with their link.
 
 The at-most-once law across restarts:
 

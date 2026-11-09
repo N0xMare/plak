@@ -346,11 +346,18 @@ impl RunnerRegistry {
             return Err(failure);
         }
         let client = connection.client;
-        if let Some(Connection::Remote(_, previous)) = &entry.connection
-            && previous.backend().identity() == services.backend().identity()
-        {
-            services = previous.clone();
+        if let Some(Connection::Remote(_, previous)) = &entry.connection {
+            if previous.backend().identity() == services.backend().identity() {
+                services = previous.clone();
+            } else {
+                // Nodes still holding the old services would wait on them
+                // forever: their held calls end with a refusal instead.
+                previous.refuse();
+            }
         }
+        let registry = self.clone();
+        let runner = id.to_owned();
+        services.request_reconciliation_with(move || registry.reconcile_when_available(&runner));
         services.set_available(true);
         entry.row.status = RunnerStatus::Ready;
         entry.row.checked_at = Some(now);
@@ -450,7 +457,7 @@ impl RunnerRegistry {
             entry.row.runner.names.clear();
             entry.refresh.invalidate_cache();
             if let Some(Connection::Remote(_, services)) = &entry.connection {
-                services.set_available(false);
+                services.refuse();
             }
             entry.row.status = RunnerStatus::Blocked(missing(id));
             self.changed
@@ -546,7 +553,13 @@ impl RunnerRegistry {
     ) {
         entry.row.blocked_since.get_or_insert(now);
         if let Some(Connection::Remote(_, services)) = &entry.connection {
-            services.set_available(false);
+            // An unreachable link or barrier holds model calls; a refused
+            // placement ends their holds (spec 01 §8.4).
+            if matches!(failure, PlacementFailure::RunnerUnreachable { .. }) {
+                services.set_available(false);
+            } else {
+                services.refuse();
+            }
         }
         if completed {
             entry.row.checked_at = Some(now);

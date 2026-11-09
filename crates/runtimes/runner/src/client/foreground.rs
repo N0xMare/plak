@@ -164,7 +164,9 @@ impl Inner {
                 return Ok(());
             }
             if lock(&self.state).sender.is_none() {
-                return Err(RunnerFailure::Unavailable(
+                // Nothing of the cleanup started: the reconnect barrier runs
+                // it before the call this precedes is sent again.
+                return Err(RunnerFailure::NotSent(
                     "foreground reconciliation awaits the runner".into(),
                 ));
             }

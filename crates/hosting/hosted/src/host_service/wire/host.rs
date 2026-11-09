@@ -519,7 +519,7 @@ where
                     row.live_work.children = u32::try_from(kept.children).unwrap_or(u32::MAX);
                     row.live_work.held_children =
                         u32::try_from(kept.held_children).unwrap_or(u32::MAX);
-                    row.needs_operator = kept.awaiting_operator;
+                    row.needs_operator = needs_operator(&kept, &row.runner_status);
                     if kept.busy {
                         row.activity = SessionActivity::Busy;
                     }
@@ -1497,3 +1497,20 @@ mod archived;
 
 #[cfg(test)]
 mod host_reads_tests;
+
+/// A resident row's attention: an operator decision, or live work held on
+/// a placement whose link or reconnect barrier is down, until automatic
+/// release or Stop. A refused placement is not a hold.
+fn needs_operator(
+    kept: &crate::host_service::KeptActivity,
+    status: &plakous_host_protocol::wire::RunnerStatus,
+) -> bool {
+    kept.awaiting_operator
+        || (kept.busy
+            && matches!(
+                status,
+                plakous_host_protocol::wire::RunnerStatus::Blocked {
+                    reason: plakous_host_protocol::wire::PlacementReason::RunnerUnreachable { .. },
+                }
+            ))
+}

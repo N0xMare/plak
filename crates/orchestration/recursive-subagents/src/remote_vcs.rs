@@ -310,7 +310,7 @@ fn decode<T: DeserializeOwned>(answer: Value) -> Result<Result<T, VcsError>, Vcs
 /// host cannot know, which marks `stage` unknown.
 fn link_error(failure: &RunnerFailure, stage: Option<&stage::VcsStage>) -> VcsError {
     match failure {
-        RunnerFailure::OutcomeUnknown(detail) => {
+        RunnerFailure::OutcomeUnknown(detail) | RunnerFailure::ReadInterrupted(detail) => {
             if let Some(stage) = stage {
                 stage.mark_unknown();
             }
@@ -328,7 +328,9 @@ fn link_error(failure: &RunnerFailure, stage: Option<&stage::VcsStage>) -> VcsEr
                 "the runner ran the VCS step and its answer was already taken",
             )
         }
-        RunnerFailure::Unavailable(detail) | RunnerFailure::Refused(detail) => {
+        RunnerFailure::Unavailable(detail)
+        | RunnerFailure::NotSent(detail)
+        | RunnerFailure::Refused(detail) => {
             VcsError::mint_unavailable(format!("the runner did not run the VCS step: {detail}"))
         }
         RunnerFailure::Unsupported => {

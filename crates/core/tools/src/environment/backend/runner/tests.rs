@@ -11,6 +11,7 @@ use crate::{
     WorkspaceMutation, WorkspaceReplacement,
 };
 
+mod hold;
 mod services;
 mod special_files;
 

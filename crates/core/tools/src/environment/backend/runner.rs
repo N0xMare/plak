@@ -30,7 +30,7 @@ pub use service::{
     RunnerSecretResolver, ServeServiceFuture, serve_service_spawn, serve_service_terminate,
     service_spawned, terminated_service,
 };
-pub use services::RunnerServices;
+pub use services::{PlacementGate, RunnerServices};
 
 /// `request` naming `secrets` (variable, secret name) for the runner that
 /// spawns it to resolve from its own store. A local backend refuses such a
@@ -315,6 +315,10 @@ pub struct RunnerCall {
     payload: Value,
     owner: Option<LineOwner>,
     class: RunnerClass,
+    /// Started by a model tool call: its context carried that call's key,
+    /// even where the class is an observation. A host's own controls,
+    /// probes and builds never are, whatever owner they name.
+    model_call: bool,
     budget: Option<Timestamp>,
     cancellation: CancellationToken,
     preempt: tokio::sync::watch::Receiver<ToolPreempt>,
@@ -340,6 +344,7 @@ impl RunnerCall {
             payload,
             owner: control.owner().copied(),
             class: control.class().into(),
+            model_call: matches!(control.class(), OperationClass::EffectCall { .. }),
             budget: control.budget(),
             cancellation: control.cancellation().clone(),
             preempt: control.preempt().clone(),
@@ -419,6 +424,60 @@ impl RunnerCall {
     pub const fn preempt(&self) -> &tokio::sync::watch::Receiver<ToolPreempt> {
         &self.preempt
     }
+
+    /// Whether a placement hold may keep this call until its runner is
+    /// ready again (spec 01 §8.4): a model tool call's new effect of a
+    /// listed verb, which waits only before it is sent, or its read or
+    /// observation, which may also be sent again after a lost link.
+    /// Controls, tree steps, probes and the host's own calls never wait.
+    #[must_use]
+    pub(crate) fn holds_for_placement(&self) -> bool {
+        if !self.model_call || self.owner.is_none() {
+            return false;
+        }
+        match self.class {
+            RunnerClass::Effect { .. } => {
+                self.verb.is_read()
+                    || matches!(
+                        self.verb,
+                        RunnerVerb::ExecuteLiteralProcess
+                            | RunnerVerb::ProcessStart
+                            | RunnerVerb::MutateWorkspace
+                            | RunnerVerb::VcsEffect
+                            | RunnerVerb::ServiceSpawn
+                    )
+            }
+            RunnerClass::Observation { .. } => self.verb.is_read(),
+            _ => false,
+        }
+    }
+
+    /// The same call, to send again after a placement hold kept it unsent
+    /// for `held`: the same verb, payload, key and owner, with the
+    /// host-side budget moved past the hold. Never used for a call that
+    /// may have been sent, except a read.
+    #[must_use]
+    pub(crate) fn reissue(&self, held: std::time::Duration) -> Self {
+        Self {
+            verb: self.verb,
+            payload: self.payload.clone(),
+            owner: self.owner,
+            class: self.class.clone(),
+            model_call: self.model_call,
+            budget: self.budget.map(|budget| extend_budget(budget, held)),
+            cancellation: self.cancellation.clone(),
+            preempt: self.preempt.clone(),
+        }
+    }
+}
+
+fn extend_budget(budget: Timestamp, held: std::time::Duration) -> Timestamp {
+    let nanos = u128::from(budget.seconds()) * 1_000_000_000
+        + u128::from(budget.nanoseconds())
+        + held.as_nanos();
+    let seconds = u64::try_from(nanos / 1_000_000_000).unwrap_or(u64::MAX);
+    let subsec = u32::try_from(nanos % 1_000_000_000).unwrap_or(0);
+    Timestamp::new(seconds, subsec).unwrap_or(budget)
 }
 
 /// A yield in this seam's schema.
@@ -463,8 +522,20 @@ pub enum RunnerFailure {
     NotHolder,
     /// The runner does not implement the operation; nothing ran.
     Unsupported,
-    /// The link refused the call without sending it.
+    /// The link refused the call without sending it, for a reason sending
+    /// it again does not cure: the runner refused this host, the call
+    /// could not be recorded, or this link never carries it.
     Unavailable(String),
+    /// This request never entered the outgoing transport, for a transient
+    /// reason: blocked before dispatch, no connection, or a link failure
+    /// before its send. Nothing ran; a placement hold sends it again with
+    /// the same key once the runner is ready.
+    NotSent(String),
+    /// A read or observation the link lost: sent on a link that was then
+    /// lost, and unanswered within its window. Reading again cannot repeat
+    /// an effect, so a placement hold sends it again with the same
+    /// arguments; any other caller treats it as of unknown outcome.
+    ReadInterrupted(String),
     /// The call may have run: the link was lost after it was sent, or the
     /// runner restarted under it.
     OutcomeUnknown(String),
@@ -520,6 +591,12 @@ pub trait RunnerLink: Send + Sync + 'static {
     fn open(&self, call: RunnerCall) -> RunnerOpenFuture {
         drop(call);
         Box::pin(std::future::ready(Err(RunnerFailure::Unsupported)))
+    }
+
+    /// The placement hold this link's model calls wait on, when its runner
+    /// is placed through one.
+    fn placement(&self) -> Option<PlacementGate> {
+        None
     }
 }
 
@@ -659,15 +736,19 @@ fn failure_error(failure: RunnerFailure) -> ExecutionBackendError {
             ExecutionBackendErrorKind::Unsupported,
             "the runner does not implement this operation",
         ),
-        RunnerFailure::Unavailable(detail) => ExecutionBackendError::new(
-            ExecutionBackendErrorKind::Io,
-            format!("the runner is unavailable: {detail}"),
-        )
-        .with_proven_no_effect(true),
-        RunnerFailure::OutcomeUnknown(detail) => ExecutionBackendError::new(
-            ExecutionBackendErrorKind::RecoveryRequired,
-            format!("the runner operation's outcome is unknown: {detail}"),
-        ),
+        RunnerFailure::Unavailable(detail) | RunnerFailure::NotSent(detail) => {
+            ExecutionBackendError::new(
+                ExecutionBackendErrorKind::Io,
+                format!("the runner is unavailable: {detail}"),
+            )
+            .with_proven_no_effect(true)
+        }
+        RunnerFailure::OutcomeUnknown(detail) | RunnerFailure::ReadInterrupted(detail) => {
+            ExecutionBackendError::new(
+                ExecutionBackendErrorKind::RecoveryRequired,
+                format!("the runner operation's outcome is unknown: {detail}"),
+            )
+        }
         RunnerFailure::Spent => ExecutionBackendError::new(
             ExecutionBackendErrorKind::RecoveryRequired,
             "the runner ran this call and its answer was already taken, so its outcome is unknown",
@@ -824,6 +905,14 @@ impl ExecutionEnvironment {
             daemon.driver_operation_settled(owner, call_id, attempt_id);
         }
     }
+    /// The placement hold of this node's runner, when it runs on a placed
+    /// runner: a driver waits on it before new paid model work.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn placement_gate(&self) -> Option<PlacementGate> {
+        self.runner_link.as_ref().and_then(|link| link.placement())
+    }
+
     /// Pins the executor of this node's runner link. This live service fact
     /// is not part of its frozen execution descriptor.
     #[must_use]

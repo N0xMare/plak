@@ -29,6 +29,7 @@ use plakous_model::{
 };
 use std::num::NonZeroU32;
 use std::sync::Arc;
+use std::time::Duration;
 impl Driver {
     fn request_conversation(&self) -> ConversationView {
         self.conversation()
@@ -226,7 +227,7 @@ impl Driver {
             }
         };
         let started = crate::executor::now();
-        let parked_before = self.credential_wait_elapsed;
+        let parked_before = (self.credential_wait_elapsed, self.placement_wait_elapsed);
         let operation_deadline = started + self.config.model_operation_timeout;
         let context = self
             .telemetry_context
@@ -268,7 +269,7 @@ impl Driver {
         }
         let model_elapsed = started
             .elapsed()
-            .saturating_sub(self.credential_wait_elapsed.saturating_sub(parked_before));
+            .saturating_sub(self.parked_since(parked_before));
         let served_by = result
             .as_ref()
             .ok()
@@ -305,14 +306,25 @@ impl Driver {
         }
     }
 
+    /// Credential and placement parking since `before`, which no model
+    /// operation's budget or active duration counts.
+    fn parked_since(&self, (credential, placement): (Duration, Duration)) -> Duration {
+        self.credential_wait_elapsed
+            .saturating_sub(credential)
+            .saturating_add(self.placement_wait_elapsed.saturating_sub(placement))
+    }
+
     /// Takes a slot in the host's shared request budget, if it set one,
-    /// before any deadline of this request starts. A full budget publishes
-    /// one `ModelRequestQueued` and waits in arrival order; cancellation,
-    /// shutdown and a lost lease end the wait without taking a slot.
+    /// before any deadline of this request starts, once a held placement
+    /// has released. A full budget publishes one `ModelRequestQueued` and
+    /// waits in arrival order; cancellation, shutdown and a lost lease end
+    /// the wait without taking a slot.
     pub(super) async fn take_request_slot(
         &mut self,
         command: &PromptCommand,
     ) -> Result<Option<RequestSlot>, AgentError> {
+        self.wait_for_placement(command.cancellation.clone())
+            .await?;
         let Some(slots) = self.request_slots.clone() else {
             return Ok(None);
         };
@@ -365,9 +377,10 @@ impl Driver {
         output_deltas: &mut u64,
     ) -> Result<ModelResponse, AgentError> {
         let wait_elapsed_before = self.credential_wait_elapsed;
+        let held_before = self.placement_wait_elapsed;
         let base_deadline = operation_deadline;
         let mut operation_deadline;
-        let mut slot_wait_elapsed = std::time::Duration::ZERO;
+        let mut slot_wait_elapsed = Duration::ZERO;
         let descriptor = self.provider_configuration.effective().descriptor().clone();
         let (plan, prepared, prepared_at) = match request {
             RoundRequest::Fresh(request) => {
@@ -521,6 +534,8 @@ impl Driver {
             .await?;
         }
         let start = loop {
+            self.wait_for_placement(command.cancellation.clone())
+                .await?;
             if self.request_slot.is_none() {
                 let queued_at = crate::executor::now();
                 self.request_slot = self.take_request_slot(command).await?;
@@ -530,6 +545,7 @@ impl Driver {
                 + self
                     .credential_wait_elapsed
                     .saturating_sub(wait_elapsed_before)
+                + self.placement_wait_elapsed.saturating_sub(held_before)
                 + slot_wait_elapsed;
             if crate::executor::now() >= operation_deadline {
                 return Err(self.model_timeout_error());

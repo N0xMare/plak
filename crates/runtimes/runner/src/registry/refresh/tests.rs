@@ -485,3 +485,180 @@ async fn assert_catalog_repair(registry: &RunnerRegistry, client: &crate::Runner
         "admitted calls retain their reconciliation client"
     );
 }
+
+mod hold {
+    use super::*;
+    use crate::{ClientWindows, RunnerClient, RunnerIdentity, RunnerService, RunnerServices};
+    use plakous_runner_protocol::{Bind, Hello, VersionTriple};
+    use plakous_tools::internal::runner::{RunnerBackend, RunnerLink, RunnerSessions};
+    use plakous_tools::{
+        ExecutionBackendError, ExecutionBackendErrorKind, ExecutionEnvironment,
+        ExecutionEnvironmentConfig, ExecutionEnvironmentScope, JoinedProcessCommand,
+        JoinedProcessStartRequest, JoinedProcessTerminalMode, LineOwner, OperationClass,
+        OperationContext, RunnerId,
+    };
+
+    /// A live in-process runner `held` and the host's client of it.
+    async fn linked(
+        environment: &ExecutionEnvironment,
+    ) -> (RunnerClient, Hello, tokio::task::JoinHandle<()>) {
+        let version = VersionTriple::current("hold", "test");
+        let service = RunnerService::new(
+            environment.clone(),
+            RunnerIdentity {
+                runner_id: RunnerId::new("held").unwrap(),
+                version: version.clone(),
+                boot_id: "boot".into(),
+                binary_id: None,
+            },
+        )
+        .unwrap();
+        let (host, runner) = tokio::io::duplex(65536);
+        let serving = tokio::spawn(async move {
+            service.serve_connection(runner).await;
+        });
+        let bind = Bind {
+            host_id: "host".into(),
+            host_instance: "hold".into(),
+            version,
+            inspect: false,
+        };
+        let (client, hello) = RunnerClient::connect(host, bind, ClientWindows::default())
+            .await
+            .unwrap();
+        (client, hello, serving)
+    }
+
+    fn ready(registry: &RunnerRegistry, client: &RunnerClient, services: RunnerServices, now: u64) {
+        let options = crate::WorkspaceOptions {
+            roots: None,
+            default_workspace: None,
+            copies: false,
+        };
+        registry
+            .ready(
+                "held",
+                client.connection_revision(),
+                services,
+                options,
+                crate::WorkspaceDiscovery::default(),
+                now,
+            )
+            .unwrap();
+    }
+
+    fn owner() -> LineOwner {
+        LineOwner::new(
+            "00000000-0000-0000-0000-0000000000a1".parse().unwrap(),
+            1,
+            "00000000-0000-0000-0000-0000000000b1".parse().unwrap(),
+            1,
+        )
+    }
+
+    /// A model tool call's process start through `link`, which would leave
+    /// a marker in the workspace if it ran.
+    fn start(
+        link: Arc<dyn RunnerLink>,
+        environment: &ExecutionEnvironment,
+        call: u8,
+    ) -> tokio::task::JoinHandle<Result<plakous_tools::JoinedProcessSessionId, ExecutionBackendError>>
+    {
+        let sessions = RunnerSessions::from_link(link, environment, owner());
+        let request = JoinedProcessStartRequest::new(
+            JoinedProcessCommand::literal("/bin/sh", ["-c".to_owned(), "touch marker".to_owned()])
+                .unwrap(),
+            ".",
+            Vec::new(),
+            false,
+            JoinedProcessTerminalMode::Pipes,
+        )
+        .unwrap();
+        let control = OperationContext::new(plakous_model::CancellationToken::new())
+            .with_owner(owner())
+            .with_class(OperationClass::EffectCall {
+                call_id: format!("00000000-0000-0000-0000-0000000000{call:02x}")
+                    .parse()
+                    .unwrap(),
+                attempt_id: "00000000-0000-0000-0000-0000000000c1".parse().unwrap(),
+            });
+        tokio::spawn(async move { sessions.start(request, control).await })
+    }
+
+    async fn refused(
+        started: tokio::task::JoinHandle<
+            Result<plakous_tools::JoinedProcessSessionId, ExecutionBackendError>,
+        >,
+    ) {
+        let error = tokio::time::timeout(Duration::from_secs(10), started)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert!(
+            error.kind() == ExecutionBackendErrorKind::Io && error.proven_no_effect(),
+            "{error:?}"
+        );
+    }
+
+    /// An unreachable placement holds its nodes' model calls; a backend
+    /// whose identity changed replaces the services and ends the old holds
+    /// with a refusal rather than stranding them; a refused placement ends
+    /// holds and refuses new calls at once. Nothing held is sent.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn placement_failures_hold_or_end_held_calls_by_kind() {
+        let root = tempfile::tempdir().unwrap();
+        let environment = ExecutionEnvironment::host(
+            ExecutionEnvironmentScope::Run("00000000-0000-0000-0000-000000000001".parse().unwrap()),
+            root.path(),
+            ".",
+            ExecutionEnvironmentConfig::default(),
+        )
+        .unwrap();
+        let (client, hello, serving) = linked(&environment).await;
+        let registry = registry(0);
+        registry.configure(ConfiguredRunner {
+            runner_id: "held".into(),
+            names: vec!["held".into()],
+        });
+        let services = |descriptor: serde_json::Value| {
+            RunnerServices::new(
+                Arc::new(RunnerBackend::new(descriptor, Arc::new(client.clone())).unwrap()),
+                tokio::runtime::Handle::current(),
+            )
+        };
+        let first = services(hello.descriptor.clone());
+        ready(&registry, &client, first.clone(), 1);
+        registry.blocked(
+            "held",
+            PlacementFailure::RunnerUnreachable {
+                phase: ProbePhase::LinkLost,
+                timed_out: false,
+            },
+            2,
+        );
+        let held = start(first.backend().link(), &environment, 1);
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(!held.is_finished(), "an unreachable placement holds");
+
+        let mut changed = hello.descriptor.clone();
+        changed["operating_system"] = if changed["operating_system"] == "linux" {
+            "macos".into()
+        } else {
+            "linux".into()
+        };
+        let second = services(changed);
+        ready(&registry, &client, second.clone(), 3);
+        refused(held).await;
+        assert!(second.is_available());
+
+        registry.blocked("held", PlacementFailure::RunnerNotPaired, 4);
+        refused(start(second.backend().link(), &environment, 2)).await;
+        assert!(
+            !root.path().join("marker").exists(),
+            "nothing held was sent"
+        );
+        client.disconnect();
+        serving.abort();
+    }
+}

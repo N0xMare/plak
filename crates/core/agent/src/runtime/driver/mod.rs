@@ -71,6 +71,7 @@ pub(super) enum ToolDispatchOrigin {
 
 mod credential_wait;
 mod operator_input;
+mod placement_wait;
 mod reresolution;
 mod turn;
 pub(in crate::runtime) mod turn_position;
@@ -156,6 +157,9 @@ struct Driver {
     request_slots: Option<crate::runtime::RequestSlots>,
     request_slot: Option<crate::runtime::request_slots::RequestSlot>,
     credential_wait_elapsed: Duration,
+    /// Time this driver spent parked on a held runner placement; excluded
+    /// from every model operation's budget like credential parking.
+    placement_wait_elapsed: Duration,
     credential_wait: Arc<Mutex<Option<super::CredentialWait>>>,
     effect_decision_tombstones: VecDeque<EffectDecisionTombstone>,
     command_ledger: BTreeMap<CommandId, CommandLedgerEntry>,

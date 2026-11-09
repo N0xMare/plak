@@ -215,10 +215,12 @@ impl Driver {
         &mut self,
         live: &mut LiveCompaction,
     ) -> Result<ModelResponse, AgentError> {
+        self.wait_for_placement(live.cancellation().clone()).await?;
         self.request_slot = self
             .take_compaction_request_slot(live.cancellation().clone())
             .await?;
         let wait_elapsed_before = self.credential_wait_elapsed;
+        let held_before = self.placement_wait_elapsed;
         let (base_deadline, context) = live.begin_call()?;
         let mut deadline_at;
         let mut slot_wait_elapsed = std::time::Duration::ZERO;
@@ -231,6 +233,7 @@ impl Driver {
         let provider_configuration = Arc::clone(&live.runtime().provider_configuration);
         let descriptor = provider_configuration.effective().descriptor().clone();
         let start = loop {
+            self.wait_for_placement(cancellation.clone()).await?;
             if self.request_slot.is_none() {
                 let queued_at = crate::executor::now();
                 self.request_slot = self
@@ -242,6 +245,7 @@ impl Driver {
                 + self
                     .credential_wait_elapsed
                     .saturating_sub(wait_elapsed_before)
+                + self.placement_wait_elapsed.saturating_sub(held_before)
                 + slot_wait_elapsed;
             let provider_dispatch_gate = Arc::clone(&self.provider_dispatch_gate);
             let dispatch_guard = provider_dispatch_gate.lock().await;

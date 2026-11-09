@@ -3115,3 +3115,34 @@ fn a_lost_output_during_release_withdraws_the_request() {
     }
     handed_off(&host);
 }
+
+#[test]
+fn held_live_work_needs_the_operator_and_a_refused_or_idle_placement_does_not() {
+    use plakous_host_protocol::wire::{PlacementReason, RunnerPhase, RunnerStatus};
+    let unreachable = |phase| RunnerStatus::Blocked {
+        reason: PlacementReason::RunnerUnreachable {
+            phase,
+            timed_out: false,
+        },
+    };
+    let busy = crate::host_service::KeptActivity {
+        busy: true,
+        ..Default::default()
+    };
+    let idle = crate::host_service::KeptActivity::default();
+    assert!(needs_operator(&busy, &unreachable(RunnerPhase::LinkLost)));
+    assert!(needs_operator(&busy, &unreachable(RunnerPhase::Reconcile)));
+    assert!(!needs_operator(&idle, &unreachable(RunnerPhase::LinkLost)));
+    assert!(!needs_operator(&busy, &RunnerStatus::Ready));
+    assert!(!needs_operator(
+        &busy,
+        &RunnerStatus::Blocked {
+            reason: PlacementReason::RunnerNotPaired
+        }
+    ));
+    let awaiting = crate::host_service::KeptActivity {
+        awaiting_operator: true,
+        ..Default::default()
+    };
+    assert!(needs_operator(&awaiting, &RunnerStatus::Ready));
+}

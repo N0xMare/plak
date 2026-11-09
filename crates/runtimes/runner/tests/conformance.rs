@@ -928,7 +928,7 @@ async fn an_oversized_frame_from_the_runner_loses_the_link() {
         ))
         .await
         .unwrap_err();
-    assert!(matches!(error, RunnerFailure::Unavailable(_)));
+    assert!(matches!(error, RunnerFailure::NotSent(_)), "{error:?}");
     fake.abort();
 }
 
@@ -1066,7 +1066,7 @@ async fn a_silent_link_is_lost_at_both_ends_and_pings_keep_it() {
         ))
         .await
         .unwrap_err();
-    assert!(matches!(error, RunnerFailure::Unavailable(_)));
+    assert!(matches!(error, RunnerFailure::NotSent(_)), "{error:?}");
     mute.abort();
 }
 
@@ -1531,4 +1531,374 @@ async fn conformance_a_sibling_cannot_take_or_tombstone_the_holder_keys() {
         RunnerFrame::Result { .. }
     ));
     assert_eq!(appended(root.path()), 2);
+}
+
+/// A runner end a placement-hold test plays by hand over one connection.
+async fn fake_runner(hello: &Hello) -> (DuplexStream, Raw) {
+    let (host, runner) = tokio::io::duplex(1 << 16);
+    let (reader, writer) = tokio::io::split(runner);
+    let mut raw = Raw {
+        reader,
+        writer,
+        frames: FrameReader::new(),
+    };
+    raw.answer(&RunnerFrame::Hello(hello.clone())).await;
+    (host, raw)
+}
+
+impl Raw {
+    async fn answer(&mut self, frame: &RunnerFrame) {
+        self.writer
+            .write_all(&encode(frame).unwrap())
+            .await
+            .unwrap();
+    }
+
+    /// The host's next request, accepting every owner transfer before it.
+    async fn next_request(&mut self) -> Request {
+        loop {
+            // A liveness bound only: generous, so load never trips it.
+            match tokio::time::timeout(Duration::from_secs(30), self.next_host())
+                .await
+                .unwrap()
+            {
+                HostFrame::Request(request) => return request,
+                HostFrame::TransferOwner(transfer) => {
+                    self.answer(&RunnerFrame::TransferAccepted {
+                        control_id: transfer.control_id,
+                        stopped: Vec::new(),
+                        unpromoted: Vec::new(),
+                    })
+                    .await;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    async fn fail(&mut self, request: &Request) {
+        self.answer(&RunnerFrame::Error {
+            request_id: request.request_id.clone(),
+            error: plakous_runner_protocol::WireError {
+                error: json!({
+                    "kind": "io",
+                    "message": "answered",
+                    "proven_no_effect": true,
+                    "conflict_path": null,
+                }),
+                proven_no_effect: true,
+            },
+        })
+        .await;
+    }
+}
+
+/// Records every link failure the client answers.
+#[derive(Clone)]
+struct Tap {
+    client: plakous_runner::RunnerClient,
+    failures: Arc<Mutex<Vec<RunnerFailure>>>,
+}
+
+impl Tap {
+    fn new(client: &plakous_runner::RunnerClient) -> Self {
+        Self {
+            client: client.clone(),
+            failures: Arc::default(),
+        }
+    }
+
+    fn failures(&self) -> Vec<RunnerFailure> {
+        self.failures.lock().unwrap().clone()
+    }
+}
+
+impl RunnerLink for Tap {
+    fn call(&self, call: RunnerCall) -> RunnerCallFuture {
+        let answer = self.client.call(call);
+        let failures = Arc::clone(&self.failures);
+        Box::pin(async move {
+            let answer = answer.await;
+            if let Err(failure) = &answer {
+                failures.lock().unwrap().push(failure.clone());
+            }
+            answer
+        })
+    }
+}
+
+const SESSION: &str = "0000000000000000000000000000002a";
+
+fn placement_windows() -> ClientWindows {
+    ClientWindows {
+        read: Duration::from_millis(300),
+        effect: Duration::from_millis(300),
+        ..ClientWindows::default()
+    }
+}
+
+fn start_request() -> plakous_tools::JoinedProcessStartRequest {
+    plakous_tools::JoinedProcessStartRequest::new(
+        plakous_tools::JoinedProcessCommand::literal(
+            "/bin/sh",
+            ["-c".to_owned(), "true".to_owned()],
+        )
+        .unwrap(),
+        ".",
+        Vec::new(),
+        false,
+        plakous_tools::JoinedProcessTerminalMode::Pipes,
+    )
+    .unwrap()
+}
+
+type Sessions = Arc<plakous_tools::internal::runner::RunnerSessions>;
+type Started = tokio::task::JoinHandle<
+    Result<plakous_tools::JoinedProcessSessionId, plakous_tools::ExecutionBackendError>,
+>;
+type Polled = tokio::task::JoinHandle<
+    Result<plakous_tools::JoinedProcessCursorPollResult, plakous_tools::ExecutionBackendError>,
+>;
+
+/// A model tool call's start under call key `call`.
+fn start_as(sessions: &Sessions, call: u8) -> Started {
+    let sessions = Arc::clone(sessions);
+    tokio::spawn(async move {
+        sessions
+            .start(start_request(), effect(owner(1, 1), call))
+            .await
+    })
+}
+
+/// A model's foreground poll of `id` at cursor 5.
+fn poll_at(sessions: &Sessions, id: plakous_tools::JoinedProcessSessionId) -> Polled {
+    let sessions = Arc::clone(sessions);
+    tokio::spawn(async move {
+        sessions
+            .poll_from(
+                id,
+                plakous_tools::JoinedProcessOutputCursor::new(5),
+                1024,
+                16,
+                Duration::ZERO,
+                effect(owner(1, 1), 3),
+            )
+            .await
+    })
+}
+
+/// The reread poll and the held start on a released connection, in either
+/// order, each fresh and each exactly once.
+async fn reread_and_sent(second: &mut Raw) -> (Request, Request) {
+    let mut reread = None;
+    let mut sent = None;
+    while reread.is_none() || sent.is_none() {
+        let request = second.next_request().await;
+        assert!(!request.replay, "a fresh send, not a replay: {request:?}");
+        match request.class {
+            RequestClass::ProcessObservation { .. } => {
+                assert!(reread.replace(request).is_none(), "one reread");
+            }
+            RequestClass::EffectCall { .. } => {
+                assert!(sent.replace(request).is_none(), "one send");
+            }
+            _ => panic!("unexpected request {request:?}"),
+        }
+    }
+    (reread.unwrap(), sent.unwrap())
+}
+
+/// A started session over `runner`, its start answered at once.
+async fn started(
+    sessions: &Sessions,
+    runner: &mut Raw,
+    hello: &Hello,
+) -> plakous_tools::JoinedProcessSessionId {
+    let starting = start_as(sessions, 1);
+    let request = runner.next_request().await;
+    runner
+        .answer(&RunnerFrame::Result {
+            request_id: request.request_id,
+            payload: json!({"session": SESSION, "instance": hello.instance}),
+        })
+        .await;
+    starting.await.unwrap().unwrap()
+}
+
+/// A model effect sent before its link was lost keeps its key past the
+/// effect window while the link stays lost, and takes the answer the same
+/// runner instance gives its replay: no unknown outcome merely at the
+/// window (spec 01 §8.4).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_model_effect_is_observed_past_its_window_while_its_link_is_lost() {
+    let root = tempfile::tempdir().unwrap();
+    let hello = service(root.path()).hello().clone();
+    let (link, mut first) = fake_runner(&hello).await;
+    let (client, _) =
+        plakous_runner::RunnerClient::connect(link, bind("instance-1"), placement_windows())
+            .await
+            .unwrap();
+    let tap = Tap::new(&client);
+    let sessions = plakous_tools::internal::runner::RunnerSessions::from_link(
+        Arc::new(tap.clone()),
+        &host(root.path()),
+        owner(1, 1),
+    );
+    let starting = tokio::spawn(async move {
+        sessions
+            .start(start_request(), effect(owner(1, 1), 7))
+            .await
+    });
+    let sent = first.next_request().await;
+    assert!(matches!(sent.class, RequestClass::EffectCall { .. }));
+    drop(first);
+    // Three effect windows with the link lost.
+    tokio::time::sleep(Duration::from_millis(900)).await;
+    assert!(!starting.is_finished(), "{:?}", tap.failures());
+    let (link, mut second) = fake_runner(&hello).await;
+    client.reconnect(link).await.unwrap();
+    let replayed = second.next_request().await;
+    assert!(replayed.replay);
+    assert_eq!(
+        (&replayed.class, &replayed.digest),
+        (&sent.class, &sent.digest)
+    );
+    second
+        .answer(&RunnerFrame::Result {
+            request_id: replayed.request_id,
+            payload: json!({"session": SESSION, "instance": hello.instance}),
+        })
+        .await;
+    tokio::time::timeout(Duration::from_secs(30), starting)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(tap.failures(), []);
+}
+
+/// On a healthy link the windows stay the ordinary failure: an unanswered
+/// effect is of unknown outcome, and an unanswered observation too.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn healthy_link_expiry_still_fixes_unknown_outcomes() {
+    let root = tempfile::tempdir().unwrap();
+    let hello = service(root.path()).hello().clone();
+    let (link, mut runner) = fake_runner(&hello).await;
+    let (client, _) =
+        plakous_runner::RunnerClient::connect(link, bind("instance-1"), placement_windows())
+            .await
+            .unwrap();
+    let tap = Tap::new(&client);
+    let sessions = Arc::new(plakous_tools::internal::runner::RunnerSessions::from_link(
+        Arc::new(tap.clone()),
+        &host(root.path()),
+        owner(1, 1),
+    ));
+    let id = started(&sessions, &mut runner, &hello).await;
+    let starting = start_as(&sessions, 2);
+    let _unanswered = runner.next_request().await;
+    let error = tokio::time::timeout(Duration::from_secs(30), starting)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(error.kind(), ExecutionBackendErrorKind::RecoveryRequired);
+    let polling = poll_at(&sessions, id);
+    let _unanswered = runner.next_request().await;
+    tokio::time::timeout(Duration::from_secs(30), polling)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
+    let failures = tap.failures();
+    assert!(
+        matches!(
+            failures.as_slice(),
+            [
+                RunnerFailure::OutcomeUnknown(_),
+                RunnerFailure::OutcomeUnknown(_)
+            ]
+        ),
+        "{failures:?}"
+    );
+    drop(runner);
+}
+
+/// Through the placement's admitted link, a model's foreground poll whose
+/// link was lost is read again at the same cursor once the placement is
+/// released, and a model effect made while held is sent once, under its
+/// own key, only after release.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_held_placement_rereads_a_lost_poll_and_sends_a_held_effect_once() {
+    let root = tempfile::tempdir().unwrap();
+    let hello = service(root.path()).hello().clone();
+    let (link, mut first) = fake_runner(&hello).await;
+    let (client, _) =
+        plakous_runner::RunnerClient::connect(link, bind("instance-1"), placement_windows())
+            .await
+            .unwrap();
+    let tap = Tap::new(&client);
+    let backend = RunnerBackend::new(hello.descriptor.clone(), Arc::new(tap.clone())).unwrap();
+    let services =
+        plakous_runner::RunnerServices::new(Arc::new(backend), tokio::runtime::Handle::current());
+    let sessions = Arc::new(plakous_tools::internal::runner::RunnerSessions::from_link(
+        services.backend().link(),
+        &host(root.path()),
+        owner(1, 1),
+    ));
+    let id = started(&sessions, &mut first, &hello).await;
+    let polling = poll_at(&sessions, id);
+    let polled = first.next_request().await;
+    assert!(matches!(
+        polled.class,
+        RequestClass::ProcessObservation { cursor: 5, .. }
+    ));
+    // The link is lost; its owner holds the placement, as the watcher does.
+    drop(first);
+    services.set_available(false);
+    let starting = start_as(&sessions, 9);
+    // Past the read window: the lost poll was interrupted, not failed.
+    tokio::time::sleep(Duration::from_millis(900)).await;
+    assert!(!polling.is_finished() && !starting.is_finished());
+    assert!(
+        matches!(
+            tap.failures().as_slice(),
+            [RunnerFailure::ReadInterrupted(_)]
+        ),
+        "{:?}",
+        tap.failures()
+    );
+    let (link, mut second) = fake_runner(&hello).await;
+    client.reconnect(link).await.unwrap();
+    services.set_available(true);
+    let (reread, sent) = reread_and_sent(&mut second).await;
+    assert_eq!(
+        reread.operation, polled.operation,
+        "the same cursor and arguments"
+    );
+    assert_eq!(reread.class, polled.class);
+    assert_eq!(sent.operation.verb, "process.start");
+    second.fail(&reread).await;
+    second
+        .answer(&RunnerFrame::Result {
+            request_id: sent.request_id.clone(),
+            payload: json!({"session": "0000000000000000000000000000002b", "instance": hello.instance}),
+        })
+        .await;
+    let polled = tokio::time::timeout(Duration::from_secs(30), polling)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(polled.kind(), ExecutionBackendErrorKind::Io, "{polled:?}");
+    tokio::time::timeout(Duration::from_secs(30), starting)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    // Nothing more is sent: the held effect went exactly once.
+    let quiet = tokio::time::Instant::now() + Duration::from_millis(300);
+    while let Ok(frame) = tokio::time::timeout_at(quiet, second.next_host()).await {
+        assert!(!matches!(frame, HostFrame::Request(_)), "{frame:?}");
+    }
 }

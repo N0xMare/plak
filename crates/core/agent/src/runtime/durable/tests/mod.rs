@@ -66,6 +66,7 @@ mod native_prefix_compaction;
 mod native_tail_tests;
 mod note_receipt;
 mod observation_budget;
+mod placement_hold;
 mod process_notices;
 #[path = "../provider_outcome_tests.rs"]
 mod provider_outcome_tests;

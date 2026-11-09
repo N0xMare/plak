@@ -265,6 +265,7 @@ impl PreparedAgent {
             request_slots: self.request_slots,
             request_slot: None,
             credential_wait_elapsed: std::time::Duration::ZERO,
+            placement_wait_elapsed: std::time::Duration::ZERO,
             prompt_in_history: None,
             restored_turn: None,
             appended_prompt: None,

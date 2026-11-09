@@ -21,10 +21,10 @@ pub use plakous_model::redaction as preview;
 #[doc(hidden)]
 pub mod runner {
     pub use crate::environment::runner::{
-        LocalDaemonBackend, RunnerBackend, RunnerCall, RunnerCallFuture, RunnerClass,
-        RunnerExtension, RunnerFailure, RunnerLink, RunnerOpenFuture, RunnerSecretResolver,
-        RunnerServices, RunnerSessions, RunnerStreams, RunnerVerb, RunnerVerbFamily,
-        RunnerWorkspaceProbe, ServeFailure, ServeFuture, ServeServiceFuture,
+        LocalDaemonBackend, PlacementGate, RunnerBackend, RunnerCall, RunnerCallFuture,
+        RunnerClass, RunnerExtension, RunnerFailure, RunnerLink, RunnerOpenFuture,
+        RunnerSecretResolver, RunnerServices, RunnerSessions, RunnerStreams, RunnerVerb,
+        RunnerVerbFamily, RunnerWorkspaceProbe, ServeFailure, ServeFuture, ServeServiceFuture,
         adopt_runner_process_sessions, answer_too_large, call_blocking, decode_jobs_snapshot,
         decode_preempt, encode_preempt, environment_failure, job_capacity, line_sessions,
         local_daemon_environment, lost_process_owner, requested_workspace, runner_descriptor,

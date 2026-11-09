@@ -155,6 +155,9 @@ struct State {
     /// Ends the current connection: a newer one, or a silent link.
     closer: CancellationToken,
     last_heard: Instant,
+    /// When the current connection was bound: every call still waiting
+    /// was sent again on it then.
+    connected_at: Instant,
     instance: String,
     pending: HashMap<String, Pending>,
     transfers: HashMap<String, oneshot::Sender<RunnerFrame>>,
@@ -321,6 +324,7 @@ impl RunnerClient {
                     connection: 0,
                     closer: CancellationToken::new(),
                     last_heard: Instant::now(),
+                    connected_at: Instant::now(),
                     instance: String::new(),
                     pending: HashMap::new(),
                     transfers: HashMap::new(),
@@ -547,6 +551,7 @@ impl RunnerClient {
             state.connection += 1;
             state.closer = closer.clone();
             state.last_heard = Instant::now();
+            state.connected_at = Instant::now();
             for pending in state.pending.values() {
                 let mut request = pending.request.clone();
                 request.replay = true;
@@ -620,7 +625,7 @@ impl Inner {
         }
         tokio::time::timeout(self.windows.read, connected)
             .await
-            .map_err(|_| RunnerFailure::Unavailable("the runner did not reconnect".into()))
+            .map_err(|_| RunnerFailure::NotSent("the runner did not reconnect".into()))
     }
     async fn read<R: AsyncRead + Unpin>(
         &self,
@@ -884,17 +889,17 @@ impl Inner {
             from,
             to: to.clone(),
         }));
+        // The call the transfer precedes is not sent either way: a later
+        // attempt transfers again, which the runner answers idempotently.
         if !sent {
             lock(&self.state).transfers.remove(&control_id);
-            return Err(RunnerFailure::Unavailable(
-                "the runner is not connected".into(),
-            ));
+            return Err(RunnerFailure::NotSent("the runner is not connected".into()));
         }
         if let Ok(Ok(frame)) = tokio::time::timeout(self.windows.read, answer).await {
             return Ok(frame);
         }
         lock(&self.state).transfers.remove(&control_id);
-        Err(RunnerFailure::Unavailable(
+        Err(RunnerFailure::NotSent(
             "the runner did not answer the owner transfer".into(),
         ))
     }
@@ -906,14 +911,7 @@ impl Inner {
         request.request_id = self.next_id("r");
         request.replay = true;
         request.age_ms = Some(plakous_model::now_unix_millis().saturating_sub(entry.claimed_at_ms));
-        let window = if matches!(
-            request.class,
-            RequestClass::EffectCall { .. } | RequestClass::TreeOperation { .. }
-        ) {
-            self.windows.effect
-        } else {
-            self.windows.read
-        };
+        let window = self.window(&request.class);
         let request_id = request.request_id.clone();
         let (answer, answered) = oneshot::channel();
         {
@@ -940,6 +938,18 @@ impl Inner {
         }
         lock(&self.state).pending.remove(&request_id);
         Err(RunnerFailure::OutcomeUnknown(LINK_LOST.into()))
+    }
+
+    /// How long a sent call of `class` waits for its answer.
+    const fn window(&self, class: &RequestClass) -> Duration {
+        if matches!(
+            class,
+            RequestClass::EffectCall { .. } | RequestClass::TreeOperation { .. }
+        ) {
+            self.windows.effect
+        } else {
+            self.windows.read
+        }
     }
 
     fn request(&self, call: &RunnerCall, owner: Option<LineOwner>) -> Request {
@@ -1018,14 +1028,7 @@ impl Inner {
             self.transfer(owner).await?;
         }
         let request = self.request(&call, owner);
-        let window = if matches!(
-            request.class,
-            RequestClass::EffectCall { .. } | RequestClass::TreeOperation { .. }
-        ) {
-            self.windows.effect
-        } else {
-            self.windows.read
-        };
+        let window = self.window(&request.class);
         let frame = HostFrame::Request(request.clone());
         if !fits(&frame) {
             return Err(RunnerFailure::Refused(
@@ -1033,14 +1036,17 @@ impl Inner {
             ));
         }
         let request_id = request.request_id.clone();
+        let expiring = Expiring::of(&request);
         let (answer, mut answered) = oneshot::channel();
         let mut answer = Some(answer);
+        let mut sent_on = 0;
         loop {
             if self.foreground.dispatch_if_clean(&call, || {
                 let sender = answer.take().ok_or_else(|| {
                     RunnerFailure::Unavailable("runner dispatch answer was already consumed".into())
                 })?;
-                self.dispatch(request.clone(), frame.clone(), sender)
+                sent_on = self.dispatch(request.clone(), frame.clone(), sender)?;
+                Ok(())
             })? {
                 break;
             }
@@ -1083,10 +1089,13 @@ impl Inner {
                     }
                 }
                 () = &mut expiry => {
-                    lock(&self.state).pending.remove(&request_id);
-                    return Err(RunnerFailure::OutcomeUnknown(
-                        "the runner did not answer within the call's window".into(),
-                    ));
+                    match self.expired(expiring, sent_on, window) {
+                        Ok(deadline) => expiry.as_mut().reset(deadline),
+                        Err(failure) => {
+                            lock(&self.state).pending.remove(&request_id);
+                            return Err(failure);
+                        }
+                    }
                 }
             }
         }
@@ -1095,12 +1104,15 @@ impl Inner {
     /// Sends one request, recorded as pending its answer. A keyed call is
     /// journaled first, with the runner instance it goes to, so a restarted
     /// host replays it rather than guessing its outcome.
+    /// Answers the connection the request was sent on. A refusal before
+    /// send is transient ([`RunnerFailure::NotSent`]) unless the runner
+    /// refused this host or the call could not be recorded.
     fn dispatch(
         &self,
         request: Request,
         frame: HostFrame,
         answer: oneshot::Sender<Result<Value, RunnerFailure>>,
-    ) -> Result<(), RunnerFailure> {
+    ) -> Result<u64, RunnerFailure> {
         let request_id = request.request_id.clone();
         let (sender, instance, refusal) = {
             let state = lock(&self.state);
@@ -1110,11 +1122,11 @@ impl Inner {
                 state.refusal.clone().filter(ends_connection),
             )
         };
-        let not_connected = || {
-            RunnerFailure::Unavailable(refusal.as_ref().map_or_else(
-                || "the runner is not connected".to_owned(),
-                |refusal| format!("the runner refused this host: {refusal:?}"),
-            ))
+        let not_connected = || match &refusal {
+            Some(refusal) => {
+                RunnerFailure::Unavailable(format!("the runner refused this host: {refusal:?}"))
+            }
+            None => RunnerFailure::NotSent("the runner is not connected".to_owned()),
         };
         let sender = sender.ok_or_else(not_connected)?;
         let journaled = match (&self.journal, keyed(&request)) {
@@ -1149,7 +1161,45 @@ impl Inner {
             self.unclaim(journaled, &request_id);
             return Err(not_connected());
         }
-        Ok(())
+        Ok(state.connection)
+    }
+
+    /// What a call's expired answer window means. A healthy link's expiry
+    /// fixes the outcome as unknown. A model effect's window does not run
+    /// while its link is lost, and restarts when the link is bound again,
+    /// which sends the call again under its key (spec 01 §8.4). A read or
+    /// observation the lost link took is interrupted, to be read again.
+    fn expired(
+        &self,
+        expiring: Expiring,
+        sent_on: u64,
+        window: Duration,
+    ) -> Result<tokio::time::Instant, RunnerFailure> {
+        let unknown = || {
+            RunnerFailure::OutcomeUnknown(
+                "the runner did not answer within the call's window".into(),
+            )
+        };
+        let state = lock(&self.state);
+        let linked = state.sender.is_some() && !state.closer.is_cancelled();
+        let lost = !linked || state.connection != sent_on;
+        match expiring {
+            Expiring::Read if lost => Err(RunnerFailure::ReadInterrupted(
+                "the link was lost before the read was answered".into(),
+            )),
+            Expiring::ModelEffect if !linked => {
+                Ok(tokio::time::Instant::now() + LOST_LINK_RECHECK.min(window))
+            }
+            Expiring::ModelEffect if lost => {
+                let deadline = tokio::time::Instant::from_std(state.connected_at) + window;
+                if deadline > tokio::time::Instant::now() {
+                    Ok(deadline)
+                } else {
+                    Err(unknown())
+                }
+            }
+            Expiring::Window | Expiring::Read | Expiring::ModelEffect => Err(unknown()),
+        }
     }
 
     /// Forgets a claimed call that was never sent.
@@ -1316,6 +1366,30 @@ const fn ends_connection(refusal: &Refusal) -> bool {
             | Refusal::NotPaired { .. }
             | Refusal::InspectOnly
     )
+}
+
+/// How often a model effect whose link is lost looks for its rebinding.
+const LOST_LINK_RECHECK: Duration = Duration::from_secs(1);
+
+/// How a sent call's answer window ends.
+#[derive(Clone, Copy)]
+enum Expiring {
+    /// Unknown outcome at the window's end, whatever the link did.
+    Window,
+    /// A model tool call's effect: its window pauses while the link is lost.
+    ModelEffect,
+    /// An unkeyed read or an observation: interrupted when the link was lost.
+    Read,
+}
+
+impl Expiring {
+    fn of(request: &Request) -> Self {
+        match request.class {
+            RequestClass::EffectCall { .. } => Self::ModelEffect,
+            _ if !keyed(request) && replayable(request) => Self::Read,
+            _ => Self::Window,
+        }
+    }
 }
 
 /// How a replay or recovery says the link was lost before an answer came.

@@ -1,7 +1,9 @@
 //! Explicit runner backend and executor, shared without selecting process authority.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use tokio::sync::watch;
 
 use super::{RunnerBackend, RunnerWorkspaceProbe};
 use crate::WorkspaceProbe;
@@ -11,37 +13,97 @@ use crate::WorkspaceProbe;
 pub struct RunnerServices {
     backend: Arc<RunnerBackend>,
     runtime: tokio::runtime::Handle,
-    available: Arc<AtomicBool>,
+    availability: Arc<watch::Sender<Availability>>,
+    reconcile: Reconcile,
+}
+
+type Reconcile = Arc<Mutex<Option<Arc<dyn Fn() + Send + Sync>>>>;
+
+/// Whether the placement admits new calls: its owner opens it after the
+/// first-bind/reconnect barrier, holds it while the link or that barrier is
+/// down, and refuses it for good once the placement itself was refused or
+/// replaced.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Admission {
+    Open,
+    Held,
+    Refused,
+}
+
+/// The admission and its revision: every change advances the revision, so
+/// a waiter whose call found the link gone never mistakes the stale open
+/// state it was sent under for a fresh one.
+#[derive(Clone, Copy, Debug)]
+struct Availability {
+    admission: Admission,
+    revision: u64,
 }
 
 impl RunnerServices {
     /// Explicit services of one runner; construction selects no process global.
     #[must_use]
     pub fn new(backend: Arc<RunnerBackend>, runtime: tokio::runtime::Handle) -> Self {
-        let available = Arc::new(AtomicBool::new(true));
+        let availability = Arc::new(
+            watch::channel(Availability {
+                admission: Admission::Open,
+                revision: 0,
+            })
+            .0,
+        );
+        let reconcile = Reconcile::default();
         let link = Arc::new(AdmittedLink {
             inner: backend.link(),
-            available: available.clone(),
+            availability: Arc::clone(&availability),
+            reconcile: Arc::clone(&reconcile),
         });
         let mut backend = Arc::unwrap_or_clone(backend).running_on(runtime.clone());
         backend.link = link;
         Self {
             backend: Arc::new(backend),
             runtime,
-            available,
+            availability,
+            reconcile,
         }
     }
 
-    /// Gates new effects while reconnect reconciliation/configuration is
-    /// blocked. Existing reads and admitted futures retain their recovery owner.
+    /// Opens or holds new-call admission across reconnect reconciliation
+    /// and configuration. Existing reads and admitted futures retain their
+    /// recovery owner; held model calls wait (spec 01 §8.4). Opening also
+    /// lifts an earlier refusal for calls made from here on.
     pub fn set_available(&self, available: bool) {
-        self.available.store(available, Ordering::Release);
+        self.availability.send_modify(|state| {
+            state.admission = match (available, state.admission) {
+                (true, _) => Admission::Open,
+                (false, Admission::Refused) => Admission::Refused,
+                (false, _) => Admission::Held,
+            };
+            state.revision = state.revision.wrapping_add(1);
+        });
+    }
+
+    /// Ends every placement hold on these services with a permanent
+    /// refusal: the placement was refused, removed or replaced. New calls
+    /// refuse until [`Self::set_available`] opens admission again.
+    pub fn refuse(&self) {
+        self.availability.send_modify(|state| {
+            state.admission = Admission::Refused;
+            state.revision = state.revision.wrapping_add(1);
+        });
     }
 
     /// Whether the owner has opened the new-call admission barrier.
     #[must_use]
     pub fn is_available(&self) -> bool {
-        self.available.load(Ordering::Acquire)
+        self.availability.borrow().admission == Admission::Open
+    }
+
+    /// Installs how a held call asks its owner for a fresh reconciliation
+    /// when the link refused it under an admission that still reads open.
+    pub fn request_reconciliation_with(&self, request: impl Fn() + Send + Sync + 'static) {
+        *self
+            .reconcile
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::new(request));
     }
 
     /// Whether a built/open node still retains these services.
@@ -77,9 +139,146 @@ impl RunnerServices {
     }
 }
 
+/// A placed runner's hold as a driver sees it: whether new paid model work
+/// must wait, and when it may go on. It names no runner or topology.
+#[derive(Clone, Debug)]
+pub struct PlacementGate {
+    availability: watch::Receiver<Availability>,
+}
+
+impl PlacementGate {
+    /// Whether the placement is held: the link or its reconnect barrier is
+    /// down, and its owner has not refused it.
+    #[must_use]
+    pub fn is_held(&self) -> bool {
+        self.availability.borrow().admission == Admission::Held
+    }
+
+    /// Waits until the placement is no longer held: released after the
+    /// barrier, or refused.
+    pub async fn released(&mut self) {
+        let _ = self
+            .availability
+            .wait_for(|state| state.admission != Admission::Held)
+            .await;
+    }
+}
+
 struct AdmittedLink {
     inner: Arc<dyn super::RunnerLink>,
-    available: Arc<AtomicBool>,
+    availability: Arc<watch::Sender<Availability>>,
+    reconcile: Reconcile,
+}
+
+impl AdmittedLink {
+    /// A call that never waits: under a closed admission, a read still goes
+    /// through, and anything else is refused unsent.
+    fn unheld(&self, call: &super::RunnerCall) -> Option<super::RunnerFailure> {
+        if call.verb().is_read() {
+            return None;
+        }
+        match self.availability.borrow().admission {
+            Admission::Open => None,
+            Admission::Held => Some(super::RunnerFailure::NotSent(
+                "runner is blocked before dispatch".into(),
+            )),
+            Admission::Refused => Some(refused()),
+        }
+    }
+
+    fn hold(&self) -> Hold {
+        Hold {
+            availability: self.availability.subscribe(),
+            reconcile: Arc::clone(&self.reconcile),
+        }
+    }
+}
+
+fn refused() -> super::RunnerFailure {
+    super::RunnerFailure::Unavailable(
+        "the runner placement was refused or replaced before the call was sent".into(),
+    )
+}
+
+/// One held call's view of its placement.
+struct Hold {
+    availability: watch::Receiver<Availability>,
+    reconcile: Reconcile,
+}
+
+impl Hold {
+    /// Sends `call` once its placement is open, and again with the same key
+    /// after each transient refusal before send, or, for a read, after the
+    /// link lost it. The wait runs here, outside every lock the link takes
+    /// for the call, and ends at once on cancellation or refusal.
+    async fn send<T>(
+        mut self,
+        call: super::RunnerCall,
+        send: impl Fn(
+            super::RunnerCall,
+        )
+            -> std::pin::Pin<Box<dyn Future<Output = Result<T, super::RunnerFailure>> + Send>>,
+    ) -> Result<T, super::RunnerFailure> {
+        let rereads = call.verb().is_read();
+        let mut stale = None;
+        let mut held = Duration::ZERO;
+        loop {
+            let waiting = tokio::time::Instant::now();
+            let revision = self.open(stale, call.cancellation()).await?;
+            held = held.saturating_add(waiting.elapsed());
+            match send(call.reissue(held)).await {
+                Err(super::RunnerFailure::NotSent(_)) => {}
+                Err(super::RunnerFailure::ReadInterrupted(_)) if rereads => {}
+                answer => return answer,
+            }
+            stale = Some(revision);
+            let current = self.availability.borrow().revision;
+            if current == revision {
+                let request = self
+                    .reconcile
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone();
+                if let Some(request) = request {
+                    request();
+                }
+            }
+        }
+    }
+
+    /// The revision of an open admission other than `stale`.
+    async fn open(
+        &mut self,
+        stale: Option<u64>,
+        cancellation: &plakous_model::CancellationToken,
+    ) -> Result<u64, super::RunnerFailure> {
+        loop {
+            let current = *self.availability.borrow_and_update();
+            match current.admission {
+                Admission::Refused => return Err(refused()),
+                Admission::Open if stale != Some(current.revision) => return Ok(current.revision),
+                _ => {}
+            }
+            let mut cancelled = std::pin::pin!(cancellation.cancelled());
+            let mut changed = std::pin::pin!(self.availability.changed());
+            let changed = std::future::poll_fn(|context| {
+                if cancelled.as_mut().poll(context).is_ready() {
+                    return std::task::Poll::Ready(None);
+                }
+                changed.as_mut().poll(context).map(Some)
+            })
+            .await;
+            match changed {
+                None => {
+                    return Err(super::RunnerFailure::NotSent(
+                        "the call was cancelled before it was sent".into(),
+                    ));
+                }
+                Some(Err(_)) => return Err(refused()),
+                Some(Ok(())) => {}
+            }
+        }
+    }
 }
 
 impl super::RunnerLink for AdmittedLink {
@@ -92,22 +291,43 @@ impl super::RunnerLink for AdmittedLink {
         self.inner
             .driver_operation_settled(owner, call_id, attempt_id);
     }
+
     fn call(&self, call: super::RunnerCall) -> super::RunnerCallFuture {
-        if !self.available.load(Ordering::Acquire) && !call.verb().is_read() {
-            return Box::pin(std::future::ready(Err(super::RunnerFailure::Unavailable(
-                "runner is blocked before dispatch".into(),
-            ))));
+        if !call.holds_for_placement() {
+            if let Some(failure) = self.unheld(&call) {
+                return Box::pin(std::future::ready(Err(failure)));
+            }
+            return self.inner.call(call);
         }
-        self.inner.call(call)
+        let inner = Arc::clone(&self.inner);
+        Box::pin(self.hold().send(call, move |call| inner.call(call)))
     }
 
     fn open(&self, call: super::RunnerCall) -> super::RunnerOpenFuture {
-        if !self.available.load(Ordering::Acquire) {
-            return Box::pin(std::future::ready(Err(super::RunnerFailure::Unavailable(
-                "runner is blocked before dispatch".into(),
-            ))));
+        if !call.holds_for_placement() {
+            if let Some(failure) = self.unheld(&call).or_else(|| {
+                (!self.is_open()).then(|| {
+                    super::RunnerFailure::NotSent("runner is blocked before dispatch".into())
+                })
+            }) {
+                return Box::pin(std::future::ready(Err(failure)));
+            }
+            return self.inner.open(call);
         }
-        self.inner.open(call)
+        let inner = Arc::clone(&self.inner);
+        Box::pin(self.hold().send(call, move |call| inner.open(call)))
+    }
+
+    fn placement(&self) -> Option<PlacementGate> {
+        Some(PlacementGate {
+            availability: self.availability.subscribe(),
+        })
+    }
+}
+
+impl AdmittedLink {
+    fn is_open(&self) -> bool {
+        self.availability.borrow().admission == Admission::Open
     }
 }
 
