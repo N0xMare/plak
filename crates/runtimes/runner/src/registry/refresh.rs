@@ -25,7 +25,19 @@ pub(super) struct ProbeState {
     admitted: Option<Instant>,
     completed: Option<Instant>,
     pub(super) phase: ProbePhase,
+    /// The last reconciliation a held call requested, and its backoff step.
+    requested: Option<(Instant, usize)>,
 }
+
+/// The coalescing backoff of held calls' reconciliation requests.
+const REQUEST_BACKOFF: [Duration; 4] = [
+    Duration::from_secs(1),
+    Duration::from_secs(2),
+    Duration::from_secs(5),
+    Duration::from_secs(15),
+];
+/// A quiet interval after which the backoff starts over.
+const REQUEST_RESET: Duration = Duration::from_secs(60);
 
 impl Default for ProbeState {
     fn default() -> Self {
@@ -35,6 +47,7 @@ impl Default for ProbeState {
             admitted: None,
             completed: None,
             phase: ProbePhase::Queued,
+            requested: None,
         }
     }
 }
@@ -42,6 +55,23 @@ impl Default for ProbeState {
 impl ProbeState {
     pub(super) fn invalidate_cache(&mut self) {
         self.completed = None;
+    }
+
+    /// Whether a held call's reconciliation request may close admission
+    /// now: the first at once, then one per backoff step.
+    pub(super) fn reconcile_request_due(&mut self, now: Instant) -> bool {
+        let step = match self.requested {
+            None => 0,
+            Some((last, _)) if now.duration_since(last) >= REQUEST_RESET => 0,
+            Some((last, step)) => {
+                if now.duration_since(last) < REQUEST_BACKOFF[step] {
+                    return false;
+                }
+                (step + 1).min(REQUEST_BACKOFF.len() - 1)
+            }
+        };
+        self.requested = Some((now, step));
+        true
     }
 }
 

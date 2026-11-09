@@ -1902,3 +1902,125 @@ async fn a_held_placement_rereads_a_lost_poll_and_sends_a_held_effect_once() {
         assert!(!matches!(frame, HostFrame::Request(_)), "{frame:?}");
     }
 }
+
+/// A model effect sent before its link was lost waits for a rebinding; a
+/// refused placement (here the runner was upgraded while away) ends that
+/// wait at once as of unknown outcome, rather than leaving it forever.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_refused_placement_ends_a_lost_links_effect_wait() {
+    let root = tempfile::tempdir().unwrap();
+    let hello = service(root.path()).hello().clone();
+    let (link, mut first) = fake_runner(&hello).await;
+    let (client, _) =
+        plakous_runner::RunnerClient::connect(link, bind("instance-1"), placement_windows())
+            .await
+            .unwrap();
+    let tap = Tap::new(&client);
+    let backend = RunnerBackend::new(hello.descriptor.clone(), Arc::new(tap.clone())).unwrap();
+    let services =
+        plakous_runner::RunnerServices::new(Arc::new(backend), tokio::runtime::Handle::current());
+    let registry = plakous_runner::RunnerRegistry::default();
+    registry.configure(plakous_runner::ConfiguredRunner {
+        runner_id: "loopback".into(),
+        names: vec!["loopback".into()],
+    });
+    registry
+        .ready(
+            "loopback",
+            client.connection_revision(),
+            services.clone(),
+            plakous_runner::WorkspaceOptions {
+                roots: None,
+                default_workspace: None,
+                copies: false,
+            },
+            plakous_runner::WorkspaceDiscovery::default(),
+            1,
+        )
+        .unwrap();
+    let sessions: Sessions = Arc::new(plakous_tools::internal::runner::RunnerSessions::from_link(
+        services.backend().link(),
+        &host(root.path()),
+        owner(1, 1),
+    ));
+    let starting = start_as(&sessions, 4);
+    let _sent = first.next_request().await;
+    drop(first);
+    // Two windows with the link lost: still waiting for a rebinding.
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert!(!starting.is_finished(), "{:?}", tap.failures());
+    registry.blocked(
+        "loopback",
+        plakous_runner::PlacementFailure::RunnerVersionMismatch {
+            expected: version(),
+            actual: VersionTriple::current("upgraded", "debug"),
+        },
+        2,
+    );
+    let error = tokio::time::timeout(Duration::from_secs(10), starting)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(error.kind(), ExecutionBackendErrorKind::RecoveryRequired);
+    assert!(
+        matches!(
+            tap.failures().as_slice(),
+            [RunnerFailure::OutcomeUnknown(_)]
+        ),
+        "{:?}",
+        tap.failures()
+    );
+}
+
+/// A runner that refuses the host on a rebinding proves only the requests
+/// first sent on that connection never ran: a model effect replayed from
+/// the lost link is of unknown outcome, while one first sent on the
+/// refused connection is unavailable.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_refusal_after_rebinding_leaves_replayed_effects_unknown() {
+    let root = tempfile::tempdir().unwrap();
+    let hello = service(root.path()).hello().clone();
+    let (link, mut first) = fake_runner(&hello).await;
+    let (client, _) =
+        plakous_runner::RunnerClient::connect(link, bind("instance-1"), placement_windows())
+            .await
+            .unwrap();
+    let tap = Tap::new(&client);
+    let sessions: Sessions = Arc::new(plakous_tools::internal::runner::RunnerSessions::from_link(
+        Arc::new(tap.clone()),
+        &host(root.path()),
+        owner(1, 1),
+    ));
+    let earlier = start_as(&sessions, 5);
+    let _sent = first.next_request().await;
+    drop(first);
+    let (link, mut second) = fake_runner(&hello).await;
+    client.reconnect(link).await.unwrap();
+    let replayed = second.next_request().await;
+    assert!(replayed.replay);
+    let fresh = start_as(&sessions, 6);
+    let sent = second.next_request().await;
+    assert!(!sent.replay);
+    second
+        .answer(&RunnerFrame::Refused {
+            request_id: None,
+            refusal: Refusal::NotPaired {
+                host_id: "host-1".into(),
+            },
+        })
+        .await;
+    let earlier = tokio::time::timeout(Duration::from_secs(10), earlier)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(earlier.kind(), ExecutionBackendErrorKind::RecoveryRequired);
+    let fresh = tokio::time::timeout(Duration::from_secs(10), fresh)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
+    assert!(fresh.proven_no_effect(), "{fresh:?}");
+    assert_ne!(fresh.kind(), ExecutionBackendErrorKind::RecoveryRequired);
+}

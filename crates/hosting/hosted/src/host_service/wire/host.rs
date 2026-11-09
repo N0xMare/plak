@@ -1498,15 +1498,15 @@ mod archived;
 #[cfg(test)]
 mod host_reads_tests;
 
-/// A resident row's attention: an operator decision, or live work held on
-/// a placement whose link or reconnect barrier is down, until automatic
-/// release or Stop. A refused placement is not a hold.
+/// A resident row's attention: an operator decision, or a running root turn
+/// whose own placement's link or reconnect barrier is down. Parked or live
+/// children alone do not raise it; a refused placement is not unreachable.
 fn needs_operator(
     kept: &crate::host_service::KeptActivity,
     status: &plakous_host_protocol::wire::RunnerStatus,
 ) -> bool {
     kept.awaiting_operator
-        || (kept.busy
+        || (kept.turn_busy
             && matches!(
                 status,
                 plakous_host_protocol::wire::RunnerStatus::Blocked {

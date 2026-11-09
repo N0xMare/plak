@@ -173,6 +173,8 @@ struct Pending {
     answer: oneshot::Sender<Result<Value, RunnerFailure>>,
     /// Recorded in the journal, so its answer settles the record.
     journaled: bool,
+    /// The connection it was first sent on.
+    connection: u64,
 }
 
 /// A keyed call a previous host process left unsettled, and what replaying
@@ -228,6 +230,33 @@ impl RunnerClient {
     pub fn has_pending_calls(&self) -> bool {
         !lock(&self.inner.state).pending.is_empty() || !lock(&self.inner.left).is_empty()
     }
+    /// Ends the wait of every model effect whose link is lost: its placement
+    /// was refused, removed or replaced, so no rebinding will replay it
+    /// here. Each ends of unknown outcome and keeps its journal claim for
+    /// keyed recovery. Nothing on a live link is touched.
+    pub fn abandon_lost_effects(&self) {
+        let mut state = lock(&self.inner.state);
+        if state.sender.is_some() && !state.closer.is_cancelled() {
+            return;
+        }
+        let lost: Vec<String> = state
+            .pending
+            .iter()
+            .filter(|(_, pending)| matches!(pending.request.class, RequestClass::EffectCall { .. }))
+            .map(|(id, _)| id.clone())
+            .collect();
+        let abandoned: Vec<Pending> = lost
+            .iter()
+            .filter_map(|id| state.pending.remove(id))
+            .collect();
+        drop(state);
+        for pending in abandoned {
+            let _ = pending.answer.send(Err(RunnerFailure::OutcomeUnknown(
+                "the runner placement was refused with the call outstanding".into(),
+            )));
+        }
+    }
+
     /// Closes this client's current link without stopping its processes.
     /// Foreground authority lasts until transfer or owner-lease expiry.
     pub fn disconnect(&self) {
@@ -775,9 +804,21 @@ impl Inner {
         for (_, mut stream) in state.streams.drain() {
             stream.close();
         }
+        let refused_on = state.connection;
         let pending: Vec<Pending> = state.pending.drain().map(|(_, pending)| pending).collect();
         drop(state);
         for pending in pending {
+            // Only a request first sent on the refused connection is proven
+            // not to have run; one sent earlier, or replayed, may have, so
+            // its outcome is unknown and its journal claim stays.
+            if pending.connection != refused_on || pending.request.replay {
+                let _ = pending
+                    .answer
+                    .send(Err(RunnerFailure::OutcomeUnknown(format!(
+                        "{reason}, with a call sent earlier outstanding"
+                    ))));
+                continue;
+            }
             if pending.journaled
                 && let Some(journal) = &self.journal
             {
@@ -920,12 +961,14 @@ impl Inner {
                 return Err(RunnerFailure::OutcomeUnknown(LINK_LOST.into()));
             };
             let frame = HostFrame::Request(request.clone());
+            let connection = state.connection;
             state.pending.insert(
                 request_id.clone(),
                 Pending {
                     request,
                     answer,
                     journaled: false,
+                    connection,
                 },
             );
             if sender.send(frame).is_err() {
@@ -1147,12 +1190,14 @@ impl Inner {
             _ => false,
         };
         let mut state = lock(&self.state);
+        let connection = state.connection;
         state.pending.insert(
             request_id.clone(),
             Pending {
                 request,
                 answer,
                 journaled,
+                connection,
             },
         );
         if sender.send(frame).is_err() {

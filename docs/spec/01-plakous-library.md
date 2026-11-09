@@ -2328,11 +2328,16 @@ Placement parking is the same kind of wait for a node placed on a runner whose
 placement is held (§8.4): its link is lost or its reconnect barrier has not yet
 published readiness. Before taking a request slot and again before each paid
 physical dispatch of a model round or compaction, the driver parks while the
-environment's placement gate reads held. It is in memory only, keeps the same
-driver, turn, child attempt and runtime lease heartbeat, releases the request
-slot and dispatch gate, processes controls, and ends on exact-turn
-cancellation, shutdown, lease loss, release or refusal. Hold time is
-accumulated separately from credential and slot waits, never overlapping them,
+environment's placement gate reads held, and parks again if the gate reads
+held once the slot and dispatch gate are taken. It is in memory only, keeps the
+same driver, turn, child attempt and runtime lease heartbeat, releases the
+request slot and dispatch gate, processes controls, and ends on exact-turn
+cancellation, shutdown, lease loss, release or refusal; an idle session
+workflow's parking also ends on its owner's cooperative interruption, as
+credential parking does. Shutdown also cancels a running mutating tool, so a
+runner call held inside it ends unsent. Hold time is accumulated separately
+from credential and slot waits, never overlapping them (a slot wait excludes
+the placement parking inside it),
 and excluded from the model operation deadline and from `ModelFinished`
 elapsed. A model exchange already dispatched finishes and accounts normally; a
 final answer needing no further work may finish. Placement parking creates no
@@ -6094,24 +6099,38 @@ a host restart never resumes it (ordinary owner-loss recovery applies).
 
 The authoritative cut is one `RunnerCall` at the admitted link, strictly
 outside the client's per-line foreground gate and owner-transfer lock, so the
-barrier can always run. Only a model tool call's own calls wait there: a new
-effect of process execution, process start, workspace mutation, VCS effect or
-service spawn under its effect key, and its reads and process observations.
-Owner controls, recorded controls, foreground cleanup, tree steps, probes and
-every host-owned call fail fast under their existing rules, so Stop, process
-stop/write/promote, job stop and service termination never join the wait. A
-waiting call is sent once the admission opens; on `NotSent` it waits for a
-revision other than the one it was sent under and sends the same call again
-(same verb, payload and key; a new transport request id), asking its owner for
-a fresh reconciliation when the admission still reads open at that revision.
+barrier can always run. Exactly these calls wait there, each sent under a
+model tool call's own context (its line owner and effect key): a process
+execution, process start or workspace mutation under that key; a workspace,
+repository, instruction or VCS read under it; and that tool call's own
+process observations (the foreground polls, tails and joins the process tool
+makes while it watches the process it started or polls). Service spawns are
+unkeyed and VCS effects are tree steps, so neither waits. Owner controls,
+recorded controls, foreground cleanup, tree steps, probes, the background
+change watch and every host-owned call fail fast under their existing rules,
+so Stop, process stop/write/promote, job stop and service termination never
+join the wait. A waiting call is sent once the admission opens; on `NotSent`
+it waits for a revision other than the one it was sent under and sends the
+same call again (same verb, payload and key; a new transport request id). If
+the admission still reads open at that revision, it asks its owner for a fresh
+reconciliation; the registry coalesces those requests on a 1/2/5/15-second
+backoff, so a healthy link that keeps refusing never cycles a runner's
+admission. Services with no owner hook instead retry the same open admission
+after the same bounded backoff.
 A model read or observation answered `ReadInterrupted` is read again the same
 way at the same cursor; the cursor advances only when a result is consumed. No
 tool, nested cell or batch is retried to recover one call. A call possibly
 sent is never sent again under a new key. Before a re-send the host-side
 operation budget moves past the hold; a sent effect's transmitted deadline,
-digest and claim age never change. Cancellation ends a wait as `NotSent`, and a
-refused admission ends every wait with `Unavailable`; a call made under a
-refused admission refuses at once until a later Ready opens it. There is no
+digest and claim age never change. Cancellation, including the driver's
+shutdown, ends a wait as `NotSent`, and a refused admission ends every wait
+with `Unavailable`; a call made under a refused admission refuses at once
+until a later Ready opens it. Refusing, removing or replacing a placement also
+ends every model effect that was sent on its now-lost link and is waiting for a
+rebinding: it is `OutcomeUnknown` at once and keeps its journal claim for
+keyed recovery. A foreground yield whose promotion the lost link refused
+before send does not terminate the process: the tool's observation waits out
+the hold and the promotion is tried once more after release. There is no
 wall-clock cap: memory, queue and owner Stop bound the hold. Release is
 automatic after the barrier; a stale Ready never releases a newer loss, and a
 fixed unknown outcome (restart, `Spent`, `Expired`) closes its call through
@@ -6142,8 +6161,10 @@ the normal recovery-required path before Ready. The driver's placement parking
   the line table and ping (`InspectOnly` refuses anything else). A refusal of
   the connection itself (`Unbound`, a version mismatch, `NotPaired`,
   `InspectOnly`) comes before any request of it ran: the host fails every
-  call and transfer waiting on that link at once, unavailable and proven to
-  have had no effect, and takes no new call on it.
+  call and transfer first sent on that link at once, unavailable and proven
+  to have had no effect, and takes no new call on it. A call sent on an
+  earlier connection, or replayed on this one, may have run there: it is
+  `OutcomeUnknown` and its journal claim stays.
 - **Liveness.** The host pings every 5 s. Either end treats a link it heard
   nothing on for 15 s as lost and closes it: the runner stops answering on
   it, ends its services and shuts its write half once what is queued is

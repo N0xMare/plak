@@ -502,8 +502,10 @@ impl AttachmentCount {
 /// ([`HostService::kept_activity`]).
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct KeptActivity {
-    /// A turn runs.
+    /// A turn runs, or a child's work is live.
     pub busy: bool,
+    /// The root's own turn runs, whatever its children do.
+    pub turn_busy: bool,
     /// An approval, credential wait or context-capacity decision needs the operator.
     pub awaiting_operator: bool,
     /// Background processes running or stopping.
@@ -1002,7 +1004,10 @@ impl<P: ProtocolExtension> HostService<P> {
         };
         for observation in &snapshot.states {
             match observation {
-                SessionObservation::SetBusy(busy) => kept.busy = *busy,
+                SessionObservation::SetBusy(busy) => {
+                    kept.busy = *busy;
+                    kept.turn_busy = *busy;
+                }
                 SessionObservation::Processes { running, .. } => kept.processes = *running,
                 SessionObservation::ContextCapacityRecovery(Some(_)) => {
                     kept.awaiting_operator = true;

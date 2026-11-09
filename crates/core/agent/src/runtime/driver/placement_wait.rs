@@ -24,6 +24,7 @@ impl Driver {
         // A held node must not keep another agent's inference waiting.
         self.request_slot.take();
         let active = self.active_root.clone();
+        let interruption = self.authority.reader();
         let started = crate::executor::now();
         let result = loop {
             tokio::select! {
@@ -32,6 +33,11 @@ impl Driver {
                 () = self.shutdown.cancelled() => break Err(cancelled_error()),
                 () = self.authority.lease_lost() => break Err(self.authority.heartbeat_failure()),
                 () = gate.released() => break Ok(()),
+                // A session workflow (an idle compaction) has no turn to
+                // cancel: its owner's cooperative interruption stops it.
+                () = crate::executor::sleep(std::time::Duration::from_millis(100)), if active.is_none() => {
+                    if interruption.cooperative_wait_interrupted() { break Err(cancelled_error()); }
+                }
                 control = self.control_receiver.recv() => {
                     let Some(control) = control else { break Err(cancelled_error()); };
                     Box::pin(self.handle_control(active.as_ref(), control)).await;
@@ -42,5 +48,13 @@ impl Driver {
             .placement_wait_elapsed
             .saturating_add(started.elapsed());
         result
+    }
+
+    /// Whether this node's runner placement holds new work right now.
+    pub(super) fn placement_held(&self) -> bool {
+        self.tools
+            .environment()
+            .placement_gate()
+            .is_some_and(|gate| gate.is_held())
     }
 }

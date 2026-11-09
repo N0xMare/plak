@@ -3117,7 +3117,7 @@ fn a_lost_output_during_release_withdraws_the_request() {
 }
 
 #[test]
-fn held_live_work_needs_the_operator_and_a_refused_or_idle_placement_does_not() {
+fn a_running_root_turn_on_an_unreachable_placement_needs_the_operator() {
     use plakous_host_protocol::wire::{PlacementReason, RunnerPhase, RunnerStatus};
     let unreachable = |phase| RunnerStatus::Blocked {
         reason: PlacementReason::RunnerUnreachable {
@@ -3127,9 +3127,22 @@ fn held_live_work_needs_the_operator_and_a_refused_or_idle_placement_does_not() 
     };
     let busy = crate::host_service::KeptActivity {
         busy: true,
+        turn_busy: true,
         ..Default::default()
     };
     let idle = crate::host_service::KeptActivity::default();
+    // Children alone, live or parked, keep the row busy but are not the
+    // root turn waiting on its runner.
+    let children_only = crate::host_service::KeptActivity {
+        busy: true,
+        children: 2,
+        held_children: 1,
+        ..Default::default()
+    };
+    assert!(!needs_operator(
+        &children_only,
+        &unreachable(RunnerPhase::LinkLost)
+    ));
     assert!(needs_operator(&busy, &unreachable(RunnerPhase::LinkLost)));
     assert!(needs_operator(&busy, &unreachable(RunnerPhase::Reconcile)));
     assert!(!needs_operator(&idle, &unreachable(RunnerPhase::LinkLost)));

@@ -1062,9 +1062,18 @@ impl ProcessSessionTools {
             debug_assert_ne!(remaining, 0);
             let backend = session.sessions.clone();
             let id = session.id;
-            let poll =
-                process_backend(move || backend.poll_from(id, cursor, remaining, max_records))
-                    .await?;
+            let observer = control.clone();
+            let poll = process_backend(move || {
+                plakous_tools::internal::observe_process_from(
+                    &backend,
+                    id,
+                    cursor,
+                    remaining,
+                    max_records,
+                    &observer,
+                )
+            })
+            .await?;
             let backend_terminal = poll.status().is_terminal() && !poll.more_output();
             skipped = skipped.saturating_add(poll.skipped_bytes());
             let (terminal, buffered_without_text_progress) = {
@@ -1100,7 +1109,11 @@ impl ProcessSessionTools {
             }
             if may_join && terminal {
                 let backend = session.sessions.clone();
-                let status = process_backend(move || backend.join(id)).await?;
+                let observer = control.clone();
+                let status = process_backend(move || {
+                    plakous_tools::internal::join_observed_process(&backend, id, &observer)
+                })
+                .await?;
                 session
                     .quiet_polls
                     .lock()

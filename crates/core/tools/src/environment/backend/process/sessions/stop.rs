@@ -101,8 +101,18 @@ impl JoinedProcessSessions {
         &self,
         id: JoinedProcessSessionId,
     ) -> Result<JoinedProcessStatus, ExecutionBackendError> {
+        self.join_observed(id, None)
+    }
+
+    /// [`Self::join`] under a model tool call's `observer` context, which a
+    /// held runner placement keeps.
+    pub(crate) fn join_observed(
+        &self,
+        id: JoinedProcessSessionId,
+        observer: Option<&crate::OperationContext>,
+    ) -> Result<JoinedProcessStatus, ExecutionBackendError> {
         if let Some(arm) = self.arm_for(id) {
-            return arm.join(id);
+            return arm.join(id, observer);
         }
         let session = self.session(id)?;
         let _operation = session.enter()?;

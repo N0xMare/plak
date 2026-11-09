@@ -538,8 +538,14 @@ impl Driver {
                 .await?;
             if self.request_slot.is_none() {
                 let queued_at = crate::executor::now();
+                let held_at = self.placement_wait_elapsed;
                 self.request_slot = self.take_request_slot(command).await?;
-                slot_wait_elapsed = slot_wait_elapsed.saturating_add(queued_at.elapsed());
+                // Placement parking inside the slot wait is counted once.
+                slot_wait_elapsed = slot_wait_elapsed.saturating_add(
+                    queued_at
+                        .elapsed()
+                        .saturating_sub(self.placement_wait_elapsed.saturating_sub(held_at)),
+                );
             }
             operation_deadline = base_deadline
                 + self
@@ -552,6 +558,11 @@ impl Driver {
             }
             let provider_dispatch_gate = Arc::clone(&self.provider_dispatch_gate);
             let dispatch_guard = provider_dispatch_gate.lock().await;
+            if self.placement_held() {
+                // Held while this round queued: park again without the gate.
+                drop(dispatch_guard);
+                continue;
+            }
             if command.cancellation.is_cancelled() || self.shutdown.is_cancelled() {
                 return Err(cancelled_error());
             }

@@ -304,8 +304,21 @@ impl JoinedProcessSessions {
         max_bytes: usize,
         max_records: usize,
     ) -> Result<JoinedProcessCursorPollResult, ExecutionBackendError> {
+        self.poll_from_observed(id, cursor, max_bytes, max_records, None)
+    }
+
+    /// [`Self::poll_from`] for a model tool call's observation under its
+    /// own `observer` context, which a held runner placement keeps.
+    pub(crate) fn poll_from_observed(
+        &self,
+        id: JoinedProcessSessionId,
+        cursor: JoinedProcessOutputCursor,
+        max_bytes: usize,
+        max_records: usize,
+        observer: Option<&OperationContext>,
+    ) -> Result<JoinedProcessCursorPollResult, ExecutionBackendError> {
         if let Some(arm) = self.arm_for(id) {
-            return arm.poll_from(id, cursor, max_bytes, max_records);
+            return arm.poll_from(id, cursor, max_bytes, max_records, observer);
         }
         if max_bytes == 0
             || u64::try_from(max_bytes).unwrap_or(u64::MAX)
@@ -380,9 +393,10 @@ impl JoinedProcessSessions {
         id: JoinedProcessSessionId,
         max_bytes: usize,
         max_records: usize,
+        observer: Option<&OperationContext>,
     ) -> Result<JoinedProcessCursorPollResult, ExecutionBackendError> {
         if let Some(arm) = self.arm_for(id) {
-            return arm.poll_tail(id, max_bytes, max_records);
+            return arm.poll_tail(id, max_bytes, max_records, observer);
         }
         if max_bytes == 0
             || u64::try_from(max_bytes).unwrap_or(u64::MAX)

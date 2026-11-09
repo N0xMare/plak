@@ -321,6 +321,32 @@ async fn promote_job(
     ))
 }
 
+/// Whether a promotion refused before it was sent is worth one more try: a
+/// runner placement lost just after the yield was decided refuses the
+/// promotion unsent, and the model's own observation then waits out the
+/// hold. Once it reads again, the promotion is retried rather than the
+/// still-running process terminated. Any other failure stands.
+async fn observed_after_refusal(
+    sessions: &JoinedProcessSessions,
+    id: JoinedProcessSessionId,
+    control: &OperationContext,
+    failure: &plakous_tools::ExecutionBackendError,
+) -> Result<bool, ToolRuntimeError> {
+    if failure.kind() != plakous_tools::ExecutionBackendErrorKind::Io
+        || !failure.proven_no_effect()
+        || control.cancellation().is_cancelled()
+    {
+        return Ok(false);
+    }
+    let backend = sessions.clone();
+    let observer = control.clone();
+    Ok(process_backend(move || {
+        plakous_tools::internal::observe_process_tail(&backend, id, 1, 1, &observer)
+    })
+    .await
+    .is_ok())
+}
+
 pub(crate) async fn process_backend<T: Send + 'static>(
     operation: impl FnOnce() -> Result<T, plakous_tools::ExecutionBackendError> + Send + 'static,
 ) -> Result<T, ToolRuntimeError> {
@@ -482,7 +508,13 @@ impl ProcessSessionTools {
                 .as_ref()
                 .is_ok_and(|result| result.projection.session_id.is_some())
             {
-                plakous_tools::internal::promote(&sessions, id).map_err(backend_runtime_error)?;
+                let mut promotion = plakous_tools::internal::promote(&sessions, id);
+                if let Err(failure) = &promotion
+                    && observed_after_refusal(&sessions, id, &observation_control, failure).await?
+                {
+                    promotion = plakous_tools::internal::promote(&sessions, id);
+                }
+                promotion.map_err(backend_runtime_error)?;
                 if let Ok(result) = &mut result {
                     result.first_promotion = true;
                 }
@@ -658,7 +690,12 @@ impl ProcessSessionTools {
                 .as_ref()
                 .is_ok_and(|result| result.projection.session_id.is_some())
             {
-                let promotion = promote_job(&sessions, id).await?;
+                let mut promotion = promote_job(&sessions, id).await?;
+                if let Err(failure) = &promotion
+                    && observed_after_refusal(&sessions, id, &observation_control, failure).await?
+                {
+                    promotion = promote_job(&sessions, id).await?;
+                }
                 if promotion.as_ref().is_err_and(|error| {
                     error.kind() == plakous_tools::ExecutionBackendErrorKind::ResourceLimit
                 }) && *observation_control.preempt().borrow() != plakous_tools::ToolPreempt::None
@@ -1025,12 +1062,14 @@ impl ProcessSessionTools {
             let backend = session.sessions.clone();
             let id = session.id;
             let max_records = request.max_output_records;
+            let observer = control.clone();
             let poll = process_backend(move || {
-                plakous_tools::internal::process_session_tail(
+                plakous_tools::internal::observe_process_tail(
                     &backend,
                     id,
                     page_budget,
                     max_records,
+                    &observer,
                 )
             })
             .await?;
@@ -1052,7 +1091,11 @@ impl ProcessSessionTools {
             if status.is_terminal() {
                 if session.sessions.active_session_ids().contains(&session.id) {
                     let backend = session.sessions.clone();
-                    process_backend(move || backend.join(id)).await?;
+                    let observer = control.clone();
+                    process_backend(move || {
+                        plakous_tools::internal::join_observed_process(&backend, id, &observer)
+                    })
+                    .await?;
                 }
                 session
                     .quiet_polls

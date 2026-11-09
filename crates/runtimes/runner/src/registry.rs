@@ -158,6 +158,31 @@ pub struct RunnerRegistry {
     executor: Arc<RwLock<Option<tokio::runtime::Handle>>>,
 }
 
+/// A registry handle its own services can hold without keeping it alive.
+struct WeakRegistry {
+    entries: std::sync::Weak<RwLock<BTreeMap<String, Entry>>>,
+    changed: std::sync::Weak<tokio::sync::watch::Sender<u64>>,
+    progress: std::sync::Weak<tokio::sync::broadcast::Sender<RunnerProgress>>,
+    probe: std::sync::Weak<RwLock<Option<Arc<RunnerProbe>>>>,
+    probe_pool: std::sync::Weak<tokio::sync::Semaphore>,
+    configured: std::sync::Weak<RwLock<Option<Arc<RunnerCatalog>>>>,
+    executor: std::sync::Weak<RwLock<Option<tokio::runtime::Handle>>>,
+}
+
+impl WeakRegistry {
+    fn upgrade(&self) -> Option<RunnerRegistry> {
+        Some(RunnerRegistry {
+            entries: self.entries.upgrade()?,
+            changed: self.changed.upgrade()?,
+            progress: self.progress.upgrade()?,
+            probe: self.probe.upgrade()?,
+            probe_pool: self.probe_pool.upgrade()?,
+            configured: self.configured.upgrade()?,
+            executor: self.executor.upgrade()?,
+        })
+    }
+}
+
 /// Home composition reads current aliases/pins; saved ids remain authority.
 pub type RunnerCatalog = dyn Fn() -> Result<Vec<ConfiguredRunner>, PlacementFailure> + Send + Sync;
 
@@ -188,6 +213,38 @@ pub struct BoundWorkspace {
 }
 
 impl RunnerRegistry {
+    fn downgrade(&self) -> WeakRegistry {
+        WeakRegistry {
+            entries: Arc::downgrade(&self.entries),
+            changed: Arc::downgrade(&self.changed),
+            progress: Arc::downgrade(&self.progress),
+            probe: Arc::downgrade(&self.probe),
+            probe_pool: Arc::downgrade(&self.probe_pool),
+            configured: Arc::downgrade(&self.configured),
+            executor: Arc::downgrade(&self.executor),
+        }
+    }
+
+    /// A held call's request for fresh reconciliation of a runner whose
+    /// admission still read open when its link refused the call. Requests
+    /// coalesce on the runner's probe backoff (1, 2, 5, then 15 s): a
+    /// healthy link refusing repeatedly re-closes admission at most once
+    /// per backoff step, never in a loop.
+    fn request_reconciliation(&self, id: &str) {
+        let due = {
+            let mut entries = self.entries.write().unwrap_or_else(PoisonError::into_inner);
+            let Some(entry) = entries.get_mut(id) else {
+                return;
+            };
+            entry
+                .refresh
+                .reconcile_request_due(tokio::time::Instant::now())
+        };
+        if due {
+            self.reconcile_when_available(id);
+        }
+    }
+
     /// Pins separately owned probes/reconciliation to the serving executor.
     /// Its owner must outlive requests; request executors may then be dropped.
     pub fn run_probes_on(&self, executor: tokio::runtime::Handle) {
@@ -355,9 +412,13 @@ impl RunnerRegistry {
                 previous.refuse();
             }
         }
-        let registry = self.clone();
+        let registry = self.downgrade();
         let runner = id.to_owned();
-        services.request_reconciliation_with(move || registry.reconcile_when_available(&runner));
+        services.request_reconciliation_with(move || {
+            if let Some(registry) = registry.upgrade() {
+                registry.request_reconciliation(&runner);
+            }
+        });
         services.set_available(true);
         entry.row.status = RunnerStatus::Ready;
         entry.row.checked_at = Some(now);
@@ -456,8 +517,9 @@ impl RunnerRegistry {
             }
             entry.row.runner.names.clear();
             entry.refresh.invalidate_cache();
-            if let Some(Connection::Remote(_, services)) = &entry.connection {
+            if let Some(Connection::Remote(client, services)) = &entry.connection {
                 services.refuse();
+                client.abandon_lost_effects();
             }
             entry.row.status = RunnerStatus::Blocked(missing(id));
             self.changed
@@ -552,13 +614,15 @@ impl RunnerRegistry {
         completed: bool,
     ) {
         entry.row.blocked_since.get_or_insert(now);
-        if let Some(Connection::Remote(_, services)) = &entry.connection {
+        if let Some(Connection::Remote(client, services)) = &entry.connection {
             // An unreachable link or barrier holds model calls; a refused
-            // placement ends their holds (spec 01 §8.4).
+            // placement ends their holds, and its sent effects' waits on a
+            // lost link (spec 01 §8.4).
             if matches!(failure, PlacementFailure::RunnerUnreachable { .. }) {
                 services.set_available(false);
             } else {
                 services.refuse();
+                client.abandon_lost_effects();
             }
         }
         if completed {

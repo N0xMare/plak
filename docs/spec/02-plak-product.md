@@ -3972,8 +3972,8 @@ outside that crate. Moving these types changes neither wire bytes nor schema.
 
 On protocol 5, directory attention is independent of activity:
 `needs_operator` means an unresolved approval or credential wait on any
-node, a pending context-capacity decision, or live work held on its runner
-placement, even while a turn runs.
+node, a pending context-capacity decision, or a running root turn whose own
+runner placement is unreachable, even while a turn runs.
 Clients use the busy activity to submit `follow_up` (Queue), never infer
 idle merely from attention. Child and held-child counts cover the whole tree.
 
@@ -4258,18 +4258,16 @@ verdicts) are addressed, the session profile and workspace chrome states.
   `unknown`, `ready` or `blocked {reason}`; reads project cached readiness,
   never wait for SSH. `needs_operator` is independent of busy activity and
   aggregates unresolved approvals, credential waits and context-capacity
-  decisions across all resident nodes; dormant rows have false. A resident
-  row whose session is busy (its turn or any live child) while its own
-  runner status is `blocked {runner_unreachable}` also needs the operator:
-  that work is held on the placement (spec 01 §8.4) until automatic release
-  after reconnection or Stop. Activity stays `busy`, the runner status keeps
-  its `link_lost` or `reconcile` phase (unavailable versus reconciling), and
-  `activity_seq` does not advance for the hold; no new field, client protocol
-  or duration is added. Clients show Stop and automatic-release guidance from
-  these fields, never thinking, idle, failure or process death, and a
-  reattach reconstructs the same chrome from current fields. A refused
-  placement (`not_paired`, identity, version, configuration) is not a hold:
-  its held calls end with the refusal. Node-to-node
+  decisions across all resident nodes; dormant rows have false. It is also
+  true for a resident row whose root turn itself is running while the row's
+  runner status is `blocked {runner_unreachable}`: that turn may be waiting
+  on its placement (spec 01 §8.4) until automatic release after reconnection
+  or Stop. Live or parked children alone do not set it. Activity stays
+  `busy`, the runner status keeps its `link_lost` or `reconcile` phase, and
+  `activity_seq` does not advance for this. No field, client protocol or
+  duration is added; these are the fields a client reads. A refused
+  placement (`not_paired`, identity, version, configuration) does not set it:
+  calls waiting on that placement end with the refusal. Node-to-node
   questions are not operator decisions. `activity_seq` is the session head's
   durable checkpoint revision (zero before runtime creation), never a feed
   cursor, lease release, directory sequence or metadata timestamp. Every
@@ -5059,10 +5057,10 @@ open; an empty resident table does not settle its handoff debt.
 Each second checks only in-memory blockers. An uncapped targeted durable check
 runs off the accept loop every thirty seconds and before an otherwise-expiring
 clock can exit. Only runners with recorded stop debt block exit while unavailable
-or not Ready; an ordinary offline placement does not. A session holding live
-work on an unavailable placement (spec 01 §8.4) stays resident, as a running
-turn does, and so blocks idle exit through the in-memory resident check; the
-hold is never idle-released or evicted. An idle session on that placement
+or not Ready; an ordinary offline placement does not. A session whose turn is
+waiting on an unavailable placement (spec 01 §8.4) stays resident, as any
+running turn does, and so blocks idle exit through the in-memory resident
+check; it is never idle-released or evicted. An idle session on that placement
 alone blocks nothing. Blocking reasons are
 content-free and logged once per change. The startup scan uses the same uncapped
 continuation candidates as idle eligibility, including records older than the

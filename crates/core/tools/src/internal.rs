@@ -450,7 +450,43 @@ pub fn process_session_tail(
     max_bytes: usize,
     max_records: usize,
 ) -> Result<crate::JoinedProcessCursorPollResult, crate::ExecutionBackendError> {
-    sessions.poll_tail(id, max_bytes, max_records)
+    sessions.poll_tail(id, max_bytes, max_records, None)
+}
+
+/// [`process_session_tail`] as a model tool call's observation under its own
+/// `control`: on a runner placement a hold keeps it and reads it again after
+/// release (spec 01 §8.4), and the call's cancellation ends the wait.
+pub fn observe_process_tail(
+    sessions: &crate::JoinedProcessSessions,
+    id: crate::JoinedProcessSessionId,
+    max_bytes: usize,
+    max_records: usize,
+    control: &crate::OperationContext,
+) -> Result<crate::JoinedProcessCursorPollResult, crate::ExecutionBackendError> {
+    sessions.poll_tail(id, max_bytes, max_records, Some(control))
+}
+
+/// [`crate::JoinedProcessSessions::poll_from`] as a model tool call's
+/// observation under its own `control`, as [`observe_process_tail`].
+pub fn observe_process_from(
+    sessions: &crate::JoinedProcessSessions,
+    id: crate::JoinedProcessSessionId,
+    cursor: crate::JoinedProcessOutputCursor,
+    max_bytes: usize,
+    max_records: usize,
+    control: &crate::OperationContext,
+) -> Result<crate::JoinedProcessCursorPollResult, crate::ExecutionBackendError> {
+    sessions.poll_from_observed(id, cursor, max_bytes, max_records, Some(control))
+}
+
+/// [`crate::JoinedProcessSessions::join`] as a model tool call's
+/// observation under its own `control`, as [`observe_process_tail`].
+pub fn join_observed_process(
+    sessions: &crate::JoinedProcessSessions,
+    id: crate::JoinedProcessSessionId,
+    control: &crate::OperationContext,
+) -> Result<crate::JoinedProcessStatus, crate::ExecutionBackendError> {
+    sessions.join_observed(id, Some(control))
 }
 
 /// Subscribe before polling to observe output and status without lost wakeups.

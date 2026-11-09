@@ -194,6 +194,15 @@ impl AdmittedLink {
     }
 }
 
+/// How long a held call whose services have no reconciliation owner waits
+/// before trying the same open admission again.
+const RECHECK: [Duration; 4] = [
+    Duration::from_secs(1),
+    Duration::from_secs(2),
+    Duration::from_secs(5),
+    Duration::from_secs(15),
+];
+
 fn refused() -> super::RunnerFailure {
     super::RunnerFailure::Unavailable(
         "the runner placement was refused or replaced before the call was sent".into(),
@@ -221,10 +230,12 @@ impl Hold {
     ) -> Result<T, super::RunnerFailure> {
         let rereads = call.verb().is_read();
         let mut stale = None;
+        let mut recheck = None;
+        let mut step = 0;
         let mut held = Duration::ZERO;
         loop {
             let waiting = tokio::time::Instant::now();
-            let revision = self.open(stale, call.cancellation()).await?;
+            let revision = self.open(stale, recheck, call.cancellation()).await?;
             held = held.saturating_add(waiting.elapsed());
             match send(call.reissue(held)).await {
                 Err(super::RunnerFailure::NotSent(_)) => {}
@@ -233,25 +244,32 @@ impl Hold {
             }
             stale = Some(revision);
             let current = self.availability.borrow().revision;
-            if current == revision {
-                let request = self
-                    .reconcile
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .clone();
-                if let Some(request) = request {
-                    request();
-                }
+            let request = self
+                .reconcile
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            // Without an owner to ask, the same open admission is tried
+            // again only after a bounded backoff.
+            recheck = request.is_none().then(|| RECHECK[step]);
+            step = (step + 1).min(RECHECK.len() - 1);
+            if current == revision
+                && let Some(request) = request
+            {
+                request();
             }
         }
     }
 
-    /// The revision of an open admission other than `stale`.
+    /// The revision of an open admission other than `stale`, or the stale
+    /// one again once `recheck` has passed.
     async fn open(
         &mut self,
         stale: Option<u64>,
+        recheck: Option<Duration>,
         cancellation: &plakous_model::CancellationToken,
     ) -> Result<u64, super::RunnerFailure> {
+        let mut recheck_at = recheck.map(|delay| tokio::time::Instant::now() + delay);
         loop {
             let current = *self.availability.borrow_and_update();
             match current.admission {
@@ -259,23 +277,45 @@ impl Hold {
                 Admission::Open if stale != Some(current.revision) => return Ok(current.revision),
                 _ => {}
             }
-            let mut cancelled = std::pin::pin!(cancellation.cancelled());
-            let mut changed = std::pin::pin!(self.availability.changed());
-            let changed = std::future::poll_fn(|context| {
-                if cancelled.as_mut().poll(context).is_ready() {
-                    return std::task::Poll::Ready(None);
+            let woke = {
+                let mut cancelled = std::pin::pin!(cancellation.cancelled());
+                let mut changed = std::pin::pin!(self.availability.changed());
+                let mut rechecked = std::pin::pin!(async move {
+                    match recheck_at {
+                        Some(at) => tokio::time::sleep_until(at).await,
+                        None => std::future::pending().await,
+                    }
+                });
+                std::future::poll_fn(|context| {
+                    if cancelled.as_mut().poll(context).is_ready() {
+                        return std::task::Poll::Ready(None);
+                    }
+                    if rechecked.as_mut().poll(context).is_ready() {
+                        return std::task::Poll::Ready(Some(Ok(true)));
+                    }
+                    changed
+                        .as_mut()
+                        .poll(context)
+                        .map(|changed| Some(changed.map(|()| false)))
+                })
+                .await
+            };
+            match woke {
+                Some(Ok(true)) => {
+                    let now = *self.availability.borrow();
+                    if now.admission == Admission::Open {
+                        return Ok(now.revision);
+                    }
+                    // Not open: wait for a change, no longer on the timer.
+                    recheck_at = None;
                 }
-                changed.as_mut().poll(context).map(Some)
-            })
-            .await;
-            match changed {
                 None => {
                     return Err(super::RunnerFailure::NotSent(
                         "the call was cancelled before it was sent".into(),
                     ));
                 }
                 Some(Err(_)) => return Err(refused()),
-                Some(Ok(())) => {}
+                Some(Ok(false)) => {}
             }
         }
     }

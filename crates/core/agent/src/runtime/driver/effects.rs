@@ -140,6 +140,12 @@ impl Driver {
                 () = command.cancellation.cancelled(), if boundary_error.is_none() => {
                     boundary_error = Some(cancelled_error());
                 }
+                // Shutdown reaches the running effect through its call's
+                // cancellation, so a held runner call ends unsent.
+                () = self.shutdown.cancelled(), if boundary_error.is_none() => {
+                    command.cancellation.cancel();
+                    boundary_error = Some(cancelled_error());
+                }
                 control = self.control_receiver.recv(), if controls_open => {
                     if let Some(control) = control {
                         Box::pin(self.handle_control(Some(command), control)).await;

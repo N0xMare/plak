@@ -17,6 +17,8 @@ mod jobs;
 mod output;
 mod pack;
 mod pi;
+#[cfg(all(test, unix))]
+mod placement_hold_tests;
 mod program;
 mod projection;
 #[cfg(all(test, unix))]

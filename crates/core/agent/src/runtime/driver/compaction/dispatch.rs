@@ -249,6 +249,10 @@ impl Driver {
                 + slot_wait_elapsed;
             let provider_dispatch_gate = Arc::clone(&self.provider_dispatch_gate);
             let dispatch_guard = provider_dispatch_gate.lock().await;
+            if self.placement_held() {
+                drop(dispatch_guard);
+                continue;
+            }
             if self.shutdown.is_cancelled() || cancellation.is_cancelled() {
                 return Err(cancelled_error());
             }

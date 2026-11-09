@@ -88,6 +88,19 @@ impl RunnerArm {
         OperationContext::new(plakous_model::CancellationToken::new())
     }
 
+    /// The context an observation is sent under: a model tool call's own
+    /// (its line owner, call key and cancellation), so a held placement
+    /// keeps the observation and reads it again after release (spec 01
+    /// §8.4), or a fresh unkeyed one for the host's own reads, which fail
+    /// fast. A yield signal is never forwarded on an observation.
+    fn observing(observer: Option<&OperationContext>) -> OperationContext {
+        observer.map_or_else(Self::control, |observer| {
+            observer
+                .clone()
+                .with_preempt(tokio::sync::watch::channel(crate::ToolPreempt::None).1)
+        })
+    }
+
     fn update(&self, id: JoinedProcessSessionId, status: JoinedProcessStatus) {
         let mut state = lock(&self.state);
         let session = state.sessions.entry(id).or_insert_with(ArmSession::new);
@@ -368,6 +381,7 @@ impl RunnerArm {
         cursor: JoinedProcessOutputCursor,
         max_bytes: usize,
         max_records: usize,
+        observer: Option<&OperationContext>,
     ) -> Result<JoinedProcessCursorPollResult, ExecutionBackendError> {
         let result = self.wait(self.sessions.poll_from(
             id,
@@ -375,7 +389,7 @@ impl RunnerArm {
             max_bytes,
             max_records,
             Duration::ZERO,
-            Self::control(),
+            Self::observing(observer),
         ))?;
         self.update(id, result.status());
         Ok(result)
@@ -394,6 +408,7 @@ impl RunnerArm {
             JoinedProcessOutputCursor::new(cursor),
             max_bytes,
             max_records,
+            None,
         )?;
         lock(&self.state)
             .polled
@@ -412,12 +427,14 @@ impl RunnerArm {
         id: JoinedProcessSessionId,
         max_bytes: usize,
         max_records: usize,
+        observer: Option<&OperationContext>,
     ) -> Result<JoinedProcessCursorPollResult, ExecutionBackendError> {
         self.poll_from(
             id,
             JoinedProcessOutputCursor::new(0),
             max_bytes,
             max_records,
+            observer,
         )
     }
 
@@ -499,8 +516,9 @@ impl RunnerArm {
     pub(super) fn join(
         &self,
         id: JoinedProcessSessionId,
+        observer: Option<&OperationContext>,
     ) -> Result<JoinedProcessStatus, ExecutionBackendError> {
-        let polled = self.poll_from(id, JoinedProcessOutputCursor::new(0), 1, 1)?;
+        let polled = self.poll_from(id, JoinedProcessOutputCursor::new(0), 1, 1, observer)?;
         if !polled.status().is_terminal() {
             return Err(conflict_error("process is still running"));
         }
