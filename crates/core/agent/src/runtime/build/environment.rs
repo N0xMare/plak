@@ -32,8 +32,15 @@ pub(super) fn stable_workspace_environment_digest(
     })
 }
 
-/// Compiles an explicit profile from the exact tool registry and workspace
-/// policy that an [`AgentBuilder`](crate::AgentBuilder) will consume.
+/// Compiles an explicit profile from the exact tool registry, workspace
+/// policy and execution backend that an [`AgentBuilder`](crate::AgentBuilder)
+/// will consume.
+///
+/// `backend` is the descriptor of the backend the builder's environment runs
+/// on: [`ExecutionBackendDescriptor::local_runner`] for the local runner, or
+/// the selected runner's descriptor. The plan binds the run-stable workspace
+/// facts of that backend (its OS and runner), so a plan compiled for one
+/// backend is refused on another as an execution-environment change.
 ///
 /// This is the safe consumer seam for explicit product profiles: callers do
 /// not reconstruct private tool or execution-environment identity encodings.
@@ -50,6 +57,7 @@ pub fn compile_explicit_runtime_profile(
     provider_configuration: &CompiledProviderConfiguration,
     tools: &FrozenToolRegistry,
     workspace: &WorkspacePolicy,
+    backend: &ExecutionBackendDescriptor,
     context_sources: Vec<ResolvedContextSourceFact>,
 ) -> Result<ResolvedHarnessPlan, AgentError> {
     let registry_digest = tools.registry_identity_digest().map_err(|error| {
@@ -63,12 +71,9 @@ pub fn compile_explicit_runtime_profile(
         .iter()
         .map(|definition| definition.name().as_str().to_owned())
         .collect();
-    // An explicit profile is compiled before any environment exists; the
-    // builder's backend is the host backend (spec 01 §12).
-    let environment_digest = stable_workspace_environment_digest(
-        workspace,
-        &ExecutionBackendDescriptor::local_runner(),
-    )?;
+    // An explicit profile is compiled before any environment exists, against
+    // the backend the caller names (spec 01 §12).
+    let environment_digest = stable_workspace_environment_digest(workspace, backend)?;
     crate::compile_explicit_profile(
         spec,
         model,

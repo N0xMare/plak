@@ -8557,9 +8557,11 @@ OS tag of the execution backend its tools run on (`linux` or `macos` for a
 runner): on a node placed on a remote runner (§3.1), the runner's descriptor
 OS, not the OS of the host process that renders the prompt; on the local
 runner, this process's OS. A child placed on the parent's runner gets the same
-tag. The tag is part of the rendered instructions, as the root and cwd are;
-it adds no binding input, since the workspace environment identity already
-records the backend's OS.
+tag. The node's explicit plan is compiled against the same backend descriptor,
+so the run-stable workspace facts it binds (the backend's OS and runner,
+chapter 01 §8.5) are the runner's, and a fresh session on a remote runner opens
+there. The tag is part of the rendered instructions, as the root and cwd are;
+it adds no binding input beyond those facts.
 
 The sentence about earlier messages exists because a session may have been
 bound to another model before: the current turn's instructions are what

@@ -1007,7 +1007,7 @@ pub(in crate::agent) async fn coding_session_runtime_binding_for(
         });
     }
 
-    // The prompt names this backend's OS.
+    // The prompt names this backend's OS and the explicit plan binds it.
     let backend = node_backend_descriptor(state_roots.runner_services());
     // Exact reopen must not offer a freshly compiled product default as a
     // replacement for the reconstruction-complete plan in the checkpoint.
@@ -1054,6 +1054,7 @@ pub(in crate::agent) async fn coding_session_runtime_binding_for(
             &session_configuration,
             &frozen_tools,
             workspace.as_ref(),
+            &backend,
             context_sources,
         )
         .map_err(|error| CliFailure::new(format!("harness plan could not be compiled: {error}")))?;

@@ -6923,7 +6923,11 @@ containment claims are refused, independently of the decoding process's OS.
 Path-format compatibility is likewise checked against the descriptor's OS;
 semantic revisions are implementation-wide, not OS-specific. Decoding platform
 data grants no execution authority and does not expand the supported process
-or evaluator platforms in chapter 00. The in-process joined
+or evaluator platforms in chapter 00. An explicit plan binds the workspace
+facts of the backend it will run on: `compile_explicit_runtime_profile` takes
+that backend's descriptor (`local_runner()`, or the selected runner's), and a
+plan compiled for another backend is refused at construction as
+`BindingChange::ExecutionEnvironment`. The in-process joined
 process service requires the local runner's direct backend; a runner
 environment's service is its runner arm (below).
 
@@ -10986,20 +10990,28 @@ stays a `plakous-tools` helper. They break earlier embedders in these ways:
 4. A rebind or fork whose target names another runner is refused
    (`InvalidInput`, `BindingChange::Runner`).
 
-**Runner placement** (§8.4, §8.5) changes these facade signatures. The
-`plakous::prompts` assembler takes a `plakous::prompts::identity::PromptWorkspace`
-(the workspace root and cwd and the backend's OS tag, built with
+**Runner placement** (§8.4, §8.5) changes these facade signatures.
+`plakous::agent::compile_explicit_runtime_profile` takes the descriptor of the
+backend the plan will run on after the workspace policy
+(`&plakous::tools::ExecutionBackendDescriptor`). The `plakous::prompts`
+assembler takes a `plakous::prompts::identity::PromptWorkspace` (the
+workspace root and cwd and the backend's OS tag, built with
 `PromptWorkspace::new`; its `Debug` redacts the paths) in place of the root and
 cwd pair: `identity::product_environment_sentence(workspace)`,
 `identity::product_identity_tail(workspace, model, effort)`,
 `plan::PromptPlan::new(base, workspace, model, effort, contributions)` and
 `plan::target_instructions(family_base, composition, surface, workspace, model,
-effort)`. `plakous::tools::ExecutionBackendDescriptor` is on the facade. They
-break earlier embedders in these ways:
+effort)`. They break earlier embedders in these ways:
 
-1. A caller of the prompt assembler names the backend's OS tag; the
+1. A caller of `compile_explicit_runtime_profile` passes
+   `&ExecutionBackendDescriptor::local_runner()` for the local runner, or the
+   selected runner's descriptor; a plan compiled for one backend is refused on
+   another (`InvalidInput`, `BindingChange::ExecutionEnvironment`).
+   `construction::compile_local_composition_plan` compiles for the local
+   runner.
+2. A caller of the prompt assembler names the backend's OS tag; the
    environment sentence states it instead of the process's OS.
-2. A `Runner` descriptor naming an OS other than `linux` or `macos` no longer
+3. A `Runner` descriptor naming an OS other than `linux` or `macos` no longer
    decodes, and a runner whose hello names one is refused.
 
 `plakous::sessions::feed` is the change feed's public surface (§5.11):

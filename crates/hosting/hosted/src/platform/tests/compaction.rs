@@ -5,7 +5,7 @@ use plakous::sessions::*;
 use plakous_http::{Client, Limits, Origin, TlsConfigIdentity};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
-async fn runtime(
+pub(super) async fn runtime(
     provider: PlatformProvider,
     spec: &ApiRuntimeSpec<'_>,
     client: Client,
@@ -192,7 +192,7 @@ async fn endpoint_with_cut(
     endpoint_with_requests(provider, model, outage, 3, None).await
 }
 
-async fn endpoint_with_requests(
+pub(super) async fn endpoint_with_requests(
     provider: PlatformProvider,
     model: &'static str,
     outage: Option<Arc<std::sync::atomic::AtomicBool>>,

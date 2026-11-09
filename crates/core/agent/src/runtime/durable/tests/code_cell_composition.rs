@@ -442,6 +442,7 @@ pub(super) fn code_cell_agent_builder(
         configured.configuration(),
         &registry,
         workspace.as_ref(),
+        &plakous_tools::ExecutionBackendDescriptor::local_runner(),
         Vec::new(),
     )?;
     let attachment_identity = composition_descriptor.identity;

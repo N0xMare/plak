@@ -574,6 +574,7 @@ fn v2_direct_builder(
         configured.configuration(),
         &registry,
         workspace.as_ref(),
+        &plakous_tools::ExecutionBackendDescriptor::local_runner(),
         Vec::new(),
     )?;
     let target = composition_projection_target(&configured, &descriptor)?;

@@ -1568,6 +1568,7 @@ async fn cancelled_mutation_proves_buffered_read_was_not_dispatched() -> TestRes
         configured.configuration(),
         &registry,
         workspace.as_ref(),
+        &plakous_tools::ExecutionBackendDescriptor::local_runner(),
         Vec::new(),
     )?;
     let sessions = DurableSessionRuntime::current(

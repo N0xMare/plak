@@ -813,6 +813,7 @@ async fn direct_custom_patch_decodes_canonical_model_string_before_executor(
         configured.configuration(),
         &registry,
         workspace.as_ref(),
+        &plakous_tools::ExecutionBackendDescriptor::local_runner(),
         Vec::new(),
     )?;
     let mut builder = AgentBuilder::new(configured.clone(), registry.clone(), workspace);

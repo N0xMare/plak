@@ -342,6 +342,9 @@ mod catalog_admission;
 #[cfg(test)]
 #[path = "tests/compaction.rs"]
 pub(crate) mod compaction;
+#[cfg(test)]
+#[path = "tests/runner_placement.rs"]
+mod runner_placement;
 
 #[test]
 fn openai_api_code_mode_table_matches_the_codex_reference_catalog() {
@@ -799,6 +802,7 @@ async fn pre_pack_openai_api_direct_session_reopen_fails_closed() {
         &configuration,
         &registry,
         workspace.as_ref(),
+        &plakous::tools::ExecutionBackendDescriptor::local_runner(),
         context_sources,
     )
     .unwrap();
@@ -1108,6 +1112,7 @@ async fn pre_w3_b_grok_session_reopen_fails_closed() {
         &configuration,
         &registry,
         workspace.as_ref(),
+        &plakous::tools::ExecutionBackendDescriptor::local_runner(),
         context_sources,
     )
     .unwrap();

@@ -1764,6 +1764,7 @@ async fn fenced_direct_child_session_admits_its_projection_at_construction()
             &node.configuration,
             &registry,
             workspace.as_ref(),
+            &plakous::tools::ExecutionBackendDescriptor::local_runner(),
             Vec::new(),
         )
         .map_err(|error| format!("{tier:?}: {error}"))?;
@@ -4437,6 +4438,7 @@ async fn supergrok_hub_creates_and_reopens_on_every_fence() -> Result<(), Box<dy
                                 &node.configuration,
                                 &registry,
                                 workspace.as_ref(),
+                                &plakous::tools::ExecutionBackendDescriptor::local_runner(),
                                 Vec::new(),
                             )
                             .map_err(|e| format!("plan: {e}"))?;

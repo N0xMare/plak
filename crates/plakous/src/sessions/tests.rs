@@ -933,6 +933,7 @@ fn instructed_runtime_binding_for(
         configured.configuration(),
         &registry,
         &workspace,
+        &plakous_tools::ExecutionBackendDescriptor::local_runner(),
         facts,
     )?;
     let builder = AgentBuilder::new(configured, registry, workspace)

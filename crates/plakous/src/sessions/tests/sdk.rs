@@ -324,6 +324,7 @@ async fn sdk_driver(foreground_stop: bool) -> TestResult {
         configured.configuration(),
         &registry,
         &workspace,
+        &plakous_tools::ExecutionBackendDescriptor::local_runner(),
         Vec::new(),
     )?;
     let attachment = LocalCompositionAttachment::builder(profile)

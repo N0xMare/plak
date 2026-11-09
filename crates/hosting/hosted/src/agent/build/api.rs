@@ -315,6 +315,7 @@ pub(crate) fn runtime_binding(
             &configuration,
             &registry,
             workspace.as_ref(),
+            &backend,
             context_sources,
         )
         .map_err(|error| {

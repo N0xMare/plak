@@ -220,7 +220,10 @@ pub fn provider_model_projection_identity(
 /// A composition deployment exposes its nested catalog through the evaluator,
 /// so the provider-visible exposure strategy is [`ToolExposureStrategy::None`].
 /// Naming that, the registry, the workspace, and the configuration once is all
-/// this plan requires.
+/// this plan requires. The plan is compiled for the local runner
+/// ([`ExecutionBackendDescriptor::local_runner`](crate::tools::ExecutionBackendDescriptor::local_runner));
+/// a deployment on another runner compiles through
+/// [`compile_explicit_runtime_profile`] with that runner's descriptor.
 ///
 /// # Errors
 ///
@@ -249,6 +252,7 @@ pub fn compile_local_composition_plan(
         configuration,
         tools,
         workspace,
+        &plakous_tools::ExecutionBackendDescriptor::local_runner(),
         Vec::new(),
     )
 }

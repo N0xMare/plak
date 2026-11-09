@@ -15,6 +15,11 @@ one cross-build carrier (a build imports its own and the previous version).
   tools run on a remote runner. `plakous::prompts` takes a `PromptWorkspace`
   (root, cwd, backend OS) in place of the root and cwd pair.
 
+- Compile a session's explicit plan against the backend its tools run on, so a
+  fresh session on a remote runner opens instead of being refused as an
+  execution-environment change. `compile_explicit_runtime_profile` takes the
+  backend's `ExecutionBackendDescriptor`, now on the facade.
+
 - Share serialized product wire types through the internal `plakd-wire-types`
   crate without changing the wire schema or resetting terminal-local preferences.
 
