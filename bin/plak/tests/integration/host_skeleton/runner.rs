@@ -370,8 +370,12 @@ fn an_unreachable_user_manager_falls_back_to_a_detached_runner() {
         ],
     );
     // The local daemon starts after the host serves; wait for its manager call.
+    // The shell creates the marker before printf fills it, so wait for content.
     let deadline = std::time::Instant::now() + WAIT;
-    while !marker.exists() {
+    while std::fs::read_to_string(&marker)
+        .unwrap_or_default()
+        .is_empty()
+    {
         assert!(
             std::time::Instant::now() < deadline,
             "the user manager was never asked"
