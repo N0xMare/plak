@@ -70,6 +70,256 @@ fn release(gate: &Gate) {
     gate.1.notify_all();
 }
 
+fn full_controls(
+    sender: &WireSender<Core>,
+    gate: &Gate,
+    writing: &mpsc::Receiver<()>,
+) -> writer::Ticket {
+    *lock(&gate.0) = true;
+    sender.request_operation(Op::Ping).unwrap();
+    writing.recv_timeout(Duration::from_secs(3)).unwrap();
+    for _ in 1..writer::MAX_FRAMES - 1 {
+        sender.request_operation(Op::Ping).unwrap();
+    }
+    sender
+        .connection
+        .inner
+        .outbox
+        .push(
+            encode_line(&ClientFrame::<Core>::Request {
+                id: u64::MAX,
+                op: Op::Ping,
+            })
+            .unwrap(),
+        )
+        .unwrap()
+}
+
+fn pending_control(sender: &WireSender<Core>, expected: impl Fn(&Control) -> bool) {
+    let inner = &sender.connection.inner;
+    let until = Instant::now() + Duration::from_secs(3);
+    let mut state = lock(&inner.state);
+    while !state.control_retry.as_ref().is_some_and(&expected) {
+        let left = until
+            .checked_duration_since(Instant::now())
+            .expect("control retry not recorded");
+        let (next, wait) = inner.changed.wait_timeout(state, left).unwrap();
+        assert!(
+            !wait.timed_out(),
+            "control state change did not wake waiters"
+        );
+        state = next;
+    }
+}
+
+#[test]
+fn slow_link_deliver_overflow_replays_detach_before_attach_without_leaking() {
+    let (mut host, sender, receiver, gate, writing) = gated();
+    let _last = full_controls(&sender, &gate, &writing);
+    for _ in 0..=crate::limits::OBSERVATION_QUEUE_CAPACITY {
+        let observation = SessionObservation::DraftRejected(SessionIntent::Interrupt);
+        host.send(&HostFrame::Event {
+            client_id: None,
+            attachment: 1,
+            seq: 1,
+            class: observation.class(),
+            observation,
+            blobs: Vec::new(),
+        });
+    }
+    pending_control(&sender, |control| matches!(control, Control::Detach(1)));
+    assert_eq!(receiver.ended(), None);
+    assert!(receiver.transcript_resnapshot_required_for(&TranscriptScope::Root));
+    receiver.try_iter().for_each(drop);
+    release(&gate);
+    for _ in 0..writer::MAX_FRAMES {
+        assert_eq!(host.request().1, Op::Ping);
+    }
+    assert_eq!(
+        host.request().1,
+        Op::Detach { attachment: 1 },
+        "release the live host attachment first"
+    );
+    let (id, op) = host.request();
+    assert_eq!(op, Op::Attach { node: node("t1") });
+    host.send(&HostFrame::Response {
+        id,
+        outcome: Outcome::Ok(Answer::Attached { attachment: 2 }),
+    });
+    host.send(&event(2, true));
+    assert_eq!(
+        receiver.recv_timeout(Duration::from_secs(3)).unwrap(),
+        SessionObservation::SetBusy(true)
+    );
+    let sentinel = sender.request_operation(Op::Ping).unwrap();
+    assert_eq!(
+        host.request().0,
+        sentinel,
+        "no extra attachment after recovery"
+    );
+}
+
+#[test]
+fn slow_link_transcript_overflow_replays_open_on_current_attachment() {
+    let (mut host, sender, receiver, gate, writing) = gated();
+    sender
+        .send(SessionIntent::OpenAgentTranscript {
+            agent_id: "a1".into(),
+        })
+        .unwrap();
+    let (id, _) = host.request();
+    host.send(&HostFrame::Response {
+        id,
+        outcome: Outcome::Ok(Answer::Accepted { duplicate: false }),
+    });
+    assert!(sender.settle(Duration::from_secs(3)));
+    host.send(&HostFrame::ResyncRequired { attachment: 1 });
+    let (attach, op) = host.request();
+    assert_eq!(op, Op::Attach { node: node("t1") });
+    let _last = full_controls(&sender, &gate, &writing);
+    host.send(&HostFrame::Response {
+        id: attach,
+        outcome: Outcome::Ok(Answer::Attached { attachment: 2 }),
+    });
+    pending_control(
+        &sender,
+        |control| matches!(control, Control::OpenTranscript(agent) if agent == "a1"),
+    );
+    release(&gate);
+    for _ in 0..writer::MAX_FRAMES {
+        assert_eq!(host.request().1, Op::Ping);
+    }
+    assert_eq!(
+        host.request().1,
+        Op::Intent {
+            client_id: None,
+            attachment: 2,
+            intent: SessionIntent::OpenAgentTranscript {
+                agent_id: "a1".into()
+            },
+            blobs: Vec::new(),
+        }
+    );
+    let sentinel = sender.request_operation(Op::Ping).unwrap();
+    assert_eq!(
+        host.request().0,
+        sentinel,
+        "opening a transcript must not create another attachment"
+    );
+    assert!(receiver.try_control_error().is_none());
+}
+
+#[test]
+fn slow_link_overflow_notifies_waiters_and_queued_selection_clears_retry_state() {
+    let (mut host, sender, receiver, gate, writing) = gated();
+    let last = full_controls(&sender, &gate, &writing);
+    let inner = Arc::clone(&sender.connection.inner);
+    let (ready, registered) = mpsc::channel();
+    let watch = thread::spawn(move || {
+        let mut state = lock(&inner.state);
+        ready.send(()).unwrap();
+        while state.control_retry.is_none() {
+            let (next, wait) = inner
+                .changed
+                .wait_timeout(state, Duration::from_secs(3))
+                .unwrap();
+            assert!(!wait.timed_out(), "WouldBlock must notify changed waiters");
+            state = next;
+        }
+    });
+    registered.recv_timeout(Duration::from_secs(3)).unwrap();
+    host.send(&HostFrame::ResyncRequired { attachment: 1 });
+    watch.join().unwrap();
+    assert!(lock(&sender.connection.inner.state).control_error.is_some());
+    assert!(last.withdraw());
+    let selection = sender.attach_to(node("chosen")).unwrap();
+    {
+        let state = lock(&sender.connection.inner.state);
+        assert!(
+            state.control_retry.is_none(),
+            "any queued attach supersedes the old attach retry"
+        );
+        assert!(
+            state.control_error.is_none(),
+            "queued attach clears the old overflow reason"
+        );
+    }
+    release(&gate);
+    for _ in 0..writer::MAX_FRAMES - 1 {
+        assert_eq!(host.request().1, Op::Ping);
+    }
+    assert_eq!(
+        host.request(),
+        (
+            selection,
+            Op::Attach {
+                node: node("chosen")
+            }
+        )
+    );
+    host.send(&HostFrame::Response {
+        id: selection,
+        outcome: Outcome::Ok(Answer::Attached { attachment: 2 }),
+    });
+    assert_eq!(
+        receiver.recv_response(Duration::from_secs(3)).unwrap().0,
+        selection
+    );
+    let sentinel = sender.request_operation(Op::Ping).unwrap();
+    assert_eq!(
+        host.request().0,
+        sentinel,
+        "stale retry must not leak another attachment"
+    );
+}
+
+#[test]
+fn slow_link_attached_intent_is_serialized_once() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static SERIALIZATIONS: AtomicUsize = AtomicUsize::new(0);
+    #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize)]
+    struct Counted(u8);
+    impl Serialize for Counted {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            SERIALIZATIONS.fetch_add(1, Ordering::SeqCst);
+            serializer.serialize_u8(self.0)
+        }
+    }
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    struct Counting;
+    impl ProtocolExtension for Counting {
+        type Intent = Counted;
+        type Observation = crate::Never;
+        type HostRequest = crate::Never;
+        type HostResponse = crate::Never;
+        type WelcomeExtension = Option<crate::Never>;
+    }
+    let inner = Inner::<Counting>::new();
+    lock(&inner.state).attachment = Some(1);
+    let sender = WireSender {
+        connection: Arc::new(Connection {
+            inner: Arc::clone(&inner),
+        }),
+    };
+    sender.send(SessionIntent::Extension(Counted(7))).unwrap();
+    assert_eq!(SERIALIZATIONS.load(Ordering::SeqCst), 1);
+    inner.outbox.finish();
+    let (read, write) = UnixStream::pair().unwrap();
+    inner.outbox.run(Box::new(write), || {}).unwrap();
+    let mut line = String::new();
+    BufReader::new(read).read_line(&mut line).unwrap();
+    assert!(matches!(
+        decode_line::<ClientFrame<Counting>>(&line).unwrap(),
+        ClientFrame::Request {
+            op: Op::Intent {
+                intent: SessionIntent::Extension(Counted(7)),
+                ..
+            },
+            ..
+        }
+    ));
+}
+
 #[test]
 fn slow_link_answer_deadline_withdraws_unwritten_draft_before_pipe_drains() {
     let (mut host, sender, receiver, gate, writing) = gated();

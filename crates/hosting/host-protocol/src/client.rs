@@ -25,8 +25,8 @@
 //! One writer thread alone writes the transport, from a queue of encoded
 //! lines: the reader thread and the face never block on a write, so a
 //! large request does not hold up what the host says meanwhile. Intent
-//! batches leave fixed control headroom; internal control overflow defers
-//! a fresh attachment without ending a progressing connection.
+//! batches leave fixed control headroom; internal control overflow retains
+//! the failed control without ending a progressing connection.
 //!
 //! What the face has not taken waits in an observation mailbox with the
 //! session's own rules ([`crate::observation_channel`]): a state supersedes
@@ -49,7 +49,9 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
+mod control;
 mod writer;
+use control::Control;
 
 /// The connected sender, observation/response receiver and typed welcome.
 pub type Connected<P> = (WireSender<P>, WireReceiver<P>, Welcome<P>);
@@ -306,7 +308,7 @@ struct State<P: ProtocolExtension> {
     /// Intents waiting for the next attachment, in the order sent.
     unsent: VecDeque<Sent<P>>,
     unsent_bytes: usize,
-    control_retry: bool,
+    control_retry: Option<Control>,
     control_error: Option<String>,
     /// Intents the host did not take, for the face.
     refused: VecDeque<SendError<P>>,
@@ -328,6 +330,23 @@ struct State<P: ProtocolExtension> {
 }
 
 impl<P: ProtocolExtension> State<P> {
+    fn clear_control_retry(&mut self) {
+        self.control_retry = None;
+        self.control_error = None;
+    }
+
+    fn current_attachment(&self) -> Option<AttachmentId> {
+        self.attachment.filter(|_| {
+            self.attaching.is_none() && self.selections.is_empty() && self.control_retry.is_none()
+        })
+    }
+
+    fn mark_gaps(&mut self) {
+        self.gaps.insert(TranscriptScope::Root);
+        if let Some(agent) = &self.agent {
+            self.gaps.insert(TranscriptScope::Agent(agent.clone()));
+        }
+    }
     /// Gives back overdue intents, withdrawing queued writes before they
     /// can land. Only a batch whose write began has an unknown outcome.
     fn expire(&mut self, now: Instant) {
@@ -561,7 +580,7 @@ impl<P: ProtocolExtension> Inner<P> {
                 sent: BTreeMap::new(),
                 unsent: VecDeque::new(),
                 unsent_bytes: 0,
-                control_retry: false,
+                control_retry: None,
                 control_error: None,
                 refused: VecDeque::new(),
                 agent: None,
@@ -623,12 +642,19 @@ where
     pub fn attach_to(&self, root: NodeAddress) -> std::io::Result<RequestId> {
         let inner = &self.connection.inner;
         let mut state = lock(&inner.state);
+        if let Some(Control::Detach(attachment)) = state.control_retry.as_ref() {
+            let attachment = *attachment;
+            inner.write_control(&mut state, Control::Detach(attachment))?;
+            // If the selection cannot be queued yet, finish the old recovery.
+            state.control_retry = Some(Control::Attach);
+        }
         let id = state.next_request;
         state.next_request += 1;
         inner.write(&ClientFrame::Request {
             id,
             op: Op::Attach { node: root.clone() },
         })?;
+        state.clear_control_retry();
         state.selections.insert(id, root);
         Ok(id)
     }
@@ -641,22 +667,33 @@ where
     ///
     /// The never-sent intent: disconnected when the connection ended,
     /// saturated when the attachment-wait buffer is full, or refused when
-    /// encoding fails. On an attachment, writer saturation arrives instead
-    /// through [`WireReceiver::try_unsent`].
+    /// sizing fails. On an attachment, writer saturation or encoding failure
+    /// arrives instead through [`WireReceiver::try_unsent`]. Attached intents
+    /// are encoded once, without a preliminary size-only serialization.
     #[allow(
         clippy::result_large_err,
         reason = "the refusal hands the rejected intent back so the caller can restore it"
     )]
     pub fn send(&self, intent: SessionIntent<P>) -> Result<(), SendError<P>> {
-        let bytes = match serde_json::to_vec(&intent) {
-            Ok(encoded) => encoded.len(),
-            Err(_) => return Err(SendError::Refused(IntentSendError::Refused(intent))),
-        };
         let inner = &self.connection.inner;
         let mut state = lock(&inner.state);
         if state.closed {
             return Err(SendError::Refused(IntentSendError::Disconnected(intent)));
         }
+        let bytes = if state.current_attachment().is_some() {
+            0
+        } else {
+            drop(state);
+            let bytes = match serde_json::to_vec(&intent) {
+                Ok(encoded) => encoded.len(),
+                Err(_) => return Err(SendError::Refused(IntentSendError::Refused(intent))),
+            };
+            state = lock(&inner.state);
+            if state.closed {
+                return Err(SendError::Refused(IntentSendError::Disconnected(intent)));
+            }
+            bytes
+        };
         let sent = Sent {
             client_id: is_draft(&intent).then(crate::wire::ClientDraftId::new),
             intent,
@@ -666,10 +703,7 @@ where
             bytes,
             host_generation: state.host_generation,
         };
-        if let Some(attachment) = state
-            .attachment
-            .filter(|_| state.attaching.is_none() && state.selections.is_empty())
-        {
+        if let Some(attachment) = state.current_attachment() {
             inner.write_intent(&mut state, attachment, sent);
         } else {
             if state.unsent.len() >= writer::INTENT_FRAMES
@@ -704,6 +738,7 @@ where
             || state.host_generation != host_generation
             || state.attaching.is_some()
             || !state.selections.is_empty()
+            || state.control_retry.is_some()
             || !is_draft(&intent)
         {
             return None;
@@ -802,10 +837,7 @@ where
                     "the connection ended",
                 ));
             }
-            if let Some(attachment) = state
-                .attachment
-                .filter(|_| state.attaching.is_none() && state.selections.is_empty())
-            {
+            if let Some(attachment) = state.current_attachment() {
                 break attachment;
             }
             let left = deadline
@@ -845,7 +877,7 @@ impl<P: ProtocolExtension> WireReceiver<P> {
     }
 
     /// A deferred internal control write hit the full control budget.
-    /// The connection stays open and retries a fresh attach as space frees.
+    /// The connection stays open and retries that control as space frees.
     #[must_use]
     pub fn try_control_error(&self) -> Option<String> {
         lock(&self.connection.inner.state).control_error.take()
@@ -1059,10 +1091,10 @@ impl<P: ProtocolExtension> Inner<P> {
                 if sent.report {
                     return None;
                 }
-                let refusal = if error.kind() == std::io::ErrorKind::WouldBlock {
-                    IntentSendError::Saturated(sent.intent)
-                } else {
-                    IntentSendError::Disconnected(sent.intent)
+                let refusal = match error.kind() {
+                    std::io::ErrorKind::WouldBlock => IntentSendError::Saturated(sent.intent),
+                    std::io::ErrorKind::BrokenPipe => IntentSendError::Disconnected(sent.intent),
+                    _ => IntentSendError::Refused(sent.intent),
                 };
                 state.refused.push_back(SendError::Refused(refusal));
                 None
@@ -1073,20 +1105,9 @@ impl<P: ProtocolExtension> Inner<P> {
     /// Asks to attach `state.root`.
     fn attach(&self, state: &mut State<P>) -> std::io::Result<()>
     where
-        ClientFrame<P>: Serialize,
+        P::Intent: Serialize,
     {
-        let id = state.next_request;
-        state.next_request += 1;
-        if state.attachment.is_some() {
-            state.previous_attachment = state.attachment.take();
-        }
-        state.attaching = Some(id);
-        self.write(&ClientFrame::Request {
-            id,
-            op: Op::Attach {
-                node: state.root.clone(),
-            },
-        })
+        self.write_control(state, Control::Attach)
     }
 
     /// Reads and follows the host until the transport ends.
@@ -1112,10 +1133,7 @@ impl<P: ProtocolExtension> Inner<P> {
             let delivered = match taken {
                 Ok(delivered) => delivered,
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    let mut state = lock(&self.state);
-                    state.control_error = Some(error.to_string());
-                    state.control_retry = true;
-                    drop(state);
+                    self.changed.notify_all();
                     self.retry_control();
                     self.wake();
                     continue;
@@ -1140,16 +1158,6 @@ impl<P: ProtocolExtension> Inner<P> {
         }
     }
 
-    fn retry_control(&self)
-    where
-        P::Intent: Serialize,
-    {
-        let mut state = lock(&self.state);
-        if state.control_retry && !state.closed {
-            state.control_retry = self.attach_again(&mut state).is_err();
-        }
-    }
-
     /// Takes the host's answer to the root attach in flight.
     fn attached(
         &self,
@@ -1168,17 +1176,7 @@ impl<P: ProtocolExtension> Inner<P> {
                 // The face's agent transcript, which the last attachment's
                 // end closed, opens on this one first.
                 if let Some(agent_id) = state.agent.clone() {
-                    let id = state.next_request;
-                    state.next_request += 1;
-                    self.write(&ClientFrame::Request {
-                        id,
-                        op: Op::Intent {
-                            client_id: None,
-                            attachment,
-                            intent: SessionIntent::OpenAgentTranscript { agent_id },
-                            blobs: Vec::new(),
-                        },
-                    })?;
+                    self.write_control(state, Control::OpenTranscript(agent_id))?;
                 }
                 for sent in state.take_unsent() {
                     self.write_intent(state, attachment, sent);
@@ -1240,13 +1238,9 @@ impl<P: ProtocolExtension> Inner<P> {
             Ok(()) => Ok(true),
             Err(dropped) if transcript_observation(&dropped) => Ok(true),
             Err(_) => {
+                state.mark_gaps();
                 if let Some(attachment) = state.attachment.take() {
-                    let id = state.next_request;
-                    state.next_request += 1;
-                    self.write(&ClientFrame::Request {
-                        id,
-                        op: Op::Detach { attachment },
-                    })?;
+                    self.write_control(state, Control::Detach(attachment))?;
                 }
                 self.attach_again(state)?;
                 Ok(true)
@@ -1258,12 +1252,9 @@ impl<P: ProtocolExtension> Inner<P> {
     /// attachment held as lost until its fresh baseline.
     fn attach_again(&self, state: &mut State<P>) -> std::io::Result<()>
     where
-        ClientFrame<P>: Serialize,
+        P::Intent: Serialize,
     {
-        state.gaps.insert(TranscriptScope::Root);
-        if let Some(agent) = &state.agent {
-            state.gaps.insert(TranscriptScope::Agent(agent.clone()));
-        }
+        state.mark_gaps();
         self.attach(state)
     }
 

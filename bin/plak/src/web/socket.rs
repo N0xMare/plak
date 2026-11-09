@@ -248,7 +248,7 @@ async fn next_text<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
 async fn send_pending<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
     socket: &mut WebSocketStream<ProgressIo<S>>,
     outbox: &Outbox,
-    stop: super::StopProbe,
+    stopped: impl Fn() -> bool,
 ) -> Result<(), Ended> {
     let (lines, overflowed) = outbox.take();
     if overflowed {
@@ -266,12 +266,12 @@ async fn send_pending<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
                 }
                 Ok(())
             },
-            || stop.stopped(),
+            &stopped,
         )
         .await
     {
         Ok(result) => result,
-        Err(()) if stop.stopped() => Err(Ended::Stopping),
+        Err(()) if stopped() => Err(Ended::Stopping),
         Err(()) => Err(Ended::Lost("client too slow")),
     }
 }
@@ -295,7 +295,7 @@ async fn drive(socket: &mut Socket, served: &Arc<Served>, login: &str) -> Ended 
         &mut outbox.clone(),
         &move || stop.stopped(),
     );
-    if let Err(ended) = send_pending(socket, &outbox, served.stop).await {
+    if let Err(ended) = send_pending(socket, &outbox, || served.stop.stopped()).await {
         return ended;
     }
     if !matches!(admitted, Ok(true)) {
@@ -325,6 +325,7 @@ async fn attached<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
     pong: &mut Option<Instant>,
 ) -> Ended {
     let mut pinger = tokio::time::interval(PING_EVERY);
+    pinger.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     pinger.tick().await;
     let mut rate = Rate::new();
     loop {
@@ -333,14 +334,13 @@ async fn attached<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
             return Ended::Lost("client fell behind");
         }
         let began = Instant::now();
-        if let Err(ended) = send_pending(socket, outbox, served.stop).await {
+        if let Err(ended) = send_pending(socket, outbox, || served.stop.stopped()).await {
             return ended;
         }
         if began.elapsed() >= PING_EVERY {
             if let Some(sent) = pong {
                 *sent = Instant::now();
             }
-            pinger.reset();
         }
         if served.stop.stopped() {
             return Ended::Stopping;
@@ -358,7 +358,7 @@ async fn attached<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
                 // An attach may open a session, which takes a while.
                 if !connection_work(|| connection.frame(Ok(line))).unwrap_or(false) {
                     let _ = connection.flush();
-                    let _ = send_pending(socket, outbox, served.stop).await;
+                    let _ = send_pending(socket, outbox, || served.stop.stopped()).await;
                     return Ended::Left;
                 }
             }

@@ -3659,13 +3659,20 @@ baselines, an unaffected healthy second writer, no-progress detachment and
 the hard total deadline despite continuing trickle progress. These tests
 use no live host or network service. Withdrawal and idle-deadline renewal
 are mutation targets; elapsed simulated time is not live bandwidth evidence.
-Review regressions cover reserved control headroom and coalesced attach
-retry on control overflow, FIFO suffix withdrawal, a mid-write unknown
+Review regressions cover reserved control headroom and exact control
+replay on overflow (detach before attach, transcript open on the current
+attachment), queued-attach retry/error clearing and waiter notification,
+FIFO suffix withdrawal, a mid-write unknown
 outcome retaining draft identity while a later line survives, and single
 signalling of check saturation. Paused-clock tests drive the actual web
-attachment loop through a throttled baseline with an outstanding ping;
-they also cover the web outbox byte cap/reset and stop during send. Control
+attachment loop through a throttled baseline with an outstanding ping,
+including Pong/Bye buffered during the send ahead of a ready heartbeat
+tick. They also cover the web outbox byte cap/reset and stop in the actual
+web `send_pending` path, as well as the socket path. An attached extension
+intent counts serializer invocations to forbid a redundant size-only pass. Control
 headroom, pong re-arming and FIFO suffix withdrawal are mutation targets.
+Exact-control replay, retry-state clearing, overflow notification and
+buffered-Pong priority also have targeted mutation witnesses.
 
 `product_runtime_e2e_tests` retains the former mixed terminal module's actual
 runtime cases without depending on the terminal feature: exact-resume

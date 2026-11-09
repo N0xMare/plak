@@ -28,8 +28,7 @@ fn slow_link_web_outbox_caps_partial_and_completed_bytes_and_resets_on_take() {
     assert!(outbox.write_all(b"x").is_err());
 }
 
-#[tokio::test(start_paused = true)]
-async fn slow_link_attached_rearms_outstanding_pong_after_throttled_baseline() {
+fn context() -> (tempfile::TempDir, Served) {
     let home = tempfile::tempdir().unwrap();
     let paths = crate::home::paths::PlakPaths::explicit(home.path().to_path_buf());
     paths.ensure_layout().unwrap();
@@ -46,6 +45,13 @@ async fn slow_link_attached_rearms_outstanding_pong_after_throttled_baseline() {
             super::super::auth::CookieKey::load_or_create(&paths).unwrap(),
         ),
     };
+    (home, context)
+}
+
+#[tokio::test(start_paused = true)]
+async fn slow_link_attached_rearms_outstanding_pong_after_throttled_baseline() {
+    let (_home, context) = context();
+    let host = Arc::clone(&context.host);
     let outbox = Outbox::default();
     outbox
         .clone()
@@ -93,6 +99,108 @@ async fn slow_link_attached_rearms_outstanding_pong_after_throttled_baseline() {
     );
     drop(reading.await.unwrap());
     connection.leave();
+}
+
+#[tokio::test(start_paused = true)]
+async fn slow_link_buffered_pong_and_bye_precede_missed_heartbeat_tick() {
+    let (_home, context) = context();
+    let outbox = Outbox::default();
+    outbox
+        .clone()
+        .write_all(format!("{}\n", "x".repeat(512 * 1024)).as_bytes())
+        .unwrap();
+    let mut connection = context.host.connect(
+        outbox.clone(),
+        Face::Remote,
+        plakous_hosted::host_service::wire::HostPrincipal::Web("fixture".into()),
+        || false,
+    );
+    let (server, client) = tokio::io::duplex(8192);
+    let mut socket =
+        WebSocketStream::from_raw_socket(ProgressIo::new(server), Role::Server, None).await;
+    let reading = tokio::spawn(async move {
+        let mut client = WebSocketStream::from_raw_socket(
+            Throttled {
+                io: client,
+                next: Box::pin(tokio::time::sleep(Duration::ZERO)),
+            },
+            Role::Client,
+            None,
+        )
+        .await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        client.send(Message::Pong(Bytes::new())).await.unwrap();
+        client
+            .send(Message::text("{\"frame\":\"bye\"}"))
+            .await
+            .unwrap();
+        let buffered_at = Instant::now();
+        assert!(matches!(
+            client.next().await.unwrap().unwrap(),
+            Message::Text(_)
+        ));
+        while let Some(Ok(message)) = client.next().await {
+            assert!(
+                !matches!(message, Message::Ping(_)),
+                "a ready heartbeat must not overtake buffered Pong/Bye"
+            );
+        }
+        buffered_at
+    });
+    let began = Instant::now();
+    let mut pong = Some(began);
+    let ended = attached(&mut socket, &context, &mut connection, &outbox, &mut pong).await;
+    let finished = Instant::now();
+    assert_eq!(ended.as_str(), "client left");
+    assert!(pong.is_none());
+    assert!(finished.duration_since(began) > PONG_DEADLINE);
+    drop(socket);
+    let buffered_at = reading.await.unwrap();
+    assert!(
+        buffered_at > began && buffered_at < finished,
+        "Pong must have arrived while the baseline send was blocked"
+    );
+    connection.leave();
+}
+
+#[tokio::test(start_paused = true)]
+async fn slow_link_web_send_pending_stop_preempts_progressing_baseline() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let outbox = Outbox::default();
+    outbox
+        .clone()
+        .write_all(format!("{}\n", "x".repeat(512 * 1024)).as_bytes())
+        .unwrap();
+    let (server, client) = tokio::io::duplex(8192);
+    let mut socket =
+        WebSocketStream::from_raw_socket(ProgressIo::new(server), Role::Server, None).await;
+    let reading = tokio::spawn(async move {
+        let mut client = WebSocketStream::from_raw_socket(
+            Throttled {
+                io: client,
+                next: Box::pin(tokio::time::sleep(Duration::ZERO)),
+            },
+            Role::Client,
+            None,
+        )
+        .await;
+        while let Some(Ok(_)) = client.next().await {}
+    });
+    let stop = Arc::new(AtomicBool::new(false));
+    let stopping = Arc::clone(&stop);
+    let stop_task = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        stopping.store(true, Ordering::Release);
+    });
+    let began = Instant::now();
+    let ended = send_pending(&mut socket, &outbox, || stop.load(Ordering::Acquire))
+        .await
+        .unwrap_err();
+    assert_eq!(ended.as_str(), "host stopping");
+    assert!(began.elapsed() <= Duration::from_millis(2050));
+    drop(socket);
+    stop_task.await.unwrap();
+    reading.await.unwrap();
 }
 
 struct Throttled {

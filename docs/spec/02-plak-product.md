@@ -4828,11 +4828,18 @@ verdicts) are addressed, the session profile and workspace chrome states.
   controls may use the full cap. Control overflow is `WouldBlock`, never
   disconnected: request APIs return the error without queueing a frame.
   Internal control overflow is observable through `try_control_error` and
-  defers a fresh root attach until the progressing writer frees capacity.
+  retains the specific failed attach, detach or transcript-open control
+  until the progressing writer frees capacity. A failed detach is replayed
+  before attaching again; a transcript open is retried on the current
+  attachment, not by creating another one. Any queued attach clears stale
+  attach retry/error state, after first queueing any pending detach.
+  Overflow wakes control-state waiters even while the writer is stalled.
   It does not end the connection. Intent saturation returns never-sent
   backpressure, never a partial blob sequence.
   The attachment-wait buffer separately holds at most 56 intents and 63 MiB
-  of serialized intent bodies, counted once before taking the state lock.
+  of serialized intent bodies, tracked with a running byte total. Size-only
+  serialization runs only for attachment-wait admission, outside the state
+  lock; already-attached intents are encoded once for the wire.
   At the answer deadline or disconnect,
   queued batches are withdrawn under the same lock that starts writes and
   returned as never sent; they cannot land when a stalled pipe drains.
@@ -4932,6 +4939,7 @@ chapter 04 §2.10; its keys are `[web]` (chapter 07 §3).
   pong deadline is re-armed. Buffered
   client text/control frames are polled before overdue heartbeat ticks,
   so a pong buffered during the send cannot lose a select race to timeout.
+  Missed heartbeat intervals are skipped rather than burst-replayed.
 - **Static files.** `--ui <dir>` must hold `csp.json`
   (`{"header": "...", "report_only_header": "..."}`, the second optional),
   whose `header` must carry `frame-ancestors 'none'`; without `--ui` only
@@ -5094,7 +5102,7 @@ settles asynchronously after endpoint binding, before local admission.
   30-minute total send bound. A large baseline that continues making byte
   progress is not detached merely because the batch takes more than 10 s;
   neither a slow nor a stalled client holds up another client's sends.
-  Sending checks host stop at most every 50 ms and abandons the connection
+  Sending checks host stop within 50 ms and abandons the connection
   on stop, including idle-exit stop; the hard batch bound cannot delay the
   planned 55 s session handoff. The WebSocket sender obeys the same stop
   rule. Client frames on that same connection are processed only after
