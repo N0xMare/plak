@@ -298,15 +298,42 @@ fn wire_host_restart_switch() {
     matrix(true);
 }
 
+/// A signature with each store's consecutive unlabelled commits merged: how
+/// many the projector needs for one stream of rows depends on event timing,
+/// not on the face that drove it. Labelled commits keep their order.
+#[cfg(feature = "tui")]
+fn merged_runs(signature: &Signature) -> Vec<(String, String)> {
+    let mut runs: Vec<(String, String)> = Vec::new();
+    for (store, _, label) in signature {
+        if label == "unlabelled"
+            && runs
+                .last()
+                .is_some_and(|(last_store, last)| last_store == store && last == "unlabelled")
+        {
+            continue;
+        }
+        runs.push((store.clone(), label.clone()));
+    }
+    runs
+}
+
 #[cfg(feature = "tui")]
 #[test]
 fn wire_host_restart_pilots_match_original_terminal_indexed_signatures() {
     for child in [false, true] {
         let wire_stop = pilot(child, false).1;
         let terminal_stop = tui::pilot(child).1;
-        assert_eq!(wire_stop, terminal_stop, "stop pilot child={child}");
+        assert_eq!(
+            merged_runs(&wire_stop),
+            merged_runs(&terminal_stop),
+            "stop pilot child={child}: {wire_stop:?} vs {terminal_stop:?}"
+        );
         let wire_switch = pilot(child, true).1;
         let terminal_switch = tui::review_pilot(child).1;
-        assert_eq!(wire_switch, terminal_switch, "switch pilot child={child}");
+        assert_eq!(
+            merged_runs(&wire_switch),
+            merged_runs(&terminal_switch),
+            "switch pilot child={child}: {wire_switch:?} vs {terminal_switch:?}"
+        );
     }
 }

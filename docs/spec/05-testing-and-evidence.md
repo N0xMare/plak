@@ -3780,7 +3780,10 @@ Typed face-transcript equality covers row content, order and multiplicity on
 both connections; live provisional row keys need not equal committed anchors.
 `wire_host_restart` and `wire_host_restart_switch` cover root and child twin
 pilots and every reached per-store commit cut. Their indexed signatures match
-the original terminal pilots, including labels, not just commit counts.
+the original terminal pilots, including labels and their per-store order; a run
+of consecutive unlabelled commits in one store compares as one run, because how
+many commits the projector takes for one stream of rows depends on timing, not
+on the face that drove it.
 Recovery reconnects without replaying input and checks durable stop, custody,
 no handoff/continuation and no extra root or child provider dispatch. These
 matrices are in the durability lane with the reviewed longer timeout; the
