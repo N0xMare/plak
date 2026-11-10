@@ -6478,9 +6478,13 @@ the normal recovery-required path before Ready. The driver's placement parking
   bound again (which replays it under its original key, digest and first-claim
   age), so a lost link alone never fixes its outcome as unknown at 120 s; a
   runner restart, `Spent`, `Expired` or cancellation still does at once. An
-  unkeyed read or observation whose link was lost while it waited ends at its
-  next link recheck (at most 1 s) as `ReadInterrupted`, re-issuable rather
-  than of unknown outcome; any other caller maps it as unknown. A runner restart
+  unkeyed host read or process observation whose link was lost while it
+  waited stays pending until its 30 s read window ends: a reconnection inside
+  that window replays it on the same runner instance. If still unanswered at
+  the window's end after link loss, it ends as `ReadInterrupted`, re-issuable
+  rather than of unknown outcome; any other caller maps it as unknown. Only
+  an `EffectCall` model read checks link loss every 1 s, without shortening
+  its healthy 120 s effect-call answer window. A runner restart
   still ends an outstanding `ProcessObservation` as `OutcomeUnknown`, because
   the process and cursor belong to the old runner instance; it is not reread
   against the new instance. This is host-side answer scheduling

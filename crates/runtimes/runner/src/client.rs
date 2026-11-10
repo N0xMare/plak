@@ -1260,10 +1260,10 @@ impl Inner {
         let linked = state.sender.is_some() && !state.closer.is_cancelled();
         let lost = !linked || state.connection != sent_on;
         match expiring {
-            Expiring::Read if lost => Err(RunnerFailure::ReadInterrupted(
+            Expiring::ModelRead | Expiring::Read if lost => Err(RunnerFailure::ReadInterrupted(
                 "the link was lost before the read was answered".into(),
             )),
-            Expiring::Read if tokio::time::Instant::now() < deadline => {
+            Expiring::ModelRead if tokio::time::Instant::now() < deadline => {
                 Ok(deadline.min(tokio::time::Instant::now() + LOST_LINK_RECHECK))
             }
             Expiring::ModelEffect if !linked => {
@@ -1277,7 +1277,9 @@ impl Inner {
                     Err(unknown())
                 }
             }
-            Expiring::Window | Expiring::Read | Expiring::ModelEffect => Err(unknown()),
+            Expiring::Window | Expiring::Read | Expiring::ModelRead | Expiring::ModelEffect => {
+                Err(unknown())
+            }
         }
     }
 
@@ -1447,7 +1449,7 @@ const fn ends_connection(refusal: &Refusal) -> bool {
     )
 }
 
-/// How often a read checks link loss, or a lost model effect checks rebinding.
+/// How often a model read checks loss, or a lost model effect checks rebinding.
 const LOST_LINK_RECHECK: Duration = Duration::from_secs(1);
 
 /// How a sent call's answer window ends.
@@ -1457,29 +1459,32 @@ enum Expiring {
     Window,
     /// A model tool call's effect: its window pauses while the link is lost.
     ModelEffect,
-    /// An unkeyed read or an observation: interrupted when the link was lost.
+    /// A model read: rechecks link loss without shortening its effect window.
+    ModelRead,
+    /// A host read or observation: checks link loss only at its window's end.
     Read,
 }
 
 impl Expiring {
     fn recheck(self, window: Duration) -> Duration {
         match self {
-            Self::Read => window.min(LOST_LINK_RECHECK),
-            Self::Window | Self::ModelEffect => window,
+            Self::ModelRead => window.min(LOST_LINK_RECHECK),
+            Self::Window | Self::Read | Self::ModelEffect => window,
         }
     }
 
     fn lost(self, detail: &str) -> RunnerFailure {
         match self {
-            Self::Read => RunnerFailure::ReadInterrupted(detail.into()),
+            Self::Read | Self::ModelRead => RunnerFailure::ReadInterrupted(detail.into()),
             Self::Window | Self::ModelEffect => RunnerFailure::OutcomeUnknown(detail.into()),
         }
     }
 
     fn of(request: &Request) -> Self {
         match request.class {
-            _ if !keyed(request) && replayable(request) => Self::Read,
+            RequestClass::EffectCall { .. } if !keyed(request) => Self::ModelRead,
             RequestClass::EffectCall { .. } => Self::ModelEffect,
+            _ if !keyed(request) && replayable(request) => Self::Read,
             _ => Self::Window,
         }
     }

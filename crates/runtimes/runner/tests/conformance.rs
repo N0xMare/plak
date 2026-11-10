@@ -351,6 +351,100 @@ mod review_call_keys {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn a_host_build_read_survives_a_same_instance_reconnect_inside_its_window() {
+        let root = tempfile::tempdir().unwrap();
+        let hello = service(root.path()).hello().clone();
+        let (link, mut first) = fake_runner(&hello).await;
+        let (client, _) = plakous_runner::RunnerClient::connect(
+            link,
+            bind("instance-1"),
+            ClientWindows::default(),
+        )
+        .await
+        .unwrap();
+        let reading =
+            tokio::spawn(client.call(RunnerCall::unkeyed(RunnerVerb::ProbeWorkspace, json!({}))));
+        let sent = first.next_request().await;
+        assert_eq!(sent.class, RequestClass::BuildRead);
+        drop(first);
+        let _ = client.lines().await;
+        tokio::time::advance(Duration::from_secs(3)).await;
+        tokio::task::yield_now().await;
+        assert!(
+            !reading.is_finished(),
+            "a host read keeps its 30 s replay window"
+        );
+        let (link, mut second) = fake_runner(&hello).await;
+        client.reconnect(link).await.unwrap();
+        let replay = tokio::time::timeout(Duration::from_secs(5), second.next_request())
+            .await
+            .unwrap();
+        assert!(replay.replay);
+        assert_eq!(replay.request_id, sent.request_id);
+        assert_eq!(replay.operation, sent.operation);
+        second
+            .answer(&RunnerFrame::Result {
+                request_id: replay.request_id,
+                payload: json!({"ok":true}),
+            })
+            .await;
+        assert_eq!(reading.await.unwrap(), Ok(json!({"ok":true})));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_observation_survives_a_same_instance_reconnect_inside_its_window() {
+        let root = tempfile::tempdir().unwrap();
+        let hello = service(root.path()).hello().clone();
+        let (link, mut first) = fake_runner(&hello).await;
+        let (client, _) = plakous_runner::RunnerClient::connect(
+            link,
+            bind("instance-1"),
+            ClientWindows::default(),
+        )
+        .await
+        .unwrap();
+        let tap = Tap::new(&client);
+        let sessions = Arc::new(plakous_tools::internal::runner::RunnerSessions::from_link(
+            Arc::new(tap.clone()),
+            &host(root.path()),
+            owner(1, 1),
+        ));
+        let id = started(&sessions, &mut first, &hello).await;
+        let polling = poll_at(&sessions, id);
+        let sent = first.next_request().await;
+        assert!(matches!(
+            sent.class,
+            RequestClass::ProcessObservation { cursor: 5, .. }
+        ));
+        drop(first);
+        let _ = client.lines().await;
+        tokio::time::advance(Duration::from_secs(3)).await;
+        tokio::task::yield_now().await;
+        assert!(
+            !polling.is_finished(),
+            "an observation keeps its 30 s replay window"
+        );
+        let (link, mut second) = fake_runner(&hello).await;
+        client.reconnect(link).await.unwrap();
+        let replay = tokio::time::timeout(Duration::from_secs(5), second.next_request())
+            .await
+            .unwrap();
+        assert!(replay.replay);
+        assert_eq!(replay.request_id, sent.request_id);
+        assert_eq!(replay.class, sent.class);
+        assert_eq!(replay.operation, sent.operation);
+        second.fail(&replay).await;
+        assert_eq!(
+            polling.await.unwrap().unwrap_err().kind(),
+            ExecutionBackendErrorKind::Io
+        );
+        assert!(matches!(
+            tap.failures().as_slice(),
+            [RunnerFailure::Backend(_)]
+        ));
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn a_lost_model_read_interrupts_within_the_link_recheck_not_the_effect_window() {
         let mut link = ReadLink::new().await;
         let reading = link.read();
