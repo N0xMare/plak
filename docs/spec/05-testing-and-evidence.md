@@ -2007,6 +2007,14 @@ provider status responses.
 Real-process fixtures own host children and their process groups from spawn,
 before waiting for readiness. Teardown reaps them on drop, panic or a readiness
 timeout, and reaps home-local daemons before removing their homes.
+The process-group teardown regression waits for the grandchild's exit as well
+as reaping its parent: group signal delivery is not a join. Hosted client-reload
+PTY fixtures fence Activity opening and closing by its heading, not command text
+that can already appear in the transcript, before sending the next slash command.
+Remote skills regressions construct a native Claude-profile session through a
+workspace-only loopback runner and cold-reopen an API session through the host
+after dropping the runtime and topology handles. Exact reopen retains the frozen
+listing even when another project skill appears; neither open reads host-home skills.
 The guarded entry points are the Rust lanes in `tools/gate/dev-check.sh`,
 `just nextest`, and `just dev crash-sweep`. `tools/dev/coverage.sh` and
 `tools/perf/perf-smoke.sh` are not guarded.

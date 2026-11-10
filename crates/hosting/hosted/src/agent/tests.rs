@@ -8,6 +8,8 @@ use crate::runtime::test_kit::BlockOn as _;
 
 use super::*;
 
+mod remote_skills;
+
 #[test]
 fn sdk_child_selection_refusals_are_exact_and_create_nothing() {
     let directory = tempfile::tempdir().unwrap();

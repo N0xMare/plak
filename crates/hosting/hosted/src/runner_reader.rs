@@ -18,6 +18,9 @@ use plakous::tools::runner::{
 };
 use serde_json::{Value, json};
 
+#[cfg(test)]
+pub(crate) mod test_kit;
+
 /// Reader of this node's workspace authority. Global sources use a separate
 /// explicit host reader, never a path-prefix exception in this one.
 pub(crate) fn instruction_reader(

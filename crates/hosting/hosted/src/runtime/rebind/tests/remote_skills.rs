@@ -3,80 +3,7 @@
 //! never this host's login home (spec 02 §6.1.1).
 
 use super::*;
-use plakous::runner::protocol::{Bind, VersionTriple};
-use plakous::runner::{
-    ClientWindows, RunnerClient, RunnerIdentity, RunnerOptions, RunnerService, RunnerServices,
-};
-use plakous::tools::runner::RunnerBackend;
-use plakous::tools::{
-    ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope, RunnerId,
-};
-use std::path::Path;
-
-/// A runner on this machine serving only `workspace`, as a daemon whose
-/// roots name it does: the production extension with its roots predicate.
-fn runner_serving(
-    runtime: &tokio::runtime::Runtime,
-    workspace: &Path,
-) -> (RunnerServices, RunnerClient) {
-    let admitted = workspace.to_path_buf();
-    let admits: Arc<dyn Fn(&Path) -> bool + Send + Sync> =
-        Arc::new(move |path: &Path| path.is_absolute() && path.starts_with(&admitted));
-    let extension = crate::runner_reader::runner_extension(
-        plakous_recursive_subagents::remote_vcs::vcs_runner_extension(admits.clone(), None),
-        admits,
-    );
-    let version = VersionTriple::current("remote-skills", "debug");
-    let service = RunnerService::with_options(
-        ExecutionEnvironment::host(
-            ExecutionEnvironmentScope::Run(uuid::Uuid::new_v4().try_into().unwrap()),
-            workspace,
-            ".",
-            ExecutionEnvironmentConfig::default(),
-        )
-        .unwrap(),
-        RunnerIdentity {
-            runner_id: RunnerId::new("remote").unwrap(),
-            version: version.clone(),
-            boot_id: "boot".into(),
-            binary_id: None,
-        },
-        RunnerOptions {
-            extension: Some(extension),
-            ..RunnerOptions::default()
-        },
-    )
-    .unwrap();
-    let (host, runner) = tokio::io::duplex(1 << 16);
-    runtime.spawn(async move { service.serve_connection(runner).await });
-    let (client, hello) = runtime
-        .block_on(RunnerClient::connect(
-            host,
-            Bind {
-                host_id: "host".into(),
-                host_instance: "instance".into(),
-                version,
-                inspect: false,
-            },
-            ClientWindows::default(),
-        ))
-        .unwrap();
-    let backend = Arc::new(RunnerBackend::new(hello.descriptor, Arc::new(client.clone())).unwrap());
-    (
-        RunnerServices::new(backend, runtime.handle().clone()),
-        client,
-    )
-}
-
-fn write_skill(root: &Path, name: &str) {
-    let directory = root.join(".agents/skills").join(name);
-    std::fs::create_dir_all(&directory).unwrap();
-    std::fs::write(
-        directory.join("SKILL.md"),
-        format!("---\nname: {name}\ndescription: The {name} skill.\n---\nSteps.\n"),
-    )
-    .unwrap();
-}
+use crate::runner_reader::test_kit::{runner_serving, write_skill};
 
 fn listing(opened: &AttachedCodingSession) -> Option<String> {
     instruction_sources(opened)
@@ -161,6 +88,96 @@ fn a_runner_placed_session_opens_with_skills_on() {
     .unwrap_or_else(|error| panic!("the placed session did not reopen: {}", error.message()));
     assert!(reopened.presented());
     assert_eq!(reopened.read_roots(), [] as [PathBuf; 0]);
+    client.disconnect();
+}
+
+/// Exercise the host's production exact-open path, with no retained runtime
+/// sessions or topology hub, rather than calling discovery on a frozen list.
+#[test]
+fn a_runner_placed_session_cold_reopens_through_the_host() {
+    let root = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(root.path()).unwrap();
+    let runner_runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    let login_home = root.join("login");
+    write_skill(&login_home, "host-only");
+    let trees = root.join("trees/subagents.sqlite3");
+    std::fs::create_dir_all(trees.parent().unwrap()).unwrap();
+    let setting = crate::skills::SkillsSetting::new(true, Some(login_home));
+    let (mut config, parent) = api_topology_root_parent(
+        &root,
+        None,
+        crate::binding::PlatformProvider::Anthropic,
+        "claude-sonnet-5",
+        setting.clone(),
+        Some(Arc::new(SqliteTrees(trees.clone()))),
+    );
+    drop(parent);
+    let workspace = std::fs::canonicalize(&config.session.workspace_root).unwrap();
+    write_skill(&workspace, "review-pr");
+    let (services, client) = runner_serving(&runner_runtime, &workspace);
+    config.state_roots = config
+        .state_roots
+        .with_runner_services(services.clone())
+        .with_runner_client(client.clone());
+    let store = config.store.clone();
+    let product_home = config.product_home.clone();
+    config.store.save(&mut config.session).unwrap();
+    let id = config.session.id.clone();
+    run_attached_actions(config, Vec::new());
+    let locator = store.load(&id).unwrap().plakous_locator.unwrap();
+    let executor = ApplicationExecutor::new().unwrap();
+    let sessions = crate::agent::ProductStateRoots::with_doubles(
+        product_home.clone(),
+        product_home.join("state"),
+    )
+    .runtime_sessions()
+    .unwrap();
+    let frozen = executor
+        .block_on(crate::skills::frozen_skills(&sessions, locator))
+        .unwrap()
+        .unwrap();
+    let first = frozen.listing.unwrap();
+    assert!(
+        first.contains("review-pr") && !first.contains("host-only"),
+        "{first}"
+    );
+    drop(sessions);
+    assert!(crate::topology_runtime::lookup(&id).is_none());
+
+    // Fresh roots open new SQLite actors and a new tree-store handle. The
+    // product port supplies only the stored record, not a live attachment.
+    let (mut config, parent) = api_topology_root_parent(
+        &root,
+        None,
+        crate::binding::PlatformProvider::Anthropic,
+        "claude-sonnet-5",
+        setting,
+        Some(Arc::new(SqliteTrees(trees))),
+    );
+    drop(parent);
+    config.store = store;
+    config.session = config.store.load(&id).unwrap();
+    config.state_roots = config
+        .state_roots
+        .with_runner_services(services)
+        .with_runner_client(client.clone());
+    // A cold exact reopen must retain the listing it froze, not discover a
+    // new listing or silently carry to a different canonical branch.
+    write_skill(&workspace, "added-later");
+    let state_roots = config.state_roots.clone();
+    let records = config.store.clone();
+    run_attached_actions(config, Vec::new());
+    assert_eq!(records.load(&id).unwrap().plakous_locator, Some(locator));
+    let sessions = state_roots.runtime_sessions().unwrap();
+    let frozen = executor
+        .block_on(crate::skills::frozen_skills(&sessions, locator))
+        .unwrap()
+        .unwrap();
+    assert_eq!(frozen.listing.as_deref(), Some(first.as_str()));
     client.disconnect();
 }
 
