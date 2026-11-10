@@ -13,7 +13,8 @@ use plakous::prompts::instructions::{
     LocalInstructionSourceReader, SourceEntryKind, SourceFile, SourceReadError, SourceResolution,
 };
 use plakous::tools::runner::{
-    RunnerCall, RunnerExtension, RunnerLink, RunnerVerb, ServeFailure, ServeFuture, call_blocking,
+    RunnerCall, RunnerExtension, RunnerFailure, RunnerLink, RunnerVerb, ServeFailure, ServeFuture,
+    call_blocking,
 };
 use serde_json::{Value, json};
 
@@ -33,7 +34,8 @@ pub(crate) fn instruction_reader(
 
 /// An [`InstructionSourceReader`] whose answers come from a runner. Each
 /// read is one request, waited for on a thread of its own; any link failure
-/// is [`SourceReadError::Unavailable`], never an absent answer.
+/// is [`SourceReadError::UnavailableBecause`] naming it, never an absent
+/// answer.
 struct RunnerInstructionSourceReader {
     link: Arc<dyn RunnerLink>,
     runtime: tokio::runtime::Handle,
@@ -46,8 +48,42 @@ impl RunnerInstructionSourceReader {
             &self.runtime,
             RunnerCall::unkeyed(RunnerVerb::ReadInstructions, question),
         )
-        .map_err(|_| SourceReadError::Unavailable)
+        .map_err(|failure| SourceReadError::UnavailableBecause(failure_reason(&failure)))
     }
+}
+
+/// Longest runner failure reason a read error carries.
+const MAX_REASON_BYTES: usize = 512;
+
+/// What the runner or its link said, as the display text of a failed read.
+fn failure_reason(failure: &RunnerFailure) -> String {
+    let reason = match failure {
+        RunnerFailure::Backend(error) => error
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("the runner refused the read")
+            .to_owned(),
+        RunnerFailure::StaleOwner => "a newer owner holds the line on the runner".to_owned(),
+        RunnerFailure::NotHolder => {
+            "another process of this host holds the line on the runner".to_owned()
+        }
+        RunnerFailure::Unsupported => "the runner does not serve instruction reads".to_owned(),
+        RunnerFailure::Spent => "the runner's answer was already taken".to_owned(),
+        RunnerFailure::Unavailable(detail)
+        | RunnerFailure::NotSent(detail)
+        | RunnerFailure::ReadInterrupted(detail)
+        | RunnerFailure::OutcomeUnknown(detail)
+        | RunnerFailure::Refused(detail) => format!("the runner link failed: {detail}"),
+        _ => "the runner link failed".to_owned(),
+    };
+    if reason.len() <= MAX_REASON_BYTES {
+        return reason;
+    }
+    let mut end = MAX_REASON_BYTES;
+    while !reason.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}...", &reason[..end])
 }
 
 fn bytes(path: &Path) -> String {

@@ -54,9 +54,19 @@ impl SkillsSetting {
         self.enabled
     }
 
-    fn roots(&self, workspace_root: &Path) -> Vec<SkillRoot> {
+    /// The project root, then the user root under this process's home. A
+    /// node placed on a runner has no user root: this home is not on the
+    /// machine its reads and tools reach, and the runner serves only its own
+    /// roots.
+    fn roots(
+        &self,
+        workspace_root: &Path,
+        runner: Option<&plakous::runner::RunnerServices>,
+    ) -> Vec<SkillRoot> {
         let mut roots = vec![SkillRoot::project(workspace_root)];
-        roots.extend(self.home.as_deref().map(SkillRoot::user));
+        if runner.is_none() {
+            roots.extend(self.home.as_deref().map(SkillRoot::user));
+        }
         roots
     }
 }
@@ -137,7 +147,7 @@ impl NodeSkills {
         presentation: SkillsPresentation,
         runner: Option<&plakous::runner::RunnerServices>,
     ) -> CliResult<Self> {
-        let roots = setting.roots(workspace_root);
+        let roots = setting.roots(workspace_root, runner);
         let reader: Arc<dyn InstructionSourceReader> =
             crate::runner_reader::instruction_reader(runner);
         let unreadable =

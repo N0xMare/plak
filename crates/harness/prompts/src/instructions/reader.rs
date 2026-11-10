@@ -20,13 +20,17 @@ use rustix::fs::{Mode, OFlags};
 use super::INSTRUCTION_FILE_NAME;
 
 /// Why a reader produced no answer at all.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum SourceReadError {
     /// The reader could not answer: the host the files live on is
     /// unreachable. Distinct from every "absent" answer, so discovery fails
     /// closed instead of freezing an empty result.
     Unavailable,
+    /// As [`Self::Unavailable`], with the reason the files' host gave: a
+    /// runner that refused the read or a link that lost it. The reason is
+    /// display text, never an answer.
+    UnavailableBecause(String),
     /// The reader answered outside its contract: more bytes than the read
     /// admits, a chain of the wrong length, an entry that is not one name.
     /// Discovery raises this; a reader never needs to.
@@ -35,10 +39,20 @@ pub enum SourceReadError {
 
 impl fmt::Display for SourceReadError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
-            Self::Unavailable => "the instruction source reader is unavailable",
-            Self::InvalidAnswer => "the instruction source reader answered outside its contract",
-        })
+        match self {
+            Self::Unavailable => {
+                formatter.write_str("the instruction source reader is unavailable")
+            }
+            Self::UnavailableBecause(reason) => {
+                write!(
+                    formatter,
+                    "the instruction source reader is unavailable: {reason}"
+                )
+            }
+            Self::InvalidAnswer => {
+                formatter.write_str("the instruction source reader answered outside its contract")
+            }
+        }
     }
 }
 

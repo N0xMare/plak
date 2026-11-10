@@ -1628,6 +1628,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         'tools': {
             'runner::RunnerCall',
             'runner::RunnerExtension',
+            'runner::RunnerFailure',
             'runner::RunnerLink',
             'runner::RunnerVerb',
             'runner::ServeFailure',

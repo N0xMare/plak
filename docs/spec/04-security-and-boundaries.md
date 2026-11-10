@@ -340,7 +340,9 @@ session's user skill root, `~/.agents/skills` (chapter 02 §6.1.1). The project
 skill root never enters the exception: its files are workspace files, read
 through ordinary containment, and discovery refuses a project root whose
 canonical path leaves the canonical workspace (a repository may commit
-`.agents/skills` as a link to anywhere) and any link inside it. The user root
+`.agents/skills` as a link to anywhere) and any link inside it. A node placed
+on a remote runner has no user skill root and so no exception: the exception
+opens host files, and that node's tools reach the runner. The user root
 is admitted only if it existed as a directory when the node's tools were
 built (session construction, and again at each reopen or attach; a reopen
 admits it only when the session froze a skills listing or the `Skill` tool,

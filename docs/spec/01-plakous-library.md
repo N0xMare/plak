@@ -6985,7 +6985,9 @@ workspace refusal, which the host sees as `Unavailable`. The probe is a
 port, not authority: it grants nothing a tool could use, and the product-state
 exclusion and copy-layout rules applied to its answers stay with the host.
 Every probe and reader answer is fallible with a distinct `Unavailable` error
-(`ProbeError::Unavailable`, `SourceReadError::Unavailable`) that is never an
+(`ProbeError::Unavailable`, `SourceReadError::Unavailable`, or
+`SourceReadError::UnavailableBecause` carrying the runner's bounded reason,
+at most 512 bytes of its failure text) that is never an
 "absent" answer: session construction, spawn, exact resume, instruction and
 skill discovery and the copy-size pass fail closed on it, so nothing is skipped
 and then frozen into a session. Falling back to the recorded path applies only

@@ -187,7 +187,9 @@ skills catalog, Claude Code's listing for its `Skill` tool, grok-build's
 listing with absolute paths, or pi's `<available_skills>`. The model reads a
 skill's files when a task matches; its read tool can also read your own skill
 files under `~/.agents/skills`, outside the workspace. Claude models also get
-Claude Code's `Skill` tool, which loads a listed skill by name. At most 64
+Claude Code's `Skill` tool, which loads a listed skill by name. A session on a
+remote runner lists only the project's skills, read on the runner; your own
+skills under `~/.agents/skills` on the host are not on that machine. At most 64
 skills are listed, and the listing stops at 16 KiB; a skill left out is named
 in the notice and cannot be loaded.
 
