@@ -615,12 +615,20 @@ execution and durable settlement, for both serial mutating calls and parallel
 read-only calls, with or without steer. On the transition to nested quiescence
 they re-arm from now: the model-operation timeout for execute and for ordinary
 steer settlement, or requested yield plus five seconds for a non-steered wait.
+They also suspend across a placement hold, including queued nested work. The
+driver continues controls, nested settlement and genuine cell-loss/delivery
+events, releases its shared request slot and admits no new nested work or
+synthetic yield while held. Release re-arms observation at quiescence. Process
+observation/yield windows exclude cumulative, non-overlapping host placement
+hold time; an expired observation clock cannot promote a process during the
+hold or immediately on wake. Execution hard caps and cell delivery ambiguity
+remain real and are not extended by this host-side accounting.
 Expediting a parked-cell resume preserves that ordinary acknowledgement bound;
 a notice never shortens the budget of an already-admitted delivery. Only after
 both nested executions and delivery acknowledgements have settled does the
 five-second expedited observation window arm. Its expiration yields
 synthetically; only the ordinary delivery bound may fail closed.
-A computing cell with no nested work retains its ordinary deadline. An outer
+Outside a placement hold, a computing cell with no nested work retains its ordinary deadline. An outer
 deadline that elapsed inside nested execution cannot turn a steer yield into
 a joined failure; a genuine delivery loss or timeout still fails closed.
 

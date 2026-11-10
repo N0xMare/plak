@@ -4,8 +4,8 @@
 
 use std::path::Path;
 use std::str::FromStr;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use plakous_model::{AttemptId, BranchId, CallId, CancellationToken, LineId, RunId};
@@ -28,6 +28,7 @@ type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 /// a read sent before the loss is answered interrupted and anything else
 /// is refused unsent, as the host client answers them.
 struct LosableRunner {
+    release_poll: Mutex<Option<(std::path::PathBuf, usize)>>,
     environment: ExecutionEnvironment,
     sessions: JoinedProcessSessions,
     /// The link is lost.
@@ -57,6 +58,19 @@ impl RunnerLink for LosableRunner {
                 RunnerFailure::NotSent("lost".into())
             };
             return Box::pin(std::future::ready(Err(failure)));
+        }
+        if call.verb() == RunnerVerb::ProcessPoll {
+            let mut release = self
+                .release_poll
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some((path, polls)) = release.as_mut() {
+                *polls += 1;
+                if *polls == 2 {
+                    std::fs::write(path, b"release")
+                        .unwrap_or_else(|error| panic!("release marker: {error}"));
+                }
+            }
         }
         match call.verb() {
             RunnerVerb::ProcessStop | RunnerVerb::ForegroundStop | RunnerVerb::JobsStop => {
@@ -122,7 +136,7 @@ fn owner() -> TestResult<LineOwner> {
 
 /// A placed environment over a losable runner, and its tool call context.
 struct Placed {
-    _root: tempfile::TempDir,
+    root: tempfile::TempDir,
     runner: Arc<LosableRunner>,
     services: RunnerServices,
     environment: ExecutionEnvironment,
@@ -133,6 +147,7 @@ fn placed(lose_after_start: bool, refuse_promotion: bool) -> TestResult<Placed> 
     let root = tempfile::tempdir()?;
     let runner_side = host(root.path())?;
     let runner = Arc::new(LosableRunner {
+        release_poll: Mutex::default(),
         sessions: line_sessions(&runner_side, &job_capacity(8))?,
         environment: runner_side.clone(),
         lost: Arc::new(AtomicBool::new(false)),
@@ -163,7 +178,7 @@ fn placed(lose_after_start: bool, refuse_promotion: bool) -> TestResult<Placed> 
             attempt_id: AttemptId::from_str("00000000-0000-0000-0000-0000000000d1")?,
         });
     Ok(Placed {
-        _root: root,
+        root,
         runner,
         services,
         environment,
@@ -224,6 +239,35 @@ impl Placed {
 /// Start a foreground command, lose the placement's link as it starts, and
 /// release it after the command ended: the command completes naturally,
 /// its result comes through, and nothing stops it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn placement_hold_cut_yield_deadline_does_not_promote_on_rebind() -> TestResult {
+    let placed = placed(true, false)?;
+    let path = placed.root.path().join("release");
+    *placed
+        .runner
+        .release_poll
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((path.clone(), 0));
+    let outage = placed.outage(Duration::from_secs(3));
+    let result = placed
+        .start(
+            "n=0; while test ! -f release; do [ \"$n\" -lt 3000 ] || exit 1; n=$((n + 1)); sleep 0.01; done; sleep 0.1; printf done",
+            2_000,
+        )
+        .await;
+    // Also release a process a mutant promoted, before any assertion can fail.
+    std::fs::write(&path, b"release")?;
+    outage.await?;
+    let result = result?;
+    assert!(
+        result.joined,
+        "the elapsed hold spent the yield window and promoted a live process"
+    );
+    assert_eq!(placed.runner.promotions.load(Ordering::SeqCst), 0);
+    assert_eq!(placed.runner.stops.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_foreground_command_survives_a_placement_hold() -> TestResult {
     let placed = placed(true, false)?;

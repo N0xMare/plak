@@ -359,6 +359,10 @@ fn adopt_failure(error: VcsError) -> AdoptFailure {
 }
 
 impl VcsOps for RemoteVcs {
+    fn placement_ready(&self, _path: &Path) -> Option<bool> {
+        self.link.placement().map(|gate| gate.is_ready())
+    }
+
     fn stage_runner(&self) -> Option<&str> {
         Some(&self.runner_id)
     }

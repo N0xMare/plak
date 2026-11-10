@@ -7,6 +7,7 @@ pub(in crate::agent) type Hook =
     Arc<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
 static BEFORE_WAKE_ADMISSION: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
+static BEFORE_SUBMIT_NUDGE: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
 static BEFORE_FAILED_WAKE_END: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
 static AFTER_FOLLOW_UP_ADMISSION: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
 static AROUND_REOPEN_SPAWNED_CHILD: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
@@ -39,6 +40,14 @@ pub(in crate::agent) fn set_before_wake_admission(agent_id: &str, hook: Hook) {
 
 pub(in crate::agent) async fn before_wake_admission(agent_id: &str) {
     run(&BEFORE_WAKE_ADMISSION, agent_id).await;
+}
+
+pub(in crate::agent) fn set_before_submit_nudge(agent_id: &str, hook: Hook) {
+    set(&BEFORE_SUBMIT_NUDGE, agent_id, hook);
+}
+
+pub(in crate::agent) async fn before_submit_nudge(agent_id: &str) {
+    run(&BEFORE_SUBMIT_NUDGE, agent_id).await;
 }
 
 /// Runs `hook` after a wake that was not admitted marked the child

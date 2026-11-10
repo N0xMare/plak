@@ -94,6 +94,8 @@ impl Drop for AgentView {
 /// Owned by one host face; dropping the face drops every child subscription.
 #[derive(Default)]
 pub(super) struct ChildObservers {
+    tree_id: Option<String>,
+    held: std::collections::BTreeSet<String>,
     children: BTreeMap<String, Observer>,
     agent_view: Option<AgentView>,
     gate: Arc<ViewGate>,
@@ -177,11 +179,35 @@ impl ChildObservers {
 
     pub(super) fn progress_changed(&self) -> bool {
         self.published != self.material_progress()
+            || self.held_now().is_some_and(|held| held != self.held)
+    }
+
+    fn held_now(&self) -> Option<std::collections::BTreeSet<String>> {
+        let runtime = crate::topology_runtime::lookup(self.tree_id.as_deref()?)?;
+        runtime.try_read(|tree| {
+            tree.nodes()
+                .values()
+                .filter(|node| {
+                    node.agent_id != tree.root_agent_id
+                        && matches!(
+                            node.status,
+                            plakous_host_protocol::topology::NodeStatus::Running
+                                | plakous_host_protocol::topology::NodeStatus::Sealing
+                        )
+                        && !tree.placement_ready(&node.agent_id)
+                })
+                .map(|node| node.agent_id.clone())
+                .collect()
+        })
     }
 
     /// Progress can change without a durable tree revision. Publish a complete
     /// snapshot for either kind of change; never manufacture a tree revision.
     pub(super) fn project(&mut self, view: &mut TreeView) -> bool {
+        self.tree_id = Some(view.tree_id.clone());
+        let held = self.held_now().unwrap_or_else(|| self.held.clone());
+        let held_changed = held != self.held;
+        self.held = held;
         let mut progress = BTreeMap::new();
         for node in &mut view.nodes {
             node.live_progress = self.children.get(&node.agent_id).and_then(|observer| {
@@ -193,8 +219,13 @@ impl ChildObservers {
                 value.last_activity_unix_ms = None;
                 progress.insert(node.agent_id.clone(), value);
             }
+            if self.held.contains(&node.agent_id)
+                && let Some(progress) = &mut node.live_progress
+            {
+                progress.activity = Some(format!("tools waiting · {}", node.runner.name));
+            }
         }
-        let changed = self.published != progress;
+        let changed = held_changed || self.published != progress;
         self.published = progress;
         changed
     }

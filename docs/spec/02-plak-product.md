@@ -4285,12 +4285,17 @@ verdicts) are addressed, the session profile and workspace chrome states.
   true for a resident row whose root turn itself is running while the row's
   runner status is `blocked {runner_unreachable}`: that turn may be waiting
   on its placement (spec 01 §8.4) until automatic release after reconnection
-  or Stop. Live or parked children alone do not set it. Activity stays
+  or Stop. A child's held placement or deferred seal also sets attention,
+  without overwriting the root's own runner status. Merely having live or
+  parked children on available placements does not set it. A live child turn uses
+  the existing `tools waiting · <runner>` label, without a new wire field.
+  Activity stays
   `busy`, the runner status keeps its `link_lost` or `reconcile` phase, and
   `activity_seq` does not advance for this. No field, client protocol or
   duration is added; these are the fields a client reads. A refused
-  placement (`not_paired`, identity, version, configuration) does not set it:
-  calls waiting on that placement end with the refusal. Node-to-node
+  placement (`not_paired`, identity, version, configuration) is not a live
+  root hold: its calls end with the refusal. An unavailable child's deferred
+  seal or recovery debt still needs attention. Node-to-node
   questions are not operator decisions. `activity_seq` is the session head's
   durable checkpoint revision (zero before runtime creation), never a feed
   cursor, lease release, directory sequence or metadata timestamp. Every

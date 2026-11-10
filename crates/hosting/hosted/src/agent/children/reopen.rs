@@ -84,6 +84,9 @@ pub(in crate::agent) async fn recover_owed_children(
         .unwrap_or_default();
     let mut faults: Vec<(String, String)> = Vec::new();
     for agent_id in owed {
+        if !crate::agent::placement::ready(runtime.driver(), &agent_id) {
+            continue;
+        }
         let _claim = match crate::agent::recovery::claim_child(runtime, &agent_id).await {
             Ok(claim) => claim,
             Err(crate::agent::recovery::ChildOwner::Process) => {

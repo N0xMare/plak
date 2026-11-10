@@ -97,6 +97,7 @@ pub(in crate::agent) enum StartAdmission {
 /// The refusal a continuation's admission checks return once something
 /// ended it.
 pub(in crate::agent) const LOSS_CONTINUATION_ENDED: &str = "the continuation after the loss ended before it started; a close, an interrupt or another turn won the race";
+const PLACEMENT_UNAVAILABLE: &str = "child placement is unavailable before turn admission";
 
 /// Whether `error` is an admission check's refusal for a hold that ended:
 /// nothing started or bound, and nothing is at fault.
@@ -134,6 +135,9 @@ impl StartAdmission {
         tree: &crate::agent_tree::ProductAgentTree,
         agent_id: &str,
     ) -> Result<(), String> {
+        if !tree.placement_ready(agent_id) {
+            return Err(PLACEMENT_UNAVAILABLE.into());
+        }
         match self {
             Self::Ordinary => Ok(()),
             Self::LossContinuation(command_id)
@@ -197,7 +201,7 @@ pub(in crate::agent) async fn start_child_turn_as(
     let startup = match reserved {
         Ok(startup) => startup,
         // The hold ended: nothing was reserved and nothing is at fault.
-        Err(error) if hold_ended(&error) => {
+        Err(error) if hold_ended(&error) || error == PLACEMENT_UNAVAILABLE => {
             let _ = attached.release_opened().await;
             return Err(ChildStartFailure::Refused(error));
         }

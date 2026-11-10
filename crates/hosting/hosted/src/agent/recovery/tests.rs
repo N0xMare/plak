@@ -4416,6 +4416,81 @@ async fn continuation_admitted(fixture: &Fixture) -> String {
 /// decision before it starts one new instruction turn; a second Resume
 /// records nothing and submits nothing again.
 #[tokio::test]
+async fn placement_hold_owner_loss_keeps_consent_pending_and_stop_suppresses_reopen() {
+    for stop in [false, true] {
+        let fixture = Fixture::new(if stop {
+            "placement-loss-stop"
+        } else {
+            "placement-loss-consent"
+        });
+        let id = owner_lost_child(&fixture).await;
+        let path = fixture
+            .runtime
+            .read(|tree| tree.node(&id).unwrap().path.clone())
+            .unwrap();
+        fixture.vcs.set_placement_ready(path.clone(), false);
+        let before = fixture
+            .runtime
+            .read(|tree| tree.attempt(&id).unwrap().usage.turns)
+            .unwrap();
+        let resumed =
+            crate::agent::children::operator_resume_after_loss(&fixture.runtime, Some(&id))
+                .await
+                .unwrap();
+        assert!(matches!(
+            resumed.as_slice(),
+            [(_, crate::agent::children::LossResume::Deferred(_))]
+        ));
+        assert_eq!(
+            continuation_decisions(&fixture),
+            1,
+            "operator consent must survive unavailable placement"
+        );
+        assert_eq!(continuation_commands(&fixture).len(), 0);
+        assert_eq!(
+            fixture
+                .runtime
+                .read(|tree| tree.attempt(&id).unwrap().usage.turns)
+                .unwrap(),
+            before
+        );
+        if stop {
+            let target = id.clone();
+            fixture
+                .runtime
+                .mutate_then_emit(false, move |tree| {
+                    tree.interrupt_agent(
+                        "root",
+                        &crate::agent_tree_protocol::AttemptScopedRequest {
+                            agent_id: target,
+                            expected_attempt_id: None,
+                        },
+                        None,
+                    )
+                    .map(|_| ())
+                    .map_err(|error| error.message)
+                })
+                .await
+                .unwrap();
+        }
+        fixture.vcs.set_placement_ready(path, true);
+        recover_tree(&fixture.tree_id).await;
+        if stop {
+            assert!(
+                continuation_commands(&fixture).is_empty(),
+                "Stop cannot be resumed by Ready"
+            );
+        } else {
+            continuation_admitted(&fixture).await;
+            recover_tree(&fixture.tree_id).await;
+            assert_eq!(continuation_commands(&fixture).len(), 1);
+            assert_eq!(continuation_decisions(&fixture), 1);
+        }
+        crate::topology_runtime::force_release(&fixture.tree_id).await;
+    }
+}
+
+#[tokio::test]
 async fn a_held_continuation_resumes_once_with_consent_recorded_first() {
     let fixture = Fixture::new("held-resume");
     let id = owner_lost_child(&fixture).await;

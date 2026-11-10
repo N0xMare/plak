@@ -22,7 +22,7 @@ pub(super) fn resume_allowed_in(
         && !tree.attempt_turns_spent(agent_id)
 }
 
-pub(super) fn resume_allowed(
+pub(in crate::agent) fn resume_allowed(
     driver: &TreeDriver,
     agent_id: &str,
     identity: &ChildTurnIdentity,
@@ -108,6 +108,9 @@ pub(super) async fn try_transient_resume(
         })
         .ok()
         .flatten()?;
+    if !crate::agent::placement::wait_ready(driver, live, agent_id, identity).await {
+        return Some(Err(()));
+    }
     let notice = failed_worktree::snapshot_failure(driver, identity, agent_id)
         .await
         .unwrap_or_default();

@@ -362,11 +362,12 @@ impl TreeDriver {
         Ok(())
     }
 
-    pub(crate) fn set_retirement_recovery(&self, recovery: RetirementRecovery) {
-        *self
-            .retirement_recovery
+    pub(crate) fn set_retirement_recovery(&self, recovery: RetirementRecovery) -> bool {
+        self.retirement_recovery
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(recovery);
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .replace(recovery)
+            .is_none()
     }
 
     pub(crate) fn observer(&self) -> Option<&Arc<dyn TopologyObserver>> {
@@ -1016,10 +1017,17 @@ impl TreeDriver {
         let mut settled = Settled::default();
         let mut first_save_error = None;
         while !effects.is_empty() {
-            let runner = self.vcs.stage_runner().map(str::to_owned);
+            let runner = self.vcs.stage_runner().map(str::to_owned).or_else(|| {
+                effects
+                    .seals
+                    .iter()
+                    .any(|ticket| self.vcs.placement_ready(&ticket.path).is_some())
+                    .then(|| "local".to_owned())
+            });
             let driver = self.clone();
             let (admitted, refused, stages) = self
                 .write_owed(move |tree| {
+                    tree.defer_unavailable_seals(&mut effects);
                     let refused = Self::admit_settled_effects(tree, &mut effects)?;
                     // On a runner each effect is a recorded stage, published
                     // before it runs (spec 03 §14).

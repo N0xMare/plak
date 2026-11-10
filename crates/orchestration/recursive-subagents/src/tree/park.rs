@@ -45,6 +45,15 @@ enum ParkState {
 }
 
 impl ProductAgentTree {
+    /// Current node-local admission, read from its retained port rather than
+    /// picker cache or the root's placement. No runner call is made here.
+    #[must_use]
+    pub fn placement_ready(&self, agent_id: &str) -> bool {
+        self.nodes
+            .get(agent_id)
+            .is_some_and(|node| self.vcs.0.placement_ready(&node.path).unwrap_or(true))
+    }
+
     /// The caller's children that will still report on their own: open
     /// attempts on a node that runs (or will once resumed from a reopen), and
     /// nodes sealing a result they have not pushed yet. Interrupted and
@@ -156,6 +165,9 @@ impl ProductAgentTree {
     /// whether the child is still parked on a running node: an interrupt or
     /// close that won the race ended the park, and no wake may start.
     pub fn begin_wake(&mut self, agent_id: &str) -> bool {
+        if !self.placement_ready(agent_id) {
+            return false;
+        }
         let running = self
             .nodes
             .get(agent_id)
@@ -169,13 +181,25 @@ impl ProductAgentTree {
         }
     }
 
+    /// Returns an unadmitted wake to its park after a placement race. An
+    /// interrupt or an ending attempt is never undone.
+    pub fn defer_wake(&mut self, agent_id: &str) {
+        if let Some(parked) = self.parked.get_mut(agent_id)
+            && parked.state == ParkState::Waking
+        {
+            parked.state = ParkState::Parked;
+        }
+    }
+
     /// Whether a wake begun by [`Self::begin_wake`] may still start: nothing
     /// ended the park since.
     #[must_use]
     pub fn wake_admissible(&self, agent_id: &str) -> bool {
-        self.parked
-            .get(agent_id)
-            .is_some_and(|parked| parked.state == ParkState::Waking)
+        self.placement_ready(agent_id)
+            && self
+                .parked
+                .get(agent_id)
+                .is_some_and(|parked| parked.state == ParkState::Waking)
             && self
                 .nodes
                 .get(agent_id)

@@ -211,6 +211,9 @@ impl ProductAgentTree {
                 attempt_id: Option<super::AttemptId>,
                 reserved_at: super::FoldAnchor,
             }
+            if self.restore_unstarted_seal(&agent_id, &canonical) {
+                continue;
+            }
             let Ok(reservation) = serde_json::from_str::<SealReservation>(&canonical) else {
                 continue;
             };

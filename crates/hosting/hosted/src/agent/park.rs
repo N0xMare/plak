@@ -258,9 +258,15 @@ pub(super) async fn park_until_wake(
                 continue;
             }
             WakeDecision::Fire(arrivals) => {
+                if !crate::agent::placement::ready(driver, agent_id)
+                    && !crate::agent::placement::wait_ready(driver, live, agent_id, identity).await
+                {
+                    return end_park(driver, live, agent_id, identity).await;
+                }
                 return match start_wake_turn(driver, live, agent_id, identity).await {
                     Ok(handle) => ParkEnd::Woken(handle, arrivals),
                     Err(WakeRefusal::ParkEnded) => end_park(driver, live, agent_id, identity).await,
+                    Err(WakeRefusal::Placement) => continue,
                     // The child stays parked: the turn waiter marks it ending
                     // while it ends the attempt (or hands it to an interrupt).
                     Err(WakeRefusal::Failed(error)) => ParkEnd::WakeFailed(error),
@@ -368,6 +374,7 @@ pub(super) fn wake_command(
 
 /// Why a wake did not start.
 enum WakeRefusal {
+    Placement,
     /// The park ended before the Start (an interrupt or close won the race,
     /// or the live session went away): nothing was admitted, and any batch
     /// prepared for it was released unread.
@@ -391,6 +398,9 @@ async fn start_wake_turn(
     agent_id: &str,
     identity: &ChildTurnIdentity,
 ) -> Result<TurnResultHandle, WakeRefusal> {
+    if !crate::agent::placement::ready(driver, agent_id) {
+        return Err(WakeRefusal::Placement);
+    }
     let (begun, effects) = driver
         .mutate({
             let agent_id = agent_id.to_owned();
@@ -404,10 +414,18 @@ async fn start_wake_turn(
         .map_err(|error| WakeRefusal::Failed(error.message))?;
     settle_or_fault(driver, effects, agent_id).await;
     let Some(command_text) = begun.map_err(WakeRefusal::Failed)? else {
+        if !crate::agent::placement::ready(driver, agent_id) {
+            return Err(WakeRefusal::Placement);
+        }
         return Err(WakeRefusal::ParkEnded);
     };
     #[cfg(test)]
     hooks::before_wake_admission(agent_id).await;
+    if !crate::agent::placement::ready(driver, agent_id)
+        && !crate::agent::placement::wait_ready(driver, live, agent_id, identity).await
+    {
+        return Err(WakeRefusal::ParkEnded);
+    }
     let prompt = crate::child_prompts::PLAK_CHILD_WAKE_PROMPT;
     let command_id = CommandId::new(command_text.clone())
         .map_err(|error| WakeRefusal::Failed(error.to_string()))?;
@@ -439,6 +457,15 @@ async fn start_wake_turn(
     let admissible = driver
         .read(|tree| identity.still_owns(tree, agent_id) && tree.wake_admissible(agent_id))
         .unwrap_or(false);
+    if !crate::agent::placement::ready(driver, agent_id) {
+        drop(live_map);
+        mutate_child(driver, agent_id, {
+            let id = agent_id.to_owned();
+            move |tree| tree.defer_wake(&id)
+        })
+        .await;
+        return Err(WakeRefusal::Placement);
+    }
     let child = live_map
         .get_mut(agent_id)
         .filter(|child| admissible && child.turn_id() == identity.turn);
@@ -461,6 +488,14 @@ async fn start_wake_turn(
         Ok(result) => result,
         Err(error) => {
             drop(live_map);
+            if error == super::live::RESTART_PLACEMENT_UNAVAILABLE {
+                mutate_child(driver, agent_id, {
+                    let id = agent_id.to_owned();
+                    move |tree| tree.defer_wake(&id)
+                })
+                .await;
+                return Err(WakeRefusal::Placement);
+            }
             if error == super::live::RESTART_RECONCILIATION_REQUIRED {
                 super::children::finalize_child_failure(
                     driver,

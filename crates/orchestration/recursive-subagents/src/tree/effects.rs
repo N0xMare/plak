@@ -6,11 +6,22 @@ use super::{
 };
 
 impl ProductAgentTree {
+    pub(crate) fn defer_unavailable_seals(&mut self, effects: &mut Effects) {
+        let (ready, deferred): (Vec<_>, Vec<_>) = std::mem::take(&mut effects.seals)
+            .into_iter()
+            .partition(|ticket| self.vcs.0.placement_ready(&ticket.path).unwrap_or(true));
+        effects.seals = ready;
+        self.effects.seals.extend(deferred);
+    }
+
     /// Drains what the mutations so far owe the VCS, excluding reopen-owned
     /// base-pin reconciliation, which the driver drains during attachment. The
     /// caller runs them with the mutex released and hands the answers back
     /// to [`Self::complete`].
     pub fn take_effects(&mut self) -> Effects {
+        let (seals, deferred) = std::mem::take(&mut self.effects.seals)
+            .into_iter()
+            .partition(|ticket| self.vcs.0.placement_ready(&ticket.path).unwrap_or(true));
         let base_pins = std::mem::take(&mut self.effects.base_pins);
         let (attach_refreshes, refreshes): (Vec<_>, Vec<_>) =
             std::mem::take(&mut self.effects.refreshes)
@@ -18,6 +29,8 @@ impl ProductAgentTree {
                 .partition(|ticket| ticket.attach);
         self.effects.refreshes = refreshes;
         let mut effects = std::mem::take(&mut self.effects);
+        effects.seals = seals;
+        self.effects.seals = deferred;
         self.effects.base_pins = base_pins;
         self.effects.refreshes = attach_refreshes;
         effects.launch_checkout.clone_from(&self.launch_checkout);

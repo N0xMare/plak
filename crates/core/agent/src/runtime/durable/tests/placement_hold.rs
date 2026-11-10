@@ -57,6 +57,108 @@ fn placed_services(root: &std::path::Path) -> TestResult<RunnerServices> {
     Ok(placed(root)?.0)
 }
 
+#[tokio::test(start_paused = true)]
+async fn placement_hold_cell_outer_deadline_suspends_and_rearms_without_a_new_turn() -> TestResult {
+    use super::code_cell_composition::{
+        FakeCompositionEvidence, composition_test_builder, neutral_composition_for,
+        neutral_composition_test_descriptor, neutral_composition_test_registry,
+    };
+    for source in ["seed job", "lose after release"] {
+        let directory = tempfile::tempdir()?;
+        let services = placed_services(directory.path())?;
+        let registry = neutral_composition_test_registry()?;
+        let descriptor = neutral_composition_test_descriptor()?;
+        let authority = artifact_authority(&descriptor, 1)?;
+        let model = Arc::new(
+            ArtifactModel::new(descriptor.clone(), authority.clone(), 0, 147_000, false)
+                .with_scripted_tool_calls([(0, "exec", serde_json::to_string(source)?)]),
+        );
+        let composition = neutral_composition_for(&model, &descriptor, &authority, &registry)?;
+        let evidence = Arc::new(FakeCompositionEvidence::default());
+        let mut builder = composition_test_builder(
+            Arc::new(WorkspacePolicy::host(directory.path(), ".")?),
+            registry,
+            &model,
+            descriptor,
+            authority,
+            composition,
+            (evidence.clone(), LocalCompositionLifecycle::RootTurnJoined),
+        )?
+        .with_runner_services(services.clone())
+        .config(AgentConfig::default().with_model_operation_timeout(Duration::from_secs(1)));
+        builder.harness_plan = Some(compile_explicit_runtime_profile(
+            builder
+                .harness_plan
+                .as_ref()
+                .ok_or("plan")?
+                .source_profile(),
+            model.as_ref(),
+            &builder.provider_configuration,
+            &builder.tools,
+            &builder.workspace,
+            services.backend().descriptor(),
+            Vec::new(),
+        )?);
+        let sessions = DurableSessionRuntime::current(
+            Arc::new(TestCreateStore::default()),
+            RuntimeDurability::Required,
+            NonZeroU64::new(30).ok_or("lease")?,
+        )?;
+        let agent = sessions
+            .create("create:placement-cell-clock", builder)
+            .await?;
+        let turn = agent.prompt("keep the cell").await?;
+        while evidence.physical_cell_starts.load(Ordering::Acquire) == 0 {
+            tokio::task::yield_now().await;
+        }
+        services.set_available(false);
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(12 * 60 * 60)).await;
+        let mut result = Box::pin(turn.result());
+        for _ in 0..20 {
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            futures_util::poll!(result.as_mut()).is_pending(),
+            "outer deadline ended a held cell"
+        );
+        assert_eq!(evidence.physical_cell_starts.load(Ordering::Acquire), 1);
+        if source == "lose after release" {
+            evidence.source_release.notify_one();
+            let result = tokio::time::timeout(Duration::from_secs(5), result)
+                .await
+                .expect("placement hold hid real cell delivery loss")?;
+            assert!(
+                matches!(
+                    result.outcome(),
+                    TurnResultOutcome::Failed(_) | TurnResultOutcome::RecoveryRequired(_)
+                ),
+                "{:?}",
+                result.outcome()
+            );
+            assert!(!services.is_available());
+            assert_eq!(
+                model.calls.load(Ordering::Acquire),
+                1,
+                "cell loss admitted paid triage"
+            );
+            services.set_available(true);
+        } else {
+            services.set_available(true);
+            evidence.source_release.notify_one();
+            let result = result.await?;
+            assert!(
+                matches!(result.outcome(), TurnResultOutcome::Completed(_)),
+                "{:?}",
+                result.outcome()
+            );
+        }
+        assert_eq!(evidence.physical_cell_starts.load(Ordering::Acquire), 1);
+        agent.shutdown().await?;
+    }
+    Ok(())
+}
+
 fn placed(root: &std::path::Path) -> TestResult<(RunnerServices, Arc<InProcessRunner>)> {
     let environment = ExecutionEnvironment::host(
         ExecutionEnvironmentScope::Run("00000000-0000-0000-0000-000000000071".parse()?),

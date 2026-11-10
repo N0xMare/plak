@@ -58,6 +58,38 @@ fn accepted<P: plakous_host_protocol::ProtocolExtension>(
 }
 
 #[test]
+fn placement_hold_root_wake_preflight_is_deferred_without_suppression_or_submission() {
+    let dir = tempfile::tempdir().unwrap();
+    let (config, _) = fresh_injected_attached_host(dir.path());
+    let (_, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let (events, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let mut host =
+        RootActor::open_blocking(config, &actions, crate::runtime::Sender::over(events), None)
+            .unwrap();
+    let roots = host.role.config.state_roots.clone();
+    let registry = plakous::runner::RunnerRegistry::default();
+    registry.configure(plakous::runner::ConfiguredRunner {
+        runner_id: "local".into(),
+        names: vec!["local".into()],
+    });
+    host.role.config.state_roots = roots.clone().with_runner_readiness(registry, "local");
+    assert!(matches!(
+        host.block(async |host| host.fit_child_wake(WAKE_PROMPT).await)
+            .unwrap(),
+        WakeFit::Deferred
+    ));
+    assert_eq!(submissions(&host).len(), 0);
+    assert!(!host.role.config.session.child_wake_suppressed);
+    host.role.config.state_roots = roots;
+    assert!(matches!(
+        host.block(async |host| host.fit_child_wake(WAKE_PROMPT).await)
+            .unwrap(),
+        WakeFit::Fits
+    ));
+    host.block(async |host| host.release().await).unwrap();
+}
+
+#[test]
 fn notices_only_wake_without_a_tree_carries_ids_not_notice_text() {
     let dir = tempfile::tempdir().unwrap();
     let (config, _) = fresh_injected_attached_host(dir.path());

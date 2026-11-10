@@ -37,6 +37,8 @@ enum Admission {
 struct Availability {
     admission: Admission,
     revision: u64,
+    held_since: Option<std::time::Instant>,
+    held_elapsed: Duration,
 }
 
 impl RunnerServices {
@@ -47,6 +49,8 @@ impl RunnerServices {
             watch::channel(Availability {
                 admission: Admission::Open,
                 revision: 0,
+                held_since: None,
+                held_elapsed: Duration::ZERO,
             })
             .0,
         );
@@ -72,6 +76,11 @@ impl RunnerServices {
     /// lifts an earlier refusal for calls made from here on.
     pub fn set_available(&self, available: bool) {
         self.availability.send_modify(|state| {
+            if available {
+                state.end_hold();
+            } else if state.admission != Admission::Refused && state.held_since.is_none() {
+                state.held_since = Some(std::time::Instant::now());
+            }
             state.admission = match (available, state.admission) {
                 (true, _) => Admission::Open,
                 (false, Admission::Refused) => Admission::Refused,
@@ -86,6 +95,7 @@ impl RunnerServices {
     /// refuse until [`Self::set_available`] opens admission again.
     pub fn refuse(&self) {
         self.availability.send_modify(|state| {
+            state.end_hold();
             state.admission = Admission::Refused;
             state.revision = state.revision.wrapping_add(1);
         });
@@ -149,6 +159,29 @@ pub struct PlacementGate {
 }
 
 impl PlacementGate {
+    /// Cumulative, non-overlapping host-side hold time on these services.
+    #[must_use]
+    pub fn held_elapsed(&self) -> Duration {
+        let state = self.availability.borrow();
+        state.held_elapsed.saturating_add(
+            state
+                .held_since
+                .map_or(Duration::ZERO, |since| since.elapsed()),
+        )
+    }
+    /// Whether the current barrier admits new work; refusal is not readiness.
+    #[must_use]
+    pub fn is_ready(&self) -> bool {
+        self.availability.borrow().admission == Admission::Open
+    }
+
+    /// Observes the next availability revision without polling a tool call.
+    pub async fn changed(&mut self) {
+        if self.availability.changed().await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    }
+
     /// Whether the placement is held: the link or its reconnect barrier is
     /// down, and its owner has not refused it.
     #[must_use]
@@ -163,6 +196,14 @@ impl PlacementGate {
             .availability
             .wait_for(|state| state.admission != Admission::Held)
             .await;
+    }
+}
+
+impl Availability {
+    fn end_hold(&mut self) {
+        if let Some(since) = self.held_since.take() {
+            self.held_elapsed = self.held_elapsed.saturating_add(since.elapsed());
+        }
     }
 }
 

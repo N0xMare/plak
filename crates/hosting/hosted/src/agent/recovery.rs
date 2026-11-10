@@ -707,6 +707,11 @@ async fn recover_claimed_child(
     agent_id: &str,
     expected_attempt_id: Option<&AttemptId>,
 ) -> Result<RecoverAgentOutput, TopologyError> {
+    if !crate::agent::placement::ready(runtime.driver(), agent_id) {
+        return Err(session_refusal(
+            "child placement is unavailable; recovery is deferred",
+        ));
+    }
     let rebuilding = runtime
         .read(|tree| {
             tree.node(agent_id)
@@ -1305,11 +1310,22 @@ pub(crate) fn start_tree_recovery(
 
 pub(super) async fn install_retirement_recovery(runtime: &ProductTopologyRuntime, tree_id: &str) {
     let tree_id = tree_id.to_owned();
-    runtime
+    let first = runtime
         .set_retirement_recovery(Arc::new(move || {
             start_tree_recovery(tree_id.clone(), |_| {});
         }))
         .await;
+    if !first {
+        return;
+    }
+    let Some(owner) = crate::topology_runtime::lookup(
+        &runtime
+            .read(|tree| tree.tree_id.clone())
+            .unwrap_or_default(),
+    ) else {
+        return;
+    };
+    crate::agent::placement::watch_debt(&owner);
 }
 
 #[cfg(test)]

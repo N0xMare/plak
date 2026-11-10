@@ -9,9 +9,11 @@ use super::{
 impl ProductTopologyRuntime {
     /// Installs the host's recovery trigger for returned startup/retirement owners.
     /// The callback must not retain this runtime; shutdown closes its admission.
-    pub async fn set_retirement_recovery(&self, recovery: Arc<dyn Fn() + Send + Sync>) {
-        self.driver.set_retirement_recovery(recovery.clone());
+    /// Returns whether this is the first installation on this runtime.
+    pub async fn set_retirement_recovery(&self, recovery: Arc<dyn Fn() + Send + Sync>) -> bool {
+        let first = self.driver.set_retirement_recovery(recovery.clone());
         self.live.lock().await.retirement_recovery = Some(recovery);
+        first
     }
 
     /// Takes ownership of `tree`, binding it to `store` (one connection for

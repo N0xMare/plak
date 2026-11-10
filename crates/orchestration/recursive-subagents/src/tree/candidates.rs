@@ -15,6 +15,8 @@ use super::{
     WorkspaceStatus, bounded_text, diverged_from_base, now_unix_millis, topology_error_from_vcs,
 };
 
+mod recovery;
+
 const SEAL_EFFECT_KIND: &str = "seal_effect";
 
 pub(super) const SEAL_OUTCOME_KIND: &str = "seal_outcome";

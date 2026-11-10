@@ -25,6 +25,7 @@ pub(super) const RESTART_RECONCILIATION_REQUIRED: &str =
 
 /// Prefix of a restart the runtime definitely rejected: nothing was admitted.
 pub(super) const RESTART_REJECTED: &str = "child restart was rejected";
+pub(super) const RESTART_PLACEMENT_UNAVAILABLE: &str = "child restart placement is unavailable";
 
 type LiveTransition<'a> = (
     tokio::sync::MutexGuard<'a, crate::topology_runtime::LiveChildTable>,
@@ -461,6 +462,17 @@ async fn restart(
     prompt: String,
     acknowledged: Acknowledged,
 ) -> Result<TurnResultHandle, ChildRestartError> {
+    if driver
+        .read(|tree| {
+            tree.command(command_id.as_str())
+                .is_some_and(|command| !tree.placement_ready(&command.recipient))
+        })
+        .unwrap_or(true)
+    {
+        return Err(ChildRestartError::Runtime(
+            RESTART_PLACEMENT_UNAVAILABLE.into(),
+        ));
+    }
     let agent = attached
         .agent()
         .ok_or_else(|| "opened child has no agent".to_owned())?;

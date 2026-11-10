@@ -275,7 +275,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     /// root host wake: the same journaled submission, crash and reopen rules
     /// as an idle wake. It waits while another submission is unresolved.
     pub(super) async fn continuation_prompt(&mut self) -> CliResult<HostStep> {
-        if self.role.recovery.blocked()
+        if self.role.config.state_roots.runner_pending()
+            || self.role.recovery.blocked()
             || self.role.pending_start.is_some()
             || self.role.config.session.queue_commands.has_pending()
         {
@@ -288,6 +289,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         // prompt's admission reads back.
         match self.fit_child_wake(&text).await {
             Ok(WakeFit::Fits) => {}
+            Ok(WakeFit::Deferred) => {
+                self.role.config.continuation = Some(text);
+                return Ok(HostStep::Continue);
+            }
             Ok(WakeFit::Stopped(_)) => {
                 self.role.config.continuation = Some(text);
                 return Ok(HostStep::Continue);
@@ -380,6 +385,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         now: Instant,
         jobs: Vec<plakous::tools::JobView>,
     ) -> CliResult<HostStep> {
+        if self.role.config.state_roots.runner_pending() {
+            return Ok(HostStep::Continue);
+        }
         let views = self
             .role
             .config
@@ -480,6 +488,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         if !self.preflight_child_wake(&command).await? {
             return Ok(HostStep::Continue);
         }
+        if self.role.config.state_roots.runner_pending() {
+            return Ok(HostStep::Continue);
+        }
         let watch = super::InterruptWatch::new(self.role.actions, &self.role.interrupt_state);
         watch.poll();
         if self.role.interrupt_state.borrow().has_deferred() || watch.interrupted() {
@@ -513,6 +524,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     async fn preflight_child_wake(&mut self, command: &str) -> CliResult<bool> {
         match self.fit_child_wake(command).await? {
             WakeFit::Fits => return Ok(true),
+            WakeFit::Deferred => return Ok(false),
             WakeFit::Stopped(stopped) => {
                 let _ = stopped;
                 self.role.child_wake.park();
@@ -540,6 +552,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     }
 
     pub(super) async fn fit_child_wake(&mut self, command: &str) -> CliResult<WakeFit> {
+        if self.role.config.state_roots.runner_pending() {
+            return Ok(WakeFit::Deferred);
+        }
         let watch = super::InterruptWatch::new(self.role.actions, &self.role.interrupt_state);
         watch.begin();
         self.refresh_native_authority_before_prompt().await?;
@@ -569,6 +584,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             return Ok(WakeFit::Fits);
         }
         self.role.config.session.queue_drain_state = super::SessionQueueDrainState::LiveAutoDrain;
+        if self.role.config.state_roots.runner_pending() {
+            return Ok(WakeFit::Deferred);
+        }
         super::observe_compact(&self.role.events, 0, true);
         let outcome = super::run_scheduled_compaction_until_fits(
             super::InterruptWatch::new(self.role.actions, &self.role.interrupt_state),
@@ -613,6 +631,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
 }
 
 pub(super) enum WakeFit {
+    Deferred,
     Fits,
     DoesNotFit,
     Stopped(super::prompt::preparation::Stopped),

@@ -592,12 +592,18 @@ impl LocalCompositionSession for FakeSession {
                     }
                     let mut started_cell_id = "C";
                     let response = match request.source.as_str() {
-                        "seed job" => {
+                        "seed job" | "lose after release" => {
                             let evidence = Arc::clone(&fixture.evidence);
+                            let lose = request.source == "lose after release";
                             return Ok(LocalCompositionStartedCell {
                                 cell_id: "C".to_owned(),
                                 initial_response: Box::pin(async move {
                                     evidence.source_release.notified().await;
+                                    if lose {
+                                        return Err(LocalCompositionSessionLoss::HostLost(
+                                            "cell delivery lost".into(),
+                                        ));
+                                    }
                                     Ok(LocalCompositionResponse::Result {
                                         cell_id: "C".to_owned(),
                                         items: Vec::new(),

@@ -905,7 +905,7 @@ impl ProcessSessionTools {
         };
         terminals.borrow_and_update();
         let mut other_terminal = false;
-        let deadline = tokio::time::Instant::now()
+        let mut deadline = tokio::time::Instant::now()
             .checked_add(std::time::Duration::from_millis(yield_time_ms))
             .ok_or_else(|| {
                 ToolRuntimeError::new(
@@ -920,6 +920,11 @@ impl ProcessSessionTools {
             plakous_tools::internal::process_session_changes(&session.sessions, session.id)
                 .map_err(backend_runtime_error)?;
         let mut preempt = control.preempt().clone();
+        let placement = environment.placement_gate();
+        let mut excluded = placement.as_ref().map_or(
+            std::time::Duration::ZERO,
+            plakous_tools::internal::runner::PlacementGate::held_elapsed,
+        );
         loop {
             changes.borrow_and_update();
             let remaining = u64::try_from(
@@ -940,6 +945,11 @@ impl ProcessSessionTools {
                 control,
             )
             .await?;
+            if let Some(gate) = &placement {
+                let elapsed = gate.held_elapsed();
+                deadline += elapsed.saturating_sub(excluded);
+                excluded = elapsed;
+            }
             page.skip(result.skipped);
             let empty = result.projection.output.is_empty();
             // A full chunk means more output is already waiting: drain the
@@ -1045,7 +1055,7 @@ impl ProcessSessionTools {
             plakous_tools::internal::process_session_changes(&session.sessions, session.id)
                 .map_err(backend_runtime_error)?;
         let mut preempt = control.preempt().clone();
-        let deadline = tokio::time::Instant::now()
+        let mut deadline = tokio::time::Instant::now()
             .checked_add(std::time::Duration::from_millis(yield_time_ms))
             .ok_or_else(|| {
                 ToolRuntimeError::new(
@@ -1056,6 +1066,11 @@ impl ProcessSessionTools {
         let mut output = String::new();
         let mut skipped = 0_u64;
         let mut cursor = cursor;
+        let placement = environment.placement_gate();
+        let mut excluded = placement.as_ref().map_or(
+            std::time::Duration::ZERO,
+            plakous_tools::internal::runner::PlacementGate::held_elapsed,
+        );
         loop {
             changes.borrow_and_update();
             let remaining = max_bytes.saturating_sub(output.len());
@@ -1074,6 +1089,11 @@ impl ProcessSessionTools {
                 )
             })
             .await?;
+            if let Some(gate) = &placement {
+                let elapsed = gate.held_elapsed();
+                deadline += elapsed.saturating_sub(excluded);
+                excluded = elapsed;
+            }
             let backend_terminal = poll.status().is_terminal() && !poll.more_output();
             skipped = skipped.saturating_add(poll.skipped_bytes());
             let (terminal, buffered_without_text_progress) = {

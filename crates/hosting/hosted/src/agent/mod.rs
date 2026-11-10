@@ -13,6 +13,7 @@ mod ledger;
 pub(crate) use ledger::project_running_children;
 pub mod live;
 mod park;
+mod placement;
 mod recovery;
 mod reresolve;
 #[cfg(test)]

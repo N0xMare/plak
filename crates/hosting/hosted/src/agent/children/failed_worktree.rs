@@ -10,6 +10,9 @@ pub(super) async fn snapshot_failure(
     identity: &ChildTurnIdentity,
     agent_id: &str,
 ) -> Option<String> {
+    if !crate::agent::placement::ready(driver, agent_id) {
+        return None;
+    }
     let (ticket, effects) = driver
         .mutate({
             let (driver, identity, agent_id) =

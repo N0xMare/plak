@@ -895,6 +895,12 @@ Mail is **not a second spawn** and is not how a prompt is assigned.
 
 ### 4.4 `wait_agent`
 
+A placement-held child or descendant remains live work. Runner loss alone
+settles no parent wait, sends no result and interrupts no subtree. Wait
+deadlines and urgent-mail wakes remain ordinary caller-local events; a root
+Stop still cascades. Nodes on other runners continue independently, including
+sealing and result delivery, even with one shared account request slot.
+
 | Field | Notes |
 | --- | --- |
 | `agent_ids` | optional; 1 to `MAX_WAIT_TARGETS` = 32 ids, no duplicates; omitted means every managed child that is not closed and has not reported to this caller yet or has unread, unclaimed mail for it (including mail or a Result envelope an earlier return's budget withheld) |
@@ -1469,6 +1475,16 @@ migration or guessed identity is performed.
 
 ### 5.2 `submit_result` and `completed_without_submission`
 
+A live placement hold retains the exact child driver, turn, attempt and token;
+it admits no new turn or corrective submit nudge and spends no `max_turns`.
+A parked child stays parked. Mail and process arrivals remain coalesced pending
+wakes, unread and unclaimed until placement admission; mail already committed
+to a held turn stays read. Wake reservation and binding check the child's own
+placement, not its parent's or a picker cache. A loss in between defers the
+unadmitted wake with its batch unread. No park timer or host-loss consent is
+created. Corrective Starts wait outside the tree and live-table locks and
+recheck placement before binding; Stop/interrupt wins while still absent.
+
 Attempt success requires the child to call `submit_result` with the current
 `turn_token` and schema-valid `output_json`. **Last assistant text is never a
 result and is never harvested into `output_json`.**
@@ -1925,6 +1941,16 @@ A minted copy whose `.jj/repo` is a directory rather than a workspace pointer
 is a standalone repository; snapshot, seal, and adopt refuse it.
 
 ### 6.3 When a seal runs
+
+An owed fork seal whose placement is unavailable is deferred under its existing
+`seal_effect` reservation. Its node remains `sealing`; it fabricates neither a
+candidate nor completion mail. This includes a failed/refused turn and the
+seal owed after unpaid recovery of an unknown outcome. The driver dispatches
+no Tree call for an unavailable seal and retains its debt without waiting under
+a shared lock. Availability release drains the debt automatically, after the
+ordinary barrier and owner checks. A seal already staged or ambiguous is not
+restarted by availability; cross-runner Tree/VCS stages retain their identities
+and fail fast, rather than joining model-call holds.
 
 Every minted (`workspace=fork`) node seals at **turn completion**, not at
 `submit_result` — the child can still write until its turn ends — on every
@@ -2438,6 +2464,12 @@ as `recovery_required` and is never automatically retried.
 
 ## 8. Wait and pushed completion
 
+Placement gates both idle wake admission and its preflight compaction. An
+unready placement defers rather than suppresses the wake, consumes no mail,
+and is rechecked before the delivery is reserved. A held fork seal pushes
+nothing until its real outcome is recorded. Neither runner loss nor elapsed
+hold time generates a child result/nudge or paid parent triage cascade.
+
 Completion is **pushed**, not only polled. A host-authored `result` message is
 enqueued into the tree inbox from the seal, so it can name the candidate; an
 inherit node seals nothing and pushes from turn completion instead. A forked
@@ -2897,6 +2929,13 @@ description states the caller's granted `max_nodes` and `max_children`, so a
 model sees the bounds it is actually under.
 
 ### 10.2 Blocked and failed attempts
+
+Transient and corrective continuation Starts also require current placement
+admission, checked before mail preparation and again at reservation/binding.
+Network reachability alone is not runner readiness. A placement closure is a
+non-model error and never qualifies for inference-failure continuation. There
+is no default hold expiry; fixed unknown/refusal follows ordinary unpaid
+recovery, with an unavailable fork's seal retained as debt (§6.3).
 
 One hosted transient-continuation service plans and gates root and child
 continuations; both roles admit its instruction through the command ledger
@@ -3565,6 +3604,21 @@ already depends on that crate.
 
 ### 14.1 Reopen
 
+No live placement hold survives host loss. Reopen follows the ordinary Working
+and owner-loss laws, with no paid recovery or in-place suffix replay. An
+unavailable node's recovery/open is deferred without blocking other runners;
+release retries the existing obligations, not a model command. Ready is not
+continuation consent: paid owner-loss continuation still requires its durable
+decision and `resume_after_loss` policy (default hold), plus current placement
+admission. Recorded Stop suppresses continuation regardless of old hold chrome.
+
+For a runner-placed seal, the existing reservation without any dispatch stage
+proves unstarted debt: reopen reconstructs its ticket and waits for placement.
+The stage is published before dispatch. Once a stage exists an unresolved seal
+remains the existing explicit VCS recovery obligation, never an automatic retry.
+An in-process reservation has no such pre-dispatch proof and remains ambiguous.
+Hold state, elapsed time and waiters add no persisted fields or wire versions.
+
 Root and child adapters share a small exact-retry state and reopened-turn
 classification. It permits one stale-head adoption and bounds child lease waits;
 child lease polls retain their
@@ -3606,7 +3660,8 @@ stored `restored_paused` or `interrupted` admission from an earlier build reads
 as `live` and is not written again. Root rebind follows the settled-tree
 predicate. `NodeRecord::presentation_status` is the node's own status.
 
-An unresolved seal reservation, or a workspace row observed `adopting`, is
+An unresolved seal reservation other than the proven-unstarted runner debt
+above, or a workspace row observed `adopting`, is
 `recovery_required` and MUST NOT auto-retry: the subprocess may have completed.
 Recovered ambiguity is an explicit obligation, never a blind replay. A reopen
 records anchored `vcs_fault` intents for a pending seal, the occupants of an

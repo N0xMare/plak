@@ -99,6 +99,10 @@ fn ready<'a, T: Send + 'a>(value: T) -> VcsFuture<'a, T> {
 }
 
 impl VcsOps for RoutedVcs {
+    fn placement_ready(&self, path: &Path) -> Option<bool> {
+        self.port(path).placement_ready(path)
+    }
+
     fn stage_runner(&self) -> Option<&str> {
         self.home.stage_runner()
     }

@@ -1580,6 +1580,15 @@ includes follow the module location; manifest-root fixture paths do not move.
 
 ### 2.3 Serial groups and the budget lane
 
+Placement-hold wall-clock admission and process-yield cuts (`placement_hold_cut_`)
+run in the serial lane. The cell deadline and recovery-notification cuts use
+paused clocks. Offline tree cuts distinguish an unstarted seal reservation
+from its published dispatch stage, assert no candidate/mail/parent settlement
+while deferred, and let an unrelated sibling seal. Wake reservation/binding,
+unclaimed mail, corrective decision admission, child-only attention and exact
+owner-loss debt release have separate assertions; live runner sleep is not
+inferred from these fixtures.
+
 Dormant-stop recovery and real-process UI signal reload scenarios belong
 to the serial lane, excluded from offline parallel execution. Their waits
 are for explicit observations, log acknowledgements or process settlement.

@@ -47,14 +47,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         user_echoed: bool,
         one_shot: Option<&mut super::super::oneshot::OneShotState>,
     ) -> CliResult<HostStep> {
-        if self.refuse_archived_prompt(&raw_text)? {
-            return Ok(HostStep::Continue);
-        }
         let wake = queued_delivery
             .as_ref()
             .and_then(|item| self.role.config.session.queue_commands.pending_for(item))
             .filter(|submission| submission.kind == sessions::projector::SubmissionKind::HostWake)
             .cloned();
+        if self.role.config.state_roots.runner_pending() && wake.is_some() {
+            return Ok(HostStep::Continue);
+        }
+        if self.refuse_archived_prompt(&raw_text)? {
+            return Ok(HostStep::Continue);
+        }
         // A child wake already passed the capacity check before its immutable
         // receipt was recorded. Do not turn that receipt into suppression here.
         if wake.is_none() {

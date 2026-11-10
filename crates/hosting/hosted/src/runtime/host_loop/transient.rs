@@ -155,6 +155,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         if !pending.ready.load(Ordering::Acquire) {
             return Ok(HostStep::Continue);
         }
+        if self.role.config.state_roots.runner_pending() {
+            return Ok(HostStep::Continue);
+        }
         let command = pending.plan.command_id.clone();
         let text = pending.plan.text.clone();
         let mut candidate = self.role.config.session.clone();

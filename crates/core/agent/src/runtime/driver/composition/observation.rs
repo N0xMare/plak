@@ -118,6 +118,23 @@ enum ObservedResponse {
 }
 
 impl ObservedResponse {
+    fn is_failure(&self) -> bool {
+        matches!(
+            self,
+            Self::Execute(Err(_)) | Self::Wait(Err(_) | Ok(LocalCompositionWaitOutcome::Lost(_)))
+        )
+    }
+
+    fn is_yielded(&self) -> bool {
+        matches!(
+            self,
+            Self::Yielded(_)
+                | Self::Execute(Ok(LocalCompositionResponse::Yielded { .. }))
+                | Self::Wait(Ok(LocalCompositionWaitOutcome::Live(
+                    LocalCompositionResponse::Yielded { .. }
+                )))
+        )
+    }
     fn with_notice(mut self, reason: Option<String>) -> Self {
         let response = match &mut self {
             Self::Execute(Ok(response))
@@ -184,16 +201,32 @@ impl Driver {
         let mut resume_in_flight = false;
         let mut expedited = false;
         let mut expedited_deadline_started = false;
+        let mut placement = self.tools.environment().placement_gate();
+        let mut placement_was_held = false;
+        let mut held_response = None;
         let wait_resumes_cell = state.integration().runtime_contract().wait_resumes_cell;
         let mut job_changes = self.job_sessions.job_terminal_changes();
         job_changes.mark_changed();
         loop {
+            let placement_held = placement
+                .as_ref()
+                .is_some_and(plakous_tools::internal::runner::PlacementGate::is_held);
+            if placement_held {
+                self.request_slot.take();
+            } else if placement_was_held {
+                response_deadline.set(crate::executor::sleep(
+                    observation.timeout(operation_timeout, false),
+                ));
+                nested_was_settled = false;
+                expedited_deadline_started = false;
+            }
+            placement_was_held = placement_held;
             let steer_pending = state.integration().runtime_contract().supports_yield
                 && matches!(
                     *self.tool_preempt.borrow(),
                     plakous_tools::ToolPreempt::Steer | plakous_tools::ToolPreempt::Notice(_)
                 );
-            if steer_pending && resume_in_flight && !expedited {
+            if !placement_held && steer_pending && resume_in_flight && !expedited {
                 let deadline = crate::executor::now() + EXPEDITED_OBSERVATION_BOUND;
                 let expedited_result = crate::executor::timeout_at(
                     deadline,
@@ -235,6 +268,20 @@ impl Driver {
                 && state.deliveries_are_empty()
                 && (matches!(observation, LocalCompositionObservation::Wait { .. })
                     || !state.has_active_nested());
+            if response_ready
+                && held_response
+                    .as_ref()
+                    .is_some_and(|response: &ObservedResponse| {
+                        !placement_held || !response.is_yielded()
+                    })
+                && let Some(response) = held_response.take()
+            {
+                break response.resolve(state);
+            }
+            let observe_held = placement_held
+                && (matches!(observation, LocalCompositionObservation::Execute { .. })
+                    || resume_in_flight
+                    || !wait_resumes_cell);
             let yield_ready = steer_pending && executions_settled && state.deliveries_are_empty();
             let held_nested = expedited && yield_ready && !state.pending_is_empty();
             let deadline_ready =
@@ -261,7 +308,13 @@ impl Driver {
                     };
                     Box::pin(self.handle_control(Some(command), control)).await;
                 }
-                () = &mut response_deadline, if deadline_ready => {
+                () = async {
+                    match placement.as_mut() {
+                        Some(gate) => gate.changed().await,
+                        None => std::future::pending().await,
+                    }
+                } => {},
+                () = &mut response_deadline, if deadline_ready && !placement_held => {
                     break if expedited_deadline_started {
                         Ok(observation.yielded(notice_reason))
                     } else {
@@ -271,13 +324,13 @@ impl Driver {
                 // Never drop a nested execution: the driver retains mutation
                 // settlement authority and drains an admitted read-only group.
                 response = async {
-                    if held_nested {
+                    if !placement_held && held_nested {
                         // The pump cannot publish its answer until these held
                         // calls are delivered. Retain the resume in the session
                         // and let the next wait dispatch them instead.
                         return ObservedResponse::Yielded(observation.yielded(notice_reason.clone()));
                     }
-                    if yield_ready && !resume_in_flight && poll_response
+                    if !placement_held && yield_ready && !resume_in_flight && poll_response
                         && matches!(observation, LocalCompositionObservation::Wait { .. })
                     {
                         match session.buffered(observation.cell_id().to_owned()).await {
@@ -286,9 +339,14 @@ impl Driver {
                             Ok(None) => {}
                         }
                     }
-                    observation.receive(&mut resume_in_flight, yield_ready, notice_reason.clone(), wait_resumes_cell, poll_response).await.with_notice(notice_reason.clone())
+                    observation.receive(&mut resume_in_flight, yield_ready && !placement_held, notice_reason.clone(), wait_resumes_cell, poll_response).await.with_notice(notice_reason.clone())
                 },
-                    if response_ready || yield_ready => break response.resolve(state),
+                    if held_response.is_none() && (observe_held || (!placement_held && (response_ready || yield_ready))) => {
+                        if response.is_failure() || !placement_held {
+                            break response.resolve(state);
+                        }
+                        held_response = Some(response);
+                    },
                 _ = job_changes.changed() => self.preempt_for_job_terminals(),
                 delivery = state.next_delivery(), if !state.deliveries_are_empty() => {
                     // Every receipt is the same instruction to the driver:
@@ -311,7 +369,7 @@ impl Driver {
                         break Err(error);
                     }
                 },
-                () = async {}, if !steer_pending
+                () = async {}, if !placement_held && !steer_pending
                     && state.pending_front().is_some_and(|pending| {
                     self.tools.definitions().iter().find(|definition| definition.name().as_str() == pending.call.tool_name).is_some_and(|definition| definition.effect() == ToolEffect::ReadOnly)
                         || (!state.has_active_nested() && state.completed_is_empty())

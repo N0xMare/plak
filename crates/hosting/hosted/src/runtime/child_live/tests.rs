@@ -1019,6 +1019,73 @@ fn test_runtime(root: &std::path::Path) -> (String, Arc<ProductTopologyRuntime>)
     (tree_id, runtime)
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn placement_hold_child_only_attention_and_activity_clear_without_a_tree_revision() {
+    let root = tempfile::tempdir().unwrap();
+    let (id, runtime) = test_runtime(root.path());
+    let vcs = Arc::new(crate::occupancy_vcs::fake::FakeVcs::new());
+    let (child, path) = runtime
+        .mutate_then_emit_borrowed_for_test(false, |tree| {
+            tree.set_vcs(vcs.clone());
+            let child = tree
+                .spawn_agent(
+                    "root",
+                    &crate::agent_tree_protocol::SpawnAgentRequest::test_review(),
+                    None,
+                )
+                .unwrap()
+                .agent_id;
+            Ok((child.clone(), tree.node(&child).unwrap().path.clone()))
+        })
+        .await
+        .unwrap();
+    let mut observations = ChildObservers::default();
+    let mut view = runtime
+        .read(crate::agent_tree::view::project_tree_view)
+        .unwrap();
+    observations.project(&mut view);
+    assert!(!super::super::child_projection::tree_needs_operator(&id));
+    vcs.set_placement_ready(path.clone(), false);
+    {
+        let _live = runtime.live.lock().await;
+        assert!(
+            super::super::child_projection::tree_needs_operator(&id),
+            "known placement attention must survive live-table contention"
+        );
+    }
+    assert!(observations.progress_changed());
+    assert!(observations.project(&mut view));
+    assert!(
+        view.nodes
+            .iter()
+            .find(|node| node.agent_id == child)
+            .unwrap()
+            .live_progress
+            .is_none(),
+        "placement attention cannot fabricate a running turn"
+    );
+    assert!(super::super::child_projection::tree_needs_operator(&id));
+    assert!(
+        !observations.progress_changed(),
+        "stable hold must not flood tree frames"
+    );
+    let revision = view.revision;
+    vcs.set_placement_ready(path, true);
+    assert!(observations.progress_changed());
+    observations.project(&mut view);
+    assert_eq!(view.revision, revision);
+    assert!(!super::super::child_projection::tree_needs_operator(&id));
+    assert!(
+        view.nodes
+            .iter()
+            .find(|node| node.agent_id == child)
+            .unwrap()
+            .live_progress
+            .is_none()
+    );
+    crate::topology_runtime::force_release(&id).await;
+}
+
 /// A running agent's view: committed rows first, naming the live turn, then
 /// only that turn's ops, none of them a committed item again. A tree update
 /// for the same turn changes nothing; the turn's end re-sends committed rows;

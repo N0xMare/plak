@@ -121,6 +121,48 @@ async fn root_transient_delay_and_no_probe_fallback_use_paused_time() {
 }
 
 #[test]
+fn placement_hold_root_ready_transient_retains_pending_instruction_until_placement_ready() {
+    use std::sync::atomic::Ordering;
+    let root = tempfile::tempdir().unwrap();
+    let (mut config, _) = fresh_injected_attached_host(root.path());
+    config.store.save(&mut config.session).unwrap();
+    let (_, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let (events, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let mut host = RootActor::open_blocking(config, &actions, Sender::over(events), None).unwrap();
+    assert!(host.in_runtime(|host| {
+        host.schedule_transient_resume(failure(ResumeGate::Network), "temporary failure")
+    }));
+    host.role
+        .pending_resume
+        .as_ref()
+        .unwrap()
+        .ready
+        .store(true, Ordering::Release);
+    let roots = host.role.config.state_roots.clone();
+    let registry = plakous::runner::RunnerRegistry::default();
+    registry.configure(plakous::runner::ConfiguredRunner {
+        runner_id: "local".into(),
+        names: vec!["local".into()],
+    });
+    host.role.config.state_roots = roots.clone().with_runner_readiness(registry, "local");
+    assert!(matches!(
+        host.block(async |host| host.transient_resume_prompt().await)
+            .unwrap(),
+        HostStep::Continue
+    ));
+    assert!(host.role.pending_resume.is_some());
+    assert_eq!(host.role.config.session.pending_queue.len(), 0);
+    assert!(!host.role.config.session.queue_commands.has_pending());
+    host.role.config.state_roots = roots;
+    assert!(matches!(
+        host.block(async |host| host.transient_resume_prompt().await)
+            .unwrap(),
+        HostStep::Prompt { .. }
+    ));
+    host.block(async |host| host.release().await).unwrap();
+}
+
+#[test]
 fn root_transient_ready_enqueues_one_instruction_without_user_history_or_mail() {
     use std::sync::atomic::Ordering;
     let root = tempfile::tempdir().unwrap();

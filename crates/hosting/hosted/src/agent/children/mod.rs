@@ -38,6 +38,7 @@ mod failed_worktree;
 mod reopen;
 mod turns;
 mod waiter;
+pub(in crate::agent) use waiter::resume_allowed;
 
 #[cfg(test)]
 pub(super) use reopen_error_tests::REOPEN_OPERATIONS;

@@ -342,6 +342,202 @@ pub(in crate::agent) fn held(text: &str) -> serde_json::Value {
 }
 
 #[tokio::test]
+async fn placement_hold_cut_parked_mail_and_late_reservation_wait_without_claim_or_turn() {
+    let vcs = Arc::new(crate::occupancy_vcs::fake::FakeVcs::new());
+    let fixture = fixture(
+        json!([start_job("read line"), {"output": {"text": "park"}}, held("wake")]),
+        |tree| {
+            tree.set_vcs(vcs.clone());
+            leaf(tree)
+        },
+    )
+    .await;
+    fixture.until("park", parked).await;
+    let path = fixture
+        .runtime
+        .read(|tree| tree.node(&fixture.child).unwrap().path.clone())
+        .unwrap();
+    let cut = Arc::new(tokio::sync::Notify::new());
+    hooks::set_before_wake_admission(
+        &fixture.child,
+        Arc::new({
+            let (vcs, path, cut) = (vcs.clone(), path.clone(), cut.clone());
+            move || {
+                let (vcs, path, cut) = (vcs.clone(), path.clone(), cut.clone());
+                Box::pin(async move {
+                    vcs.set_placement_ready(path, false);
+                    cut.notify_one();
+                })
+            }
+        }),
+    );
+    fixture
+        .mutate(|tree| {
+            tree.send_agent_message(
+                "root",
+                &SendAgentMessageRequest {
+                    refresh: None,
+                    agent_id: fixture.child.clone(),
+                    message: "wake mail".into(),
+                    purpose: None,
+                    priority: None,
+                    in_reply_to: None,
+                    output_schema_json: None,
+                },
+                None,
+            )
+            .unwrap();
+        })
+        .await;
+    tokio::time::timeout(Duration::from_secs(10), cut.notified())
+        .await
+        .unwrap();
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(100),
+            fixture.provider_gates[0].entered()
+        )
+        .await
+        .is_err(),
+        "held wake dispatched"
+    );
+    fixture
+        .runtime
+        .read(|tree| {
+            assert_eq!(tree.attempt(&fixture.child).unwrap().usage.turns, 1);
+            assert_eq!(
+                tree.attempt(&fixture.child).unwrap().submit_harness_nudge,
+                crate::agent_tree::SubmitNudgeBudget::NONE
+            );
+            assert!(tree.is_parked(&fixture.child));
+            assert_eq!(
+                tree.wake_mail(&fixture.child).len(),
+                1,
+                "held mail remains unclaimed"
+            );
+            assert!(
+                !tree
+                    .commands()
+                    .values()
+                    .any(|command| command.kind == crate::agent_tree::AgentCommandKind::Wake),
+                "held wake prepared a command batch"
+            );
+            assert_eq!(tree.pending_mail("root").len(), 0);
+        })
+        .unwrap();
+    vcs.set_placement_ready(path, true);
+    fixture.held_reached().await;
+    fixture.until("one wake", turns(2)).await;
+    fixture.submit().await;
+    fixture.until("submitted", settled).await;
+    fixture
+        .registry
+        .stop_all(Duration::from_millis(250))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn placement_hold_cut_submit_nudge_waits_and_stop_wins_without_release() {
+    let vcs = Arc::new(crate::occupancy_vcs::fake::FakeVcs::new());
+    let fixture = fixture(json!([held("unsubmitted"), held("corrective")]), |tree| {
+        tree.set_vcs(vcs.clone());
+        leaf(tree)
+    })
+    .await;
+    fixture.held_reached().await;
+    let path = fixture
+        .runtime
+        .read(|tree| tree.node(&fixture.child).unwrap().path.clone())
+        .unwrap();
+    vcs.set_placement_ready(path, false);
+    let nudge = Arc::new(tokio::sync::Notify::new());
+    hooks::set_before_submit_nudge(
+        &fixture.child,
+        Arc::new({
+            let nudge = nudge.clone();
+            move || {
+                let nudge = nudge.clone();
+                Box::pin(async move {
+                    nudge.notify_one();
+                })
+            }
+        }),
+    );
+    fixture.provider_gates[0].release();
+    tokio::time::timeout(Duration::from_secs(10), nudge.notified())
+        .await
+        .unwrap();
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(100),
+            fixture.provider_gates[1].entered()
+        )
+        .await
+        .is_err(),
+        "held corrective Start dispatched"
+    );
+    fixture
+        .runtime
+        .read(|tree| {
+            assert_eq!(tree.attempt(&fixture.child).unwrap().usage.turns, 1);
+            assert_eq!(
+                tree.attempt(&fixture.child).unwrap().submit_harness_nudge,
+                crate::agent_tree::SubmitNudgeBudget::NONE
+            );
+            assert!(
+                !tree
+                    .commands()
+                    .values()
+                    .any(|command| command.kind == crate::agent_tree::AgentCommandKind::Corrective)
+            );
+            assert!(
+                !tree.operations().values().any(|operation| {
+                    operation.tool_name == "child_finalization"
+                        && operation
+                            .canonical_request
+                            .contains("\"decision\":\"Nudge\"")
+                }),
+                "hold recorded a corrective decision"
+            );
+        })
+        .unwrap();
+    fixture
+        .mutate(|tree| {
+            tree.interrupt_agent(
+                "root",
+                &crate::agent_tree_protocol::AttemptScopedRequest {
+                    agent_id: fixture.child.clone(),
+                    expected_attempt_id: None,
+                },
+                None,
+            )
+            .unwrap();
+        })
+        .await;
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        fixture.runtime.cancel_live(&fixture.child),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        fixture
+            .runtime
+            .read(|tree| tree.node(&fixture.child).unwrap().status)
+            .unwrap(),
+        NodeStatus::Interrupted
+    );
+    assert!(
+        fixture
+            .runtime
+            .read(|tree| tree.pending_mail("root").is_empty())
+            .unwrap()
+    );
+}
+
+#[tokio::test]
 async fn transient_failure_continues_same_attempt_after_exact_route_probe() {
     use plakous::model::{ReachabilityProbe, RouteId};
     let entered = Arc::new(tokio::sync::Notify::new());

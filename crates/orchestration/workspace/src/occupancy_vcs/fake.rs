@@ -72,6 +72,7 @@ type LockProbe = Box<dyn Fn() -> bool + Send + Sync>;
 /// plain directories under `<launch>/.plak/fake/<agent_id>`.
 #[derive(Default)]
 pub struct FakeVcs {
+    placements: Mutex<BTreeMap<PathBuf, bool>>,
     calls: Mutex<Vec<FakeCall>>,
     lock_probe: Mutex<Option<LockProbe>>,
     next_seal: Mutex<Option<Result<VcsSnapshot, VcsError>>>,
@@ -86,6 +87,13 @@ pub struct FakeVcs {
 }
 
 impl FakeVcs {
+    /// Sets a managed placement's barrier for deterministic admission cuts.
+    pub fn set_placement_ready(&self, path: PathBuf, ready: bool) {
+        self.placements
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(path, ready);
+    }
     /// Enables a deterministic Ready/Refreshed pair for indexed refresh cuts.
     pub fn script_refresh(&self) {
         self.scripted_refresh
@@ -469,6 +477,16 @@ impl FakeVcs {
 /// Each answer is computed when the call is made, so a recorded call's lock
 /// probe sees the caller's lock state at the call.
 impl VcsOps for FakeVcs {
+    fn placement_ready(&self, path: &Path) -> Option<bool> {
+        self.placements
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|(root, _)| path.starts_with(root))
+            .max_by_key(|(root, _)| root.components().count())
+            .map(|(_, ready)| *ready)
+    }
+
     fn prepare_refresh<'a>(
         &'a self,
         request: &'a super::RefreshRequest,

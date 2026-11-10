@@ -91,6 +91,14 @@ pub struct RevertRange {
 /// fallible, and an `Err` is never an "absent" answer: a port that cannot
 /// reach the workspace answers `Err`, and the caller fails closed.
 pub trait VcsOps: Send + Sync {
+    /// Current placement admission for `path`, without I/O. `None` denotes
+    /// an in-process port. A closed barrier defers unstarted seals and new
+    /// turns, never retries a dispatched stage.
+    fn placement_ready(&self, path: &Path) -> Option<bool> {
+        let _ = path;
+        None
+    }
+
     /// The runner this port's effects run on when it is not this process:
     /// its effects are then recorded as tree stages before they run, and
     /// each runs under its stage's key (see [`super::stage`]). `None`, the

@@ -474,14 +474,33 @@ pub(crate) fn tree_needs_operator(tree_id: &str) -> bool {
     let Some(runtime) = crate::topology_runtime::lookup(tree_id) else {
         return false;
     };
+    let placement_attention = runtime.try_read(|tree| {
+        tree.nodes().values().any(|node| {
+            node.agent_id != tree.root_agent_id
+                && matches!(
+                    node.status,
+                    crate::agent_tree_protocol::NodeStatus::Running
+                        | crate::agent_tree_protocol::NodeStatus::Pending
+                        | crate::agent_tree_protocol::NodeStatus::Sealing
+                        | crate::agent_tree_protocol::NodeStatus::RecoveryRequired
+                )
+                && !tree.placement_ready(&node.agent_id)
+        })
+    });
     let Ok(live) = runtime.live.try_lock() else {
-        return LAST
-            .lock()
+        return placement_attention.unwrap_or(false)
+            || LAST
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(tree_id)
+                .is_some_and(|last| last.runtime.ptr_eq(&Arc::downgrade(&runtime)) && last.value);
+    };
+    let value = placement_attention.unwrap_or_else(|| {
+        LAST.lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(tree_id)
-            .is_some_and(|last| last.runtime.ptr_eq(&Arc::downgrade(&runtime)) && last.value);
-    };
-    let value = live.keys().any(|id| {
+            .is_some_and(|last| last.runtime.ptr_eq(&Arc::downgrade(&runtime)) && last.value)
+    }) || live.keys().any(|id| {
         live.get(id)
             .and_then(of)
             .is_some_and(|observation| observation.needs_operator())

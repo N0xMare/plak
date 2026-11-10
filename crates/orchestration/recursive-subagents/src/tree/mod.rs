@@ -7,6 +7,8 @@
 mod bootstrap;
 mod effects;
 mod ledger;
+#[cfg(test)]
+mod placement_hold_tests;
 mod records;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};

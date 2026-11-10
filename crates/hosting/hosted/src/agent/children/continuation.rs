@@ -138,6 +138,11 @@ async fn resume_claimed(
         }
         Err(error) => return Resumed::Settled(LossResume::Deferred(error)),
     };
+    if !crate::agent::placement::ready(runtime.driver(), agent_id) {
+        return Resumed::Settled(LossResume::Deferred(
+            "child placement is unavailable".into(),
+        ));
+    }
     let Ok(command) = CommandId::new(command_id.clone()) else {
         return Resumed::Settled(LossResume::Deferred(
             "the continuation command id is invalid".to_owned(),
