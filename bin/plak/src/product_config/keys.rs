@@ -651,7 +651,7 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         field: ConfigField::SkillsEnabled,
         kind: "bool",
         constraint: "true or false",
-        doc: "Discover Agent Skills (<workspace>/.agents/skills, then ~/.agents/skills; a session on a remote runner discovers only the workspace root, on the runner) when a session is constructed, list them in its instructions, let its read tool read files under ~/.agents/skills (local sessions), and give Claude-vocabulary sessions the Skill tool. Bound when a new session or spawn is constructed; exact reopen keeps the listing and tools it froze, and a fork, rebind or switch keeps the source session's on or off.",
+        doc: "Discover Agent Skills (<workspace>/.agents/skills, then ~/.agents/skills; both on the selected runner for a remote session, using that runner process's home, never the host's) when a session is constructed, list them in its instructions, let its read tool read files under that user skill root on the same machine, and give Claude-vocabulary sessions the Skill tool. Bound when a new session or spawn is constructed; exact reopen keeps the listing and tools it froze, and a fork, rebind or switch keeps the source session's on or off.",
         example: "true",
         scope: ConfigScope::Immediate,
     },

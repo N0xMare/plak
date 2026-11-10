@@ -41,7 +41,7 @@ fn a_runner_placed_session_opens_with_skills_on() {
     let workspace = std::fs::canonicalize(&config.session.workspace_root).unwrap();
     write_skill(&workspace, "review-pr");
 
-    let (services, client) = runner_serving(&runner_runtime, &workspace);
+    let (services, client) = runner_serving(&runner_runtime, &workspace, None);
     // As the host's placement does: the node's services and the shared
     // client's control port.
     config.state_roots = config
@@ -107,6 +107,8 @@ fn a_runner_placed_session_cold_reopens_through_the_host() {
     let trees = root.join("trees/subagents.sqlite3");
     std::fs::create_dir_all(trees.parent().unwrap()).unwrap();
     let setting = crate::skills::SkillsSetting::new(true, Some(login_home));
+    let runner_home = root.join("runner-login");
+    write_skill(&runner_home, "runner-only");
     let (mut config, parent) = api_topology_root_parent(
         &root,
         None,
@@ -118,7 +120,7 @@ fn a_runner_placed_session_cold_reopens_through_the_host() {
     drop(parent);
     let workspace = std::fs::canonicalize(&config.session.workspace_root).unwrap();
     write_skill(&workspace, "review-pr");
-    let (services, client) = runner_serving(&runner_runtime, &workspace);
+    let (services, client) = runner_serving(&runner_runtime, &workspace, Some(&runner_home));
     config.state_roots = config
         .state_roots
         .with_runner_services(services.clone())
@@ -142,7 +144,9 @@ fn a_runner_placed_session_cold_reopens_through_the_host() {
         .unwrap();
     let first = frozen.listing.unwrap();
     assert!(
-        first.contains("review-pr") && !first.contains("host-only"),
+        first.contains("review-pr")
+            && first.contains("runner-only")
+            && !first.contains("host-only"),
         "{first}"
     );
     drop(sessions);
@@ -193,7 +197,7 @@ fn an_unreachable_runner_fails_skills_discovery_closed_and_names_why() {
         .enable_all()
         .build()
         .unwrap();
-    let (services, client) = runner_serving(&runner_runtime, &workspace);
+    let (services, client) = runner_serving(&runner_runtime, &workspace, None);
     client.disconnect();
     let error = crate::skills::NodeSkills::discover(
         &crate::skills::SkillsSetting::new(true, None),

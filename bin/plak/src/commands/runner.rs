@@ -335,7 +335,7 @@ fn vcs_extension(
         admits.clone(),
         config.copies.clone(),
     );
-    plakous_hosted::runner_reader::runner_extension(vcs, admits)
+    plakous_hosted::runner_reader::runner_extension(vcs, admits, crate::home::paths::user_home())
 }
 
 /// This build's daemon socket in `home`, refused by name when the platform

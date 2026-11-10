@@ -7001,7 +7001,8 @@ This is path-policy validation, not an atomic exec or hostile-shim-content fence
 
 Tool operations reach the workspace through the sealed backend, with three
 exceptions: the files pack's skill-root read exception, which opens files under
-the enrolled skill roots directly; the hosted `Skill` load, which reads
+the enrolled skill roots locally for a local node or through that node's runner
+for a placed node; the hosted `Skill` load, which reads
 through an `InstructionSourceReader`; and the orchestration topology tools,
 whose mints, seals, adoptions, removals, refreshes and occupancy probes reach
 copies and checkouts through the orchestration VCS port (chapter 03 §16). The few
@@ -7021,6 +7022,13 @@ under its roots and outside its home (chapter 04 §2.9); any other is a
 workspace refusal, which the host sees as `Unavailable`. The probe is a
 port, not authority: it grants nothing a tool could use, and the product-state
 exclusion and copy-layout rules applied to its answers stay with the host.
+The runner's instruction extension also answers `user_skill_home` with its own
+process home and `read_skill_slice` with at most one standard text slice of a
+regular file under its own canonical user skill root. These are read-only
+`ReadInstructions` requests, not workspace or VCS admission. The files pack's
+`with_runner_skill_roots` retains runner-discovered paths without host filesystem
+resolution and reads those slices on that runner, checking their bounds and
+cancellation between slices; no runner failure becomes a local-file fallback.
 Every probe and reader answer is fallible with a distinct `Unavailable` error
 (`ProbeError::Unavailable`, `SourceReadError::Unavailable`, or
 `SourceReadError::UnavailableBecause` carrying the runner's bounded reason,

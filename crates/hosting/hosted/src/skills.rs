@@ -55,19 +55,23 @@ impl SkillsSetting {
     }
 
     /// The project root, then the user root under this process's home. A
-    /// node placed on a runner has no user root: this home is not on the
-    /// machine its reads and tools reach, and the runner serves only its own
-    /// roots.
+    /// node placed on a runner asks that runner for its own home, never uses
+    /// this host's home, and reads both roots through the runner.
     fn roots(
         &self,
         workspace_root: &Path,
         runner: Option<&plakous::runner::RunnerServices>,
-    ) -> Vec<SkillRoot> {
+    ) -> Result<Vec<SkillRoot>, plakous::prompts::instructions::SourceReadError> {
         let mut roots = vec![SkillRoot::project(workspace_root)];
-        if runner.is_none() {
-            roots.extend(self.home.as_deref().map(SkillRoot::user));
+        match runner {
+            Some(runner) => roots.extend(
+                crate::runner_reader::user_skill_home(runner)?
+                    .as_deref()
+                    .map(SkillRoot::user),
+            ),
+            None => roots.extend(self.home.as_deref().map(SkillRoot::user)),
         }
-        roots
+        Ok(roots)
     }
 }
 
@@ -120,6 +124,7 @@ pub(crate) struct NodeSkills {
     discovery: Arc<SkillDiscovery>,
     /// Where the skill files are read, at discovery and at every `Skill` load.
     reader: Arc<dyn InstructionSourceReader>,
+    runner: Option<plakous::runner::RunnerServices>,
 }
 
 impl std::fmt::Debug for NodeSkills {
@@ -147,11 +152,20 @@ impl NodeSkills {
         presentation: SkillsPresentation,
         runner: Option<&plakous::runner::RunnerServices>,
     ) -> CliResult<Self> {
-        let roots = setting.roots(workspace_root, runner);
         let reader: Arc<dyn InstructionSourceReader> =
             crate::runner_reader::instruction_reader(runner);
         let unreadable =
             |error| CliFailure::new(format!("skills could not be discovered: {error}"));
+        let on = match mode {
+            SkillsMode::New => setting.enabled,
+            SkillsMode::Inherited(on) => on,
+            SkillsMode::Frozen(frozen) => frozen.on || frozen.listing.is_some(),
+        };
+        let roots = if on {
+            setting.roots(workspace_root, runner).map_err(unreadable)?
+        } else {
+            Vec::new()
+        };
         let fresh = |on: bool| {
             Ok(Self {
                 presentation,
@@ -163,6 +177,7 @@ impl NodeSkills {
                     SkillDiscovery::default()
                 }),
                 reader: Arc::clone(&reader),
+                runner: runner.cloned(),
             })
         };
         let frozen = match mode {
@@ -187,6 +202,7 @@ impl NodeSkills {
             new_construction: false,
             discovery: Arc::new(discovery),
             reader,
+            runner: runner.cloned(),
         })
     }
 
@@ -206,6 +222,10 @@ impl NodeSkills {
             .filter(|root| root.scope() == SkillScope::User)
             .map(|root| root.path().to_path_buf())
             .collect()
+    }
+
+    pub(crate) fn runner(&self) -> Option<&plakous::runner::RunnerServices> {
+        self.runner.as_ref()
     }
 
     /// The listing as one instruction source after `AGENTS.md`; a reopen

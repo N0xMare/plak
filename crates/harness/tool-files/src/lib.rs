@@ -118,9 +118,19 @@ fn codex_patch_envelope_registration(
 ///
 /// The default pack reads only the workspace (and issued job output files).
 /// [`FilesToolPack::with_skill_roots`] adds read-only skill roots.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct FilesToolPack {
     skill_roots: Arc<[PathBuf]>,
+    skill_runner: Option<plakous_tools::internal::runner::RunnerServices>,
+}
+
+impl std::fmt::Debug for FilesToolPack {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FilesToolPack")
+            .field("skill_roots", &self.skill_roots)
+            .field("remote_skills", &self.skill_runner.is_some())
+            .finish()
+    }
 }
 
 impl FilesToolPack {
@@ -142,7 +152,35 @@ impl FilesToolPack {
         }
         Self {
             skill_roots: canonical.into(),
+            skill_runner: None,
         }
+    }
+
+    /// Uses canonical user skill roots discovered on this runner. These paths
+    /// are never resolved or read on the host; the runner rechecks its own root
+    /// containment for every read.
+    #[must_use]
+    pub fn with_runner_skill_roots(
+        roots: impl IntoIterator<Item = PathBuf>,
+        runner: plakous_tools::internal::runner::RunnerServices,
+    ) -> Self {
+        Self {
+            skill_roots: roots.into_iter().collect(),
+            skill_runner: Some(runner),
+        }
+    }
+
+    /// The runner extension's bounded, read-only user-skill file operation.
+    ///
+    /// # Errors
+    /// Refuses paths outside `root`, escaping links and non-regular files.
+    #[doc(hidden)]
+    pub fn read_skill_slice(
+        root: &Path,
+        path: &Path,
+        offset: u64,
+    ) -> Result<(Vec<u8>, bool), ToolRuntimeError> {
+        read::skill_root::read_slice(root, path, offset)
     }
 
     /// Registers transactional file operations for an explicitly enrolled SDK catalog.
@@ -170,7 +208,7 @@ impl ToolPack for FilesToolPack {
         Ok(vec![
             standard_registration(
                 "read-file",
-                ReadFileTool::new(Arc::clone(&self.skill_roots)),
+                ReadFileTool::new(Arc::clone(&self.skill_roots), self.skill_runner.clone()),
             )?,
             standard_registration("view-image", visual::ViewImageTool::new())?,
             standard_registration_with_executor(

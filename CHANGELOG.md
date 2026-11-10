@@ -20,9 +20,10 @@ one cross-build carrier (a build imports its own and the previous version).
   installing and using `/reload`.
 
 - Open sessions placed on a remote runner with skills on: such a node
-  discovers only `<workspace>/.agents/skills`, on the runner, and never asks
-  the runner for the host's `~/.agents/skills`, which it refused outside its
-  roots so that every first open failed. A runner reader's failure now names
+  discovers `<workspace>/.agents/skills` and then the runner process's
+  `~/.agents/skills`, both on the runner, never the host's home. User-skill file
+  reads use the runner's read-only exception, allow links only within that root,
+  and never fall back to a same-spelled host file. A runner reader's failure now names
   the runner's reason (`SourceReadError::UnavailableBecause`), so
   `SourceReadError` is no longer `Copy`; discovery still fails closed when the
   runner cannot answer.

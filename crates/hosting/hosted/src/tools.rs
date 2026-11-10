@@ -62,6 +62,7 @@ pub struct ProductToolExtensions {
     /// Canonical user skill roots this node's read may reach outside the
     /// workspace.
     skill_roots: Arc<[std::path::PathBuf]>,
+    skill_runner: Option<plakous::runner::RunnerServices>,
     /// The skills listing this node's instructions carry after `AGENTS.md`.
     skills_listing: Option<plakous::agent::RegisteredContextSource>,
     /// Whether a registered `Skill` is presented: only on Claude vocabulary.
@@ -123,6 +124,7 @@ impl ProductToolExtensions {
             image_gen: None,
             contributions: Arc::new([]),
             skill_roots: Arc::new([]),
+            skill_runner: None,
             skills_listing: None,
             skill_presented: false,
         })
@@ -134,6 +136,7 @@ impl ProductToolExtensions {
     /// Call it after [`Self::with_plan`], which rebuilds the extensions.
     pub(crate) fn with_skills(mut self, skills: &crate::skills::NodeSkills) -> CliResult<Self> {
         self.skill_roots = skills.read_roots().into();
+        self.skill_runner = skills.runner().cloned();
         self.skills_listing = skills.listing_source()?;
         self.skill_presented = skills.presented();
         if let Some(registration) = skills.tool_registration()? {
@@ -161,6 +164,10 @@ impl ProductToolExtensions {
 
     pub(crate) fn skill_roots(&self) -> &[std::path::PathBuf] {
         &self.skill_roots
+    }
+
+    pub(crate) fn skill_runner(&self) -> Option<&plakous::runner::RunnerServices> {
+        self.skill_runner.as_ref()
     }
 
     pub(crate) fn skills_listing(&self) -> Option<&plakous::agent::RegisteredContextSource> {

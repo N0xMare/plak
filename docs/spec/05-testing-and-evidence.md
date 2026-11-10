@@ -2012,9 +2012,13 @@ as reaping its parent: group signal delivery is not a join. Hosted client-reload
 PTY fixtures fence Activity opening and closing by its heading, not command text
 that can already appear in the transcript, before sending the next slash command.
 Remote skills regressions construct a native Claude-profile session through a
-workspace-only loopback runner and cold-reopen an API session through the host
+workspace-restricted loopback runner with its own user-skill exception and
+cold-reopen an API session through the host
 after dropping the runtime and topology handles. Exact reopen retains the frozen
 listing even when another project skill appears; neither open reads host-home skills.
+The native fixture counts real runner file-read requests, exercises multiple
+bounded slices, permits an internal user-root link, refuses an escaping link,
+and requires a disconnected runner to refuse rather than read the host file.
 The guarded entry points are the Rust lanes in `tools/gate/dev-check.sh`,
 `just nextest`, and `just dev crash-sweep`. `tools/dev/coverage.sh` and
 `tools/perf/perf-smoke.sh` are not guarded.

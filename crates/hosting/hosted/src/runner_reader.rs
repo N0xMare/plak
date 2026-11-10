@@ -35,6 +35,20 @@ pub(crate) fn instruction_reader(
     }
 }
 
+pub(crate) fn user_skill_home(
+    runner: &plakous::runner::RunnerServices,
+) -> Result<Option<PathBuf>, SourceReadError> {
+    let reader = RunnerInstructionSourceReader {
+        link: runner.backend().link(),
+        runtime: runner.runtime().clone(),
+    };
+    let answer = reader.ask(json!({"op": "user_skill_home"}))?;
+    if answer.get("home") == Some(&Value::Null) {
+        return Ok(None);
+    }
+    path_of(answer.get("home")).map(Some).ok_or(INVALID)
+}
+
 /// An [`InstructionSourceReader`] whose answers come from a runner. Each
 /// read is one request, waited for on a thread of its own; any link failure
 /// is [`SourceReadError::UnavailableBecause`] naming it, never an absent
@@ -292,34 +306,48 @@ pub fn test_runner_extension() -> Arc<dyn RunnerExtension> {
     runner_extension(
         plakous_recursive_subagents::remote_vcs::vcs_runner_extension(Arc::new(|_| true), None),
         Arc::new(|_| true),
+        None,
     )
 }
 
 /// Combines runner-owned instruction reads with the admitted VCS extension.
-/// The same consent predicate protects instruction reads before filesystem I/O.
+/// Workspace consent and the runner's own read-only user skill root protect
+/// instruction reads before filesystem I/O.
 #[doc(hidden)]
 #[must_use]
 pub fn runner_extension(
     vcs: Arc<dyn RunnerExtension>,
     admits: Arc<dyn Fn(&Path) -> bool + Send + Sync>,
+    login_home: Option<PathBuf>,
 ) -> Arc<dyn RunnerExtension> {
-    Arc::new(NodeRunnerExtension { vcs, admits })
+    Arc::new(NodeRunnerExtension {
+        vcs,
+        admits,
+        login_home,
+    })
 }
 
 struct NodeRunnerExtension {
     vcs: Arc<dyn RunnerExtension>,
     admits: Arc<dyn Fn(&Path) -> bool + Send + Sync>,
+    login_home: Option<PathBuf>,
 }
 
 impl RunnerExtension for NodeRunnerExtension {
     fn serve(&self, verb: RunnerVerb, payload: Value) -> ServeFuture {
+        if verb == RunnerVerb::ReadInstructions {
+            let home = self.login_home.clone();
+            let admits = self.admits.clone();
+            return Box::pin(async move {
+                tokio::task::spawn_blocking(move || {
+                    answer_node(&payload, home.as_deref(), admits.as_ref())
+                })
+                .await
+                .map_err(|_| ServeFailure::Unsupported)?
+            });
+        }
         match verb {
             RunnerVerb::VcsRead | RunnerVerb::VcsEffect => self.vcs.serve(verb, payload),
-            RunnerVerb::ReadInstructions
-                if path_of(payload.get("path")).is_some_and(|path| (self.admits)(&path)) =>
-            {
-                InstructionReaderExtension.serve(verb, payload)
-            }
             _ => Box::pin(std::future::ready(Err(
                 plakous::tools::runner::environment_failure(
                     &plakous::tools::runner::workspace_refusal(),
@@ -329,21 +357,80 @@ impl RunnerExtension for NodeRunnerExtension {
     }
 }
 
-struct InstructionReaderExtension;
-
-impl RunnerExtension for InstructionReaderExtension {
-    fn serve(&self, verb: RunnerVerb, payload: Value) -> ServeFuture {
-        if verb != RunnerVerb::ReadInstructions {
-            return Box::pin(std::future::ready(Err(ServeFailure::Unsupported)));
-        }
-        Box::pin(async move {
-            tokio::task::spawn_blocking(move || answer(&payload))
-                .await
-                .ok()
-                .flatten()
-                .ok_or(ServeFailure::Unsupported)
-        })
+fn refused_skill(message: &str) -> ServeFailure {
+    ServeFailure::Backend {
+        error: json!({"message": message}),
+        proven_no_effect: true,
     }
+}
+
+fn answer_node(
+    question: &Value,
+    home: Option<&Path>,
+    admits: &dyn Fn(&Path) -> bool,
+) -> Result<Value, ServeFailure> {
+    let op = question
+        .get("op")
+        .and_then(Value::as_str)
+        .ok_or(ServeFailure::Unsupported)?;
+    if op == "user_skill_home" {
+        return Ok(json!({"home": home.map(bytes)}));
+    }
+    let user_root = home.map(|home| home.join(".agents/skills"));
+    if op == "read_skill_slice" {
+        let decode_path = |field: &str| {
+            serde_json::from_value::<Vec<u8>>(question[field].clone())
+                .map(|bytes| PathBuf::from(OsString::from_vec(bytes)))
+                .map_err(|_| ServeFailure::Unsupported)
+        };
+        let path = decode_path("path_bytes")?;
+        let supplied = decode_path("root_bytes")?;
+        let root = user_root
+            .as_ref()
+            .and_then(|root| std::fs::canonicalize(root).ok())
+            .filter(|root| root == &supplied)
+            .ok_or_else(|| refused_skill("the runner does not serve this user skill root"))?;
+        let offset = question
+            .get("offset")
+            .and_then(Value::as_u64)
+            .ok_or(ServeFailure::Unsupported)?;
+        let result = plakous::tools::FilesToolPack::read_skill_slice(&root, &path, offset)
+            .map_err(|error| refused_skill(error.message().as_str()))?;
+        return serde_json::to_value(result).map_err(|_| ServeFailure::Unsupported);
+    }
+    let path = path_of(question.get("path")).ok_or(ServeFailure::Unsupported)?;
+    if admits(&path) {
+        return answer(question).ok_or(ServeFailure::Unsupported);
+    }
+    let root = user_root.ok_or_else(|| refused_skill("the runner has no user skills home"))?;
+    let canonical_root = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
+    if !path.is_absolute()
+        || path.components().any(|part| {
+            matches!(
+                part,
+                std::path::Component::ParentDir | std::path::Component::CurDir
+            )
+        })
+        || (!path.starts_with(&root) && !path.starts_with(&canonical_root))
+    {
+        return Err(plakous::tools::runner::environment_failure(
+            &plakous::tools::runner::workspace_refusal(),
+        ));
+    }
+    // Canonicalization may report an escaping target so discovery can give
+    // the same diagnostic as local discovery, but it never reads that target.
+    if op == "canonicalize" || op == "entry_kind" {
+        return answer(question).ok_or(ServeFailure::Unsupported);
+    }
+    if std::fs::canonicalize(&path).is_ok_and(|path| !path.starts_with(&canonical_root)) {
+        return Err(refused_skill(
+            "path resolves outside the skills directory on the runner",
+        ));
+    }
+    if op == "read_instruction_chain" {
+        return Err(ServeFailure::Unsupported);
+    }
+    answer(question).ok_or(ServeFailure::Unsupported)
 }
 
 /// One read's answer from this process's filesystem; `None` for a request

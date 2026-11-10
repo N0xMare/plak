@@ -8492,10 +8492,12 @@ A skill is a directory `<root>/<name>/SKILL.md` in the Agent Skills format.
 With `skills.enabled` (chapter 07, default true) a new construction discovers
 `<workspace root>/.agents/skills` and then `~/.agents/skills`; nothing else
 under `.agents/` is read. A node placed on a remote runner (§3.1) discovers
-only the project root, through the runner: `~/.agents/skills` is the host
-process's login home, which is not on the machine the node's reads and tools
-reach, so it is never read for that node and its read tool has no skill-root
-exception. A runner that cannot answer still fails discovery closed, and the
+the project root and then the runner process's `~/.agents/skills`, both through
+the runner. The host's login home is never used for that node. The runner serves
+its user skill root as a read-only exception to its workspace roots; the node's
+read tool reaches that exception through the runner, never through a same-spelled
+host path. Local nodes keep their local user root. A runner that cannot answer
+fails discovery and reads closed, and the
 refusal carries the runner's reason. The project root is admitted only when its canonical
 path stays inside the canonical workspace, and nothing in it may be reached
 through a link: a linked skill directory or `SKILL.md` there is refused, so

@@ -14,6 +14,7 @@ use std::sync::Arc;
 pub(crate) fn runner_serving(
     runtime: &tokio::runtime::Runtime,
     workspace: &Path,
+    login_home: Option<&Path>,
 ) -> (RunnerServices, RunnerClient) {
     let admitted = workspace.to_path_buf();
     let admits: Arc<dyn Fn(&Path) -> bool + Send + Sync> =
@@ -21,6 +22,7 @@ pub(crate) fn runner_serving(
     let extension = super::runner_extension(
         plakous_recursive_subagents::remote_vcs::vcs_runner_extension(admits.clone(), None),
         admits,
+        login_home.map(Path::to_path_buf),
     );
     let version = VersionTriple::current("remote-skills", "debug");
     let service = RunnerService::with_options(

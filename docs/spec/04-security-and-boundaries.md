@@ -341,8 +341,14 @@ skill root never enters the exception: its files are workspace files, read
 through ordinary containment, and discovery refuses a project root whose
 canonical path leaves the canonical workspace (a repository may commit
 `.agents/skills` as a link to anywhere) and any link inside it. A node placed
-on a remote runner has no user skill root and so no exception: the exception
-opens host files, and that node's tools reach the runner. The user root
+on a remote runner uses the runner process's user skill root, never the host's
+home. Both discovery and the read exception run on that runner. Its instruction
+extension reports its own process home and serves user-skill reads outside
+the workspace roots, never VCS operations, writes, arbitrary home files or a
+host-supplied user root. Every file read rechecks the runner-owned canonical root
+and refuses a link escaping it; links within that root are permitted, with the
+same file and discovery bounds as local skills. An unavailable runner refuses
+with its reason, without falling back to the host filesystem. The user root
 is admitted only if it existed as a directory when the node's tools were
 built (session construction, and again at each reopen or attach; a reopen
 admits it only when the session froze a skills listing or the `Skill` tool,

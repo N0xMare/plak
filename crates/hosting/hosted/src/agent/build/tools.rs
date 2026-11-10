@@ -54,9 +54,16 @@ pub(crate) fn coding_tool_registry_with_extensions(
     // the product extension pack. Composition markers below are enrollment for
     // a driver, not a model-visible tool, and are not a pack.
     let mut builder = ToolRegistryBuilder::default();
+    let files = match extensions.skill_runner() {
+        Some(runner) => plakous::tools::FilesToolPack::with_runner_skill_roots(
+            extensions.skill_roots().to_vec(),
+            runner.clone(),
+        ),
+        None => plakous::tools::FilesToolPack::with_skill_roots(extensions.skill_roots().to_vec()),
+    };
     plakous::tools::register_packs(
         &plakous::tools::standard_coding_packs_with_files(
-            plakous::tools::FilesToolPack::with_skill_roots(extensions.skill_roots().to_vec()),
+            files,
             Arc::new(InMemoryPlanState::with_identity(identity)),
             Arc::clone(&process),
         ),

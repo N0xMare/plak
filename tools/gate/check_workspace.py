@@ -1894,6 +1894,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     ("plakous-hosted", "src/tools.rs"): {
         "tools": {"ProcessPackConfig"},
         "prompts": {"UNTRUSTED_TOOL_DATA_AGREEMENTS", "UNTRUSTED_TOOL_DATA_CONTRIBUTION_ID"},
+        "runner": {"RunnerServices"},
     },
     # Binding reads each route's release-owned hosted retrieval table.
     ("plakous-hosted", "src/tool_plan.rs"): {
