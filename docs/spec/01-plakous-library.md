@@ -11441,7 +11441,9 @@ and `ProbeError` are nameable the same way. `plakous::prompts::instructions`
 names `InstructionSourceReader`, `LocalInstructionSourceReader` and the answer
 types (`SourceResolution`, `DirectoryAnswer`, `DirectoryRefusal`,
 `InstructionChainEntry`, `SourceFile`, `SourceEntryKind`, `SourceReadError`),
-so a consumer can supply its own reader. Discovery takes the reader first:
+so a consumer can supply its own reader. `SourceReadError` is not `Copy`: its
+`UnavailableBecause(String)` variant carries a reader's bounded reason.
+Discovery takes the reader first:
 `discover_instruction_sources(reader, product_home, workspace_root, cwd)`
 (its error gains `InstructionDiscoveryError::Reader`),
 `skills::discover_skills(reader, workspace_root, roots)` and

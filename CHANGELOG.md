@@ -11,8 +11,9 @@ one cross-build carrier (a build imports its own and the previous version).
   discovers only `<workspace>/.agents/skills`, on the runner, and never asks
   the runner for the host's `~/.agents/skills`, which it refused outside its
   roots so that every first open failed. A runner reader's failure now names
-  the runner's reason (`SourceReadError::UnavailableBecause`); discovery still
-  fails closed when the runner cannot answer.
+  the runner's reason (`SourceReadError::UnavailableBecause`), so
+  `SourceReadError` is no longer `Copy`; discovery still fails closed when the
+  runner cannot answer.
 
 - Hold a live session's runner work while its placement is unreachable instead
   of failing it: unsent tool effects and model reads wait for the reconnect
