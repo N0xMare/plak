@@ -38,10 +38,10 @@ mod foreground;
 /// How long the host waits on its runner.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ClientWindows {
-    /// How long a read or other non-effect waits from its send for an answer
+    /// How long a request outside the effect-call and tree classes waits
     /// (spec 01 §8.4: 30 s). A lost link interrupts a read for reissue.
     pub read: Duration,
-    /// How long a keyed model effect or tree step waits (120 s).
+    /// How long any model call, including a read, or tree step waits (120 s).
     pub effect: Duration,
     /// How often the host pings the runner (5 s).
     pub ping: Duration,
@@ -236,10 +236,10 @@ impl RunnerClient {
     pub fn has_pending_calls(&self) -> bool {
         !lock(&self.inner.state).pending.is_empty() || !lock(&self.inner.left).is_empty()
     }
-    /// Ends the wait of every model effect whose link is lost: its placement
+    /// Ends the wait of every model call whose link is lost: its placement
     /// was refused, removed or replaced, so no rebinding will replay it
-    /// here. Each ends of unknown outcome and keeps its journal claim for
-    /// keyed recovery. Nothing on a live link is touched.
+    /// here. Effects end of unknown outcome and keep their journal claim;
+    /// reads end interrupted. Nothing on a live link is touched.
     pub fn abandon_lost_effects(&self) {
         let mut state = lock(&self.inner.state);
         if state.sender.is_some() && !state.closer.is_cancelled() {
@@ -248,10 +248,7 @@ impl RunnerClient {
         let lost: Vec<String> = state
             .pending
             .iter()
-            .filter(|(_, pending)| {
-                matches!(pending.request.class, RequestClass::EffectCall { .. })
-                    && keyed(&pending.request)
-            })
+            .filter(|(_, pending)| matches!(pending.request.class, RequestClass::EffectCall { .. }))
             .map(|(id, _)| id.clone())
             .collect();
         let abandoned: Vec<Pending> = lost
@@ -260,9 +257,9 @@ impl RunnerClient {
             .collect();
         drop(state);
         for pending in abandoned {
-            let _ = pending.answer.send(Err(RunnerFailure::OutcomeUnknown(
-                "the runner placement was refused with the call outstanding".into(),
-            )));
+            let failure = Expiring::of(&pending.request)
+                .lost("the runner placement was refused with the call outstanding");
+            let _ = pending.answer.send(Err(failure));
         }
     }
 
@@ -642,7 +639,15 @@ impl State {
                 } else {
                     "the link was lost with the call outstanding"
                 };
-                let failure = Expiring::of(&pending.request).lost(detail);
+                let failure = if restarted
+                    && matches!(
+                        pending.request.class,
+                        RequestClass::ProcessObservation { .. }
+                    ) {
+                    RunnerFailure::OutcomeUnknown(detail.into())
+                } else {
+                    Expiring::of(&pending.request).lost(detail)
+                };
                 let _ = pending.answer.send(Err(failure));
             }
         }
@@ -778,12 +783,13 @@ impl Inner {
                 let Some((request_id, answer, acknowledge)) = request_answer(other) else {
                     return;
                 };
-                // The answer is recorded below, so the runner may forget it.
-                let recorded = lock(&self.state)
+                // A late keyed answer still releases the runner's retention
+                // hold after its waiter has gone. A known read has no key.
+                let unkeyed = lock(&self.state)
                     .pending
                     .get(&request_id)
-                    .is_some_and(|pending| keyed(&pending.request));
-                if acknowledge && recorded {
+                    .is_some_and(|pending| !keyed(&pending.request));
+                if acknowledge && !unkeyed {
                     self.send(HostFrame::Ack {
                         request_id: request_id.clone(),
                     });
@@ -998,12 +1004,10 @@ impl Inner {
 
     /// How long a sent request waits for its answer.
     fn window(&self, request: &Request) -> Duration {
-        if keyed(request)
-            && matches!(
-                request.class,
-                RequestClass::EffectCall { .. } | RequestClass::TreeOperation { .. }
-            )
-        {
+        if matches!(
+            request.class,
+            RequestClass::EffectCall { .. } | RequestClass::TreeOperation { .. }
+        ) {
             self.windows.effect
         } else {
             self.windows.read
@@ -1113,7 +1117,8 @@ impl Inner {
             }
         }
         drop(foreground_guard);
-        let expiry = tokio::time::sleep(window);
+        let deadline = tokio::time::Instant::now() + window;
+        let expiry = tokio::time::sleep(expiring.recheck(window));
         tokio::pin!(expiry);
         let cancellation = call.cancellation().clone();
         let mut cancel_sent = false;
@@ -1147,7 +1152,7 @@ impl Inner {
                     }
                 }
                 () = &mut expiry => {
-                    match self.expired(expiring, sent_on, window) {
+                    match self.expired(expiring, sent_on, window, deadline) {
                         Ok(deadline) => expiry.as_mut().reset(deadline),
                         Err(failure) => {
                             lock(&self.state).pending.remove(&request_id);
@@ -1244,6 +1249,7 @@ impl Inner {
         expiring: Expiring,
         sent_on: u64,
         window: Duration,
+        deadline: tokio::time::Instant,
     ) -> Result<tokio::time::Instant, RunnerFailure> {
         let unknown = || {
             RunnerFailure::OutcomeUnknown(
@@ -1257,6 +1263,9 @@ impl Inner {
             Expiring::Read if lost => Err(RunnerFailure::ReadInterrupted(
                 "the link was lost before the read was answered".into(),
             )),
+            Expiring::Read if tokio::time::Instant::now() < deadline => {
+                Ok(deadline.min(tokio::time::Instant::now() + LOST_LINK_RECHECK))
+            }
             Expiring::ModelEffect if !linked => {
                 Ok(tokio::time::Instant::now() + LOST_LINK_RECHECK.min(window))
             }
@@ -1438,7 +1447,7 @@ const fn ends_connection(refusal: &Refusal) -> bool {
     )
 }
 
-/// How often a model effect whose link is lost looks for its rebinding.
+/// How often a read checks link loss, or a lost model effect checks rebinding.
 const LOST_LINK_RECHECK: Duration = Duration::from_secs(1);
 
 /// How a sent call's answer window ends.
@@ -1453,6 +1462,13 @@ enum Expiring {
 }
 
 impl Expiring {
+    fn recheck(self, window: Duration) -> Duration {
+        match self {
+            Self::Read => window.min(LOST_LINK_RECHECK),
+            Self::Window | Self::ModelEffect => window,
+        }
+    }
+
     fn lost(self, detail: &str) -> RunnerFailure {
         match self {
             Self::Read => RunnerFailure::ReadInterrupted(detail.into()),

@@ -6162,9 +6162,9 @@ digest and claim age never change. Cancellation, including the driver's
 shutdown, ends a wait as `NotSent`, and a refused admission ends every wait
 with `Unavailable`; a call made under a refused admission refuses at once
 until a later Ready opens it. Refusing, removing or replacing a placement also
-ends every model effect that was sent on its now-lost link and is waiting for a
-rebinding: it is `OutcomeUnknown` at once and keeps its journal claim for
-keyed recovery. A foreground yield whose promotion the lost link refused
+immediately ends every model read sent on its now-lost link with
+`ReadInterrupted`, and every sent model effect waiting for a rebinding with
+`OutcomeUnknown`. Effects keep their journal claims for keyed recovery. A foreground yield whose promotion the lost link refused
 before send does not terminate the process: the tool's observation waits out
 the hold, then the promotion is tried once more, or, if the process ended
 meanwhile, the tool reports its end and exit status instead of a running
@@ -6218,8 +6218,8 @@ the normal recovery-required path before Ready. The driver's placement parking
   keyed by host, line, generation, call, attempt and verb for an effect verb,
   so one call may start a process and then write to it, and must name its
   owner. A read verb under the same class keeps its owner fence and model-call
-  identity but is never entered in the runner's op table, journaled by the
-  host or acknowledged. A tool may repeat identical reads or make different
+  identity but is never entered in the runner's op table or journaled by the
+  host; the host skips acknowledgement for a known pending read's answer. A tool may repeat identical reads or make different
   reads of the same verb, including slices and reads of several files, under
   one call and attempt. This applies to every read verb in the runner seam,
   not only `workspace.read` and `repository.query`. Read replays remain
@@ -6308,8 +6308,8 @@ the normal recovery-required path before Ready. The driver's placement parking
   held is answered and readdressed only to the instance that last sent it or
   to the line's holder (a successor that transferred the line first), so no
   other process takes its answer, result or acknowledgement. An observation
-  has no effect and is not held to the holder. The fence applies to
-  work that has not run: a new key or an unkeyed request whose owner is older
+  or model-call read has no effect and is not held to the holder. The fence
+  applies to work that has not run: a new key or an unkeyed request whose owner is older
   than the accepted owner is refused `StaleOwner`, and one whose owner is newer
   but was never transferred, or is the accepted owner of a line that is not
   held (orphaned, or recorded before a restart), is refused
@@ -6333,15 +6333,21 @@ the normal recovery-required path before Ready. The driver's placement parking
   its `Ack`, `Cancel` and `Preempt` belong to the host instance that last sent
   it: the answer goes to that instance's connection, and another instance of
   the same host cannot acknowledge, cancel or yield it. Answers and
-  tombstones are kept until `Ack` or for 24 hours. A replay carries `age_ms`,
+  tombstones are kept until `Ack` or for 24 hours. The host still acknowledges
+  a late keyed answer after its waiter expired, was cancelled or was abandoned;
+  it skips acknowledgement only for a known pending unkeyed request. A late
+  answer no longer matched to a pending request is acknowledged conservatively;
+  an unrecorded read has no key to spend. This releases a late keyed answer's
+  idle-retention hold. A replay carries `age_ms`,
   how long ago the host first claimed it by its wall clock; an unseen key
   replayed at least 23 hours after its claim (24 hours less a 1 hour margin
   for that clock stepping back) answers `Expired` and is not tombstoned, since
   the runner may have run it and forgotten it: its outcome is unknown.
-  A model read uses the read window, not the effect window. Losing its link
-  or restarting its runner interrupts it with `ReadInterrupted`, never an
-  unknown effect. Placement-hold-eligible reads retain their model-call flag
-  and owner: the hold waits and reissues the same arguments and cursor after
+  A model read keeps the 120 s effect-call answer window on a healthy link,
+  even though it reserves no effect key. A lost link interrupts the read at
+  the next 1 s link recheck; a runner restart interrupts it immediately. Both
+  return `ReadInterrupted`, never an unknown effect. Placement-hold-eligible
+  reads retain their model-call flag and owner: the hold waits and reissues the same arguments and cursor after
   release. A live keyed effect remains retained and replayed under its original
   key; excluding reads changes neither its retention nor its at-most-once law.
 - **Line table.** Protocol 3 adds `foreground` to each `Lines` entry: true
@@ -6462,8 +6468,8 @@ the normal recovery-required path before Ready. The driver's placement parking
   separates builds with different read-key and interruption semantics because
   a home-local bind does not require matching source revisions.
 - **Host link.** On a healthy link a call waits 30 s for an answer (120 s
-  for an effect or tree call), then its outcome is unknown. Effect calls,
-  owner controls, observations and reads outstanding when the link is lost
+  for every `EffectCall`, including a model read, or tree call), then its
+  outcome is unknown. Effect calls, owner controls, observations and reads outstanding when the link is lost
   are sent again on reconnection to the same runner instance: keyed calls by
   their key and digest, reads and observations by their arguments and cursor.
   An unkeyed mutation, process or service spawn outstanding then is
@@ -6473,8 +6479,11 @@ the normal recovery-required path before Ready. The driver's placement parking
   age), so a lost link alone never fixes its outcome as unknown at 120 s; a
   runner restart, `Spent`, `Expired` or cancellation still does at once. An
   unkeyed read or observation whose link was lost while it waited ends at its
-  window as `ReadInterrupted`, re-issuable rather than of unknown outcome;
-  any other caller maps it as unknown. This is host-side answer scheduling
+  next link recheck (at most 1 s) as `ReadInterrupted`, re-issuable rather
+  than of unknown outcome; any other caller maps it as unknown. A runner restart
+  still ends an outstanding `ProcessObservation` as `OutcomeUnknown`, because
+  the process and cursor belong to the old runner instance; it is not reread
+  against the new instance. This is host-side answer scheduling
   only: frames, keys, holders, digests, Ack, replay age and runner retention
   are unchanged. A call refused before it entered the transport for a
   transient reason (no connection, a send failure, an owner transfer the

@@ -266,6 +266,375 @@ mod model_reads {
     }
 }
 
+mod review_call_keys {
+    use super::*;
+    use plakous_tools::internal::runner::{RunnerExtension, RunnerVerb, ServeFuture};
+
+    struct ReadLink {
+        _root: tempfile::TempDir,
+        client: plakous_runner::RunnerClient,
+        tap: Tap,
+        environment: ExecutionEnvironment,
+        runner: Raw,
+    }
+
+    impl ReadLink {
+        async fn new() -> Self {
+            let root = tempfile::tempdir().unwrap();
+            let hello = service(root.path()).hello().clone();
+            let (link, runner) = fake_runner(&hello).await;
+            let (client, _) = plakous_runner::RunnerClient::connect(
+                link,
+                bind("instance-1"),
+                ClientWindows::default(),
+            )
+            .await
+            .unwrap();
+            let tap = Tap::new(&client);
+            let backend =
+                Arc::new(RunnerBackend::new(hello.descriptor, Arc::new(tap.clone())).unwrap());
+            let environment =
+                runner_environment(scope(), root.path(), ".", config(), backend).unwrap();
+            Self {
+                _root: root,
+                client,
+                tap,
+                environment,
+                runner,
+            }
+        }
+
+        fn read(
+            &self,
+        ) -> tokio::task::JoinHandle<
+            Result<plakous_tools::WorkspaceReadSlice, plakous_tools::ExecutionBackendError>,
+        > {
+            tokio::spawn(self.environment.read_workspace(
+                WorkspaceReadSliceRequest::start("a", 5).unwrap(),
+                effect(owner(1, 1), 1),
+            ))
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_healthy_model_query_keeps_the_effect_window_past_thirty_seconds() {
+        let mut link = ReadLink::new().await;
+        let query = RepositoryQuery::new(
+            ".",
+            b"needle".to_vec(),
+            RepositoryMatchCase::Sensitive,
+            query_limits(),
+        )
+        .unwrap();
+        let querying = tokio::spawn(
+            link.environment
+                .query_repository(query, effect(owner(1, 1), 1)),
+        );
+        let sent = link.runner.next_request().await;
+        assert_eq!(sent.operation.verb, "repository.query");
+        tokio::time::advance(Duration::from_secs(31)).await;
+        tokio::task::yield_now().await;
+        assert!(
+            !querying.is_finished(),
+            "a healthy model read still has its 120 s window"
+        );
+        link.runner
+            .answer(&RunnerFrame::Result {
+                request_id: sent.request_id,
+                payload: json!({"matches":[], "files_considered":0, "files_scanned":0,
+                "bytes_scanned":0, "skipped_binary":0, "skipped_oversize":0,
+                "skipped_changed":0, "entries_skipped":0, "lossy_lines":0, "stop_reason":null}),
+            })
+            .await;
+        assert_eq!(querying.await.unwrap().unwrap().matches().len(), 0);
+        assert_eq!(link.tap.failures(), []);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_lost_model_read_interrupts_within_the_link_recheck_not_the_effect_window() {
+        let mut link = ReadLink::new().await;
+        let reading = link.read();
+        let _sent = link.runner.next_request().await;
+        link.client.disconnect();
+        let _ = link.client.lines().await;
+        tokio::time::timeout(Duration::from_secs(2), reading)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert!(matches!(
+            link.tap.failures().as_slice(),
+            [RunnerFailure::ReadInterrupted(_)]
+        ));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn abandoning_a_lost_placement_interrupts_its_model_read_at_once() {
+        let mut link = ReadLink::new().await;
+        let reading = link.read();
+        let _sent = link.runner.next_request().await;
+        link.client.disconnect();
+        let now = tokio::time::Instant::now();
+        link.client.abandon_lost_effects();
+        tokio::time::timeout(Duration::from_secs(1), reading)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(
+            tokio::time::Instant::now(),
+            now,
+            "no answer window or recheck wait"
+        );
+        assert!(matches!(
+            link.tap.failures().as_slice(),
+            [RunnerFailure::ReadInterrupted(_)]
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_model_read_from_the_current_owners_sibling_runs_without_taking_the_line() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("a"), "alpha").unwrap();
+        let service = service(root.path());
+        let recorder = Arc::new(Recorder::default());
+        let backend = Arc::new(
+            RunnerBackend::new(service.hello().descriptor.clone(), recorder.clone()).unwrap(),
+        );
+        let environment = runner_environment(scope(), root.path(), ".", config(), backend).unwrap();
+        let _ = environment
+            .read_workspace(WorkspaceReadSliceRequest::start("a", 5).unwrap(), unkeyed())
+            .await;
+        let (verb, payload) = recorder.0.lock().unwrap().pop().unwrap();
+        let operation = Operation { verb, payload };
+        let mut holder = Raw::bound(&service, "instance-1").await;
+        assert!(matches!(
+            holder.ask(transfer("t", None, wire_owner())).await,
+            RunnerFrame::TransferAccepted { .. }
+        ));
+        let mut sibling = Raw::bound(&service, "instance-2").await;
+        let call = "00000000-0000-0000-0000-000000000001";
+        for replay in [false, true] {
+            assert!(matches!(
+                sibling.ask(keyed("read", call, &operation, replay)).await,
+                RunnerFrame::Result { .. }
+            ));
+        }
+        let append = super::operation(&service, root.path(), shell("echo x >> log")).await;
+        assert_eq!(
+            sibling.ask(keyed("effect", call, &append, false)).await,
+            not_transferred("effect")
+        );
+        assert_eq!(appended(root.path()), 0);
+        assert!(matches!(
+            holder.ask(keyed("effect", call, &append, false)).await,
+            RunnerFrame::Result { .. }
+        ));
+        assert_eq!(appended(root.path()), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_runner_restart_keeps_a_pending_process_observation_unknown() {
+        let root = tempfile::tempdir().unwrap();
+        let mut hello = service(root.path()).hello().clone();
+        let (link, mut first) = fake_runner(&hello).await;
+        let (client, _) =
+            plakous_runner::RunnerClient::connect(link, bind("instance-1"), windows())
+                .await
+                .unwrap();
+        let tap = Tap::new(&client);
+        let sessions = Arc::new(plakous_tools::internal::runner::RunnerSessions::from_link(
+            Arc::new(tap.clone()),
+            &host(root.path()),
+            owner(1, 1),
+        ));
+        let id = started(&sessions, &mut first, &hello).await;
+        let polling = poll_at(&sessions, id);
+        let sent = first.next_request().await;
+        assert!(matches!(
+            sent.class,
+            RequestClass::ProcessObservation { .. }
+        ));
+        hello.instance = "restarted".into();
+        let (link, _second) = fake_runner(&hello).await;
+        client.reconnect(link).await.unwrap();
+        polling.await.unwrap().unwrap_err();
+        assert!(
+            matches!(
+                tap.failures().as_slice(),
+                [RunnerFailure::OutcomeUnknown(_)]
+            ),
+            "{:?}",
+            tap.failures()
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_late_model_effect_answer_is_acked_after_abandon_or_unreachable_cancel() {
+        for abandon in [true, false] {
+            let root = tempfile::tempdir().unwrap();
+            let hello = service(root.path()).hello().clone();
+            let (link, mut first) = fake_runner(&hello).await;
+            let (client, _) =
+                plakous_runner::RunnerClient::connect(link, bind("instance-1"), windows())
+                    .await
+                    .unwrap();
+            let sessions = plakous_tools::internal::runner::RunnerSessions::from_link(
+                Arc::new(client.clone()),
+                &host(root.path()),
+                owner(1, 1),
+            );
+            let control = effect(owner(1, 1), 1);
+            let cancellation = control.cancellation().clone();
+            let starting =
+                tokio::spawn(async move { sessions.start(start_request(), control).await });
+            let sent = first.next_request().await;
+            drop(first);
+            let _ = client.lines().await;
+            if abandon {
+                client.abandon_lost_effects();
+            } else {
+                cancellation.cancel();
+            }
+            starting.await.unwrap().unwrap_err();
+            let (link, mut second) = fake_runner(&hello).await;
+            client.reconnect(link).await.unwrap();
+            second
+                .answer(&RunnerFrame::Result {
+                    request_id: sent.request_id.clone(),
+                    payload: json!({"session": SESSION, "instance":hello.instance}),
+                })
+                .await;
+            let ack = tokio::time::timeout(Duration::from_secs(1), async {
+                loop {
+                    if let HostFrame::Ack { request_id } = second.next_host().await {
+                        break request_id;
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            assert_eq!(ack, sent.request_id);
+        }
+    }
+
+    #[derive(Default)]
+    struct DelayedEffect {
+        started: tokio::sync::Notify,
+        release: Arc<tokio::sync::Notify>,
+    }
+
+    impl RunnerExtension for DelayedEffect {
+        fn serve(&self, _: RunnerVerb, _: Value) -> ServeFuture {
+            self.started.notify_one();
+            let release = Arc::clone(&self.release);
+            Box::pin(async move {
+                release.notified().await;
+                Ok(json!({"ran":true}))
+            })
+        }
+    }
+
+    // Observe the real host's Ack while forwarding it to the real runner.
+    async fn ack_relay(
+        host: DuplexStream,
+        runner: DuplexStream,
+        ack: tokio::sync::oneshot::Sender<String>,
+    ) {
+        let (mut host_read, mut host_write) = tokio::io::split(host);
+        let (mut runner_read, mut runner_write) = tokio::io::split(runner);
+        let replies = tokio::io::copy(&mut runner_read, &mut host_write);
+        let requests = async move {
+            let mut ack = Some(ack);
+            let mut frames = FrameReader::new();
+            let mut buffer = [0; 4096];
+            loop {
+                let read = host_read.read(&mut buffer).await.unwrap();
+                if read == 0 {
+                    break;
+                }
+                runner_write.write_all(&buffer[..read]).await.unwrap();
+                frames.push(&buffer[..read]);
+                while let Some(frame) = frames.next_frame().unwrap() {
+                    if let HostFrame::Ack { request_id } = decode::<HostFrame>(&frame).unwrap()
+                        && let Some(ack) = ack.take()
+                    {
+                        let _ = ack.send(request_id);
+                    }
+                }
+            }
+        };
+        tokio::select! { _ = replies => {}, () = requests => {} }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_late_keyed_answer_after_window_expiry_is_acked_and_no_longer_pins_idle() {
+        let root = tempfile::tempdir().unwrap();
+        let delayed = Arc::new(DelayedEffect::default());
+        let service = RunnerService::with_options(
+            host(root.path()),
+            RunnerIdentity {
+                runner_id: RunnerId::new("loopback").unwrap(),
+                version: version(),
+                boot_id: "boot".into(),
+                binary_id: None,
+            },
+            plakous_runner::RunnerOptions {
+                extension: Some(delayed.clone()),
+                limits: RunnerLimits {
+                    dead: Duration::from_secs(3600),
+                    ..RunnerLimits::default()
+                },
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let (host, relay_host) = tokio::io::duplex(1 << 16);
+        let (relay_runner, runner) = tokio::io::duplex(1 << 16);
+        let serving = tokio::spawn({
+            let service = service.clone();
+            async move { service.serve_connection(runner).await }
+        });
+        let (ack, acked) = tokio::sync::oneshot::channel();
+        let relay = tokio::spawn(ack_relay(relay_host, relay_runner, ack));
+        let (client, _) = plakous_runner::RunnerClient::connect(
+            host,
+            bind("instance-1"),
+            ClientWindows::default(),
+        )
+        .await
+        .unwrap();
+        let call = tokio::spawn(client.call(RunnerCall::tree(
+            RunnerVerb::VcsEffect,
+            json!({}),
+            "tree",
+            "op",
+        )));
+        delayed.started.notified().await;
+        tokio::time::advance(Duration::from_secs(121)).await;
+        assert!(matches!(
+            call.await.unwrap(),
+            Err(RunnerFailure::OutcomeUnknown(_))
+        ));
+        delayed.release.notify_one();
+        assert_ne!(
+            tokio::time::timeout(Duration::from_secs(1), acked)
+                .await
+                .unwrap()
+                .unwrap(),
+            ""
+        );
+        client.lines().await.unwrap(); // FIFO barrier after the forwarded Ack.
+        client.disconnect();
+        relay.await.unwrap();
+        serving.await.unwrap();
+        assert!(
+            service.is_idle(),
+            "holds_unacknowledged must clear for the late keyed answer"
+        );
+    }
+}
+
 fn scope() -> ExecutionEnvironmentScope {
     ExecutionEnvironmentScope::Run(RunId::from_str("00000000-0000-0000-0000-000000000041").unwrap())
 }

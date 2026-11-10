@@ -19,7 +19,7 @@ kills that home's daemons until none remain. A real-daemon regression places
 a successor and a startup probe before the exit observation, on both supported
 platforms.
 
-Runner placement contracts pin protocol 4 frames, process payloads and read-only
+Runner placement contracts pin protocol 5 frames, process payloads and read-only
 root-identity probes without modifying earlier version pins. Deterministic runner
 tests distinguish an answered/Acked start from a committed terminal driver operation:
 same-owner live reconnect preserves foreground work, terminal cleanup stops only the

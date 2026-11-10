@@ -86,6 +86,12 @@ There is no need to reinstall an unchanged unit after updating the stable
 binary link. Remote runners still need the host's matching protocol/revision/
 flavor; follow the runner upgrade rules rather than substituting another build.
 
+Before upgrading from runner protocol 4 to 5, finish or stop all home-local
+background jobs using the old build. A protocol-5 host does not see the live
+protocol-4 home-local daemon or its jobs, including during the embedded
+startup check. Settle those jobs before installing the new build and using
+`/reload`; reloading does not transfer them across protocol directories.
+
 The unit leaves WorkingDirectory unset, using systemd's user-service default
 of `$HOME`; it does not choose a workspace or change cwd to bypass startup checks.
 

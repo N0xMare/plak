@@ -14,6 +14,10 @@ one cross-build carrier (a build imports its own and the previous version).
   keyed effects retain their at-most-once behavior. Runner protocol 5 separates
   these semantics from older home-local runners, which can bind across source
   revisions; frame schemas and persisted formats are unchanged.
+  Settle home-local background jobs before upgrading: a protocol-5 host does
+  not see a live protocol-4 home-local daemon or its jobs, including in the
+  embedded startup check. Finish or stop them with the old build before
+  installing and using `/reload`.
 
 - Open sessions placed on a remote runner with skills on: such a node
   discovers only `<workspace>/.agents/skills`, on the runner, and never asks
