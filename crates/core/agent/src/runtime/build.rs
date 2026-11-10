@@ -41,7 +41,8 @@ use crate::manifest::{
 use crate::profile::compile_construction_bound_plan;
 use crate::runtime::RequestSlots;
 use crate::runtime::admission::{
-    refreshed_reopen_admission, reopen_account_changed, validate_configuration_runtime_authority,
+    attribute_account_change, refreshed_reopen_admission, reopen_account_changed,
+    validate_configuration_runtime_authority,
 };
 use crate::runtime::checkpoint::io::{
     DurabilityCommitTelemetry, StoreCallError, StorePhase, store_call,
@@ -770,10 +771,11 @@ impl PreparedAgent {
         Self::new_bound(builder, Some(bootstrap))
     }
 
-    /// A reopen refused under another provider account says so, whichever
-    /// binding comparison failed first: an account-scoped model binding (a
+    /// A binding refusal of a reopen under another provider account says so,
+    /// whichever comparison failed first: an account-scoped model binding (a
     /// context contract naming the account) differs too, and that change
-    /// stays named for a carry.
+    /// stays named for a carry. Other refusals (store, ownership, an
+    /// unreadable checkpoint) keep their own cause.
     pub(super) fn new_bound(
         builder: AgentBuilder,
         bootstrap: Option<DurableRuntimeBootstrap>,
@@ -784,13 +786,8 @@ impl PreparedAgent {
                 &builder.initial_model_authority,
             )
         });
-        Self::new_bound_checked(builder, bootstrap).map_err(|error| {
-            if account_changed {
-                error.with_account_changed()
-            } else {
-                error
-            }
-        })
+        Self::new_bound_checked(builder, bootstrap)
+            .map_err(|error| attribute_account_change(error, account_changed))
     }
 
     #[allow(

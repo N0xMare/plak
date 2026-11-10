@@ -832,15 +832,15 @@ async fn retry_step<W: FamilyWire, H: FamilyHttpHooks<W>>(
         unreachable,
     } = progress;
     let facts = attempt.terminal_facts();
-    let advice_beyond_budget =
-        unreachable.advice_beyond_budget(facts, failure.point, failure.retry_after, *waited);
-    let delay = unreachable.next_delay(
+    let wait = unreachable.next_wait(
         facts,
         failure.point,
         failure.retry_after,
         *waited,
         Jitter::random(),
     );
+    let delay = wait.delay();
+    let advice_beyond_budget = wait == plakous_attempt::RetryWait::AdviceBeyondBudget;
     let reason = retry_decline(
         &RetryDeclineInput {
             deadline_remaining: hard_deadline

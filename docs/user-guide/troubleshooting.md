@@ -121,9 +121,14 @@ OpenRouter Chat also retries one in-band upstream timeout (`408` or `504`)
 within the existing budget; a second ends the turn as a timeout. Partial output
 is discarded, and a request with a possible hosted effect is never replayed.
 
-Plak makes at most four ordinary requests, honoring the provider's `Retry-After` (a
-longer wait is shortened to 60 seconds) and otherwise waiting about 1, 2 and 4
-seconds (randomized by up to half), with at most 120 seconds of ordinary waiting.
+Plak makes at most four ordinary requests, honoring the provider's `Retry-After`
+(a longer wait is shortened to 60 seconds while it still fits the 120 seconds of
+ordinary waiting left; advice beyond that ends the attempt at once, declined
+for `advice_beyond_budget`) and otherwise waiting about 1, 2 and 4 seconds
+(randomized by up to half), with at most 120 seconds of ordinary waiting.
+Advice of a day or more is shown as `retry after 24 h or more`, never as an
+exact number of seconds. A Claude subscription whose session or weekly limit
+is used up names that limit and its reset time instead, and is not retried.
 When DNS, connection or TLS fails before anything was sent, it instead rides
 out a short outage: up to twelve proven-unsent requests, waiting about 2, 4, 8,
 16 then 30 seconds (randomized by up to half), with at most 240 seconds of
@@ -180,8 +185,7 @@ request body byte count, never the body or query parameters.
 `plak telemetry status --views` includes `v_replay_loss`: content-free retry
 and declined-retry rows. A declined row records `declined_reason` (`deadline`,
 `budget`, `advice_beyond_budget`, `server_effect`, `retry_disabled`, or
-`workflow`; `advice_beyond_budget` means the provider asked to wait longer
-than the two-minute retry wait allows); its next attempt
+`workflow`); its next attempt
 number is proposed, not dispatched. Zero delay and `output_discarded=false`
 are declined `ModelRetry` event facts, not SQL columns. The rows include
 correlation ids, attempts, cause/phase, text/thinking byte counts, completed

@@ -676,10 +676,9 @@ pub(super) fn attach_repair_notice(failure: &HostFailure, original_account: &str
             "the live login selection changed since this session was recorded",
             R::CarryCurrentLogin {},
         ),
-        A::AccountChanged => (
-            "the provider account changed since this session was recorded",
-            R::RestoreAccountOrRebind { account },
-        ),
+        // The diagnostic names the account change; this row only leads its
+        // remedy.
+        A::AccountChanged => ("repair options", R::RestoreAccountOrRebind { account }),
         A::BindingChanged => (
             "this session's frozen binding differs from what the current login and build derive",
             R::RestoreBindingOrCarry { account },
@@ -693,7 +692,7 @@ pub(super) fn attach_repair_notice(failure: &HostFailure, original_account: &str
             R::LoginThenAttach { account },
         ),
         A::TreeHostedElsewhere => (
-            "another plak process holds this session's agent tree; if it ran on another machine or is gone, `plak tree release --force <tree-id>` releases it",
+            "another plak process holds this session's agent tree; quit that plak, or if it ran on another machine or is gone, `plak tree release --force <tree-id>` releases it",
             R::RepairThenAttach {},
         ),
         A::Other => ("the agent could not attach", R::RepairThenAttach {}),

@@ -260,6 +260,7 @@ impl AnthropicLocalHttpServiceFactory {
     #[must_use]
     pub fn make_service(&self) -> AnthropicLocalHttpService {
         let hooks = AnthropicHttpHooks {
+            clock: Arc::clone(&self.clock),
             route: self.route.clone(),
             prepared: self.prepared.clone(),
             renewal: self.renewal.clone(),
@@ -620,6 +621,7 @@ pub async fn call_local_anthropic_operation(
 
 #[derive(Clone)]
 struct AnthropicHttpHooks {
+    clock: Arc<dyn Clock>,
     route: AnthropicPlatformRoute,
     prepared: PreparedMessagesRequest,
     renewal: Option<Arc<dyn ClaudeCredentialRenewal>>,
@@ -666,6 +668,7 @@ fn anthropic_credential_rejected(
             .await
             .map_err(|error| protocol_source(&error))?;
         Ok(AnthropicHttpHooks {
+            clock: Arc::clone(&hooks.clock),
             route: grant.route,
             prepared: hooks.prepared.clone(),
             renewal: hooks.renewal.clone(),
@@ -804,7 +807,7 @@ impl MessagesHttpHooks<plakous_messages::MessagesWire> for AnthropicHttpHooks {
                         .then(|| {
                             usage_limit::SubscriptionLimit::from_headers(
                                 response.headers(),
-                                std::time::SystemTime::now(),
+                                self.clock.now(),
                             )
                         })
                         .flatten(),

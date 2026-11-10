@@ -8,10 +8,11 @@
 use std::time::{Duration, SystemTime};
 
 use plakous_http::{HeaderName, HeaderValue};
+use plakous_model::Timestamp;
+
+use super::RATE_LIMIT_CLAIM as CLAIM;
 
 const STATUS: HeaderName = HeaderName::from_static("anthropic-ratelimit-unified-status");
-const CLAIM: HeaderName =
-    HeaderName::from_static("anthropic-ratelimit-unified-representative-claim");
 const RESET: HeaderName = HeaderName::from_static("anthropic-ratelimit-unified-reset");
 const OVERAGE_STATUS: HeaderName =
     HeaderName::from_static("anthropic-ratelimit-unified-overage-status");
@@ -63,11 +64,11 @@ impl SubscriptionLimit {
     /// Reads the unified rate-limit headers of a 429. Each header must occur
     /// at most once; a duplicated, unknown or missing attestation, or a
     /// request the account's usage credits still admit, establishes nothing.
-    pub(super) fn from_headers(headers: &plakous_http::Headers, now: SystemTime) -> Option<Self> {
+    pub(super) fn from_headers(headers: &plakous_http::Headers, now: Timestamp) -> Option<Self> {
         Self::from_pairs(&headers.iter().collect::<Vec<_>>(), now)
     }
 
-    fn from_pairs(headers: &[(&HeaderName, &HeaderValue)], now: SystemTime) -> Option<Self> {
+    fn from_pairs(headers: &[(&HeaderName, &HeaderValue)], now: Timestamp) -> Option<Self> {
         if single(headers, &STATUS)? != b"rejected" {
             return None;
         }
@@ -84,9 +85,8 @@ impl SubscriptionLimit {
             .and_then(|value| std::str::from_utf8(value).ok())
             .filter(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
             .and_then(|value| value.parse::<u64>().ok())
-            .filter(|seconds| *seconds <= MAX_RESET_SECONDS)
-            .and_then(|seconds| SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(seconds)))
-            .filter(|time| *time > now);
+            .filter(|seconds| *seconds <= MAX_RESET_SECONDS && *seconds > now.seconds())
+            .and_then(|seconds| SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(seconds)));
         Some(Self { window, resets_at })
     }
 
@@ -146,14 +146,15 @@ mod tests {
         headers
     }
 
-    const NOW: Duration = Duration::from_secs(1_800_000_000);
-    const FUTURE: &str = "4102444812";
+    const NOW: u64 = 1_800_000_000;
+    /// One day after `NOW`.
+    const FUTURE: &str = "1800086400";
 
     fn read(lines: &[(&'static str, &'static str)]) -> Option<SubscriptionLimit> {
         let headers = headers(lines);
         SubscriptionLimit::from_pairs(
             &headers.iter().collect::<Vec<_>>(),
-            SystemTime::UNIX_EPOCH + NOW,
+            Timestamp::new(NOW, 0).ok()?,
         )
     }
 
@@ -174,7 +175,7 @@ mod tests {
             assert_eq!(
                 limit.notice(),
                 format!(
-                    "You've hit your Claude {name}; try again after Fri, 01 Jan 2100 00:00:12 GMT, or switch to another Claude account."
+                    "You've hit your Claude {name}; try again after Sat, 16 Jan 2027 08:00:00 GMT, or switch to another Claude account."
                 )
             );
         }
@@ -184,7 +185,7 @@ mod tests {
     fn a_missing_past_or_malformed_reset_keeps_the_limit_without_a_time() {
         for reset in [
             None,
-            Some("1700000000"),
+            Some("1800000000"),
             Some("soon"),
             Some("1.5e9"),
             Some(""),

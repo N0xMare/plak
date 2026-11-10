@@ -259,8 +259,7 @@ pub(super) fn runtime_error(error: &AgentError) -> AgentSessionsError {
     if error.account_changed() {
         // The account switch is the cause; an account-scoped binding input
         // that changed with it stays named in `binding_change` only.
-        "the provider account changed since this session was recorded; \
-         exact reopen needs the original account"
+        "the provider account changed since this session was recorded"
             .clone_into(&mut mapped.message);
         mapped.account_changed = true;
     }

@@ -286,33 +286,45 @@ fn provider_advice_is_clamped_within_the_budget_and_refused_beyond_it() {
     assert_eq!(next(2, advice(60), 60), advice(60));
     // The total wait is bounded: two full minutes allow no third wait.
     assert_eq!(next(3, advice(60), 120), None);
-    let beyond = |physical, retry_after, waited| {
-        POLICY.advice_beyond_budget(
+    let wait = |physical, retry_after, waited| {
+        POLICY.next_wait(
             Facts::refused(physical).build(),
+            FailurePoint::Refused,
             retry_after,
             Duration::from_secs(waited),
+            Jitter::LONGEST,
         )
     };
-    assert!(beyond(1, advice(121), 0));
-    assert!(beyond(2, advice(61), 60));
-    assert!(!beyond(1, advice(120), 0));
-    assert!(!beyond(2, advice(60), 60));
-    assert!(!beyond(1, None, 0));
+    assert_eq!(wait(1, advice(121), 0), RetryWait::AdviceBeyondBudget);
+    assert_eq!(wait(2, advice(61), 60), RetryWait::AdviceBeyondBudget);
+    assert_eq!(
+        wait(1, advice(120), 0),
+        RetryWait::After(Duration::from_secs(60))
+    );
+    assert_eq!(wait(1, None, 0), RetryWait::After(Duration::from_secs(1)));
     // With no physical request left the budget decline is the honest one.
-    assert!(!beyond(4, advice(3_600), 0));
-    // The outage ride-out takes no advice; other points ignore its waits.
-    let ride_out = UnreachableRideOut::default();
-    assert!(ride_out.advice_beyond_budget(
-        Facts::refused(1).build(),
-        FailurePoint::Refused,
-        advice(121),
-        Duration::ZERO,
-    ));
-    assert!(!ride_out.advice_beyond_budget(
-        Facts::refused(1).build(),
-        FailurePoint::Unreachable,
-        advice(121),
-        Duration::ZERO,
+    assert_eq!(wait(4, advice(3_600), 0), RetryWait::Exhausted);
+    // The outage ride-out takes no advice.
+    let mut ride_out = UnreachableRideOut::default();
+    assert_eq!(
+        ride_out.next_wait(
+            Facts::refused(1).build(),
+            FailurePoint::Refused,
+            advice(121),
+            Duration::ZERO,
+            Jitter::LONGEST,
+        ),
+        RetryWait::AdviceBeyondBudget
+    );
+    assert!(matches!(
+        ride_out.next_wait(
+            Facts::refused(1).build(),
+            FailurePoint::Unreachable,
+            advice(121),
+            Duration::ZERO,
+            Jitter::LONGEST,
+        ),
+        RetryWait::After(_)
     ));
 }
 

@@ -245,19 +245,15 @@ pub(super) async fn wait_to_retry(
         .map_or(Duration::ZERO, |started| {
             monotonic_now().saturating_duration_since(started)
         });
-    let advice_beyond_budget = attempt.unreachable.advice_beyond_budget(
-        facts,
-        failure.point,
-        failure.retry_after,
-        *waited,
-    );
-    let delay = attempt.unreachable.next_delay(
+    let wait = attempt.unreachable.next_wait(
         facts,
         failure.point,
         failure.retry_after,
         *waited,
         Jitter::random(),
     );
+    let delay = wait.delay();
+    let advice_beyond_budget = wait == plakous_attempt::RetryWait::AdviceBeyondBudget;
     let reason = retry_decline(
         &RetryDeclineInput {
             deadline_remaining: attempt

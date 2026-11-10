@@ -5596,9 +5596,12 @@ contract naming the account, differs with it; that input stays named for
 (§5.4), which the TUI renders with the one carry command first: carry the full
 history into a new session with `/rebind`; restoring the original
 account/configuration with the named login command reopens it exactly instead.
-The detached notice is the `attach failed: <diagnostic>` row, then one repair
-row whose text names the cause and whose remedy alone says what to do, so each
-remedy is stated once.
+The detached notice is the `attach failed: <diagnostic>` row, with no remedy,
+then one repair row that carries the remedy. The repair row's text neither
+restates the remedy nor repeats the diagnostic's cause, so each remedy is
+stated once; an agent tree held by another plak process is the exception,
+whose row also names quitting that plak or `plak tree release --force
+<tree-id>`, which the generic repair remedy cannot name.
 `plak --resume <id>` of such a session opens unattached with that reason and
 guidance. `/reload`
 from that refusal takes the same in-process carry path. A missing login or
@@ -7322,6 +7325,9 @@ attached checkpoint in memory and never persisted, the guidance names the
 segment limit instead of token or tool growth, on native routes too: `/compact`
 compacts this session's earlier history, `/fork-then-compact` compacts a fork
 and leaves this session unchanged, and `/new` starts a new session.
+A failed turn's retry hint renders the provider's retained advice in whole
+seconds; advice at its 24 h retention ceiling (chapter 01) renders as `retry
+after 24 h or more`, never as an exact delay.
 These are in-process host observations, not new JSONL v1 lines.
 
 ### 5.5 The Menu
@@ -9578,9 +9584,8 @@ The bounded writer has the same best-effort drop behavior
 as other analytics; these rows are not recovery authority. `v_replay_loss` is
 the canned view printed by `plak telemetry status --views`, including declined
 retries. Schema **14** adds the nullable `declined_reason` column with the
-closed set `deadline`, `budget`, `server_effect`, `retry_disabled`, and
-`workflow`; `advice_beyond_budget` joins it as a new string value of the same
-unconstrained column (chapter 01 §13.1), with no schema change. On a declined `ModelRetry`, delay is zero and
+closed set `deadline`, `budget`, `advice_beyond_budget`, `server_effect`,
+`retry_disabled`, and `workflow` in an unconstrained `TEXT` column. On a declined `ModelRetry`, delay is zero and
 `output_discarded=false`; these are event facts, not `model_retries` columns.
 A declined row's byte/item counts describe the failed generation, not discarded
 output; its next physical number is proposed, not dispatched. `model_attempts`

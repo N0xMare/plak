@@ -115,8 +115,10 @@ what is pending, joined by ` · `: unread child results and questions, process
 exits the next turn has not seen, and `auto-continue paused`. Counts refresh from the live tree, or from
 fresh stored-tree observations when it is not live; a failed observation
 leaves the displayed line unchanged until a successful check. A running turn
-hides the line. Esc pauses auto-continue until the next prompt, and so does a
-wake that did not fit the window; when auto-continue is on and a child or
+hides the line. Esc pauses auto-continue until the next prompt, and so do a
+wake that did not fit the window and a root turn that failed because the
+model's usage quota is exhausted (a child's question then waits, unread, for
+your next prompt); when auto-continue is on and a child or
 background process could still wake the root, the HUD says so and the
 transcript keeps one `auto-continue paused until the next prompt` line. It
 comes back the same after a restart or `/resume`, without a second copy. A wake the

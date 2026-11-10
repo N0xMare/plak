@@ -234,7 +234,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         {
             return self.wake_deferred();
         }
-        let suppressed = self.role.config.session.child_wake_suppressed;
+        let mut paused_row = false;
         let step = match self.try_child_wake_prompt(now).await {
             Ok(step) => {
                 self.role.child_wake.retry = None;
@@ -263,10 +263,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 );
                 let _ = self.suppress_child_wake(Some(error.message().to_owned()));
                 self.role.child_wake.park();
+                paused_row = true;
                 Ok(HostStep::Continue)
             }
         };
-        if !suppressed && self.role.config.session.child_wake_suppressed {
+        // Only a failure that wrote its own pause row ends the episode's
+        // line; a suppression read from the views still gets the one line.
+        if paused_row && self.role.config.session.child_wake_suppressed {
             self.auto_continue_pause_reported();
         }
         self.publish_pending_continuation();

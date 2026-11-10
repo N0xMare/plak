@@ -43,8 +43,9 @@ pub use map::{
     FamilyAuthError, FamilyObservationError, map_auth_reservation, map_core, map_observation,
 };
 pub use retry::{
-    FailurePoint, Jitter, LongStreamReplayBudget, ReplaySafety, RetryPolicy, UnreachableRideOut,
-    body_reports_usage_limit, retry_after_seconds, terminal_usage_error, value_reports_usage_limit,
+    FailurePoint, Jitter, LongStreamReplayBudget, ReplaySafety, RetryPolicy, RetryWait,
+    UnreachableRideOut, body_reports_usage_limit, retry_after_seconds, terminal_usage_error,
+    value_reports_usage_limit,
 };
 pub use terminal::{
     Cancellation, ExchangeBreak, FailureRisk, LogicalOutcome, ProviderFailure, ProviderRefusal,

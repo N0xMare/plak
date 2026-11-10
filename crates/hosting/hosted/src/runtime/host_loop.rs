@@ -406,6 +406,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         let mut transcript = sessions::ProductTranscript::stored(views.transcript(&intents));
         transcript.restore_pending_notices(unsaved, &intents);
         self.role.config.session.transcript = transcript;
+        // A terminal that suppresses wakes (a quota-exhausted root, spec 03
+        // §8) pauses auto-continue now, so the idle indicator and its one
+        // pause line see it before any wake check runs.
+        if views.wake_suppressed(&intents) {
+            self.role.config.session.child_wake_suppressed = true;
+        }
         self.role.config.session.root_turn_count = views.state.counters.root_turns;
         self.role.config.session.tool_call_count = views.state.counters.tool_calls;
         self.role.config.session.compaction_count = views.state.counters.compactions;

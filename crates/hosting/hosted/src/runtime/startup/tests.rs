@@ -502,13 +502,11 @@ fn claude_refresh_rejection_and_attach_guidance_name_distinct_repairs() {
     );
 }
 
-/// The detached notice states each remedy once: the remedy rides only the
-/// repair row, whose text names the cause without restating what to do, so a
-/// face that appends the remedy to its row says it a single time.
-#[test]
-fn a_detached_attach_failure_states_its_remedy_once() {
-    use plakous_host_protocol::notice_remedy::{AccountTarget, NoticeRemedy};
-    let restating = [
+/// Asserts the detached notice for `failure` states its remedy once: the
+/// remedy rides only the repair row, neither row restates what to do, and the
+/// repair row does not repeat the diagnostic's cause.
+fn assert_remedy_stated_once(failure: &plakous_host_protocol::status::HostFailure, account: &str) {
+    const RESTATING: [&str; 11] = [
         "restor",
         "carry",
         "retry",
@@ -521,6 +519,40 @@ fn a_detached_attach_failure_states_its_remedy_once() {
         "/attach",
         "/reload",
     ];
+    let rows = attach_failure_notices(failure, account);
+    let notices: Vec<_> = rows
+        .iter()
+        .map(|row| match row {
+            TranscriptRow::Notice(notice) => notice,
+            other => panic!("{:?}: a detached row is a notice: {other:?}", failure.cause),
+        })
+        .collect();
+    assert!(notices[0].remedy.is_none(), "{:?}", failure.cause);
+    assert!(notices[1].remedy.is_some(), "{:?}", failure.cause);
+    for notice in &notices {
+        let text = notice.text.to_lowercase();
+        for fragment in RESTATING {
+            assert!(
+                !text.contains(fragment),
+                "{:?} restates `{fragment}`: {text}",
+                failure.cause
+            );
+        }
+    }
+    let diagnostic = notices[0].text.to_lowercase();
+    for clause in notices[1].text.to_lowercase().split("; ") {
+        assert!(
+            !diagnostic.contains(clause),
+            "{:?} repeats the cause `{clause}`",
+            failure.cause
+        );
+    }
+}
+
+/// The detached notice states each remedy once whatever the cause.
+#[test]
+fn a_detached_attach_failure_states_its_remedy_once() {
+    use plakous_host_protocol::notice_remedy::{AccountTarget, NoticeRemedy};
     for cause in [
         AttachFailure::JavaScriptHostUnavailable,
         AttachFailure::PythonHostUnavailable,
@@ -529,7 +561,6 @@ fn a_detached_attach_failure_states_its_remedy_once() {
         AttachFailure::BindingChanged,
         AttachFailure::CredentialRejected,
         AttachFailure::CredentialUnavailable,
-        AttachFailure::TreeHostedElsewhere,
         AttachFailure::Other,
     ] {
         let failure = CliFailure::new("exact session reopen failed: cause")
@@ -538,27 +569,21 @@ fn a_detached_attach_failure_states_its_remedy_once() {
             })
             .with_attach_failure(cause)
             .host_failure();
-        let rows = attach_failure_notices(&failure, "claude");
-        let remedies: Vec<_> = rows
-            .iter()
-            .filter_map(|row| match row {
-                TranscriptRow::Notice(notice) => notice.remedy.clone(),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(remedies.len(), 1, "{cause:?}: {rows:?}");
-        let TranscriptRow::Notice(repair) = &rows[1] else {
-            panic!("{cause:?}: the repair row is a notice");
-        };
-        assert!(repair.remedy.is_some(), "{cause:?}");
-        let text = repair.text.to_lowercase();
-        for fragment in restating {
-            assert!(
-                !text.contains(fragment),
-                "{cause:?} restates `{fragment}`: {text}"
-            );
-        }
+        assert_remedy_stated_once(&failure, "claude");
     }
+    assert_remedy_stated_once(
+        &native_account_changed("Claude", "claude").host_failure(),
+        "claude",
+    );
+    // A tree held elsewhere keeps its own escape on the row: the generic
+    // repair remedy cannot name the holder or the forced release.
+    let held = CliFailure::new("exact session reopen failed: cause")
+        .with_attach_failure(AttachFailure::TreeHostedElsewhere)
+        .host_failure();
+    let [diagnostic, repair] = attach_failure_notices(&held, "claude");
+    assert!(matches!(diagnostic, TranscriptRow::Notice(notice) if notice.remedy.is_none()));
+    assert!(matches!(repair, TranscriptRow::Notice(notice)
+        if notice.text.contains("quit that plak") && notice.text.contains("plak tree release --force")));
 }
 
 #[test]
@@ -896,6 +921,86 @@ fn a_reconstructed_binding_change_types_the_attach_failure_and_selects_the_carry
             TranscriptRow::Notice(notice)
                 if notice.remedy == Some(NoticeRemedy::RestoreBindingOrCarry { account: AccountTarget::Claude })
         ));
+    }
+}
+
+/// The incident's shape: the context contract names the account, so an open
+/// under another account also changes the model capability binding. The
+/// refusal is the account change on both mapping sites, and the binding change
+/// stays named, so a reopen verification still answers binding-changed and
+/// `/reload` carries.
+#[test]
+fn an_account_switch_is_the_attach_failure_while_its_binding_change_stays_named() {
+    use plakous_host_protocol::notice_remedy::{AccountTarget, NoticeRemedy};
+    let fixture = ReopenFixture::new();
+    let sessions = fixture.sessions("runtime");
+    let locator = fixture.create(&sessions);
+    let other = || {
+        plakous_offline_crash_harness::runtime_binding_for_account(
+            &fixture.workspace,
+            fixture.controller.clone(),
+            b"offline-loopback-other-account",
+        )
+        .unwrap()
+    };
+    let change = plakous::agent::BindingChange::ModelCapabilities;
+    let verified = fixture
+        .executor
+        .block_on(sessions.verify_open(locator, other()))
+        .unwrap();
+    let Err(verified) = verified else {
+        panic!("verification under another account must refuse");
+    };
+    assert!(verified.account_changed());
+    assert_eq!(verified.binding_change(), Some(&change));
+    let opened = fixture
+        .executor
+        .block_on(sessions.open(plakous::sessions::OpenSessionRequest::new(
+            plakous::sessions::SessionOperationId::new("reopen-fixture:other-open").unwrap(),
+            locator,
+            other(),
+        )))
+        .unwrap();
+    let Err(direct) = opened else {
+        panic!("the open under another account must be refused");
+    };
+    assert!(direct.account_changed());
+    assert_eq!(direct.binding_change(), Some(&change));
+    let message = direct.to_string();
+    let reopened = fixture
+        .executor
+        .block_on(crate::agent::build_or_open_bound_session(
+            Arc::clone(&sessions),
+            Some(locator),
+            None,
+            plakous::sessions::SessionOperationId::new("reopen-fixture:other-reopen").unwrap(),
+            other(),
+        ))
+        .unwrap();
+    let Err(reopened) = reopened else {
+        panic!("the exact reopen under another account must be refused");
+    };
+    // What the reopen probe reads: still a binding change, so /reload carries.
+    assert_eq!(reopened.binding_change.as_deref(), Some(&change));
+    for failure in [
+        CliFailure::from(direct).host_failure(),
+        reopened.failure.host_failure(),
+    ] {
+        assert_eq!(failure.cause, AttachFailure::AccountChanged);
+        assert!(
+            failure.diagnostic.as_str().contains(&message),
+            "{failure:?}"
+        );
+        assert!(
+            !failure.diagnostic.as_str().contains("capability"),
+            "{failure:?}"
+        );
+        assert!(matches!(
+            attach_repair_notice(&failure, "claude"),
+            TranscriptRow::Notice(notice)
+                if notice.remedy == Some(NoticeRemedy::RestoreAccountOrRebind { account: AccountTarget::Claude })
+        ));
+        assert_remedy_stated_once(&failure, "claude");
     }
 }
 

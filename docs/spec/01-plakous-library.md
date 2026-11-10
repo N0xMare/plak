@@ -2275,12 +2275,14 @@ when its account and credential authority are unchanged. Claude OAuth accepts
 a new grant for the same validated provider account at the next request and
 at exact reopen; its grant lineage is a credential-store write fence, not a
 session binding. Live adapter revalidation names a different account; exact
-reopen retains its Revalidation binding-mismatch refusal, which says the
-provider account changed (`AgentError::account_changed`,
-`AgentSessionsError::account_changed`) whenever the reopening credential's
-account binding differs from the recorded admission's, whichever binding
-comparison refused first; a changed account-scoped binding input stays named
-as the binding change. Neither dispatches
+reopen retains its Revalidation binding-mismatch refusal. When the reopening
+credential's account binding differs from the recorded admission's, a
+binding refusal (a revalidation mismatch or a named binding change, whichever
+comparison refused first) says the provider account changed
+(`AgentError::account_changed`, `AgentSessionsError::account_changed`, message
+`the provider account changed since this session was recorded`); a changed
+account-scoped binding input stays named as the binding change. Store,
+ownership and unreadable-checkpoint refusals keep their own cause. Neither dispatches
 on the changed account. An old Working attempt is never upgraded to the new generation.
 
 Before native open/create and at a quiescent prompt boundary, the host treats
@@ -5267,18 +5269,18 @@ and provider-hosted-effect safeguards remain unchanged.
 Any Claude OAuth model's HTTP 429 is the account's subscription usage limit,
 also typed `QuotaExceeded` (permanent, never retried by the protocol owner),
 when its `anthropic-ratelimit-unified-*` response headers attest it the way
-the native client classifies a refused request: exactly one `-status:
+the reviewed native client (Claude Code 2.1.311) classifies a refused request: exactly one `-status:
 rejected`, exactly one `-representative-claim` naming a subscription window,
 and no `-overage-status` of `allowed` or `allowed_warning` (usage credits still
-admitting the account). The windows and their names are the native client's
-own: `five_hour` (session limit), `seven_day` (weekly limit), `seven_day_opus`
+admitting the account). The recognized windows and their names are that
+client's own: `five_hour` (session limit), `seven_day` (weekly limit), `seven_day_opus`
 (Opus limit) and `seven_day_sonnet` (Sonnet limit). Exactly one `-reset` of
 decimal Unix seconds in the future is the reset time, rendered as an HTTP date
 in UTC; otherwise the notice says the limit resets without naming a time. The
 notice is `You've hit your Claude <limit>; try again after <reset>, or switch
 to another Claude account.` The `overage` claim (a usage-credit limit),
-`seven_day_overage_included` outside the Fable rule above, an unknown or
-duplicated header, a status other than `rejected`, and every API-key route
+`seven_day_overage_included` outside the Fable rule above, any other window
+claim, an unknown or duplicated header, a status other than `rejected`, and every API-key route
 stay a generic `RateLimited` 429, as does the bare `rate_limit_error` body,
 which names no limit.
 
@@ -12074,13 +12076,13 @@ the budget, becomes:
   enters history or the attempt ledger.
 - **Terminal refusals.** A definite authentication rejection keeps its HTTP
   status and phase with `Permanent` retryability. The Responses retry behavior
-  is revision-bound in the Responses attempt host behavior identity (revision
-  12: proven-unsent permit settlement and outage ride-out, per-generation
-  deadlines, the long-generation cap, semantic-stall handling,
-  activity/declined-retry observations, and, new in 12, the immediate
-  `advice_beyond_budget` decline of retry advice beyond the wait budget). A
-  session recorded under revision 11 refuses exact reopen and carries forward
-  through reload or rebind.
+  is revision-bound in the Responses attempt host behavior identity, revision
+  12. It binds proven-unsent permit settlement and outage ride-out,
+  per-generation deadlines, the long-generation cap, semantic-stall handling,
+  activity/declined-retry observations and the immediate
+  `advice_beyond_budget` decline of retry advice beyond the wait budget. A
+  session recorded under an earlier revision refuses exact reopen and carries
+  forward through reload or rebind.
 
 A classified retry that is declined still emits a content-free `ModelRetry`
 observation: `loss.declined_reason` is one of `deadline`, `budget`,

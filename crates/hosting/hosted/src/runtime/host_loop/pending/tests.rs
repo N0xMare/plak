@@ -1043,3 +1043,71 @@ fn contended_tree_lock_neither_flaps_nor_rewrites_the_pause_row() {
         );
     });
 }
+
+/// A root turn that fails with exhausted quota pauses auto-continue live:
+/// one pause line while the child that could wake it runs, and no second
+/// copy after reopen.
+#[test]
+fn a_quota_exhausted_root_turn_writes_one_live_pause_line() {
+    let quota = |config: &mut crate::runtime::HostConfig<TestExtension>| {
+        let workspace = config.cwd.clone();
+        let root = config.product_home.parent().unwrap().to_path_buf();
+        let controller =
+            plakous_offline_crash_harness::BoundaryController::quiet_from_evidence_path(
+                plakous_offline_crash_harness::protocol::CrashBoundary::None,
+                root.join("quota-events.jsonl"),
+            )
+            .unwrap();
+        let binding =
+            |workspace: &std::path::Path,
+             controller: plakous_offline_crash_harness::BoundaryController| {
+                plakous_offline_crash_harness::projected_terminal_failure_runtime_binding(
+                    workspace,
+                    controller,
+                    plakous::model::ModelErrorKind::QuotaExceeded,
+                )
+            };
+        let target = binding(&workspace, controller.clone())
+            .unwrap()
+            .target_binding();
+        config.runtime_factory = Arc::new(crate::runtime::ScriptedRuntimeFactory {
+            rebind_target: target,
+            runtime: Arc::new(move |_| {
+                binding(&workspace, controller.clone()).map_err(|error| error.to_string())
+            }),
+            observe: Arc::new(|_, _| {}),
+            child_runtime: None,
+            rebind_builds: std::sync::Mutex::new(Vec::new()),
+        });
+    };
+    with_configured_tree(0, quota, |host, runtime, actions, _| {
+        spawn_child(runtime);
+        actions
+            .send(UserAction::Prompt("work until the limit".into()))
+            .unwrap();
+        let (text, queued_delivery, user_echoed) = take_prompt(
+            host.block(async |host| host.next_prompt(None).await)
+                .unwrap(),
+        );
+        host.block(async |host| {
+            host.run_prompt(text, queued_delivery, user_echoed, None)
+                .await
+        })
+        .unwrap();
+        assert!(host.role.config.session.child_wake_suppressed);
+        host.publish_pending_continuation();
+        host.publish_pending_continuation();
+        assert_eq!(
+            pause_rows(&host.role.config.session, AUTO_CONTINUE_PAUSE_TEXT),
+            1
+        );
+        reopen(host, |restored| {
+            assert!(restored.role.config.session.child_wake_suppressed);
+            restored.publish_pending_continuation();
+            assert_eq!(
+                pause_rows(&restored.role.config.session, AUTO_CONTINUE_PAUSE_TEXT),
+                1
+            );
+        });
+    });
+}

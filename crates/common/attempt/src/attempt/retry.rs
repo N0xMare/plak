@@ -77,25 +77,6 @@ impl UnreachableRideOut {
         }
     }
 
-    /// Whether the provider's retry advice for this failure exceeds what is
-    /// left of the ordinary wait budget while physical requests remain, so no
-    /// permitted wait can honor it. The outage ride-out takes no advice.
-    #[must_use]
-    pub fn advice_beyond_budget(
-        self,
-        facts: TerminalFacts,
-        point: FailurePoint,
-        retry_after: Option<Duration>,
-        waited: Duration,
-    ) -> bool {
-        point != FailurePoint::Unreachable
-            && RetryPolicy::TURN.advice_beyond_budget_for_physical(
-                self.ordinary_physical(facts),
-                retry_after,
-                waited.saturating_sub(self.waited),
-            )
-    }
-
     /// Records one failed generation and returns its bounded, equal-jittered wait.
     /// Kernels still enforce cancellation, replay safety and the caller's hard deadline.
     pub fn next_delay(
@@ -106,8 +87,22 @@ impl UnreachableRideOut {
         waited: Duration,
         jitter: Jitter,
     ) -> Option<Duration> {
+        self.next_wait(facts, point, retry_after, waited, jitter)
+            .delay()
+    }
+
+    /// [`Self::next_delay`] with the reason no wait is permitted. The outage
+    /// ride-out takes no provider advice.
+    pub fn next_wait(
+        &mut self,
+        facts: TerminalFacts,
+        point: FailurePoint,
+        retry_after: Option<Duration>,
+        waited: Duration,
+        jitter: Jitter,
+    ) -> RetryWait {
         if point != FailurePoint::Unreachable {
-            return RetryPolicy::TURN.next_delay_for_physical(
+            return RetryPolicy::TURN.next_wait_for_physical(
                 facts,
                 self.ordinary_physical(facts),
                 point,
@@ -118,16 +113,39 @@ impl UnreachableRideOut {
         }
         self.physical = self.physical.saturating_add(1);
         if self.physical >= 12 || facts.hosted_effects_possible() {
-            return None;
+            return RetryWait::Exhausted;
         }
         let base = (2_u64 << self.physical.saturating_sub(1).min(4)).min(30);
         let delay = jitter.spread(Duration::from_secs(base));
         let total = self.waited.saturating_add(delay);
         if total > Duration::from_secs(240) {
-            return None;
+            return RetryWait::Exhausted;
         }
         self.waited = total;
-        Some(delay)
+        RetryWait::After(delay)
+    }
+}
+
+/// The retry policy's answer for one failed physical request.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RetryWait {
+    /// Wait this long, then send the next physical request.
+    After(Duration),
+    /// The provider's retry advice exceeds what remains of the wait budget
+    /// while physical requests remain: waiting less would only fail again.
+    AdviceBeyondBudget,
+    /// No physical request or wait remains, or the failure is not replayable.
+    Exhausted,
+}
+
+impl RetryWait {
+    /// The wait, when one is permitted.
+    #[must_use]
+    pub const fn delay(self) -> Option<Duration> {
+        match self {
+            Self::After(delay) => Some(delay),
+            Self::AdviceBeyondBudget | Self::Exhausted => None,
+        }
     }
 }
 
@@ -252,7 +270,21 @@ impl RetryPolicy {
         waited: Duration,
         jitter: Jitter,
     ) -> Option<Duration> {
-        self.next_delay_for_physical(
+        self.next_wait(facts, point, retry_after, waited, jitter)
+            .delay()
+    }
+
+    /// [`Self::next_delay`] with the reason no wait is permitted.
+    #[must_use]
+    pub fn next_wait(
+        self,
+        facts: TerminalFacts,
+        point: FailurePoint,
+        retry_after: Option<Duration>,
+        waited: Duration,
+        jitter: Jitter,
+    ) -> RetryWait {
+        self.next_wait_for_physical(
             facts,
             facts.physical_attempts(),
             point,
@@ -262,30 +294,7 @@ impl RetryPolicy {
         )
     }
 
-    /// Whether advice exceeds the wait budget left after `waited`, while
-    /// physical requests remain.
-    #[must_use]
-    pub fn advice_beyond_budget(
-        self,
-        facts: TerminalFacts,
-        retry_after: Option<Duration>,
-        waited: Duration,
-    ) -> bool {
-        self.advice_beyond_budget_for_physical(facts.physical_attempts(), retry_after, waited)
-    }
-
-    fn advice_beyond_budget_for_physical(
-        self,
-        physical: u32,
-        retry_after: Option<Duration>,
-        waited: Duration,
-    ) -> bool {
-        physical < self.max_physical
-            && retry_after
-                .is_some_and(|advice| advice > self.max_total_delay.saturating_sub(waited))
-    }
-
-    fn next_delay_for_physical(
+    fn next_wait_for_physical(
         self,
         facts: TerminalFacts,
         physical: u32,
@@ -293,9 +302,9 @@ impl RetryPolicy {
         retry_after: Option<Duration>,
         waited: Duration,
         jitter: Jitter,
-    ) -> Option<Duration> {
+    ) -> RetryWait {
         if facts.hosted_effects_possible() || physical >= self.max_physical {
-            return None;
+            return RetryWait::Exhausted;
         }
         let cost_only = facts.replay_safety() == ReplaySafety::CostOnly;
         let replayable = match point {
@@ -305,13 +314,12 @@ impl RetryPolicy {
             FailurePoint::AfterSend | FailurePoint::MidStream => cost_only,
         };
         if !replayable {
-            return None;
+            return RetryWait::Exhausted;
         }
         let delay = match retry_after {
             _ if point == FailurePoint::RecordRejectedInTransit && physical == 1 => Duration::ZERO,
-            // Waiting less than the provider asked would only fail again.
-            _ if self.advice_beyond_budget_for_physical(physical, retry_after, waited) => {
-                return None;
+            Some(advice) if advice > self.max_total_delay.saturating_sub(waited) => {
+                return RetryWait::AdviceBeyondBudget;
             }
             Some(advice) => advice.min(self.max_delay),
             None => {
@@ -323,7 +331,11 @@ impl RetryPolicy {
                 )
             }
         };
-        (waited.saturating_add(delay) <= self.max_total_delay).then_some(delay)
+        if waited.saturating_add(delay) <= self.max_total_delay {
+            RetryWait::After(delay)
+        } else {
+            RetryWait::Exhausted
+        }
     }
 }
 

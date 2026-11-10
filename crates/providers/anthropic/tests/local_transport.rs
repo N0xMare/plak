@@ -1543,11 +1543,21 @@ async fn fable_included_limit_requires_exact_oauth_model_and_header_claim() -> T
 /// retried; the generic 429 of the same account stays a rate limit.
 #[tokio::test]
 async fn an_attested_claude_subscription_limit_is_typed_quota_with_its_reset() -> TestResult {
-    let weekly = "anthropic-ratelimit-unified-status: rejected\r\nanthropic-ratelimit-unified-representative-claim: seven_day\r\nanthropic-ratelimit-unified-reset: 4102444812\r\n";
-    let notice = "You've hit your Claude weekly limit; try again after Fri, 01 Jan 2100 00:00:12 GMT, or switch to another Claude account.";
+    // A reset one day out, against the factory's system clock.
+    let reset = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs()
+        + 86_400;
+    let weekly = format!(
+        "anthropic-ratelimit-unified-status: rejected\r\nanthropic-ratelimit-unified-representative-claim: seven_day\r\nanthropic-ratelimit-unified-reset: {reset}\r\n"
+    );
+    let notice = format!(
+        "You've hit your Claude weekly limit; try again after {}, or switch to another Claude account.",
+        httpdate::fmt_http_date(std::time::UNIX_EPOCH + Duration::from_secs(reset))
+    );
     for (oauth, headers, expected) in [
-        (true, weekly, true),
-        (false, weekly, false),
+        (true, weekly.as_str(), true),
+        (false, weekly.as_str(), false),
         (true, "", false),
         (
             true,
@@ -1579,12 +1589,52 @@ async fn an_attested_claude_subscription_limit_is_typed_quota_with_its_reset() -
         let error = result.expect_err("a 429 must not become a successful turn");
         assert_eq!(error.usage_limit(), expected, "oauth={oauth}: {error}");
         assert_eq!(
-            error.to_string().contains(notice),
+            error.to_string().contains(&notice),
             expected,
             "oauth={oauth}: {error}"
         );
         assert_eq!(timeout(Duration::from_secs(30), peer).await???, 1);
     }
+    Ok(())
+}
+
+/// Advice longer than the remaining wait budget ends the attempt at once with
+/// its own declined reason; the kernel neither sleeps nor sends again.
+#[tokio::test]
+async fn retry_advice_beyond_the_wait_budget_is_declined_at_once() -> TestResult {
+    let body =
+        br#"{"type":"error","error":{"type":"rate_limit_error","message":"fixture rate limit"}}"#;
+    let mut response = format!(
+        "HTTP/1.1 429 Too Many Requests\r\ncontent-type: application/json\r\nretry-after: 3600\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+        body.len()
+    )
+    .into_bytes();
+    response.extend_from_slice(body);
+    let (client, origin, peer) = tls_exchange_sequence(vec![response]).await?;
+    let resolved = resolved_fixture()?;
+    let factory = with_retry_authority(AnthropicLocalHttpServiceFactory::new(
+        client,
+        origin,
+        resolved.route().clone(),
+        prepared(&resolved)?,
+    )?);
+    // A liveness bound well under the clamped 60 s wait the old policy slept.
+    let (result, events) = timeout(Duration::from_secs(10), run(&factory)).await??;
+    let error = result.expect_err("the advice is beyond the budget");
+    assert!(!error.usage_limit());
+    assert!(retries_of(&events).is_empty(), "nothing waited");
+    let declined: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            Ok(ModelEvent::Retry(retry)) => retry.loss().declined_reason,
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        declined,
+        [plakous_model::ModelRetryDeclineReason::AdviceBeyondBudget]
+    );
+    assert_eq!(timeout(Duration::from_secs(5), peer).await???, 1);
     Ok(())
 }
 
