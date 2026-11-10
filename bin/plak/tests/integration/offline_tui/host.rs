@@ -385,8 +385,13 @@ fn a_host_tui_reload_keeps_a_running_daemon_job() {
     terminal.wait_screen("daemon job survives client reload");
     terminal.wait_absent("Esc stop");
     terminal.send(b"/ps\r");
-    terminal.wait_screen("read line");
+    terminal.wait_where("the running job in Activity", |frame| {
+        frame.contains("Activity") && frame.contains("read line")
+    });
     terminal.send(b"\x1b");
+    // Fence the standalone Esc before typing a slash command: if the PTY
+    // reader receives both together it can decode Esc + '/' as Alt-/.
+    terminal.wait_absent("Activity");
     let job = std::fs::read_to_string(fixture.workspace().join("job.pid")).unwrap();
     let (pid, parent) = job.trim().split_once(' ').unwrap();
     let pid: i32 = pid.parse().unwrap();
@@ -401,7 +406,9 @@ fn a_host_tui_reload_keeps_a_running_daemon_job() {
     assert_client_reload_keeps_host(&fixture, &mut terminal);
     assert_eq!(terminal.pid(), client_pid, "exec retains the client pid");
     terminal.send(b"/ps\r");
-    let screen = terminal.wait_screen("read line");
+    let screen = terminal.wait_where("the surviving job in Activity", |frame| {
+        frame.contains("Activity") && frame.contains("read line")
+    });
     assert!(
         !screen.contains("outcome unknown") && !screen.contains("stopped"),
         "{screen}"
@@ -413,6 +420,7 @@ fn a_host_tui_reload_keeps_a_running_daemon_job() {
     );
     assert!(nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok());
     terminal.send(b"\x1b");
+    terminal.wait_absent("Activity");
     terminal.quit();
 }
 

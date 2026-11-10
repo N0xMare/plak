@@ -88,14 +88,27 @@ fn a_fixture_child_is_reaped_when_readiness_panics_or_times_out() {
             Err(nix::errno::Errno::ECHILD)
         ));
         let grandchild = std::fs::read_to_string(grandchild).unwrap();
-        let state = Command::new("ps")
-            .args(["-o", "stat=", "-p", grandchild.trim()])
-            .output()
-            .unwrap();
-        let stopped = state.stdout.is_empty()
-            || String::from_utf8_lossy(&state.stdout)
-                .trim()
-                .starts_with('Z');
+        // Reaping the group leader does not join its children. SIGKILL is
+        // delivered to each member independently; wait for the grandchild's
+        // exit too, rather than racing its last scheduling slice.
+        let until = Instant::now() + WAIT;
+        let stopped = loop {
+            let state = Command::new("ps")
+                .args(["-o", "stat=", "-p", grandchild.trim()])
+                .output()
+                .unwrap();
+            if state.stdout.is_empty()
+                || String::from_utf8_lossy(&state.stdout)
+                    .trim()
+                    .starts_with('Z')
+            {
+                break true;
+            }
+            if Instant::now() >= until {
+                break false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
         // Keep a mutant's surviving child from becoming a fixture leak.
         if !stopped
             && let Ok(pid) = grandchild.trim().parse::<i32>()
