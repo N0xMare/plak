@@ -868,12 +868,17 @@ impl JobHost for JobRegistry {
             .services
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        // The line's next head, or the same head reopened, takes the service
-        // with its running jobs; an older owner never does.
-        let service = if let Some(entry) = services.get_mut(&owner.line) {
-            if !owner.succeeds(&entry.owner) {
-                return Err(ExecutionBackendError::stale_job_owner());
-            }
+        if services
+            .get(&owner.line)
+            .is_some_and(|entry| !owner.succeeds(&entry.owner))
+        {
+            return Err(ExecutionBackendError::stale_job_owner());
+        }
+        // Local jobs live in the retained service; runner jobs live on the
+        // runner, whose fresh port carries this attachment's exact owner.
+        let service = if let Some(entry) = services.get_mut(&owner.line)
+            && !fresh.is_runner()
+        {
             entry.owner = owner;
             entry.service.clone()
         } else {

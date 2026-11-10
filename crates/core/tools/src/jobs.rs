@@ -250,10 +250,15 @@ impl JobHost for LocalJobHost {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         services.retain(|_, (_, service)| !service.job_admission_closed() || service.has_jobs());
-        let service = if let Some((holder, service)) = services.get_mut(&owner.line) {
-            if !owner.succeeds(holder) {
-                return Err(ExecutionBackendError::stale_job_owner());
-            }
+        if services
+            .get(&owner.line)
+            .is_some_and(|(holder, _)| !owner.succeeds(holder))
+        {
+            return Err(ExecutionBackendError::stale_job_owner());
+        }
+        let service = if let Some((holder, service)) = services.get_mut(&owner.line)
+            && !fresh.is_runner()
+        {
             *holder = owner;
             service.clone()
         } else {

@@ -10,6 +10,33 @@ use std::{path::Path, str::FromStr, time::Duration};
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 #[test]
+fn a_fresh_runner_port_never_admits_an_older_owner() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let product = JobRegistry::default();
+    let embedded = plakous::tools::LocalJobHost::new();
+    for host in [&product as &dyn JobHost, &embedded as &dyn JobHost] {
+        let port = || -> TestResult<JoinedSessionsPort> {
+            Ok(JoinedSessionsPort::runner(
+                sessions(root.path())?.local().clone(),
+            ))
+        };
+        let initial = owner("00000000-0000-0000-0000-000000000702")?;
+        host.attach(initial, port()?)?;
+        let successor = JobOwner {
+            fence: initial.fence + 1,
+            ..initial
+        };
+        host.attach(successor, port()?)?;
+        assert!(host.attach(initial, port()?).is_err());
+        assert!(
+            host.service_at(successor.session_id, successor.branch_id)
+                .is_some()
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn a_recorded_stop_retires_only_the_superseded_process_port() -> TestResult {
     let root = tempfile::tempdir()?;
     let registry = JobRegistry::default();

@@ -7885,6 +7885,14 @@ jobs. `plakous::tools::LocalJobHost` is the in-memory implementation an
 embedder installs for continuity. A reopen verification attaches to no
 `JobHost`.
 
+An in-process local service is retained across an accepted owner change. A
+runner service's port is scoped to one exact owner: after checking
+`JobOwner::succeeds`, a registry replaces that port with the fresh port built
+for the current owner, including on a successor's exact reopen. The jobs stay
+on the runner; its fresh port refreshes their mirror under the new owner's
+generation and fence. It never reads or stops them through the predecessor's
+stale port. This applies both to a home-local daemon and to a placed runner.
+
 Terminals a lease-only holder records for a head that cannot open fully
 (`line_job_terminals`, §5.1) take precedence over `outcome_unknown` on the
 head's next open and are folded into its ledger by its next commit.

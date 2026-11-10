@@ -54,6 +54,13 @@ impl JoinedSessionsPort {
         }
     }
 
+    /// Whether this port's runner scope must be rebuilt for a new owner.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn is_runner(&self) -> bool {
+        matches!(self.service, Service::Runner(_))
+    }
+
     const fn sessions(&self) -> &JoinedProcessSessions {
         match &self.service {
             Service::Local(sessions) | Service::Runner(sessions) => sessions,
