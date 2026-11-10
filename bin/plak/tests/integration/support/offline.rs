@@ -109,10 +109,13 @@ fn a_fixture_child_is_reaped_when_readiness_panics_or_times_out() {
             }
             std::thread::sleep(Duration::from_millis(10));
         };
-        // Keep a mutant's surviving child from becoming a fixture leak.
+        // Keep a mutant's surviving child from becoming a fixture leak;
+        // recheck its fixture group before using the recorded pid.
         if !stopped
-            && let Ok(pid) = grandchild.trim().parse::<i32>()
-            && let Some(pid) = rustix::process::Pid::from_raw(pid)
+            && let Ok(child_id) = grandchild.trim().parse::<i32>()
+            && nix::unistd::getpgid(Some(nix::unistd::Pid::from_raw(child_id)))
+                .is_ok_and(|group| group == pid)
+            && let Some(pid) = rustix::process::Pid::from_raw(child_id)
         {
             let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
         }

@@ -2019,6 +2019,12 @@ listing even when another project skill appears; neither open reads host-home sk
 The native fixture counts real runner file-read requests, exercises multiple
 bounded slices, permits an internal user-root link, refuses an escaping link,
 and requires a disconnected runner to refuse rather than read the host file.
+Raw instruction requests independently pin the runner's refusal of an escaping
+user-root link and a non-root path, without host-side discovery filtering.
+Held-link and between-slice replacement fixtures require Stop to return without
+the runner's answer and refuse a torn page. Slice identity tests pin inode,
+size and modification-time changes. Fixture leak cleanup checks the recorded
+child's process group before signalling it.
 The guarded entry points are the Rust lanes in `tools/gate/dev-check.sh`,
 `just nextest`, and `just dev crash-sweep`. `tools/dev/coverage.sh` and
 `tools/perf/perf-smoke.sh` are not guarded.

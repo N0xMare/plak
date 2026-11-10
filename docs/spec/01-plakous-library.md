@@ -7027,8 +7027,15 @@ process home and `read_skill_slice` with at most one standard text slice of a
 regular file under its own canonical user skill root. These are read-only
 `ReadInstructions` requests, not workspace or VCS admission. The files pack's
 `with_runner_skill_roots` retains runner-discovered paths without host filesystem
-resolution and reads those slices on that runner, checking their bounds and
-cancellation between slices; no runner failure becomes a local-file fallback.
+resolution and reads those slices on that runner. Paths, roots and slice bytes
+use the instruction extension's hexadecimal encoding. Each response carries the
+opened file's device, inode, size and nanosecond modification time, checked
+before and after the slice and unchanged across all slices; a change refuses
+the whole page. `RunnerCall::read_instructions(payload, operation_context)`
+retains the tool's owner, request class, budget, cancellation and preempt
+controls without changing the verb. Stop cancels an in-flight read without
+waiting for an unavailable peer's answer. No runner failure becomes a local-file
+fallback.
 Every probe and reader answer is fallible with a distinct `Unavailable` error
 (`ProbeError::Unavailable`, `SourceReadError::Unavailable`, or
 `SourceReadError::UnavailableBecause` carrying the runner's bounded reason,

@@ -21,6 +21,9 @@ use serde_json::{Value, json};
 #[cfg(test)]
 pub(crate) mod test_kit;
 
+#[cfg(test)]
+mod tests;
+
 /// Reader of this node's workspace authority. Global sources use a separate
 /// explicit host reader, never a path-prefix exception in this one.
 pub(crate) fn instruction_reader(
@@ -378,13 +381,8 @@ fn answer_node(
     }
     let user_root = home.map(|home| home.join(".agents/skills"));
     if op == "read_skill_slice" {
-        let decode_path = |field: &str| {
-            serde_json::from_value::<Vec<u8>>(question[field].clone())
-                .map(|bytes| PathBuf::from(OsString::from_vec(bytes)))
-                .map_err(|_| ServeFailure::Unsupported)
-        };
-        let path = decode_path("path_bytes")?;
-        let supplied = decode_path("root_bytes")?;
+        let path = path_of(question.get("path")).ok_or(ServeFailure::Unsupported)?;
+        let supplied = path_of(question.get("root")).ok_or(ServeFailure::Unsupported)?;
         let root = user_root
             .as_ref()
             .and_then(|root| std::fs::canonicalize(root).ok())
@@ -394,9 +392,10 @@ fn answer_node(
             .get("offset")
             .and_then(Value::as_u64)
             .ok_or(ServeFailure::Unsupported)?;
-        let result = plakous::tools::FilesToolPack::read_skill_slice(&root, &path, offset)
-            .map_err(|error| refused_skill(error.message().as_str()))?;
-        return serde_json::to_value(result).map_err(|_| ServeFailure::Unsupported);
+        let (slice, complete, identity) =
+            plakous::tools::FilesToolPack::read_skill_slice(&root, &path, offset)
+                .map_err(|error| refused_skill(error.message().as_str()))?;
+        return Ok(json!({"bytes": hex(&slice), "complete": complete, "identity": identity}));
     }
     let path = path_of(question.get("path")).ok_or(ServeFailure::Unsupported)?;
     if admits(&path) {

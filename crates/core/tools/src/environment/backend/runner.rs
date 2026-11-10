@@ -31,6 +31,7 @@ pub use service::{
     service_spawned, terminated_service,
 };
 pub use services::{PlacementGate, RunnerServices};
+pub use wire::{hex, unhex};
 
 /// `request` naming `secrets` (variable, secret name) for the runner that
 /// spawns it to resolve from its own store. A local backend refuses such a
@@ -350,6 +351,13 @@ impl RunnerCall {
             cancellation: control.cancellation().clone(),
             preempt: control.preempt().clone(),
         }
+    }
+
+    /// One instruction read with its caller's owner, request class, budget,
+    /// cancellation and preempt controls intact.
+    #[must_use]
+    pub fn read_instructions(payload: Value, control: &OperationContext) -> Self {
+        Self::new(RunnerVerb::ReadInstructions, payload, control)
     }
 
     /// An unkeyed call no line owns: a host's own question to its runner.

@@ -65,6 +65,8 @@ use text::PLAKOUS_TOOL_READ_BINARY;
 use image::InspectImageTool;
 use patch::ApplyPatchTool;
 use read::ReadFileTool;
+#[doc(hidden)]
+pub use read::skill_root::SkillFileIdentity;
 
 fn relative_workspace_path(
     context: &ToolContext,
@@ -179,7 +181,7 @@ impl FilesToolPack {
         root: &Path,
         path: &Path,
         offset: u64,
-    ) -> Result<(Vec<u8>, bool), ToolRuntimeError> {
+    ) -> Result<(Vec<u8>, bool, SkillFileIdentity), ToolRuntimeError> {
         read::skill_root::read_slice(root, path, offset)
     }
 

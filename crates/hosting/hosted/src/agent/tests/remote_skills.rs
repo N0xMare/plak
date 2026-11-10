@@ -2,7 +2,10 @@
 
 use super::*;
 use crate::runner_reader::test_kit::{runner_serving, write_skill};
+use plakous::model::CancellationToken;
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+mod reads;
 
 fn read_text(outcome: &ToolOutcome) -> &str {
     let Some(ToolResultPart::Text(text)) = outcome.parts().first() else {
@@ -40,9 +43,16 @@ async fn read_file(
     workspace: &Path,
     path: &Path,
 ) -> Result<ToolOutcome, Box<dyn std::error::Error>> {
-    use plakous::model::{
-        CancellationToken, Clock, FixedClock, Timestamp, ToolCorrelation, ToolName,
-    };
+    read_file_with_cancellation(registry, workspace, path, CancellationToken::new()).await
+}
+
+async fn read_file_with_cancellation(
+    registry: &plakous::tools::FrozenToolRegistry,
+    workspace: &Path,
+    path: &Path,
+    cancellation: CancellationToken,
+) -> Result<ToolOutcome, Box<dyn std::error::Error>> {
+    use plakous::model::{Clock, FixedClock, Timestamp, ToolCorrelation, ToolName};
     use plakous_tools::{
         EffectAuthorizationGrantSource, ProgressSink, ToolInvocationRequest, ToolPolicyRevision,
     };
@@ -50,12 +60,20 @@ async fn read_file(
     let turn = uuid::Uuid::from_u128(2).try_into()?;
     let attempt = uuid::Uuid::from_u128(3).try_into()?;
     let call = uuid::Uuid::from_u128(4).try_into()?;
-    let environment = Arc::new(plakous::tools::ExecutionEnvironment::host(
-        plakous::tools::ExecutionEnvironmentScope::Run(run),
-        workspace,
-        ".",
-        plakous::tools::ExecutionEnvironmentConfig::default(),
-    )?);
+    let environment = Arc::new(
+        plakous::tools::ExecutionEnvironment::host(
+            plakous::tools::ExecutionEnvironmentScope::Run(run),
+            workspace,
+            ".",
+            plakous::tools::ExecutionEnvironmentConfig::default(),
+        )?
+        .with_line_owner(plakous::tools::LineOwner::new(
+            uuid::Uuid::from_u128(42).try_into()?,
+            1,
+            uuid::Uuid::from_u128(43).try_into()?,
+            0,
+        )),
+    );
     let invocation = registry.prepare(ToolInvocationRequest::new(
         run,
         turn,
@@ -80,7 +98,7 @@ async fn read_file(
         run,
         turn,
         attempt,
-        CancellationToken::new(),
+        cancellation,
         None,
         clock,
         environment,
@@ -174,8 +192,8 @@ fn a_native_claude_profile_lists_and_reads_runner_home_skills()
         plakous::tools::runner::RunnerCall::unkeyed(
             plakous::tools::runner::RunnerVerb::ReadInstructions,
             serde_json::json!({"op": "read_skill_slice", "offset": 0,
-                "path_bytes": workspace_root.join(".agents/skills/review-pr/SKILL.md").as_os_str().as_encoded_bytes(),
-                "root_bytes": workspace_root.as_os_str().as_encoded_bytes()}),
+                "path": plakous::tools::runner::hex(workspace_root.join(".agents/skills/review-pr/SKILL.md").as_os_str().as_encoded_bytes()),
+                "root": plakous::tools::runner::hex(workspace_root.as_os_str().as_encoded_bytes())}),
         ),
     ))?.unwrap_err();
     assert!(

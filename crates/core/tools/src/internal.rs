@@ -26,11 +26,11 @@ pub mod runner {
         RunnerSecretResolver, RunnerServices, RunnerSessions, RunnerStreams, RunnerVerb,
         RunnerVerbFamily, RunnerWorkspaceProbe, ServeFailure, ServeFuture, ServeServiceFuture,
         adopt_runner_process_sessions, answer_too_large, call_blocking, decode_jobs_snapshot,
-        decode_preempt, encode_preempt, environment_failure, job_capacity, line_sessions,
+        decode_preempt, encode_preempt, environment_failure, hex, job_capacity, line_sessions,
         local_daemon_environment, lost_process_owner, requested_workspace, runner_descriptor,
         runner_environment, serve, serve_failure, serve_jobs_watch, serve_probe,
         serve_service_spawn, serve_service_terminate, serve_sessions, service_spawned,
-        terminated_service, with_runner_secrets, workspace_refusal,
+        terminated_service, unhex, with_runner_secrets, workspace_refusal,
     };
 }
 

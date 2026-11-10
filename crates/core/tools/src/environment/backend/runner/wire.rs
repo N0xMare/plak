@@ -38,7 +38,9 @@ pub(super) fn path_text(path: &Path) -> Result<String, ExecutionBackendError> {
         .ok_or_else(|| invalid_request("runner wire path is not UTF-8"))
 }
 
-pub(super) fn hex(bytes: &[u8]) -> String {
+/// Encodes raw instruction paths and file slices for runner JSON payloads.
+#[must_use]
+pub fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
     let mut text = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
@@ -47,7 +49,11 @@ pub(super) fn hex(bytes: &[u8]) -> String {
     text
 }
 
-pub(super) fn unhex(text: &str) -> Result<Vec<u8>, ExecutionBackendError> {
+/// Decodes raw bytes from runner JSON payloads.
+///
+/// # Errors
+/// Refuses odd-length text or a non-hexadecimal byte.
+pub fn unhex(text: &str) -> Result<Vec<u8>, ExecutionBackendError> {
     if !text.len().is_multiple_of(2) {
         return Err(malformed());
     }

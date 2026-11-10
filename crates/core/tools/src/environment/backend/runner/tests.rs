@@ -16,6 +16,38 @@ mod services;
 mod special_files;
 
 #[test]
+fn instruction_read_preserves_the_callers_complete_operation_context() {
+    use plakous_model::{BranchId, CallId, LineId, Timestamp};
+    let id = "00000000-0000-0000-0000-000000000041";
+    let owner = LineOwner::new(
+        LineId::from_str(id).unwrap(),
+        3,
+        BranchId::from_str(id).unwrap(),
+        7,
+    );
+    let cancellation = CancellationToken::new();
+    let (preempt, receiver) = tokio::sync::watch::channel(ToolPreempt::None);
+    let deadline = Timestamp::new(123, 456).unwrap();
+    let control = OperationContext::new(cancellation.clone())
+        .with_owner(owner)
+        .with_class(OperationClass::EffectCall {
+            call_id: CallId::from_str(id).unwrap(),
+            attempt_id: AttemptId::from_str(id).unwrap(),
+        })
+        .with_budget(deadline)
+        .with_preempt(receiver);
+    let call = RunnerCall::read_instructions(json!({"op": "read_skill_slice"}), &control);
+    assert_eq!(call.verb(), RunnerVerb::ReadInstructions);
+    assert_eq!(call.owner(), Some(&owner));
+    assert_eq!(call.class(), &RunnerClass::from(control.class()));
+    assert_eq!(call.budget(), Some(deadline));
+    cancellation.cancel();
+    assert!(call.cancellation().is_cancelled());
+    preempt.send(ToolPreempt::Notice(true)).unwrap();
+    assert_eq!(*call.preempt().borrow(), ToolPreempt::Notice(true));
+}
+
+#[test]
 fn runner_backend_accepts_each_os_and_rejects_crossed_containment() {
     struct NoCalls;
     impl RunnerLink for NoCalls {

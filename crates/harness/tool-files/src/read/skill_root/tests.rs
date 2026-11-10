@@ -38,6 +38,32 @@ fn a_regular_file_under_the_root_reads_to_eof() {
 }
 
 #[test]
+fn slice_identity_pins_inode_size_and_modification_time() {
+    let (_temporary, root) = fixture();
+    let path = root.join("deploy/SKILL.md");
+    let (_, _, first) = read_slice(&root, &path, 0).unwrap();
+    assert_eq!(read_slice(&root, &path, 0).unwrap().2, first);
+    let file = fs::OpenOptions::new().write(true).open(&path).unwrap();
+    file.set_times(
+        fs::FileTimes::new()
+            .set_modified(std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(123)),
+    )
+    .unwrap();
+    let modified = read_slice(&root, &path, 0).unwrap().2;
+    assert_ne!(modified, first);
+    assert_eq!(modified.inode, first.inode);
+    assert_eq!(modified.size, first.size);
+    fs::write(&path, "longer replacement contents for this skill\n").unwrap();
+    let resized = read_slice(&root, &path, 0).unwrap().2;
+    assert_ne!(resized.size, modified.size);
+    let replacement = root.join("replacement");
+    fs::write(&replacement, "new inode\n").unwrap();
+    fs::rename(replacement, &path).unwrap();
+    let replaced = read_slice(&root, &path, 0).unwrap().2;
+    assert_ne!(replaced.inode, resized.inode);
+}
+
+#[test]
 fn missing_paths_directories_and_escaping_links_are_refused_without_effect() {
     let (temporary, root) = fixture();
     let outside = temporary.path().join("secret.txt");

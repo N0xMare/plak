@@ -364,7 +364,12 @@ opens it without following a link and without blocking (`O_NOFOLLOW |
 O_NONBLOCK`), and checks the descriptor again, so a FIFO or device is refused
 (`path is not a regular file: <path>`) and never read; missing paths and
 directories get the same messages as workspace reads. The read keeps the
-workspace read's page, slice, line and 16 MiB file bounds, records no
+workspace read's page, slice, line and 16 MiB file bounds. It publishes no
+partial page when the runner file changes between slices, and pins the file's
+device, inode, size and nanosecond modification time before and after each
+slice and across the page. A model's runner read carries its operation owner,
+budget, cancellation and preempt controls; Stop returns without waiting for a
+stalled peer to answer. It records no
 text-read observation (it never authorizes `Write`), and grants nothing else:
 no write, edit, search or listing tool accepts these paths. The canonical
 check and the open are separate steps, not a descriptor walk, so a rename
