@@ -17,6 +17,12 @@ use crate::runtime::topology_state::TreeRows;
 use crate::sessions::{NoticeScope, TranscriptRow};
 
 pub(super) const AUTO_CONTINUE_PAUSE_TEXT: &str = "auto-continue paused until the next prompt";
+/// The row a wake that does not fit the window writes for its pause.
+pub(super) const WAKE_PREFLIGHT_PAUSE_TEXT: &str =
+    "Sub-agent auto-continue preflight paused until the next prompt";
+/// The lead of the row a failed wake writes for its pause, before its cause.
+pub(super) const WAKE_FAILURE_PAUSE_TEXT: &str =
+    "Sub-agent auto-continue paused until the next prompt";
 
 /// What the indicator reads from the session's agent tree.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -226,16 +232,27 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     }
 }
 
-/// A restored pause line is current when the same notice is already in the
-/// transcript and no later user prompt has cleared the episode.
+/// A restored pause line is current when the same notice, or the row a wake
+/// failure wrote for its own pause, is already in the transcript and no later
+/// user prompt has cleared the episode.
 fn pause_already_recorded(session: &crate::sessions::SessionRecord, row: &TranscriptRow) -> bool {
     let rows: &[TranscriptRow] = &session.transcript;
-    let Some(index) = rows.iter().rposition(|existing| existing == row) else {
+    let Some(index) = rows
+        .iter()
+        .rposition(|existing| existing == row || reports_wake_pause(existing))
+    else {
         return false;
     };
     !rows[index + 1..]
         .iter()
         .any(|later| matches!(later, TranscriptRow::User { .. }))
+}
+
+fn reports_wake_pause(row: &TranscriptRow) -> bool {
+    matches!(row, TranscriptRow::Notice(notice)
+        if notice.scope == NoticeScope::Tree
+            && (notice.text == WAKE_PREFLIGHT_PAUSE_TEXT
+                || notice.text.starts_with(WAKE_FAILURE_PAUSE_TEXT)))
 }
 
 #[cfg(test)]

@@ -234,7 +234,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         {
             return self.wake_deferred();
         }
-        let mut paused_row = false;
+        let suppressed = self.role.config.session.child_wake_suppressed;
         let step = match self.try_child_wake_prompt(now).await {
             Ok(step) => {
                 self.role.child_wake.retry = None;
@@ -255,7 +255,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     TranscriptRow::error(
                         NoticeScope::Tree,
                         format!(
-                            "Sub-agent auto-continue paused until the next prompt: {}",
+                            "{}: {}",
+                            super::pending::WAKE_FAILURE_PAUSE_TEXT,
                             error.message()
                         ),
                     )
@@ -263,13 +264,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 );
                 let _ = self.suppress_child_wake(Some(error.message().to_owned()));
                 self.role.child_wake.park();
-                paused_row = true;
                 Ok(HostStep::Continue)
             }
         };
-        // Only a failure that wrote its own pause row ends the episode's
-        // line; a suppression read from the views still gets the one line.
-        if paused_row && self.role.config.session.child_wake_suppressed {
+        if !suppressed && self.role.config.session.child_wake_suppressed {
             self.auto_continue_pause_reported();
         }
         self.publish_pending_continuation();
@@ -525,16 +523,23 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             }
             WakeFit::DoesNotFit => {}
         }
+        self.pause_unfit_child_wake()?;
+        Ok(false)
+    }
+
+    /// Pauses auto-continue for a wake that does not fit the window. Its own
+    /// row says so, so the episode's generic pause line is not written too.
+    pub(super) fn pause_unfit_child_wake(&mut self) -> CliResult<()> {
         self.suppress_child_wake(Some(
             "Sub-agent auto-continue preflight did not fit".to_owned(),
         ))?;
-
         let _ = self.role.events.notice(TranscriptRow::warning(
             NoticeScope::Tree,
-            "Sub-agent auto-continue preflight paused until the next prompt",
+            super::pending::WAKE_PREFLIGHT_PAUSE_TEXT,
         ));
+        self.auto_continue_pause_reported();
         self.role.child_wake.park();
-        Ok(false)
+        Ok(())
     }
 
     pub(super) async fn fit_child_wake(&mut self, command: &str) -> CliResult<WakeFit> {

@@ -2580,9 +2580,11 @@ its returned batch never wakes the root again on its own, and the host's wake
 prompt is never restored into the operator's composer. That persisted
 suppression includes a `plak run` continuation (chapter 02 §5.2): a later
 interactive open starts paused. An interactive withheld wake also leaves one
-`auto-continue paused until the next prompt` transcript warning, the same line
-a failed wake preflight's pause episode leaves; a wake failure that already
-wrote its own pause line does not write a second. A crash between the
+`auto-continue paused until the next prompt` transcript warning. A wake that
+does not fit at preflight (`Sub-agent auto-continue preflight paused until the
+next prompt`) or fails (`Sub-agent auto-continue paused until the next prompt:
+<cause>`) writes its own pause row instead, and that episode gets no second
+line, live or after reopen (chapter 02 §5.2). A crash between the
 turn's terminal and the tree transaction leaves the tree cursor behind, and the
 next open returns the batch from the same record. Message bodies escape
 `&`, `<`, `>` and quotes; only host-controlled attributes frame each

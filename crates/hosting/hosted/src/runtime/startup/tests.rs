@@ -924,8 +924,8 @@ fn a_reconstructed_binding_change_types_the_attach_failure_and_selects_the_carry
     }
 }
 
-/// The incident's shape: the context contract names the account, so an open
-/// under another account also changes the model capability binding. The
+/// An open under another account whose context contract names the account,
+/// so the model capability binding changes with it. The
 /// refusal is the account change on both mapping sites, and the binding change
 /// stays named, so a reopen verification still answers binding-changed and
 /// `/reload` carries.

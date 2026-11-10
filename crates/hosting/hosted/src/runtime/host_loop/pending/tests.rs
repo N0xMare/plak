@@ -1111,3 +1111,30 @@ fn a_quota_exhausted_root_turn_writes_one_live_pause_line() {
         });
     });
 }
+
+/// A wake that does not fit the window writes its own pause row; the episode
+/// gets no generic pause line on top, live or after reopen.
+#[test]
+fn an_unfit_wake_pause_is_one_row_live_and_after_reopen() {
+    use super::WAKE_PREFLIGHT_PAUSE_TEXT;
+    with_tree(0, |host, runtime, _, _| {
+        spawn_child(runtime);
+        host.pause_unfit_child_wake().unwrap();
+        host.commit_notice_intents();
+        host.publish_pending_continuation();
+        host.publish_pending_continuation();
+        let rows = |session: &crate::sessions::SessionRecord| {
+            (
+                pause_rows(session, WAKE_PREFLIGHT_PAUSE_TEXT),
+                pause_rows(session, AUTO_CONTINUE_PAUSE_TEXT),
+            )
+        };
+        assert!(host.role.config.session.child_wake_suppressed);
+        assert_eq!(rows(&host.role.config.session), (1, 0));
+        reopen(host, |restored| {
+            assert!(restored.role.config.session.child_wake_suppressed);
+            restored.publish_pending_continuation();
+            assert_eq!(rows(&restored.role.config.session), (1, 0));
+        });
+    });
+}

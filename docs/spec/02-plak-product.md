@@ -6104,8 +6104,9 @@ facts to send. On an interactive face, pausing
 auto-continue also writes one typed `tree` warning as a notice intent —
 `auto-continue paused until the next prompt` — once per pause episode; a JSONL
 face writes no row and its output is unchanged. An episode ends when a prompt is
-admitted (the admitted-turn count advances). A wake failure that already said
-auto-continue is paused writes no second line. Attaching to a session, or
+admitted (the admitted-turn count advances). A wake that did not fit at
+preflight or failed writes its own pause row, and that episode writes no
+second line, live or after reopen. Attaching to a session, or
 switching to it in place, keeps an already recorded row instead of writing a
 second copy. The suppression intent is written
 immediately even with live children, and an attached host re-reads the view at
@@ -7326,7 +7327,7 @@ segment limit instead of token or tool growth, on native routes too: `/compact`
 compacts this session's earlier history, `/fork-then-compact` compacts a fork
 and leaves this session unchanged, and `/new` starts a new session.
 A failed turn's retry hint renders the provider's retained advice in whole
-seconds; advice at its 24 h retention ceiling (chapter 01) renders as `retry
+seconds; advice at its 24 h retention ceiling (chapter 01 §13.1) renders as `retry
 after 24 h or more`, never as an exact delay.
 These are in-process host observations, not new JSONL v1 lines.
 

@@ -12021,7 +12021,10 @@ the budget, becomes:
   honored as given up to 60 s and never jittered; longer advice is clamped to
   60 s while it fits what remains of the 120 s wait budget. Advice beyond that
   remainder, while physical requests remain, is declined at once
-  (`advice_beyond_budget`) rather than waited short and failed later.
+  (`advice_beyond_budget`) rather than waited short and failed later. Advice
+  retained on a model error (`ModelRetryDelay`) is capped at 24 h: longer
+  advice saturates at that ceiling, so a retained 24 h value is a floor, not
+  an exact delay.
   Without advice the wait is equal-jittered from a base that doubles from
   1 s (half the base fixed, half uniformly random; the random source is
   injectable for tests). The sole zero-first-backoff exception is the TLS

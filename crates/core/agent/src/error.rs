@@ -57,6 +57,7 @@ pub struct AgentError {
     store_error: Option<SessionStoreError>,
     binding_change: Option<Box<crate::BindingChange>>,
     account_changed: bool,
+    binding_mismatch: bool,
     reresolution_error: Option<Box<crate::runtime::ModelReresolutionError>>,
 }
 
@@ -105,6 +106,7 @@ impl AgentError {
             store_error: None,
             binding_change: None,
             account_changed: false,
+            binding_mismatch: false,
             reresolution_error: None,
         }
     }
@@ -130,6 +132,17 @@ impl AgentError {
 
     pub(crate) const fn with_account_changed(mut self) -> Self {
         self.account_changed = true;
+        self
+    }
+
+    /// Whether this refusal is the revalidation or model-binding mismatch of
+    /// a reopened checkpoint against the caller's binding.
+    pub(crate) const fn binding_mismatch(&self) -> bool {
+        self.binding_mismatch
+    }
+
+    pub(crate) const fn with_binding_mismatch(mut self) -> Self {
+        self.binding_mismatch = true;
         self
     }
 
@@ -229,6 +242,7 @@ impl AgentError {
             store_error: None,
             binding_change: None,
             account_changed: false,
+            binding_mismatch: false,
             reresolution_error: None,
         }
     }
@@ -248,6 +262,7 @@ impl AgentError {
             store_error: None,
             binding_change: None,
             account_changed: false,
+            binding_mismatch: false,
             reresolution_error: None,
         }
     }
@@ -261,6 +276,7 @@ impl AgentError {
             store_error: None,
             binding_change: None,
             account_changed: false,
+            binding_mismatch: false,
             reresolution_error: None,
         }
     }
@@ -279,6 +295,7 @@ impl AgentError {
             store_error: None,
             binding_change: None,
             account_changed: false,
+            binding_mismatch: false,
             reresolution_error: None,
         }
     }
@@ -296,6 +313,7 @@ impl AgentError {
             store_error: Some(error),
             binding_change: None,
             account_changed: false,
+            binding_mismatch: false,
             reresolution_error: None,
         }
     }
@@ -311,6 +329,7 @@ impl AgentError {
             store_error: Some(error),
             binding_change: None,
             account_changed: false,
+            binding_mismatch: false,
             reresolution_error: None,
         }
     }
@@ -330,6 +349,7 @@ impl AgentError {
             store_error,
             binding_change: None,
             account_changed: false,
+            binding_mismatch: false,
             reresolution_error: None,
         }
     }
@@ -347,6 +367,7 @@ impl fmt::Debug for AgentError {
             .field("store_error", &self.store_error)
             .field("binding_change", &self.binding_change)
             .field("account_changed", &self.account_changed)
+            .field("binding_mismatch", &self.binding_mismatch)
             .field("reresolution_error", &self.reresolution_error)
             .finish()
     }

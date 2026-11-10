@@ -136,18 +136,28 @@ pub(super) fn runtime_rehydration_error(error: crate::RuntimeRehydrationError) -
     // An account, profile or admission mismatch is a revalidation failure of
     // the caller's binding. Everything else means this build cannot read or
     // rebuild what an earlier build stored.
-    let kind = match error {
+    let mismatch = matches!(
+        error,
         crate::RuntimeRehydrationError::Revalidation(
             crate::recovery_scope::RevalidationError::BindingMismatch,
-        ) => AgentErrorKind::InvalidInput,
-        _ => AgentErrorKind::IncompatibleSession,
+        )
+    );
+    let kind = if mismatch {
+        AgentErrorKind::InvalidInput
+    } else {
+        AgentErrorKind::IncompatibleSession
     };
     // The typed source names the exact recovery scope, binding, or manifest
     // fact that did not revalidate; without it a reopen refusal is undiagnosable.
-    AgentError::new(
+    let refusal = AgentError::new(
         kind,
         format!("runtime checkpoint recovery scope or revalidation failed: {error}"),
-    )
+    );
+    if mismatch {
+        refusal.with_binding_mismatch()
+    } else {
+        refusal
+    }
 }
 
 pub(super) fn profile_construction_error(error: &ProfileError) -> AgentError {

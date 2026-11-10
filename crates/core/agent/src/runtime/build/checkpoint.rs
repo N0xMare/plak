@@ -54,7 +54,8 @@ pub(super) fn reopened_checkpoint_authority(
         return Err(AgentError::new(
             AgentErrorKind::InvalidInput,
             "builder model binding disagrees with the durable checkpoint",
-        ));
+        )
+        .with_binding_mismatch());
     }
     let durable_prefix = manifest.canonical().stable_prefix();
     if durable_prefix != stable_request_prefix {

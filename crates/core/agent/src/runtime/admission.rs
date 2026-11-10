@@ -168,11 +168,10 @@ pub(super) fn reopen_account_changed(
 }
 
 /// Names the account change on a binding refusal of a reopen under another
-/// provider account: a revalidation mismatch or a named binding change. Store,
-/// ownership and unreadable-checkpoint refusals keep their own cause.
+/// provider account: a revalidation or model-binding mismatch, or a named
+/// binding change. Every other refusal keeps its own cause.
 pub(super) fn attribute_account_change(error: AgentError, account_changed: bool) -> AgentError {
-    let binding_refusal =
-        error.binding_change().is_some() || error.kind() == AgentErrorKind::InvalidInput;
+    let binding_refusal = error.binding_change().is_some() || error.binding_mismatch();
     if account_changed && binding_refusal {
         error.with_account_changed()
     } else {
@@ -239,7 +238,12 @@ mod tests {
 
     #[test]
     fn only_a_binding_refusal_under_another_account_names_the_account_change() {
-        let mismatch = || AgentError::new(AgentErrorKind::InvalidInput, "binding mismatch");
+        let mismatch = || {
+            runtime_rehydration_error(crate::RuntimeRehydrationError::Revalidation(
+                crate::recovery_scope::RevalidationError::BindingMismatch,
+            ))
+        };
+        let other_input = || AgentError::new(AgentErrorKind::InvalidInput, "limits invalid");
         let changed = || {
             AgentError::new(AgentErrorKind::IncompatibleSession, "presentation")
                 .with_binding_change(crate::BindingChange::ToolPresentation)
@@ -248,6 +252,7 @@ mod tests {
         assert!(attribute_account_change(mismatch(), true).account_changed());
         assert!(attribute_account_change(changed(), true).account_changed());
         assert!(!attribute_account_change(unrelated(), true).account_changed());
+        assert!(!attribute_account_change(other_input(), true).account_changed());
         assert!(!attribute_account_change(mismatch(), false).account_changed());
     }
 }
