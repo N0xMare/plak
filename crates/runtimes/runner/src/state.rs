@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use plakous_runner_protocol::{LineOwner, Refusal, Request, RequestClass, RunnerFrame};
+use plakous_tools::internal::runner::RunnerVerb;
 
 use crate::floors::{Floor, OwnerFloors};
 
@@ -362,10 +363,7 @@ impl Tables {
     fn fence(&self, host: &str, instance: &str, request: &Request) -> Option<RunnerFrame> {
         let owner = request.owner.as_ref()?;
         let id = request.request_id.clone();
-        let keyed = matches!(
-            request.class,
-            RequestClass::EffectCall { .. } | RequestClass::OwnerControl { .. }
-        );
+        let keyed = matches!(op_key(request), Keyed::Key(_));
         let current = self.owners.get(&(host.to_owned(), owner.line.clone()));
         // A replay of an unseen key tombstones it, so only the line's holder
         // may send one: its own key again, or its predecessor's under the
@@ -492,6 +490,11 @@ enum Keyed {
 /// control's.
 fn op_key(request: &Request) -> Keyed {
     match (&request.class, &request.owner) {
+        (RequestClass::EffectCall { .. }, Some(_))
+            if RunnerVerb::parse(&request.operation.verb).is_some_and(RunnerVerb::is_read) =>
+        {
+            Keyed::Unkeyed
+        }
         (
             RequestClass::EffectCall {
                 call_id,

@@ -93,8 +93,8 @@ pub struct Hello {
     pub binary_id: Option<String>,
     /// The runner's stable identity, as its home records it.
     pub runner_id: String,
-    /// This runner process: a new instance is a restart, and the host treats
-    /// every request it had pending on the old one as of unknown outcome.
+    /// This runner process: a new instance interrupts pending reads and
+    /// leaves pending effects of unknown outcome.
     pub instance: String,
     /// The machine boot the runner process belongs to.
     pub boot_id: String,
@@ -132,8 +132,9 @@ pub struct Bind {
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(tag = "class", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RequestClass {
-    /// One tool call's effect: keyed by the owner's line, the call and its
-    /// attempt, and run at most once per key.
+    /// One model tool call: effect verbs are keyed by the owner's line, the
+    /// call and its attempt, and run at most once per key. Read verbs keep
+    /// the owner fence but are never recorded.
     EffectCall {
         /// The tool call.
         call_id: String,
@@ -197,7 +198,7 @@ pub struct Request {
     pub digest: String,
     /// The host resends a request it may already have sent: the runner then
     /// answers a key it never saw with [`RunnerFrame::NotSeen`] and runs
-    /// nothing.
+    /// nothing. An unkeyed read instead reads again under its owner fence.
     pub replay: bool,
     /// On a replay, how long ago the host first claimed the request. A
     /// runner keeps a key's answer for 24 hours only, so a replay at least

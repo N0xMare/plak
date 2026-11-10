@@ -6131,9 +6131,9 @@ a host restart never resumes it (ordinary owner-loss recovery applies).
 The authoritative cut is one `RunnerCall` at the admitted link, strictly
 outside the client's per-line foreground gate and owner-transfer lock, so the
 barrier can always run. Exactly these calls wait there, each sent under a
-model tool call's own context (its line owner and effect key): a process
-execution, process start or workspace mutation under that key; a workspace or
-repository read under it; and that tool call's own process observations (the
+model tool call's own context (its line owner, call and attempt): a process
+execution, process start or workspace mutation under its effect key; a workspace
+or repository read without reserving a key; and that tool call's own process observations (the
 foreground polls, tails and joins the process tool makes while it watches the
 process it started or polls). Instruction and VCS reads are sent unkeyed,
 service spawns are unkeyed and VCS effects are tree steps, so none of them
@@ -6215,8 +6215,15 @@ the normal recovery-required path before Ready. The driver's placement parking
   deadline as a duration (the ends share no clock), a digest (lowercase hex
   SHA-256 of the RFC 8785 JSON of its operation) and a `replay` flag. An
   `EffectCall { call_id, attempt_id }` (from `OperationClass::EffectCall`) is
-  keyed by host, line, generation, call, attempt and verb, so one call may
-  start a process and then write to it, and must name its owner. An
+  keyed by host, line, generation, call, attempt and verb for an effect verb,
+  so one call may start a process and then write to it, and must name its
+  owner. A read verb under the same class keeps its owner fence and model-call
+  identity but is never entered in the runner's op table, journaled by the
+  host or acknowledged. A tool may repeat identical reads or make different
+  reads of the same verb, including slices and reads of several files, under
+  one call and attempt. This applies to every read verb in the runner seam,
+  not only `workspace.read` and `repository.query`. Read replays remain
+  owner-fenced and perform the read again rather than tombstoning a key. An
   `OwnerControl { control_id }` (a stop, a promotion or a disown of the
   line's processes) is keyed by host, line and control id, and must name its
   owner. A `ProcessObservation { job, cursor }` (a poll) must name its owner,
@@ -6313,7 +6320,8 @@ the normal recovery-required path before Ready. The driver's placement parking
   proven to have had no effect. A
   resend of a key the runner already holds is answered from the op table
   whatever its owner, since the call it names may have run.
-- **At most once.** An effect-call key runs at most once per runner instance.
+- **At most once.** An effect-call key for an effect verb runs at most once
+  per runner instance; read verbs under a model call have no such key.
   The first send runs it. A resend with the same key and digest answers
   `InProgress` while it runs, then the stored answer; another digest under the
   key answers `StaleRequest`, with no effect. A replay (`replay = true`) of a
@@ -6330,6 +6338,12 @@ the normal recovery-required path before Ready. The driver's placement parking
   replayed at least 23 hours after its claim (24 hours less a 1 hour margin
   for that clock stepping back) answers `Expired` and is not tombstoned, since
   the runner may have run it and forgotten it: its outcome is unknown.
+  A model read uses the read window, not the effect window. Losing its link
+  or restarting its runner interrupts it with `ReadInterrupted`, never an
+  unknown effect. Placement-hold-eligible reads retain their model-call flag
+  and owner: the hold waits and reissues the same arguments and cursor after
+  release. A live keyed effect remains retained and replayed under its original
+  key; excluding reads changes neither its retention nor its at-most-once law.
 - **Line table.** Protocol 3 adds `foreground` to each `Lines` entry: true
   while an unpromoted process is live, independent of retained job snapshots.
   Missing `foreground` in an obsolete protocol 1 or 2 line decodes as false
@@ -6443,11 +6457,16 @@ the normal recovery-required path before Ready. The driver's placement parking
   are one build, every change to the runner's semantics (a holder, fence or
   key rule, a refusal's meaning, a journal or floors rule, a frame's meaning)
   bumps `PROTOCOL_VERSION`.
+  Protocol 5 excludes model-call reads from effect keys and from host
+  journaling and acknowledgement. Frame schemas are unchanged; the version
+  separates builds with different read-key and interruption semantics because
+  a home-local bind does not require matching source revisions.
 - **Host link.** On a healthy link a call waits 30 s for an answer (120 s
   for an effect or tree call), then its outcome is unknown. Effect calls,
   owner controls, observations and reads outstanding when the link is lost
-  are replayed by key and digest on the reconnection to the same runner
-  instance; an unkeyed mutation, process or service spawn outstanding then is
+  are sent again on reconnection to the same runner instance: keyed calls by
+  their key and digest, reads and observations by their arguments and cursor.
+  An unkeyed mutation, process or service spawn outstanding then is
   `OutcomeUnknown`, since it has no key to ask by. A model tool call's effect
   window does not run while its link is lost: it restarts when the link is
   bound again (which replays it under its original key, digest and first-claim
@@ -6631,6 +6650,11 @@ lease clock excludes suspend. Floors, socket, lock and log are isolated by exact
 triple; no floors migration crosses a protocol/revision/flavor boundary.
 
 ### 8.5 Execution environment and process sessions
+
+The runner seam keeps a read's `OperationClass::EffectCall` context intact:
+it identifies the model call and its placement-hold eligibility, not an effect
+to deduplicate. The host and runner classify the verb's read-only semantics
+as §8.4 states; no distinct wire class or per-read operation key is required.
 
 File mutations report `changed_files=N`, then every committed changed
 workspace-relative path in lexical order as `A`, `M` or `D`, a space and a JSON

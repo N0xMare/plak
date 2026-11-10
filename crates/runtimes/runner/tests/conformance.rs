@@ -36,6 +36,236 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream, ReadHalf, WriteHalf};
 const LINE: &str = "00000000-0000-0000-0000-0000000000a1";
 const BRANCH: &str = "00000000-0000-0000-0000-0000000000b1";
 
+mod model_reads {
+    use super::*;
+    use plakous_tools::internal::runner::RunnerVerb;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Default)]
+    struct Journal(AtomicUsize);
+
+    impl plakous_runner::CallJournal for Journal {
+        fn claim(&self, _: &plakous_runner::JournalEntry) -> std::io::Result<()> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        fn settle(&self, _: &str) -> std::io::Result<()> {
+            panic!("a model read must never be journaled or settled")
+        }
+
+        fn pending(&self) -> std::io::Result<Vec<plakous_runner::JournalEntry>> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn repository_queries_and_identical_reads_share_one_model_context() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("a"), "alpha").unwrap();
+        let (_link, environment) = loopback(root.path()).await;
+        for needle in ["alpha", "absent", "alpha"] {
+            let query = RepositoryQuery::new(
+                ".",
+                needle.as_bytes().to_vec(),
+                RepositoryMatchCase::Sensitive,
+                query_limits(),
+            )
+            .unwrap();
+            let answer = environment
+                .query_repository(query, effect(owner(1, 1), 1))
+                .await
+                .unwrap();
+            assert_eq!(answer.matches().len(), usize::from(needle == "alpha"));
+        }
+        for _ in 0..2 {
+            let read = environment
+                .read_workspace(
+                    WorkspaceReadSliceRequest::start("a", 5).unwrap(),
+                    effect(owner(1, 1), 1),
+                )
+                .await
+                .unwrap();
+            assert_eq!(read.bytes().as_ref(), b"alpha");
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn every_model_read_verb_is_unrecorded_but_still_owner_fenced() {
+        let root = tempfile::tempdir().unwrap();
+        let service = service(root.path());
+        let mut raw = Raw::bound(&service, "instance-1").await;
+        assert!(matches!(
+            raw.ask(transfer("t", None, wire_owner())).await,
+            RunnerFrame::TransferAccepted { .. }
+        ));
+        // Malformed payloads deliberately fail at the backend. Their answers
+        // still must not reserve, tombstone or spend a model-call key.
+        for verb in RunnerVerb::ALL.into_iter().filter(|verb| verb.is_read()) {
+            for (index, replay) in [(0, false), (1, true), (2, false)] {
+                let operation = Operation {
+                    verb: verb.as_str().into(),
+                    payload: json!({"invalid": index}),
+                };
+                let HostFrame::Request(mut request) = keyed(
+                    "read",
+                    "00000000-0000-0000-0000-000000000001",
+                    &operation,
+                    replay,
+                ) else {
+                    unreachable!()
+                };
+                request.digest = format!("digest-{index}");
+                let answer = raw.ask(HostFrame::Request(request.clone())).await;
+                assert!(
+                    matches!(
+                        answer,
+                        RunnerFrame::Result { .. }
+                            | RunnerFrame::Error { .. }
+                            | RunnerFrame::Refused {
+                                refusal: Refusal::Unsupported { .. },
+                                ..
+                            }
+                    ),
+                    "{verb:?}: {answer:?}"
+                );
+                raw.send(&HostFrame::Ack {
+                    request_id: "read".into(),
+                })
+                .await;
+                request.owner = Some(wire_owner_of(LINE, 0));
+                assert!(
+                    matches!(
+                        raw.ask(HostFrame::Request(request.clone())).await,
+                        RunnerFrame::StaleOwner { .. }
+                    ),
+                    "{verb:?}: a read, including a replay, stays fenced"
+                );
+                request.owner = None;
+                assert!(matches!(
+                    raw.ask(HostFrame::Request(request)).await,
+                    RunnerFrame::Refused {
+                        refusal: Refusal::Malformed { .. },
+                        ..
+                    }
+                ));
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn lost_model_workspace_read_is_held_reissued_and_never_journaled_or_acked() {
+        let root = tempfile::tempdir().unwrap();
+        let hello = service(root.path()).hello().clone();
+        let (link, mut first) = fake_runner(&hello).await;
+        let journal = Arc::new(Journal::default());
+        let (client, _) = plakous_runner::RunnerClient::connect_journaled(
+            link,
+            bind("instance-1"),
+            placement_windows(),
+            Some(journal.clone()),
+        )
+        .await
+        .unwrap();
+        let tap = Tap::new(&client);
+        let backend = RunnerBackend::new(hello.descriptor.clone(), Arc::new(tap.clone())).unwrap();
+        let services = plakous_runner::RunnerServices::new(
+            Arc::new(backend),
+            tokio::runtime::Handle::current(),
+        );
+        let environment =
+            runner_environment(scope(), root.path(), ".", config(), services.backend()).unwrap();
+        let reading = tokio::spawn(environment.read_workspace(
+            WorkspaceReadSliceRequest::start("a", 5).unwrap(),
+            effect(owner(1, 1), 1),
+        ));
+        let sent = first.next_request().await;
+        assert_eq!(sent.operation.verb, "workspace.read");
+        services.set_available(false);
+        drop(first);
+        client.disconnect();
+        client.abandon_lost_effects();
+        tokio::time::timeout(Duration::from_secs(10), tap.failed.notified())
+            .await
+            .unwrap();
+        assert!(
+            matches!(
+                tap.failures().as_slice(),
+                [RunnerFailure::ReadInterrupted(_)]
+            ),
+            "{:?}",
+            tap.failures()
+        );
+        assert!(
+            !reading.is_finished(),
+            "the placement holds the interrupted read"
+        );
+        assert_eq!(journal.0.load(Ordering::SeqCst), 0);
+        let (link, mut second) = fake_runner(&hello).await;
+        client.reconnect(link).await.unwrap();
+        services.set_available(true);
+        let reissued = second.next_request().await;
+        assert_eq!(reissued.operation, sent.operation);
+        assert_eq!(reissued.owner, sent.owner);
+        assert_eq!(reissued.class, sent.class);
+        assert!(!reissued.replay);
+        assert_ne!(reissued.request_id, sent.request_id);
+        second.fail(&reissued).await;
+        assert_eq!(
+            reading.await.unwrap().unwrap_err().kind(),
+            ExecutionBackendErrorKind::Io
+        );
+        // A later request is a transport barrier: an erroneous Ack would
+        // precede it in this connection's FIFO.
+        let barrier =
+            tokio::spawn(client.call(RunnerCall::unkeyed(RunnerVerb::ProbeWorkspace, json!({}))));
+        loop {
+            match second.next_host().await {
+                HostFrame::Ack { .. } => panic!("a model read must not be acknowledged"),
+                HostFrame::Request(request) => {
+                    second.fail(&request).await;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        assert!(barrier.await.unwrap().is_err());
+        assert_eq!(journal.0.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_restarted_runner_interrupts_model_reads_without_unknown_effects() {
+        let root = tempfile::tempdir().unwrap();
+        let mut hello = service(root.path()).hello().clone();
+        let (link, mut first) = fake_runner(&hello).await;
+        let (client, _) =
+            plakous_runner::RunnerClient::connect(link, bind("instance-1"), windows())
+                .await
+                .unwrap();
+        let tap = Tap::new(&client);
+        let backend =
+            Arc::new(RunnerBackend::new(hello.descriptor.clone(), Arc::new(tap.clone())).unwrap());
+        let environment = runner_environment(scope(), root.path(), ".", config(), backend).unwrap();
+        let reading = tokio::spawn(environment.read_workspace(
+            WorkspaceReadSliceRequest::start("a", 5).unwrap(),
+            effect(owner(1, 1), 1),
+        ));
+        let _sent = first.next_request().await;
+        hello.instance = "restarted".into();
+        let (link, _second) = fake_runner(&hello).await;
+        client.reconnect(link).await.unwrap();
+        reading.await.unwrap().unwrap_err();
+        assert!(
+            matches!(
+                tap.failures().as_slice(),
+                [RunnerFailure::ReadInterrupted(_)]
+            ),
+            "{:?}",
+            tap.failures()
+        );
+    }
+}
+
 fn scope() -> ExecutionEnvironmentScope {
     ExecutionEnvironmentScope::Run(RunId::from_str("00000000-0000-0000-0000-000000000041").unwrap())
 }
@@ -1598,6 +1828,7 @@ impl Raw {
 struct Tap {
     client: plakous_runner::RunnerClient,
     failures: Arc<Mutex<Vec<RunnerFailure>>>,
+    failed: Arc<tokio::sync::Notify>,
 }
 
 impl Tap {
@@ -1605,6 +1836,7 @@ impl Tap {
         Self {
             client: client.clone(),
             failures: Arc::default(),
+            failed: Arc::default(),
         }
     }
 
@@ -1615,12 +1847,19 @@ impl Tap {
 
 impl RunnerLink for Tap {
     fn call(&self, call: RunnerCall) -> RunnerCallFuture {
+        if call.verb() == plakous_tools::internal::runner::RunnerVerb::ProbeWorkspace {
+            let served =
+                plakous_tools::internal::runner::serve_probe(call.payload().clone(), &|_| true);
+            return Box::pin(async move { served.await.map_err(|_| RunnerFailure::Unsupported) });
+        }
         let answer = self.client.call(call);
         let failures = Arc::clone(&self.failures);
+        let failed = Arc::clone(&self.failed);
         Box::pin(async move {
             let answer = answer.await;
             if let Err(failure) = &answer {
                 failures.lock().unwrap().push(failure.clone());
+                failed.notify_one();
             }
             answer
         })

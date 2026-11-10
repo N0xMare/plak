@@ -1,11 +1,11 @@
-//! Runner protocol, version 4: what a Plakous host and a runner say to each
+//! Runner protocol, version 5: what a Plakous host and a runner say to each
 //! other over one byte stream (spec 01 §8.4).
 //!
 //! A connection carries length-prefixed JSON frames ([`frame`]). The runner
 //! speaks first with its [`Hello`]; the host answers with its [`Bind`], and
 //! only then sends requests. Every request names its [`RequestClass`]: an
-//! effect call is keyed by its line, call and attempt and runs at most once
-//! per key, under the line's current [`LineOwner`]; an owner change is
+//! effect verb in a model call is keyed by its line, call and attempt and
+//! runs at most once per key; reads retain only the owner fence. An owner change is
 //! announced with [`TransferOwner`] before the new owner's first request.
 //!
 //! Operation payloads and backend errors are JSON values whose schema the
@@ -28,7 +28,7 @@ pub use owner::LineOwner;
 /// A home-local runner binds any build of it, so every change to the
 /// runner's semantics bumps it (spec 01 §8.4); the frames of each version
 /// are pinned by a test.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Stable stopped-foreground receipt identity, independent of the connection
 /// and owner generation. Another call reusing the PID cannot match it.

@@ -7,6 +7,14 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ## Unreleased
 
+- Allow repeated reads within one model tool call on a remote runner. Claude
+  `Read`, sliced text and image reads, multi-file patches, and search context
+  reads no longer collide under the tool call's effect key. Reads retain their
+  owner fence and placement hold but are neither recorded nor acknowledged;
+  keyed effects retain their at-most-once behavior. Runner protocol 5 separates
+  these semantics from older home-local runners, which can bind across source
+  revisions; frame schemas and persisted formats are unchanged.
+
 - Open sessions placed on a remote runner with skills on: such a node
   discovers only `<workspace>/.agents/skills`, on the runner, and never asks
   the runner for the host's `~/.agents/skills`, which it refused outside its

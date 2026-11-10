@@ -38,11 +38,10 @@ mod foreground;
 /// How long the host waits on its runner.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ClientWindows {
-    /// How long a call that is not an effect call waits for its answer from
-    /// when it was sent, across a lost link, before its outcome is unknown
-    /// (spec 01 §8.4: 30 s).
+    /// How long a read or other non-effect waits from its send for an answer
+    /// (spec 01 §8.4: 30 s). A lost link interrupts a read for reissue.
     pub read: Duration,
-    /// The same for an effect call (120 s).
+    /// How long a keyed model effect or tree step waits (120 s).
     pub effect: Duration,
     /// How often the host pings the runner (5 s).
     pub ping: Duration,
@@ -249,7 +248,10 @@ impl RunnerClient {
         let lost: Vec<String> = state
             .pending
             .iter()
-            .filter(|(_, pending)| matches!(pending.request.class, RequestClass::EffectCall { .. }))
+            .filter(|(_, pending)| {
+                matches!(pending.request.class, RequestClass::EffectCall { .. })
+                    && keyed(&pending.request)
+            })
             .map(|(id, _)| id.clone())
             .collect();
         let abandoned: Vec<Pending> = lost
@@ -635,13 +637,13 @@ impl State {
             .collect();
         for id in ids {
             if let Some(pending) = self.pending.remove(&id) {
-                let _ = pending
-                    .answer
-                    .send(Err(RunnerFailure::OutcomeUnknown(if restarted {
-                        "the runner restarted with the call outstanding".into()
-                    } else {
-                        "the link was lost with the call outstanding".into()
-                    })));
+                let detail = if restarted {
+                    "the runner restarted with the call outstanding"
+                } else {
+                    "the link was lost with the call outstanding"
+                };
+                let failure = Expiring::of(&pending.request).lost(detail);
+                let _ = pending.answer.send(Err(failure));
             }
         }
     }
@@ -777,7 +779,11 @@ impl Inner {
                     return;
                 };
                 // The answer is recorded below, so the runner may forget it.
-                if acknowledge {
+                let recorded = lock(&self.state)
+                    .pending
+                    .get(&request_id)
+                    .is_some_and(|pending| keyed(&pending.request));
+                if acknowledge && recorded {
                     self.send(HostFrame::Ack {
                         request_id: request_id.clone(),
                     });
@@ -959,7 +965,7 @@ impl Inner {
         request.request_id = self.next_id("r");
         request.replay = true;
         request.age_ms = Some(plakous_model::now_unix_millis().saturating_sub(entry.claimed_at_ms));
-        let window = self.window(&request.class);
+        let window = self.window(&request);
         let request_id = request.request_id.clone();
         let (answer, answered) = oneshot::channel();
         {
@@ -990,12 +996,14 @@ impl Inner {
         Err(RunnerFailure::OutcomeUnknown(LINK_LOST.into()))
     }
 
-    /// How long a sent call of `class` waits for its answer.
-    const fn window(&self, class: &RequestClass) -> Duration {
-        if matches!(
-            class,
-            RequestClass::EffectCall { .. } | RequestClass::TreeOperation { .. }
-        ) {
+    /// How long a sent request waits for its answer.
+    fn window(&self, request: &Request) -> Duration {
+        if keyed(request)
+            && matches!(
+                request.class,
+                RequestClass::EffectCall { .. } | RequestClass::TreeOperation { .. }
+            )
+        {
             self.windows.effect
         } else {
             self.windows.read
@@ -1078,7 +1086,7 @@ impl Inner {
             self.transfer(owner).await?;
         }
         let request = self.request(&call, owner);
-        let window = self.window(&request.class);
+        let window = self.window(&request);
         let frame = HostFrame::Request(request.clone());
         if !fits(&frame) {
             return Err(RunnerFailure::Refused(
@@ -1126,8 +1134,8 @@ impl Inner {
                     cancel_sent = true;
                     if !self.send(HostFrame::Cancel { request_id: request_id.clone() }) {
                         lock(&self.state).pending.remove(&request_id);
-                        return Err(RunnerFailure::OutcomeUnknown(
-                            "the call was cancelled while the runner was unreachable".into(),
+                        return Err(expiring.lost(
+                            "the call was cancelled while the runner was unreachable",
                         ));
                     }
                 }
@@ -1445,10 +1453,17 @@ enum Expiring {
 }
 
 impl Expiring {
+    fn lost(self, detail: &str) -> RunnerFailure {
+        match self {
+            Self::Read => RunnerFailure::ReadInterrupted(detail.into()),
+            Self::Window | Self::ModelEffect => RunnerFailure::OutcomeUnknown(detail.into()),
+        }
+    }
+
     fn of(request: &Request) -> Self {
         match request.class {
-            RequestClass::EffectCall { .. } => Self::ModelEffect,
             _ if !keyed(request) && replayable(request) => Self::Read,
+            RequestClass::EffectCall { .. } => Self::ModelEffect,
             _ => Self::Window,
         }
     }
@@ -1457,15 +1472,16 @@ impl Expiring {
 /// How a replay or recovery says the link was lost before an answer came.
 const LINK_LOST: &str = "the link was lost before the replay was answered";
 
-/// Whether a request runs at most once per key: an effect call or an owner
-/// control. These are the calls the journal records.
-const fn keyed(request: &Request) -> bool {
-    matches!(
-        request.class,
-        RequestClass::EffectCall { .. }
-            | RequestClass::OwnerControl { .. }
-            | RequestClass::TreeOperation { .. }
-    )
+/// Whether a request runs at most once per key: an effect verb under a
+/// model call, an owner control or a tree step. The journal records these.
+fn keyed(request: &Request) -> bool {
+    match request.class {
+        RequestClass::EffectCall { .. } => {
+            !RunnerVerb::parse(&request.operation.verb).is_some_and(RunnerVerb::is_read)
+        }
+        RequestClass::OwnerControl { .. } | RequestClass::TreeOperation { .. } => true,
+        _ => false,
+    }
 }
 
 /// Whether a request outstanding at a lost link may be sent again: a keyed

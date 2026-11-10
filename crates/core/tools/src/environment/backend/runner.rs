@@ -262,7 +262,8 @@ impl RunnerVerb {
 /// How a link keys one call (spec 01 §8.4).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RunnerClass {
-    /// One tool call's effect: at most once per key.
+    /// One model tool call: effect verbs run at most once per key; read verbs
+    /// retain the owner fence without recording a key.
     Effect {
         /// The tool call.
         call_id: CallId,
