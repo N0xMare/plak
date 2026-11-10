@@ -42,26 +42,13 @@ impl Applier<'_> {
                     crate::runtime::truncation_note(bound),
                 ));
             }
-            FeedTurnOutcome::Failed { context, .. } => {
-                let text = match self.terminal_read(turn_id)? {
-                    TerminalRead::Failed(error) => error,
-                    _ => "agent turn failed".to_owned(),
-                };
-                self.push(TranscriptRow::error(NoticeScope::Turn, text));
-                if context.is_some() {
-                    self.views.state.pause = Some(Anchored {
-                        anchor,
-                        value: Some(PauseCause::ContextCapacity {
-                            turn_id: turn.clone(),
-                        }),
-                    });
-                    if open_turn.as_ref().is_some_and(|turn| turn.host_wake) {
-                        self.views.state.wake = Some(Anchored {
-                            anchor,
-                            value: true,
-                        });
-                    }
-                }
+            FeedTurnOutcome::Failed {
+                model_kind,
+                context,
+                ..
+            } => {
+                let host_wake = open_turn.as_ref().is_some_and(|turn| turn.host_wake);
+                self.failed_turn(turn_id, anchor, host_wake, context.is_some(), model_kind)?;
             }
             FeedTurnOutcome::Cancelled { .. } if interrupted => {
                 self.push(TranscriptRow::Interrupted);
@@ -112,6 +99,43 @@ impl Applier<'_> {
                 NoticeScope::Recovery,
                 crate::runtime::RECOVERED_COMPLETED_STEERING_NOTICE,
             ));
+        }
+        Ok(())
+    }
+
+    /// A failed turn's error row, and the pause and wake suppression its
+    /// typed failure implies.
+    fn failed_turn(
+        &mut self,
+        turn_id: plakous::model::TurnId,
+        anchor: u64,
+        host_wake: bool,
+        context_limit: bool,
+        model_kind: Option<plakous::model::ModelErrorKind>,
+    ) -> Result<(), ProjectError> {
+        let text = match self.terminal_read(turn_id)? {
+            TerminalRead::Failed(error) => error,
+            _ => "agent turn failed".to_owned(),
+        };
+        self.push(TranscriptRow::error(NoticeScope::Turn, text));
+        if context_limit {
+            self.views.state.pause = Some(Anchored {
+                anchor,
+                value: Some(PauseCause::ContextCapacity {
+                    turn_id: turn_id.to_string(),
+                }),
+            });
+        }
+        // Spec 03 §8: a root whose route reported its quota exhausted would
+        // only fail again, so mail does not wake it, whatever started the
+        // turn; the next operator prompt ends the suppression.
+        if (context_limit && host_wake)
+            || model_kind == Some(plakous::model::ModelErrorKind::QuotaExceeded)
+        {
+            self.views.state.wake = Some(Anchored {
+                anchor,
+                value: true,
+            });
         }
         Ok(())
     }

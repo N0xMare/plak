@@ -261,8 +261,10 @@ fn equal_jitter_stays_between_half_and_the_whole_backoff() {
     );
 }
 
+/// Advice that fits the remaining wait budget is honored, clamped to sixty
+/// seconds; advice beyond it is refused at once rather than waited short.
 #[test]
-fn provider_advice_is_honored_and_clamped_not_refused() {
+fn provider_advice_is_clamped_within_the_budget_and_refused_beyond_it() {
     let advice = |seconds| Some(Duration::from_secs(seconds));
     let next = |physical, retry_after, waited| {
         POLICY.next_delay(
@@ -276,10 +278,42 @@ fn provider_advice_is_honored_and_clamped_not_refused() {
     assert_eq!(next(1, advice(7), 0), advice(7));
     assert_eq!(next(3, advice(1), 0), advice(1));
     assert_eq!(next(1, advice(0), 0), advice(0));
-    assert_eq!(next(1, advice(3_600), 0), advice(60));
+    assert_eq!(next(1, advice(120), 0), advice(60));
+    assert_eq!(next(1, advice(121), 0), None);
+    assert_eq!(next(1, advice(3_600), 0), None);
+    assert_eq!(next(1, advice(86_400), 0), None);
+    assert_eq!(next(2, advice(90), 60), None);
+    assert_eq!(next(2, advice(60), 60), advice(60));
     // The total wait is bounded: two full minutes allow no third wait.
     assert_eq!(next(3, advice(60), 120), None);
-    assert_eq!(next(2, advice(60), 60), advice(60));
+    let beyond = |physical, retry_after, waited| {
+        POLICY.advice_beyond_budget(
+            Facts::refused(physical).build(),
+            retry_after,
+            Duration::from_secs(waited),
+        )
+    };
+    assert!(beyond(1, advice(121), 0));
+    assert!(beyond(2, advice(61), 60));
+    assert!(!beyond(1, advice(120), 0));
+    assert!(!beyond(2, advice(60), 60));
+    assert!(!beyond(1, None, 0));
+    // With no physical request left the budget decline is the honest one.
+    assert!(!beyond(4, advice(3_600), 0));
+    // The outage ride-out takes no advice; other points ignore its waits.
+    let ride_out = UnreachableRideOut::default();
+    assert!(ride_out.advice_beyond_budget(
+        Facts::refused(1).build(),
+        FailurePoint::Refused,
+        advice(121),
+        Duration::ZERO,
+    ));
+    assert!(!ride_out.advice_beyond_budget(
+        Facts::refused(1).build(),
+        FailurePoint::Unreachable,
+        advice(121),
+        Duration::ZERO,
+    ));
 }
 
 #[test]

@@ -712,9 +712,9 @@ async fn native_credential_failure(
 fn native_account_changed(label: &str, account: &str) -> CliFailure {
     let label = native_account_label(label, account);
     let account = plakous_host_protocol::notice_remedy::AccountTarget::from_account(account);
+    // The remedy says what to do; the diagnostic names only the cause.
     CliFailure::new(format!(
-        "{label} provider account changed; restore the original account for exact reopen, or \
-         explicitly carry history into a new session under the current account"
+        "{label} provider account changed since this session was recorded"
     ))
     .with_remedy(
         plakous_host_protocol::notice_remedy::NoticeRemedy::RestoreAccountOrRebind { account },

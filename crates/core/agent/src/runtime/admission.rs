@@ -147,6 +147,26 @@ pub(super) fn recorded_admission_authority(
     Ok(configured)
 }
 
+/// Whether the current credential belongs to another provider account than
+/// the one the checkpoint was admitted under. Undecodable evidence answers
+/// no; the ordinary revalidation refuses it.
+pub(super) fn reopen_account_changed(
+    manifest: &RuntimeManifest,
+    current: &RuntimeModelAuthority,
+) -> bool {
+    let fact = manifest.binding().admission();
+    if fact.evidence().kind() != RuntimeComponentKind::AdmissionEvidence
+        || fact.evidence().codec_revision() != 1
+    {
+        return false;
+    }
+    serde_json::from_slice::<ConfiguredAdmissionEvidence>(fact.evidence().bytes()).is_ok_and(
+        |ConfiguredAdmissionEvidence(_, _, _, _, recorded, ..)| {
+            recorded != current.account_binding()
+        },
+    )
+}
+
 pub(super) fn refreshed_reopen_admission(
     manifest: &RuntimeManifest,
     configuration: &CompiledProviderConfiguration,

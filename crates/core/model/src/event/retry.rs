@@ -241,6 +241,9 @@ pub enum ModelRetryDeclineReason {
     Deadline,
     /// A physical, wait, or long-generation replay budget is exhausted.
     Budget,
+    /// The provider's retry advice exceeds the remaining wait budget, so the
+    /// retry is declined at once instead of waiting less than it asked.
+    AdviceBeyondBudget,
     /// Replaying may duplicate provider-hosted effects.
     ServerEffect,
     /// The provider explicitly disabled retries.
@@ -256,6 +259,7 @@ impl ModelRetryDeclineReason {
         match self {
             Self::Deadline => "deadline",
             Self::Budget => "budget",
+            Self::AdviceBeyondBudget => "advice_beyond_budget",
             Self::ServerEffect => "server_effect",
             Self::RetryDisabled => "retry_disabled",
             Self::Workflow => "workflow",

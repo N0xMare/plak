@@ -237,12 +237,16 @@ impl From<plakous::sessions::AgentSessionsError> for CliFailure {
     }
 }
 
-/// An open refused for a reconstructed frozen binding input is a binding
-/// change; a missing login or any other refusal never is.
+/// An open refused under another provider account is an account change, even
+/// when an account-scoped binding input changed with it; one refused for a
+/// reconstructed frozen binding input is a binding change; a missing login or
+/// any other refusal is neither.
 pub(crate) fn sessions_attach_failure(
     error: &plakous::sessions::AgentSessionsError,
 ) -> AttachFailure {
-    if error.binding_change().is_some() {
+    if error.account_changed() {
+        AttachFailure::AccountChanged
+    } else if error.binding_change().is_some() {
         AttachFailure::BindingChanged
     } else {
         AttachFailure::default()

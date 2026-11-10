@@ -245,6 +245,12 @@ pub(super) async fn wait_to_retry(
         .map_or(Duration::ZERO, |started| {
             monotonic_now().saturating_duration_since(started)
         });
+    let advice_beyond_budget = attempt.unreachable.advice_beyond_budget(
+        facts,
+        failure.point,
+        failure.retry_after,
+        *waited,
+    );
     let delay = attempt.unreachable.next_delay(
         facts,
         failure.point,
@@ -268,6 +274,7 @@ pub(super) async fn wait_to_retry(
             facts,
             elapsed,
             delay,
+            advice_beyond_budget,
         },
         &mut attempt.long_stream_replays,
     );

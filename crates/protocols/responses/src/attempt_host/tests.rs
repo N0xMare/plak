@@ -4302,6 +4302,36 @@ async fn shared_model_host_incomplete_arguments_deadline_is_diagnostic_and_joine
     Ok(())
 }
 
+/// Declining advice beyond the wait budget is a declined-retry behavior the
+/// identity binds, so revision 12 differs from revision 11.
+#[tokio::test]
+async fn retry_advice_decline_changes_shared_host_behavior_identity() -> TestResult {
+    let endpoint = wire_endpoint().await?;
+    let client = Client::with_tls_config_and_identity(
+        Limits::default(),
+        endpoint.client_config,
+        endpoint.tls_identity,
+    )?;
+    let authorization = ResponsesAuthorizationAdapter::new(1, 1, wire_preflight, wire_revalidate)?;
+    let current = host_behavior_identity(&client, &authorization)?;
+    let transport = client
+        .behavior_identity()
+        .ok_or_else(|| io::Error::other("missing TLS behavior identity"))?;
+    let prior = Digest::sha256(
+        DigestDomain::ModelBinding,
+        11,
+        &[
+            b"responses-attempt-host-behavior-v11",
+            transport.as_bytes().as_slice(),
+            1_u32.to_be_bytes().as_slice(),
+            1_u32.to_be_bytes().as_slice(),
+        ],
+    )?;
+    assert_ne!(current, prior);
+    assert_eq!(HOST_BEHAVIOR_IDENTITY_REVISION, 12);
+    Ok(())
+}
+
 #[tokio::test]
 async fn unreachable_ride_out_changes_shared_host_behavior_identity() -> TestResult {
     let endpoint = wire_endpoint().await?;
@@ -4326,7 +4356,6 @@ async fn unreachable_ride_out_changes_shared_host_behavior_identity() -> TestRes
         ],
     )?;
     assert_ne!(current, prior);
-    assert_eq!(HOST_BEHAVIOR_IDENTITY_REVISION, 11);
     Ok(())
 }
 

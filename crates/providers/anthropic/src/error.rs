@@ -205,7 +205,7 @@ impl AnthropicError {
         self
     }
 
-    pub(crate) fn with_notice(mut self, notice: &'static str) -> Self {
+    pub(crate) fn with_notice(mut self, notice: impl AsRef<str>) -> Self {
         self.message = SafeDiagnostic::new(notice);
         self
     }

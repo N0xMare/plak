@@ -1824,7 +1824,7 @@ view, and nothing is both.
 | Workflow completion | view | `WorkflowAdmitted`, `WorkflowSettled` with the request's operation id; for new, the successor session's `SessionCreated` with the derived create operation id | admitted without settlement belongs to the runtime; settled ends the request; neither means never admitted |
 | Pause causes | intent-backed view | the facts that pause (a context-capacity or `RecoveryRequired` `TurnTerminal`, a session-wide `CommandRejected`, a `WorkflowSettled` of a scheduled pass that did not compact) and `pause_cause` intents the host writes for causes no fact carries (an unrecorded session-wide refusal, a failed wake preflight); a workflow fact joins its request by the request's operation id, never by the derived workflow identity | the newest applied cause, by anchor, for the restored note; drain itself is process-local and never stored |
 | Counters: root turns, tool calls, compactions | view | root `CommandAccepted`; the distinct call ids of effect `OperationAdvanced` facts and of the tool results `HistoryAppended` commits (so a call rejected before preparation counts once); each `WorkflowSettled { Compacted }` once, whatever its reason (endpoint or turn fence) | monotonic over the applied records; a successor starts from its source's values at the `Branched` record; after a `BehindRetention` rebuild they restart from zero |
-| Child-wake suppression | intent-backed view | `wake_suppression` intents the host writes on an idle interrupt and on a failed or discarded wake; the cancel of a running `HostWake` turn (`CommandAccepted` of a cancel naming it) and a context-capacity `TurnTerminal` of a `HostWake` root | suppressed from the newest such intent or fact until a `CommandAccepted` of a `UserPrompt` root anchored after it |
+| Child-wake suppression | intent-backed view | `wake_suppression` intents the host writes on an idle interrupt and on a failed or discarded wake; the cancel of a running `HostWake` turn (`CommandAccepted` of a cancel naming it), a context-capacity `TurnTerminal` of a `HostWake` root, and a `QuotaExceeded` failed `TurnTerminal` of any root turn | suppressed from the newest such intent or fact until a `CommandAccepted` of a `UserPrompt` root anchored after it |
 | Agent attention acknowledgements | intent | `(tree, agent, attempt, attention)` | operator-authored presentation bookkeeping |
 | Identity registry | intent | each identity and its content digest | permanent; a discarded unadmitted workflow binding refuses even identical replay; it holds no runtime outcomes |
 | Carry and export bookkeeping: carried-forward lineage, carry files, retained references, deleted-artifact tombstones | intent and files | §2.5 | lineage is written by import; files and tombstones live outside the store and keep their own rules |
@@ -5587,10 +5587,18 @@ automatically. No shell export/import round trip is required.
 
 An unattached exact reopen refusal names the account or the specific frozen
 binding input that differs (`resolved harness plan is bound to a different
-<change>`, chapter 01 §5.4). Its repair notice carries the binding remedy
+<change>`, chapter 01 §5.4). When the current credential belongs to another
+provider account than the one the session was recorded under, the refusal is
+the account change (`AccountChanged`, with the restore-account-or-rebind
+remedy) even if an account-scoped binding input, such as a Claude OAuth context
+contract naming the account, differs with it; that input stays named for
+`/reload`'s carry. Its repair notice carries the binding remedy
 (§5.4), which the TUI renders with the one carry command first: carry the full
 history into a new session with `/rebind`; restoring the original
 account/configuration with the named login command reopens it exactly instead.
+The detached notice is the `attach failed: <diagnostic>` row, then one repair
+row whose text names the cause and whose remedy alone says what to do, so each
+remedy is stated once.
 `plak --resume <id>` of such a session opens unattached with that reason and
 guidance. `/reload`
 from that refusal takes the same in-process carry path. A missing login or
@@ -6064,8 +6072,9 @@ A job terminal signals once per turn, excluding in-band terminal observations
 already pending consumption. Notices-off hosts emit neither automatic signal. Hosted process packs enable repeat quiet holds only
 where `host_wakes` is earned (chapter 01 §8.5).
 Child-wake suppression is an intent-backed product view (§2.6), with no wake
-counter. It is set by the cancel of a running wake turn or a wake's
-context-capacity terminal (feed facts), or by a `wake_suppression` intent the
+counter. It is set by the cancel of a running wake turn, a wake's
+context-capacity terminal, or any root turn's failed terminal typed
+`QuotaExceeded` (feed facts), or by a `wake_suppression` intent the
 host writes on an idle interrupt and on a failed or discarded wake; a user
 prompt's accepted root anchored after it clears it, and nothing else does, so it
 survives reopen and rebuild. Fresh completions can keep waking the root without a user
@@ -9570,7 +9579,8 @@ as other analytics; these rows are not recovery authority. `v_replay_loss` is
 the canned view printed by `plak telemetry status --views`, including declined
 retries. Schema **14** adds the nullable `declined_reason` column with the
 closed set `deadline`, `budget`, `server_effect`, `retry_disabled`, and
-`workflow`. On a declined `ModelRetry`, delay is zero and
+`workflow`; `advice_beyond_budget` joins it as a new string value of the same
+unconstrained column (chapter 01 §13.1), with no schema change. On a declined `ModelRetry`, delay is zero and
 `output_discarded=false`; these are event facts, not `model_retries` columns.
 A declined row's byte/item counts describe the failed generation, not discarded
 output; its next physical number is proposed, not dispatched. `model_attempts`

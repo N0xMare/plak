@@ -1538,6 +1538,56 @@ async fn fable_included_limit_requires_exact_oauth_model_and_header_claim() -> T
     Ok(())
 }
 
+/// A Claude OAuth 429 whose unified headers attest a rejected subscription
+/// window is that window's usage limit, typed quota exhaustion and never
+/// retried; the generic 429 of the same account stays a rate limit.
+#[tokio::test]
+async fn an_attested_claude_subscription_limit_is_typed_quota_with_its_reset() -> TestResult {
+    let weekly = "anthropic-ratelimit-unified-status: rejected\r\nanthropic-ratelimit-unified-representative-claim: seven_day\r\nanthropic-ratelimit-unified-reset: 4102444812\r\n";
+    let notice = "You've hit your Claude weekly limit; try again after Fri, 01 Jan 2100 00:00:12 GMT, or switch to another Claude account.";
+    for (oauth, headers, expected) in [
+        (true, weekly, true),
+        (false, weekly, false),
+        (true, "", false),
+        (
+            true,
+            "anthropic-ratelimit-unified-status: allowed\r\nanthropic-ratelimit-unified-representative-claim: seven_day\r\n",
+            false,
+        ),
+    ] {
+        let body = br#"{"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your account's rate limit. Please try again later."}}"#;
+        let mut response = format!(
+            "HTTP/1.1 429 Too Many Requests\r\ncontent-type: application/json\r\nrequest-id: req_quota_fixture\r\nretry-after: 172800\r\n{headers}content-length: {}\r\nconnection: close\r\n\r\n",
+            body.len(),
+        )
+        .into_bytes();
+        response.extend_from_slice(body);
+        let (client, origin, peer) = tls_exchange_sequence(vec![response]).await?;
+        let resolved = if oauth {
+            resolved_oauth_fixture_model("claude-opus-5")?
+        } else {
+            resolved_fixture_model("claude-opus-5")?
+        };
+        let factory = AnthropicLocalHttpServiceFactory::new(
+            client,
+            origin,
+            resolved.route().clone(),
+            prepared(&resolved)?,
+        )?;
+        // A liveness bound only: generous, so load never trips it.
+        let (result, _) = timeout(Duration::from_secs(30), run(&factory)).await??;
+        let error = result.expect_err("a 429 must not become a successful turn");
+        assert_eq!(error.usage_limit(), expected, "oauth={oauth}: {error}");
+        assert_eq!(
+            error.to_string().contains(notice),
+            expected,
+            "oauth={oauth}: {error}"
+        );
+        assert_eq!(timeout(Duration::from_secs(30), peer).await???, 1);
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn a_401_triggers_one_refresh_and_retry() -> TestResult {
     // With the renewal seam installed, an HTTP 401 head forces one refresh and

@@ -201,12 +201,15 @@ pub struct RetryDeclineInput {
     /// The ride-out delay before the next request; `None` when the physical or
     /// wait budget is exhausted.
     pub delay: Option<Duration>,
+    /// The provider's retry advice exceeds the remaining wait budget while
+    /// physical requests remain.
+    pub advice_beyond_budget: bool,
 }
 
 /// Returns why a turn retry must not happen, or `None` to retry after
 /// `input.delay`. Precedence: a passed deadline, an established decline, a
-/// disabled retry, the workflow, a possible server effect, the budget, and a
-/// deadline the delay would cross. The long-stream budget is consulted (and
+/// disabled retry, the workflow, a possible server effect, retry advice
+/// beyond the wait budget, the budget, and a deadline the delay would cross. The long-stream budget is consulted (and
 /// charged) only when every earlier rung admits the retry.
 #[must_use]
 pub fn retry_decline(
@@ -238,6 +241,8 @@ pub fn retry_decline(
             ))
     {
         Some(Decline::ServerEffect)
+    } else if input.advice_beyond_budget {
+        Some(Decline::AdviceBeyondBudget)
     } else if !long_stream_replays.permits(facts.physical_attempts(), input.point, input.elapsed)
         || input.delay.is_none()
     {

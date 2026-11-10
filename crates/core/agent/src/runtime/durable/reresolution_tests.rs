@@ -465,6 +465,51 @@ async fn a_changed_account_or_a_refused_resolution_fails_closed_before_any_dispa
     Ok(())
 }
 
+/// A cold exact reopen under a credential of another provider account is
+/// refused as the account change, whichever comparison refused it; the same
+/// account's fresh resolution reopens.
+#[tokio::test]
+async fn a_cold_reopen_under_another_account_reports_the_account_change() -> TestResult {
+    let durable = Durable::new()?;
+    let current = Arc::new(windowed_model(
+        1,
+        9,
+        WINDOW_END,
+        1,
+        b"artifact-account",
+        10_300,
+    )?);
+    let agent = durable
+        .sessions
+        .create("create:account-switch", durable.builder(&current, None)?)
+        .await?;
+    agent.shutdown().await?;
+    durable.clock.set(PAST_WINDOW);
+    let address = DurableSessionAddress::new(
+        agent.session_id(),
+        agent.branch_id(),
+        agent.checkpoint().id(),
+    );
+    let foreign = Arc::new(windowed_model(25, 25, 100, 2, b"other-account", 10_400)?);
+    let Err(refused) = durable
+        .sessions
+        .open(
+            "open:other-account",
+            address,
+            durable.builder(&foreign, None)?,
+        )
+        .await
+    else {
+        return Err("another account reopened the session exactly".into());
+    };
+    assert!(refused.account_changed(), "{refused:?}");
+    assert_eq!(foreign.calls.load(Ordering::Acquire), 0);
+    durable
+        .reopen_exactly("open:same-account", &agent, &fresh_model(10_500)?)
+        .await?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn without_a_reresolver_a_model_past_its_window_fails_as_before() -> TestResult {
     let durable = Durable::new()?;

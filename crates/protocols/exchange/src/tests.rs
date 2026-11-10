@@ -16,6 +16,7 @@ fn input() -> RetryDeclineInput {
         facts: TerminalFacts::preacceptance_test(),
         elapsed: Duration::from_secs(1),
         delay: Some(Duration::from_secs(1)),
+        advice_beyond_budget: false,
     }
 }
 
@@ -115,6 +116,22 @@ fn declines_follow_the_specified_precedence() {
         ..input()
     };
     assert_eq!(decline(&budget), Some(Decline::Budget));
+    // Advice beyond the wait budget names itself, ahead of the budget.
+    let advice = RetryDeclineInput {
+        delay: None,
+        advice_beyond_budget: true,
+        ..input()
+    };
+    assert_eq!(decline(&advice), Some(Decline::AdviceBeyondBudget));
+    let advice_without_redispatch = RetryDeclineInput {
+        redispatch_available: false,
+        advice_beyond_budget: true,
+        ..input()
+    };
+    assert_eq!(
+        decline(&advice_without_redispatch),
+        Some(Decline::RetryDisabled)
+    );
     // The first long-generation replay is admitted; it bounds later ones.
     let long_stream = RetryDeclineInput {
         point: FailurePoint::MidStream,

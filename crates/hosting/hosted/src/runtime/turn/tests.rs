@@ -187,13 +187,38 @@ fn rate_limit_presentation_does_not_invent_subscription_exhaustion() {
     let rendered = operator_facing_render(
         "agent turn failed: anthropic/RateLimited request_id=req_safe".to_owned(),
         Some(plakous::model::ModelErrorKind::RateLimited),
-        Some(60),
+        Some(59_001),
     );
     assert!(rendered.starts_with(
         "the provider returned a rate-limit response; the exact cause is unavailable · retry after 60s\n"
     ));
     assert!(rendered.contains("request_id=req_safe"));
     assert!(!rendered.contains("quota is exhausted"));
+}
+
+/// Advice saturated at the 24 h retention ceiling is a floor: it is never
+/// shown as an exact number of seconds.
+#[test]
+fn saturated_retry_advice_renders_as_a_floor() {
+    let raw = "agent turn failed: anthropic/RateLimited status=Some(429)";
+    let saturated = operator_facing_render(
+        raw.to_owned(),
+        Some(plakous::model::ModelErrorKind::RateLimited),
+        Some(86_400_000),
+    );
+    assert!(
+        saturated.starts_with(
+            "the provider returned a rate-limit response; the exact cause is unavailable · retry after 24 h or more\n"
+        ),
+        "{saturated}"
+    );
+    assert!(!saturated.contains("86400s"), "{saturated}");
+    let below = operator_facing_render(
+        raw.to_owned(),
+        Some(plakous::model::ModelErrorKind::RateLimited),
+        Some(86_399_000),
+    );
+    assert!(below.contains(" · retry after 86399s\n"), "{below}");
 }
 
 /// Words in an untyped diagnostic are not a category.

@@ -461,7 +461,16 @@ fn native_freshness_keeps_the_recorded_slot_and_refuses_vertical_disagreement() 
 fn changed_native_account_names_both_exact_restore_and_history_carry() {
     use plakous_host_protocol::notice_remedy::{AccountTarget, NoticeRemedy};
     let failure = native_account_changed("Claude", "claude");
-    assert!(failure.message().contains("original account"));
+    assert_eq!(
+        failure.message(),
+        "Claude provider account changed since this session was recorded"
+    );
+    assert_eq!(
+        failure.remedy(),
+        Some(&NoticeRemedy::RestoreAccountOrRebind {
+            account: AccountTarget::Claude
+        })
+    );
     assert_eq!(failure.host_failure().cause, AttachFailure::AccountChanged);
     assert!(
         matches!(attach_repair_notice(&failure.host_failure(), "grok"), TranscriptRow::Notice(notice) if notice.remedy == Some(NoticeRemedy::RestoreAccountOrRebind { account: AccountTarget::Claude }))
@@ -493,6 +502,65 @@ fn claude_refresh_rejection_and_attach_guidance_name_distinct_repairs() {
     );
 }
 
+/// The detached notice states each remedy once: the remedy rides only the
+/// repair row, whose text names the cause without restating what to do, so a
+/// face that appends the remedy to its row says it a single time.
+#[test]
+fn a_detached_attach_failure_states_its_remedy_once() {
+    use plakous_host_protocol::notice_remedy::{AccountTarget, NoticeRemedy};
+    let restating = [
+        "restor",
+        "carry",
+        "retry",
+        "supply",
+        "quit",
+        "log in",
+        "plak login",
+        "address",
+        "/rebind",
+        "/attach",
+        "/reload",
+    ];
+    for cause in [
+        AttachFailure::JavaScriptHostUnavailable,
+        AttachFailure::PythonHostUnavailable,
+        AttachFailure::LoginSelectionChanged,
+        AttachFailure::AccountChanged,
+        AttachFailure::BindingChanged,
+        AttachFailure::CredentialRejected,
+        AttachFailure::CredentialUnavailable,
+        AttachFailure::TreeHostedElsewhere,
+        AttachFailure::Other,
+    ] {
+        let failure = CliFailure::new("exact session reopen failed: cause")
+            .with_remedy(NoticeRemedy::RestoreAccountOrRebind {
+                account: AccountTarget::Claude,
+            })
+            .with_attach_failure(cause)
+            .host_failure();
+        let rows = attach_failure_notices(&failure, "claude");
+        let remedies: Vec<_> = rows
+            .iter()
+            .filter_map(|row| match row {
+                TranscriptRow::Notice(notice) => notice.remedy.clone(),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(remedies.len(), 1, "{cause:?}: {rows:?}");
+        let TranscriptRow::Notice(repair) = &rows[1] else {
+            panic!("{cause:?}: the repair row is a notice");
+        };
+        assert!(repair.remedy.is_some(), "{cause:?}");
+        let text = repair.text.to_lowercase();
+        for fragment in restating {
+            assert!(
+                !text.contains(fragment),
+                "{cause:?} restates `{fragment}`: {text}"
+            );
+        }
+    }
+}
+
 #[test]
 fn a_changed_frozen_binding_leads_the_attach_repair_with_the_carry() {
     use plakous_host_protocol::notice_remedy::{AccountTarget, NoticeRemedy};
@@ -504,7 +572,7 @@ fn a_changed_frozen_binding_leads_the_attach_repair_with_the_carry() {
         attach_repair_notice(&failure.host_failure(), "claude"),
         TranscriptRow::Notice(notice)
             if notice.remedy == Some(NoticeRemedy::RestoreBindingOrCarry { account: AccountTarget::Claude })
-                && notice.text.starts_with("explicitly carry the full history into a new session")
+                && !notice.text.contains("carry")
                 && !notice.text.contains('/')
     ));
 }

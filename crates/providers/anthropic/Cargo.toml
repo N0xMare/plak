@@ -48,6 +48,7 @@ time = { version = "0.3", features = ["parsing"] }
 thiserror = { workspace = true, optional = true }
 tower-service.workspace = true
 futures-util = { workspace = true, features = ["std"] }
+httpdate.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "time"] }
 zeroize = { workspace = true, optional = true }
 

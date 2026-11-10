@@ -51,6 +51,8 @@ pub enum AttemptRetryDecline {
     Deadline,
     /// budget classification.
     Budget,
+    /// The provider's retry advice exceeds the remaining wait budget.
+    AdviceBeyondBudget,
     /// server effect classification.
     ServerEffect,
     /// retry disabled classification.
@@ -66,6 +68,7 @@ impl AttemptRetryDecline {
         match label {
             "deadline" => Some(Self::Deadline),
             "budget" => Some(Self::Budget),
+            "advice_beyond_budget" => Some(Self::AdviceBeyondBudget),
             "server_effect" => Some(Self::ServerEffect),
             "retry_disabled" => Some(Self::RetryDisabled),
             "workflow" => Some(Self::Workflow),
@@ -79,6 +82,7 @@ impl fmt::Display for AttemptRetryDecline {
         formatter.write_str(match self {
             Self::Deadline => "deadline",
             Self::Budget => "budget",
+            Self::AdviceBeyondBudget => "advice_beyond_budget",
             Self::ServerEffect => "server_effect",
             Self::RetryDisabled => "retry_disabled",
             Self::Workflow => "workflow",

@@ -2473,7 +2473,14 @@ finding/coordinate mail never ends a wait by itself unless it is the only
 pending item of a bare wait.
 
 A submitted or queued user prompt always takes precedence. User interrupt or
-cancel disables waking until the next user prompt. Recovery fences,
+cancel disables waking until the next user prompt. So does a root turn, of any
+origin, whose terminal failure is typed `QuotaExceeded`: a wake would start a
+paid turn the exhausted route refuses again. The suppression is the turn's
+terminal fact (chapter 02 §2.6), so it survives reopen; the failed turn's error
+row names the limit and its reset when the provider gave one, the idle
+indicator and its one `auto-continue paused until the next prompt` line show
+the pause, and waiting mail stays unread for the operator's next prompt, which
+ends it. A reset time does not end it on its own. Recovery fences,
 `recovery_blocked`, paused restored queues, and closing sessions forbid wakes.
 A stale pause marker on an empty queue is not restored work; a new wake uses
 ordinary live queue admission, including after a clean idle close and reopen.

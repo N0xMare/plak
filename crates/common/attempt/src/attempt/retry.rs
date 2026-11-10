@@ -77,6 +77,25 @@ impl UnreachableRideOut {
         }
     }
 
+    /// Whether the provider's retry advice for this failure exceeds what is
+    /// left of the ordinary wait budget while physical requests remain, so no
+    /// permitted wait can honor it. The outage ride-out takes no advice.
+    #[must_use]
+    pub fn advice_beyond_budget(
+        self,
+        facts: TerminalFacts,
+        point: FailurePoint,
+        retry_after: Option<Duration>,
+        waited: Duration,
+    ) -> bool {
+        point != FailurePoint::Unreachable
+            && RetryPolicy::TURN.advice_beyond_budget_for_physical(
+                self.ordinary_physical(facts),
+                retry_after,
+                waited.saturating_sub(self.waited),
+            )
+    }
+
     /// Records one failed generation and returns its bounded, equal-jittered wait.
     /// Kernels still enforce cancellation, replay safety and the caller's hard deadline.
     pub fn next_delay(
@@ -179,11 +198,12 @@ pub struct RetryPolicy {
 
 impl RetryPolicy {
     /// Four physical requests per logical attempt. The provider's
-    /// `Retry-After` is honored as given up to sixty seconds (longer advice is
-    /// clamped, not refused) and is never jittered; without advice the wait
-    /// doubles from one second, with equal jitter. A peer-rejected TLS record
-    /// on the first physical request has zero first backoff. At most two
-    /// minutes of waiting in total.
+    /// `Retry-After` is honored as given up to sixty seconds and is never
+    /// jittered; longer advice is clamped to sixty seconds while it still fits
+    /// the remaining wait budget, and refused when it does not. Without advice
+    /// the wait doubles from one second, with equal jitter. A peer-rejected
+    /// TLS record on the first physical request has zero first backoff. At
+    /// most two minutes of waiting in total.
     pub const TURN: Self = Self {
         max_physical: 4,
         base_delay: Duration::from_secs(1),
@@ -242,6 +262,29 @@ impl RetryPolicy {
         )
     }
 
+    /// Whether advice exceeds the wait budget left after `waited`, while
+    /// physical requests remain.
+    #[must_use]
+    pub fn advice_beyond_budget(
+        self,
+        facts: TerminalFacts,
+        retry_after: Option<Duration>,
+        waited: Duration,
+    ) -> bool {
+        self.advice_beyond_budget_for_physical(facts.physical_attempts(), retry_after, waited)
+    }
+
+    fn advice_beyond_budget_for_physical(
+        self,
+        physical: u32,
+        retry_after: Option<Duration>,
+        waited: Duration,
+    ) -> bool {
+        physical < self.max_physical
+            && retry_after
+                .is_some_and(|advice| advice > self.max_total_delay.saturating_sub(waited))
+    }
+
     fn next_delay_for_physical(
         self,
         facts: TerminalFacts,
@@ -266,6 +309,10 @@ impl RetryPolicy {
         }
         let delay = match retry_after {
             _ if point == FailurePoint::RecordRejectedInTransit && physical == 1 => Duration::ZERO,
+            // Waiting less than the provider asked would only fail again.
+            _ if self.advice_beyond_budget_for_physical(physical, retry_after, waited) => {
+                return None;
+            }
             Some(advice) => advice.min(self.max_delay),
             None => {
                 let doublings = physical.saturating_sub(1).min(16);

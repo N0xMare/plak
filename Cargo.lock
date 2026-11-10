@@ -4033,6 +4033,7 @@ name = "plakous-anthropic"
 version = "0.0.3"
 dependencies = [
  "futures-util",
+ "httpdate",
  "plakous-agent",
  "plakous-attempt",
  "plakous-auth",

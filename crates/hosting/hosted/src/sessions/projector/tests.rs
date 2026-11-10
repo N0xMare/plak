@@ -262,6 +262,7 @@ impl Feed {
 enum End {
     Completed,
     Failed,
+    QuotaExceeded,
     ContextCapacity,
     Interrupted,
     Abandoned,
@@ -705,6 +706,17 @@ fn turn(
             FeedTurnOutcome::Failed {
                 kind: AgentErrorKind::Model,
                 model_kind: None,
+                context: None,
+            }
+        }
+        End::QuotaExceeded => {
+            reads.terminals.push((
+                turn_id,
+                TerminalRead::Failed(format!("agent turn failed: weekly limit {n}")),
+            ));
+            FeedTurnOutcome::Failed {
+                kind: AgentErrorKind::Model,
+                model_kind: Some(plakous::model::ModelErrorKind::QuotaExceeded),
                 context: None,
             }
         }
@@ -2221,6 +2233,42 @@ fn a_cancel_settled_by_an_abandonment_is_the_operators_interrupt() {
             .any(|row| row.text().is_some_and(|text| text.contains("recovered"))),
         "{rows:?}"
     );
+}
+
+/// A root whose route reported exhausted quota is not woken by child mail,
+/// whichever origin its failed turn had: the suppression is the terminal
+/// fact's view, held across host wakes until an operator prompt is accepted.
+#[test]
+fn a_quota_terminal_suppresses_wakes_until_the_next_prompt() {
+    let turn = |host_wake, end| Step::Turn {
+        host_wake,
+        submitted: true,
+        tools: 0,
+        nested_duplicate: false,
+        steer: false,
+        end,
+    };
+    for host_wake in [false, true] {
+        let mut feed = feed_of(&[turn(host_wake, End::QuotaExceeded)]);
+        let views = project_all(&feed).views;
+        assert!(
+            views.wake_suppressed(&feed.intents),
+            "host_wake={host_wake}"
+        );
+        assert!(views.pause_cause(&feed.intents).is_none());
+        let errors: Vec<_> = rows(&views)
+            .into_iter()
+            .filter(|row| row.is_error())
+            .collect();
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].text().unwrap().contains("weekly limit"));
+        apply_step(&mut feed, &turn(true, End::Completed));
+        assert!(project_all(&feed).views.wake_suppressed(&feed.intents));
+        apply_step(&mut feed, &turn(false, End::Completed));
+        assert!(!project_all(&feed).views.wake_suppressed(&feed.intents));
+    }
+    let feed = feed_of(&[turn(false, End::Failed)]);
+    assert!(!project_all(&feed).views.wake_suppressed(&feed.intents));
 }
 
 #[test]

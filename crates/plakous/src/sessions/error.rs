@@ -151,6 +151,7 @@ pub struct AgentSessionsError {
     session: Option<SessionId>,
     pressure: Option<Box<SessionStorePressure>>,
     binding_change: Option<Box<BindingChange>>,
+    account_changed: bool,
 }
 
 impl AgentSessionsError {
@@ -163,6 +164,7 @@ impl AgentSessionsError {
             session: None,
             pressure: None,
             binding_change: None,
+            account_changed: false,
         }
     }
 
@@ -186,6 +188,7 @@ impl AgentSessionsError {
             session: None,
             pressure: None,
             binding_change: None,
+            account_changed: false,
         }
     }
 
@@ -225,6 +228,14 @@ impl AgentSessionsError {
         self.binding_change.as_deref()
     }
 
+    /// Whether an exact open refused because the current credential belongs
+    /// to another provider account than the one the session was recorded
+    /// under.
+    #[must_use]
+    pub const fn account_changed(&self) -> bool {
+        self.account_changed
+    }
+
     /// Returns the aggregate bound and class of a
     /// [`AgentSessionsErrorKind::StoragePressure`] refusal, when the refused
     /// write was held to an admission class.
@@ -245,6 +256,14 @@ impl std::error::Error for AgentSessionsError {}
 pub(super) fn runtime_error(error: &AgentError) -> AgentSessionsError {
     let mut mapped = runtime_error_kind(error);
     mapped.binding_change = error.binding_change().cloned().map(Box::new);
+    if error.account_changed() {
+        // The account switch is the cause; an account-scoped binding input
+        // that changed with it stays named in `binding_change` only.
+        "the provider account changed since this session was recorded; \
+         exact reopen needs the original account"
+            .clone_into(&mut mapped.message);
+        mapped.account_changed = true;
+    }
     mapped
 }
 

@@ -77,6 +77,7 @@ fn an_in_band_deadline_after_a_hosted_effect_never_replays()
                 facts,
                 elapsed: std::time::Duration::ZERO,
                 delay,
+                advice_beyond_budget: false,
             },
             &mut plakous_attempt::LongStreamReplayBudget::default(),
         );

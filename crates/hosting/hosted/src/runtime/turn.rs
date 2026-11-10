@@ -273,7 +273,7 @@ pub(crate) fn operator_facing_agent_error(prefix: &str, error: &AgentError) -> S
         raw.push_str(&operator_facing_model_context_suffix(context));
         match context.retryability() {
             plakous::model::ModelRetryability::Eligible { retry_after } => {
-                retry_after.map(|delay| delay.as_millis().div_ceil(1000))
+                retry_after.map(u64::from)
             }
             _ => None,
         }
@@ -318,11 +318,19 @@ pub(crate) fn agent_error_remedy(
 fn operator_facing_render(
     raw: String,
     kind: Option<plakous::model::ModelErrorKind>,
-    retry_after_secs: Option<u64>,
+    retry_after_millis: Option<u64>,
 ) -> String {
     use plakous::model::ModelErrorKind;
-    let retry_hint =
-        retry_after_secs.map_or_else(String::new, |secs| format!(" · retry after {secs}s"));
+    // Retained advice saturates at 24 h (spec 01 §13.1), so that value is a
+    // floor, never an exact delay.
+    const SATURATED_RETRY_ADVICE_MILLIS: u64 = 24 * 60 * 60 * 1000;
+    let retry_hint = retry_after_millis.map_or_else(String::new, |millis| {
+        if millis >= SATURATED_RETRY_ADVICE_MILLIS {
+            " · retry after 24 h or more".to_owned()
+        } else {
+            format!(" · retry after {}s", millis.div_ceil(1000))
+        }
+    });
     let headline = match kind {
         Some(ModelErrorKind::RateLimited) => format!(
             "the provider returned a rate-limit response; the exact cause is unavailable{retry_hint}"

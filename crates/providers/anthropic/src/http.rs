@@ -2,6 +2,7 @@
 
 #[cfg(feature = "native-auth")]
 pub(crate) mod compatibility;
+mod usage_limit;
 
 use std::collections::VecDeque;
 use std::fmt;
@@ -679,6 +680,7 @@ struct AnthropicErrorMetadata {
     request_id: Option<String>,
     retry_after_millis: Option<u64>,
     fable_included_limit: bool,
+    subscription_limit: Option<usage_limit::SubscriptionLimit>,
 }
 
 impl MessagesHttpHooks<plakous_messages::MessagesWire> for AnthropicHttpHooks {
@@ -797,6 +799,15 @@ impl MessagesHttpHooks<plakous_messages::MessagesWire> for AnthropicHttpHooks {
                         && self.prepared.model().as_str() == "claude-fable-5-1"
                         && status == StatusCode::TOO_MANY_REQUESTS
                         && is_fable_included_limit(response.headers()),
+                    subscription_limit: (self.route.is_claude_oauth()
+                        && status == StatusCode::TOO_MANY_REQUESTS)
+                        .then(|| {
+                            usage_limit::SubscriptionLimit::from_headers(
+                                response.headers(),
+                                std::time::SystemTime::now(),
+                            )
+                        })
+                        .flatten(),
                 },
                 outcome,
                 provider_accepted: false,
@@ -852,6 +863,10 @@ impl MessagesHttpHooks<plakous_messages::MessagesWire> for AnthropicHttpHooks {
         if metadata.fable_included_limit && error.kind() == AnthropicErrorKind::RateLimited {
             protocol_source(&error.with_notice("You've reached your Fable limit."))
                 .with_usage_limit()
+        } else if let Some(limit) = metadata.subscription_limit
+            && error.kind() == AnthropicErrorKind::RateLimited
+        {
+            protocol_source(&error.with_notice(limit.notice())).with_usage_limit()
         } else {
             protocol_source(&error)
         }

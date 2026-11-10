@@ -605,14 +605,9 @@ pub(super) fn emit_shell_empty_state<P: plakous_host_protocol::ProtocolExtension
     ));
     match &config.reason {
         DetachedReason::ResolveFailed(failure) | DetachedReason::RecoveryRequired(failure) => {
-            let _ = events.notice(
-                TranscriptRow::info(
-                    NoticeScope::Session,
-                    format!("attach failed: {}", failure.diagnostic.as_str()),
-                )
-                .with_optional_remedy(failure.remedy.as_ref()),
-            );
-            let _ = events.notice(attach_repair_notice(failure, account));
+            for row in attach_failure_notices(failure, account) {
+                let _ = events.notice(row);
+            }
         }
         DetachedReason::MissingDefaults => {
             let _ = events.notice(
@@ -648,47 +643,60 @@ pub(super) fn emit_shell_empty_state<P: plakous_host_protocol::ProtocolExtension
     }
 }
 
+/// The detached notice for a failed attach: the diagnostic, then one repair
+/// row. The repair row's text names the cause and its remedy says what to do,
+/// so each remedy is stated once.
+pub(super) fn attach_failure_notices(
+    failure: &HostFailure,
+    original_account: &str,
+) -> [TranscriptRow; 2] {
+    [
+        TranscriptRow::info(
+            NoticeScope::Session,
+            format!("attach failed: {}", failure.diagnostic.as_str()),
+        ),
+        attach_repair_notice(failure, original_account),
+    ]
+}
+
 pub(super) fn attach_repair_notice(failure: &HostFailure, original_account: &str) -> TranscriptRow {
     use AttachFailure as A;
     use plakous_host_protocol::notice_remedy::{AccountTarget, NoticeRemedy as R};
     let account = AccountTarget::from_account(original_account);
     let (text, remedy) = match failure.cause {
         A::JavaScriptHostUnavailable => (
-            "the JavaScript runtime artifact is unavailable; supply the configured runtime artifact, then retry attachment",
+            "the JavaScript runtime artifact is unavailable",
             R::RepairJavaScriptHost {},
         ),
         A::PythonHostUnavailable => (
-            "the Python runtime artifact is unavailable; supply the configured runtime artifact, then retry attachment",
+            "the Python runtime artifact is unavailable",
             R::RepairPythonHost {},
         ),
         A::LoginSelectionChanged => (
-            "the live login-selection fence changed; explicitly carry this history under the current login; logging in to the same account cannot restore the old selection",
+            "the live login selection changed since this session was recorded",
             R::CarryCurrentLogin {},
         ),
         A::AccountChanged => (
-            "restore the original account for exact reopen, or explicitly carry history into a new session under the newly logged-in account",
+            "the provider account changed since this session was recorded",
             R::RestoreAccountOrRebind { account },
         ),
         A::BindingChanged => (
-            "explicitly carry the full history into a new session under the current login; restoring the original account and configuration reopens it exactly instead; profile selection cannot repair a frozen binding",
+            "this session's frozen binding differs from what the current login and build derive",
             R::RestoreBindingOrCarry { account },
         ),
         A::CredentialRejected => (
-            "the credential was rejected or its refresh outcome is unknown; restore usable credentials, then retry attachment; same-account login preserves the session where the route attests it",
+            "the credential was rejected or its refresh outcome is unknown",
             R::LoginThenAttach { account },
         ),
         A::CredentialUnavailable => (
-            "no usable login is available; restore credentials, then retry attachment",
+            "no usable login is available",
             R::LoginThenAttach { account },
         ),
         A::TreeHostedElsewhere => (
-            "another plak process holds this session's agent tree; quit that plak, then retry attachment here; if it ran on another machine or is gone, `plak tree release --force <tree-id>` releases it",
+            "another plak process holds this session's agent tree; if it ran on another machine or is gone, `plak tree release --force <tree-id>` releases it",
             R::RepairThenAttach {},
         ),
-        A::Other => (
-            "address the attach failure above, then retry attachment; profile selection only chooses a different profile",
-            R::RepairThenAttach {},
-        ),
+        A::Other => ("the agent could not attach", R::RepairThenAttach {}),
     };
     TranscriptRow::info(NoticeScope::Session, text)
         .with_remedy(failure.remedy.clone().unwrap_or(remedy))

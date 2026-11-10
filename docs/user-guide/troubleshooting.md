@@ -179,7 +179,9 @@ request body byte count, never the body or query parameters.
 
 `plak telemetry status --views` includes `v_replay_loss`: content-free retry
 and declined-retry rows. A declined row records `declined_reason` (`deadline`,
-`budget`, `server_effect`, `retry_disabled`, or `workflow`); its next attempt
+`budget`, `advice_beyond_budget`, `server_effect`, `retry_disabled`, or
+`workflow`; `advice_beyond_budget` means the provider asked to wait longer
+than the two-minute retry wait allows); its next attempt
 number is proposed, not dispatched. Zero delay and `output_discarded=false`
 are declined `ModelRetry` event facts, not SQL columns. The rows include
 correlation ids, attempts, cause/phase, text/thinking byte counts, completed

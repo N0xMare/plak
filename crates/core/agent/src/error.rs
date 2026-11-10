@@ -56,6 +56,7 @@ pub struct AgentError {
     tool_kind: Option<ToolRuntimeErrorKind>,
     store_error: Option<SessionStoreError>,
     binding_change: Option<Box<crate::BindingChange>>,
+    account_changed: bool,
     reresolution_error: Option<Box<crate::runtime::ModelReresolutionError>>,
 }
 
@@ -103,6 +104,7 @@ impl AgentError {
             tool_kind: None,
             store_error: None,
             binding_change: None,
+            account_changed: false,
             reresolution_error: None,
         }
     }
@@ -116,6 +118,18 @@ impl AgentError {
 
     pub(crate) fn with_binding_change(mut self, change: crate::BindingChange) -> Self {
         self.binding_change = Some(Box::new(change));
+        self
+    }
+
+    /// Whether an exact reopen refused because the current credential's
+    /// provider account is not the account the session was recorded under.
+    #[must_use]
+    pub const fn account_changed(&self) -> bool {
+        self.account_changed
+    }
+
+    pub(crate) const fn with_account_changed(mut self) -> Self {
+        self.account_changed = true;
         self
     }
 
@@ -214,6 +228,7 @@ impl AgentError {
             tool_kind: None,
             store_error: None,
             binding_change: None,
+            account_changed: false,
             reresolution_error: None,
         }
     }
@@ -232,6 +247,7 @@ impl AgentError {
             tool_kind: None,
             store_error: None,
             binding_change: None,
+            account_changed: false,
             reresolution_error: None,
         }
     }
@@ -244,6 +260,7 @@ impl AgentError {
             tool_kind: None,
             store_error: None,
             binding_change: None,
+            account_changed: false,
             reresolution_error: None,
         }
     }
@@ -261,6 +278,7 @@ impl AgentError {
             tool_kind: Some(error.kind()),
             store_error: None,
             binding_change: None,
+            account_changed: false,
             reresolution_error: None,
         }
     }
@@ -277,6 +295,7 @@ impl AgentError {
             tool_kind: None,
             store_error: Some(error),
             binding_change: None,
+            account_changed: false,
             reresolution_error: None,
         }
     }
@@ -291,6 +310,7 @@ impl AgentError {
             tool_kind: None,
             store_error: Some(error),
             binding_change: None,
+            account_changed: false,
             reresolution_error: None,
         }
     }
@@ -309,6 +329,7 @@ impl AgentError {
             tool_kind,
             store_error,
             binding_change: None,
+            account_changed: false,
             reresolution_error: None,
         }
     }
@@ -325,6 +346,7 @@ impl fmt::Debug for AgentError {
             .field("tool_kind", &self.tool_kind)
             .field("store_error", &self.store_error)
             .field("binding_change", &self.binding_change)
+            .field("account_changed", &self.account_changed)
             .field("reresolution_error", &self.reresolution_error)
             .finish()
     }
