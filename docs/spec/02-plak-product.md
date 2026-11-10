@@ -6110,7 +6110,9 @@ second line, live or after reopen. Attaching to a session, or
 switching to it in place, keeps an already recorded row instead of writing a
 second copy. The suppression intent is written
 immediately even with live children, and an attached host re-reads the view at
-the wake check. Wake failures write an error notice intent and a
+the wake check. A suppression first observed there (including a quota terminal
+not yet folded into the host's session view) publishes its pause line on that
+observation, not only on a later attach. Wake failures write an error notice intent and a
 `wake_suppression` intent, and leave the host attached; if that write fails the
 suppression is kept in memory for the process. Undispatched wakes are
 disposable: their queue item and submission are removed, with mail left

@@ -120,8 +120,11 @@ wake that did not fit the window and a root turn that failed because the
 model's usage quota is exhausted (a child's question then waits, unread, for
 your next prompt); when auto-continue is on and a child or
 background process could still wake the root, the HUD says so and the
-transcript keeps one `auto-continue paused until the next prompt` line. It
-comes back the same after a restart or `/resume`, without a second copy. A wake the
+transcript keeps one `auto-continue paused until the next prompt` line. A wake
+that did not fit instead keeps its `Sub-agent auto-continue preflight paused
+until the next prompt` line; a failed wake keeps its error and cause, without
+an extra generic pause line. Each comes back the same after a restart or
+`/resume`, without a second copy. A wake the
 session store refuses because it is busy or unavailable, or whose delivery the
 product store refuses because another writer holds it, is retried on its own
 for about 30 s; after that the transcript shows one `Sub-agent auto-continue

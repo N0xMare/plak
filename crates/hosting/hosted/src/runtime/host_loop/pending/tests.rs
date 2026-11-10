@@ -1138,3 +1138,94 @@ fn an_unfit_wake_pause_is_one_row_live_and_after_reopen() {
         });
     });
 }
+
+#[test]
+fn a_failed_wake_pause_is_one_row_live_and_after_reopen() {
+    use super::WAKE_FAILURE_PAUSE_TEXT;
+    with_tree(1, |host, _, _, observed| {
+        let now = Instant::now();
+        host.block(async |host| host.child_wake_prompt(now).await)
+            .unwrap();
+        crate::error::read_faults::inject(crate::agent::TREE_FEED_READ_FAILED, None, 1);
+        host.block(async |host| {
+            host.child_wake_prompt(now + super::super::wake::QUIET_WINDOW)
+                .await
+        })
+        .unwrap();
+        host.commit_notice_intents();
+        let rows = |session: &crate::sessions::SessionRecord| {
+            session
+                .transcript
+                .iter()
+                .filter(|row| {
+                    matches!(row,
+                TranscriptRow::Notice(notice) if notice.scope == NoticeScope::Tree
+                    && notice.text.starts_with(WAKE_FAILURE_PAUSE_TEXT)
+                    && notice.text.contains("integrity"))
+                })
+                .count()
+        };
+        assert!(host.role.config.session.child_wake_suppressed);
+        assert_eq!(rows(&host.role.config.session), 1);
+        assert_eq!(
+            pause_rows(&host.role.config.session, AUTO_CONTINUE_PAUSE_TEXT),
+            0
+        );
+        let _ = observed.try_iter().count();
+        reopen(host, |restored| {
+            restored.publish_pending_continuation();
+            assert!(restored.role.config.session.child_wake_suppressed);
+            assert_eq!(rows(&restored.role.config.session), 1);
+            assert_eq!(
+                pause_rows(&restored.role.config.session, AUTO_CONTINUE_PAUSE_TEXT),
+                0
+            );
+            assert!(!observed.try_iter().any(|event| matches!(event,
+                HostEvent::Row(TranscriptRow::Notice(notice))
+                    if notice.text == AUTO_CONTINUE_PAUSE_TEXT)));
+        });
+    });
+}
+
+#[test]
+fn a_pause_first_observed_at_the_idle_wake_check_is_reported_immediately() {
+    with_tree(0, |host, runtime, _, observed| {
+        spawn_child(runtime);
+        // A terminal is already projected durably, but the host has not
+        // folded its views (for example a projector wait just failed).
+        host.role
+            .config
+            .store
+            .save(&mut host.role.config.session)
+            .unwrap();
+        host.role
+            .config
+            .store
+            .write_host_controls(&host.role.config.session.id, true, None)
+            .unwrap();
+        assert!(!host.role.config.session.child_wake_suppressed);
+        host.block(async |host| host.child_wake_prompt(Instant::now()).await)
+            .unwrap();
+        assert!(host.role.config.session.child_wake_suppressed);
+        assert_eq!(
+            pause_rows(&host.role.config.session, AUTO_CONTINUE_PAUSE_TEXT),
+            1
+        );
+        assert_eq!(
+            observed
+                .try_iter()
+                .filter(|event| matches!(event,
+            HostEvent::Row(TranscriptRow::Notice(notice))
+                if notice.text == AUTO_CONTINUE_PAUSE_TEXT))
+                .count(),
+            1
+        );
+        reopen(host, |restored| {
+            restored.publish_pending_continuation();
+            assert_eq!(
+                pause_rows(&restored.role.config.session, AUTO_CONTINUE_PAUSE_TEXT),
+                1
+            );
+        });
+    });
+}

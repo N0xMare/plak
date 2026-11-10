@@ -234,7 +234,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         {
             return self.wake_deferred();
         }
-        let suppressed = self.role.config.session.child_wake_suppressed;
         let step = match self.try_child_wake_prompt(now).await {
             Ok(step) => {
                 self.role.child_wake.retry = None;
@@ -263,13 +262,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     .with_optional_remedy(error.remedy()),
                 );
                 let _ = self.suppress_child_wake(Some(error.message().to_owned()));
+                self.auto_continue_pause_reported();
                 self.role.child_wake.park();
                 Ok(HostStep::Continue)
             }
         };
-        if !suppressed && self.role.config.session.child_wake_suppressed {
-            self.auto_continue_pause_reported();
-        }
         self.publish_pending_continuation();
         step
     }
