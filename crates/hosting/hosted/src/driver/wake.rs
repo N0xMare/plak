@@ -118,6 +118,11 @@ impl WakeCoalescer {
         self.observed.clear();
         self.quiet_since = None;
     }
+
+    pub(crate) fn quiet_for(&self, now: Instant) -> Duration {
+        self.quiet_since
+            .map_or(Duration::ZERO, |since| now.saturating_duration_since(since))
+    }
 }
 
 pub(crate) enum WakeIdentity<'a> {

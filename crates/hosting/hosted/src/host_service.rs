@@ -1247,6 +1247,7 @@ impl<P: ProtocolExtension> HostService<P> {
             }
         }
         for (sender, scope) in asks {
+            wake_stats::record(&scope);
             let _ = sender.send(SessionIntent::ResyncTranscript { scope });
         }
     }
@@ -1610,3 +1611,5 @@ impl<P: ProtocolExtension> Attachment<P> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]
 mod tests;
+
+pub(crate) mod wake_stats;

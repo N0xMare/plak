@@ -161,6 +161,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     &self.role.events,
                     false,
                 );
+                self.wake_watchdog(Instant::now());
             }
             let mut acknowledgement = None;
             let mut command_reply = false;
@@ -181,6 +182,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 acknowledgement = Some(guard);
                 action
             });
+            if let Ok(action) = &received {
+                self.wake_received(action);
+            }
             if received.is_ok() {
                 // An intent is activity: the idle release waits afresh.
                 self.role.idle_since = None;

@@ -76,6 +76,13 @@ pub(super) struct PendingTrack {
     baseline: bool,
 }
 
+impl PendingTrack {
+    pub(super) fn unread_count(&self) -> usize {
+        self.tree
+            .map_or(0, |tree| tree.results as usize + tree.questions as usize)
+    }
+}
+
 impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     pub(super) fn has_automatic_continue_work(&mut self) -> bool {
         if !self.role.config.prompt_host_facts().host_wakes {

@@ -6101,7 +6101,13 @@ confirmation** are covered in §5.5 and §5.7.
 
 Idle interactive roots auto-continue on pending process notices or unread
 child results or questions when `[turn] auto_continue` is enabled (default true). A 2 s
-quiet window coalesces completions. A wake leaves no transcript row: the
+quiet window coalesces completions. Content-free `plak.wake` logs report each
+wake decision/reason transition with mail and process-exit counts and quiet
+window age. If wake work stays unread with host wakes enabled and no decision
+runs for over ten seconds, tree observation warns once until a decision runs
+or the work clears. The warning includes received action-class counts and
+host-wide transcript gap-repair ask counts by root/agent scope since the last
+check; these counters are diagnostic, never wake or delivery authority. A wake leaves no transcript row: the
 host neither persists nor emits one for it, and the host-authored prompt
 itself is model input, never a transcript row. The woken turn's own rows
 follow the previous turn's. User prompts take precedence. Esc

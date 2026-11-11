@@ -845,6 +845,8 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-hosted", "src/runtime/events.rs"): {"warn"},
     # A wake the session store refused logs its cause class, never content.
     ("plakous-hosted", "src/runtime/host_loop/wake.rs"): {"warn"},
+    # Wake decisions and starvation warnings carry ids, closed reasons and counts only.
+    ("plakous-hosted", "src/runtime/host_loop/wake/diagnostics.rs"): {"info", "warn"},
     # A host's stop logs the session id and whether it was recorded; the
     # wire request that asked for it also logs the connection's face and
     # login (spec 04 section 2.10). Never content.

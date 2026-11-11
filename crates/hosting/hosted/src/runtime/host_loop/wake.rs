@@ -6,6 +6,8 @@ use crate::sessions::{NoticeScope, TranscriptRow};
 use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 use std::time::Duration;
 
+mod diagnostics;
+
 #[cfg(test)]
 pub(in crate::runtime) const QUIET_WINDOW: Duration =
     crate::driver::wake::WakePolicy::Root.window();
@@ -25,6 +27,7 @@ pub(super) struct RootWake {
     suppression_pending: bool,
     pause_pending: Option<String>,
     retry: Option<TransientRetry>,
+    diagnostics: diagnostics::Diagnostics,
     pub(super) prepared_context: Option<crate::context::ContextProjection>,
 }
 
@@ -40,8 +43,10 @@ struct TransientRetry {
 impl RootWake {
     fn observe(&mut self, session_id: &str, ids: Vec<String>, now: Instant) -> bool {
         if self.session_id != session_id {
+            let diagnostics = std::mem::take(&mut self.diagnostics);
             *self = Self {
                 session_id: session_id.to_owned(),
+                diagnostics,
                 ..Self::default()
             };
         }
@@ -214,6 +219,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         &mut self,
         now: Instant,
     ) -> CliResult<HostStep> {
+        self.role
+            .child_wake
+            .diagnostics
+            .checked(&self.role.config.session.id, now);
         if self.role.config.interactive
             && let Some(surface) = self.role.config.surface.as_deref()
             && let Some(enabled) = surface.child_wake_enabled()
@@ -225,6 +234,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 .suppress_child_wake(self.role.child_wake.pause_pending.clone())
                 .is_err()
         {
+            self.wake_decision("retry", "suppression_pending", now);
             return Ok(HostStep::Continue);
         }
         if self
@@ -232,6 +242,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             .child_wake
             .retry_waiting(&self.role.config.session.id, now)
         {
+            self.wake_decision("waiting", "retry_wait", now);
             return self.wake_deferred();
         }
         let step = match self.try_child_wake_prompt(now).await {
@@ -242,6 +253,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             Err(error) => {
                 if let Some(refusal) = error.store_refusal() {
                     self.defer_child_wake(refusal, now);
+                    self.wake_decision("retry", "store_refused", now);
                     return self.wake_deferred();
                 }
                 tracing::warn!(
@@ -264,6 +276,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 let _ = self.suppress_child_wake(Some(error.message().to_owned()));
                 self.auto_continue_pause_reported();
                 self.role.child_wake.park();
+                self.wake_decision("parked", "refused", now);
                 Ok(HostStep::Continue)
             }
         };
@@ -385,7 +398,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         now: Instant,
         jobs: Vec<plakous::tools::JobView>,
     ) -> CliResult<HostStep> {
+        self.role.child_wake.diagnostics.mail = self.role.pending_track.unread_count();
+        self.role.child_wake.diagnostics.exits = jobs
+            .iter()
+            .filter(|job| job.status != plakous::tools::JobStatus::Running)
+            .count();
         if self.role.config.state_roots.runner_pending() {
+            self.wake_decision("deferred", "placement_pending", now);
             return Ok(HostStep::Continue);
         }
         let views = self
@@ -406,6 +425,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         self.role.config.session.child_wake_suppressed = views.wake_suppressed(&intents);
         if views.pause_cause(&intents).is_some() {
             self.role.child_wake.park();
+            self.wake_decision("parked", "pause_cause", now);
             return Ok(HostStep::Continue);
         }
         self.role
@@ -414,14 +434,24 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             .pending_queue
             .retain(|item| !self.role.config.session.queue_commands.is_consumed(item));
         let session = &self.role.config.session;
-        if !self.role.config.prompt_host_facts().host_wakes
-            || self.role.recovery.blocked()
-            || session.child_wake_suppressed
-            || self.role.pending_start.is_some()
-            || !session.pending_queue.is_empty()
-            || session.queue_commands.has_pending()
-        {
+        let parked = if !self.role.config.prompt_host_facts().host_wakes {
+            Some("host_wakes_off")
+        } else if self.role.recovery.blocked() {
+            Some("recovery_blocked")
+        } else if session.child_wake_suppressed {
+            Some("suppressed")
+        } else if self.role.pending_start.is_some() {
+            Some("pending_start")
+        } else if !session.pending_queue.is_empty() {
+            Some("queue_nonempty")
+        } else if session.queue_commands.has_pending() {
+            Some("submission_pending")
+        } else {
+            None
+        };
+        if let Some(reason) = parked {
             self.role.child_wake.park();
+            self.wake_decision("parked", reason, now);
             return Ok(HostStep::Continue);
         }
         let rows = self.role.config.topology_rows();
@@ -431,7 +461,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             .filter(|job| job.status != plakous::tools::JobStatus::Running)
             .collect();
         let ids = wake_ids(runtime.as_deref(), &notices)?;
+        self.role.child_wake.diagnostics.mail = ids.len().saturating_sub(notices.len());
+        let empty = ids.is_empty();
         if !self.role.child_wake.observe(&session.id, ids, now) {
+            self.wake_decision(
+                if empty { "parked" } else { "waiting" },
+                if empty { "no_batch" } else { "quiet_window" },
+                now,
+            );
             return Ok(HostStep::Continue);
         }
         // A wake is to be admitted: this is its admission pass to the tail,
@@ -447,12 +484,23 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         let ids = wake_ids(runtime.as_deref(), &notices)?;
         if ids.is_empty() {
             self.role.child_wake.park();
+            self.wake_decision("parked", "empty_after_pass", now);
             return Ok(HostStep::Continue);
         }
         // Recheck ingress after observing mail: user input and shutdown outrank a wake.
         let watch = super::InterruptWatch::new(self.role.actions, &self.role.interrupt_state);
         watch.poll();
-        if self.role.interrupt_state.borrow().has_deferred() || watch.interrupted() {
+        let deferred = self.role.interrupt_state.borrow().has_deferred();
+        if deferred || watch.interrupted() {
+            self.wake_decision(
+                "deferred",
+                if watch.interrupted() {
+                    "interrupted"
+                } else {
+                    "ingress_deferred"
+                },
+                now,
+            );
             return Ok(HostStep::Continue);
         }
         let admission = self.role.config.store.storage_admission();
@@ -481,6 +529,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         .map_err(CliFailure::new)?;
         if batch.is_none() && notices.is_empty() {
             self.role.child_wake.park();
+            self.wake_decision("parked", "no_batch", now);
             return Ok(HostStep::Continue);
         }
         // Compaction requires an idle journal; budget the complete mail batch
@@ -489,11 +538,22 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             return Ok(HostStep::Continue);
         }
         if self.role.config.state_roots.runner_pending() {
+            self.wake_decision("deferred", "placement_pending", now);
             return Ok(HostStep::Continue);
         }
         let watch = super::InterruptWatch::new(self.role.actions, &self.role.interrupt_state);
         watch.poll();
-        if self.role.interrupt_state.borrow().has_deferred() || watch.interrupted() {
+        let deferred = self.role.interrupt_state.borrow().has_deferred();
+        if deferred || watch.interrupted() {
+            self.wake_decision(
+                "deferred",
+                if watch.interrupted() {
+                    "interrupted"
+                } else {
+                    "ingress_deferred"
+                },
+                now,
+            );
             return Ok(HostStep::Continue);
         }
         let mut candidate = self.role.config.session.clone();
@@ -513,6 +573,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         )
         .await
         .map_err(CliFailure::from)?;
+        self.wake_decision("fired", "admitted", now);
         self.role.child_wake.park();
         Ok(HostStep::Prompt {
             text: item.text.clone(),
@@ -524,15 +585,20 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     async fn preflight_child_wake(&mut self, command: &str) -> CliResult<bool> {
         match self.fit_child_wake(command).await? {
             WakeFit::Fits => return Ok(true),
-            WakeFit::Deferred => return Ok(false),
+            WakeFit::Deferred => {
+                self.wake_decision("deferred", "placement_pending", Instant::now());
+                return Ok(false);
+            }
             WakeFit::Stopped(stopped) => {
                 let _ = stopped;
                 self.role.child_wake.park();
+                self.wake_decision("parked", "preflight_stopped", Instant::now());
                 return Ok(false);
             }
             WakeFit::DoesNotFit => {}
         }
         self.pause_unfit_child_wake()?;
+        self.wake_decision("parked", "preflight_unfit", Instant::now());
         Ok(false)
     }
 
