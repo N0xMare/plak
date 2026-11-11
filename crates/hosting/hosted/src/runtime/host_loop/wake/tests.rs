@@ -17,6 +17,8 @@ use crate::surface_protocol::HostEvent;
 use crate::surface_protocol::{HostEventReceiver, UserAction, UserActionSender};
 use std::sync::Arc;
 
+mod starvation;
+
 type PendingCut = Box<dyn FnOnce() + Send>;
 static PENDING_CUTS: std::sync::LazyLock<
     std::sync::Mutex<std::collections::BTreeMap<String, PendingCut>>,

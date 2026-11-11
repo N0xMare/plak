@@ -221,7 +221,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 }
                 other => other,
             };
-            match received {
+            let selected = match received {
                 Ok(UserAction::ReleaseForReopen { ticket, session }) => {
                     if session != self.role.config.session.id {
                         let _ = self.role.actions.settle_release_for_reopen(
@@ -1112,27 +1112,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     None
                 }
                 Err(RecvTimeoutError::Timeout) => {
-                    if self.role.pending_resume.is_some() {
-                        return self.transient_resume_prompt().await;
-                    }
-                    if one_shot.is_none()
-                        && !self.role.config.attached_one_shot
-                        && self.role.root_loss_resume_due
+                    if let Some(step) = self
+                        .idle_automatic_prompt(one_shot.is_some(), observed_tree)
+                        .await?
                     {
-                        return Ok(match self.root_loss_resume_delivery().await? {
-                            Some((text, queued_delivery, user_echoed)) => HostStep::Prompt {
-                                text,
-                                queued_delivery,
-                                user_echoed,
-                            },
-                            None => HostStep::Continue,
-                        });
-                    }
-                    if one_shot.is_none() && self.role.config.continuation.is_some() {
-                        return self.continuation_prompt().await;
-                    }
-                    if one_shot.is_none() && observed_tree {
-                        return self.child_wake_prompt(Instant::now()).await;
+                        return Ok(step);
                     }
                     // The word read before the receive. A test pauses here,
                     // between that read and the decision, which is the gap a
@@ -1148,7 +1132,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     self.quit_started_at.get_or_insert_with(Instant::now);
                     return Ok(HostStep::Quit);
                 }
+            };
+            if selected.is_none() && observed_tree && one_shot.is_none() {
+                drop(acknowledgement);
+                // Preserve the iteration boundary: action notices precede
+                // any pause/wake notice the automatic check may commit.
+                self.commit_notice_intents();
+                if let Some(step) = self.idle_automatic_prompt(false, true).await? {
+                    return Ok(step);
+                }
             }
+            selected
         };
 
         Ok(match next_prompt {
@@ -1159,6 +1153,36 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             },
             None => HostStep::Continue,
         })
+    }
+
+    async fn idle_automatic_prompt(
+        &mut self,
+        one_shot: bool,
+        observed_tree: bool,
+    ) -> CliResult<Option<HostStep>> {
+        if self.role.pending_resume.is_some() {
+            return self.transient_resume_prompt().await.map(Some);
+        }
+        if one_shot {
+            return Ok(None);
+        }
+        if !self.role.config.attached_one_shot && self.role.root_loss_resume_due {
+            return Ok(Some(match self.root_loss_resume_delivery().await? {
+                Some((text, queued_delivery, user_echoed)) => HostStep::Prompt {
+                    text,
+                    queued_delivery,
+                    user_echoed,
+                },
+                None => HostStep::Continue,
+            }));
+        }
+        if self.role.config.continuation.is_some() {
+            return self.continuation_prompt().await.map(Some);
+        }
+        if observed_tree {
+            return self.child_wake_prompt(Instant::now()).await.map(Some);
+        }
+        Ok(None)
     }
 }
 

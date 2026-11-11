@@ -6110,7 +6110,12 @@ host-wide transcript gap-repair ask counts by root/agent scope since the last
 check; these counters are diagnostic, never wake or delivery authority. A wake leaves no transcript row: the
 host neither persists nor emits one for it, and the host-authored prompt
 itself is model input, never a transcript row. The woken turn's own rows
-follow the previous turn's. User prompts take precedence. Esc
+follow the previous turn's. User prompts, follow-ups, queued structural
+work, shutdown and observed interrupts take precedence. Ordinary deferred
+reads do not abandon admission. After a non-prompt action, an idle iteration
+that observed the tree checks automatic work with the same retry/loss-resume,
+continuation and wake precedence as a receive timeout; a stream of transcript
+resyncs cannot starve child-result or process-exit wakes. Esc
 confirms interruption of that turn as usual and disables auto-continue until the next prompt.
 A wake whose turn ends at the context window disables it the same way, as a
 failed wake preflight does, so the mail it returned to unread waits for the

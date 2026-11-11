@@ -490,7 +490,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         // Recheck ingress after observing mail: user input and shutdown outrank a wake.
         let watch = super::InterruptWatch::new(self.role.actions, &self.role.interrupt_state);
         watch.poll();
-        let deferred = self.role.interrupt_state.borrow().has_deferred();
+        let deferred = self.role.interrupt_state.borrow().has_wake_preemptor();
         if deferred || watch.interrupted() {
             self.wake_decision(
                 "deferred",
@@ -543,7 +543,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         }
         let watch = super::InterruptWatch::new(self.role.actions, &self.role.interrupt_state);
         watch.poll();
-        let deferred = self.role.interrupt_state.borrow().has_deferred();
+        let deferred = self.role.interrupt_state.borrow().has_wake_preemptor();
         if deferred || watch.interrupted() {
             self.wake_decision(
                 "deferred",
