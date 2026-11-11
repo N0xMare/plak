@@ -11,6 +11,15 @@ type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 #[test]
 fn a_fresh_runner_port_never_admits_an_older_owner() -> TestResult {
+    assert_fresh_runner_port(false)
+}
+
+#[test]
+fn a_compaction_successor_uses_its_fresh_runner_port() -> TestResult {
+    assert_fresh_runner_port(true)
+}
+
+fn assert_fresh_runner_port(next_generation: bool) -> TestResult {
     let root = tempfile::tempdir()?;
     let product = JobRegistry::default();
     let embedded = plakous::tools::LocalJobHost::new();
@@ -21,17 +30,84 @@ fn a_fresh_runner_port_never_admits_an_older_owner() -> TestResult {
             ))
         };
         let initial = owner("00000000-0000-0000-0000-000000000702")?;
-        host.attach(initial, port()?)?;
-        let successor = JobOwner {
-            fence: initial.fence + 1,
-            ..initial
+        let retained = port()?;
+        retained.seed_job_counter(11);
+        host.attach(initial, retained.clone())?;
+        let successor = if next_generation {
+            JobOwner {
+                line: initial.line,
+                generation: initial.generation + 1,
+                ..owner("00000000-0000-0000-0000-000000000703")?
+            }
+        } else {
+            JobOwner {
+                fence: initial.fence + 1,
+                ..initial
+            }
         };
-        host.attach(successor, port()?)?;
-        assert!(host.attach(initial, port()?).is_err());
-        assert!(
-            host.service_at(successor.session_id, successor.branch_id)
-                .is_some()
+        let fresh = port()?;
+        fresh.seed_job_counter(29);
+        let attached = host.attach(successor, fresh)?;
+        assert_eq!(
+            plakous_tools::internal::next_job_number(attached.local()),
+            29
         );
+        assert!(host.attach(initial, port()?).is_err());
+        let found = host
+            .service_at(successor.session_id, successor.branch_id)
+            .ok_or("missing successor port")?;
+        assert_eq!(plakous_tools::internal::next_job_number(found.local()), 29);
+        assert_eq!(
+            plakous_tools::internal::next_job_number(retained.local()),
+            11
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn only_two_local_ports_retain_the_previous_service() -> TestResult {
+    let root = tempfile::tempdir()?;
+    for (retained_runner, fresh_runner) in
+        [(false, false), (false, true), (true, false), (true, true)]
+    {
+        let product = JobRegistry::default();
+        let embedded = plakous::tools::LocalJobHost::new();
+        for host in [&product as &dyn JobHost, &embedded as &dyn JobHost] {
+            let port = |runner: bool, marker| -> TestResult<JoinedSessionsPort> {
+                let local = sessions(root.path())?;
+                let port = if runner {
+                    JoinedSessionsPort::runner(local.local().clone())
+                } else {
+                    local
+                };
+                port.seed_job_counter(marker);
+                Ok(port)
+            };
+            let initial = owner("00000000-0000-0000-0000-000000000702")?;
+            host.attach(initial, port(retained_runner, 11)?)?;
+            let successor = JobOwner {
+                fence: initial.fence + 1,
+                ..initial
+            };
+            let attached = host.attach(successor, port(fresh_runner, 29)?)?;
+            let expected = if retained_runner || fresh_runner {
+                29
+            } else {
+                11
+            };
+            assert_eq!(
+                plakous_tools::internal::next_job_number(attached.local()),
+                expected
+            );
+            let found = host
+                .service_at(successor.session_id, successor.branch_id)
+                .ok_or("missing successor port")?;
+            assert_eq!(
+                plakous_tools::internal::next_job_number(found.local()),
+                expected
+            );
+        }
     }
     Ok(())
 }

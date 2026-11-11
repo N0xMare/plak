@@ -1,4 +1,4 @@
-//! Neutral session-owned process observations and host ownership seam.
+//! Line-owned process observations, retained local services and owner-scoped runner ports.
 
 use crate::ExecutionBackendError;
 use plakous_model::{BranchId, LineId, SessionId, Timestamp};
@@ -163,11 +163,13 @@ impl JobOwner {
 /// Optional host-owned registry, keyed by agent line. Without it the agent
 /// privately owns its service, and its jobs stop when it drops.
 ///
-/// A host holds each line's service as a [`JoinedSessionsPort`] and transfers
-/// it only to a [`JobOwner::succeeds`] owner: the line's next head after a
-/// rebind, or the same head on a reopen. It must stop foreground sessions
-/// before returning transferred authority, and must never hand a service to
-/// another line or to an older owner.
+/// A host holds each line's service as a [`JoinedSessionsPort`] and admits
+/// only a [`JobOwner::succeeds`] owner: the line's next head or the same head
+/// on a reopen. Two local ports retain the live in-process service; if either
+/// port is a runner port, the fresh port replaces it so operations use the
+/// current owner's exact runner scope and backend kind. Runner jobs remain
+/// on the runner. It must stop foreground sessions before returning authority,
+/// and must never hand a service to another line or to an older owner.
 pub trait JobHost: Send + Sync {
     /// Reads only the service owned by this exact line.
     fn service(&self, line: LineId) -> Option<JoinedSessionsPort>;
@@ -196,8 +198,10 @@ pub trait JobHost: Send + Sync {
 /// An in-memory [`JobHost`] keyed by agent line.
 ///
 /// Installing one on every agent of a line gives an embedder process
-/// continuity across a rebind: the rebind's target head takes the source's
-/// live service, running jobs included. Services live as long as this value.
+/// continuity across a rebind: local-to-local attaches retain the source's
+/// live service, running jobs included. If either port is a runner port, the
+/// target takes its fresh port instead. Registry entries live as long as this
+/// value; replaced ports drop when their remaining runtime handles drop.
 #[derive(Default)]
 pub struct LocalJobHost {
     services: std::sync::Mutex<std::collections::HashMap<LineId, (JobOwner, JoinedSessionsPort)>>,
@@ -258,6 +262,7 @@ impl JobHost for LocalJobHost {
         }
         let service = if let Some((holder, service)) = services.get_mut(&owner.line)
             && !fresh.is_runner()
+            && !service.is_runner()
         {
             *holder = owner;
             service.clone()

@@ -1,5 +1,5 @@
-//! Process services keyed by agent line: retained across a same-branch owner
-//! replacement and handed to the line's next head on a rebind.
+//! Line-keyed process services: retain local-to-local services, but replace
+//! owner-scoped runner ports with the admitted current owner's fresh port.
 
 use plakous::tools::{
     ExecutionBackendError, JobHost, JobHostCapacity, JobOutputRoot, JobOwner, JoinedSessionsPort,
@@ -874,10 +874,11 @@ impl JobHost for JobRegistry {
         {
             return Err(ExecutionBackendError::stale_job_owner());
         }
-        // Local jobs live in the retained service; runner jobs live on the
-        // runner, whose fresh port carries this attachment's exact owner.
+        // Retain only local-to-local services. If either side is a runner,
+        // the fresh port carries the current owner's scope and backend kind.
         let service = if let Some(entry) = services.get_mut(&owner.line)
             && !fresh.is_runner()
+            && !entry.service.is_runner()
         {
             entry.owner = owner;
             entry.service.clone()

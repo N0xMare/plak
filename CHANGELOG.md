@@ -7,6 +7,12 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ## Unreleased
 
+- Reopen compaction and profile successors on runner-placed and home-daemon
+  sessions through a fresh process port scoped to the current line owner.
+  Profile switches keep their recorded attachable root address, and a late
+  `ProfileApplied` confirmation reaches only the requesting client's
+  replacement attachment on the same live connection.
+
 - Keep saved history readable when a session cannot open: root attach answers
   `Attached` with a read-only, `not_ready` view instead of refusing it. Plain
   attach retries a failed open once its cause is fixed, except while the startup
