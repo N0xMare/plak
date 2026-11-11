@@ -4555,7 +4555,11 @@ verdicts) are addressed, the session profile and workspace chrome states.
   snapshot. An **event** is broadcast as it happens; a *required* event is
   never dropped (an attachment that cannot take one gets
   `resync_required` and is detached), a *droppable* one may be coalesced or
-  evicted and is repaired by a resnapshot. An **addressed** observation
+  evicted and is repaired by a resnapshot. Repair waits for room in the
+  attachment queue and permits at most one outstanding snapshot ask per
+  attachment and transcript scope; a baseline clears losses it supersedes.
+  A saturated or slow client cannot create a resync feedback loop in the
+  session mailbox. An **addressed** observation
   goes to one attachment only: the answer to its own request (draft and
   queue-edit verdicts, steer acknowledgements, call detail, the navigator
   and resume lists, tool-invocation origins and correlation resets, and the

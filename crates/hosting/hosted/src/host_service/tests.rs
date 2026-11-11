@@ -5,6 +5,7 @@ use plakous_host_protocol::{Core, Draft, IntentReceiver, intent_channel, observa
 use super::*;
 
 mod child;
+mod gap_repair;
 
 type Observation = SessionObservation<Core>;
 
@@ -452,6 +453,8 @@ fn a_lost_transcript_is_repaid_with_a_fresh_baseline() {
     service.observe(Observation::AssistantDelta("d".into()));
     service.observe(stream(TranscriptScope::Agent("c1".into())));
     service.observe(Observation::AssistantDelta("e".into()));
+    // Evict the agent stream itself, independent of root-baseline timing.
+    service.observe(Observation::AssistantDelta("f".into()));
     let _ = service.take(id);
     let mut asked = Vec::new();
     while let Ok(delivery) = intents.try_recv() {

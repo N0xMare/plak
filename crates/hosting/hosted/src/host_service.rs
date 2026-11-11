@@ -130,6 +130,7 @@ struct Attachment<P: ProtocolExtension> {
     /// Scopes whose transcript content this attachment lost to a full
     /// queue; repaid with a fresh baseline.
     gapped: BTreeSet<TranscriptScope>,
+    repairing: BTreeSet<TranscriptScope>,
     /// Attach-snapshot items still at the head of the queue; they do not
     /// count against the capacity.
     snapshot_held: usize,
@@ -907,6 +908,7 @@ impl<P: ProtocolExtension> HostService<P> {
             seq: 0,
             scopes,
             gapped: BTreeSet::new(),
+            repairing: BTreeSet::new(),
             snapshot_held: items.len(),
             dropped: false,
             waiting,
@@ -1033,7 +1035,17 @@ impl<P: ProtocolExtension> HostService<P> {
     /// Takes everything queued for `attachment`. A dropped attachment
     /// yields its resync-required once and is then gone.
     pub fn take(&self, attachment: AttachmentId) -> Vec<Outbound<P>> {
-        self.repair_gaps();
+        let mut taken = Vec::new();
+        // The first drain makes room; the second includes any kept baseline
+        // that repays its gaps. Never spin waiting for a mailbox snapshot.
+        for _ in 0..2 {
+            self.repair_gaps();
+            taken.extend(self.take_queued(attachment));
+        }
+        taken
+    }
+
+    fn take_queued(&self, attachment: AttachmentId) -> Vec<Outbound<P>> {
         // As in `detach`, the senders this ends drop after the lock.
         let mailbox = self.mailbox();
         let mut state = self.lock();
@@ -1230,25 +1242,46 @@ impl<P: ProtocolExtension> HostService<P> {
                 snapshot,
                 ..
             } = &mut *state;
-            for held in attachments.values_mut() {
-                if held.dropped {
+            for (id, held) in attachments.iter_mut() {
+                if held.dropped
+                    || held.queue.len().saturating_sub(held.snapshot_held)
+                        >= held.capacity(self.capacity)
+                {
                     continue;
                 }
                 for scope in std::mem::take(&mut held.gapped) {
+                    if held.repairing.contains(&scope) {
+                        held.gapped.insert(scope);
+                        continue;
+                    }
                     match (&scope, &snapshot.baseline) {
                         (TranscriptScope::Root, Some((baseline, patches))) => {
                             for item in std::iter::once(baseline).chain(patches) {
                                 held.offer(item.clone(), item.class(), self.capacity);
                             }
                         }
-                        _ => asks.extend(held.sender.clone().map(|sender| (sender, scope))),
+                        _ => {
+                            if let Some(sender) = held.sender.clone() {
+                                held.repairing.insert(scope.clone());
+                                asks.push((*id, sender, scope));
+                            }
+                        }
                     }
                 }
             }
         }
-        for (sender, scope) in asks {
-            wake_stats::record(&scope);
-            let _ = sender.send(SessionIntent::ResyncTranscript { scope });
+        for (id, sender, scope) in asks {
+            if sender
+                .send(SessionIntent::ResyncTranscript {
+                    scope: scope.clone(),
+                })
+                .is_ok()
+            {
+                wake_stats::record(&scope);
+            } else if let Some(held) = self.lock().attachments.get_mut(&id) {
+                held.repairing.remove(&scope);
+                held.gapped.insert(scope);
+            }
         }
     }
 }
@@ -1449,6 +1482,10 @@ impl<P: ProtocolExtension> State<P> {
             && scopes.remove(&TranscriptScope::Agent(agent.to_owned()))
             && let Some(count) = self.agent_holders.get_mut(agent)
         {
+            held.gapped
+                .remove(&TranscriptScope::Agent(agent.to_owned()));
+            held.repairing
+                .remove(&TranscriptScope::Agent(agent.to_owned()));
             *count = count.saturating_sub(1);
             if *count == 0 {
                 self.agent_holders.remove(agent);
@@ -1599,6 +1636,11 @@ impl<P: ProtocolExtension> Attachment<P> {
             }
         }
         self.seq += 1;
+        if let SessionObservation::PresentationSnapshot(snapshot) = &observation {
+            // The baseline includes any transcript evicted to make room for it.
+            self.gapped.remove(&snapshot.scope);
+            self.repairing.remove(&snapshot.scope);
+        }
         self.queue.push_back(Outbound::Event {
             client_id: None,
             seq: self.seq,

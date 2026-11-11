@@ -264,6 +264,7 @@ impl<P: ProtocolExtension> HostService<P> {
                 seq: 0,
                 scopes: Scopes::Held(BTreeSet::from([scope])),
                 gapped: BTreeSet::new(),
+                repairing: BTreeSet::new(),
                 snapshot_held: 0,
                 dropped: false,
                 // As a root attachment made before an unresolved
