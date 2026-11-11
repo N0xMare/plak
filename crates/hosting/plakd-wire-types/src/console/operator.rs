@@ -47,3 +47,23 @@ pub struct OperatorConsent {
     pub nonce: String,
     pub expires_in_ms: u64,
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LoginMethod {
+    DeviceCode,
+    Paste,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LoginPhase {
+    Starting,
+    AwaitingInput,
+    Exchanging,
+    Cancelling,
+    Succeeded,
+    Failed,
+    Cancelled,
+    Expired,
+}

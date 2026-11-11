@@ -5822,3 +5822,11 @@ principal/connection/generation/action, disconnect/restart, four-grant quota,
 mutation single-flight and aggregate per-principal quota with web writes off.
 They use synthetic account IDs and no provider traffic. No persisted format
 or binding input changes are introduced by the consent machinery.
+
+Protocol-7 account write contracts use temporary isolated homes and synthetic
+secrets to verify write-only replies, Debug/input-bound redaction, exact named
+creation/removal and absent-slot isolation. Attempt-table contracts verify
+connection/principal/generation theft refusal, disconnect cancellation, fresh
+restart state, one-account exclusion and host-wide pending quotas. Existing
+facade callback/device/claim/CAS tests remain the provider workflow authority;
+no paid or live login is required by offline gates.

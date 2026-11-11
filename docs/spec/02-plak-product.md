@@ -5056,6 +5056,15 @@ does not inherit another connection's pending answers.
 
 ### 4.6 `plak host`
 
+Protocol-7 native login runs in a dedicated account-service worker, never the
+session intent mailbox or host action loop. Only the owning authenticated
+connection receives its challenge; poll returns sanitized phase, not a replay
+of the challenge. Disconnect cancels the attempt. No attempt or completion
+authority is recovered after host restart. Cancellation uses an attempt-local
+channel, not process SIGINT; an exchange already admitted retains the facade's
+existing recovery/quarantine law. A missing completion answer requires a
+status reread, not a second exchange.
+
 The supported command `plak host` (feature `web`, enabled by default)
 is the per-user host process, run in the foreground under a systemd
 user unit or a terminal multiplexer on the host machine. It serves every
@@ -9801,6 +9810,13 @@ product observations without moving product vocabulary into the agent sink.
 
 ### 7.2 Usage and allowances
 
+Protocol-7 `account_refresh` is a confirmed, explicit claimed refresh, not
+`accounts_status`/`accounts_usage` or automatic login. The exact account is
+selected throughout; an unaccepted/inactive integration refuses before provider
+I/O. Credential waits retain their existing scoped readiness recheck and
+admission behavior; a successful login never replays a paid turn. Private
+clients route the Login remedy to Accounts/Providers, retaining the CLI fallback.
+
 There is exactly one usage renderer. `plak usage` and the TUI Usage tab go
 through the same projection and the same text builder, so the CLI and the
 screen cannot disagree.
@@ -9844,7 +9860,7 @@ with its reason, not omitted, and the reason is its own: a local lock, a lease,
 a credential state, and an HTTP failure are named as exactly what they are; a
 local refusal is never reported as a transport failure. A non-Ready vertical
 renders one plain line naming
-the command that repairs it and **no bar**. Login remains CLI-only; Usage
+the command that repairs it and **no bar**. Login is an explicit operator action, never a read side effect; Usage
 may perform an explicit credential refresh as described below.
 
 No usage read refreshes an expired token, on any account (chapter 01 §7.3): an
@@ -10159,6 +10175,18 @@ variables, spelled the same way `plak doctor` spells them.
 
 ### 8.2 The two credential routes
 
+The attachment-free protocol-7 write requests select the same exact
+`<vertical>/<name>` as the CLI: `account_key_set/clear`, `account_logout`,
+`account_refresh`, `account_remove` and `account_login_start/complete/poll/cancel`.
+The Add account form supplies a validated new reference to key set or login;
+there is no empty account registry or default-slot fallback. Removal preserves
+the CLI's signed-out native restriction and default-account refusal.
+Key writes consume zeroizing input; set and clear refuse
+`environment_override {proven_no_effect:true}` while the default
+account's host environment variable wins, without modifying any file. Named
+keys remain file-only. A changed direct-API fingerprint requires explicit rebind.
+No stored credential is returned.
+
 `plak key set|status|clear <vertical>/<name>` and
 `plak status <api-vertical>/<name>` operate on that exact home-local API key.
 Set creates the named key file; clear removes it. Named keys are file-only,
@@ -10238,8 +10266,10 @@ evidence fails **before** credential use or network dispatch, and no
 caller-supplied endpoint, discovered client id, or copied token can promote a
 profile's provenance.
 
-**Login, logout, and API keys are CLI-only.** Nothing in the TUI runs an OAuth
-flow, captures key material, or offers a logout; the Providers tab reads status
+**Login, logout and API keys are explicit operator operations:** the CLI and
+protocol-7 authenticated host console share the account service. Private TUI
+and web forms consume that wire contract; they do not own credentials. The
+retained embedded TUI does not run an OAuth flow or capture key material; the Providers tab reads status
 and prints the exact command (§5.5).
 
 The product's `AccountOps` port contains account and catalog operations, with
@@ -10251,6 +10281,23 @@ presentation, browser launch, reminders, and cancellation/timeout messages.
 The facade retains route admission, callback validation, and credential writes.
 
 ### 8.3 Local and remote
+
+Confirmed host login always uses Remote mode: Codex device code, Grok/Claude
+masked paste. `account_login_start` binds exact notice revision and explicit
+newer-build replacement consent. The host acknowledges that exact notice,
+retains the opaque pending token and records machine provenance on success
+(best-effort warning on failure). It never invokes a terminal confirmation
+helper. Challenge URLs/codes are private request responses, never observations,
+snapshots or resync data. Paste is bounded at 16 KiB including whitespace.
+One native-account attempt is pending host-wide, at most three accounts total
+and two per principal, three starts/minute/principal, at most 15 minutes or the
+provider expiry. Poll is at most once/second. Grants and attempts bind principal,
+connection and generation. Device-login unavailable has no loopback fallback;
+use host CLI with explicit port 1455 forwarding instead, never copied tokens.
+
+Host login replaces the selected native account for every build/home of this
+user on that machine. Other machines use independent login families. Cross-
+process races settle through the existing credential-store generation CAS.
 
 Nothing here is a hosted service, so *local* and *remote* describe only where
 the browser is relative to this machine.
@@ -10449,6 +10496,12 @@ quarantine; selecting a profile is not represented as repair for a binding
 mismatch. A same-account Claude login preserves its stable account binding.
 
 ### 8.5 Logout
+
+Confirmed host logout preserves remote revocation versus explicit local-only
+retirement. Unusable records retire locally with `remote_grant_may_remain`; a
+failed revoke never silently chooses local-only or reports success. Failure
+responses distinguish a proven no-effect refusal from an operation whose
+effect may be unknown. API clear never crosses into subscription logout.
 
 `plak logout <account>` first reads the local credential offline and never
 asks the operator to log in in order to log out:

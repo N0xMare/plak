@@ -22,6 +22,7 @@ neutral = false
 plakous-host-protocol.workspace = true
 serde = { workspace = true, features = ["derive"] }
 schemars.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

@@ -1005,6 +1005,11 @@ credential authority. Signed identity verification remains provider-specific.
 
 ### 3.1 Where they live
 
+Host-console key set and clear use this same home-local store and exact
+account reference. An environment override refuses both without changing the
+shadowed file. Native host login changes this user's selected machine-wide
+XDG slot for all homes/builds, never a browser-local or copied token family.
+
 Subscription (OAuth) credentials live in a private per-provider store under XDG
 state:
 
@@ -1157,6 +1162,16 @@ binary with the current process environment unchanged: unsetting an overriding
 variable in a shell requires a fresh Plak process, not `/reload` in the old one.
 
 ### 3.2 Permissions are verified, not merely set
+
+The shared API-key write seam consumes a zeroizing string. Protocol-7 secret
+fields share zeroizing storage across envelope clones and have redacted Debug;
+HostRequest Debug never prints its fields. Owned decoded host JSON, partial
+socket input and queued socket input are wiped on completion/error/drop.
+Input bounds include whitespace (64 KiB outer credential request, 16 KiB key
+and callback input). Immutable browser/transport/Serde internals and allocator
+copies cannot be proved wiped; no perfect-erasure claim is made. Clients clear
+fields after submission and never use the chat composer, logs, browser storage,
+URLs or telemetry for secrets.
 
 Private subscription metadata operations retain file and parent identity,
 lock ordering, bounded reads, durable publication and rollback inside the
@@ -1476,9 +1491,21 @@ Chapter 03 §6.1 holds the exact list.
 
 ### 3.6 Login surfaces
 
-Login, logout, and API-key management are **CLI-only**. Nothing in the TUI runs
-an OAuth flow, captures key material, or offers a logout; the Providers view is
-read-only status plus the exact command that repairs each vertical.
+Native login, logout, explicit refresh and API-key management are explicit
+operator operations on CLI or protocol-7 host console. Web writes require the
+startup-captured credentials-write capability; verified same-user sockets are
+trusted, with identical consent and quota checks. Private clients own forms,
+not credential authority; the retained embedded Providers view remains
+read-only status plus CLI repair. MCP OAuth, named secrets, runner pairing
+and project trust remain CLI-only.
+
+Host login uses Remote mode and a dedicated cancellable account-service owner.
+Only the initiating connection receives its pinned-provider challenge. The
+host retains and consumes its opaque pending token; random client attempt IDs
+are not completion authority. Disconnect, expiry and restart retire pending
+authority. No login is initiated/approved/completed through an agent tool,
+model-visible channel or unsolicited observation; same-uid shell/socket/CLI
+access remains the stated residual, not a credential-isolation guarantee.
 
 Login is authorization-code with PKCE (S256) against a revision-pinned profile
 for every vertical. Only one vertical has a loopback flow at all; the others are
@@ -1995,6 +2022,13 @@ the product home. Its authority is exactly the user's own:
   it is refused the intents that exec or hand off the host's build (§4.6).
 
 ## 5. Redaction
+
+Protocol-7 operator audit records safe action/account IDs and categorical
+outcomes, never API keys, authorize URLs, codes, paste bodies, frames or raw
+parser diagnostics. Secret-bearing request and challenge fields deliberately
+redact Debug. Failure replies never reflect secret input; a lost reply is not
+authority to repeat an exchange. Pending-login state is process-local; existing
+credential records and recovery formats are unchanged.
 
 The portable runner dial core never formats keys, offers, pairing secrets,
 `K_pair`, proofs or cryptographic session state in `Debug`; these types have no

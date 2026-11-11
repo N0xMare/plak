@@ -11,10 +11,50 @@ mod definitions;
 pub use definitions::*;
 mod operator;
 pub use operator::*;
+mod secret;
+pub use secret::SecretInput;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "request", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HostRequest {
+    AccountKeySet {
+        account_id: String,
+        secret: SecretInput,
+        confirmation: String,
+    },
+    AccountKeyClear {
+        account_id: String,
+        confirmation: String,
+    },
+    AccountLogout {
+        account_id: String,
+        local_only: bool,
+        confirmation: String,
+    },
+    AccountRefresh {
+        account_id: String,
+        confirmation: String,
+    },
+    AccountRemove {
+        account_id: String,
+        confirmation: String,
+    },
+    AccountLoginStart {
+        account_id: String,
+        notice_revision: String,
+        replace_newer: bool,
+        confirmation: String,
+    },
+    AccountLoginComplete {
+        attempt: String,
+        pasted: SecretInput,
+    },
+    AccountLoginPoll {
+        attempt: String,
+    },
+    AccountLoginCancel {
+        attempt: String,
+    },
     OperatorPrepare {
         action: OperatorAction,
     },
@@ -70,6 +110,24 @@ pub enum HostRequest {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "response", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HostResponse {
+    AccountChanged {
+        account_id: String,
+        remote_grant_may_remain: bool,
+        provenance_warning: bool,
+    },
+    LoginChallenge {
+        attempt: String,
+        method: LoginMethod,
+        authorize_url: SecretInput,
+        user_code: Option<SecretInput>,
+        expires_in_ms: u64,
+        warning: String,
+    },
+    LoginProgress {
+        attempt: String,
+        phase: LoginPhase,
+        provenance_warning: bool,
+    },
     OperatorPrepared {
         consent: OperatorConsent,
     },
@@ -156,6 +214,13 @@ pub struct Diagnostic {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "reason", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ReadRefusal {
+    EnvironmentOverride {
+        proven_no_effect: bool,
+    },
+    AccountOperationFailed {
+        outcome_unknown: bool,
+    },
+    DeviceLoginUnavailable {},
     ConfirmationRequired {},
     ConfirmationExpired {},
     Conflict {
@@ -173,6 +238,12 @@ pub enum ReadRefusal {
         cause: UnavailableCode,
         remedies: Vec<ReadRemedy>,
     },
+}
+
+impl std::fmt::Debug for HostRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HostRequest(<redacted>)")
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

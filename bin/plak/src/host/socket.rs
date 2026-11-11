@@ -333,7 +333,18 @@ struct Reader {
     read: tokio::net::unix::OwnedReadHalf,
     lines: LineReader,
     queued: VecDeque<Result<String, WireError>>,
-    buffer: Vec<u8>,
+    buffer: zeroize::Zeroizing<Vec<u8>>,
+}
+
+impl Drop for Reader {
+    fn drop(&mut self) {
+        use zeroize::Zeroize as _;
+        for line in &mut self.queued {
+            if let Ok(text) = line {
+                text.zeroize();
+            }
+        }
+    }
 }
 
 impl Reader {
@@ -343,6 +354,8 @@ impl Reader {
             Ok(0) | Err(_) => false,
             Ok(read) => {
                 self.queued.extend(self.lines.push(&self.buffer[..read]));
+                use zeroize::Zeroize as _;
+                self.buffer[..read].zeroize();
                 true
             }
         }
@@ -368,7 +381,7 @@ async fn connection(
         read,
         lines: LineReader::default(),
         queued: VecDeque::new(),
-        buffer: vec![0; 64 * 1024],
+        buffer: zeroize::Zeroizing::new(vec![0; 64 * 1024]),
     };
     let outbox = Outbox::default();
     let hello = tokio::time::timeout(HELLO_DEADLINE, async {

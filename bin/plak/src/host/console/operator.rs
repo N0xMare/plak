@@ -237,6 +237,10 @@ impl Console {
     }
 
     pub fn disconnect(&self, principal: &HostPrincipal, connection: u64, generation: u64) {
+        self.logins
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .disconnect(principal, connection, generation);
         self.operator
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -258,6 +262,12 @@ fn same_owner(left: &HostRequestContext, right: &HostRequestContext) -> bool {
 fn validate(action: &OperatorAction) -> Result<(), ReadRefusal> {
     if let Some(id) = account(action) {
         let account = super::accounts::exact(id)?;
+        if !account.vertical().capability().compiled {
+            return Err(super::unavailable(
+                plakd_wire_types::console::ReadScope::Accounts,
+                plakd_wire_types::console::UnavailableCode::NotCompiled,
+            ));
+        }
         let valid = match action {
             OperatorAction::AccountKeySet { .. } | OperatorAction::AccountKeyClear { .. } => {
                 account.vertical().is_api()

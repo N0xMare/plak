@@ -27,8 +27,18 @@ fn named_api_keys_are_disjoint_from_defaults_siblings_and_generic_secrets() {
         let sibling = format!("{vertical}/personal");
         assert_eq!(env_var_for_account(&account), None);
         assert!(resolve_api_key(&paths, &account).unwrap().is_none());
-        set_api_key(&paths, &account, &format!("{vertical}-work-key")).unwrap();
-        set_api_key(&paths, &sibling, &format!("{vertical}-personal-key")).unwrap();
+        set_api_key(
+            &paths,
+            &account,
+            zeroize::Zeroizing::new((format!("{vertical}-work-key")).to_string()),
+        )
+        .unwrap();
+        set_api_key(
+            &paths,
+            &sibling,
+            zeroize::Zeroizing::new((format!("{vertical}-personal-key")).to_string()),
+        )
+        .unwrap();
         assert_eq!(
             resolve_api_key(&paths, &account).unwrap().unwrap(),
             format!("{vertical}-work-key")
@@ -72,12 +82,22 @@ fn file_round_trip_and_fingerprint() {
         PlakPaths::resolve(Some(OsStr::new(dir.path())), Some(OsStr::new("/home/u"))).unwrap();
     paths.ensure_layout().unwrap();
     let Some(account) = unshadowed_api_key_account() else {
-        let error = set_api_key(&paths, "openai", "sk-test-secret-key-9999").unwrap_err();
+        let error = set_api_key(
+            &paths,
+            "openai",
+            zeroize::Zeroizing::new(("sk-test-secret-key-9999").to_string()),
+        )
+        .unwrap_err();
         assert!(error.contains("OPENAI_API_KEY"));
         assert!(error.contains("still wins over the file store"));
         return;
     };
-    set_api_key(&paths, account, "sk-test-secret-key-9999").unwrap();
+    set_api_key(
+        &paths,
+        account,
+        zeroize::Zeroizing::new(("sk-test-secret-key-9999").to_string()),
+    )
+    .unwrap();
     let got = resolve_api_key(&paths, account).unwrap().unwrap();
     assert_eq!(got, "sk-test-secret-key-9999");
     let status = key_status(&paths, account).unwrap();
@@ -94,7 +114,12 @@ fn xai_api_product_account_shares_only_the_xai_key_store() {
     let dir = tempdir().unwrap();
     let paths = PlakPaths::explicit(dir.path().to_owned());
     paths.ensure_layout().unwrap();
-    set_api_key(&paths, "xai-api", "offline-fixture-key").unwrap();
+    set_api_key(
+        &paths,
+        "xai-api",
+        zeroize::Zeroizing::new(("offline-fixture-key").to_string()),
+    )
+    .unwrap();
     assert!(paths.api_key_file("xai").is_file());
     assert!(!paths.api_key_file("xai-api").exists());
     assert!(clear_api_key(&paths, "xai-api").unwrap());
@@ -108,8 +133,8 @@ fn rejects_oauth_account_names() {
     let dir = tempdir().unwrap();
     let paths =
         PlakPaths::resolve(Some(OsStr::new(dir.path())), Some(OsStr::new("/home/u"))).unwrap();
-    assert!(set_api_key(&paths, "grok", "x").is_err());
-    assert!(set_api_key(&paths, "codex", "x").is_err());
+    assert!(set_api_key(&paths, "grok", zeroize::Zeroizing::new(("x").to_string())).is_err());
+    assert!(set_api_key(&paths, "codex", zeroize::Zeroizing::new(("x").to_string())).is_err());
 }
 
 #[test]
@@ -292,7 +317,7 @@ proptest! {
         paths.ensure_layout().unwrap();
         let key = format!("sk-test-{suffix}");
         if let Some(account) = unshadowed_api_key_account() {
-            set_api_key(&paths, account, &key).unwrap();
+            set_api_key(&paths, account, zeroize::Zeroizing::new((key).to_string())).unwrap();
             let got = resolve_api_key(&paths, account).unwrap().unwrap();
             prop_assert_eq!(got, key.clone());
             let status = key_status(&paths, account).unwrap();
@@ -302,7 +327,7 @@ proptest! {
             prop_assert!(clear_api_key(&paths, account).unwrap());
             prop_assert!(resolve_api_key(&paths, account).unwrap().is_none());
         } else {
-            let error = set_api_key(&paths, "openai", &key).unwrap_err();
+            let error = set_api_key(&paths, "openai", zeroize::Zeroizing::new((key).to_string())).unwrap_err();
             prop_assert!(error.contains("OPENAI_API_KEY"));
         }
     }

@@ -238,6 +238,11 @@ pub enum LoginOutcome {
     TimedOut,
 }
 
+pub(crate) enum HostLoginStartError {
+    DeviceUnavailable,
+    Failed,
+}
+
 /// Synchronous account operations. Commands own terminal input and output;
 /// the facade owns login admission, the opaque pending authority, and completion.
 pub trait AccountOps {
@@ -392,6 +397,63 @@ pub struct PlakousApplication {
 }
 
 impl PlakousApplication {
+    pub(crate) fn begin_host_login(
+        &mut self,
+        account: &AccountRef,
+    ) -> Result<LoginChallenge<<Self as AccountOps>::PendingLogin>, HostLoginStartError> {
+        let subscriptions = self
+            .subscriptions_for(account)
+            .map_err(|_| HostLoginStartError::Failed)?;
+        let provider = native_provider(account).map_err(|_| HostLoginStartError::Failed)?;
+        let pending = self
+            .executor
+            .block_on(subscriptions.begin_login(provider, NativeLoginMode::Remote))
+            .map_err(|_| HostLoginStartError::Failed)?
+            .map_err(|error| {
+                if error == plakous::subscriptions::NativeSubscriptionError::DeviceLoginUnavailable
+                {
+                    HostLoginStartError::DeviceUnavailable
+                } else {
+                    HostLoginStartError::Failed
+                }
+            })?;
+        Ok(login_challenge(account, pending))
+    }
+    /// Finishes one host-owned attempt without installing process signal
+    /// handlers. Dropping completion retains the facade's recovery semantics.
+    pub(crate) fn finish_host_login(
+        &mut self,
+        pending: <Self as AccountOps>::PendingLogin,
+        pasted: Option<&str>,
+        timeout: std::time::Duration,
+        mut cancelled: tokio::sync::watch::Receiver<bool>,
+    ) -> CliResult<LoginOutcome> {
+        let (account, pending) = pending;
+        let result = self
+            .executor
+            .block_on(async move {
+                if *cancelled.borrow() {
+                    return Ok(LoginOutcome::Cancelled);
+                }
+                let completion = async move {
+                    match pasted {
+                        Some(input) => pending.complete_remote(input).await,
+                        None => pending.complete().await,
+                    }
+                };
+                tokio::select! {
+                    biased;
+                    _ = cancelled.changed() => Ok(LoginOutcome::Cancelled),
+                    result = tokio::time::timeout(timeout, completion) => match result {
+                        Err(_) => Ok(LoginOutcome::TimedOut),
+                        Ok(result) => result.map(credential_state).map(LoginOutcome::Completed),
+                    },
+                }
+            })
+            .map_err(application_execution_failure)?;
+        result.map_err(|error| self.account_failure(error, &account))
+    }
+
     /// Supplies read-only home paths without opening a product store or telemetry.
     pub(crate) fn with_account_home(mut self, paths: Option<product_paths::PlakPaths>) -> Self {
         if self.product.is_none() {
@@ -848,21 +910,7 @@ impl AccountOps for PlakousApplication {
             .block_on(subscriptions.begin_login(native_provider(account)?, mode))
             .map_err(application_execution_failure)?
             .map_err(|error| self.account_failure(error, account))?;
-        let replaced_unusable = pending.replaced_unusable_record();
-        let instructions = pending.instructions();
-        let authorize_url = instructions.verification_uri().to_owned();
-        let completion = instructions.completion();
-        let device_code = instructions.device_code().map(|code| DeviceCodePrompt {
-            user_code: zeroize::Zeroizing::new(code.user_code().to_owned()),
-            expires_in: code.expires_in(),
-        });
-        Ok(LoginChallenge {
-            pending: (account.clone(), pending),
-            authorize_url,
-            completion,
-            device_code,
-            replaced_unusable,
-        })
+        Ok(login_challenge(account, pending))
     }
 
     fn finish_login(
@@ -1023,6 +1071,27 @@ impl AccountOps for PlakousApplication {
             return Err(CliFailure::new("native model catalog provider mismatch"));
         }
         catalog_summaries(provider, &catalog)
+    }
+}
+
+fn login_challenge(
+    account: &AccountRef,
+    pending: plakous::subscriptions::PendingNativeLogin,
+) -> LoginChallenge<(AccountRef, plakous::subscriptions::PendingNativeLogin)> {
+    let replaced_unusable = pending.replaced_unusable_record();
+    let instructions = pending.instructions();
+    let authorize_url = instructions.verification_uri().to_owned();
+    let completion = instructions.completion();
+    let device_code = instructions.device_code().map(|code| DeviceCodePrompt {
+        user_code: zeroize::Zeroizing::new(code.user_code().to_owned()),
+        expires_in: code.expires_in(),
+    });
+    LoginChallenge {
+        pending: (account.clone(), pending),
+        authorize_url,
+        completion,
+        device_code,
+        replaced_unusable,
     }
 }
 

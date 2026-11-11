@@ -944,9 +944,9 @@ where
 /// Splits a byte stream into lines, holding at most [`MAX_LINE_BYTES`]: a
 /// longer line is reported once as [`WireError::TooLarge`] and skipped to
 /// its newline.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct LineReader {
-    held: Vec<u8>,
+    held: zeroize::Zeroizing<Vec<u8>>,
     skipping: bool,
 }
 
@@ -961,7 +961,8 @@ impl LineReader {
                 } else {
                     let held = std::mem::take(&mut self.held);
                     lines.push(
-                        String::from_utf8(held)
+                        std::str::from_utf8(&held)
+                            .map(str::to_owned)
                             .map_err(|_| WireError::Malformed("a line is not UTF-8".into())),
                     );
                 }
@@ -972,7 +973,7 @@ impl LineReader {
             }
             // The newline counts toward the cap.
             if self.held.len() + 1 >= MAX_LINE_BYTES {
-                self.held = Vec::new();
+                self.held = zeroize::Zeroizing::default();
                 self.skipping = true;
                 lines.push(Err(WireError::TooLarge));
                 continue;
@@ -980,6 +981,12 @@ impl LineReader {
             self.held.push(byte);
         }
         lines
+    }
+}
+
+impl std::fmt::Debug for LineReader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("LineReader(<redacted>)")
     }
 }
 

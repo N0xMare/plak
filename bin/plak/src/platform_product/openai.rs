@@ -176,7 +176,12 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let paths = PlakPaths::explicit(directory.path().join("home"));
         for name in ["openai/work", "openai/other"] {
-            crate::home::secrets::set_api_key(&paths, name, "identical-test-key").unwrap();
+            crate::home::secrets::set_api_key(
+                &paths,
+                name,
+                zeroize::Zeroizing::new(("identical-test-key").to_string()),
+            )
+            .unwrap();
         }
         let product = ProductPlatformCredentials {
             paths: paths.clone(),

@@ -740,6 +740,7 @@ where
             self.leave();
             return Ok(false);
         };
+        let mut text = zeroize::Zeroizing::new(text);
         if let Some(reading) = self.preflight_host_read(&text)? {
             return Ok(reading);
         }
@@ -756,7 +757,7 @@ where
             // A blob precedes the intent that names it, on the node
             // attachment; with none it is no one's.
             return if self.node.is_some() {
-                self.forward(text)
+                self.forward(std::mem::take(&mut *text))
             } else {
                 Ok(true)
             };

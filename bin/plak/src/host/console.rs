@@ -1,5 +1,6 @@
 //! Attachment-free, home-scoped product reads. No session store is opened here.
 
+mod account_writes;
 mod accounts;
 mod clock;
 mod definitions;
@@ -41,6 +42,7 @@ pub(super) struct Console {
     definition_nonce: [u8; 16],
     switches: ConfiguredSwitches,
     operator: Mutex<operator::State>,
+    logins: Mutex<account_writes::Logins>,
     #[cfg(test)]
     native_fixture: Mutex<Option<plakous::subscriptions::NativeSubscriptions>>,
 }
@@ -65,6 +67,7 @@ impl Console {
             definition_nonce: *uuid::Uuid::new_v4().as_bytes(),
             switches,
             operator: Mutex::default(),
+            logins: Mutex::default(),
             #[cfg(test)]
             native_fixture: Mutex::new(None),
         })
@@ -111,6 +114,28 @@ impl Console {
         context: HostRequestContext,
         request: HostRequest,
     ) -> HostReadTask<PlakExtension> {
+        if account_writes::is_request(&request) {
+            let this = Arc::clone(self);
+            let runtime = self.runtime.clone();
+            return Box::pin(async move {
+                let Some(runtime) = runtime else {
+                    return Ok(refused(unavailable(
+                        ReadScope::Accounts,
+                        UnavailableCode::Storage,
+                    )));
+                };
+                let task = runtime.spawn(async move { this.account_write(context, request).await });
+                let _cancel = Cancel {
+                    abort: task.abort_handle(),
+                    cancelled: Arc::new(AtomicBool::new(false)),
+                };
+                task.await.unwrap_or_else(|_| {
+                    Ok(refused(ReadRefusal::AccountOperationFailed {
+                        outcome_unknown: true,
+                    }))
+                })
+            });
+        }
         if matches!(
             request,
             HostRequest::OperatorPrepare { .. } | HostRequest::OperatorConfirm { .. }

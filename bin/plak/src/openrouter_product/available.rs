@@ -342,7 +342,12 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let paths = PlakPaths::explicit(directory.path().join("home"));
         for account in ["openrouter/work", "openrouter/other"] {
-            crate::home::secrets::set_api_key(&paths, account, "identical-test-key").unwrap();
+            crate::home::secrets::set_api_key(
+                &paths,
+                account,
+                zeroize::Zeroizing::new(("identical-test-key").to_string()),
+            )
+            .unwrap();
         }
         let work =
             ProductOpenRouterApiKeySource::new(paths.clone(), "openrouter/work".parse().unwrap())
@@ -371,7 +376,12 @@ mod tests {
             Some(OsStr::new("/home/tester")),
         )
         .unwrap();
-        crate::home::secrets::set_api_key(&paths, "openrouter", "key-alpha").unwrap();
+        crate::home::secrets::set_api_key(
+            &paths,
+            "openrouter",
+            zeroize::Zeroizing::new(("key-alpha").to_string()),
+        )
+        .unwrap();
         let label = ProductOpenRouterCredentials::new(paths.clone())
             .key_label(&"openrouter".parse().unwrap())
             .unwrap();
@@ -383,7 +393,12 @@ mod tests {
                 .unwrap();
         let alpha = source.generation().unwrap();
 
-        crate::home::secrets::set_api_key(&paths, "openrouter", "key-beta").unwrap();
+        crate::home::secrets::set_api_key(
+            &paths,
+            "openrouter",
+            zeroize::Zeroizing::new(("key-beta").to_string()),
+        )
+        .unwrap();
         let beta = source.generation().unwrap();
         assert_ne!(alpha, beta);
 

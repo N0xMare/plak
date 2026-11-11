@@ -3956,6 +3956,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "zeroize",
 ]
 
 [[package]]
@@ -4183,6 +4184,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
@@ -4222,6 +4224,7 @@ dependencies = [
  "toml",
  "tracing",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

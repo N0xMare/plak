@@ -348,15 +348,15 @@ async fn attached<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
         tokio::select! {
             biased;
             message = next_text(socket, pong) => {
-                let line = match message {
-                    Ok(line) => line,
+                let mut line = match message {
+                    Ok(line) => zeroize::Zeroizing::new(line),
                     Err(ended) => return ended,
                 };
                 if !Connection::is_host_request(&line) && !rate.admit() {
                     return Ended::Policy("message rate");
                 }
                 // An attach may open a session, which takes a while.
-                if !connection_work(|| connection.frame(Ok(line))).unwrap_or(false) {
+                if !connection_work(|| connection.frame(Ok(std::mem::take(&mut *line)))).unwrap_or(false) {
                     let _ = connection.flush();
                     let _ = send_pending(socket, outbox, || served.stop.stopped()).await;
                     return Ended::Left;

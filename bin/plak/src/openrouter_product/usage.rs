@@ -217,7 +217,11 @@ mod tests {
         let root = tempfile::tempdir()?;
         let paths = PlakPaths::explicit(root.path().join("home"));
         let account: AccountRef = "openrouter/work".parse()?;
-        secrets::set_api_key(&paths, account.as_str(), "synthetic-offline-fixture")?;
+        secrets::set_api_key(
+            &paths,
+            account.as_str(),
+            zeroize::Zeroizing::new(("synthetic-offline-fixture").to_string()),
+        )?;
         let entry = entry(&paths, &account).ok_or("fixture registry full")?;
         let flight = Flight::legacy(Some(Arc::clone(&entry)));
         let before = fence(&paths, &account)?;
@@ -244,7 +248,11 @@ mod tests {
         let root = tempfile::tempdir()?;
         let paths = PlakPaths::explicit(root.path().join("home"));
         let account: AccountRef = "openrouter/work".parse()?;
-        secrets::set_api_key(&paths, account.as_str(), "synthetic-offline-fixture")?;
+        secrets::set_api_key(
+            &paths,
+            account.as_str(),
+            zeroize::Zeroizing::new(("synthetic-offline-fixture").to_string()),
+        )?;
         let gets = Arc::new(AtomicUsize::new(0));
         let (started, ready) = tokio::sync::oneshot::channel();
         let (finish, finished) = tokio::sync::oneshot::channel();

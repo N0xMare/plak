@@ -329,7 +329,12 @@ pub fn key_set(
         .map_err(|_| CliFailure::new("stderr failed"))?;
     let key = read_terminal_secret_line(stdin, stderr, MAX_REMOTE_AUTHORIZATION_INPUT_BYTES)
         .map_err(|_| CliFailure::new("could not read API key"))?;
-    product_secrets::set_api_key(&paths, account, key.as_str()).map_err(CliFailure::from)?;
+    product_secrets::set_api_key(
+        &paths,
+        account,
+        zeroize::Zeroizing::new((key.as_str()).to_string()),
+    )
+    .map_err(CliFailure::from)?;
     writeln!(
         stderr,
         "stored API key for {account} (fingerprint only on status)"

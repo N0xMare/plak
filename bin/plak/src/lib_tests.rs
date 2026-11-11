@@ -2367,7 +2367,12 @@ fn status_omits_an_empty_ready_or_setup_section() {
         let present = product_secrets::key_status(&paths, account)
             .is_ok_and(|status| status.source != product_secrets::KeySource::Missing);
         if !present {
-            product_secrets::set_api_key(&paths, account, "synthetic-status-key").unwrap();
+            product_secrets::set_api_key(
+                &paths,
+                account,
+                zeroize::Zeroizing::new(("synthetic-status-key").to_string()),
+            )
+            .unwrap();
         }
     }
     let mut ready = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);

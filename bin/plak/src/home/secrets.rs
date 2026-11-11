@@ -143,7 +143,11 @@ pub fn resolve_api_key(paths: &PlakPaths, account: &str) -> Result<Option<String
     Ok(Some(value))
 }
 
-pub fn set_api_key(paths: &PlakPaths, account: &str, key: &str) -> Result<(), String> {
+pub fn set_api_key(
+    paths: &PlakPaths,
+    account: &str,
+    key: zeroize::Zeroizing<String>,
+) -> Result<(), String> {
     if !is_api_key_account(account) {
         return Err(format!(
             "account `{account}` is not an API-key account; use plak login for OAuth accounts"
