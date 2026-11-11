@@ -114,6 +114,47 @@ fn host_binding_requests_preserve_history_without_another_paid_turn() {
 }
 
 #[test]
+fn host_plain_attach_reopens_after_a_failed_placement_is_fixed() {
+    let Some(fixture) = fixture() else { return };
+    fixture.write_script(
+        &json!({"version":1,"repeat_last_step":true,"steps":[{"output":{"text":ANSWER}}]}),
+    );
+    let mut host = start(&fixture);
+    let (mut client, session, node, _) = seeded(&fixture, &host);
+    assert_eq!(
+        client.request(
+            5,
+            Op::ReleaseSession {
+                session: session.clone()
+            }
+        ),
+        Outcome::Ok(Answer::Released)
+    );
+    let unavailable = fixture.root.join("workspace-unavailable");
+    std::fs::rename(fixture.workspace(), &unavailable).unwrap();
+    let attachment = client.attach(6, &node);
+    assert!(matches!(
+        client.request(
+            7,
+            Op::Intent {
+                attachment,
+                intent: SessionIntent::Prompt("not admitted".into()),
+                client_id: None,
+                blobs: Vec::new(),
+            }
+        ),
+        Outcome::Refused(_)
+    ));
+    assert_eq!(dispatches(&fixture), 1);
+    std::fs::rename(unavailable, fixture.workspace()).unwrap();
+    let attachment = client.attach(8, &node);
+    client.prompt(9, attachment, "plain attach is live again", ANSWER);
+    assert_eq!(dispatches(&fixture), 2);
+    drop(client);
+    stop(&mut host);
+}
+
+#[test]
 fn host_binding_request_crash_cuts_keep_one_owner_and_never_redispatch() {
     for rebind in [false, true] {
         for cut in ["fenced", "released", "carried", "opened"] {

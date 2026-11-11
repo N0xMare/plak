@@ -129,6 +129,55 @@ async fn interrupted_inspection_is_retryable_but_a_missing_identity_is_not() {
     let _ = daemon.await;
 }
 
+#[tokio::test]
+async fn inspection_lost_after_hello_before_lines_answer_is_retryable() {
+    use plakous::runner::protocol::{HostFrame, RunnerFrame, frame};
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    let home = tempfile::tempdir().unwrap();
+    let roots = ProductStateRoots::with_doubles(home.path().into(), home.path().join("state"));
+    let service = inspection_service(home.path());
+    let listener = tokio::net::UnixListener::bind(inspection_socket(home.path())).unwrap();
+    let hello = service.hello().clone();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        stream
+            .write_all(&frame::encode(&RunnerFrame::Hello(hello)).unwrap())
+            .await
+            .unwrap();
+        let mut frames = frame::FrameReader::new();
+        let mut buffer = [0; 4096];
+        let mut bound = false;
+        loop {
+            let read = stream.read(&mut buffer).await.unwrap();
+            assert_ne!(read, 0);
+            frames.push(&buffer[..read]);
+            while let Some(body) = frames.next_frame().unwrap() {
+                match frame::decode::<HostFrame>(&body).unwrap() {
+                    HostFrame::Bind(bind) => {
+                        assert!(bind.inspect);
+                        bound = true;
+                    }
+                    HostFrame::Lines { .. } => {
+                        assert!(bound);
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    });
+    let locator = plakous::sessions::SessionLocator::new(
+        uuid::Uuid::new_v4().try_into().unwrap(),
+        uuid::Uuid::new_v4().try_into().unwrap(),
+        uuid::Uuid::new_v4().try_into().unwrap(),
+    );
+    let failure = roots.refuse_daemon_tree(locator, "root").await.unwrap_err();
+    assert!(failure.can_retry_open(), "{failure}");
+    assert!(failure.message().contains("ReadInterrupted"), "{failure}");
+    server.await.unwrap();
+}
+
 fn inspection_socket(home: &std::path::Path) -> std::path::PathBuf {
     home.join(format!(
         "host/runner/v{}/run/runner.sock",
@@ -137,6 +186,17 @@ fn inspection_socket(home: &std::path::Path) -> std::path::PathBuf {
 }
 
 fn inspection_daemon(home: &std::path::Path) -> tokio::task::JoinHandle<()> {
+    let service = inspection_service(home);
+    let listener = tokio::net::UnixListener::bind(inspection_socket(home)).unwrap();
+    tokio::spawn(async move {
+        loop {
+            let (stream, _) = listener.accept().await.unwrap();
+            service.serve_connection(stream).await;
+        }
+    })
+}
+
+fn inspection_service(home: &std::path::Path) -> plakous::runner::RunnerService {
     use plakous::runner::protocol::VersionTriple;
     use plakous::runner::{RunnerIdentity, RunnerOptions, RunnerService};
     use plakous::tools::{
@@ -145,7 +205,6 @@ fn inspection_daemon(home: &std::path::Path) -> tokio::task::JoinHandle<()> {
     let socket = inspection_socket(home);
     std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
     std::fs::write(home.join("host-id"), "inspection-home").unwrap();
-    let listener = tokio::net::UnixListener::bind(socket).unwrap();
     let environment = ExecutionEnvironment::host(
         ExecutionEnvironmentScope::Run(uuid::Uuid::new_v4().try_into().unwrap()),
         home,
@@ -153,7 +212,7 @@ fn inspection_daemon(home: &std::path::Path) -> tokio::task::JoinHandle<()> {
         ExecutionEnvironmentConfig::default(),
     )
     .unwrap();
-    let service = RunnerService::with_options(
+    RunnerService::with_options(
         environment,
         RunnerIdentity {
             runner_id: RunnerId::new("inspection").unwrap(),
@@ -166,11 +225,5 @@ fn inspection_daemon(home: &std::path::Path) -> tokio::task::JoinHandle<()> {
             ..RunnerOptions::default()
         },
     )
-    .unwrap();
-    tokio::spawn(async move {
-        loop {
-            let (stream, _) = listener.accept().await.unwrap();
-            service.serve_connection(stream).await;
-        }
-    })
+    .unwrap()
 }

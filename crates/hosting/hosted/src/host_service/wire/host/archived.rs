@@ -76,18 +76,18 @@ where
             Ok(None) => return Ok(None),
             Err(detail) => return Ok(refused(RequestRefusal::SessionUnavailable { detail })),
         };
-        let mut view = match self.host.sessions.stored_view(&session) {
-            Ok(Some(view)) => view,
-            Ok(None) => return Ok(None),
-            Err(refusal) => return Ok(refused(refusal)),
-        };
         let cached = self
             .host
             .lock()
             .iter()
-            .find(|slot| super::serves(slot, &session))
+            .find(|slot| super::serves(slot, &session) && slot.startup_retrying())
             .and_then(|slot| slot.open_failure());
         let failure = failure.or(cached.as_ref());
+        let mut view = match self.host.sessions.stored_view(&session, failure.is_some()) {
+            Ok(Some(view)) => view,
+            Ok(None) => return Ok(None),
+            Err(refusal) => return Ok(refused(refusal)),
+        };
         // Ownership refusals must be rechecked when their holder goes away,
         // even when the product can no longer resolve the old holder's PID.
         if !view.archived
@@ -114,7 +114,11 @@ where
             return Ok(None);
         }
         if view.root != *node {
-            return Ok(refused(RequestRefusal::UnknownNode));
+            return Ok(refused(if view.archived {
+                RequestRefusal::UnknownNode
+            } else {
+                refusal
+            }));
         }
         if let Some(failure) = failure.filter(|_| !view.archived) {
             view.mark_unavailable(failure);

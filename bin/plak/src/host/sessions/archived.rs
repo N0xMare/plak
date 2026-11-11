@@ -13,6 +13,7 @@ impl ProductSessions {
     pub(super) fn read_stored(
         &self,
         id: &str,
+        include_unarchived: bool,
     ) -> Result<Option<StoredSessionView<PlakExtension>>, RequestRefusal> {
         let unavailable = |detail| RequestRefusal::SessionUnavailable { detail };
         let paths = self
@@ -20,6 +21,9 @@ impl ProductSessions {
             .paths()
             .map_err(|failure| unavailable(failure.message().to_owned()))?;
         let record = ProductStore::inspect_session_read_only(paths, id).map_err(unavailable)?;
+        if !record.archived && !include_unarchived {
+            return Ok(None);
+        }
         let root = NodeAddress {
             tree_id: record.node.tree_id.clone(),
             agent_id: record.node.agent_id.clone(),
@@ -77,7 +81,11 @@ mod tests {
             let services = Services::for_home(paths.clone());
             let product = ProductSessions::new(&services, None, None).unwrap();
             assert_eq!(services.product_store_opens(), 0);
-            let view = product.read_stored(&record.id).unwrap().unwrap();
+            assert_eq!(
+                product.read_stored(&record.id, false).unwrap().is_some(),
+                archived
+            );
+            let view = product.read_stored(&record.id, true).unwrap().unwrap();
             assert_eq!(view.session, record.id);
             assert_eq!(view.archived, archived);
             assert!(view.observations.iter().any(|event| matches!(event,

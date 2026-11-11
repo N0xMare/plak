@@ -393,11 +393,12 @@ impl HostSessions<PlakExtension> for ProductSessions {
     fn stored_view(
         &self,
         session: &str,
+        include_unarchived: bool,
     ) -> Result<
         Option<plakous_hosted::host_service::wire::StoredSessionView<PlakExtension>>,
         RequestRefusal,
     > {
-        self.read_stored(session)
+        self.read_stored(session, include_unarchived)
     }
 
     fn runner_label(&self, id: &str) -> plakous_host_protocol::wire::RunnerLabel {

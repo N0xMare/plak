@@ -1652,13 +1652,21 @@ this is saved history, not live execution; historical in-progress transcript
 rows are not evidence of current work. The notice is never persisted.
 Routing/ownership refusals (such as `tree_hosted_elsewhere`) and a stopping
 host retain their refusals rather than creating a saved-history attachment.
-Subsequent reads of that failed slot do not attempt execution. The
-directory marks the failed open as needing operator attention. Execution
-intents, Resume and rebind are explicitly refused, not queued. `retry_attach`
-validates the current attachment and retries through the existing serialized
-slot; success returns `moved` for a fresh live attachment. Stop still durably
-withdraws pending continuation through the normal stop path. Archive retains
-its separate read-only refusal and no-op Stop semantics.
+A plain attach retries the open through the existing serialized slot and
+serves saved history only if that fresh attempt fails. While the startup scan
+still owns a failed slot's automatic retries, plain attach instead reads the
+cached failure without attempting another open. When that slot opens, existing
+read-only links receive `moved` to reattach live. A failed child-node attach
+returns the open's refusal, not `UnknownNode`. Normal attaches do not project
+an unarchived session's stored transcript. The directory marks failed opens
+as needing operator attention only when they are not being retried by the
+startup scan; a successful durable Stop clears that failed-open attention.
+Execution intents, Resume and rebind on read-only attachments are explicitly
+refused, not queued. `retry_attach` also validates the current attachment and
+retries through the same slot; success returns `moved` for a fresh live
+attachment. Stop still durably withdraws pending continuation through the
+normal stop path. Archive retains its separate read-only refusal and no-op
+Stop semantics.
 
 `plak session delete <id> [--yes] [--abandon-children]` removes one session and all of its retained
 runtime history. It is a remedy when logical retention bounds are full; physical
@@ -5082,7 +5090,9 @@ continuation candidates as idle eligibility, including records older than the
 newest 256 directory rows. Failed opens retry only when explicitly classified
 as transient before execution admission: an interrupted runner inspection or
 a busy/unavailable line-identity read. The delay doubles from one second to a
-30-second cap; runner changes wake the scan early. Every attempt rechecks
+30-second cap, with unbounded attempts while eligible; runner changes wake the
+scan early. Inspection send failures and lost or unanswered line-list reads are
+retryable; explicit runner refusals are not. Every attempt rechecks
 Stop, archive/deletion and current loss policy. Unclassified, ownership,
 protocol and recovery-required failures stop automatic attempts. Eligibility
 read failures also stop rather than guessing permission to continue; failures

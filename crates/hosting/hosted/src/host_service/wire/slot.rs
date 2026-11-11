@@ -15,7 +15,7 @@
 //! that open is refused for as long as the old worker holds the session's
 //! runtime lease, so a slow release never yields a second live session.
 
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, TryLockError};
 use std::time::{Duration, Instant};
 
@@ -84,6 +84,7 @@ pub struct SessionSlot<P: ProtocolExtension> {
     known: Mutex<String>,
     /// Last open failure, visible without waiting for a retry's slot lock.
     failure: Mutex<Option<CliFailure>>,
+    startup_retrying: AtomicBool,
 }
 
 /// The slot's lock is held for no long step.
@@ -127,6 +128,7 @@ where
             busy: AtomicU8::new(BUSY_NONE),
             known,
             failure: Mutex::new(None),
+            startup_retrying: AtomicBool::new(false),
         }
     }
 
@@ -145,6 +147,7 @@ where
             release_join: RELEASE_JOIN,
             busy: AtomicU8::new(BUSY_NONE),
             failure: Mutex::new(None),
+            startup_retrying: AtomicBool::new(false),
         }
     }
 
@@ -155,6 +158,16 @@ where
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
+    }
+
+    /// Assign or release startup-scan retry ownership. Plain attaches read
+    /// saved history after a failed open while the scan owns the retry.
+    pub fn set_startup_retrying(&self, retrying: bool) {
+        self.startup_retrying.store(retrying, Ordering::Release);
+    }
+
+    pub(super) fn startup_retrying(&self) -> bool {
+        self.startup_retrying.load(Ordering::Acquire)
     }
 
     /// The slot as it stands, without waiting for an open or a release
@@ -327,6 +340,7 @@ where
         }
         std::thread::scope(|scope| scope.spawn(|| stop_dormant(&source)).join())
             .map_err(|_| CliFailure::new("the dormant stop panicked"))??;
+        *self.failure.lock().unwrap_or_else(PoisonError::into_inner) = None;
         Ok(None)
     }
 

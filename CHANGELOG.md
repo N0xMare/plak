@@ -7,6 +7,19 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ## Unreleased
 
+- Keep saved history readable when a session cannot open: root attach answers
+  `Attached` with a read-only, `not_ready` view instead of refusing it. Plain
+  attach retries a failed open once its cause is fixed, except while the startup
+  scan owns the retry; existing read-only links are told to reattach when it
+  succeeds. Startup continuation retries transient pre-admission failures with
+  backoff: 1 s doubling to 30 s, unbounded attempts while eligible. Interrupted
+  runner line inspection is retryable, but explicit refusals are not. The public
+  `plakous::agent::SessionStore` gains a required `branch_line` method, breaking
+  embedder implementations. `plakous-hosted` renames `ArchivedSessionView` to
+  `StoredSessionView` and `archived_view` to `stored_view`; the latter takes an
+  `include_unarchived` flag to avoid projecting live sessions on normal attach.
+  No frame-schema or persisted-format change; export document unchanged.
+
 - Allow repeated reads within one model tool call on a remote runner. Claude
   `Read`, sliced text and image reads, multi-file patches, and search context
   reads no longer collide under the tool call's effect key. Reads retain their

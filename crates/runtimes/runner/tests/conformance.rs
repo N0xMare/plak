@@ -2239,6 +2239,59 @@ async fn fake_runner(hello: &Hello) -> (DuplexStream, Raw) {
     (host, raw)
 }
 
+#[tokio::test(start_paused = true)]
+async fn line_inspection_distinguishes_unsent_interrupted_and_refused_reads() {
+    let root = tempfile::tempdir().unwrap();
+    let hello = service(root.path()).hello().clone();
+    for outcome in ["lost", "unanswered", "refused"] {
+        let (stream, mut raw) = fake_runner(&hello).await;
+        let (client, _) = plakous_runner::RunnerClient::connect(
+            stream,
+            bind("inspection-test"),
+            ClientWindows {
+                read: Duration::from_secs(1),
+                ..ClientWindows::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(raw.next_host().await, HostFrame::Bind(_)));
+        let read = tokio::spawn({
+            let client = client.clone();
+            async move { client.lines().await }
+        });
+        let HostFrame::Lines { request_id } = raw.next_host().await else {
+            panic!("expected line inspection");
+        };
+        if outcome == "refused" {
+            raw.answer(&RunnerFrame::Refused {
+                request_id: Some(request_id),
+                refusal: Refusal::InspectOnly,
+            })
+            .await;
+        }
+        let held = (outcome != "lost").then_some(raw);
+        let failure = read.await.unwrap().unwrap_err();
+        if outcome == "refused" {
+            assert!(
+                matches!(failure, RunnerFailure::Unavailable(_)),
+                "{failure:?}"
+            );
+        } else {
+            assert!(
+                matches!(failure, RunnerFailure::ReadInterrupted(_)),
+                "{failure:?}"
+            );
+        }
+        client.disconnect();
+        assert!(matches!(
+            client.lines().await,
+            Err(RunnerFailure::NotSent(_))
+        ));
+        drop(held);
+    }
+}
+
 impl Raw {
     async fn answer(&mut self, frame: &RunnerFrame) {
         self.writer

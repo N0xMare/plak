@@ -211,10 +211,16 @@ pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
     fn create(&self, request: &Creation<'_>) -> Result<Created, RequestRefusal>;
 
     /// Read stored attach facts without opening a runtime or taking a lease.
+    /// Unless `include_unarchived`, return none before projecting an
+    /// unarchived session's transcript.
     ///
     /// # Errors
     /// Product metadata or transcript facts could not be read.
-    fn stored_view(&self, _session: &str) -> Result<Option<StoredSessionView<P>>, RequestRefusal> {
+    fn stored_view(
+        &self,
+        _session: &str,
+        _include_unarchived: bool,
+    ) -> Result<Option<StoredSessionView<P>>, RequestRefusal> {
         Ok(None)
     }
 
@@ -501,12 +507,18 @@ where
                         id.clone()
                     }
                 };
-                (id, (view, slot.open_failure()))
+                (
+                    id,
+                    (
+                        view,
+                        slot.open_failure().is_some() && !slot.startup_retrying(),
+                    ),
+                )
             })
             .collect();
         for row in &mut rows {
             let entry = held.get(&row.session);
-            if entry.is_some_and(|(_, failure)| failure.is_some()) {
+            if entry.is_some_and(|(_, needs_operator)| *needs_operator) {
                 row.needs_operator = true;
             }
             match entry.map(|(view, _)| view) {
@@ -1343,6 +1355,19 @@ where
         self.flush_host_reads()?;
         self.flush_draining()?;
         if let Some(link) = &mut self.readonly {
+            if !matches!(link.refusal, RequestRefusal::SessionArchived { .. }) {
+                let root = self.host.lock().iter().find_map(|slot| {
+                    if serves(slot, &link.session)
+                        && let SlotView::Resident(session) = slot.peek()
+                    {
+                        return Some(session.root());
+                    }
+                    None
+                });
+                if let Some(root) = root {
+                    link.connection.service.move_attachments(&root, None);
+                }
+            }
             link.connection.flush()?;
         }
         if let Some(link) = &mut self.node {

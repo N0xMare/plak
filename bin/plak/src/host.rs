@@ -21,13 +21,16 @@ mod sessions;
 mod socket;
 mod starter;
 
+#[cfg(test)]
+mod scan_tests;
+
 pub(crate) const AVAILABLE: bool = true;
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use plakous_hosted::error::{CliFailure, CliResult, ProcessOutcome};
-use plakous_hosted::host_service::wire::SessionHost;
+use plakous_hosted::host_service::wire::{SessionHost, SessionSlot};
 
 use crate::command::HostCommand;
 use crate::commands::runner::{environment, services as runner};
@@ -154,7 +157,7 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
     scan(
         &host,
         owed,
-        stop,
+        move || stop.stopped(),
         &services,
         runtime.handle(),
         Arc::clone(&scanning),
@@ -220,7 +223,7 @@ fn host_generation() -> u64 {
 fn scan(
     host: &Arc<SessionHost<crate::surface_protocol::PlakExtension>>,
     owed: Vec<String>,
-    stop: crate::web::StopProbe,
+    stopped: impl Fn() -> bool + Send + 'static,
     services: &Services,
     runtime: &tokio::runtime::Handle,
     scanning: Arc<std::sync::atomic::AtomicBool>,
@@ -231,13 +234,20 @@ fn scan(
     let host = Arc::clone(host);
     let services = services.clone();
     let runtime = runtime.clone();
+    let mut pending: Vec<_> = owed
+        .into_iter()
+        .map(|session| {
+            let slot = host.slot(&session);
+            slot.set_startup_retrying(true);
+            PendingOpen::new(session, slot)
+        })
+        .collect();
     std::thread::spawn(move || {
         let mut changed = services.runners().changes();
-        let mut pending: Vec<_> = owed.into_iter().map(PendingOpen::new).collect();
         let mut runner_changed = false;
-        while !pending.is_empty() && !stop.stopped() {
+        while !pending.is_empty() && !stopped() {
             pending.retain_mut(|pending| {
-                if stop.stopped() || (!runner_changed && Instant::now() < pending.next) {
+                if stopped() || (!runner_changed && Instant::now() < pending.next) {
                     return true;
                 }
                 let session = &pending.session;
@@ -275,7 +285,7 @@ fn scan(
                     }
                 }
             });
-            if !pending.is_empty() && !stop.stopped() {
+            if !pending.is_empty() && !stopped() {
                 runner_changed = runtime.block_on(async {
                     tokio::select! {
                         result = changed.changed() => result.is_ok(),
@@ -284,20 +294,27 @@ fn scan(
                 });
             }
         }
+        drop(pending);
+        host.changed();
         scanning.store(false, std::sync::atomic::Ordering::Release);
     });
 }
 
 struct PendingOpen {
     session: String,
+    slot: Arc<SessionSlot<crate::surface_protocol::PlakExtension>>,
     next: Instant,
     delay: Duration,
 }
 
 impl PendingOpen {
-    fn new(session: String) -> Self {
+    fn new(
+        session: String,
+        slot: Arc<SessionSlot<crate::surface_protocol::PlakExtension>>,
+    ) -> Self {
         Self {
             session,
+            slot,
             next: Instant::now(),
             delay: Duration::from_secs(1),
         }
@@ -306,6 +323,12 @@ impl PendingOpen {
     fn defer(&mut self) {
         self.next = Instant::now() + self.delay;
         self.delay = (self.delay * 2).min(Duration::from_secs(30));
+    }
+}
+
+impl Drop for PendingOpen {
+    fn drop(&mut self) {
+        self.slot.set_startup_retrying(false);
     }
 }
 

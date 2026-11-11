@@ -160,7 +160,7 @@ struct State {
     instance: String,
     pending: HashMap<String, Pending>,
     transfers: HashMap<String, oneshot::Sender<RunnerFrame>>,
-    questions: HashMap<String, oneshot::Sender<Vec<LineStatus>>>,
+    questions: HashMap<String, oneshot::Sender<Result<Vec<LineStatus>, RunnerFailure>>>,
     /// Why the runner refused the connection itself, such as an unpaired
     /// host.
     refusal: Option<Refusal>,
@@ -472,7 +472,8 @@ impl RunnerClient {
     ///
     /// # Errors
     ///
-    /// The runner is unreachable or did not answer within the read window.
+    /// A failed send is `NotSent`; a lost or unanswered read is
+    /// `ReadInterrupted`. A runner refusal remains `Unavailable`.
     pub async fn lines(&self) -> Result<Vec<LineStatus>, RunnerFailure> {
         let request_id = self.inner.next_id("q");
         let (waiter, answer) = oneshot::channel();
@@ -482,16 +483,26 @@ impl RunnerClient {
         if !self.inner.send(HostFrame::Lines {
             request_id: request_id.clone(),
         }) {
-            lock(&self.inner.state).questions.remove(&request_id);
-            return Err(RunnerFailure::Unavailable(
-                "the runner is not connected".into(),
-            ));
+            let mut state = lock(&self.inner.state);
+            state.questions.remove(&request_id);
+            if let Some(refusal) = &state.refusal {
+                return Err(RunnerFailure::Unavailable(format!(
+                    "the runner refused the inspection: {refusal:?}"
+                )));
+            }
+            return Err(RunnerFailure::NotSent("the runner is not connected".into()));
         }
         if let Ok(Ok(lines)) = tokio::time::timeout(self.inner.windows.read, answer).await {
-            return Ok(lines);
+            return lines;
         }
-        lock(&self.inner.state).questions.remove(&request_id);
-        Err(RunnerFailure::Unavailable(
+        let mut state = lock(&self.inner.state);
+        state.questions.remove(&request_id);
+        if let Some(refusal) = &state.refusal {
+            return Err(RunnerFailure::Unavailable(format!(
+                "the runner refused the inspection: {refusal:?}"
+            )));
+        }
+        Err(RunnerFailure::ReadInterrupted(
             "the runner did not list its lines".into(),
         ))
     }
@@ -742,6 +753,17 @@ impl Inner {
             }
             return;
         }
+        if let RunnerFrame::Refused {
+            request_id: Some(id),
+            refusal,
+        } = &frame
+            && let Some(waiter) = lock(&self.state).questions.remove(id)
+        {
+            let _ = waiter.send(Err(RunnerFailure::Unavailable(format!(
+                "the runner refused the inspection: {refusal:?}"
+            ))));
+            return;
+        }
         let (request_id, answer) = match frame {
             RunnerFrame::Refused {
                 request_id: None,
@@ -758,7 +780,7 @@ impl Inner {
             }
             RunnerFrame::Lines { request_id, lines } => {
                 if let Some(waiter) = lock(&self.state).questions.remove(&request_id) {
-                    let _ = waiter.send(lines);
+                    let _ = waiter.send(Ok(lines));
                 }
                 return;
             }

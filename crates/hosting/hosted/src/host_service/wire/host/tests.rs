@@ -302,6 +302,7 @@ impl HostSessions<Core> for Fake {
     fn stored_view(
         &self,
         session: &str,
+        include_unarchived: bool,
     ) -> Result<Option<StoredSessionView<Core>>, RequestRefusal> {
         let archived = self
             .0
@@ -310,7 +311,8 @@ impl HostSessions<Core> for Fake {
             .unwrap()
             .iter()
             .find(|row| row.session == session)
-            .map(|row| row.archived);
+            .map(|row| row.archived)
+            .filter(|archived| *archived || include_unarchived);
         Ok(archived.map(|archived| StoredSessionView {
             archived,
             session: session.to_owned(),
@@ -1155,7 +1157,7 @@ fn assert_saved_history(frames: &[HostFrame<Core>]) {
 }
 
 #[test]
-fn failed_open_keeps_history_readable_until_an_explicit_retry_and_stop_still_works() {
+fn failed_open_keeps_history_readable_during_scan_and_plain_attach_retries_after_stop() {
     let (host, fake) = host(&["s1"]);
     fake.0.stay.store(true, Ordering::SeqCst);
     let refusal = RequestRefusal::SessionUnavailable {
@@ -1178,7 +1180,10 @@ fn failed_open_keeps_history_readable_until_an_explicit_retry_and_stop_still_wor
     attached(&out.take(), 1);
     assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
     assert!(row_of(&host, "s1").needs_operator);
-    // A reconnect reads the saved view without starting another open.
+    host.slot("s1").set_startup_retrying(true);
+    host.changed();
+    assert!(!row_of(&host, "s1").needs_operator);
+    // The startup scan owns the retry; reconnect does not open in parallel.
     request(&mut connection, 2, Op::Attach { node: node("s1") });
     let attachment = attached(&out.take(), 2);
     connection.flush().unwrap();
@@ -1234,23 +1239,10 @@ fn failed_open_keeps_history_readable_until_an_explicit_retry_and_stop_still_wor
     );
     assert_eq!(fake.0.dormant_stops.load(Ordering::SeqCst), 1);
     assert_eq!(row_of(&host, "s1").activity, SessionActivity::Stopped);
+    host.slot("s1").set_startup_retrying(false);
+    host.changed();
+    assert!(!row_of(&host, "s1").needs_operator);
     fake.0.refuse.lock().unwrap().clear();
-    request(
-        &mut connection,
-        7,
-        Op::RetryAttach {
-            attachment,
-            request_id: "retry".into(),
-        },
-    );
-    assert_eq!(
-        outcome(&out.take(), 7),
-        Outcome::Ok(Answer::Moved { node: node("s1") })
-    );
-    connection.flush().unwrap();
-    assert!(out.take().iter().any(
-        |frame| matches!(frame, HostFrame::Moved { request_id: Some(id), .. } if id == "retry")
-    ));
     request(&mut connection, 8, Op::Attach { node: node("s1") });
     attached(&out.take(), 8);
     assert_eq!(fake.0.opens.load(Ordering::SeqCst), 2);
@@ -2365,6 +2357,72 @@ fn a_stop_is_answered_after_its_attachment_ends() {
         );
         connection.leave();
     }
+}
+
+#[test]
+fn a_background_open_moves_readonly_links_to_a_fresh_live_attachment() {
+    let (host, fake) = host(&["s1"]);
+    fake.0.stay.store(true, Ordering::SeqCst);
+    fake.0.refuse.lock().unwrap().insert(
+        "s1".into(),
+        RequestRefusal::SessionUnavailable {
+            detail: "offline".into(),
+        },
+    );
+    let out = Out::default();
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    let attachment = attached(&out.take(), 1);
+    connection.flush().unwrap();
+    out.take();
+    fake.0.refuse.lock().unwrap().clear();
+    let (_resident, _hold) = host.slot("s1").resident().unwrap();
+    host.changed();
+    connection.flush().unwrap();
+    assert!(out.take().iter().any(|frame| matches!(frame,
+        HostFrame::Moved { attachment: held, node: root, request_id: None }
+            if *held == attachment && *root == node("s1"))));
+    request(&mut connection, 2, Op::Attach { node: node("s1") });
+    attached(&out.take(), 2);
+    assert!(connection.node.is_some());
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 2);
+    connection.leave();
+}
+
+#[test]
+fn a_child_attach_preserves_a_failed_opens_diagnostic() {
+    let (host, fake) = host(&["s1"]);
+    let refusal = RequestRefusal::SessionUnavailable {
+        detail: "offline".into(),
+    };
+    fake.0
+        .refuse
+        .lock()
+        .unwrap()
+        .insert("s1".into(), refusal.clone());
+    let out = Out::default();
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
+    request(
+        &mut connection,
+        1,
+        Op::Attach {
+            node: NodeAddress {
+                tree_id: "s1".into(),
+                agent_id: "child".into(),
+            },
+        },
+    );
+    assert_eq!(outcome(&out.take(), 1), Outcome::Refused(refusal));
 }
 
 /// The settle of a stop whose attachment ended wakes a connection that

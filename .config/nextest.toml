@@ -114,6 +114,7 @@ not (
   test(an_unattached_stop_stops_a_busy_root_and_live_children)
   |
   test(host_binding_requests_preserve_history_without_another_paid_turn)
+  | test(host_plain_attach_reopens_after_a_failed_placement_is_fixed)
   |
   test(a_dormant_directory_stop_never_opens_or_dispatches_its_continuation)
   | test(ui_reload_preserves_a_live_session_socket_and_rejects_an_invalid_replacement)
@@ -385,6 +386,7 @@ default-filter = '''
   test(an_unattached_stop_stops_a_busy_root_and_live_children)
   |
   test(host_binding_requests_preserve_history_without_another_paid_turn)
+  | test(host_plain_attach_reopens_after_a_failed_placement_is_fixed)
   |
   test(a_dormant_directory_stop_never_opens_or_dispatches_its_continuation)
   | test(ui_reload_preserves_a_live_session_socket_and_rejects_an_invalid_replacement)
