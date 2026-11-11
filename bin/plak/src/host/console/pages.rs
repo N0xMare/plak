@@ -309,6 +309,7 @@ mod tests {
             principal: HostPrincipal::Socket(7),
             connection_id: 1,
             host_generation: 10,
+            request_id: 1,
         };
         let selection = Selection::from_request(&HostRequest::AccountsUsage {
             account_id: None,
@@ -377,6 +378,7 @@ mod tests {
             principal: HostPrincipal::Socket(7),
             connection_id: 1,
             host_generation: 10,
+            request_id: 1,
         };
         let selection = Selection::from_request(&HostRequest::AccountsUsage {
             account_id: None,
@@ -444,6 +446,7 @@ mod tests {
                 principal: HostPrincipal::Socket(7),
                 connection_id: 1,
                 host_generation: 1,
+                request_id: 1,
             };
             assert!(
                 matches!(pages.start(response, context, selection, [0;32], 1), Err(ReadRefusal::Unavailable {scope:actual, cause:UnavailableCode::DependencyLimit, ..}) if actual == scope)
@@ -467,6 +470,7 @@ mod tests {
             principal: HostPrincipal::Socket(7),
             connection_id: 1,
             host_generation: 1,
+            request_id: 1,
         };
         assert!(matches!(
             pages.start(response, context, selection, [0; 32], 1),
@@ -485,6 +489,7 @@ mod tests {
             principal: HostPrincipal::Socket(7),
             connection_id: 1,
             host_generation: 1,
+            request_id: 1,
         };
         let selection = Selection::from_request(&HostRequest::AccountsStatus {
             account_id: None,
@@ -538,6 +543,7 @@ mod tests {
             principal: HostPrincipal::Socket(7),
             connection_id: 1,
             host_generation: 10,
+            request_id: 1,
         };
         let selection = Selection {
             account_id: None,
@@ -587,6 +593,7 @@ mod tests {
             principal: HostPrincipal::Socket(7),
             connection_id: 1,
             host_generation: 10,
+            request_id: 1,
         };
         let selection = Selection {
             account_id: None,
@@ -645,6 +652,7 @@ mod tests {
             principal: HostPrincipal::Socket(7),
             connection_id: 1,
             host_generation: 10,
+            request_id: 1,
         };
         let selection = Selection {
             account_id: None,
@@ -692,6 +700,7 @@ mod tests {
             },
             HostRequestContext {
                 host_generation: 11,
+                request_id: 1,
                 ..context.clone()
             },
         ] {

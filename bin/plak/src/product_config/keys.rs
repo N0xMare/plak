@@ -302,7 +302,9 @@ pub enum ConfigField {
     WebOrigin,
     /// Attachment-free web console reads; home-only, captured at host start.
     WebAccountsRead,
+    WebCredentialsWrite,
     WebConfigRead,
+    WebConfigWrite,
 }
 
 impl ConfigField {
@@ -325,7 +327,9 @@ impl ConfigField {
                 | Self::WebAllow
                 | Self::WebOrigin
                 | Self::WebAccountsRead
+                | Self::WebCredentialsWrite
                 | Self::WebConfigRead
+                | Self::WebConfigWrite
         )
     }
 
@@ -340,7 +344,9 @@ impl ConfigField {
                     | Self::WebAllow
                     | Self::WebOrigin
                     | Self::WebAccountsRead
+                    | Self::WebCredentialsWrite
                     | Self::WebConfigRead
+                    | Self::WebConfigWrite
             )
     }
 }
@@ -719,11 +725,29 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         scope: ConfigScope::Immediate,
     },
     ConfigKey {
+        path: "web.credentials_write",
+        field: ConfigField::WebCredentialsWrite,
+        kind: "bool",
+        constraint: "true or false; home-scoped; host restart required",
+        doc: "Allow confirmed operator credential mutations. Requires accounts_read; home-only, default off and captured at host startup. Credentials replace this user's machine-wide selected account, not the browser's credentials.",
+        example: "false",
+        scope: ConfigScope::Immediate,
+    },
+    ConfigKey {
         path: "web.config_read",
         field: ConfigField::WebConfigRead,
         kind: "bool",
         constraint: "true or false; home-scoped; host restart required",
         doc: "Allow admitted web principals to read home profiles, templates and allowlisted configuration. Same-user sockets are trusted independently. Captured at host startup; restart to change it; a 0.0.3 build refuses a config.toml that sets it.",
+        example: "false",
+        scope: ConfigScope::Immediate,
+    },
+    ConfigKey {
+        path: "web.config_write",
+        field: ConfigField::WebConfigWrite,
+        kind: "bool",
+        constraint: "true or false; home-scoped; host restart required",
+        doc: "Allow confirmed allowlisted home configuration, template and profile writes. Grants deferred execution through tools, on_mint and env. Requires config_read; home-only, default off and captured at host startup.",
         example: "false",
         scope: ConfigScope::Immediate,
     },

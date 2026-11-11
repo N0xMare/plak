@@ -100,6 +100,9 @@ pub struct Creation<'a> {
 
 /// What a host of many sessions needs of its product's stores.
 pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
+    /// Retires process-local operator authority when its authenticated
+    /// connection leaves. It never stops or releases an agent session.
+    fn host_disconnect(&self, _principal: &HostPrincipal, _connection_id: u64, _generation: u64) {}
     /// One immutable policy used by both welcome and console enforcement.
     fn host_read_limits(&self) -> HostReadLimits;
     /// Principal-specific capabilities, built before the handshake from the
@@ -1487,6 +1490,11 @@ where
     /// closes, and its session hold ends.
     pub fn leave(&mut self) {
         self.host_reads.clear();
+        self.host.sessions.host_disconnect(
+            &self.principal,
+            self.connection_id,
+            self.host.generation,
+        );
         self.unlink();
         // No one is left to answer.
         self.draining = None;

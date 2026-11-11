@@ -6,10 +6,15 @@ use std::collections::BTreeMap;
 impl ProductConfig {
     pub(crate) fn console_switches(
         paths: &crate::home::paths::PlakPaths,
-    ) -> Result<(bool, bool), String> {
+    ) -> Result<plakd_wire_types::console::ConfiguredSwitches, String> {
         // Startup policy must not enumerate or admit unrelated templates.
         let config = Self::load_config_file(&paths.config_file())?;
-        Ok((config.web_accounts_read, config.web_config_read))
+        Ok(plakd_wire_types::console::ConfiguredSwitches {
+            web_accounts_read: config.web_accounts_read,
+            web_config_read: config.web_config_read,
+            web_credentials_write: config.web_credentials_write,
+            web_config_write: config.web_config_write,
+        })
     }
 
     pub(crate) fn from_home_snapshot(
@@ -68,8 +73,9 @@ mod tests {
             paths.config_file(),
             "[web]\naccounts_read = false\nconfig_read = false\n",
         )?;
-        assert_eq!(captured, (true, true));
-        assert_eq!(ProductConfig::console_switches(&paths)?, (false, false));
+        assert!(captured.web_accounts_read && captured.web_config_read);
+        let current = ProductConfig::console_switches(&paths)?;
+        assert!(!current.web_accounts_read && !current.web_config_read);
         Ok(())
     }
 }

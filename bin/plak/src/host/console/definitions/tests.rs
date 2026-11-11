@@ -117,6 +117,8 @@ async fn response_fence_refuses_config_and_template_changes() -> TestResult {
         plakd_wire_types::console::ConfiguredSwitches {
             web_accounts_read: false,
             web_config_read: false,
+            web_credentials_write: false,
+            web_config_write: false,
         },
     );
     for file in [
@@ -133,6 +135,7 @@ async fn response_fence_refuses_config_and_template_changes() -> TestResult {
             principal: plakous_hosted::host_service::wire::HostPrincipal::Socket(7),
             connection_id: 1,
             host_generation: 1,
+            request_id: 1,
         };
         let result = console
             .read_definitions_with_hook(context, HostRequest::ConfigGet {}, || {
@@ -302,12 +305,15 @@ async fn encoded_definition_refuses_response_overflow_without_opening_a_session(
         plakd_wire_types::console::ConfiguredSwitches {
             web_accounts_read: false,
             web_config_read: false,
+            web_credentials_write: false,
+            web_config_write: false,
         },
     );
     let context = super::super::HostRequestContext {
         principal: plakous_hosted::host_service::wire::HostPrincipal::Socket(7),
         connection_id: 1,
         host_generation: 1,
+        request_id: 1,
     };
     let response = console
         .request(

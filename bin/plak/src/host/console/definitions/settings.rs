@@ -8,7 +8,7 @@ use plakd_wire_types::console::{
     SettingRow, SettingValue,
 };
 
-fn keys() -> impl Iterator<Item = &'static ConfigKey> {
+pub(super) fn keys() -> impl Iterator<Item = &'static ConfigKey> {
     CONFIG_KEYS.iter().filter(|key| {
         matches!(
             key.field,

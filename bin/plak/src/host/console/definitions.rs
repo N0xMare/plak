@@ -3,6 +3,9 @@
 mod catalog;
 mod files;
 mod settings;
+pub(super) fn editable_key(key: &str) -> bool {
+    settings::keys().any(|entry| entry.path == key)
+}
 #[cfg(test)]
 mod tests;
 

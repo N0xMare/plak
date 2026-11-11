@@ -27,6 +27,8 @@ pub(crate) fn refusal(reason: RequestRefusal) -> CliFailure {
     };
     let text = match &reason {
         RequestRefusal::CapabilityDisabled { capability } => match capability {
+            ConsoleCapability::CredentialsWrite => "credential writes are disabled by this host".into(),
+            ConsoleCapability::ConfigWrite => "configuration writes are disabled by this host".into(),
             ConsoleCapability::AccountsRead => "account reads are disabled by this host".into(),
             ConsoleCapability::ConfigRead => "configuration reads are disabled by this host".into(),
         },

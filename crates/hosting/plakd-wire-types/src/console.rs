@@ -9,10 +9,18 @@ mod welcome;
 pub use welcome::*;
 mod definitions;
 pub use definitions::*;
+mod operator;
+pub use operator::*;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "request", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HostRequest {
+    OperatorPrepare {
+        action: OperatorAction,
+    },
+    OperatorConfirm {
+        nonce: String,
+    },
     ProfilesList {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cursor: Option<String>,
@@ -62,6 +70,13 @@ pub enum HostRequest {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "response", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HostResponse {
+    OperatorPrepared {
+        consent: OperatorConsent,
+    },
+    OperatorConfirmed {
+        confirmation: String,
+        expires_in_ms: u64,
+    },
     ProfilesList {
         etag: String,
         #[serde(deserialize_with = "required")]
@@ -141,6 +156,11 @@ pub struct Diagnostic {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "reason", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ReadRefusal {
+    ConfirmationRequired {},
+    ConfirmationExpired {},
+    Conflict {
+        etag: String,
+    },
     ValidationFailed {
         issues: Vec<ValidationIssue>,
     },
@@ -165,6 +185,9 @@ pub struct ValidationIssue {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ValidationCode {
+    InvalidAction,
+    InvalidValue,
+    ReadOnly,
     InvalidAccount,
     UnknownAccount,
     InvalidId,

@@ -126,6 +126,8 @@ fn captured_console_switches_gate_bind_and_survive_reload() {
         let switches = ConfiguredSwitches {
             web_accounts_read: accounts,
             web_config_read: config,
+            web_credentials_write: false,
+            web_config_write: false,
         };
         std::fs::write(dir.path().join("csp.json"), &legacy).unwrap();
         assert_eq!(

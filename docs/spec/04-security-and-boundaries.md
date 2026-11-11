@@ -795,6 +795,15 @@ widens it.
 
 ### 2.10 The web endpoint
 
+Protocol-7 operator consent is confirmation, not independent authentication
+or proof of human presence. An admitted same-origin script or stolen usable
+cookie can prepare and confirm itself. Grants are random, single-use,
+60-second, exact-action/principal/connection/generation-bound process state.
+No agent observation, tool result, transcript, directory update or unsolicited
+event may carry a login challenge or handle. Capability switches do not
+sandbox the already-admitted agent shell or distinguish same-uid shell
+access from the user's socket/CLI authority.
+
 P6 console reads are attachment-free home observations, never authority to
 admit a session, model, template or credential. Admitted web principals require
 the corresponding startup-captured `web.accounts_read` or `web.config_read`;
@@ -805,7 +814,7 @@ exact entries, never paths. Template hook/environment literals are withheld
 markers, not round-trip secrets. Etags are generation-salted content identities,
 not write authority. Catalog metadata never refreshes, logs in or opens sessions.
 
-If either web console read switch is enabled, a served UI must carry an
+If any web console read or write switch is enabled, a served UI must carry an
 enforced CSP with no unsafe-inline/eval, same-origin connection sources,
 Trusted Types for script, no framing/objects/base URLs, and restricted script
 sources (only `'self'`, hashes and `'none'`). Nonces, `'strict-dynamic'` and
@@ -1891,6 +1900,12 @@ running interactive session to reload onto the installed build (chapter 02
   wants agents to restart its sessions is not asked.
 
 ### 4.7 The host socket is a same-user local channel
+
+Protocol-7 console writes trust transport-verified same-user socket peers by
+default, independently of `web.*`; they still enforce consent, exact targets,
+etags and quotas aggregated by verified uid. Clients cannot declare a local
+face or choose their audit identity. Connection departure retires its grants
+without releasing or interrupting an agent.
 
 Verified same-user socket principals receive both console read capabilities
 independently of web switches. They remain remote faces for local-only execution

@@ -30,6 +30,8 @@ fn fixture() -> Result<(tempfile::TempDir, Arc<Console>), Box<dyn std::error::Er
         ConfiguredSwitches {
             web_accounts_read: false,
             web_config_read: false,
+            web_credentials_write: false,
+            web_config_write: false,
         },
     );
     Ok((root, console))
@@ -40,6 +42,7 @@ fn context() -> HostRequestContext {
         principal: HostPrincipal::Socket(7),
         connection_id: 1,
         host_generation: 1,
+        request_id: 1,
     }
 }
 

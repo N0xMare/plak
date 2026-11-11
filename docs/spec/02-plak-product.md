@@ -4010,10 +4010,22 @@ saved placement, decorated by the host. Clients pair the existing product
 workspace text with this label; a child never borrows its root's placement.
 This is in-process chrome, not a persisted/exported field or a JSONL v1 event.
 
-The client protocol number is **6**. It must match exactly; the runner
+The client protocol number is **7**. It must match exactly; the runner
 transport has its own independent version. Protocol 5 adds explicit placement,
 bounded creation options, directory lifecycle and process-local draft identity.
 It does not change JSONL v1, canonical history or exported transcript rows.
+
+Protocol 7 adds process-local `operator_prepare {action}` and
+`operator_confirm {nonce}` through that same attachment-free seam. Prepare
+returns a host-authored consequence and a random nonce; confirm replaces it
+with a one-use grant. Both expire at the original 60-second deadline. Scope
+includes the verified principal, connection, host generation and exact typed
+action (account/options or definition ID/revision). No reusable elevated
+session is created. Four outstanding nonces/grants per principal are allowed;
+disconnect and restart retire them. Product refusals include
+`confirmation_required`, `confirmation_expired` and `conflict {etag}`.
+Credential/config write capabilities in welcome are independent of reads;
+verified socket peers are trusted by default, web writes default off.
 
 P6's private `host` family reads home account status/recorded usage,
 profiles, templates and allowlisted configuration without attaching or opening
@@ -4931,6 +4943,16 @@ verdicts) are addressed, the session profile and workspace chrome states.
   (`SO_PEERCRED`, or `getpeereid` on macOS), which must be the user's.
 
 ### 4.5 The web endpoint
+
+Protocol-7 console operations have structured host audit evidence: time,
+verified login or socket uid, face, connection/request ID, action and safe
+target, outcome category and applicable revision. This is an ordinary bounded
+host log, not durable execution authority. Never log frames, challenges,
+callback input, keys or raw parser diagnostics. Limits aggregate across
+connections: one mutation per principal at once, ten credential mutations and
+thirty config mutations per minute, with no waiting queue; excess work gets
+typed `rate_limited`. Consent quota is four outstanding grants/nonces per
+principal. The host-wide work cap remains 32.
 
 `plak host --web <unix:path|127.0.0.1:port> [--ui <dir>] [--dev-login
 <login>]` (§4.6) serves the host's sessions to browsers: wire v2 over a

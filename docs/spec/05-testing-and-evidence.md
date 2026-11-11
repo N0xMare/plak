@@ -5816,3 +5816,9 @@ Compiled-review time is never a qualification precondition: `just full`'s
 package group reports remaining days without failing. Publication dry runs
 and uploads separately require more than a third of each compiled review
 window remaining (chapter 06).
+
+Protocol-7 consent contracts deterministically cover replay, expiry, changed
+principal/connection/generation/action, disconnect/restart, four-grant quota,
+mutation single-flight and aggregate per-principal quota with web writes off.
+They use synthetic account IDs and no provider traffic. No persisted format
+or binding input changes are introduced by the consent machinery.

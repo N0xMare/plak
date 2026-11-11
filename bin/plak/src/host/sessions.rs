@@ -79,23 +79,24 @@ impl ProductSessions {
     ) -> CliResult<Self> {
         let tree =
             crate::store::tree::open_tree_store(services.paths()?).map_err(CliFailure::new)?;
-        let (web_accounts_read, web_config_read) =
-            crate::product_config::ProductConfig::console_switches(services.paths()?)
-                .unwrap_or_else(|_| {
-                    eprintln!(
-                        "plak host: unreadable console configuration; web console reads disabled"
-                    );
-                    (false, false)
-                });
+        let switches = crate::product_config::ProductConfig::console_switches(services.paths()?)
+            .unwrap_or_else(|_| {
+                eprintln!(
+                    "plak host: unreadable console configuration; web console reads disabled"
+                );
+                plakd_wire_types::console::ConfiguredSwitches {
+                    web_accounts_read: false,
+                    web_config_read: false,
+                    web_credentials_write: false,
+                    web_config_write: false,
+                }
+            });
         Ok(Self {
             console: super::console::Console::new(
                 services.paths()?.clone(),
                 services.home().state()?.to_path_buf(),
                 runtime.clone(),
-                plakd_wire_types::console::ConfiguredSwitches {
-                    web_accounts_read,
-                    web_config_read,
-                },
+                switches,
             ),
             runtime: runtime.clone(),
             placement: Box::new(placement::RegistryPlacement {
@@ -370,6 +371,14 @@ const fn environment_of(held_elsewhere: bool) -> SessionEnvironment {
 }
 
 impl HostSessions<PlakExtension> for ProductSessions {
+    fn host_disconnect(
+        &self,
+        principal: &plakous_hosted::host_service::wire::HostPrincipal,
+        connection: u64,
+        generation: u64,
+    ) {
+        self.console.disconnect(principal, connection, generation);
+    }
     fn host_read_limits(&self) -> plakous_hosted::host_service::wire::HostReadLimits {
         super::host_read_limits()
     }
@@ -1095,7 +1104,9 @@ mod tests {
             product.console_switches(),
             plakd_wire_types::console::ConfiguredSwitches {
                 web_accounts_read: false,
-                web_config_read: false
+                web_config_read: false,
+                web_credentials_write: false,
+                web_config_write: false,
             }
         );
         let rows = product.rows(None, None, false).unwrap();

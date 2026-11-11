@@ -3,6 +3,8 @@ use super::*;
 const DISABLED_SWITCHES: ConfiguredSwitches = ConfiguredSwitches {
     web_accounts_read: false,
     web_config_read: false,
+    web_credentials_write: false,
+    web_config_write: false,
 };
 
 fn context(principal: HostPrincipal) -> HostRequestContext {
@@ -10,6 +12,7 @@ fn context(principal: HostPrincipal) -> HostRequestContext {
         principal,
         connection_id: 7,
         host_generation: 9,
+        request_id: 1,
     }
 }
 fn status(account_id: Option<&str>, limit: Option<u64>) -> HostRequest {
@@ -31,6 +34,8 @@ async fn welcome_and_dispatch_share_independent_startup_switches_without_session
             let switches = ConfiguredSwitches {
                 web_accounts_read: accounts,
                 web_config_read: config,
+                web_credentials_write: false,
+                web_config_write: false,
             };
             let console = Console::new(
                 paths.clone(),

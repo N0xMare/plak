@@ -72,7 +72,9 @@ struct WebSection {
     allow: Entry,
     origin: Entry,
     accounts_read: Entry,
+    credentials_write: Entry,
     config_read: Entry,
+    config_write: Entry,
 }
 
 /// Every key is read as a spanned TOML value rather than a Rust type so the
@@ -305,7 +307,9 @@ fn forward_sections(
         assign("web.allow", &section.allow)?;
         assign("web.origin", &section.origin)?;
         assign("web.accounts_read", &section.accounts_read)?;
+        assign("web.credentials_write", &section.credentials_write)?;
         assign("web.config_read", &section.config_read)?;
+        assign("web.config_write", &section.config_write)?;
     }
     Ok(ForwardPresence::of(
         file.host.is_some(),

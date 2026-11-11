@@ -34,6 +34,8 @@ pub struct HostRequestContext {
     pub connection_id: u64,
     /// Process generation, invalidating transient reads across restart.
     pub host_generation: u64,
+    /// Wire response address, used only for bounded host audit evidence.
+    pub request_id: RequestId,
 }
 
 #[derive(Default)]
@@ -154,6 +156,7 @@ where
             principal: self.principal.clone(),
             connection_id: self.connection_id,
             host_generation: self.host.generation,
+            request_id,
         };
         let started = Instant::now();
         let deadline = started.checked_add(limits.deadline).unwrap_or(started);

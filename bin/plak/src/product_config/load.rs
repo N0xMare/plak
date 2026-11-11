@@ -237,7 +237,9 @@ pub struct ProductConfig {
     /// `[web] origin`, home-scoped: the origin `plak host --web` is served at.
     pub web_origin: Option<String>,
     pub web_accounts_read: bool,
+    pub web_credentials_write: bool,
     pub web_config_read: bool,
+    pub web_config_write: bool,
     pub(super) forward: super::forward::ForwardPresence,
 }
 
@@ -556,7 +558,11 @@ impl ProductConfig {
             ConfigField::WebAllow => self.web_allow.clone_from(&source.web_allow),
             ConfigField::WebOrigin => self.web_origin.clone_from(&source.web_origin),
             ConfigField::WebAccountsRead => self.web_accounts_read = source.web_accounts_read,
+            ConfigField::WebCredentialsWrite => {
+                self.web_credentials_write = source.web_credentials_write
+            }
             ConfigField::WebConfigRead => self.web_config_read = source.web_config_read,
+            ConfigField::WebConfigWrite => self.web_config_write = source.web_config_write,
         }
     }
 
@@ -674,7 +680,9 @@ impl ProductConfig {
             web_allow: Vec::new(),
             web_origin: None,
             web_accounts_read: false,
+            web_credentials_write: false,
             web_config_read: false,
+            web_config_write: false,
             forward: super::forward::ForwardPresence::default(),
         }
     }
@@ -909,7 +917,10 @@ impl ProductConfig {
     fn value_line(&self, key: &ConfigKey) -> Option<String> {
         if matches!(
             key.field,
-            ConfigField::WebAccountsRead | ConfigField::WebConfigRead
+            ConfigField::WebAccountsRead
+                | ConfigField::WebConfigRead
+                | ConfigField::WebCredentialsWrite
+                | ConfigField::WebConfigWrite
         ) && self.field_value(key.field)?.as_bool() == Some(false)
         {
             return None;
@@ -984,7 +995,9 @@ impl ProductConfig {
             ConfigField::WebAllow => super::web::allow_value(&self.web_allow)?,
             ConfigField::WebOrigin => Value::from(self.web_origin.as_deref()?),
             ConfigField::WebAccountsRead => Value::from(self.web_accounts_read),
+            ConfigField::WebCredentialsWrite => Value::from(self.web_credentials_write),
             ConfigField::WebConfigRead => Value::from(self.web_config_read),
+            ConfigField::WebConfigWrite => Value::from(self.web_config_write),
         })
     }
 
@@ -1208,6 +1221,12 @@ impl ProductConfig {
 
     /// The one rule set: load, `plak config set`, and `SaveRoster` share it.
     pub fn validate(&self) -> Result<(), String> {
+        if self.web_credentials_write && !self.web_accounts_read {
+            return Err("web.credentials_write requires web.accounts_read".into());
+        }
+        if self.web_config_write && !self.web_config_read {
+            return Err("web.config_write requires web.config_read".into());
+        }
         self.job_config()?;
         for (name, template) in &self.templates {
             template.validate(name)?;
@@ -1489,7 +1508,9 @@ impl ProductConfig {
             ConfigField::WebAllow => self.web_allow = super::web::assigned_logins(value)?,
             ConfigField::WebOrigin => self.web_origin = super::web::assigned_origin(key, value)?,
             ConfigField::WebAccountsRead => self.web_accounts_read = value.boolean()?,
+            ConfigField::WebCredentialsWrite => self.web_credentials_write = value.boolean()?,
             ConfigField::WebConfigRead => self.web_config_read = value.boolean()?,
+            ConfigField::WebConfigWrite => self.web_config_write = value.boolean()?,
         }
         Ok(())
     }

@@ -239,6 +239,13 @@ never in it.
 
 ## 3. `config.toml`
 
+Protocol 7 introduces `web.credentials_write` and `web.config_write`, both
+default off and captured at host startup. Each requires its matching read
+switch or loading fails. Neither console may edit `[web]` itself. These
+switches apply only to web principals; verified same-user socket writes are
+trusted by default with the same validation/consent/quota rules. No later
+console switch is accepted ahead of its introducing protocol.
+
 A session-binding problem never edits configuration. An invalid stored
 account/model selection is refused with the remedy
 `plak config set root.agent <template>`; the configured pointer and file bytes
@@ -311,6 +318,8 @@ repository can never grant web access.
 | `web.origin` | string | `(unset)` | https://<host>[:port], nothing after it; home-scoped | The exact origin tailscale serve publishes plak host --web at; every request must name its host and a WebSocket upgrade its origin. Read when plak host starts with --web; a 0.0.3 build refuses a config.toml that sets it. |
 | `web.accounts_read` | bool | `false` | true or false; home-scoped; host restart required | Allow admitted web principals to read home account status and usage. Same-user sockets are trusted independently. Captured at host startup; restart to change it; a 0.0.3 build refuses a config.toml that sets it. |
 | `web.config_read` | bool | `false` | true or false; home-scoped; host restart required | Allow admitted web principals to read home profiles, templates and allowlisted configuration. Same-user sockets are trusted independently. Captured at host startup; restart to change it; a 0.0.3 build refuses a config.toml that sets it. |
+| `web.credentials_write` | bool | `false` | home-only; requires accounts_read; host restart required | Enable confirmed selected-account mutations; affects this user's credentials on the serving machine, not the browser. |
+| `web.config_write` | bool | `false` | home-only; requires config_read; host restart required | Enable confirmed home definition writes, including deferred execution via tools/on_mint/env and root selection. |
 
 Telemetry retention applies to schema 22's frozen terminal facts as well as
 diagnostic rows. Recorded console values are measured retained subtotals,

@@ -404,7 +404,7 @@ fn the_directory_answers_and_frames_round_trip_with_pinned_bytes() {
                 session: None,
                 ..welcome()
             }),
-            r#"{"frame":"welcome","extension":null,"proto":6,"binary_id":"b1","host_generation":7,"caps":[]}"#,
+            r#"{"frame":"welcome","extension":null,"proto":7,"binary_id":"b1","host_generation":7,"caps":[]}"#,
         ),
     ];
     for (frame, pinned) in host {

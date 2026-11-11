@@ -4,6 +4,7 @@ mod accounts;
 mod clock;
 mod definitions;
 mod limits;
+mod operator;
 mod recorded;
 
 use crate::home::paths::PlakPaths;
@@ -39,6 +40,7 @@ pub(super) struct Console {
     provider: Arc<tokio::sync::Semaphore>,
     definition_nonce: [u8; 16],
     switches: ConfiguredSwitches,
+    operator: Mutex<operator::State>,
     #[cfg(test)]
     native_fixture: Mutex<Option<plakous::subscriptions::NativeSubscriptions>>,
 }
@@ -62,6 +64,7 @@ impl Console {
             provider: Arc::new(tokio::sync::Semaphore::new(limits::PROVIDER_READS)),
             definition_nonce: *uuid::Uuid::new_v4().as_bytes(),
             switches,
+            operator: Mutex::default(),
             #[cfg(test)]
             native_fixture: Mutex::new(None),
         })
@@ -89,6 +92,14 @@ impl Console {
                     disabled_reason: (!config).then_some(DisabledReason::Configuration),
                     remedy: (!config).then_some(CapabilityRemedy::EnableWebConfigReadAndRestart),
                 },
+                credentials_write: write_state(
+                    socket || self.switches.web_credentials_write,
+                    CapabilityRemedy::EnableWebCredentialsWriteAndRestart,
+                ),
+                config_write: write_state(
+                    socket || self.switches.web_config_write,
+                    CapabilityRemedy::EnableWebConfigWriteAndRestart,
+                ),
                 configured_switches: self.switches,
                 limits: limits::welcome(limits),
             },
@@ -100,6 +111,31 @@ impl Console {
         context: HostRequestContext,
         request: HostRequest,
     ) -> HostReadTask<PlakExtension> {
+        if matches!(
+            request,
+            HostRequest::OperatorPrepare { .. } | HostRequest::OperatorConfirm { .. }
+        ) {
+            let result = match request {
+                HostRequest::OperatorPrepare { action } => self.prepare(context.clone(), action),
+                HostRequest::OperatorConfirm { nonce } => self.confirm(&context, &nonce),
+                _ => unreachable!(),
+            };
+            operator::audit(
+                &context,
+                "consent",
+                None,
+                if matches!(
+                    result,
+                    Ok(HostResponse::OperatorPrepared { .. }
+                        | HostResponse::OperatorConfirmed { .. })
+                ) {
+                    "success"
+                } else {
+                    "refusal"
+                },
+            );
+            return Box::pin(async move { result });
+        }
         let accounts = is_account_request(&request);
         let permitted = matches!(context.principal, HostPrincipal::Socket(_))
             || if accounts {
@@ -231,6 +267,14 @@ impl Console {
             .unwrap_or_else(PoisonError::into_inner)
             .start(response, context, selection, revision, limit)
             .unwrap_or_else(refused))
+    }
+}
+
+fn write_state(enabled: bool, remedy: CapabilityRemedy) -> CapabilityState {
+    CapabilityState {
+        enabled,
+        disabled_reason: (!enabled).then_some(DisabledReason::Configuration),
+        remedy: (!enabled).then_some(remedy),
     }
 }
 

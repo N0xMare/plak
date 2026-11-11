@@ -13,6 +13,8 @@ pub struct ConsoleWelcome {
     pub face: ConsoleFace,
     pub accounts_read: CapabilityState,
     pub config_read: CapabilityState,
+    pub credentials_write: CapabilityState,
+    pub config_write: CapabilityState,
     pub configured_switches: ConfiguredSwitches,
     pub limits: ConsoleLimits,
 }
@@ -48,6 +50,8 @@ pub enum DisabledReason {
 pub enum CapabilityRemedy {
     EnableWebAccountsReadAndRestart,
     EnableWebConfigReadAndRestart,
+    EnableWebCredentialsWriteAndRestart,
+    EnableWebConfigWriteAndRestart,
     UseMatchingBuild,
 }
 
@@ -56,6 +60,8 @@ pub enum CapabilityRemedy {
 pub struct ConfiguredSwitches {
     pub web_accounts_read: bool,
     pub web_config_read: bool,
+    pub web_credentials_write: bool,
+    pub web_config_write: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
